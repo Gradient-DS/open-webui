@@ -1,4 +1,10 @@
 <script lang="ts">
+	// [Gradient] Tenant gates also apply to settings deep links.
+	import {
+		isAdminSettingsEnabled,
+		isAdminSettingsTabEnabled,
+		getFirstAvailableAdminSettingsTab
+	} from '$lib/utils/features';
 	import { toast } from 'svelte-sonner';
 	import { onMount, tick, getContext } from 'svelte';
 	import { openDB, deleteDB } from 'idb';
@@ -66,7 +72,6 @@
 	let grace2FAExpiresAt: number | null = null;
 
 	let version;
-<<<<<<< HEAD
 	let showAcceptanceModal = false;
 
 	const checkAcceptanceModal = async () => {
@@ -86,9 +91,7 @@
 			showAcceptanceModal = true;
 		}
 	};
-=======
 	let handledSettingsUrl = '';
->>>>>>> upstream/main
 
 	const clearChatInputStorage = () => {
 		const chatInputKeys = Object.keys(localStorage).filter((key) => key.startsWith('chat-input'));
@@ -233,11 +236,15 @@
 		}
 		handledSettingsUrl = urlKey;
 
-		showSettings.set(
-			requestedSettings.startsWith('admin:') && $user?.role !== 'admin'
-				? 'general'
-				: requestedSettings
-		);
+		let targetSettings = requestedSettings;
+		if (requestedSettings.startsWith('admin:')) {
+			if ($user?.role !== 'admin' || !isAdminSettingsEnabled()) targetSettings = 'general';
+			else if (!isAdminSettingsTabEnabled(requestedSettings.slice(6))) {
+				const first = getFirstAvailableAdminSettingsTab();
+				targetSettings = first ? 'admin:' + first : 'general';
+			}
+		}
+		showSettings.set(targetSettings);
 
 		const params = new URLSearchParams($page.url.searchParams);
 		params.delete('settings');
@@ -275,34 +282,24 @@
 		}
 
 		clearChatInputStorage();
-<<<<<<< HEAD
-		await Promise.all([
-			checkLocalDBChats(),
-			setBanners().catch((e) => console.error('Failed to load banners:', e)),
-			setTools().catch((e) => console.error('Failed to load tools:', e)),
-			(async () => {
-				if (
-					$config?.features?.require_2fa &&
-					$config?.features?.enable_2fa &&
-					$config?.features?.enable_login_form
-				) {
-					const status = await get2FAStatus(localStorage.token).catch(() => null);
-					if (status && !status.totp_enabled && !status.is_sso_user) {
-						grace2FAExpiresAt = status.grace_period_expires_at ?? null;
-						show2FAOverlay = true;
-					}
-				}
-			})().catch((e) => console.error('Failed to check 2FA status:', e)),
-			setUserSettings(async () => {
-				await setModels().catch((e) => console.error('Failed to load models:', e));
-			}).catch((e) => console.error('Failed to load user settings:', e))
-		]);
-=======
 		try {
 			await Promise.all([
 				checkLocalDBChats(),
 				setBanners().catch((e) => console.error('Failed to load banners:', e)),
 				setTools().catch((e) => console.error('Failed to load tools:', e)),
+				(async () => {
+					if (
+						$config?.features?.require_2fa &&
+						$config?.features?.enable_2fa &&
+						$config?.features?.enable_login_form
+					) {
+						const status = await get2FAStatus(localStorage.token).catch(() => null);
+						if (status && !status.totp_enabled && !status.is_sso_user) {
+							grace2FAExpiresAt = status.grace_period_expires_at ?? null;
+							show2FAOverlay = true;
+						}
+					}
+				})().catch((e) => console.error('Failed to check 2FA status:', e)),
 				setUserSettings(async () => {
 					await setModels().catch((e) => console.error('Failed to load models:', e));
 				})
@@ -312,7 +309,6 @@
 			toast.error($i18n.t('Failed to load Interface settings'));
 			return;
 		}
->>>>>>> upstream/main
 
 		selectedTerminalId.set(localStorage.selectedTerminalId ?? null);
 

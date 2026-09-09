@@ -1,11 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-<<<<<<< HEAD
-	import { onMount, getContext } from 'svelte';
-=======
-	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
+	import { onMount, getContext, tick } from 'svelte';
 	import { v4 as uuidv4 } from 'uuid';
->>>>>>> upstream/main
 	import { getModels as _getModels } from '$lib/apis';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
@@ -73,6 +69,8 @@
 	};
 
 	const updateHandler = async () => {
+		// [Gradient] A disabled Tools section must not overwrite its unloaded connections.
+		if (!isFeatureEnabled('tool_servers')) return;
 		const res = await setToolServerConnections(localStorage.token, {
 			TOOL_SERVER_CONNECTIONS: servers
 		}).catch((err) => {
@@ -159,7 +157,6 @@
 			servers = [];
 		}
 
-<<<<<<< HEAD
 		if (isFeatureEnabled('terminal_servers')) {
 			try {
 				const terminalRes = await getTerminalServerConnections(localStorage.token);
@@ -172,8 +169,6 @@
 		}
 
 		// Load agent proxy config
-=======
->>>>>>> upstream/main
 		try {
 			const agentRes = await getAgentProxyConfig(localStorage.token);
 			if (agentRes) {
@@ -201,13 +196,13 @@
 	}}
 	onDelete={() => {
 		if (editTerminalIdx !== null) {
-			removeTerminalConnection(editTerminalIdx);
+			deleteTerminalIdx = editTerminalIdx;
+			showDeleteTerminalConfirm = true;
 			editTerminalIdx = null;
 		}
 	}}
 />
 
-<<<<<<< HEAD
 <ConfirmDialog
 	bind:show={showDeleteTerminalConfirm}
 	on:confirm={() => {
@@ -218,311 +213,6 @@
 	}}
 />
 
-<!-- Gradient: kept the existing `<div>` wrapper. Upstream switched this to a
-     `<form>` with an `on:submit|preventDefault={updateHandler}` handler in
-     v0.9.5 to enable Enter-to-submit semantics. Adopting that requires
-     verifying `updateHandler` is defined for the page and updating the closing
-     `</div>` at EOF to `</form>` — kept as a follow-up to avoid widening this
-     merge. -->
-<div class="flex flex-col h-full justify-between text-sm">
-	<div class=" overflow-y-scroll scrollbar-hidden h-full">
-		{#if servers !== null}
-			<div class="">
-				<div class="mb-3">
-					<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Tools')}</div>
-
-					{#if isFeatureEnabled('tool_servers')}
-						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
-						<div class="mb-2.5 flex flex-col w-full justify-between">
-							<div class="flex justify-between items-center mb-0.5">
-								<div class="font-medium">{$i18n.t('Manage Tool Servers')}</div>
-
-								<Tooltip content={$i18n.t(`Add Connection`)}>
-									<button
-										class="px-1"
-										on:click={() => {
-											showConnectionModal = true;
-										}}
-										type="button"
-									>
-										<Plus />
-									</button>
-								</Tooltip>
-							</div>
-
-							<div class="flex flex-col gap-1">
-								{#each servers as server, idx}
-									<Connection
-										bind:connection={server}
-										onSubmit={() => {
-											updateHandler();
-										}}
-										onDelete={() => {
-											servers = servers.filter((_, i) => i !== idx);
-											updateHandler();
-										}}
-									/>
-								{/each}
-							</div>
-
-							{#if servers.length === 0}
-								<div class="text-xs text-gray-400 dark:text-gray-500">
-									{$i18n.t('No tool server connections configured.')}
-								</div>
-							{/if}
-
-							<div class="my-1.5">
-								<div class="text-xs text-gray-500">
-									{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
-								</div>
-							</div>
-						</div>
-
-						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
-					{/if}
-
-					{#if isFeatureEnabled('terminal_servers')}
-						<div class="mb-2.5 flex flex-col w-full">
-							<div class="flex justify-between items-center mb-1">
-								<div class="flex items-center gap-2">
-									<div class="font-medium">{$i18n.t('Open Terminal')}</div>
-									<span
-										class="text-[0.65rem] font-medium uppercase px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
-										>{$i18n.t('Experimental')}</span
-									>
-								</div>
-
-								<Tooltip content={$i18n.t('Add Connection')}>
-									<button
-										class="px-1"
-										on:click={() => {
-											editTerminalIdx = null;
-											showAddTerminalModal = true;
-										}}
-										type="button"
-									>
-										<Plus />
-									</button>
-								</Tooltip>
-							</div>
-
-							<div class="flex flex-col gap-1.5">
-								{#each terminalConnections as connection, idx}
-									<div class="flex w-full gap-2 items-center">
-										<Tooltip className="w-full relative" content={''} placement="top-start">
-											<div class="flex w-full">
-												<div
-													class="flex-1 relative flex gap-1.5 items-center {connection?.enabled ===
-													false
-														? 'opacity-50'
-														: ''}"
-												>
-													<Tooltip content={$i18n.t('Terminal')}>
-														<Cloud className="size-4" strokeWidth="1.5" />
-													</Tooltip>
-
-													<div class="outline-hidden w-full bg-transparent text-sm">
-														{connection.name || connection.url || $i18n.t('New Terminal')}
-													</div>
-												</div>
-											</div>
-										</Tooltip>
-
-										<div class="flex gap-1 items-center">
-											<Tooltip content={$i18n.t('Configure')}>
-												<button
-													class="self-center p-1 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-850 rounded-lg transition"
-													on:click={() => {
-														editTerminalIdx = idx;
-														showAddTerminalModal = true;
-													}}
-													type="button"
-												>
-													<Cog6 />
-												</button>
-											</Tooltip>
-
-											<Tooltip
-												content={connection?.enabled !== false
-													? $i18n.t('Enabled')
-													: $i18n.t('Disabled')}
-											>
-												<Switch
-													state={connection?.enabled !== false}
-													on:change={() => {
-														terminalConnections = terminalConnections.map((c, i) =>
-															i === idx ? { ...c, enabled: !(c?.enabled !== false) } : c
-														);
-														saveTerminalServers();
-													}}
-												/>
-											</Tooltip>
-										</div>
-									</div>
-								{/each}
-							</div>
-
-							{#if terminalConnections.length === 0}
-								<div class="text-xs text-gray-400 dark:text-gray-500">
-									{$i18n.t('No terminal connections configured.')}
-								</div>
-							{/if}
-
-							<div class="mt-1.5">
-								<div class="text-xs text-gray-500">
-									{$i18n.t(
-										'Connect to Open Terminal instances. All users will have access to file browsing and terminal tools through these servers.'
-									)}
-								</div>
-								<div class="text-xs text-gray-600 dark:text-gray-300 mt-1">
-									<a
-										class="underline"
-										href="https://github.com/open-webui/open-terminal"
-										target="_blank">{$i18n.t('Learn more about Open Terminal')} ↗</a
-									>
-								</div>
-							</div>
-						</div>
-					{/if}
-				</div>
-
-				{#if isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')}
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
-				{/if}
-
-				{#if $user?.role === 'admin'}
-					<div class="mb-2.5 flex flex-col w-full">
-						<div class="flex justify-between items-center mb-1">
-							<div class="flex items-center gap-2">
-								<div class="font-medium">{$i18n.t('Agent Proxy')}</div>
-							</div>
-
-							<Tooltip content={ENABLE_AGENT_PROXY ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
-								<Switch
-									bind:state={ENABLE_AGENT_PROXY}
-									on:change={() => {
-										saveAgentProxyConfig();
-									}}
-								/>
-							</Tooltip>
-						</div>
-
-						{#if ENABLE_AGENT_PROXY}
-							<div class="flex flex-col gap-2 mt-1">
-								<div class="text-xs text-gray-500">
-									{$i18n.t(
-										'Call soev.ai agents externally through an OpenAI-compatible endpoint. Users authenticate with their API keys.'
-									)}
-								</div>
-
-								<div class="mt-1">
-									<button
-										class="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
-										type="button"
-										on:click={async () => {
-											try {
-												const res = await fetch(
-													`${window.location.origin}/api/v1/agent/openapi.json`,
-													{
-														headers: {
-															Authorization: `Bearer ${localStorage.token}`
-														}
-													}
-												);
-												if (!res.ok) throw new Error('Failed to fetch');
-												const blob = await res.blob();
-												const url = URL.createObjectURL(blob);
-												const a = document.createElement('a');
-												a.href = url;
-												a.download = 'agent-openapi.json';
-												a.click();
-												URL.revokeObjectURL(url);
-											} catch (err) {
-												toast.error('Failed to download OpenAPI spec');
-											}
-										}}
-									>
-										{$i18n.t('Download OpenAPI Specification')}
-									</button>
-								</div>
-
-								<div class="mt-1">
-									<button
-										class="text-xs underline text-gray-600 dark:text-gray-300"
-										type="button"
-										on:click={() => {
-											showAgentDocs = !showAgentDocs;
-										}}
-									>
-										{showAgentDocs
-											? $i18n.t('Hide API documentation')
-											: $i18n.t('Show API documentation')}
-									</button>
-
-									{#if showAgentDocs}
-										<div
-											class="mt-2 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg text-xs font-mono space-y-3 overflow-x-auto"
-										>
-											<div>
-												<div class="text-gray-500 mb-2">{$i18n.t('List available models')}</div>
-												<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
-  {window.location.origin}/api/v1/agent/models</pre>
-											</div>
-
-											<div>
-												<div class="text-gray-500 mb-2">
-													{$i18n.t('Chat completions (streaming)')}
-												</div>
-												<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
-  -H "Content-Type: application/json" \
-  -d '{JSON.stringify({
-														model: 'agent-name',
-														messages: [{ role: 'user', content: 'Hello' }],
-														stream: true
-													})}' \
-  {window.location.origin}/api/v1/agent/chat/completions</pre>
-											</div>
-
-											<div>
-												<div class="text-gray-500 mb-2">
-													{$i18n.t('With collections/documents')}
-												</div>
-												<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
-  -H "Content-Type: application/json" \
-  -d '{JSON.stringify({
-														model: 'agent-name',
-														messages: [{ role: 'user', content: 'Hello' }],
-														stream: true,
-														files: [
-															{ id: 'collection-id', type: 'collection' },
-															{ id: 'document-id', type: 'file' }
-														]
-													})}' \
-  {window.location.origin}/api/v1/agent/chat/completions</pre>
-											</div>
-										</div>
-									{/if}
-								</div>
-							</div>
-						{/if}
-					</div>
-
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
-				{/if}
-
-				<IntegrationProviders
-					saveHandler={() => {
-						toast.success($i18n.t('Integration providers saved'));
-					}}
-				/>
-
-				<div class="mt-8 mb-2.5 text-base font-medium">{$i18n.t('Knowledge')}</div>
-
-				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
-
-				<ExternalKnowledge />
-			</div>
-=======
 <form
 	class="flex h-full flex-col justify-between text-sm"
 	on:submit|preventDefault={() => {
@@ -533,153 +223,273 @@
 
 	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
 		{#if servers !== null}
-			<AdminSettingSection title={$i18n.t('Tools')} first>
-				<div>
-					<div class="mb-2 flex items-center justify-between">
-						<div class="text-xs text-gray-600 dark:text-gray-400">
-							{$i18n.t('External Tool Servers')}
+			{#if isFeatureEnabled('tool_servers')}<AdminSettingSection title={$i18n.t('Tools')} first>
+					<div>
+						<div class="mb-2 flex items-center justify-between">
+							<div class="text-xs text-gray-600 dark:text-gray-400">
+								{$i18n.t('External Tool Servers')}
+							</div>
+
+							<Tooltip content={$i18n.t(`Add Connection`)}>
+								<button
+									class="flex size-6 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-black/5 hover:text-gray-900 dark:text-gray-600 dark:hover:bg-white/5 dark:hover:text-white"
+									on:click={() => {
+										showConnectionModal = true;
+									}}
+									type="button"
+								>
+									<Plus />
+								</button>
+							</Tooltip>
 						</div>
 
-						<Tooltip content={$i18n.t(`Add Connection`)}>
-							<button
-								class="flex size-6 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-black/5 hover:text-gray-900 dark:text-gray-600 dark:hover:bg-white/5 dark:hover:text-white"
-								on:click={() => {
-									showConnectionModal = true;
-								}}
-								type="button"
-							>
-								<Plus />
-							</button>
-						</Tooltip>
-					</div>
-
-					<div class="flex flex-col gap-1">
-						{#each servers ?? [] as server, idx}
-							<Connection
-								bind:connection={server}
-								onSubmit={() => {
-									updateHandler();
-								}}
-								onDelete={() => {
-									servers = (servers ?? []).filter((_, i) => i !== idx);
-									updateHandler();
-								}}
-							/>
-						{/each}
-					</div>
-
-					{#if (servers ?? []).length === 0}
-						<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
-							{$i18n.t('No tool server connections configured.')}
+						<div class="flex flex-col gap-1">
+							{#each servers ?? [] as server, idx}
+								<Connection
+									bind:connection={server}
+									onSubmit={() => {
+										updateHandler();
+									}}
+									onDelete={() => {
+										servers = (servers ?? []).filter((_, i) => i !== idx);
+										updateHandler();
+									}}
+								/>
+							{/each}
 						</div>
-					{/if}
 
-					<div class="mt-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-						{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
+						{#if (servers ?? []).length === 0}
+							<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
+								{$i18n.t('No tool server connections configured.')}
+							</div>
+						{/if}
+
+						<div class="mt-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+							{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
+						</div>
 					</div>
-				</div>
-			</AdminSettingSection>
+				</AdminSettingSection>{/if}
 
-			<AdminSettingSection title={$i18n.t('Terminal')}>
-				<div>
-					<div class="mb-2 flex items-center justify-between">
-						<div class="text-xs text-gray-600 dark:text-gray-400">{$i18n.t('Open Terminal')}</div>
+			{#if isFeatureEnabled('terminal_servers')}<AdminSettingSection title={$i18n.t('Terminal')}>
+					<div>
+						<div class="mb-2 flex items-center justify-between">
+							<div class="text-xs text-gray-600 dark:text-gray-400">{$i18n.t('Open Terminal')}</div>
 
-						<Tooltip content={$i18n.t('Add Connection')}>
-							<button
-								class="flex size-6 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-black/5 hover:text-gray-900 dark:text-gray-600 dark:hover:bg-white/5 dark:hover:text-white"
-								on:click={() => {
-									editTerminalIdx = null;
-									showAddTerminalModal = true;
-								}}
-								type="button"
-							>
-								<Plus />
-							</button>
-						</Tooltip>
-					</div>
+							<Tooltip content={$i18n.t('Add Connection')}>
+								<button
+									class="flex size-6 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-black/5 hover:text-gray-900 dark:text-gray-600 dark:hover:bg-white/5 dark:hover:text-white"
+									on:click={() => {
+										editTerminalIdx = null;
+										showAddTerminalModal = true;
+									}}
+									type="button"
+								>
+									<Plus />
+								</button>
+							</Tooltip>
+						</div>
 
-					<div class="flex flex-col gap-1.5">
-						{#each terminalConnections as connection, idx}
-							<div class="flex w-full gap-2 items-center">
-								<Tooltip className="w-full relative" content={''} placement="top-start">
-									<div class="flex w-full">
-										<div
-											class="flex-1 relative flex gap-1.5 items-center {connection?.enabled ===
-											false
-												? 'opacity-50'
-												: ''}"
-										>
-											<Tooltip content={$i18n.t('Terminal')}>
-												<Cloud className="size-4" strokeWidth="1.5" />
-											</Tooltip>
-
+						<div class="flex flex-col gap-1.5">
+							{#each terminalConnections as connection, idx}
+								<div class="flex w-full gap-2 items-center">
+									<Tooltip className="w-full relative" content={''} placement="top-start">
+										<div class="flex w-full">
 											<div
-												class="outline-hidden w-full bg-transparent text-xs text-gray-700 dark:text-gray-300"
+												class="flex-1 relative flex gap-1.5 items-center {connection?.enabled ===
+												false
+													? 'opacity-50'
+													: ''}"
 											>
-												{connection.name || connection.url || $i18n.t('New Terminal')}
+												<Tooltip content={$i18n.t('Terminal')}>
+													<Cloud className="size-4" strokeWidth="1.5" />
+												</Tooltip>
+
+												<div
+													class="outline-hidden w-full bg-transparent text-xs text-gray-700 dark:text-gray-300"
+												>
+													{connection.name || connection.url || $i18n.t('New Terminal')}
+												</div>
 											</div>
 										</div>
-									</div>
-								</Tooltip>
+									</Tooltip>
 
-								<div class="flex gap-1 items-center">
-									<Tooltip content={$i18n.t('Configure')}>
-										<button
-											class="self-center p-1 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition"
-											on:click={() => {
-												editTerminalIdx = idx;
-												showAddTerminalModal = true;
-											}}
-											type="button"
+									<div class="flex gap-1 items-center">
+										<Tooltip content={$i18n.t('Configure')}>
+											<button
+												class="self-center p-1 bg-transparent hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition"
+												on:click={() => {
+													editTerminalIdx = idx;
+													showAddTerminalModal = true;
+												}}
+												type="button"
+											>
+												<Cog6 />
+											</button>
+										</Tooltip>
+
+										<Tooltip
+											content={connection?.enabled !== false
+												? $i18n.t('Enabled')
+												: $i18n.t('Disabled')}
 										>
-											<Cog6 />
-										</button>
-									</Tooltip>
-
-									<Tooltip
-										content={connection?.enabled !== false
-											? $i18n.t('Enabled')
-											: $i18n.t('Disabled')}
-									>
-										<Switch
-											state={connection?.enabled !== false}
-											on:change={() => {
-												terminalConnections = terminalConnections.map((c, i) =>
-													i === idx ? { ...c, enabled: !(c?.enabled !== false) } : c
-												);
-												saveTerminalServers();
-											}}
-										/>
-									</Tooltip>
+											<Switch
+												state={connection?.enabled !== false}
+												on:change={() => {
+													terminalConnections = terminalConnections.map((c, i) =>
+														i === idx ? { ...c, enabled: !(c?.enabled !== false) } : c
+													);
+													saveTerminalServers();
+												}}
+											/>
+										</Tooltip>
+									</div>
 								</div>
+							{/each}
+						</div>
+
+						{#if terminalConnections.length === 0}
+							<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
+								{$i18n.t('No terminal connections configured.')}
 							</div>
-						{/each}
+						{/if}
+
+						<div class="mt-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+							{$i18n.t(
+								'Connect to Open Terminal instances. Admins and users granted access can use file browsing and terminal tools through these servers.'
+							)}
+						</div>
+						<a
+							class="mt-0.5 block text-[0.6875rem] text-gray-500 underline hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
+							href="https://github.com/open-webui/open-terminal"
+							target="_blank">{$i18n.t('Learn more about Open Terminal')} ↗</a
+						>
+					</div>
+				</AdminSettingSection>{/if}
+
+			<!-- [Gradient] Agent proxy and integration-provider configuration. -->
+			{#if $user?.role === 'admin'}
+				<AdminSettingSection title={$i18n.t('Agent Proxy')}>
+					<div class="flex justify-between items-center mb-1">
+						<Tooltip content={ENABLE_AGENT_PROXY ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
+							<Switch
+								bind:state={ENABLE_AGENT_PROXY}
+								on:change={() => {
+									saveAgentProxyConfig();
+								}}
+							/>
+						</Tooltip>
 					</div>
 
-					{#if terminalConnections.length === 0}
-						<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
-							{$i18n.t('No terminal connections configured.')}
+					{#if ENABLE_AGENT_PROXY}
+						<div class="flex flex-col gap-2 mt-1">
+							<div class="text-xs text-gray-500">
+								{$i18n.t(
+									'Call soev.ai agents externally through an OpenAI-compatible endpoint. Users authenticate with their API keys.'
+								)}
+							</div>
+
+							<div class="mt-1">
+								<button
+									class="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+									type="button"
+									on:click={async () => {
+										try {
+											const res = await fetch(
+												`${window.location.origin}/api/v1/agent/openapi.json`,
+												{
+													headers: {
+														Authorization: `Bearer ${localStorage.token}`
+													}
+												}
+											);
+											if (!res.ok) throw new Error('Failed to fetch');
+											const blob = await res.blob();
+											const url = URL.createObjectURL(blob);
+											const a = document.createElement('a');
+											a.href = url;
+											a.download = 'agent-openapi.json';
+											a.click();
+											URL.revokeObjectURL(url);
+										} catch (err) {
+											toast.error('Failed to download OpenAPI spec');
+										}
+									}}
+								>
+									{$i18n.t('Download OpenAPI Specification')}
+								</button>
+							</div>
+
+							<div class="mt-1">
+								<button
+									class="text-xs underline text-gray-600 dark:text-gray-300"
+									type="button"
+									on:click={() => {
+										showAgentDocs = !showAgentDocs;
+									}}
+								>
+									{showAgentDocs
+										? $i18n.t('Hide API documentation')
+										: $i18n.t('Show API documentation')}
+								</button>
+
+								{#if showAgentDocs}
+									<div
+										class="mt-2 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg text-xs font-mono space-y-3 overflow-x-auto"
+									>
+										<div>
+											<div class="text-gray-500 mb-2">{$i18n.t('List available models')}</div>
+											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  {window.location.origin}/api/v1/agent/models</pre>
+										</div>
+
+										<div>
+											<div class="text-gray-500 mb-2">
+												{$i18n.t('Chat completions (streaming)')}
+											</div>
+											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{JSON.stringify({
+													model: 'agent-name',
+													messages: [{ role: 'user', content: 'Hello' }],
+													stream: true
+												})}' \
+  {window.location.origin}/api/v1/agent/chat/completions</pre>
+										</div>
+
+										<div>
+											<div class="text-gray-500 mb-2">
+												{$i18n.t('With collections/documents')}
+											</div>
+											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{JSON.stringify({
+													model: 'agent-name',
+													messages: [{ role: 'user', content: 'Hello' }],
+													stream: true,
+													files: [
+														{ id: 'collection-id', type: 'collection' },
+														{ id: 'document-id', type: 'file' }
+													]
+												})}' \
+  {window.location.origin}/api/v1/agent/chat/completions</pre>
+										</div>
+									</div>
+								{/if}
+							</div>
 						</div>
 					{/if}
+				</AdminSettingSection>
+			{/if}
 
-					<div class="mt-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-						{$i18n.t(
-							'Connect to Open Terminal instances. Admins and users granted access can use file browsing and terminal tools through these servers.'
-						)}
-					</div>
-					<a
-						class="mt-0.5 block text-[0.6875rem] text-gray-500 underline hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
-						href="https://github.com/open-webui/open-terminal"
-						target="_blank">{$i18n.t('Learn more about Open Terminal')} ↗</a
-					>
-				</div>
-			</AdminSettingSection>
+			<IntegrationProviders
+				saveHandler={() => {
+					toast.success($i18n.t('Integration providers saved'));
+				}}
+			/>
 
 			<AdminSettingSection title={$i18n.t('Knowledge')}>
 				<ExternalKnowledge />
 			</AdminSettingSection>
->>>>>>> upstream/main
 		{:else}
 			<div class="flex h-full justify-center">
 				<div class="my-auto">
@@ -689,9 +499,6 @@
 		{/if}
 	</div>
 
-<<<<<<< HEAD
-</div>
-=======
 	<div class="flex justify-end pt-6 text-sm font-normal">
 		<button
 			class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
@@ -701,4 +508,3 @@
 		</button>
 	</div>
 </form>
->>>>>>> upstream/main

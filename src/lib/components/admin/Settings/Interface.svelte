@@ -10,11 +10,10 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-<<<<<<< HEAD
 	import { getLanguages } from '$lib/i18n';
 	import { toLocalizedObject } from '$lib/utils/localized';
 	import type { LocalizedString } from '$lib/types';
-=======
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SettingsSelect from '$lib/components/common/SettingsSelect.svelte';
 	import ExperimentalBadge from '$lib/components/common/ExperimentalBadge.svelte';
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
@@ -22,7 +21,6 @@
 	import AdminSettingRow from './AdminSettingRow.svelte';
 	import AdminSettingSection from './AdminSettingSection.svelte';
 	import { config as appConfig } from '$lib/stores';
->>>>>>> upstream/main
 
 	const dispatch = createEventDispatcher();
 
@@ -78,25 +76,7 @@
 			updateTaskConfig(localStorage.token, taskConfigPayload),
 			updateChatConfig(localStorage.token, chatConfig)
 		]);
-<<<<<<< HEAD
 		await setGreetingTemplate(localStorage.token, greetingTemplate);
-	};
-
-	let greetingTemplate: LocalizedString = {};
-	let greetingEditLang = $i18n?.language ?? 'en-US';
-	let languages: { code: string; title: string }[] = [];
-
-	$: greetingCurrent = toLocalizedObject(greetingTemplate, greetingEditLang)[greetingEditLang] ?? '';
-
-	const setGreetingCurrent = (value: string) => {
-		const current = toLocalizedObject(greetingTemplate, greetingEditLang);
-		if (value && value.length > 0) {
-			current[greetingEditLang] = value;
-		} else {
-			delete current[greetingEditLang];
-		}
-		greetingTemplate = current;
-=======
 		appConfig.update((current) =>
 			current
 				? {
@@ -109,7 +89,23 @@
 					}
 				: current
 		);
->>>>>>> upstream/main
+	};
+
+	let greetingTemplate: LocalizedString = {};
+	let greetingEditLang = $i18n?.language ?? 'en-US';
+	let languages: { code: string; title: string }[] = [];
+
+	$: greetingCurrent =
+		toLocalizedObject(greetingTemplate, greetingEditLang)[greetingEditLang] ?? '';
+
+	const setGreetingCurrent = (value: string) => {
+		const current = toLocalizedObject(greetingTemplate, greetingEditLang);
+		if (value && value.length > 0) {
+			current[greetingEditLang] = value;
+		} else {
+			delete current[greetingEditLang];
+		}
+		greetingTemplate = current;
 	};
 
 	let workspaceModels: any[] = [];
@@ -150,12 +146,9 @@
 				getTaskConfig(localStorage.token),
 				getChatConfig(localStorage.token)
 			]);
-<<<<<<< HEAD
 			const greetingResponse = await getGreetingTemplate(localStorage.token);
 			greetingTemplate = toLocalizedObject(greetingResponse, greetingEditLang);
-=======
 			taskConfig.TASK_MODEL_PARAMS = taskConfig.TASK_MODEL_PARAMS ?? {};
->>>>>>> upstream/main
 
 			workspaceModels = await getBaseModels(localStorage.token);
 			baseModels = await getModels(localStorage.token, null, false);
@@ -201,67 +194,58 @@
 			dispatch('save');
 		}}
 	>
-<<<<<<< HEAD
-		<div class="  overflow-y-scroll scrollbar-hidden h-full pr-1.5">
-			<div class="mb-3.5">
-				<div class="mb-2.5">
-					<div class="flex w-full justify-between mb-1 items-center">
-						<div class="self-center text-xs font-medium">
-							{$i18n.t('Greeting Template')}
-						</div>
-						<div class="flex items-center gap-2 text-xs">
-							<span class="text-gray-500 dark:text-gray-400">{$i18n.t('Editing language')}</span>
-							<select
-								class="rounded-md bg-transparent text-xs outline-hidden pl-1 pr-5 dark:text-gray-300"
-								bind:value={greetingEditLang}
-							>
-								{#each languages as language}
-									<option value={language.code} class="text-gray-900">{language.title}</option>
-								{/each}
-							</select>
-						</div>
-					</div>
-					<Tooltip
-						content={$i18n.t(
-							"Use {{name}} for the user's display name. Leave empty to use the default greeting. Add a translation for each language you want to support."
-						)}
-						placement="top-start"
-					>
-						<input
-							class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-							type="text"
-							placeholder={$i18n.t('e.g. Welcome to Acme Corp, {{name}}')}
-							value={greetingCurrent}
-							on:input={(e) => setGreetingCurrent((e.target as HTMLInputElement).value)}
-						/>
-					</Tooltip>
-					{#if typeof greetingTemplate === 'object' && Object.keys(greetingTemplate).filter((k) => greetingTemplate[k]).length > 0}
-						<div class="flex flex-wrap gap-1 mt-1">
-							{#each Object.keys(greetingTemplate).filter((k) => greetingTemplate[k]) as code}
-								<span
-									class="px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide {code ===
-									greetingEditLang
-										? 'bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-200'
-										: 'bg-gray-100 dark:bg-gray-850 text-gray-500 dark:text-gray-400'}"
-								>
-									{code}
-								</span>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			</div>
-
-			<div class="mb-3.5">
-				<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Tasks')}</div>
-=======
 		<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">
 			{$i18n.t('Interface')}
 		</h2>
->>>>>>> upstream/main
 
+		<!-- [Gradient] Localized greeting editor. -->
+		<AdminSettingSection title={$i18n.t('Greeting Template')} first
+			><AdminSettingField label={$i18n.t('Content')}
+				><div class="flex w-full justify-between mb-1 items-center">
+					<div class="flex items-center gap-2 text-xs">
+						<span class="text-gray-500 dark:text-gray-400">{$i18n.t('Editing language')}</span>
+						<select
+							class="rounded-md bg-transparent text-xs outline-hidden pl-1 pr-5 dark:text-gray-300"
+							bind:value={greetingEditLang}
+						>
+							{#each languages as language}
+								<option value={language.code} class="text-gray-900">{language.title}</option>
+							{/each}
+						</select>
+					</div>
+				</div>
+				<Tooltip
+					content={$i18n.t(
+						"Use {{name}} for the user's display name. Leave empty to use the default greeting. Add a translation for each language you want to support."
+					)}
+					placement="top-start"
+				>
+					<input
+						class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+						type="text"
+						placeholder={$i18n.t('e.g. Welcome to Acme Corp, {{name}}')}
+						value={greetingCurrent}
+						on:input={(e) => setGreetingCurrent((e.target as HTMLInputElement).value)}
+					/>
+				</Tooltip>
+				{#if typeof greetingTemplate === 'object' && Object.keys(greetingTemplate).filter((k) => greetingTemplate[k]).length > 0}
+					<div class="flex flex-wrap gap-1 mt-1">
+						{#each Object.keys(greetingTemplate).filter((k) => greetingTemplate[k]) as code}
+							<span
+								class="px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide {code ===
+								greetingEditLang
+									? 'bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-200'
+									: 'bg-gray-100 dark:bg-gray-850 text-gray-500 dark:text-gray-400'}"
+							>
+								{code}
+							</span>
+						{/each}
+					</div>
+				{/if}
+			</AdminSettingField></AdminSettingSection
+		>
 		<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
-			<AdminSettingSection title={$i18n.t('Tasks')} first>
+			<AdminSettingSection title={$i18n.t('Tasks')}>
 				<div>
 					<div class="mb-2">
 						<div class="text-xs text-gray-600 dark:text-gray-400">{$i18n.t('Task Model')}</div>

@@ -18,20 +18,15 @@
 	import { chats, config, folders, settings, theme, user } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
-<<<<<<< HEAD
 	import { downloadChatAsPDF, exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
-	import { copyFormattedChat } from '$lib/utils/copy';
-	import Download from '$lib/components/icons/Download.svelte';
-	import Clipboard from '$lib/components/icons/Clipboard.svelte';
-	import Folder from '$lib/components/icons/Folder.svelte';
-=======
-	import { downloadChatAsPDF } from '$lib/apis/utils';
 	import ArchiveBoxIcon from '$lib/components/icons/ArchiveBox.svelte';
 	import CopyIcon from './icons/Copy.svelte';
 	import DownloadIcon from './icons/Download.svelte';
 	import EditPencilIcon from './icons/EditPencil.svelte';
 	import FolderIcon from './icons/Folder.svelte';
->>>>>>> upstream/main
+	// [Gradient] Formatted chat export and copy.
+	import { copyFormattedChat } from '$lib/utils/copy';
+	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import PinIcon from './icons/Pin.svelte';
 	import PinSlashIcon from './icons/PinSlash.svelte';
@@ -357,7 +352,6 @@
 
 			<button
 				draggable="false"
-<<<<<<< HEAD
 				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 				on:click={async () => {
 					const chatData = await getChatById(localStorage.token, chatId);
@@ -376,9 +370,6 @@
 			<button
 				draggable="false"
 				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-=======
-				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
->>>>>>> upstream/main
 				on:click={() => {
 					dropdown.close();
 					renameHandler();

@@ -162,36 +162,31 @@
 							</div>
 						{/if}
 					</div>
-<<<<<<< HEAD
-				{/if}
-			</div>
-
-			<!-- Feedback Configuration Section -->
-			<div class="mb-3">
-				<div class="mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Feedback')}</div>
-				<hr class="border-gray-100/30 dark:border-gray-850/30 my-2" />
-
+				</AdminSettingSection>
+			{/if}
+			<!-- [Gradient] Message and conversation feedback configuration. -->
+			<AdminSettingSection title={$i18n.t('Feedback')}>
 				<!-- Layer 1: Thumbs Up/Down -->
-				<div class="mb-2.5 flex w-full justify-between">
-					<div class="flex flex-col">
-						<div class="text-xs font-medium">{$i18n.t('Message Rating (Thumbs Up/Down)')}</div>
-						<div class="text-xs text-gray-500">
-							{$i18n.t('Allow users to rate individual responses')}
-						</div>
-					</div>
-					<Switch bind:state={evaluationConfig.ENABLE_MESSAGE_RATING} />
-				</div>
+				<AdminSettingRow
+					label={$i18n.t('Message Rating (Thumbs Up/Down)')}
+					description={$i18n.t('Allow users to rate individual responses')}
+					let:labelId
+					><Switch
+						bind:state={evaluationConfig.ENABLE_MESSAGE_RATING}
+						ariaLabelledbyId={labelId}
+					/></AdminSettingRow
+				>
 
 				<!-- Layer 2: Issue Tags -->
-				<div class="mb-2.5 flex w-full justify-between">
-					<div class="flex flex-col">
-						<div class="text-xs font-medium">{$i18n.t('Feedback Tags')}</div>
-						<div class="text-xs text-gray-500">
-							{$i18n.t('Custom tags shown after rating a response')}
-						</div>
-					</div>
-					<Switch bind:state={evaluationConfig.ENABLE_FEEDBACK_LAYER2} />
-				</div>
+				<AdminSettingRow
+					label={$i18n.t('Feedback Tags')}
+					description={$i18n.t('Custom tags shown after rating a response')}
+					let:labelId
+					><Switch
+						bind:state={evaluationConfig.ENABLE_FEEDBACK_LAYER2}
+						ariaLabelledbyId={labelId}
+					/></AdminSettingRow
+				>
 
 				{#if evaluationConfig.ENABLE_FEEDBACK_LAYER2}
 					<div class="ml-2 mb-3">
@@ -308,15 +303,15 @@
 				{/if}
 
 				<!-- Layer 3: Free Text -->
-				<div class="mb-2.5 flex w-full justify-between">
-					<div class="flex flex-col">
-						<div class="text-xs font-medium">{$i18n.t('Free Text Comment')}</div>
-						<div class="text-xs text-gray-500">
-							{$i18n.t('Allow users to leave a text comment on responses')}
-						</div>
-					</div>
-					<Switch bind:state={evaluationConfig.ENABLE_FEEDBACK_LAYER3} />
-				</div>
+				<AdminSettingRow
+					label={$i18n.t('Free Text Comment')}
+					description={$i18n.t('Allow users to leave a text comment on responses')}
+					let:labelId
+					><Switch
+						bind:state={evaluationConfig.ENABLE_FEEDBACK_LAYER3}
+						ariaLabelledbyId={labelId}
+					/></AdminSettingRow
+				>
 
 				{#if evaluationConfig.ENABLE_FEEDBACK_LAYER3}
 					<div class="ml-2 mb-3">
@@ -330,28 +325,28 @@
 				{/if}
 
 				<!-- Category Tags -->
-				<div class="mb-2.5 flex w-full justify-between">
-					<div class="flex flex-col">
-						<div class="text-xs font-medium">{$i18n.t('Category Tags')}</div>
-						<div class="text-xs text-gray-500">
-							{$i18n.t('Allow users to add free-form category tags to feedback')}
-						</div>
-					</div>
-					<Switch bind:state={evaluationConfig.ENABLE_FEEDBACK_CATEGORY_TAGS} />
-				</div>
+				<AdminSettingRow
+					label={$i18n.t('Category Tags')}
+					description={$i18n.t('Allow users to add free-form category tags to feedback')}
+					let:labelId
+					><Switch
+						bind:state={evaluationConfig.ENABLE_FEEDBACK_CATEGORY_TAGS}
+						ariaLabelledbyId={labelId}
+					/></AdminSettingRow
+				>
 
 				<hr class="border-gray-100/30 dark:border-gray-850/30 my-2" />
 
 				<!-- Conversation-Level Feedback -->
-				<div class="mb-2.5 flex w-full justify-between">
-					<div class="flex flex-col">
-						<div class="text-xs font-medium">{$i18n.t('Conversation Feedback')}</div>
-						<div class="text-xs text-gray-500">
-							{$i18n.t('Show a feedback strip above the input after 2+ messages')}
-						</div>
-					</div>
-					<Switch bind:state={evaluationConfig.ENABLE_CONVERSATION_FEEDBACK} />
-				</div>
+				<AdminSettingRow
+					label={$i18n.t('Conversation Feedback')}
+					description={$i18n.t('Show a feedback strip above the input after 2+ messages')}
+					let:labelId
+					><Switch
+						bind:state={evaluationConfig.ENABLE_CONVERSATION_FEEDBACK}
+						ariaLabelledbyId={labelId}
+					/></AdminSettingRow
+				>
 
 				{#if evaluationConfig.ENABLE_CONVERSATION_FEEDBACK}
 					<div class="ml-2 mb-3">
@@ -380,11 +375,7 @@
 						/>
 					</div>
 				{/if}
-			</div>
-=======
-				</AdminSettingSection>
-			{/if}
->>>>>>> upstream/main
+			</AdminSettingSection>
 		{:else}
 			<div class="flex h-full justify-center">
 				<div class="my-auto">

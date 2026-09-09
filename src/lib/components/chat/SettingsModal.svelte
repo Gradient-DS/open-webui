@@ -7,7 +7,12 @@
 	import type { SettingsModalRequest } from '$lib/stores';
 	import { getUserSettings, updateUserSettings } from '$lib/apis/users';
 	import { getBackendConfig, getModels as _getModels } from '$lib/apis';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import {
+		isFeatureEnabled,
+		isAdminSettingsEnabled,
+		isAdminSettingsTabEnabled,
+		getFirstAvailableAdminSettingsTab
+	} from '$lib/utils/features';
 
 	import Modal from '../common/Modal.svelte';
 	import Account from './Settings/Account.svelte';
@@ -40,10 +45,8 @@
 	import UsageIcon from '../icons/UsageIcon.svelte';
 	import AdminTabIcon from '$lib/components/admin/Settings/AdminTabIcon.svelte';
 	import AdminGeneral from '$lib/components/admin/Settings/General.svelte';
-	import AdminAuthentication from '$lib/components/admin/Settings/Authentication.svelte';
 	import AdminConnections from '$lib/components/admin/Settings/Connections.svelte';
 	import AdminModels from '$lib/components/admin/Settings/Models.svelte';
-	import AdminSubagents from '$lib/components/admin/Settings/Subagents.svelte';
 	import AdminEvaluations from '$lib/components/admin/Settings/Evaluations.svelte';
 	import AdminAnalytics from '$lib/components/admin/Analytics.svelte';
 	import AdminIntegrations from '$lib/components/admin/Settings/Integrations.svelte';
@@ -55,6 +58,24 @@
 	import AdminImages from '$lib/components/admin/Settings/Images.svelte';
 	import AdminPipelines from '$lib/components/admin/Settings/Pipelines.svelte';
 	import AdminDatabase from '$lib/components/admin/Settings/Database.svelte';
+
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminCloudSync from '$lib/components/admin/Settings/CloudSync.svelte';
+
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminEmail from '$lib/components/admin/Settings/Email.svelte';
+
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminSecurity from '$lib/components/admin/Settings/Security.svelte';
+
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminAcceptance from '$lib/components/admin/Settings/Acceptance.svelte';
+
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminExternalAgents from '$lib/components/admin/Settings/ExternalAgents.svelte';
+
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminAgents from '$lib/components/admin/Settings/Agents.svelte';
 
 	const i18n: Writable<any> = getContext('i18n');
 
@@ -151,11 +172,15 @@
 		about: 'Profile'
 	};
 	const adminSettingGroups: Record<string, string> = {
+		'admin:agents': 'AI',
+		'admin:external-agents': 'AI',
+		'admin:acceptance': 'System',
+		'admin:security': 'System',
+		'admin:email': 'System',
+		'admin:cloud-sync': 'Tools',
 		'admin:general': 'System',
-		'admin:authentication': 'System',
 		'admin:connections': 'AI',
 		'admin:models': 'AI',
-		'admin:subagents': 'AI',
 		'admin:evaluations': 'Quality',
 		'admin:analytics': 'Quality',
 		'admin:integrations': 'Tools',
@@ -677,25 +702,52 @@
 		}
 	];
 
+	// [Gradient] Q14 hides admin:authentication; D-Runtime hides admin:subagents.
 	const adminSettings: SettingsTab[] = [
+		{
+			id: 'admin:agents',
+			title: 'AI-agents',
+			keywords: ['agent', 'agents', 'ai-agents', 'beta', 'external', 'chatbot', 'picker']
+		},
+		{
+			id: 'admin:external-agents',
+			title: 'External Agents',
+			keywords: ['agent', 'external', 'agents', 'ai']
+		},
+		{
+			id: 'admin:acceptance',
+			title: 'Acceptance',
+			keywords: ['acceptance', 'modal', 'terms', 'agreement', 'onboarding']
+		},
+		{
+			id: 'admin:security',
+			title: 'Security',
+			keywords: ['security', '2fa', 'two-factor', 'totp', 'authentication', 'mfa']
+		},
+		{
+			id: 'admin:email',
+			title: 'Email',
+			keywords: ['email', 'invite', 'smtp', 'notifications', 'mail']
+		},
+		{
+			id: 'admin:cloud-sync',
+			title: 'Cloud Sync',
+			keywords: ['cloud', 'sync', 'confluence', 'onedrive', 'google drive', 'integration']
+		},
 		{
 			id: 'admin:general',
 			title: 'General',
-			keywords: ['general', 'admin', 'settings', 'version', 'update', 'community', 'channels']
-		},
-		{
-			id: 'admin:authentication',
-			title: 'Authentication',
 			keywords: [
+				'general',
+				'admin',
+				'settings',
+				'version',
+				'update',
+				'community',
+				'channels',
 				'authentication',
-				'auth',
-				'login',
-				'signup',
 				'ldap',
-				'oauth',
-				'oidc',
-				'sso',
-				'roles'
+				'oauth'
 			]
 		},
 		{
@@ -725,11 +777,6 @@
 				'import',
 				'export'
 			]
-		},
-		{
-			id: 'admin:subagents',
-			title: 'Sub-agents',
-			keywords: ['sub-agents', 'subagents', 'delegation', 'background', 'agents']
 		},
 		{
 			id: 'admin:interface',
@@ -828,12 +875,24 @@
 			return true;
 		});
 
-		return $user?.role === 'admin' ? [...personalSettings, ...adminSettings] : personalSettings;
+		// [Gradient] Apply tenant gates before exposing any admin tab.
+		return $user?.role === 'admin' && isAdminSettingsEnabled()
+			? [
+					...personalSettings,
+					...adminSettings.filter((tab) => isAdminSettingsTabEnabled(tab.id.slice(6)))
+				]
+			: personalSettings;
 	};
 
 	const setFilteredSettings = () => {
 		filteredSettings = availableSettings
 			.filter((tab) => {
+				// [Gradient] Recheck gates when config or search changes.
+				if (
+					isAdminTab(tab.id) &&
+					(!isAdminSettingsEnabled() || !isAdminSettingsTabEnabled(tab.id.slice(6)))
+				)
+					return false;
 				const query = search.toLowerCase().trim();
 				if (tab.id === 'admin:analytics' && !($config?.features.enable_admin_analytics ?? true)) {
 					return false;
@@ -913,8 +972,13 @@
 		tabElement?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
 	};
 
-	$: if ($user?.role !== 'admin' && isAdminTab(selectedTab)) {
-		selectedTab = 'general';
+	// [Gradient] Validate direct modal requests as well as URL redirects.
+	$: if (isAdminTab(selectedTab) && ($config || $user)) {
+		if ($user?.role !== 'admin' || !isAdminSettingsEnabled()) selectedTab = 'general';
+		else if (!isAdminSettingsTabEnabled(selectedTab.slice(6))) {
+			const first = getFirstAvailableAdminSettingsTab();
+			selectedTab = first ? 'admin:' + first : 'general';
+		}
 	}
 
 	$: if (modalShow && selectedTab) {
@@ -1270,10 +1334,57 @@
 				/>
 			{:else if selectedTab === 'about'}
 				<About />
+			{:else if selectedTab === 'admin:cloud-sync'}
+				<AdminCloudSync
+					on:save={async () => {
+						// Cloud Sync autosaves and shows its own inline status, so no toast
+						// here — just refresh the backend config (integration-enabled flags
+						// feed the chat '+' menu).
+						await tick();
+						await config.set(await getBackendConfig());
+					}}
+				/>
+			{:else if selectedTab === 'admin:email'}
+				<AdminEmail
+					saveHandler={async () => {
+						toast.success($i18n.t('Settings saved successfully!'));
+
+						await tick();
+						await config.set(await getBackendConfig());
+					}}
+				/>
+			{:else if selectedTab === 'admin:security'}
+				<AdminSecurity
+					saveHandler={async () => {
+						toast.success($i18n.t('Settings saved successfully!'));
+
+						await tick();
+						await config.set(await getBackendConfig());
+					}}
+				/>
+			{:else if selectedTab === 'admin:acceptance'}
+				<AdminAcceptance
+					saveHandler={async () => {
+						toast.success($i18n.t('Settings saved successfully!'));
+
+						await tick();
+						await config.set(await getBackendConfig());
+					}}
+				/>
+			{:else if selectedTab === 'admin:external-agents'}
+				<AdminExternalAgents
+					saveHandler={() => {
+						toast.success($i18n.t('Agent selection saved'));
+					}}
+				/>
+			{:else if selectedTab === 'admin:agents'}
+				<AdminAgents
+					saveHandler={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
 			{:else if selectedTab === 'admin:general'}
 				<AdminGeneral saveHandler={adminConfigSaveHandler} />
-			{:else if selectedTab === 'admin:authentication'}
-				<AdminAuthentication />
 			{:else if selectedTab === 'admin:connections'}
 				<AdminConnections
 					on:save={() => {
@@ -1282,8 +1393,6 @@
 				/>
 			{:else if selectedTab === 'admin:models'}
 				<AdminModels bind:tabState />
-			{:else if selectedTab === 'admin:subagents'}
-				<AdminSubagents />
 			{:else if selectedTab === 'admin:evaluations'}
 				<AdminEvaluations />
 			{:else if selectedTab === 'admin:analytics'}

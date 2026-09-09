@@ -2,12 +2,14 @@
 	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 
-<<<<<<< HEAD
-	import { WEBUI_NAME, config, mobile, showSidebar, user } from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
-=======
 	import { WEBUI_NAME, config, mobile, showSettings, showSidebar, user } from '$lib/stores';
->>>>>>> upstream/main
+	// [Gradient] Keep tenant admin-section and tab gates.
+	import {
+		isFeatureEnabled,
+		isAdminSettingsEnabled,
+		isAdminSettingsTabEnabled,
+		getFirstAvailableAdminSettingsTab
+	} from '$lib/utils/features';
 	import { page } from '$app/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
@@ -19,17 +21,13 @@
 
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
-<<<<<<< HEAD
-			await goto('/');
-			return;
-=======
 			await goto('/', { replaceState: true });
+			return;
 		} else if (
 			!$config?.features?.enable_plugins &&
 			$page.url.pathname.includes('/admin/functions')
 		) {
 			await goto('/admin', { replaceState: true });
->>>>>>> upstream/main
 		}
 
 		// Redirect if trying to access disabled feature
@@ -92,44 +90,6 @@
 
 				<div class="flex w-full items-center">
 					<div
-<<<<<<< HEAD
-						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium bg-transparent pt-1"
-					>
-						<a
-							draggable="false"
-							class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/users')
-								? 'bg-gray-100 dark:bg-gray-800'
-								: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
-							href="/admin">{$i18n.t('Users')}</a
-						>
-
-						{#if $config?.features.enable_admin_analytics ?? true}
-							<a
-								draggable="false"
-								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/analytics')
-									? 'bg-gray-100 dark:bg-gray-800'
-									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
-								href="/admin/analytics">{$i18n.t('Analytics')}</a
-							>
-						{/if}
-
-						{#if isFeatureEnabled('admin_evaluations')}
-							<a
-								draggable="false"
-								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/evaluations')
-									? 'bg-gray-100 dark:bg-gray-800'
-									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
-								href="/admin/evaluations">{$i18n.t('Evaluations')}</a
-							>
-						{/if}
-
-						{#if isFeatureEnabled('admin_functions')}
-							<a
-								draggable="false"
-								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/functions')
-									? 'bg-gray-100 dark:bg-gray-800'
-									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
-=======
 						class="flex min-w-0 mr-1.5 items-center gap-0.5 md:gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-normal rounded-full bg-transparent py-1 touch-auto pointer-events-auto"
 					>
 						<a
@@ -140,48 +100,49 @@
 							href="/admin">{$i18n.t('Users')}</a
 						>
 
-						<a
-							draggable="false"
-							class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/evaluations')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-							href="/admin/evaluations">{$i18n.t('Evaluations')}</a
-						>
+						{#if isAdminSettingsTabEnabled('analytics')}
+							<a
+								draggable="false"
+								class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/analytics')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								href="/admin/analytics">{$i18n.t('Analytics')}</a
+							>
+						{/if}
 
-						{#if $config?.features?.enable_plugins}
+						{#if isFeatureEnabled('admin_evaluations')}
+							<a
+								draggable="false"
+								class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/evaluations')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								href="/admin/evaluations">{$i18n.t('Evaluations')}</a
+							>
+						{/if}
+
+						{#if isFeatureEnabled('admin_functions') && $config?.features?.enable_plugins}
 							<a
 								draggable="false"
 								class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/functions')
 									? ''
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
->>>>>>> upstream/main
 								href="/admin/functions">{$i18n.t('Functions')}</a
 							>
 						{/if}
 
-<<<<<<< HEAD
-						{#if isFeatureEnabled('admin_settings')}
+						{#if isAdminSettingsEnabled() && getFirstAvailableAdminSettingsTab()}
 							<a
 								draggable="false"
-								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/settings')
-									? 'bg-gray-100 dark:bg-gray-800'
-									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
-								href="/admin/settings">{$i18n.t('Settings')}</a
+								class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/settings')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								href="/admin/settings"
+								on:click={(event) => {
+									event.preventDefault();
+									showSettings.set('admin:' + getFirstAvailableAdminSettingsTab());
+								}}>{$i18n.t('Settings')}</a
 							>
 						{/if}
-=======
-						<a
-							draggable="false"
-							class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/settings')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-							href="/admin/settings"
-							on:click={(event) => {
-								event.preventDefault();
-								showSettings.set('admin:general');
-							}}>{$i18n.t('Settings')}</a
-						>
->>>>>>> upstream/main
 					</div>
 				</div>
 			</div>

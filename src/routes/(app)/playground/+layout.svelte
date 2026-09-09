@@ -1,19 +1,13 @@
 <script lang="ts">
-<<<<<<< HEAD
 	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { WEBUI_NAME, showSidebar, functions, mobile, user } from '$lib/stores';
-=======
-	import { getContext } from 'svelte';
-	import { WEBUI_NAME, showSidebar, mobile } from '$lib/stores';
->>>>>>> upstream/main
+	import { WEBUI_NAME, showSidebar, mobile, user } from '$lib/stores';
 	import { page } from '$app/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
 	const i18n = getContext('i18n');
-<<<<<<< HEAD
 
 	onMount(async () => {
 		// Check feature flag - applies to everyone including admins
@@ -28,8 +22,6 @@
 			return;
 		}
 	});
-=======
->>>>>>> upstream/main
 </script>
 
 <svelte:head>
@@ -72,17 +64,6 @@
 
 			<div class="flex w-full items-center">
 				<div
-<<<<<<< HEAD
-					class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium bg-transparent pt-1"
-				>
-					<a
-						draggable="false"
-						class="min-w-fit p-1.5 rounded-lg {['/playground', '/playground/'].includes(
-							$page.url.pathname
-						)
-							? 'bg-gray-100 dark:bg-gray-800'
-							: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
-=======
 					class="flex min-w-0 items-center gap-0.5 md:gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-normal rounded-full bg-transparent py-1 touch-auto pointer-events-auto"
 				>
 					<a
@@ -92,7 +73,6 @@
 						)
 							? ''
 							: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
->>>>>>> upstream/main
 						href="/playground">{$i18n.t('Chat')}</a
 					>
 
@@ -105,31 +85,17 @@
 
 					<a
 						draggable="false"
-<<<<<<< HEAD
-						class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes(
-							'/playground/completions'
-						)
-							? 'bg-gray-100 dark:bg-gray-800'
-							: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
-=======
 						class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/playground/completions')
 							? ''
 							: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
->>>>>>> upstream/main
 						href="/playground/completions">{$i18n.t('Completions')}</a
 					>
 
 					<a
 						draggable="false"
-<<<<<<< HEAD
-						class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/playground/images')
-							? 'bg-gray-100 dark:bg-gray-800'
-							: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
-=======
 						class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/playground/images')
 							? ''
 							: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
->>>>>>> upstream/main
 						href="/playground/images">{$i18n.t('Images')}</a
 					>
 				</div>

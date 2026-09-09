@@ -180,9 +180,7 @@
 
 	const loadChat = async () => {
 		if (!chat) {
-			draggable = false;
 			chat = await getChatById(localStorage.token, id);
-			draggable = true;
 		}
 	};
 
@@ -720,27 +718,13 @@
 						</button>
 					</Tooltip>
 
-<<<<<<< HEAD
-					<Tooltip content={$i18n.t('Delete')}>
-						<button
-							class=" self-center dark:hover:text-white transition disabled:cursor-not-allowed"
-							disabled={deleting}
-							on:click={() => {
-								showDeleteConfirm = true;
-							}}
-							type="button"
-						>
-							<GarbageBin strokeWidth="2" />
-						</button>
-					</Tooltip>
-=======
 					{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
 						<Tooltip content={$i18n.t('Delete')}>
 							<button
 								class=" self-center dark:hover:text-white transition disabled:cursor-not-allowed"
 								disabled={deleting}
 								on:click={() => {
-									deleteChatHandler(id);
+									showDeleteConfirm = true;
 								}}
 								type="button"
 							>
@@ -748,7 +732,6 @@
 							</button>
 						</Tooltip>
 					{/if}
->>>>>>> upstream/main
 				</div>
 			{:else}
 				<div class="flex self-center z-10 items-end">

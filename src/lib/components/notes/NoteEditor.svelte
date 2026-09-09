@@ -1,4 +1,7 @@
 <script lang="ts">
+	// [Gradient] Tenant gates for note chat and recording.
+	import { isFeatureEnabled } from '$lib/utils/features';
+	$: notesAiControlsEnabled = $config?.features?.feature_notes_ai_controls ?? true;
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { v4 as uuidv4 } from 'uuid';
 	import fileSaver from 'file-saver';
@@ -21,16 +24,8 @@
 	dayjs.extend(duration);
 	dayjs.extend(relativeTime);
 
-<<<<<<< HEAD
-	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
-
-	import { compressImage, copyToClipboard, splitStream, convertHeicToJpeg } from '$lib/utils';
-	import { isFeatureEnabled } from '$lib/utils/features';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-=======
 	import { compressImage, copyToClipboard, convertHeicToJpeg } from '$lib/utils';
 	import { WEBUI_BASE_URL } from '$lib/constants';
->>>>>>> upstream/main
 	import { getFileById, uploadFile } from '$lib/apis/files';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 
@@ -99,9 +94,6 @@
 	import ArrowUturnRight from '../icons/ArrowUturnRight.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import ChatBubbleOval from '../icons/ChatBubbleOval.svelte';
-
-	// Reactive feature flag check - must use $config directly for reactivity
-	$: notesAiControlsEnabled = $config?.features?.feature_notes_ai_controls ?? true;
 
 	export let id: null | string = null;
 
@@ -500,18 +492,6 @@ ${content}
 
 		files = [...files, fileItem];
 
-<<<<<<< HEAD
-		// open the settings panel if it is not open (only if feature is enabled)
-		if (notesAiControlsEnabled) {
-			selectedPanel = 'settings';
-
-			if (!showPanel) {
-				showPanel = true;
-			}
-		}
-
-=======
->>>>>>> upstream/main
 		try {
 			// If the file is an audio file, provide the language for STT.
 			let metadata = null;
@@ -1144,115 +1124,71 @@ ${content}
 									{/if}
 								{/if}
 
-<<<<<<< HEAD
-									{#if notesAiControlsEnabled}
-										<Tooltip placement="top" content={$i18n.t('Chat')} className="cursor-pointer">
-											<button
-												class="p-1.5 bg-transparent hover:bg-white/5 transition rounded-lg"
-												on:click={() => {
-													if (showPanel && selectedPanel === 'chat') {
-														showPanel = false;
-													} else {
-														if (!showPanel) {
-															showPanel = true;
-														}
-														selectedPanel = 'chat';
-													}
-												}}
-											>
-												<ChatBubbleOval />
-											</button>
-										</Tooltip>
-
-										<Tooltip
-											placement="top"
-											content={$i18n.t('Controls')}
-											className="cursor-pointer"
-										>
-											<button
-												class="p-1.5 bg-transparent hover:bg-white/5 transition rounded-lg"
-												on:click={() => {
-													if (showPanel && selectedPanel === 'settings') {
-														showPanel = false;
-													} else {
-														if (!showPanel) {
-															showPanel = true;
-														}
-														selectedPanel = 'settings';
-													}
-												}}
-											>
-												<AdjustmentsHorizontalOutline />
-											</button>
-										</Tooltip>
-									{/if}
-=======
 								<Tooltip content={$i18n.t('Chat')} placement="top">
-									<button
-										type="button"
-										class="p-1 bg-transparent hover:bg-white/5 transition rounded-lg"
-										aria-label={$i18n.t('Chat')}
-										on:click={openNoteChat}
-									>
-										<ChatBubbleOval className="size-4" strokeWidth="1.8" />
-									</button>
+									{#if notesAiControlsEnabled}<button
+											type="button"
+											class="p-1 bg-transparent hover:bg-white/5 transition rounded-lg"
+											aria-label={$i18n.t('Chat')}
+											on:click={openNoteChat}
+										>
+											<ChatBubbleOval className="size-4" strokeWidth="1.8" />
+										</button>{/if}
 								</Tooltip>
 
 								{#if note?.write_access}
-									<RecordMenu
-										onRecord={async () => {
-											displayMediaRecord = false;
+									{#if isFeatureEnabled('voice')}<RecordMenu
+											onRecord={async () => {
+												displayMediaRecord = false;
 
-											try {
-												let stream = await navigator.mediaDevices
-													.getUserMedia({ audio: true })
-													.catch(function (err) {
-														toast.error(
-															$i18n.t(`Permission denied when accessing microphone: {{error}}`, {
-																error: err
-															})
-														);
-														return null;
-													});
+												try {
+													let stream = await navigator.mediaDevices
+														.getUserMedia({ audio: true })
+														.catch(function (err) {
+															toast.error(
+																$i18n.t(`Permission denied when accessing microphone: {{error}}`, {
+																	error: err
+																})
+															);
+															return null;
+														});
 
-												if (stream) {
-													recording = true;
-													const tracks = stream.getTracks();
-													tracks.forEach((track) => track.stop());
+													if (stream) {
+														recording = true;
+														const tracks = stream.getTracks();
+														tracks.forEach((track) => track.stop());
+													}
+													stream = null;
+												} catch {
+													toast.error($i18n.t('Permission denied when accessing microphone'));
 												}
-												stream = null;
-											} catch {
-												toast.error($i18n.t('Permission denied when accessing microphone'));
-											}
-										}}
-										onCaptureAudio={async () => {
-											displayMediaRecord = true;
+											}}
+											onCaptureAudio={async () => {
+												displayMediaRecord = true;
 
-											recording = true;
-										}}
-										onUpload={async () => {
-											const input = document.createElement('input');
-											input.type = 'file';
-											input.accept = 'audio/*';
-											input.multiple = false;
-											input.click();
+												recording = true;
+											}}
+											onUpload={async () => {
+												const input = document.createElement('input');
+												input.type = 'file';
+												input.accept = 'audio/*';
+												input.multiple = false;
+												input.click();
 
-											input.onchange = async (e) => {
-												const files = e.target.files;
+												input.onchange = async (e) => {
+													const files = e.target.files;
 
-												if (files && files.length > 0) {
-													await uploadFileHandler(files[0]);
-												}
-											};
-										}}
-									>
-										<Tooltip content={$i18n.t('Record')} placement="top">
-											<div class="p-1 bg-transparent hover:bg-white/5 transition rounded-lg">
-												<Mic className="size-4" />
-											</div>
-										</Tooltip>
-									</RecordMenu>
->>>>>>> upstream/main
+													if (files && files.length > 0) {
+														await uploadFileHandler(files[0]);
+													}
+												};
+											}}
+										>
+											<Tooltip content={$i18n.t('Record')} placement="top">
+												<div class="p-1 bg-transparent hover:bg-white/5 transition rounded-lg">
+													<Mic className="size-4" />
+												</div>
+											</Tooltip>
+										</RecordMenu>{/if}
 								{/if}
 
 								<NoteMenu
@@ -1507,194 +1443,6 @@ ${content}
 				</div>
 			{/if}
 		</div>
-<<<<<<< HEAD
-		<div class="absolute z-50 bottom-0 right-0 p-3.5 flex select-none">
-			<div class="flex flex-col gap-2 justify-end">
-				{#if recording}
-					<div class="flex-1 w-full">
-						<VoiceRecording
-							bind:recording
-							className="p-1 w-full max-w-full"
-							transcribe={false}
-							displayMedia={displayMediaRecord}
-							echoCancellation={false}
-							noiseSuppression={false}
-							onCancel={() => {
-								recording = false;
-								displayMediaRecord = false;
-							}}
-							onConfirm={(data) => {
-								if (data?.file) {
-									uploadFileHandler(data?.file);
-								}
-
-								recording = false;
-								displayMediaRecord = false;
-							}}
-						/>
-					</div>
-				{:else}
-					{#if notesAiControlsEnabled}
-						<div
-							class="cursor-pointer flex gap-0.5 rounded-full border border-gray-50 dark:border-gray-850/30 dark:bg-gray-850 transition shadow-xl"
-						>
-							<Tooltip content={$i18n.t('AI')} placement="top">
-								{#if editing}
-									<button
-										class="p-2 flex justify-center items-center hover:bg-gray-50 dark:hover:bg-gray-800 rounded-full transition shrink-0"
-										on:click={() => {
-											stopResponseHandler();
-										}}
-										type="button"
-									>
-										<Spinner className="size-5" />
-									</button>
-								{:else}
-									<AiMenu
-										onEdit={() => {
-											enhanceNoteHandler();
-										}}
-										onChat={() => {
-											showPanel = true;
-											selectedPanel = 'chat';
-										}}
-									>
-										<div
-											class="cursor-pointer p-2.5 flex rounded-full border border-gray-50 bg-white dark:border-none dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-xl"
-										>
-											<SparklesSolid />
-										</div>
-									</AiMenu>
-								{/if}
-							</Tooltip>
-						</div>
-					{/if}
-					{#if isFeatureEnabled('voice')}
-						<RecordMenu
-							onRecord={async () => {
-								displayMediaRecord = false;
-
-								try {
-									let stream = await navigator.mediaDevices
-										.getUserMedia({ audio: true })
-										.catch(function (err) {
-											toast.error(
-												$i18n.t(`Permission denied when accessing microphone: {{error}}`, {
-													error: err
-												})
-											);
-											return null;
-										});
-
-									if (stream) {
-										recording = true;
-										const tracks = stream.getTracks();
-										tracks.forEach((track) => track.stop());
-									}
-									stream = null;
-								} catch {
-									toast.error($i18n.t('Permission denied when accessing microphone'));
-								}
-							}}
-							onCaptureAudio={async () => {
-								displayMediaRecord = true;
-
-								recording = true;
-							}}
-							onUpload={async () => {
-								const input = document.createElement('input');
-								input.type = 'file';
-								input.accept = 'audio/*';
-								input.multiple = false;
-								input.click();
-
-								input.onchange = async (e) => {
-									const files = e.target.files;
-
-									if (files && files.length > 0) {
-										await uploadFileHandler(files[0]);
-									}
-								};
-							}}
-						>
-							<Tooltip content={$i18n.t('Record')} placement="top">
-								<div
-									class="cursor-pointer p-2.5 flex rounded-full border border-gray-50 bg-white dark:border-none dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-xl"
-								>
-									<MicSolid className="size-4.5" />
-								</div>
-							</Tooltip>
-						</RecordMenu>
-					{/if}
-				{/if}
-			</div>
-		</div>
-	</Pane>
-	{#if notesAiControlsEnabled}
-		<NotePanel bind:show={showPanel}>
-			{#if selectedPanel === 'chat'}
-				<Chat
-					bind:show={showPanel}
-					bind:selectedModelId
-					bind:messages
-					bind:note
-					bind:editing
-					bind:streaming
-					bind:stopResponseFlag
-					{editor}
-					{inputElement}
-					{selectedContent}
-					{files}
-					onInsert={insertHandler}
-					onStop={stopResponseHandler}
-					{onEdited}
-					insertNoteHandler={() => {
-						insertNoteVersion(note);
-					}}
-					scrollToBottomHandler={scrollToBottom}
-				/>
-			{:else if selectedPanel === 'settings'}
-				<Controls
-					bind:show={showPanel}
-					bind:selectedModelId
-					bind:files
-					onUpdate={(updatedFiles) => {
-						files = updatedFiles;
-						note.data.files = files.length > 0 ? files : null;
-
-						if (editor) {
-							editor.storage.files = files;
-							const fileIds = new Set(files.map((file) => file.id));
-							const ranges = [];
-
-							editor.state.doc.descendants((node, pos) => {
-								const src = node.attrs.src;
-								if (
-									node.type.name === 'image' &&
-									src?.startsWith('data://') &&
-									!fileIds.has(src.slice('data://'.length))
-								) {
-									ranges.push([pos, pos + node.nodeSize]);
-								}
-							});
-
-							if (ranges.length > 0) {
-								let transaction = editor.state.tr;
-								ranges.reverse().forEach(([from, to]) => {
-									transaction = transaction.delete(from, to);
-								});
-								editor.view.dispatch(transaction);
-							}
-						}
-
-						changeDebounceHandler();
-					}}
-				/>
-			{/if}
-		</NotePanel>
-	{/if}
-</PaneGroup>
-=======
 		{#if recording}
 			<div class="absolute z-50 bottom-0 right-0 p-3.5 flex select-none">
 				<div class="flex-1 w-full">
@@ -1722,47 +1470,46 @@ ${content}
 			</div>
 		{/if}
 	</div>
-	<NotePanel bind:show={showNoteChat}>
-		{#if noteChatLoading}
-			<div class="flex h-full items-center justify-center">
-				<Spinner className="size-5" />
-			</div>
-		{:else if noteChatId || noteChatDraftKey}
-			<Chat
-				embedded={true}
-				chatIdProp={noteChatId ?? ''}
-				embeddedChats={noteChats}
-				embeddedDraftKey={noteChatDraftKey}
-				suggestedPrompts={noteChatSuggestedPrompts}
-				selectedText={selectedContent?.text ?? ''}
-				onInsertToNote={insertHandler}
-				onNewEmbeddedChat={createNoteChat}
-				onCreateEmbeddedChat={createNoteChatOnFirstMessage}
-				onSelectEmbeddedChat={(chatId) => {
-					if (!chatId || chatId === noteChatId) return;
-					noteChatId = chatId;
-					noteChatDraftKey = '';
-				}}
-				onDeleteEmbeddedChat={deleteNoteChat}
-				onEmbeddedChatTitle={(chatId, title) => {
-					noteChats = noteChats.map((chat) =>
-						chat.id === chatId
-							? {
-									...chat,
-									title,
-									chat: {
-										...(chat.chat ?? {}),
-										title
+	{#if notesAiControlsEnabled}<NotePanel bind:show={showNoteChat}>
+			{#if noteChatLoading}
+				<div class="flex h-full items-center justify-center">
+					<Spinner className="size-5" />
+				</div>
+			{:else if noteChatId || noteChatDraftKey}
+				<Chat
+					embedded={true}
+					chatIdProp={noteChatId ?? ''}
+					embeddedChats={noteChats}
+					embeddedDraftKey={noteChatDraftKey}
+					suggestedPrompts={noteChatSuggestedPrompts}
+					selectedText={selectedContent?.text ?? ''}
+					onInsertToNote={insertHandler}
+					onNewEmbeddedChat={createNoteChat}
+					onCreateEmbeddedChat={createNoteChatOnFirstMessage}
+					onSelectEmbeddedChat={(chatId) => {
+						if (!chatId || chatId === noteChatId) return;
+						noteChatId = chatId;
+						noteChatDraftKey = '';
+					}}
+					onDeleteEmbeddedChat={deleteNoteChat}
+					onEmbeddedChatTitle={(chatId, title) => {
+						noteChats = noteChats.map((chat) =>
+							chat.id === chatId
+								? {
+										...chat,
+										title,
+										chat: {
+											...(chat.chat ?? {}),
+											title
+										}
 									}
-								}
-							: chat
-					);
-				}}
-				onCloseEmbedded={() => {
-					showNoteChat = false;
-				}}
-			/>
-		{/if}
-	</NotePanel>
+								: chat
+						);
+					}}
+					onCloseEmbedded={() => {
+						showNoteChat = false;
+					}}
+				/>
+			{/if}
+		</NotePanel>{/if}
 </div>
->>>>>>> upstream/main

@@ -6,14 +6,11 @@
 
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
-<<<<<<< HEAD
 	import { isFeatureEnabled } from '$lib/utils/features';
-=======
 	import AdminSettingField from './AdminSettingField.svelte';
 	import AdminSettingRow from './AdminSettingRow.svelte';
 	import AdminSettingSection from './AdminSettingSection.svelte';
 	import SettingsSelect from '$lib/components/common/SettingsSelect.svelte';
->>>>>>> upstream/main
 
 	const i18n: any = getContext('i18n');
 
@@ -154,52 +151,6 @@
 							/>
 						</AdminSettingField>
 					{/if}
-<<<<<<< HEAD
-				</div>
-
-				{#if isFeatureEnabled('document_writer')}
-					<div class="mb-3.5">
-						<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Document Writer')}</div>
-
-						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
-
-						<div class="mb-2.5">
-							<div class=" flex w-full justify-between">
-								<div class=" self-center text-xs font-medium">
-									{$i18n.t('Enable Document Writer')}
-								</div>
-
-								<Switch bind:state={config.ENABLE_DOCUMENT_WRITER} />
-							</div>
-						</div>
-
-						{#if config.ENABLE_DOCUMENT_WRITER}
-							<div>
-								<div class="py-0.5 w-full">
-									<div class=" mb-2.5 text-xs font-medium">
-										{$i18n.t('Document Writer Prompt Template')}
-									</div>
-
-									<Tooltip
-										content={$i18n.t(
-											'Leave empty to use the default prompt, or enter a custom prompt'
-										)}
-										placement="top-start"
-									>
-										<Textarea
-											bind:value={config.DOCUMENT_WRITER_PROMPT_TEMPLATE}
-											placeholder={$i18n.t(
-												'Leave empty to use the default prompt, or enter a custom prompt'
-											)}
-										/>
-									</Tooltip>
-								</div>
-							</div>
-						{/if}
-					</div>
-				{/if}
-			</div>
-=======
 				{/if}
 			</AdminSettingSection>
 
@@ -321,7 +272,28 @@
 					</AdminSettingField>
 				{/if}
 			</AdminSettingSection>
->>>>>>> upstream/main
+			<!-- [Gradient] Document Writer remains tenant gated. -->
+			{#if isFeatureEnabled('document_writer')}
+				<AdminSettingSection title={$i18n.t('Document Writer')}>
+					<AdminSettingRow label={$i18n.t('Enable Document Writer')} let:labelId
+						><Switch
+							bind:state={config.ENABLE_DOCUMENT_WRITER}
+							ariaLabelledbyId={labelId}
+						/></AdminSettingRow
+					>
+					{#if config.ENABLE_DOCUMENT_WRITER}
+						<AdminSettingField label={$i18n.t('Document Writer Prompt Template')}>
+							<Textarea
+								className={textareaClass}
+								bind:value={config.DOCUMENT_WRITER_PROMPT_TEMPLATE}
+								placeholder={$i18n.t(
+									'Leave empty to use the default prompt, or enter a custom prompt'
+								)}
+							/>
+						</AdminSettingField>
+					{/if}
+				</AdminSettingSection>
+			{/if}
 		{/if}
 	</div>
 	<div class="flex justify-end pt-6 text-sm font-normal">

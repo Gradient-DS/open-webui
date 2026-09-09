@@ -119,6 +119,15 @@ export const visiblePinnedModels = derived([pinnedModels, models], ([$pinnedMode
 	)
 );
 
+// [Gradient] The upstream visible-pin store contains IDs; expose only custom agents.
+export const visiblePinnedAgents = derived(
+	[visiblePinnedModels, models],
+	([$visiblePinnedModels, $models]) =>
+		$visiblePinnedModels.filter((id) =>
+			$models.some((model) => model.id === id && model?.info?.base_model_id)
+		)
+);
+
 export const audioQueue = writable<AudioQueue | null>(null);
 export const chatRequestQueues: Writable<
 	Record<string, { id: string; prompt: string; files: any[] }[]>

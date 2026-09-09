@@ -2,20 +2,13 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-<<<<<<< HEAD
 	import { downloadDatabase, exportDatabaseJson } from '$lib/apis/utils';
 	import { onMount, getContext } from 'svelte';
 	import { config, user } from '$lib/stores';
-=======
-	import { downloadDatabase } from '$lib/apis/utils';
-	import { getContext } from 'svelte';
-	import { config } from '$lib/stores';
->>>>>>> upstream/main
 	import { toast } from 'svelte-sonner';
 	import { getAllUserChats } from '$lib/apis/chats';
 	import { getAllUsers } from '$lib/apis/users';
 	import { exportConfig, importConfig } from '$lib/apis/configs';
-<<<<<<< HEAD
 	import {
 		getArchives,
 		getArchive,
@@ -25,16 +18,13 @@
 		updateArchiveConfig
 	} from '$lib/apis/archives';
 	import { getDataRetentionConfig, setDataRetentionConfig } from '$lib/apis/configs';
-=======
 	import AdminSettingRow from './AdminSettingRow.svelte';
 	import AdminSettingSection from './AdminSettingSection.svelte';
->>>>>>> upstream/main
 
 	const i18n: any = getContext('i18n');
 
 	export let saveHandler: Function;
 
-<<<<<<< HEAD
 	// Archives state
 	let archives: any[] = [];
 	let archivesTotal = 0;
@@ -68,11 +58,9 @@
 	let showArchiveModal = false;
 	let selectedArchive: any = null;
 	let loadingArchive = false;
-=======
 	let configImportInputElement: HTMLInputElement;
 	const actionButtonClass =
 		'text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white';
->>>>>>> upstream/main
 
 	const exportAllUserChats = async () => {
 		let blob = new Blob([JSON.stringify(await getAllUserChats(localStorage.token))], {
@@ -103,7 +91,6 @@
 		const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
 		saveAs(blob, 'users.csv');
 	};
-<<<<<<< HEAD
 
 	const loadRetentionConfig = async () => {
 		try {
@@ -214,8 +201,6 @@
 		await loadArchiveConfig();
 		await loadArchives();
 	});
-=======
->>>>>>> upstream/main
 </script>
 
 <div class="flex flex-col h-full justify-between text-sm">
@@ -324,13 +309,9 @@
 			</AdminSettingSection>
 		{/if}
 
-		<!-- Data Retention Section -->
-		<hr class="border-gray-50 dark:border-gray-850/30 my-2" />
+		<!-- [Gradient] Data retention configuration. -->
 
-		<div>
-			<div class="flex items-center justify-between mb-1">
-				<div class="text-sm font-medium">{$i18n.t('Data Retention')}</div>
-			</div>
+		<AdminSettingSection title={$i18n.t('Data Retention')}>
 			<div class="text-xs text-gray-500 mb-3">
 				{$i18n.t('Automatically clean up inactive data after a retention period.')}
 			</div>
@@ -500,15 +481,12 @@
 					</button>
 				</div>
 			</div>
-		</div>
+		</AdminSettingSection>
 
-		<!-- User Archives Section -->
+		<!-- [Gradient] Archive retention and user archive management. -->
 		{#if archiveConfig.enable_user_archival}
-			<hr class="border-gray-50 dark:border-gray-850/30 my-2" />
-
-			<div>
+			<AdminSettingSection title={$i18n.t('User Archives')}>
 				<div class="flex items-center justify-between mb-2">
-					<div class="text-sm font-medium">{$i18n.t('User Archives')}</div>
 					<span class="text-xs text-gray-500">{archivesTotal} {$i18n.t('archives')}</span>
 				</div>
 
@@ -605,7 +583,7 @@
 						{/each}
 					</div>
 				{/if}
-			</div>
+			</AdminSettingSection>
 		{/if}
 	</div>
 </div>

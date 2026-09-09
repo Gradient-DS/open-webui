@@ -7,60 +7,33 @@
 	import { getUsage } from '$lib/apis';
 	import { getLogoutRedirectUrl, getSessionUser, userSignOut } from '$lib/apis/auths';
 
-<<<<<<< HEAD
 	import {
 		showSettings,
 		showFeedbackModal,
 		mobile,
 		showSidebar,
-		showShortcuts,
 		user,
 		config,
 		settings
 	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
-=======
-	import { showSettings, mobile, showSidebar, user, config, settings } from '$lib/stores';
->>>>>>> upstream/main
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-<<<<<<< HEAD
-	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
-	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
-	import QuestionMarkCircle from '$lib/components/icons/QuestionMarkCircle.svelte';
-	import Map from '$lib/components/icons/Map.svelte';
-	import Keyboard from '$lib/components/icons/Keyboard.svelte';
-	import ShortcutsModal from '$lib/components/chat/ShortcutsModal.svelte';
-	import Settings from '$lib/components/icons/Settings.svelte';
-	import UserGroup from '$lib/components/icons/UserGroup.svelte';
-	import SignOut from '$lib/components/icons/SignOut.svelte';
-	import FaceSmile from '$lib/components/icons/FaceSmile.svelte';
 	import UserStatusModal from './UserStatusModal.svelte';
 	import Emoji from '$lib/components/common/Emoji.svelte';
-	import XMark from '$lib/components/icons/XMark.svelte';
-=======
-	import UserStatusModal from './UserStatusModal.svelte';
-	import Emoji from '$lib/components/common/Emoji.svelte';
-	import CalendarIcon from './icons/Calendar.svelte';
-	import ClockIcon from './icons/Clock.svelte';
-	import CodeIcon from './icons/Code.svelte';
 	import EmojiFaceIcon from './icons/EmojiFace.svelte';
 	import HelpCircleIcon from './icons/HelpCircle.svelte';
 	import LogOutIcon from './icons/LogOut.svelte';
-	import MapIcon from './icons/Map.svelte';
-	import NotesIcon from './icons/Notes.svelte';
-	import PinIcon from './icons/Pin.svelte';
-	import PinSlashIcon from './icons/PinSlash.svelte';
 	import Settings from '$lib/components/icons/Settings.svelte';
 	import KeyIcon from './icons/Key.svelte';
 	import UserIcon from './icons/User.svelte';
-	import WorkspaceIcon from './icons/Workspace.svelte';
 	import XMarkIcon from './icons/XMark.svelte';
->>>>>>> upstream/main
+	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
+	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 	import { updateUserStatus, updateUserSettings } from '$lib/apis/users';
 	import { toast } from 'svelte-sonner';
 
@@ -104,19 +77,6 @@
 	};
 </script>
 
-<<<<<<< HEAD
-<ShortcutsModal bind:show={$showShortcuts} />
-=======
-<svelte:window
-	on:keydown={(e) => {
-		if (e.key === 'Shift') shiftKey = true;
-	}}
-	on:keyup={(e) => {
-		if (e.key === 'Shift') shiftKey = false;
-	}}
-/>
-
->>>>>>> upstream/main
 <UserStatusModal
 	bind:show={showUserStatusModal}
 	onSave={async () => {
@@ -252,225 +212,7 @@
 				<hr class="border-gray-50/30 dark:border-gray-800/30 my-0.5 mx-1 p-0" />
 			{/if}
 
-			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools || $user?.permissions?.workspace?.skills}
-				<div class="flex items-center w-full">
-					<a
-						href="/workspace"
-						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
-						on:click={async (e) => {
-							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-							e.preventDefault();
-							show = false;
-							goto('/workspace');
-							if ($mobile) {
-								await tick();
-								showSidebar.set(false);
-							}
-						}}
-					>
-						<div class="self-center">
-							<WorkspaceIcon className="size-3.5" strokeWidth="1.5" />
-						</div>
-						<div class="self-center truncate">{$i18n.t('Workspace')}</div>
-					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('workspace')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100/60 dark:hover:bg-gray-700/60 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('workspace')}
-							>
-								{#if isPinned('workspace')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
-				</div>
-			{/if}
-
-			{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
-				<div class="flex items-center w-full">
-					<a
-						href="/notes"
-						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
-						on:click={async (e) => {
-							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-							e.preventDefault();
-							show = false;
-							goto('/notes');
-							if ($mobile) {
-								await tick();
-								showSidebar.set(false);
-							}
-						}}
-					>
-						<div class="self-center">
-							<NotesIcon className="size-3.5" strokeWidth="1.5" />
-						</div>
-						<div class="self-center truncate">{$i18n.t('Notes')}</div>
-					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('notes')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100/60 dark:hover:bg-gray-700/60 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('notes')}
-							>
-								{#if isPinned('notes')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
-				</div>
-			{/if}
-
-			{#if $config?.features?.enable_calendar && ($user?.role === 'admin' || $user?.permissions?.features?.calendar)}
-				<div class="flex items-center w-full">
-					<a
-						href="/calendar"
-						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
-						on:click={async (e) => {
-							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-							e.preventDefault();
-							show = false;
-							goto('/calendar');
-							if ($mobile) {
-								await tick();
-								showSidebar.set(false);
-							}
-						}}
-					>
-						<div class="self-center">
-							<CalendarIcon className="size-3.5" strokeWidth="1.5" />
-						</div>
-						<div class="self-center truncate">{$i18n.t('Calendar')}</div>
-					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('calendar')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100/60 dark:hover:bg-gray-700/60 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('calendar')}
-							>
-								{#if isPinned('calendar')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
-				</div>
-			{/if}
-
-			{#if $config?.features?.enable_automations && ($user?.role === 'admin' || $user?.permissions?.features?.automations)}
-				<div class="flex items-center w-full">
-					<a
-						href="/automations"
-						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
-						on:click={async (e) => {
-							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-							e.preventDefault();
-							show = false;
-							goto('/automations');
-							if ($mobile) {
-								await tick();
-								showSidebar.set(false);
-							}
-						}}
-					>
-						<div class="self-center">
-							<ClockIcon className="size-3.5" strokeWidth="1.5" />
-						</div>
-						<div class="self-center truncate">{$i18n.t('Automations')}</div>
-					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('automations')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100/60 dark:hover:bg-gray-700/60 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('automations')}
-							>
-								{#if isPinned('automations')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
-				</div>
-			{/if}
-
-			{#if role === 'admin'}
-				<div class="flex items-center w-full">
-					<a
-						href="/playground"
-						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
-						on:click={async (e) => {
-							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-							e.preventDefault();
-							show = false;
-							goto('/playground');
-							if ($mobile) {
-								await tick();
-								showSidebar.set(false);
-							}
-						}}
-					>
-						<div class="self-center">
-							<CodeIcon className="size-3.5" strokeWidth="1.5" />
-						</div>
-						<div class="self-center truncate">{$i18n.t('Playground')}</div>
-					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('playground')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100/60 dark:hover:bg-gray-700/60 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('playground')}
-							>
-								{#if isPinned('playground')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
-				</div>
-			{/if}
+			<!-- [Gradient] Section navigation lives in the explicit sidebar entries. -->
 
 			{#if help}
 				<hr class="border-gray-50/30 dark:border-gray-800/30 my-0.5 mx-1 p-0" />
@@ -479,7 +221,7 @@
 
 				{#if $user?.role === 'admin'}
 					<a
-						href="https://docs.openwebui.com"
+						href="https://docs.soev.ai"
 						target="_blank"
 						draggable="false"
 						class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
@@ -492,23 +234,6 @@
 							<HelpCircleIcon className="size-3.5" />
 						</div>
 						<div class=" self-center truncate">{$i18n.t('Documentation')}</div>
-					</a>
-
-					<!-- Releases -->
-					<a
-						href="https://github.com/open-webui/open-webui/releases"
-						target="_blank"
-						draggable="false"
-						class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
-						id="chat-share-button"
-						on:click={() => {
-							show = false;
-						}}
-					>
-						<div class="self-center">
-							<MapIcon className="size-3.5" />
-						</div>
-						<div class=" self-center truncate">{$i18n.t('Releases')}</div>
 					</a>
 				{/if}
 
@@ -541,7 +266,7 @@
 				on:click={async () => {
 					show = false;
 
-					dispatch('show', 'archived-chat');
+					showSettings.set('archived_chats');
 
 					if ($mobile) {
 						await tick();
@@ -585,7 +310,7 @@
 					draggable="false"
 					class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
 					on:click={async (e) => {
-						if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) {
+						if (e.metaKey || e.ctrlKey || e.button === 1) {
 							return;
 						}
 						e.preventDefault();
@@ -604,53 +329,6 @@
 				</a>
 			{/if}
 
-<<<<<<< HEAD
-			{#if help}
-				<hr class=" border-gray-50/30 dark:border-gray-800/30 my-1 p-0" />
-
-				<!-- {$i18n.t('Help')} -->
-
-				{#if $user?.role === 'admin'}
-					<a
-						href="https://docs.soev.ai"
-						target="_blank"
-						draggable="false"
-						class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
-						id="chat-share-button"
-						on:click={() => {
-							show = false;
-						}}
-					>
-						<div class=" self-center mr-3">
-							<QuestionMarkCircle className="size-5" />
-						</div>
-						<div class=" self-center truncate">{$i18n.t('Documentation')}</div>
-					</a>
-				{/if}
-
-				<button
-					class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
-					type="button"
-					id="chat-share-button"
-					on:click={async () => {
-						show = false;
-						showShortcuts.set(!$showShortcuts);
-
-						if ($mobile) {
-							await tick();
-							showSidebar.set(false);
-						}
-					}}
-				>
-					<div class=" self-center mr-3">
-						<Keyboard className="size-5" />
-					</div>
-					<div class=" self-center truncate">{$i18n.t('Keyboard Shortcuts')}</div>
-				</button>
-			{/if}
-
-			<hr class=" border-gray-50/30 dark:border-gray-800/30 my-1 p-0" />
-=======
 			<button
 				class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
 				type="button"
@@ -670,7 +348,6 @@
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Settings')}</div>
 			</button>
->>>>>>> upstream/main
 
 			<button
 				class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"

@@ -5,14 +5,10 @@
 	import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Sortable from 'sortablejs';
-<<<<<<< HEAD
 	import { getContext, onMount } from 'svelte';
 	import { getLanguages } from '$lib/i18n';
 	import { toLocalizedObject } from '$lib/utils/localized';
-=======
-	import { getContext } from 'svelte';
 	import SettingsSelect from '$lib/components/common/SettingsSelect.svelte';
->>>>>>> upstream/main
 	const i18n = getContext('i18n');
 
 	export let banners = [];
@@ -117,10 +113,9 @@
 					<option value="success" class="text-gray-900">{$i18n.t('Success')}</option>
 				</SettingsSelect>
 
-<<<<<<< HEAD
 				<div class="flex flex-col flex-1 mr-2">
 					<Textarea
-						className="text-xs w-full bg-transparent outline-hidden resize-none"
+						className="text-xs w-full border border-gray-100/50 !bg-gray-50/40 outline-hidden dark:border-white/[0.04] dark:!bg-white/[0.03] dark:text-gray-300 resize-none"
 						placeholder={$i18n.t('Content ({{lang}})', { lang: editLang })}
 						value={toLocalizedObject(banner.content, editLang)[editLang] ?? ''}
 						onInput={(e) => setBannerContent(bannerIdx, e.target.value)}
@@ -141,14 +136,6 @@
 						</div>
 					{/if}
 				</div>
-=======
-				<Textarea
-					className="mr-2 text-xs w-full border border-gray-100/50 !bg-gray-50/40 outline-hidden dark:border-white/[0.04] dark:!bg-white/[0.03] dark:text-gray-300 resize-none"
-					placeholder={$i18n.t('Content')}
-					bind:value={banner.content}
-					maxSize={100}
-				/>
->>>>>>> upstream/main
 
 				<div class="relative -left-2">
 					<Tooltip content={$i18n.t('Remember Dismissal')} className="flex h-fit items-center">

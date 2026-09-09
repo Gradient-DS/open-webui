@@ -1,4 +1,11 @@
 <script lang="ts">
+	// [Gradient] Explicit tenant-gated navigation; user-configurable menu pins are retired.
+	import { isFeatureEnabled } from '$lib/utils/features';
+	import FolderOpen from '../icons/FolderOpen.svelte';
+	import Sparkles from '../icons/Sparkles.svelte';
+	import CommandLine from '../icons/CommandLine.svelte';
+	import Wrench from '../icons/Wrench.svelte';
+	import Bolt from '../icons/Bolt.svelte';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 
@@ -21,7 +28,7 @@
 		socket,
 		config,
 		isApp,
-		visiblePinnedModels,
+		visiblePinnedAgents,
 		selectedFolder,
 		WEBUI_NAME,
 		sidebarWidth
@@ -57,14 +64,9 @@
 		updateFolderParentIdById
 	} from '$lib/apis/folders';
 	import { createNewNote, getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
-<<<<<<< HEAD
-	import { checkActiveChats } from '$lib/apis/tasks';
-=======
 	import { updateUserSettings } from '$lib/apis/users';
->>>>>>> upstream/main
 	import { createNoteHandler } from '$lib/components/notes/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
@@ -82,16 +84,6 @@
 	import FolderModal from './Sidebar/Folders/FolderModal.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
 	import PinnedNoteList from './Sidebar/PinnedNoteList.svelte';
-<<<<<<< HEAD
-	import Note from '../icons/Note.svelte';
-	import FolderOpen from '../icons/FolderOpen.svelte';
-	import Sparkles from '../icons/Sparkles.svelte';
-	import CommandLine from '../icons/CommandLine.svelte';
-	import Wrench from '../icons/Wrench.svelte';
-	import Bolt from '../icons/Bolt.svelte';
-	import Code from '../icons/Code.svelte';
-	import { slide } from 'svelte/transition';
-=======
 	import CalendarIcon from './Sidebar/icons/Calendar.svelte';
 	import ClockIcon from './Sidebar/icons/Clock.svelte';
 	import CodeIcon from './Sidebar/icons/Code.svelte';
@@ -100,7 +92,6 @@
 	import SearchIcon from './Sidebar/icons/Search.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import WorkspaceIcon from './Sidebar/icons/Workspace.svelte';
->>>>>>> upstream/main
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 	import DropdownMenu from '../common/DropdownMenu.svelte';
@@ -157,11 +148,6 @@
 	let newFolderId = null;
 
 	let sharedFolders: any[] = [];
-<<<<<<< HEAD
-	$: if ($selectedFolder) {
-		initFolders();
-	}
-=======
 
 	const initSelectedFolderChats = (folder: SelectedSidebarFolder) => {
 		if (!folder?.id) {
@@ -171,93 +157,7 @@
 		folderRegistry[folder.id]?.setFolderItems?.();
 	};
 
-	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
-
-	const isMenuItemVisible = (id) => {
-		switch (id) {
-			case 'notes':
-				return (
-					($config?.features?.enable_notes ?? false) &&
-					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
-				);
-			case 'workspace':
-				return (
-					$user?.role === 'admin' ||
-					$user?.permissions?.workspace?.models ||
-					$user?.permissions?.workspace?.knowledge ||
-					$user?.permissions?.workspace?.prompts ||
-					$user?.permissions?.workspace?.tools ||
-					$user?.permissions?.workspace?.skills
-				);
-			case 'automations':
-				return (
-					$config?.features?.enable_automations &&
-					($user?.role === 'admin' || $user?.permissions?.features?.automations)
-				);
-			case 'calendar':
-				return (
-					$config?.features?.enable_calendar &&
-					($user?.role === 'admin' || $user?.permissions?.features?.calendar)
-				);
-			case 'playground':
-				return $user?.role === 'admin';
-			default:
-				return false;
-		}
-	};
-
-	const getMenuItemMeta = (id) => {
-		const items = {
-			notes: { label: 'Notes', href: '/notes', iconType: 'note' },
-			workspace: { label: 'Workspace', href: '/workspace', iconType: 'workspace' },
-			automations: { label: 'Automations', href: '/automations', iconType: 'automations' },
-			calendar: { label: 'Calendar', href: '/calendar', iconType: 'calendar' },
-			playground: { label: 'Playground', href: '/playground', iconType: 'playground' }
-		};
-		return items[id];
-	};
-
-	const menuItemPathPrefixes = {
-		notes: '/notes',
-		workspace: '/workspace',
-		calendar: '/calendar',
-		automations: '/automations',
-		playground: '/playground'
-	};
-
-	const getActiveMenuItemId = (pathname) => {
-		for (const [id, pathPrefix] of Object.entries(menuItemPathPrefixes)) {
-			if (pathname === pathPrefix || pathname.startsWith(`${pathPrefix}/`)) {
-				return id;
-			}
-		}
-
-		return null;
-	};
-
-	$: activeMenuItemId = getActiveMenuItemId($page.url.pathname);
-
-	const initPinnedMenuSortable = () => {
-		const el = document.getElementById('pinned-menu-items-list');
-		if (el && !$mobile) {
-			new Sortable(el, {
-				animation: 150,
-				onUpdate: async (event) => {
-					const itemId = event.item.dataset.id;
-					const newIndex = event.newIndex;
-					const current = [...pinnedItems];
-					const oldIndex = current.indexOf(itemId);
-					current.splice(oldIndex, 1);
-					current.splice(newIndex, 0, itemId);
-					settings.set({ ...$settings, pinnedMenuItems: current });
-					await updateUserSettings(localStorage.token, { ui: $settings });
-				}
-			});
-		}
-	};
-
 	$: initSelectedFolderChats($selectedFolder as SelectedSidebarFolder);
->>>>>>> upstream/main
 
 	const initFolders = async () => {
 		if ($config?.features?.enable_folders === false) {
@@ -754,11 +654,7 @@
 		});
 
 		await tick();
-<<<<<<< HEAD
-=======
 		await initSidebarData();
-		initPinnedMenuSortable();
->>>>>>> upstream/main
 
 		return () => {
 			unsubscribers.forEach((unsubscriber) => unsubscriber());
@@ -926,281 +822,7 @@
 >
 	<!-- svelte-ignore a11y-no-static-element-interactions -->
 
-<<<<<<< HEAD
-							<Sidebar className="size-5 hidden group-hover:flex" />
-						</div>
-					</button>
-				</Tooltip>
-			</div>
-
-			<div class="-mt-[0.5px]">
-				<div class="">
-					<Tooltip content={$i18n.t('New Chat')} placement="right">
-						<a
-							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-							href="/"
-							draggable="false"
-							on:click={async (e) => {
-								e.stopImmediatePropagation();
-								e.preventDefault();
-
-								goto('/');
-								newChatHandler();
-							}}
-							aria-label={$i18n.t('New Chat')}
-						>
-							<div class=" self-center flex items-center justify-center size-9">
-								<PencilSquare className="size-4.5" />
-							</div>
-						</a>
-					</Tooltip>
-				</div>
-
-				<div>
-					<Tooltip content={$i18n.t('Search')} placement="right">
-						<button
-							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-							on:click={(e) => {
-								e.stopImmediatePropagation();
-								e.preventDefault();
-
-								showSearch.set(true);
-							}}
-							draggable="false"
-							aria-label={$i18n.t('Search')}
-						>
-							<div class=" self-center flex items-center justify-center size-9">
-								<Search className="size-4.5" />
-							</div>
-						</button>
-					</Tooltip>
-				</div>
-
-				{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
-					<div class="">
-						<Tooltip content={$i18n.t('Notes')} placement="right">
-							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-								href="/notes"
-								on:click={async (e) => {
-									e.stopImmediatePropagation();
-									e.preventDefault();
-
-									goto('/notes');
-									itemClickHandler();
-								}}
-								draggable="false"
-								aria-label={$i18n.t('Notes')}
-							>
-								<div class=" self-center flex items-center justify-center size-9">
-									<Note className="size-4.5" />
-								</div>
-							</a>
-						</Tooltip>
-					</div>
-				{/if}
-
-				{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
-					<div class="">
-						<Tooltip content={$i18n.t('Knowledge')} placement="right">
-							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith(
-									'/workspace/knowledge'
-								)
-									? 'bg-gray-100 dark:bg-gray-850'
-									: ''}"
-								href="/workspace/knowledge"
-								on:click={async (e) => {
-									e.stopImmediatePropagation();
-									e.preventDefault();
-
-									goto('/workspace/knowledge');
-									itemClickHandler();
-								}}
-								draggable="false"
-								aria-label={$i18n.t('Knowledge')}
-							>
-								<div class=" self-center flex items-center justify-center size-9">
-									<FolderOpen className="size-4.5" strokeWidth="2" />
-								</div>
-							</a>
-						</Tooltip>
-					</div>
-				{/if}
-
-				{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
-					<div class="">
-						<Tooltip content={$i18n.t('Agents')} placement="right">
-							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith(
-									'/workspace/models'
-								)
-									? 'bg-gray-100 dark:bg-gray-850'
-									: ''}"
-								href="/workspace/models"
-								on:click={async (e) => {
-									e.stopImmediatePropagation();
-									e.preventDefault();
-
-									goto('/workspace/models');
-									itemClickHandler();
-								}}
-								draggable="false"
-								aria-label={$i18n.t('Agents')}
-							>
-								<div class=" self-center flex items-center justify-center size-9">
-									<Sparkles className="size-4.5" strokeWidth="2" />
-								</div>
-							</a>
-						</Tooltip>
-					</div>
-				{/if}
-
-				{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
-					<div class="">
-						<Tooltip content={$i18n.t('Prompts')} placement="right">
-							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith(
-									'/workspace/prompts'
-								)
-									? 'bg-gray-100 dark:bg-gray-850'
-									: ''}"
-								href="/workspace/prompts"
-								on:click={async (e) => {
-									e.stopImmediatePropagation();
-									e.preventDefault();
-
-									goto('/workspace/prompts');
-									itemClickHandler();
-								}}
-								draggable="false"
-								aria-label={$i18n.t('Prompts')}
-							>
-								<div class=" self-center flex items-center justify-center size-9">
-									<CommandLine className="size-4.5" strokeWidth="2" />
-								</div>
-							</a>
-						</Tooltip>
-					</div>
-				{/if}
-
-				{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
-					<div class="">
-						<Tooltip content={$i18n.t('Tools')} placement="right">
-							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-								href="/workspace/tools"
-								on:click={async (e) => {
-									e.stopImmediatePropagation();
-									e.preventDefault();
-
-									goto('/workspace/tools');
-									itemClickHandler();
-								}}
-								draggable="false"
-								aria-label={$i18n.t('Tools')}
-							>
-								<div class=" self-center flex items-center justify-center size-9">
-									<Wrench className="size-4.5" strokeWidth="2" />
-								</div>
-							</a>
-						</Tooltip>
-					</div>
-				{/if}
-
-				{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
-					<div class="">
-						<Tooltip content={$i18n.t('Skills')} placement="right">
-							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-								href="/workspace/skills"
-								on:click={async (e) => {
-									e.stopImmediatePropagation();
-									e.preventDefault();
-
-									goto('/workspace/skills');
-									itemClickHandler();
-								}}
-								draggable="false"
-								aria-label={$i18n.t('Skills')}
-							>
-								<div class=" self-center flex items-center justify-center size-9">
-									<Bolt className="size-4.5" strokeWidth="2" />
-								</div>
-							</a>
-						</Tooltip>
-					</div>
-				{/if}
-			</div>
-		</button>
-
-		<div>
-			<div>
-				<div class=" py-2 flex justify-center items-center">
-					{#if $user !== undefined && $user !== null}
-						<UserMenu
-							role={$user?.role}
-							profile={$config?.features?.enable_user_status ?? true}
-							showActiveUsers={false}
-							on:show={(e) => {
-								if (e.detail === 'archived-chat') {
-									showArchivedChats.set(true);
-								}
-							}}
-						>
-							<button
-								type="button"
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-								aria-label={$i18n.t('User menu')}
-							>
-								<div class="self-center relative">
-									<img
-										src={`${WEBUI_API_BASE_URL}/users/${$user?.id}/profile/image`}
-										class=" size-7 object-cover rounded-full"
-										alt={$i18n.t('Open User Profile Menu')}
-										aria-label={$i18n.t('Open User Profile Menu')}
-									/>
-
-									{#if $config?.features?.enable_user_status}
-										<div class="absolute -bottom-0.5 -right-0.5">
-											<span class="relative flex size-2.5">
-												<span
-													class="relative inline-flex size-2.5 rounded-full {true
-														? 'bg-green-500'
-														: 'bg-gray-300 dark:bg-gray-700'} border-2 border-white dark:border-gray-900"
-												></span>
-											</span>
-										</div>
-									{/if}
-								</div>
-							</button>
-						</UserMenu>
-					{/if}
-				</div>
-			</div>
-		</div>
-	</div>
-{/if}
-
-<!-- {$i18n.t('New Folder')} -->
-<!-- {$i18n.t('Pinned')} -->
-
-{#if $showSidebar}
-	<div
-		bind:this={navElement}
-		id="sidebar"
-		class="h-screen max-h-[100dvh] min-h-screen select-none {$showSidebar
-			? `${$mobile ? 'bg-gray-50 dark:bg-gray-950' : 'bg-gray-50/70 dark:bg-gray-950/70'} z-50`
-			: ' bg-transparent z-0 '} {$isApp
-			? `ml-[4.5rem] md:ml-0 `
-			: ' transition-all duration-300 '} shrink-0 text-gray-900 dark:text-gray-200 text-sm fixed top-0 left-0 overflow-x-hidden
-        "
-		transition:slide={{ duration: 250, axis: 'x' }}
-		data-state={$showSidebar}
-	>
-=======
 	{#if visible}
->>>>>>> upstream/main
 		<div
 			class=" {$isApp
 				? ' ml-[4.5rem] md:ml-0'
@@ -1300,234 +922,6 @@
 						</Tooltip>
 					</div>
 
-<<<<<<< HEAD
-					<!-- Gradient: explicit per-section entries (no dynamic pinned-items
-					     loop and no user-toggleable pinning — see Sidebar.svelte's
-					     collapsed-icon-bar block above for the matching structure).
-					     Each entry is gated by its own feature flag + permission so
-					     unused items drop out cleanly per tenant. -->
-					{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-notes-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
-									'/notes'
-								)
-									? 'bg-gray-100 dark:bg-gray-900'
-									: ''}"
-								href="/notes"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Notes')}
-							>
-								<div class="self-center">
-									<Note className="size-4.5" strokeWidth="2" />
-								</div>
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Notes')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-
-					{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-knowledge-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
-									'/workspace/knowledge'
-								)
-									? 'bg-gray-100 dark:bg-gray-900'
-									: ''}"
-								href="/workspace/knowledge"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Knowledge')}
-							>
-								<div class="self-center">
-									<FolderOpen className="size-4.5" strokeWidth="2" />
-								</div>
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Knowledge')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-
-					{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-agents-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
-									'/workspace/models'
-								)
-									? 'bg-gray-100 dark:bg-gray-900'
-									: ''}"
-								href="/workspace/models"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Agents')}
-							>
-								<div class="self-center">
-									<Sparkles className="size-4.5" strokeWidth="2" />
-								</div>
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Agents')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-
-					{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-prompts-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
-									'/workspace/prompts'
-								)
-									? 'bg-gray-100 dark:bg-gray-900'
-									: ''}"
-								href="/workspace/prompts"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Prompts')}
-							>
-								<div class="self-center">
-									<CommandLine className="size-4.5" strokeWidth="2" />
-								</div>
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Prompts')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-
-					{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-tools-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/workspace/tools"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Tools')}
-							>
-								<div class="self-center">
-									<Wrench className="size-4.5" strokeWidth="2" />
-								</div>
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Tools')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-
-					{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-skills-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/workspace/skills"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Skills')}
-							>
-								<div class="self-center">
-									<Bolt className="size-4.5" strokeWidth="2" />
-								</div>
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Skills')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-
-					{#if $config?.features?.enable_calendar && ($user?.role === 'admin' || $user?.permissions?.features?.calendar)}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-calendar-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/calendar"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Calendar')}
-							>
-								<div class="self-center">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="2"
-										stroke="currentColor"
-										class="size-4.5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
-										/>
-									</svg>
-								</div>
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Calendar')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-
-					{#if $config?.features?.enable_automations && ($user?.role === 'admin' || $user?.permissions?.features?.automations)}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-automations-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/automations"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Automations')}
-							>
-								<div class="self-center">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="2"
-										stroke="currentColor"
-										class="size-4.5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-										/>
-									</svg>
-								</div>
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Automations')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-
-					{#if isFeatureEnabled('playground') && $user?.role === 'admin'}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-playground-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/playground"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Playground')}
-							>
-								<div class="self-center">
-									<Code className="size-4.5" strokeWidth="2" />
-								</div>
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Playground')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-=======
 					<div>
 						<Tooltip content={$i18n.t('Search')} placement="right">
 							<button
@@ -1550,48 +944,161 @@
 						</Tooltip>
 					</div>
 
-					{#each pinnedItems as itemId (itemId)}
-						{@const meta = getMenuItemMeta(itemId)}
-						{#if meta && isMenuItemVisible(itemId)}
-							<div class="">
-								<Tooltip content={$i18n.t(meta.label)} placement="right">
-									<a
-										class=" cursor-pointer flex size-8 items-center justify-center transition group"
-										href={meta.href}
-										on:click={async (e) => {
-											e.stopImmediatePropagation();
-											e.preventDefault();
-											goto(meta.href);
-											itemClickHandler();
-										}}
-										draggable="false"
-										aria-label={$i18n.t(meta.label)}
-									>
-										<div
-											class="self-center flex size-[calc(30px*var(--app-text-scale,1))] items-center justify-center rounded-lg transition {itemId ===
-											activeMenuItemId
-												? ($settings?.highContrastMode ?? false)
-													? 'bg-black/[0.035] dark:bg-white/[0.06]'
-													: 'bg-black/[0.035] dark:bg-white/[0.045]'
-												: 'group-hover:bg-gray-100 dark:group-hover:bg-gray-900'}"
-										>
-											{#if itemId === 'notes'}
-												<NotesIcon className="size-4" strokeWidth="1.5" />
-											{:else if itemId === 'workspace'}
-												<WorkspaceIcon className="size-4" strokeWidth="1.5" />
-											{:else if itemId === 'automations'}
-												<ClockIcon className="size-4" strokeWidth="1.5" />
-											{:else if itemId === 'calendar'}
-												<CalendarIcon className="size-4" strokeWidth="1.5" />
-											{:else if itemId === 'playground'}
-												<CodeIcon className="size-4" strokeWidth="1.5" />
-											{/if}
-										</div>
-									</a>
-								</Tooltip>
-							</div>
-						{/if}
-					{/each}
+					{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
+						<div class="">
+							<Tooltip content={$i18n.t('Notes')} placement="right">
+								<a
+									class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+									href="/notes"
+									on:click={async (e) => {
+										e.stopImmediatePropagation();
+										e.preventDefault();
+
+										goto('/notes');
+										itemClickHandler();
+									}}
+									draggable="false"
+									aria-label={$i18n.t('Notes')}
+								>
+									<div class=" self-center flex items-center justify-center size-9">
+										<NotesIcon className="size-4" />
+									</div>
+								</a>
+							</Tooltip>
+						</div>
+					{/if}
+
+					{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
+						<div class="">
+							<Tooltip content={$i18n.t('Knowledge')} placement="right">
+								<a
+									class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith(
+										'/workspace/knowledge'
+									)
+										? 'bg-gray-100 dark:bg-gray-850'
+										: ''}"
+									href="/workspace/knowledge"
+									on:click={async (e) => {
+										e.stopImmediatePropagation();
+										e.preventDefault();
+
+										goto('/workspace/knowledge');
+										itemClickHandler();
+									}}
+									draggable="false"
+									aria-label={$i18n.t('Knowledge')}
+								>
+									<div class=" self-center flex items-center justify-center size-9">
+										<FolderOpen className="size-4" strokeWidth="2" />
+									</div>
+								</a>
+							</Tooltip>
+						</div>
+					{/if}
+
+					{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
+						<div class="">
+							<Tooltip content={$i18n.t('Agents')} placement="right">
+								<a
+									class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith(
+										'/workspace/models'
+									)
+										? 'bg-gray-100 dark:bg-gray-850'
+										: ''}"
+									href="/workspace/models"
+									on:click={async (e) => {
+										e.stopImmediatePropagation();
+										e.preventDefault();
+
+										goto('/workspace/models');
+										itemClickHandler();
+									}}
+									draggable="false"
+									aria-label={$i18n.t('Agents')}
+								>
+									<div class=" self-center flex items-center justify-center size-9">
+										<Sparkles className="size-4" strokeWidth="2" />
+									</div>
+								</a>
+							</Tooltip>
+						</div>
+					{/if}
+
+					{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
+						<div class="">
+							<Tooltip content={$i18n.t('Prompts')} placement="right">
+								<a
+									class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith(
+										'/workspace/prompts'
+									)
+										? 'bg-gray-100 dark:bg-gray-850'
+										: ''}"
+									href="/workspace/prompts"
+									on:click={async (e) => {
+										e.stopImmediatePropagation();
+										e.preventDefault();
+
+										goto('/workspace/prompts');
+										itemClickHandler();
+									}}
+									draggable="false"
+									aria-label={$i18n.t('Prompts')}
+								>
+									<div class=" self-center flex items-center justify-center size-9">
+										<CommandLine className="size-4" strokeWidth="2" />
+									</div>
+								</a>
+							</Tooltip>
+						</div>
+					{/if}
+
+					{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+						<div class="">
+							<Tooltip content={$i18n.t('Tools')} placement="right">
+								<a
+									class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+									href="/workspace/tools"
+									on:click={async (e) => {
+										e.stopImmediatePropagation();
+										e.preventDefault();
+
+										goto('/workspace/tools');
+										itemClickHandler();
+									}}
+									draggable="false"
+									aria-label={$i18n.t('Tools')}
+								>
+									<div class=" self-center flex items-center justify-center size-9">
+										<Wrench className="size-4" strokeWidth="2" />
+									</div>
+								</a>
+							</Tooltip>
+						</div>
+					{/if}
+
+					{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+						<div class="">
+							<Tooltip content={$i18n.t('Skills')} placement="right">
+								<a
+									class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+									href="/workspace/skills"
+									on:click={async (e) => {
+										e.stopImmediatePropagation();
+										e.preventDefault();
+
+										goto('/workspace/skills');
+										itemClickHandler();
+									}}
+									draggable="false"
+									aria-label={$i18n.t('Skills')}
+								>
+									<div class=" self-center flex items-center justify-center size-9">
+										<Bolt className="size-4" strokeWidth="2" />
+									</div>
+								</a>
+							</Tooltip>
+						</div>
+					{/if}
 				</div>
 			</button>
 
@@ -1631,22 +1138,11 @@
 							</UserMenu>
 						{/if}
 					</div>
->>>>>>> upstream/main
 				</div>
 			</div>
 		</div>
 	{/if}
 
-<<<<<<< HEAD
-				{#if ($models ?? []).length > 0 && (($settings?.pinnedModels ?? []).length > 0 || $config?.default_pinned_models)}
-					<Folder
-						id="sidebar-models"
-						bind:open={showPinnedModels}
-						className="px-2 mt-0.5"
-						name={$i18n.t('Agents')}
-						chevron={false}
-						dragAndDrop={false}
-=======
 	<!-- {$i18n.t('New Folder')} -->
 	<!-- {$i18n.t('Pinned')} -->
 
@@ -1684,7 +1180,6 @@
 						href="/"
 						draggable="false"
 						on:click={newChatHandler}
->>>>>>> upstream/main
 					>
 						<!-- LICENSE covers this Open WebUI sidebar logo.
 					Do not alter, remove, obscure, or replace it except as LICENSE permits:
@@ -1787,62 +1282,256 @@
 							</button>
 						</div>
 
-						<div id="pinned-menu-items-list">
-							{#each pinnedItems as itemId (itemId)}
-								{@const meta = getMenuItemMeta(itemId)}
-								{#if meta && isMenuItemVisible(itemId)}
-									<div
-										class="px-1 flex justify-center text-gray-700 dark:text-gray-300"
-										data-id={itemId}
+						<div class="space-y-0">
+							<!-- [Gradient] explicit per-section entries (no dynamic pinned-items
+					     loop and no user-toggleable pinning — see Sidebar.svelte's
+					     collapsed-icon-bar block above for the matching structure).
+					     Each entry is gated by its own feature flag + permission so
+					     unused items drop out cleanly per tenant. -->
+							{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
+								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+									<a
+										id="sidebar-notes-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
+											'/notes'
+										)
+											? 'bg-gray-100 dark:bg-gray-900'
+											: ''}"
+										href="/notes"
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t('Notes')}
 									>
-										<a
-											id="sidebar-{itemId}-button"
-											class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 transition {itemId ===
-											activeMenuItemId
-												? ($settings?.highContrastMode ?? false)
-													? 'bg-black/[0.035] dark:bg-white/[0.06]'
-													: 'bg-black/[0.035] dark:bg-white/[0.045]'
-												: 'hover:bg-gray-100 dark:hover:bg-gray-900'}"
-											href={meta.href}
-											on:click={itemClickHandler}
-											draggable="false"
-											aria-label={$i18n.t(meta.label)}
-										>
-											<div class="self-center flex size-4 shrink-0 items-center justify-center">
-												{#if itemId === 'notes'}
-													<NotesIcon className="size-4" strokeWidth="1.5" />
-												{:else if itemId === 'workspace'}
-													<WorkspaceIcon className="size-4" strokeWidth="1.5" />
-												{:else if itemId === 'automations'}
-													<ClockIcon className="size-4" strokeWidth="1.5" />
-												{:else if itemId === 'calendar'}
-													<CalendarIcon className="size-4" strokeWidth="1.5" />
-												{:else if itemId === 'playground'}
-													<CodeIcon className="size-4" strokeWidth="1.5" />
-												{/if}
-											</div>
+										<div class="self-center">
+											<NotesIcon className="size-4" strokeWidth="2" />
+										</div>
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('Notes')}</div>
+										</div>
+									</a>
+								</div>
+							{/if}
 
-											<div class="flex self-center translate-y-[0.5px]">
-												<div class=" self-center text-[0.8125rem] leading-5">
-													{$i18n.t(meta.label)}
-												</div>
+							{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
+								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+									<a
+										id="sidebar-knowledge-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
+											'/workspace/knowledge'
+										)
+											? 'bg-gray-100 dark:bg-gray-900'
+											: ''}"
+										href="/workspace/knowledge"
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t('Knowledge')}
+									>
+										<div class="self-center">
+											<FolderOpen className="size-4" strokeWidth="2" />
+										</div>
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[0.8125rem] leading-5">
+												{$i18n.t('Knowledge')}
 											</div>
-										</a>
-									</div>
-								{/if}
-							{/each}
+										</div>
+									</a>
+								</div>
+							{/if}
+
+							{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
+								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+									<a
+										id="sidebar-agents-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
+											'/workspace/models'
+										)
+											? 'bg-gray-100 dark:bg-gray-900'
+											: ''}"
+										href="/workspace/models"
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t('Agents')}
+									>
+										<div class="self-center">
+											<Sparkles className="size-4" strokeWidth="2" />
+										</div>
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('Agents')}</div>
+										</div>
+									</a>
+								</div>
+							{/if}
+
+							{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
+								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+									<a
+										id="sidebar-prompts-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
+											'/workspace/prompts'
+										)
+											? 'bg-gray-100 dark:bg-gray-900'
+											: ''}"
+										href="/workspace/prompts"
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t('Prompts')}
+									>
+										<div class="self-center">
+											<CommandLine className="size-4" strokeWidth="2" />
+										</div>
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[0.8125rem] leading-5">
+												{$i18n.t('Prompts')}
+											</div>
+										</div>
+									</a>
+								</div>
+							{/if}
+
+							{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+									<a
+										id="sidebar-tools-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+										href="/workspace/tools"
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t('Tools')}
+									>
+										<div class="self-center">
+											<Wrench className="size-4" strokeWidth="2" />
+										</div>
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('Tools')}</div>
+										</div>
+									</a>
+								</div>
+							{/if}
+
+							{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+									<a
+										id="sidebar-skills-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+										href="/workspace/skills"
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t('Skills')}
+									>
+										<div class="self-center">
+											<Bolt className="size-4" strokeWidth="2" />
+										</div>
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('Skills')}</div>
+										</div>
+									</a>
+								</div>
+							{/if}
+
+							{#if $config?.features?.enable_calendar && ($user?.role === 'admin' || $user?.permissions?.features?.calendar)}
+								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+									<a
+										id="sidebar-calendar-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+										href="/calendar"
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t('Calendar')}
+									>
+										<div class="self-center">
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke-width="2"
+												stroke="currentColor"
+												class="size-4"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
+												/>
+											</svg>
+										</div>
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[0.8125rem] leading-5">
+												{$i18n.t('Calendar')}
+											</div>
+										</div>
+									</a>
+								</div>
+							{/if}
+
+							{#if $config?.features?.enable_automations && ($user?.role === 'admin' || $user?.permissions?.features?.automations)}
+								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+									<a
+										id="sidebar-automations-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+										href="/automations"
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t('Automations')}
+									>
+										<div class="self-center">
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke-width="2"
+												stroke="currentColor"
+												class="size-4"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+												/>
+											</svg>
+										</div>
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[0.8125rem] leading-5">
+												{$i18n.t('Automations')}
+											</div>
+										</div>
+									</a>
+								</div>
+							{/if}
+
+							{#if isFeatureEnabled('playground') && $user?.role === 'admin'}
+								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+									<a
+										id="sidebar-playground-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+										href="/playground"
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t('Playground')}
+									>
+										<div class="self-center">
+											<CodeIcon className="size-4" strokeWidth="2" />
+										</div>
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[0.8125rem] leading-5">
+												{$i18n.t('Playground')}
+											</div>
+										</div>
+									</a>
+								</div>
+							{/if}
 						</div>
 					</div>
 
-					{#if $visiblePinnedModels.length > 0}
-						<SidebarSection
+					{#if $visiblePinnedAgents.length > 0}
+						<Folder
 							id="sidebar-models"
 							bind:open={showPinnedModels}
-							name={$i18n.t('Models')}
+							name={$i18n.t('Agents')}
+							chevron={false}
 							dragAndDrop={false}
 						>
 							<PinnedModelList bind:selectedChatId {shiftKey} />
-						</SidebarSection>
+						</Folder>
 					{/if}
 
 					{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true)) && $pinnedNotes.length > 0}
@@ -1951,6 +1640,7 @@
 
 					<SidebarSection
 						id="sidebar-chats"
+						collapsible={false}
 						name={$i18n.t('Chats')}
 						on:change={async (e) => {
 							selectedFolder.set(null);
@@ -2026,163 +1716,6 @@
 							}
 						}}
 					>
-<<<<<<< HEAD
-						<Folders
-							bind:folderRegistry
-							{folders}
-							{shiftKey}
-							onDelete={(folderId) => {
-								selectedFolder.set(null);
-								initChatList();
-							}}
-							on:update={() => {
-								initChatList();
-							}}
-							on:import={(e) => {
-								const { folderId, items } = e.detail;
-								importChatHandler(items, false, folderId);
-							}}
-							on:change={async () => {
-								initChatList();
-							}}
-						/>
-					</Folder>
-				{/if}
-
-				<Folder
-					id="sidebar-chats"
-					className="px-2 mt-0.5"
-					name={$i18n.t('Chats')}
-					collapsible={false}
-					chevron={false}
-					on:change={async (e) => {
-						selectedFolder.set(null);
-					}}
-					on:import={(e) => {
-						importChatHandler(e.detail);
-					}}
-					on:drop={async (e) => {
-						const { type, id, item } = e.detail;
-
-						if (type === 'chat') {
-							let chat = await getChatById(localStorage.token, id).catch((error) => {
-								return null;
-							});
-							if (!chat && item) {
-								if (!canImportChats) {
-									toast.error($i18n.t('Access prohibited'));
-									return;
-								}
-
-								chat = await importChats(localStorage.token, [
-									{
-										chat: item.chat,
-										meta: item?.meta ?? {},
-										pinned: false,
-										folder_id: null,
-										created_at: item?.created_at ?? null,
-										updated_at: item?.updated_at ?? null
-									}
-								]);
-							}
-
-							if (chat) {
-								console.log(chat);
-								if (chat.folder_id) {
-									const res = await updateChatFolderIdById(localStorage.token, chat.id, null).catch(
-										(error) => {
-											toast.error(`${error}`);
-											return null;
-										}
-									);
-
-									folderRegistry[chat.folder_id]?.setFolderItems();
-								}
-
-								if (chat.pinned) {
-									const res = await toggleChatPinnedStatusById(localStorage.token, chat.id);
-								}
-
-								initChatList();
-							}
-						} else if (type === 'folder') {
-							if (folders[id].parent_id === null) {
-								return;
-							}
-
-							const res = await updateFolderParentIdById(localStorage.token, id, null).catch(
-								(error) => {
-									toast.error(`${error}`);
-									return null;
-								}
-							);
-
-							if (res) {
-								await initFolders();
-							}
-						}
-					}}
-				>
-					{#if $pinnedChats.length > 0}
-						<div class="mb-1">
-							<div class="flex flex-col space-y-1 rounded-xl">
-								<Folder
-									id="sidebar-pinned-chats"
-									buttonClassName=" text-gray-500"
-									on:import={(e) => {
-										importChatHandler(e.detail, true);
-									}}
-									on:drop={async (e) => {
-										const { type, id, item } = e.detail;
-
-										if (type === 'chat') {
-											let chat = await getChatById(localStorage.token, id).catch((error) => {
-												return null;
-											});
-											if (!chat && item) {
-												if (!canImportChats) {
-													toast.error($i18n.t('Access prohibited'));
-													return;
-												}
-
-												chat = await importChats(localStorage.token, [
-													{
-														chat: item.chat,
-														meta: item?.meta ?? {},
-														pinned: false,
-														folder_id: null,
-														created_at: item?.created_at ?? null,
-														updated_at: item?.updated_at ?? null
-													}
-												]);
-											}
-
-											if (chat) {
-												console.log(chat);
-												if (chat.folder_id) {
-													const res = await updateChatFolderIdById(
-														localStorage.token,
-														chat.id,
-														null
-													).catch((error) => {
-														toast.error(`${error}`);
-														return null;
-													});
-												}
-
-												if (!chat.pinned) {
-													const res = await toggleChatPinnedStatusById(localStorage.token, chat.id);
-												}
-
-												initChatList();
-											}
-										}
-									}}
-									name={$i18n.t('Pinned')}
-								>
-									<div
-										class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900 text-gray-900 dark:text-gray-200"
-=======
 						<svelte:fragment slot="action">
 							<Dropdown bind:show={showChatsMenu} align="end">
 								<Tooltip content={$i18n.t('More')}>
@@ -2190,7 +1723,6 @@
 										type="button"
 										class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-100"
 										aria-label={$i18n.t('More')}
->>>>>>> upstream/main
 									>
 										<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
 									</button>

@@ -370,9 +370,9 @@
 					<Cube className="size-3.5" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Artifacts')}</div>
 				</button>
+				<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
 			{/if}
 
-<<<<<<< HEAD
 			{#if isFeatureEnabled('document_writer') && ($documentContents ?? []).length > 0}
 				<button
 					draggable="false"
@@ -390,13 +390,7 @@
 					<DocumentIcon className=" size-4" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Document')}</div>
 				</button>
-			{/if}
-
-			{#if ($mobile && isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))) || isFeatureEnabled('chat_overview') || (isFeatureEnabled('artifacts') && ($artifactContents ?? []).length > 0) || (isFeatureEnabled('document_writer') && ($documentContents ?? []).length > 0)}
-				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
-=======
 				<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
->>>>>>> upstream/main
 			{/if}
 
 			{#if !readOnly && !$temporaryChatEnabled && ($user?.role === 'admin' || ($user.permissions?.chat?.share ?? true))}

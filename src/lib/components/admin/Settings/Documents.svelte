@@ -1488,124 +1488,6 @@
 					</AdminSettingField>
 				</div>
 
-<<<<<<< HEAD
-				<div class="mb-3">
-					<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Files')}</div>
-
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">{$i18n.t('Allowed File Extensions')}</div>
-						<div class="flex items-center relative">
-							<Tooltip
-								content={$i18n.t(
-									'Allowed file extensions for upload. Separate multiple extensions with commas. Leave empty for all file types.'
-								)}
-								placement="top-start"
-							>
-								<input
-									class="flex-1 w-full text-sm bg-transparent outline-hidden"
-									type="text"
-									placeholder={$i18n.t('e.g. pdf, docx, txt')}
-									bind:value={RAGConfig.ALLOWED_FILE_EXTENSIONS}
-									autocomplete="off"
-								/>
-							</Tooltip>
-						</div>
-					</div>
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">{$i18n.t('Max Upload Size')}</div>
-						<div class="flex items-center relative">
-							<Tooltip
-								content={$i18n.t(
-									'The maximum file size in MB. If the file size exceeds this limit, the file will not be uploaded.'
-								)}
-								placement="top-start"
-							>
-								<input
-									class="flex-1 w-full text-sm bg-transparent outline-hidden"
-									type="number"
-									placeholder={$i18n.t('Leave empty for unlimited')}
-									bind:value={RAGConfig.FILE_MAX_SIZE}
-									autocomplete="off"
-									min="0"
-								/>
-							</Tooltip>
-						</div>
-					</div>
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">{$i18n.t('Max Upload Count')}</div>
-						<div class="flex items-center relative">
-							<Tooltip
-								content={$i18n.t(
-									'The maximum number of files that can be used at once in chat. If the number of files exceeds this limit, the files will not be uploaded.'
-								)}
-								placement="top-start"
-							>
-								<input
-									class="flex-1 w-full text-sm bg-transparent outline-hidden"
-									type="number"
-									placeholder={$i18n.t('Leave empty for unlimited')}
-									bind:value={RAGConfig.FILE_MAX_COUNT}
-									autocomplete="off"
-									min="0"
-								/>
-							</Tooltip>
-						</div>
-					</div>
-
-					<div class="mb-2.5 text-xs text-gray-400 dark:text-gray-500">
-						{$i18n.t(
-							'File size, count and extension limits are managed by deployment configuration and are not saved here.'
-						)}
-					</div>
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">{$i18n.t('Image Compression Width')}</div>
-						<div class="flex items-center relative">
-							<Tooltip
-								content={$i18n.t(
-									'The width in pixels to compress images to. Leave empty for no compression.'
-								)}
-								placement="top-start"
-							>
-								<input
-									class="flex-1 w-full text-sm bg-transparent outline-hidden"
-									type="number"
-									placeholder={$i18n.t('Leave empty for no compression')}
-									bind:value={RAGConfig.FILE_IMAGE_COMPRESSION_WIDTH}
-									autocomplete="off"
-									min="0"
-								/>
-							</Tooltip>
-						</div>
-					</div>
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Image Compression Height')}
-						</div>
-						<div class="flex items-center relative">
-							<Tooltip
-								content={$i18n.t(
-									'The height in pixels to compress images to. Leave empty for no compression.'
-								)}
-								placement="top-start"
-							>
-								<input
-									class="flex-1 w-full text-sm bg-transparent outline-hidden"
-									type="number"
-									placeholder={$i18n.t('Leave empty for no compression')}
-									bind:value={RAGConfig.FILE_IMAGE_COMPRESSION_HEIGHT}
-									autocomplete="off"
-									min="0"
-								/>
-							</Tooltip>
-						</div>
-					</div>
-=======
 				<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
 					<AdminSettingField
 						label={$i18n.t('Image Compression Width')}
@@ -1637,84 +1519,7 @@
 							min="0"
 						/>
 					</AdminSettingField>
->>>>>>> upstream/main
 				</div>
-			</AdminSettingSection>
-
-<<<<<<< HEAD
-				<div class="mb-3">
-					<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Danger Zone')}</div>
-
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">{$i18n.t('Reset Upload Directory')}</div>
-						<div class="flex items-center relative">
-							<button
-								class="text-xs"
-								type="button"
-								on:click={() => {
-									showResetUploadDirConfirm = true;
-								}}
-							>
-								{$i18n.t('Reset')}
-							</button>
-						</div>
-					</div>
-
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Reset Vector Storage/Knowledge')}
-						</div>
-						<div class="flex items-center relative">
-							<button
-								class="text-xs"
-								type="button"
-								on:click={() => {
-									showResetConfirm = true;
-								}}
-							>
-								{$i18n.t('Reset')}
-							</button>
-						</div>
-					</div>
-					<div class="  mb-2.5 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Reindex Knowledge Base Vectors')}
-						</div>
-						<div class="flex items-center relative">
-							<button
-								class="text-xs"
-								type="button"
-								on:click={() => {
-									showReindexConfirm = true;
-								}}
-							>
-								{$i18n.t('Reindex')}
-							</button>
-						</div>
-					</div>
-				</div>
-			</div>
-=======
-			<AdminSettingSection title={$i18n.t('Integration')}>
-				<AdminSettingRow
-					label={$i18n.t('Google Drive')}
-					description={$i18n.t('Allow Google Drive as a document source.')}
-					let:labelId
-				>
-					<Switch
-						bind:state={RAGConfig.ENABLE_GOOGLE_DRIVE_INTEGRATION}
-						ariaLabelledbyId={labelId}
-					/>
-				</AdminSettingRow>
-				<AdminSettingRow
-					label={$i18n.t('OneDrive')}
-					description={$i18n.t('Allow OneDrive as a document source.')}
-					let:labelId
-				>
-					<Switch bind:state={RAGConfig.ENABLE_ONEDRIVE_INTEGRATION} ariaLabelledbyId={labelId} />
-				</AdminSettingRow>
 			</AdminSettingSection>
 
 			<AdminSettingSection title={$i18n.t('Danger Zone')}>
@@ -1763,7 +1568,6 @@
 					</button>
 				</AdminSettingRow>
 			</AdminSettingSection>
->>>>>>> upstream/main
 		</div>
 
 		<div class="flex justify-end pt-6 text-sm font-normal">

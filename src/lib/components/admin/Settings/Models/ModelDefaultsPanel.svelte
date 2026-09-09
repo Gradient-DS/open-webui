@@ -5,7 +5,9 @@
 	const i18n = getContext('i18n');
 
 	import { config as appConfig } from '$lib/stores';
-	import { DEFAULT_CAPABILITIES } from '$lib/constants';
+	// [Gradient] Tenant capability defaults and data-warning metadata.
+	import { getDefaultCapabilities } from '$lib/utils/capabilities';
+	import DataWarnings from '$lib/components/workspace/Models/DataWarnings.svelte';
 	import { getModelsConfig, setModelsConfig, setDefaultPromptSuggestions } from '$lib/apis/configs';
 	import { getBackendConfig } from '$lib/apis';
 
@@ -28,6 +30,8 @@
 	let savedSnapshot = '';
 
 	let defaultCapabilities = {};
+	let defaultDataWarnings = {};
+	let defaultWarningMessage = '';
 	let defaultFeatureIds = [];
 	let defaultParams = {};
 	let builtinTools = {};
@@ -44,6 +48,8 @@
 	const getSnapshot = () =>
 		JSON.stringify({
 			defaultCapabilities,
+			defaultDataWarnings,
+			defaultWarningMessage,
 			defaultFeatureIds,
 			defaultParams: Object.fromEntries(configuredParams),
 			builtinTools,
@@ -63,11 +69,15 @@
 
 		const savedMeta = config?.DEFAULT_MODEL_METADATA;
 		if (savedMeta && Object.keys(savedMeta).length > 0) {
-			defaultCapabilities = savedMeta.capabilities ?? { ...DEFAULT_CAPABILITIES };
+			defaultCapabilities = savedMeta.capabilities ?? getDefaultCapabilities();
 			defaultFeatureIds = savedMeta.defaultFeatureIds ?? [];
 			builtinTools = savedMeta.builtinTools ?? {};
+			defaultDataWarnings = savedMeta.data_warnings ?? {};
+			defaultWarningMessage = savedMeta.data_warning_message ?? '';
 		} else {
-			defaultCapabilities = { ...DEFAULT_CAPABILITIES };
+			defaultCapabilities = getDefaultCapabilities();
+			defaultDataWarnings = {};
+			defaultWarningMessage = '';
 			defaultFeatureIds = [];
 			builtinTools = {};
 		}
@@ -86,6 +96,9 @@
 
 		const metadata = {
 			capabilities: defaultCapabilities,
+			...(Object.values(defaultDataWarnings).some((v) => v)
+				? { data_warnings: defaultDataWarnings, data_warning_message: defaultWarningMessage }
+				: {}),
 			...(defaultFeatureIds.length > 0 ? { defaultFeatureIds } : {}),
 			...(Object.keys(builtinTools).length > 0 ? { builtinTools } : {})
 		};
@@ -171,6 +184,7 @@
 						<div
 							class="max-h-[24rem] overflow-y-auto pb-2 pr-1 scrollbar-hover"
 							on:click={updateDirty}
+							on:input={updateDirty}
 							on:change={updateDirty}
 						>
 							<Capabilities bind:capabilities={defaultCapabilities} />
@@ -185,6 +199,12 @@
 								<div class="mt-4">
 									<BuiltinTools bind:builtinTools />
 								</div>
+							{/if}
+							{#if $appConfig?.features?.enable_data_warnings}
+								<DataWarnings
+									bind:dataWarnings={defaultDataWarnings}
+									bind:warningMessage={defaultWarningMessage}
+								/>
 							{/if}
 						</div>
 					{/if}

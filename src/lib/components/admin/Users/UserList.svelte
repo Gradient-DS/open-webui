@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { adminUserCount, config, user } from '$lib/stores';
-	import { getContext, onDestroy } from 'svelte';
+	import { getContext, onDestroy, onMount } from 'svelte';
 
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -11,12 +11,8 @@
 
 	import { toast } from 'svelte-sonner';
 
-<<<<<<< HEAD
 	import { updateUserRole, getUsers, deleteUserById } from '$lib/apis/users';
 	import { getArchiveConfig } from '$lib/apis/archives';
-=======
-	import { getUsers, deleteUserById } from '$lib/apis/users';
->>>>>>> upstream/main
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ChatBubbles from '$lib/components/icons/ChatBubbles.svelte';
@@ -573,8 +569,6 @@
 	{/if}
 {/if}
 
-<<<<<<< HEAD
-=======
 {#if !$config?.license_metadata}
 	{#if total > 50}
 		<!-- LICENSE covers the Open WebUI branding narrative here.
@@ -635,7 +629,6 @@
 	{/if}
 {/if}
 
->>>>>>> upstream/main
 {#if selectedUser}
 	<UserPreviewModal
 		bind:show={showUserPreviewModal}
