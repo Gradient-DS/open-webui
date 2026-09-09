@@ -1694,6 +1694,12 @@ wheels = [
 ]
 
 [[package]]
+name = "hostile-corpus"
+version = "1.1.0"
+source = { url = "https://github.com/Gradient-DS/.github/archive/1fb8c12d75bdb42ac5313ec405a502bcaa4b3cc3.tar.gz", subdirectory = "packages/hostile-corpus" }
+sdist = { hash = "sha256:9033a11dceae263ffb2aae71bbdae625a485ae30855e9398fac33f12b2b60808" }
+
+[[package]]
 name = "hpack"
 version = "4.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3052,6 +3058,8 @@ postgres = [
     { name = "psycopg2-binary" },
 ]
 soev = [
+    { name = "hostile-corpus" },
+    { name = "openapi-surface" },
     { name = "playwright" },
     { name = "psycopg2-binary" },
     { name = "pytest-asyncio" },
@@ -3114,6 +3122,7 @@ requires-dist = [
     { name = "google-genai", specifier = "==1.66.0" },
     { name = "googleapis-common-protos", specifier = "==1.75.0" },
     { name = "hiredis", specifier = "==3.4.0" },
+    { name = "hostile-corpus", marker = "extra == 'soev'", url = "https://github.com/Gradient-DS/.github/archive/1fb8c12d75bdb42ac5313ec405a502bcaa4b3cc3.tar.gz", subdirectory = "packages/hostile-corpus" },
     { name = "httpx", extras = ["brotli", "cli", "http2", "socks", "zstd"], specifier = "==0.28.1" },
     { name = "itsdangerous", specifier = "==2.2.0" },
     { name = "joserfc", specifier = "==1.7.4" },
@@ -3132,6 +3141,7 @@ requires-dist = [
     { name = "nltk", specifier = "==3.10.3" },
     { name = "onnxruntime", specifier = "==1.26.0" },
     { name = "openai", specifier = "==2.29.0" },
+    { name = "openapi-surface", marker = "extra == 'soev'", url = "https://github.com/Gradient-DS/.github/archive/84000662a5bd08ce56468ede3b38e1563039492b.tar.gz", subdirectory = "packages/openapi-surface" },
     { name = "opencv-python-headless", specifier = "==4.13.0.92" },
     { name = "openpyxl", specifier = "==3.1.5" },
     { name = "opensearch-py", specifier = "==3.2.0" },
@@ -3225,6 +3235,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/b4/15/203d537e58986b567
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/b1/35b6f9c8cf9318e3dbb7146cc82dab4cf61182a8d5406fc9b50864362895/openai-2.29.0-py3-none-any.whl", hash = "sha256:b7c5de513c3286d17c5e29b92c4c98ceaf0d775244ac8159aeb1bddf840eb42a", size = 1141533, upload-time = "2026-03-17T17:53:47.348Z" },
 ]
+
+[[package]]
+name = "openapi-surface"
+version = "0.1.0"
+source = { url = "https://github.com/Gradient-DS/.github/archive/84000662a5bd08ce56468ede3b38e1563039492b.tar.gz", subdirectory = "packages/openapi-surface" }
+sdist = { hash = "sha256:082a0243fdcaa8e830e4f36982b7cf2c92b49d5186904cdea03fce9627867f21" }
 
 [[package]]
 name = "opencv-python"

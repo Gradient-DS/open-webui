@@ -438,9 +438,18 @@ class KnowledgeTable:
         self, user_id: str, form_data: KnowledgeForm, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
         async with get_async_db_context(db) as db:
+            payload = form_data.model_dump(exclude={'access_grants'})
+            # KnowledgeForm.type is Optional[str] = None while KnowledgeModel.type
+            # is a required str defaulting to 'local'. Passing the None through
+            # overrides that default and fails validation, so every caller that
+            # does not set a type got a 500 -- create_external_knowledge builds
+            # its form without one, so that route could never succeed. Drop the
+            # unset value and let the model supply its default.
+            if payload.get('type') is None:
+                payload.pop('type', None)
             knowledge = KnowledgeModel(
                 **{
-                    **form_data.model_dump(exclude={'access_grants'}),
+                    **payload,
                     'id': str(uuid.uuid4()),
                     'user_id': user_id,
                     'created_at': int(time.time()),

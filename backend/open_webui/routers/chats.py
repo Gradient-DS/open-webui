@@ -32,6 +32,7 @@ from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.shared_chats import SharedChatResponse, SharedChats
 from open_webui.models.tags import TagModel, Tags
+from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.socket.main import get_event_emitter
 from open_webui.tasks import get_response_streams_by_chat_id, has_active_tasks, stop_item_tasks
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
@@ -2014,7 +2015,7 @@ class ChatAccessGrantsForm(BaseModel):
 async def update_shared_chat_access_by_id(
     request: Request,
     id: str,
-    form_data: ChatAccessGrantsForm,
+    form_data: ChatAccessGrantsForm = Depends(access_grants_body(ChatAccessGrantsForm)),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):

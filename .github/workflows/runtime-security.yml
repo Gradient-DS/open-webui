@@ -1,0 +1,128 @@
+name: Runtime Security
+
+# Layer 2 of the security gates: the application is driven over real HTTP inside
+# a stack with no route off-host, while Falco watches syscalls. The static suite
+# in security.yml cannot catch what this catches -- four of the findings this
+# plane has produced are stored values reaching a sink on a LATER request, a
+# shape stock SAST rules structurally do not follow.
+#
+# There is deliberately no workflow-level `paths:` filter. `runtime-gate` is
+# meant to become a required status check, and a workflow-level filter would
+# leave GitHub waiting forever for a check that never reports on an irrelevant
+# pull request. The `changes` job decides relevance internally instead.
+
+on:
+  pull_request:
+    branches: [dev, test, main]
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: runtime-security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Decide whether runtime paths changed
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'backend/open_webui/**'
+              - 'cicd/**'
+              - 'security/**'
+              - 'scripts/security/**'
+              - 'docker-compose.ci.yaml'
+              - '.github/workflows/runtime-security.yml'
+
+  runtime-audit:
+    needs: changes
+    # A manual run is always meant, so it is never filtered out. On a dispatch
+    # there is no pull request to ask about, so whatever paths-filter reports
+    # describes the last commit rather than the reason someone asked for the
+    # run. A filtered dispatch would skip the audit and hand `runtime-gate` a
+    # skipped dependency, which the shared gate script rightly refuses to read
+    # as a pass -- the run would report red without having tested anything.
+    if: >-
+      needs.changes.outputs.relevant == 'true'
+      || github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+    uses: Gradient-DS/.github/.github/workflows/runtime-security.yml@84000662a5bd08ce56468ede3b38e1563039492b # main, 2026-09-08
+    with:
+      compose-file: 'docker-compose.ci.yaml'
+      guarded-containers: 'open-webui-ci'
+      health-url: 'http://127.0.0.1:8080/health'
+      tooling-ref: '84000662a5bd08ce56468ede3b38e1563039492b'
+      # Paths are relative to the container's workdir, /app/backend, not to the
+      # repository root: the image copies ./backend to /app/backend.
+      # Test order is load-bearing. The plane writes the hits file that the
+      # coverage gate reads, in the same invocation: a separate run would race a
+      # stale artefact. The authorization module runs last because it drives the
+      # owner's own destructive routes as a positive control and would otherwise
+      # consume state the other modules depend on.
+      test-command: >-
+        docker compose -f docker-compose.ci.yaml exec -T
+        -e ATTACK_BASE_URL=http://localhost:8080
+        -e ATTACK_CONFIG_STATE_DIR=/tmp/attack-config
+        open-webui python -m pytest
+        open_webui/test/security/test_runtime_egress.py
+        open_webui/test/security/test_deployed_config.py
+        open_webui/test/security/test_openapi_surface.py
+        open_webui/test/security/test_writable_fields.py
+        open_webui/test/security/attack/test_client.py
+        open_webui/test/security/attack/test_seeds.py
+        open_webui/test/security/attack/test_plane.py
+        open_webui/test/security/attack/test_shapes.py
+        open_webui/test/security/attack/test_query.py
+        open_webui/test/security/attack/test_model_path.py
+        open_webui/test/security/attack/test_crossuser.py
+        -v
+      # Findings are reported, not enforced. Flipping this to true is a separate,
+      # deliberate change that pairs with adding `runtime-gate` to the branch
+      # ruleset: a required check that cannot report red protects nothing, and an
+      # enforcing check nobody is required to look at changes nothing. Both
+      # halves land together, after the open findings in
+      # security/plane-findings.md have been triaged.
+      enforce: false
+
+  runtime-gate:
+    name: runtime-gate
+    needs: [changes, runtime-audit]
+    # Always runs, so the check always reports something. A workflow that dies at
+    # startup publishes NO check, and a ruleset treats an absent check as
+    # satisfied. Note the name: security.yml publishes `gate`, and a ruleset
+    # requiring `gate` would be satisfied by whatever reports under that name --
+    # so a dead runtime workflow would leave the static gate alone to satisfy the
+    # rule, and a dead gate reads exactly like a passing one.
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: Gradient-DS/.github
+          ref: 84000662a5bd08ce56468ede3b38e1563039492b
+          path: .security-tooling
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Decide
+        working-directory: .security-tooling
+        run: |
+          python scripts/runtime_gate.py \
+            --relevant '${{ needs.changes.outputs.relevant }}' \
+            --event '${{ github.event_name }}' \
+            --audit-result '${{ needs.runtime-audit.result }}'

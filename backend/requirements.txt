@@ -153,6 +153,8 @@ pyotp==2.9.0
 qrcode[pil]==8.0
 
 ## Tests
+hostile-corpus @ https://github.com/Gradient-DS/.github/archive/1fb8c12d75bdb42ac5313ec405a502bcaa4b3cc3.tar.gz#subdirectory=packages/hostile-corpus
+openapi-surface @ https://github.com/Gradient-DS/.github/archive/84000662a5bd08ce56468ede3b38e1563039492b.tar.gz#subdirectory=packages/openapi-surface
 docker~=7.1.0
 pytest>=9.0.3,<10
 pytest-asyncio>=1.0.0

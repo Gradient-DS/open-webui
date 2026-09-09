@@ -167,3 +167,9 @@ opentelemetry-instrumentation-system-metrics==0.63b1
 # security: explicit pins for transitive deps flagged by pip-audit/Trivy
 msgpack==1.2.1 # security: GHSA-6v7p-g79w-8964 (OOB read/crash)
 setuptools>=83.0.0 # security: PYSEC-2026-3447 (image had 70.3.0)
+
+## Security-gate test tooling. Present here as well as in requirements.txt because
+## the slim image is the one CI builds and runs the suite inside: without these the
+## derivation and corpus modules cannot import and the gate collects nothing.
+hostile-corpus @ https://github.com/Gradient-DS/.github/archive/1fb8c12d75bdb42ac5313ec405a502bcaa4b3cc3.tar.gz#subdirectory=packages/hostile-corpus
+openapi-surface @ https://github.com/Gradient-DS/.github/archive/84000662a5bd08ce56468ede3b38e1563039492b.tar.gz#subdirectory=packages/openapi-surface

@@ -1,0 +1,735 @@
+# Seeding order only: what must exist before an id-taking route can run.
+# RUN-TAG: owui-phase6-seeding-order
+#
+# DO NOT key this map by parameter name. In the committed OpenAPI, `id`
+# occurs 123 times and refers to unrelated resources. A chat id in a knowledge
+# route would yield a 404 masquerading as exercised surface. Resolve each
+# (path template, parameter) using name + the longest segment-boundary prefix.
+# Prefixes match literal OpenAPI templates, not concrete request URLs.
+# `key` is only a dependency label, never a global parameter-name binding.
+# More-specific overrides matter: files/{id}/attachments has a different
+# parent seed from files/{id}. New routes are checked against the spec offline.
+#
+# Each entry has exactly one of via/body/extract (one HTTP endpoint), same_as,
+# seeded_by (an allowlisted Python callable), or unseedable (written reason).
+# depends_on is a list of dependency keys; {key} references use only declared
+# dependencies. {token} is fresh on EVERY resolve_parameters call, in bodies,
+# multipart filenames/content, and dictionary keys. Call once per pass.
+# fresh=false marks immutable inputs/environment selectors, not shared fixtures.
+# actor=admin avoids feature permissions during setup; dependent owner checks use the same actor.
+# The integration attachment remains owned by the supplied client.
+# Configuration setup enables the creation gates it names, and integration/
+# terminal setup merges existing configuration. Resolution is serial.
+#
+# Handler references below are relative to backend/open_webui. These describe
+# existence, not guaranteed authorization, body validity, or coverage. Machine
+# credentials and external-provider sessions remain separate prerequisites.
+# No unseedable entry may be silently substituted with a plausible-looking id.
+
+# Full export snapshots protect every pass and every mutating request, without
+# selecting keys or excluding routes. Startup recovers interrupted snapshots and
+# corpus values from older runs before resolving any fixtures.
+preserve_configuration = true
+
+[[parameter]]
+key = "namespace"
+name = "namespace"
+prefix = "/api/v1/configs/namespace/{namespace}"
+description = "routers/configs.py:import_config/get_config_namespace. Enable creation gates through HTTP before dependent seeds; create a unique namespace marker."
+seeded_by = "prepare_configuration"
+depends_on = []
+actor = "admin"
+config = { "folders.enable" = true, "memories.enable" = true, "channels.enable" = true, "calendar.enable" = true, "automations.enable" = true, "admin.enable_user_archival" = true }
+
+[[parameter]]
+key = "user"
+name = "user_id"
+prefix = "/api/v1/users/{user_id}"
+description = "routers/auths.py:add_user. Fresh disposable target user; never alias the driving admin to a user-deletion target."
+via = "POST /api/v1/auths/add"
+body = { "email" = "attack-fixture-{token}@example.com", "name" = "Attack fixture {token}", "password" = "Attack-Fixture-Passw0rd!", "role" = "user" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "folder"
+name = "id"
+prefix = "/api/v1/folders/{id}"
+description = "routers/folders.py:create_folder rejects duplicate sibling names. Admin avoids features.folders; namespace enables folders.enable. Keep chat creation and sharing under this owner."
+via = "POST /api/v1/folders/"
+body = { "name" = "attack-{token}" }
+extract = "id"
+actor = "admin"
+depends_on = ["namespace"]
+
+[[parameter]]
+key = "model"
+name = "model_id"
+prefix = "/api/v1/analytics/models/{model_id}"
+description = "Select from the configured upstream registry so a previous task Pipe cannot become the base fixture. Register the selected CI model through models/model/access/update with public read access: listing an unconfigured model as admin does not make it chat-usable. Reuse the upstream selector and Models row across passes."
+seeded_by = "seed_model"
+depends_on = ["openai_index"]
+fresh = false
+actor = "admin"
+
+[[parameter]]
+key = "chat"
+name = "id"
+prefix = "/api/v1/chats/{id}"
+description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. Use the admin folder owner; create_new_chat validates folder ownership even for admins."
+via = "POST /api/v1/chats/new"
+body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-{token}", "models" = ["{model}"], "history" = { "currentId" = "message_{token}", "messages" = { "message_{token}" = { "id" = "message_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fixture message.", "childrenIds" = [] } } } } }
+extract = "id"
+depends_on = ["folder", "model"]
+actor = "admin"
+
+[[parameter]]
+key = "chat_message"
+name = "message_id"
+prefix = "/api/v1/chats/{id}/messages/{message_id}"
+description = "routers/chats.py:update_chat_message_by_id reads this existing history.messages key; it is not a channel message. Read as the admin chat owner."
+via = "GET /api/v1/chats/{chat}"
+extract = "chat.history.currentId"
+depends_on = ["chat"]
+actor = "admin"
+
+[[parameter]]
+key = "share"
+name = "share_id"
+prefix = "/api/v1/chats/share/{share_id}"
+description = "routers/chats.py:share_chat_by_id creates a SharedChats snapshot and returns the original chat with share_id. Admin avoids chat.share; the handler still requires the chat to belong to this same actor."
+via = "POST /api/v1/chats/{chat}/share"
+extract = "share_id"
+depends_on = ["chat"]
+actor = "admin"
+
+[[parameter]]
+key = "shared_clone"
+name = "id"
+prefix = "/api/v1/chats/{id}/clone/shared"
+description = "routers/chats.py:clone_shared_chat_by_id resolves Chats.get_chat_by_share_id(id), unlike other /chats/{id} operations. Use the share snapshot id even though admins can fall back to a chat id; that fallback would hide a broken ordinary-user fixture."
+same_as = "share"
+
+[[parameter]]
+key = "shared_access"
+name = "id"
+prefix = "/api/v1/chats/shared/{id}"
+description = "routers/chats.py:get_shared_chat_access_by_id looks up Chats.id, not SharedChats.id."
+same_as = "chat"
+
+[[parameter]]
+key = "chat_folder"
+name = "folder_id"
+prefix = "/api/v1/chats/folder/{folder_id}"
+description = "routers/chats.py:get_chats_by_folder_id uses Folders.id; the seeded chat already belongs to this folder."
+same_as = "folder"
+
+[[parameter]]
+key = "chat_user"
+name = "user_id"
+prefix = "/api/v1/chats/list/user/{user_id}"
+description = "Same Users.id created by auths.add; this scope is explicit so unrelated user-like parameters cannot silently inherit it."
+same_as = "user"
+
+[[parameter]]
+key = "channel_user"
+name = "user_id"
+prefix = "/api/v1/channels/users/{user_id}"
+description = "Same Users.id created by auths.add; this scope is explicit so unrelated user-like parameters cannot silently inherit it."
+same_as = "user"
+
+[[parameter]]
+key = "archive_user"
+name = "user_id"
+prefix = "/api/v1/archives/user/{user_id}"
+description = "Same Users.id created by auths.add; this scope is explicit so unrelated user-like parameters cannot silently inherit it."
+same_as = "user"
+
+[[parameter]]
+key = "task_chat"
+name = "chat_id"
+prefix = "/api/tasks/chat/{chat_id}"
+description = "Handler reads the same Chats.id created by chats.new."
+same_as = "chat"
+
+[[parameter]]
+key = "chat_stats"
+name = "chat_id"
+prefix = "/api/v1/chats/stats/export/{chat_id}"
+description = "Handler reads the same Chats.id created by chats.new."
+same_as = "chat"
+
+[[parameter]]
+key = "feedback_chat"
+name = "chat_id"
+prefix = "/api/v1/evaluations/feedback/conversation/{chat_id}"
+description = "Handler reads the same Chats.id created by chats.new."
+same_as = "chat"
+
+[[parameter]]
+key = "leaderboard_model"
+name = "model_id"
+prefix = "/api/v1/evaluations/leaderboard/{model_id}"
+description = "routers/evaluations.py leaderboard history uses the model registry identifier."
+same_as = "model"
+
+[[parameter]]
+key = "channel"
+name = "id"
+prefix = "/api/v1/channels/{id}"
+description = "routers/channels.py:create_new_channel creates a group and inserts its owner as a member; group avoids the standard-channel admin-only branch. Admin avoids features.channels; group creation enrolls this actor, which message posting requires even for admins."
+via = "POST /api/v1/channels/create"
+body = { "name" = "attack-{token}", "type" = "group", "user_ids" = [] }
+extract = "id"
+depends_on = ["namespace"]
+actor = "admin"
+
+[[parameter]]
+key = "channel_message"
+name = "message_id"
+prefix = "/api/v1/channels/{id}/messages/{message_id}"
+description = "routers/channels.py:post_new_message/new_message_handler inserts Messages.id for this channel. Use the admin member created with the group; the membership check has no admin exemption."
+via = "POST /api/v1/channels/{channel}/messages/post"
+body = { "content" = "Attack channel message {token}", "data" = {  } }
+extract = "id"
+depends_on = ["channel"]
+actor = "admin"
+
+[[parameter]]
+key = "channel_webhook"
+name = "webhook_id"
+prefix = "/api/v1/channels/{id}/webhooks/{webhook_id}"
+description = "routers/channels.py:create_channel_webhook returns ChannelWebhookModel with both id and token. Admin satisfies the manager check and avoids features.channels."
+via = "POST /api/v1/channels/{channel}/webhooks/create"
+body = { "name" = "attack-{token}" }
+extract = "id"
+depends_on = ["channel"]
+actor = "admin"
+
+[[parameter]]
+key = "public_channel_webhook"
+name = "webhook_id"
+prefix = "/api/v1/channels/webhooks/{webhook_id}"
+description = "The public hook endpoint reads the very same ChannelWebhook row."
+same_as = "channel_webhook"
+
+[[parameter]]
+key = "webhook_token"
+name = "token"
+prefix = "/api/v1/channels/webhooks/{webhook_id}/{token}"
+description = "routers/channels.py:get_channel_webhooks returns tokens to the channel manager. A fresh channel has exactly our one webhook. Admin satisfies the manager check and avoids features.channels."
+via = "GET /api/v1/channels/{channel}/webhooks"
+extract = "0.token"
+depends_on = ["channel", "channel_webhook"]
+actor = "admin"
+
+[[parameter]]
+key = "event_webhook"
+name = "webhook_id"
+prefix = "/api/events/webhooks/{webhook_id}"
+description = "main.py:create_event_webhook returns upsert_event_webhook id. Disabled during fixture creation to avoid notification traffic."
+unseedable = "main.py:create_event_webhook rejects every URL reachable from the sealed CI stack. upsert_event_webhook validates the target through retrieval/web/utils.py:validate_url, which refuses any host resolving to a non-global address unless ENABLE_LOCAL_WEB_FETCH is on. In-network hosts (stub, minio) resolve to private Docker addresses and are refused; external hosts do not resolve at all, because the network is internal:true with no DNS. Enabling ENABLE_LOCAL_WEB_FETCH would seed this parameter by disabling the SSRF guard the gate exists to observe, and would diverge from production, which leaves it unset (verified in soev-gitops and the chart, 2026-09-08). Recorded rather than worked around: this route is unseedable precisely because the guard works."
+
+[[parameter]]
+key = "knowledge"
+name = "id"
+prefix = "/api/v1/knowledge/{id}"
+description = "routers/knowledge.py:create_new_knowledge inserts a local KB without requiring files. Admin avoids workspace.knowledge. The immutable FEATURE_KNOWLEDGE gate defaults true and is not overridden in docker-compose.ci.yaml."
+via = "POST /api/v1/knowledge/create"
+body = { "name" = "attack-{token}", "description" = "Attack local knowledge" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "directory"
+name = "dir_id"
+prefix = "/api/v1/knowledge/{id}/dirs/{dir_id}"
+description = "routers/knowledge.py:create_knowledge_directory inserts a directory owned by this KB. Use admin to write the admin-owned local KB; no external provider operation is needed."
+via = "POST /api/v1/knowledge/{knowledge}/dirs/create"
+body = { "name" = "attack-{token}" }
+extract = "id"
+depends_on = ["knowledge"]
+actor = "admin"
+
+[[parameter]]
+key = "connection"
+name = "id"
+prefix = "/api/v1/knowledge/external/connections/{id}"
+description = "routers/knowledge.py:create_external_knowledge_connection persists and returns the sanitized connection; creation does not contact Qdrant."
+via = "POST /api/v1/knowledge/external/connections"
+body = { "name" = "attack-{token}", "provider" = "qdrant", "endpoint" = "http://stub:8000", "auth_config" = {  } }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "external_source"
+name = "id"
+prefix = "/api/v1/knowledge/external/source/{id}"
+description = "routers/knowledge.py:create_external_knowledge inserts a KB with meta.external referencing the connection. update_external_knowledge_source reads that KB id; /external/source/create additionally tests retrieval and is unnecessary for planting the row."
+via = "POST /api/v1/knowledge/external/knowledge/create"
+body = { "name" = "attack-external-{token}", "connection_id" = "{connection}", "source" = { "name" = "attack-{token}", "config" = { "content_field" = "text" } } }
+extract = "id"
+depends_on = ["connection"]
+actor = "admin"
+
+[[parameter]]
+key = "confluence_knowledge"
+name = "knowledge_id"
+prefix = "/api/v1/confluence"
+description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Confluence."
+via = "POST /api/v1/knowledge/create"
+body = { "name" = "confluence-{token}", "description" = "Attack cloud KB", "type" = "confluence" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "google_drive_knowledge"
+name = "knowledge_id"
+prefix = "/api/v1/google-drive"
+description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Google."
+via = "POST /api/v1/knowledge/create"
+body = { "name" = "google-drive-{token}", "description" = "Attack cloud KB", "type" = "google_drive" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "onedrive_knowledge"
+name = "knowledge_id"
+prefix = "/api/v1/onedrive"
+description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Microsoft."
+via = "POST /api/v1/knowledge/create"
+body = { "name" = "onedrive-{token}", "description" = "Attack cloud KB", "type" = "onedrive" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "internal_knowledge"
+name = "knowledge_id"
+prefix = "/api/v1/internal/retrieval/knowledge/{knowledge_id}"
+description = "internal_retrieval.py reads the same Knowledge row; its service credential is a separate driving-identity requirement."
+same_as = "knowledge"
+
+[[parameter]]
+key = "sync_knowledge"
+name = "knowledge_id"
+prefix = "/api/v1/sync-daemon/runs/{knowledge_id}"
+description = "sync_daemon.py:report_run_summary resolves Knowledges.id and the provider type."
+same_as = "confluence_knowledge"
+
+[[parameter]]
+key = "file"
+name = "id"
+prefix = "/api/v1/files/{id}"
+description = "routers/files.py:upload_file/upload_file_handler stores bytes and inserts File.id. process=false avoids an asynchronous ingestion race. Admin avoids the cumulative rag.file.max_count_per_user quota on repeated passes. Tiny genuine text still passes size and sniff guards."
+via = "POST /api/v1/files/"
+extract = "id"
+files = [{ "field" = "file", "filename" = "attack-{token}.txt", "content" = "Attack file {token}", "content_type" = "text/plain" }]
+query = { "process" = false }
+actor = "admin"
+
+[[parameter]]
+key = "filename"
+name = "file_name"
+prefix = "/api/v1/files/{id}/content/{file_name}"
+description = "routers/files.py content/{file_name} delegates using id and does not bind file_name, but use the actual stored filename anyway. Read as the admin file owner."
+via = "GET /api/v1/files/{file}"
+extract = "filename"
+depends_on = ["file"]
+actor = "admin"
+
+[[parameter]]
+key = "integration_file_status"
+name = "file_id"
+prefix = "/api/v1/integrations/file-status/{file_id}"
+description = "Handler resolves Files.id; service authentication is independent of the existence of the File row."
+same_as = "file"
+
+[[parameter]]
+key = "internal_file"
+name = "file_id"
+prefix = "/api/v1/internal/retrieval/files/{file_id}"
+description = "Handler resolves Files.id; service authentication is independent of the existence of the File row."
+same_as = "file"
+
+[[parameter]]
+key = "integration_source"
+name = "source_id"
+prefix = "/api/v1/integrations/collections/{source_id}"
+description = "routers/configs.py:set_integrations_config binds the owner to a provider. integrations.py:ingest_documents creates meta.integration.source_id, a document File, its bytes and its attachment."
+seeded_by = "seed_integration"
+depends_on = ["namespace"]
+
+[[parameter]]
+key = "integration_document"
+name = "document_source_id"
+prefix = "/api/v1/integrations/collections/{source_id}/documents/{document_source_id}"
+description = "integrations.py:delete_document prefixes this external source_id with the provider; it is NOT the File UUID."
+seeded_by = "integration_value"
+depends_on = ["integration_source"]
+extract = "documents.0.source_id"
+
+[[parameter]]
+key = "attachment_file"
+name = "id"
+prefix = "/api/v1/files/{id}/attachments"
+description = "Longest-prefix override: files.py:get_file_attachment_bytes checks attachment.file_id == id. Use the ingested parent, not the independently uploaded plain file."
+seeded_by = "integration_value"
+depends_on = ["integration_source"]
+extract = "documents.0.file_id"
+
+[[parameter]]
+key = "attachment"
+name = "attachment_id"
+prefix = "/api/v1/files/{id}/attachments/{attachment_id}"
+description = "integrations.py:_persist_attachments inserts the manifest row and stores bytes. files.py:list_file_attachments exposes its real id; ingestion 2xx alone is insufficient."
+via = "GET /api/v1/files/{attachment_file}/attachments"
+extract = "0.id"
+depends_on = ["attachment_file"]
+
+[[parameter]]
+key = "note"
+name = "id"
+prefix = "/api/v1/notes/{id}"
+description = "routers/notes.py:create_new_note returns the inserted NoteModel. Admin avoids features.notes; no global notes creation gate."
+via = "POST /api/v1/notes/create"
+body = { "title" = "attack-{token}", "data" = { "content" = "Attack note" } }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "calendar"
+name = "calendar_id"
+prefix = "/api/v1/calendars/{calendar_id}"
+description = "routers/calendar.py:create_calendar requires calendar.enable and returns CalendarModel. Admin avoids features.calendar; namespace enables calendar.enable."
+via = "POST /api/v1/calendars/create"
+body = { "name" = "attack-{token}" }
+extract = "id"
+depends_on = ["namespace"]
+actor = "admin"
+
+[[parameter]]
+key = "event"
+name = "event_id"
+prefix = "/api/v1/calendars/events/{event_id}"
+description = "routers/calendar.py:create_event checks write access to the parent calendar before inserting the event. Admin avoids features.calendar and owns the parent calendar. Event timestamps are nanoseconds."
+via = "POST /api/v1/calendars/events/create"
+body = { "calendar_id" = "{calendar}", "title" = "attack-{token}", "start_at" = 2000000000000000000, "end_at" = 2000003600000000000 }
+extract = "id"
+depends_on = ["calendar"]
+actor = "admin"
+
+[[parameter]]
+key = "automation"
+name = "id"
+prefix = "/api/v1/automations/{id}"
+description = "routers/automations.py:create_new_automation validates rrule. Inactive fixture avoids scheduled background runs while later routes are seeded. Admin avoids features.automations and cumulative count/minimum-interval limits; namespace enables automations.enable."
+via = "POST /api/v1/automations/create"
+body = { "name" = "attack-{token}", "data" = { "prompt" = "Attack automation", "model_id" = "{model}", "rrule" = "FREQ=DAILY;INTERVAL=30" }, "is_active" = false }
+extract = "id"
+depends_on = ["namespace", "model"]
+actor = "admin"
+
+[[parameter]]
+key = "group"
+name = "id"
+prefix = "/api/v1/groups/id/{id}"
+description = "routers/groups.py:create_new_group returns GroupResponse.id."
+via = "POST /api/v1/groups/create"
+body = { "name" = "attack-{token}", "description" = "Attack group" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "function"
+name = "id"
+prefix = "/api/v1/functions/id/{id}"
+description = "routers/functions.py:create_new_function loads the Action class, then inserts Functions.id. Valves classes make valves routes address actual schemas."
+via = "POST /api/v1/functions/create"
+body = { "id" = "attack_function_{token}", "name" = "Attack action", "content" = "from pydantic import BaseModel\n\nclass Action:\n    class Valves(BaseModel):\n        label: str = \"seed\"\n    class UserValves(BaseModel):\n        label: str = \"seed\"\n    def __init__(self):\n        self.valves = self.Valves()\n    async def action(self, body: dict) -> dict:\n        return body\n", "meta" = {  } }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "action"
+name = "action_id"
+prefix = "/api/chat/actions/{action_id}"
+description = "utils/actions.py:chat_action resolves Functions.id and calls its Action.action method."
+same_as = "function"
+
+[[parameter]]
+key = "tool"
+name = "id"
+prefix = "/api/v1/tools/id/{id}"
+description = "routers/tools.py:create_new_tools requires an identifier and a loadable Tools class; it inserts Tool.id and callable specs. Admin satisfies workspace.tools/workspace.tools_import; no package installation or external import is needed."
+via = "POST /api/v1/tools/create"
+body = { "id" = "attack_tool_{token}", "name" = "Attack tool", "content" = "from pydantic import BaseModel\n\nclass Tools:\n    class Valves(BaseModel):\n        label: str = \"seed\"\n    class UserValves(BaseModel):\n        label: str = \"seed\"\n    def __init__(self):\n        self.valves = self.Valves()\n    def echo(self, text: str) -> str:\n        return text\n", "meta" = {  } }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "skill"
+name = "id"
+prefix = "/api/v1/skills/id/{id}"
+description = "routers/skills.py:create_new_skill inserts the requested lowercased id. Admin satisfies workspace.skills/workspace.skills_import. models/skills.py declares name unique independently of id, so BOTH include the per-pass token."
+via = "POST /api/v1/skills/create"
+body = { "id" = "attack-skill-{token}", "name" = "Attack skill {token}", "content" = "Attack skill content" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "prompt"
+name = "prompt_id"
+prefix = "/api/v1/prompts/id/{prompt_id}"
+description = "routers/prompts.py:create_new_prompt and models/prompts.py:insert_new_prompt create the prompt and its initial PromptHistory snapshot. Admin satisfies workspace.prompts/workspace.prompts_import; the command is unique per pass."
+via = "POST /api/v1/prompts/create"
+body = { "command" = "attack-{token}", "name" = "Attack prompt", "content" = "Attack prompt {token}" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "prompt_history"
+name = "history_id"
+prefix = "/api/v1/prompts/id/{prompt_id}/history/{history_id}"
+description = "The initial version_id points to this prompt's existing PromptHistory row; do not alias it to the prompt id. Read as the admin prompt owner."
+via = "GET /api/v1/prompts/id/{prompt}"
+extract = "version_id"
+depends_on = ["prompt"]
+actor = "admin"
+
+[[parameter]]
+key = "memory"
+name = "memory_id"
+prefix = "/api/v1/memories/{memory_id}"
+description = "routers/memories.py:add_memory inserts Memory.id and embeds it through the configured CI embedding endpoint. Admin avoids features.memories; namespace enables memories.enable. The CI stub supplies embeddings and Weaviate stores the vector."
+via = "POST /api/v1/memories/add"
+body = { "content" = "Attack memory {token}" }
+extract = "id"
+actor = "admin"
+depends_on = ["namespace"]
+
+[[parameter]]
+key = "feedback"
+name = "id"
+prefix = "/api/v1/evaluations/feedback/{id}"
+description = "routers/evaluations.py:create_feedback inserts Feedbacks.id; meta ties it to the seeded chat. Use the same admin as the referenced chat owner; create_feedback itself has no feature gate."
+via = "POST /api/v1/evaluations/feedback"
+body = { "type" = "rating", "data" = { "rating" = 1, "model_id" = "{model}" }, "meta" = { "chat_id" = "{chat}" } }
+extract = "id"
+depends_on = ["chat", "model"]
+actor = "admin"
+
+[[parameter]]
+key = "archive"
+name = "archive_id"
+prefix = "/api/v1/archives/{archive_id}"
+description = "routers/archives.py:create_user_archive returns CreateArchiveResponse.archive_id after ArchiveService succeeds. Archival does not delete its target user."
+via = "POST /api/v1/archives/user/{user}"
+body = { "reason" = "Attack archive {token}" }
+extract = "archive_id"
+actor = "admin"
+depends_on = ["namespace", "user"]
+
+[[parameter]]
+key = "invite"
+name = "id"
+prefix = "/api/v1/invites/{id}"
+description = "routers/invites.py:create_invite returns InviteResponse.id and token; send_email=false plants the row without sending mail."
+via = "POST /api/v1/invites/"
+body = { "email" = "attack-invite-{token}@example.com", "name" = "Attack invite", "role" = "user", "send_email" = false }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "invite_token"
+name = "token"
+prefix = "/api/v1/invites/{token}"
+description = "A separate pending invite keeps token accept/validate independent from id delete/resend. Creation returns the raw token over HTTP."
+via = "POST /api/v1/invites/"
+body = { "email" = "attack-invite-token-{token}@example.com", "name" = "Attack token invite", "role" = "user", "send_email" = false }
+extract = "token"
+actor = "admin"
+
+[[parameter]]
+key = "agent"
+name = "slug"
+prefix = "/api/v1/agent-configs/{slug}"
+description = "routers/agent_configs.py:detect -> create (if absent) -> get. Slugs are environment selectors: reuse an in-env slug, never fabricate a new one. DELETE refuses while the slug remains in AGENT_API_AGENTS."
+seeded_by = "seed_agent_config"
+depends_on = []
+actor = "admin"
+fresh = false
+
+[[parameter]]
+key = "ollama_index"
+name = "url_idx"
+prefix = "/ollama"
+description = "routers/ollama.py indexes the configured URL list; GET config and a real model-list probe establish index 0. It is a stable selector, not a resource row."
+seeded_by = "connection_index"
+depends_on = []
+actor = "admin"
+config_via = "/ollama/config"
+urls_field = "OLLAMA_BASE_URLS"
+probe = "/ollama/api/tags/0"
+fresh = false
+
+[[parameter]]
+key = "openai_index"
+name = "url_idx"
+prefix = "/openai"
+description = "routers/openai.py indexes the configured URL list; GET config and a real model-list probe establish index 0. It is a stable selector, not a resource row."
+seeded_by = "connection_index"
+depends_on = []
+actor = "admin"
+config_via = "/openai/config"
+urls_field = "OPENAI_API_BASE_URLS"
+probe = "/openai/models/0"
+fresh = false
+
+[[parameter]]
+key = "openai_path"
+name = "path"
+prefix = "/openai/{path}"
+description = "routers/openai.py:proxy appends path to the configured base URL. models is an actual upstream route, established by the model-list probe; no database id is required."
+seeded_by = "upstream_path"
+depends_on = ["openai_index"]
+probe = "/openai/models/{openai_index}"
+value = "models"
+fresh = false
+
+[[parameter]]
+key = "terminal"
+name = "server_id"
+prefix = "/api/v1/terminals/{server_id}"
+description = "routers/configs.py:import_config registers a fresh terminal_server.connections entry; terminals.py:proxy_terminal selects it by id. The dedicated terminal config endpoint has an environment feature gate that is off in CI; config import and the proxy are reachable. Merge existing connections and verify the stub OpenAPI through the proxy."
+seeded_by = "seed_terminal"
+depends_on = []
+actor = "admin"
+url = "http://stub:8000"
+
+[[parameter]]
+key = "terminal_path"
+name = "path"
+prefix = "/api/v1/terminals/{server_id}/{path}"
+description = "terminals.py proxies a relative upstream path; openapi.json exists on the CI stub and is checked through the newly registered connection."
+seeded_by = "upstream_path"
+depends_on = ["terminal"]
+probe = "/api/v1/terminals/{terminal}/openapi.json"
+value = "openapi.json"
+fresh = false
+
+[[parameter]]
+key = "cache"
+name = "path"
+prefix = "/cache/{path}"
+description = "routers/export.py:trigger_data_export -> get_export_status creates exports/<user>/<file>.zip under CACHE_DIR. Use the fresh disposable user session from auths.add so repeat passes cannot reuse an old export."
+seeded_by = "seed_export"
+depends_on = ["user"]
+
+# Removed 2026-09-08: this entry seeded GET /api/v1/retrieval/ef/{text}, which
+# routers/retrieval.py:3006 registers only under ENV=dev. The committed document is
+# generated under ENV=prod, the configuration the gate actually measures, so the route
+# and its seed no longer exist. Restore both together if the dev route is ever gated in.
+
+[[parameter]]
+key = "sync_provider"
+name = "provider"
+prefix = "/api/v1/sync-daemon/config/{provider}"
+description = "sync_daemon.py:_PROVIDERS uses built-in provider names. Verify confluence config through its public admin endpoint; the daemon route separately requires its machine credential."
+seeded_by = "upstream_path"
+depends_on = []
+actor = "admin"
+probe = "/api/v1/configs/confluence"
+value = "confluence"
+fresh = false
+
+[[parameter]]
+key = "reset_token"
+name = "token"
+prefix = "/api/v1/auths/password/reset/{token}"
+description = "auths.py:forgot_password stores only a hash and sends the raw token by email; the HTTP response is deliberately generic. There is no HTTP endpoint to retrieve a valid reset token, and this plane does not read mail or the database."
+unseedable = "auths.py:forgot_password stores only a hash and sends the raw token by email; the HTTP response is deliberately generic. There is no HTTP endpoint to retrieve a valid reset token, and this plane does not read mail or the database."
+
+[[parameter]]
+key = "oauth_session_provider"
+name = "provider"
+prefix = "/api/v1/auths/oauth/sessions/{provider}"
+description = "auths.py:delete_oauth_session_by_provider requires an OAuthSessions row for the caller. Local bearer identities have none; creating one requires an external OAuth authorization/code exchange, not merely choosing a provider name. CI has no OAuth issuer."
+unseedable = "auths.py:delete_oauth_session_by_provider requires an OAuthSessions row for the caller. Local bearer identities have none; creating one requires an external OAuth authorization/code exchange, not merely choosing a provider name. CI has no OAuth issuer."
+
+[[parameter]]
+key = "oauth_exchange_provider"
+name = "provider"
+prefix = "/api/v1/auths/oauth/{provider}"
+description = "auths.py:token_exchange requires an environment-registered OAUTH_PROVIDERS entry and an issuer access token. Neither can be created through this app HTTP API; CI has no OAuth issuer."
+unseedable = "auths.py:token_exchange requires an environment-registered OAUTH_PROVIDERS entry and an issuer access token. Neither can be created through this app HTTP API; CI has no OAuth issuer."
+
+[[parameter]]
+key = "oauth_login_provider"
+name = "provider"
+prefix = "/oauth/{provider}"
+description = "utils/oauth.py registers login providers from environment configuration. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
+unseedable = "utils/oauth.py registers login providers from environment configuration. No HTTP endpoint creates a provider or its external authorization state; CI has no OAuth issuer."
+
+[[parameter]]
+key = "oauth_client"
+name = "client_id"
+prefix = "/oauth/clients/{client_id}"
+description = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
+unseedable = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
+
+[[parameter]]
+key = "confluence_cloud"
+name = "cloud_id"
+prefix = "/api/v1/confluence/page/{cloud_id}"
+description = "confluence_sync.py:_browse_client requires a real authorized Atlassian site. Its browse/content endpoints are read-only; no app HTTP endpoint creates a Confluence cloud/site or grants external access."
+unseedable = "confluence_sync.py:_browse_client requires a real authorized Atlassian site. Its browse/content endpoints are read-only; no app HTTP endpoint creates a Confluence cloud/site or grants external access."
+
+[[parameter]]
+key = "confluence_page"
+name = "page_id"
+prefix = "/api/v1/confluence/page/{cloud_id}/{page_id}"
+description = "confluence_sync.py:get_page_content fetches an existing provider page. This app exposes no Confluence page-creation endpoint and the CI stub has no Confluence page store."
+unseedable = "confluence_sync.py:get_page_content fetches an existing provider page. This app exposes no Confluence page-creation endpoint and the CI stub has no Confluence page store."
+
+[[parameter]]
+key = "pipeline"
+name = "pipeline_id"
+prefix = "/api/v1/pipelines/{pipeline_id}"
+description = "pipelines.py:/upload and /add delegate creation to an external Pipelines server. The CI OpenAI stub has no pipeline registry or code-loading implementation; its catch-all 200 does not create a pipeline. A pipeline-capable upstream is required, not an invented id extracted from that 200."
+unseedable = "pipelines.py:/upload and /add delegate creation to an external Pipelines server. The CI OpenAI stub has no pipeline registry or code-loading implementation; its catch-all 200 does not create a pipeline. A pipeline-capable upstream is required, not an invented id extracted from that 200."
+
+[[parameter]]
+key = "task"
+name = "task_id"
+prefix = "/api/tasks/stop/{task_id}"
+description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh custom model inherits the readable upstream fixture and has public read access. Its model-scoped inlet Filter waits asynchronously for at most one hour before agent routing, keeping the id live until tasks.stop cancels it. A Pipe would be skipped by CI's production-matching agent routing. Seed late, cancel after the pass, and re-seed each pass. The finite wait bounds leaked fixtures if a driver crashes."
+seeded_by = "seed_task"
+depends_on = ["model", "chat", "cache", "attachment", "prompt_history", "channel_message", "external_source", "terminal_path"]
+content = """
+import asyncio
+
+class Filter:
+    async def inlet(self, body: dict) -> dict:
+        await asyncio.sleep(3600)
+        return body
+"""
+
+[[destructive]]
+id = "POST /api/v1/auths/signout"
+reason = "Revokes the caller JWT jti when Redis is present. CI runs real Redis; the same bearer cannot drive subsequent routes."
+
+[[destructive]]
+id = "DELETE /api/v1/auths/api_key"
+reason = "Deletes the caller API key and invalidates an API-key driving identity."
+
+[[destructive]]
+id = "POST /api/v1/auths/update/password"
+reason = "Changes the caller password and breaks subsequent signin/identity recovery using the old credential."
+
+[[destructive]]
+id = "DELETE /api/v1/users/{user_id}"
+reason = "Can delete the driving user and its owned resources. Schedule with a disposable identity after ordinary targets."
+
+[[destructive]]
+id = "DELETE /api/v1/auths/oauth/sessions/{provider}"
+reason = "Deletes the caller provider session, removing OAuth credentials needed by later provider requests."

@@ -15,6 +15,31 @@ Each entry states what diverges, why, how it is gated, and the key files.
 
 ---
 
+## Model request bodies for the security derivation
+
+Phase 4a declares permissive request shapes for 25 model-invoking operations in
+`backend/open_webui/main.py`, `backend/open_webui/routers/tasks.py`,
+`backend/open_webui/routers/ollama.py`, and `backend/open_webui/routers/openai.py`.
+Their signatures use dependencies in the fork-owned
+`backend/open_webui/services/model_request_bodies.py`. Each dependency accepts a
+typed body parameter and returns the cached raw JSON, preserving extras, omitted
+fields, and internal dictionary callers without changing handler logic.
+
+The models expose message text, multimodal content, tool descriptions and calls,
+task prompts and responses, completion prompts, and embedding inputs to the
+fork's OpenAPI security gate. All declared fields are optional and all models
+allow extras. Arbitrary vendor keys and tool JSON schemas remain accepted but
+cannot be enumerated by the derivation. This integration is fork-local because
+upstream does not consume the fork's derived attack surface; no upstream PR has
+been opened. The changes are unconditional on these routes.
+
+Vendor payload controls passed on all 25 original handlers before typing and
+again afterwards. Arrays, strings, numbers, booleans, and null already returned
+pre-handler 422 responses on all 25 original `dict` parameters; those controls
+remain unchanged. The generated surface grows from 205 routes / 810 strings to
+230 routes / 2525 strings. Exactly 25 derivation waivers are removed, leaving
+27 JSON write bodies for Phase 4b, one JSON read body, and seven multipart bodies.
+
 ## Agent API integration (chat routed to an external agent service)
 
 Chat completions bypass OWUI's built-in web search / RAG / LLM orchestration and

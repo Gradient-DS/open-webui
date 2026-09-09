@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui.config import UPLOAD_DIR
+from open_webui.services.model_request_bodies import chat_completion_body, completion_body, messages_body
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -1094,7 +1095,7 @@ async def get_ollama_url(request: Request, model: str, url_idx: int | None = Non
 @router.post('/api/chat/{url_idx}')
 async def generate_chat_completion(
     request: Request,
-    form_data: dict,
+    form_data: dict = Depends(chat_completion_body),
     url_idx: int | None = None,
     user=Depends(get_verified_user),  # noqa: B008
 ):
@@ -1211,7 +1212,7 @@ class OpenAIEmbeddingsForm(BaseModel):
 @router.post('/v1/completions/{url_idx}')
 async def generate_openai_completion(
     request: Request,
-    form_data: dict,
+    form_data: dict = Depends(completion_body),
     url_idx: int | None = None,
     user=Depends(get_verified_user),  # noqa: B008
 ):
@@ -1315,7 +1316,7 @@ async def generate_openai_embeddings(
 @router.post('/v1/chat/completions/{url_idx}')
 async def generate_openai_chat_completion(
     request: Request,
-    form_data: dict,
+    form_data: dict = Depends(chat_completion_body),
     url_idx: int | None = None,
     user=Depends(get_verified_user),  # noqa: B008
 ):
@@ -1374,7 +1375,7 @@ async def generate_openai_chat_completion(
 @router.post('/v1/messages/{url_idx}')
 async def generate_anthropic_messages(
     request: Request,
-    form_data: dict,
+    form_data: dict = Depends(messages_body),
     url_idx: int | None = None,
     user=Depends(get_verified_user),
 ):

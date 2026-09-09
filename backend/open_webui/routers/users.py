@@ -20,6 +20,7 @@ from open_webui.models.auths import Auths
 from open_webui.models.config import Config
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chats
+from open_webui.services.remaining_request_bodies import user_info_body, user_settings_body
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import (
@@ -502,7 +503,7 @@ async def get_user_settings_by_session_user(
 @router.post('/user/settings/update', response_model=UserSettings)
 async def update_user_settings_by_session_user(
     request: Request,
-    form_data: UserSettings,
+    form_data: UserSettings = Depends(user_settings_body(UserSettings)),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -683,7 +684,7 @@ async def update_user_variables_by_session_user(
 
 @router.post('/user/info/update', response_model=dict | None)
 async def update_user_info_by_session_user(  # PATCH-style merge
-    form_data: dict,
+    form_data: dict = Depends(user_info_body),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):

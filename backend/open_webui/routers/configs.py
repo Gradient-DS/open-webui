@@ -16,6 +16,7 @@ from open_webui.env import (
 )
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
+from open_webui.services.remaining_request_bodies import integrations_config_body
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import Users
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -1056,7 +1057,7 @@ async def get_integrations_config(request: Request, user=Depends(get_admin_user)
 @router.post('/integrations')
 async def set_integrations_config(
     request: Request,
-    form_data: IntegrationsConfigForm,
+    form_data: IntegrationsConfigForm = Depends(integrations_config_body(IntegrationsConfigForm)),
     user=Depends(get_admin_user),
 ):
     old_providers = await Config.get('integrations.providers') or {}
