@@ -191,6 +191,13 @@
 	export let agentRouted = false;
 	// [Gradient] Picker visibility is independent of agent runtime routing.
 	export let agentPickerActive = false;
+
+	// [Gradient] The picker shows whenever there is anything to pick, including
+	// single-model tenants — it also hosts model info, set-as-default and the pin
+	// toggle. Assistants are excluded here exactly as they are in ModelSelector.
+	$: pickerModels = ($models ?? []).filter(
+		(model) => !model?.info?.base_model_id || selectedModels.includes(model.id)
+	);
 	$: isActive =
 		!askUser?.show &&
 		((taskIds && taskIds.length > 0) ||
@@ -2911,7 +2918,7 @@
 										<!-- [Gradient] Agent-only picker tenants; model selector for other multi-model tenants. -->
 										{#if agentPickerActive}
 											<AgentSelector agentId={$pendingAgentId} editable={!history?.currentId} />
-										{:else if $models.length > 1}
+										{:else if pickerModels.length > 0}
 											<ModelSelector
 												bind:this={modelSelector}
 												bind:selectedModels

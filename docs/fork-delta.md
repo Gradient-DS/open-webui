@@ -61,9 +61,16 @@ slot (Q7). `agentPickerActive` is computed in `Chat.svelte` / `Placeholder.svelt
 and passed to `MessageInput.svelte`: `FEATURE_AGENT_PICKER` and
 `feature_agent_api_enabled` must be on, and the chat must be new or agent-bound
 (`!chat?.id || chat?.meta?.agent_id`). The slot renders `AgentSelector` when
-active, otherwise `ModelSelector` only when `$models.length > 1`. Why: picker
+active, otherwise `ModelSelector` whenever there is anything to pick. Why: picker
 tenants choose an assistant; non-picker tenants using the legacy agent bypass
 still need their model selector. `agentRouted` does not control this slot.
+
+The selector's list excludes assistants (models carrying `info.base_model_id`)
+unless one is currently selected, so the trigger can still name an assistant-bound
+chat. Assistants are reached from the sidebar pins (`visiblePinnedAgents`) and the
+AI-assistants workspace instead; the workspace is therefore the only pin surface
+for them. The list is not gated on a minimum model count: on a single-model tenant
+the selector still carries model info, set-as-default and the pin toggle.
 
 The navbar keeps upstream's title block; the new-chat greeting remains suppressed
 under the picker. Both flags default off (`FEATURE_AGENT_PICKER` / Helm

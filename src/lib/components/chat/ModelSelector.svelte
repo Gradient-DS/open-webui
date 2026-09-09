@@ -63,15 +63,20 @@
 	<div class="flex min-w-0 max-w-full">
 		<div class="min-w-0 max-w-full overflow-hidden">
 			<div class="min-w-0 max-w-full">
+				<!-- [Gradient] Assistants (custom models) are pinned in the sidebar and listed
+				     in the AI-assistants workspace; they are not offered in the model picker.
+				     A selected assistant stays in `items` so the trigger can still name it. -->
 				<Selector
 					bind:this={selector}
 					id="model"
 					placeholder={$i18n.t('Select a model')}
-					items={$models.map((model) => ({
-						value: model.id,
-						label: model.name,
-						model: model
-					}))}
+					items={$models
+						.filter((model) => !model?.info?.base_model_id || selectedModels.includes(model.id))
+						.map((model) => ({
+							value: model.id,
+							label: model.name,
+							model: model
+						}))}
 					{pinModelHandler}
 					{className}
 					{triggerClassName}
