@@ -625,3 +625,141 @@ def test_live_drive_reports_its_own_reach(live_drive, record_property):
 def test_live_drive_does_not_reflect_corpus_in_html(live_drive):
     reflected = [route for route, outcome in live_drive.items() if outcome.reflected]
     assert not reflected, reflected
+
+
+def test_the_skeleton_carries_what_no_string_derivation_can_report():
+    # The 50-route failure in one case: `enabled` and `count` are required and
+    # are not strings, so a body built from writable fields alone is refused
+    # before the handler and the route is driven without ever being entered.
+    skeleton = {'enabled': False, 'count': 0}
+    assert plane._body_for(['name'], 'hostile', skeleton) == {
+        'enabled': False,
+        'count': 0,
+        'name': 'hostile',
+    }
+
+
+def test_planting_never_writes_through_to_the_skeleton_it_was_given():
+    skeleton = {'items': [{'kind': 'page'}]}
+    plane._body_for(['items[].label'], 'hostile', skeleton)
+    assert skeleton == {'items': [{'kind': 'page'}]}
+
+
+def test_an_empty_skeleton_list_is_planted_into_rather_than_indexed():
+    # A skeleton's `[]` is a list, so the pre-skeleton `_plant` would index
+    # [0] into it and raise instead of planting.
+    assert plane._body_for(['tags[]'], 'hostile', {'tags': []}) == {'tags': ['hostile']}
+
+
+def test_a_body_with_no_skeleton_is_built_exactly_as_before():
+    assert plane._body_for(['a.b'], 'hostile') == {'a': {'b': 'hostile'}}
+
+
+@pytest.mark.parametrize(
+    ('detail', 'expected'),
+    [
+        ([{'loc': ['body', 'rrule'], 'type': 'value_error'}], {'rrule'}),
+        ([{'loc': ['body', 'items', 0, 'type']}], {'items[].type'}),
+        ([{'loc': ['body', 'a']}, {'loc': ['body', 'b']}], {'a', 'b'}),
+        ([{'loc': ['body']}], set()),
+        ([{'loc': []}], set()),
+        ('not a list', set()),
+        (None, set()),
+    ],
+)
+def test_rejected_fields_are_read_in_the_derivation_s_own_spelling(detail, expected):
+    assert plane._rejected_fields({'detail': detail} if detail is not None else {}) == expected
+    assert plane._rejected_fields(None) == set()
+
+
+def test_a_constrained_field_keeps_its_skeleton_value_but_is_still_driven_alone():
+    client = fake_client(200)
+    plane._seed_route(
+        client,
+        'POST /item',
+        '/item',
+        ['kind', 'label'],
+        ['hostile'],
+        False,
+        skeleton={'kind': 'page'},
+        constrained=('kind',),
+    )
+    bodies = [call.kwargs['json'] for call in client.request.call_args_list]
+    # All-fields body leaves `kind` alone so the route is entered at all; the
+    # payload for `kind` is still driven, where its refusal is the measurement.
+    assert bodies[0] == {'kind': 'page', 'label': 'hostile'}
+    assert {'kind': 'hostile'} in bodies
+    # Leave-one-out omits only what the all-fields body actually planted:
+    # dropping a field it never carried would repeat a request already sent.
+    assert bodies[-1] == {'kind': 'page'}
+
+
+def test_a_refused_field_is_reverted_once_and_the_refusal_is_still_recorded():
+    client = Mock()
+    client.base_url = 'http://stack'
+    client.request.side_effect = [
+        response(422, {'detail': [{'loc': ['body', 'rrule'], 'type': 'value_error'}]}),
+        *[response(200) for _ in range(10)],
+    ]
+    plane._seed_route(
+        client,
+        'POST /item',
+        '/item',
+        ['rrule', 'title'],
+        ['hostile'],
+        False,
+        skeleton={'start': 0},
+    )
+    bodies = [call.kwargs['json'] for call in client.request.call_args_list]
+    assert bodies[0] == {'start': 0, 'rrule': 'hostile', 'title': 'hostile'}
+    # The retry drops exactly the field the response named, and nothing else.
+    assert bodies[1] == {'start': 0, 'title': 'hostile'}
+    # And the original refusal still drives every field individually -- on the
+    # skeleton, so the refusal measured is the field's own and not a missing
+    # `start` -- so the payload that was refused stays in the measurement.
+    assert {'start': 0, 'rrule': 'hostile'} in bodies
+
+
+def test_a_response_that_names_no_field_costs_no_extra_request():
+    client = fake_client(500)
+    plane._seed_route(client, 'POST /item', '/item', ['a'], ['hostile'], False, skeleton={})
+    # All-fields, then leave-one-out. A 500 names no field, so nothing is
+    # reverted and no request is spent guessing which one it might have been.
+    assert [call.kwargs['json'] for call in client.request.call_args_list] == [{'a': 'hostile'}, {}]
+
+
+def test_a_route_the_response_refuses_wholesale_is_not_retried_with_the_same_body():
+    # Every plantable field refused: `kept` equals `plantable` minus all of
+    # them, so a retry would send the skeleton the drive pass already sends.
+    client = Mock()
+    client.base_url = 'http://stack'
+    client.request.side_effect = [
+        response(422, {'detail': [{'loc': ['body', 'a']}]}),
+        *[response(200) for _ in range(5)],
+    ]
+    plane._seed_route(client, 'POST /item', '/item', ['a'], ['hostile'], False, skeleton={'x': 0})
+    bodies = [call.kwargs['json'] for call in client.request.call_args_list]
+    assert bodies == [{'x': 0, 'a': 'hostile'}, {'x': 0}]
+
+
+def test_the_drive_pass_sends_the_body_the_schema_requires():
+    client = fake_client(200)
+    spec = tiny_spec(['POST /item'])
+    plane.drive_every_route(client, {}, spec=spec)
+    # Without this the pass whose one job is to reach every route sends no
+    # body at all, and every route with a required schema answers 422.
+    assert client.request.call_args_list[0].kwargs['json'] == plane.body_skeletons(spec)['POST /item']
+
+
+def test_the_drive_pass_sends_no_body_where_the_route_declares_none():
+    client = fake_client(200)
+    plane.drive_every_route(client, {}, spec={'paths': {'/item': {'get': {}}}})
+    assert 'json' not in client.request.call_args_list[0].kwargs
+
+
+def test_every_route_with_a_json_body_in_the_committed_spec_has_a_skeleton():
+    # The gap this closes is measured against the real document, not a fixture.
+    skeletons = plane.body_skeletons(seeds.SPEC)
+    writable = plane.writable_string_fields(seeds.SPEC)
+    assert set(writable) <= set(skeletons)
+    assert len(skeletons) >= len(writable)
