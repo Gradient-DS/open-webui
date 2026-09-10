@@ -1,18 +1,40 @@
 **Status: 11 open findings (PLANE-001–010, PLANE-012), 1 fixed (PLANE-011);
 BLOCKER-001 resolved; CI-stack gaps: 0 open, 3 fixed (CI-001–003).**
 
-**The live 5xx assertions are EXPECTED to be red while application findings are open.**
-Latest run (2026-09-10, first complete live run on v0.11.3, modules in the order
-`.github/workflows/runtime-security.yml` uses): **8 failed, 367 passed, zero
-errors in 490s**; offline **705 passed, 61 skipped**. Every failure is a pass's
-own 5xx assertion or the model-output control. Zero errors is the number that
-changed: BLOCKER-001, a stale seed (CI-003) and a merge regression (PLANE-011)
-had made setup fail outright. The drive pass reaches 354/662 routes with 643
-driven; 129 routes remain unentered across all passes. Nothing is accepted,
-xfailed or suppressed.
+**The coverage gate is live and red at 96 routes.** `test_every_route_is_driven_or_waived`
+merged 2026-09-10 (PR #290) and `security/route-coverage.toml` does not exist yet,
+so 96 operations in the committed document are driven by no security test and
+explained by no waiver. Reasons must come from observed behaviour. Two groups are
+already evidenced: the 7 notifications routes by CI-003 below, and the 5 OAuth
+routes by the deliberately unconfigured providers. Note that
+`POST /api/v1/auths/signin` and `POST /api/v1/configs/import` are in the 96 while
+being used constantly by the identity helper and the configuration guard — the
+harness using a route is not a security test driving it, and for those the answer
+may be to drive them rather than waive them.
 
-An earlier reviewer run recorded **4 failed, 381 passed, 9 errors in 350s**, with
-the nine setup errors reporting the crossuser reset-token surface defect. The
+**The live 5xx assertions are EXPECTED to be red while application findings are open.**
+Latest CI run (2026-09-10, first run with every pass completing on v0.11.3):
+**9 failed, 473 passed, zero errors**; offline **724 passed, 63 skipped** under
+both `-q` and `-v`. Per-pass reach — seeding 191/252, drive 354/662, shapes
+266/372, query 48/54, crossuser 260/415 — matches a workstation run almost
+exactly, which is new: before PR #290 the drive pass never ran in CI at all.
+
+Eight failures are a pass's own 5xx assertion or the model-output control. The
+ninth, `test_live_shapes_reports_its_own_reach`, is the gate telling the truth:
+shapes loses about four configuration snapshots per CI run to dropped connections
+on `GET /api/v1/configs/export`, so `config_restore_verified` is false. **That
+makes it a blocker for `enforce: true`** — a check cannot be required while it is
+permanently red for an environmental reason. The cause of the drops
+(`ConnectionError <- MaxRetryError <- ProtocolError <- RemoteDisconnected`) is
+unknown and does not reproduce off a hosted runner. CI captures Falco's logs but
+not the application's, so there is nothing to diagnose from; adding app-log
+capture to `Gradient-DS/.github` is the prerequisite.
+
+**`runtime-audit` reports pass regardless, because `enforce: false`.** Every
+result in this leg had to be read inside the job. The first green check of the
+leg sat over a run in which the drive pass never executed.
+
+An earlier reviewer run recorded **4 failed, 381 passed, 9 errors in 350s**. The
 abbreviated log was insufficient to reconcile the route union, so this document
 retains all supplied routes without inventing a current set.
 
