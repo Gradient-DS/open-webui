@@ -144,7 +144,7 @@ def recover_configuration(admin, *, report=print):
 
 
 @contextmanager
-def preserve_configuration(admin, *, report, route, durable=False, unverified=None):
+def preserve_configuration(admin, *, report, route, unverified, durable=False):
     """Snapshot configuration around a route, and say so when it could not.
 
     A timeout here is lost evidence, not a measurement: we cannot tell whether
@@ -187,6 +187,4 @@ def preserve_configuration(admin, *, report, route, durable=False, unverified=No
 
 
 def _unverified(unverified, route, reason):
-    if unverified is None:
-        raise RuntimeError(f'Configuration guard lost its snapshot with nowhere to record it: {route}: {reason}')
     unverified(reason)

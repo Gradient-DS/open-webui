@@ -140,7 +140,12 @@ def _body_result(response, item):
 def _drive(admin, route, body, result, *, probe, chunk_timeout, wall_timeout):
     item = {'route': route, 'probe': probe, 'status': None, 'bytes': 0, 'terminal': False, 'errors': []}
     response, chunks = None, bytearray()
-    with plane.preserve_configuration(admin, route=route, report=result.tally.config_findings.append):
+    with plane.preserve_configuration(
+        admin,
+        route=route,
+        report=result.tally.config_findings.append,
+        unverified=lambda reason: result.tally.config_unverified.setdefault(route, reason),
+    ):
         try:
             with deadlines(chunk_timeout, wall_timeout) as arm:
                 response = admin.request(

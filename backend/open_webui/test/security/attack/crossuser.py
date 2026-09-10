@@ -134,7 +134,12 @@ def _actor(admin, actor, destructive):
 
 def _request(admin, actor, route, target, tally, kwargs):
     guard = (
-        plane.preserve_configuration(admin, route=route, report=tally.config_findings.append)
+        plane.preserve_configuration(
+            admin,
+            route=route,
+            report=tally.config_findings.append,
+            unverified=lambda reason: tally.config_unverified.setdefault(route, reason),
+        )
         if route.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
         else nullcontext()
     )

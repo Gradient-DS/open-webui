@@ -1,5 +1,7 @@
+import ast
 import copy
 import json
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -145,7 +147,10 @@ def test_failed_restore_is_loud_evidence_and_journal_survive_then_next_setup_rec
 def test_pass_boundary_recovers_changes_from_read_routes():
     server = ConfigServer()
     before = copy.deepcopy(server.config)
-    with configuration.preserve_configuration(server, report=lambda _: None, route='drive pass', durable=True):
+    unverified = []
+    with configuration.preserve_configuration(
+        server, report=lambda _: None, route='drive pass', unverified=unverified.append, durable=True
+    ):
         server.config[ENGINE] = 'another-engine'
     assert server.config == before
 
@@ -154,7 +159,10 @@ def test_unknown_route_and_unknown_key_need_no_recovery_rule():
     server = ConfigServer()
     before = copy.deepcopy(server.config)
     records = []
-    with configuration.preserve_configuration(server, report=records.append, route='POST /future'):
+    unverified = []
+    with configuration.preserve_configuration(
+        server, report=records.append, route='POST /future', unverified=unverified.append
+    ):
         server.config['future.setting']['urls'].append(PAYLOAD)
         del server.config[KEY]
     assert server.config == before
@@ -167,8 +175,11 @@ def test_unknown_route_and_unknown_key_need_no_recovery_rule():
 def test_new_keys_cannot_be_silently_left_behind_by_merge_only_import():
     server = ConfigServer()
     records = []
+    unverified = []
     with pytest.raises(RuntimeError, match='cannot remove newly introduced keys'):
-        with configuration.preserve_configuration(server, report=records.append, route='POST /future', durable=True):
+        with configuration.preserve_configuration(
+            server, report=records.append, route='POST /future', unverified=unverified.append, durable=True
+        ):
             server.config['new.key'] = PAYLOAD
     assert records[0]['before_present'] is False
     assert configuration._journal(server).exists()
@@ -177,7 +188,8 @@ def test_new_keys_cannot_be_silently_left_behind_by_merge_only_import():
 def test_verification_distinguishes_boolean_from_integer():
     server = ConfigServer(1)
     records = []
-    with configuration.preserve_configuration(server, report=records.append, route=ROUTE):
+    unverified = []
+    with configuration.preserve_configuration(server, report=records.append, route=ROUTE, unverified=unverified.append):
         server.config[KEY] = True
     assert type(server.config[KEY]) is int
     assert records[0]['observed'] is True
@@ -233,3 +245,26 @@ def test_ingest_body_failure_is_recorded_without_hiding_handler_entry():
     ]
     plane.flush_hits()
     assert json.loads(plane.hits_path().read_text())['passes']['seeding']['body_failures'] == tally.body_failures
+
+
+def test_every_configuration_guard_says_where_a_lost_snapshot_goes():
+    """A guard that loses its snapshot must have somewhere to record it.
+
+    The keyword is required, so a new call site fails loudly rather than
+    silently -- but only when that path runs, which for the live passes means
+    CI. This is the same check, offline.
+    """
+    package = Path(__file__).resolve().parent
+    missing = []
+    for module in sorted(package.glob('*.py')):
+        if module.name.startswith('test_'):
+            continue
+        for node in ast.walk(ast.parse(module.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, 'id', None)
+            if name != 'preserve_configuration':
+                continue
+            if not any(keyword.arg == 'unverified' for keyword in node.keywords):
+                missing.append(f'{module.name}:{node.lineno}')
+    assert not missing, f'configuration guards with nowhere to record a lost snapshot: {missing}'
