@@ -36,3 +36,25 @@ def is_issuer_allowed(
         return False
 
     return tenant.casefold() in {t.strip().casefold() for t in allowed_tenants if t and t.strip()}
+
+
+def require_tenant_allowlist(tenant_id: str | None, allowed_tenants: list[str]) -> None:
+    """Reject a multi-tenant authority that has no tenant allowlist.
+
+    :raises ValueError: when ``tenant_id`` is a multi-tenant authority and
+        ``allowed_tenants`` is empty.
+    """
+    if not tenant_id:
+        return
+
+    if tenant_id.strip().casefold() not in MULTI_TENANT_AUTHORITIES:
+        return
+
+    if any(t and t.strip() for t in allowed_tenants):
+        return
+
+    raise ValueError(
+        f'MICROSOFT_CLIENT_TENANT_ID is {tenant_id!r} (multi-tenant) but OAUTH_ALLOWED_TENANTS is empty. '
+        'A multi-tenant authority without a tenant allowlist accepts sign-in from any Microsoft Entra '
+        'directory. Set OAUTH_ALLOWED_TENANTS to the tenant GUIDs permitted to sign in.'
+    )

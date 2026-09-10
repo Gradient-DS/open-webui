@@ -36,6 +36,7 @@ from open_webui.env import (
     log,
 )
 from open_webui.models.config import Config
+from open_webui.utils.oauth_issuer import require_tenant_allowlist
 
 
 async def seed_registered_defaults():
@@ -2540,6 +2541,7 @@ OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv('OAUTH_ALLOWED_D
 OAUTH_ALLOWED_TENANTS = [
     tenant.strip() for tenant in os.getenv('OAUTH_ALLOWED_TENANTS', '').split(',') if tenant.strip()
 ]
+require_tenant_allowlist(MICROSOFT_CLIENT_TENANT_ID, OAUTH_ALLOWED_TENANTS)
 
 OAUTH_UPDATE_PICTURE_ON_LOGIN = os.getenv('OAUTH_UPDATE_PICTURE_ON_LOGIN', 'False').lower() == 'true'
 

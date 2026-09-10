@@ -81,3 +81,34 @@ def test_tolerates_whitespace_in_allowlist_entries():
 
 def test_multi_tenant_authorities_contents():
     assert MULTI_TENANT_AUTHORITIES == frozenset({'organizations', 'common'})
+
+
+from open_webui.utils.oauth_issuer import require_tenant_allowlist
+
+
+def test_guard_raises_for_organizations_without_allowlist():
+    with pytest.raises(ValueError, match='OAUTH_ALLOWED_TENANTS'):
+        require_tenant_allowlist('organizations', [])
+
+
+def test_guard_raises_for_common_without_allowlist():
+    with pytest.raises(ValueError, match='OAUTH_ALLOWED_TENANTS'):
+        require_tenant_allowlist('common', [])
+
+
+def test_guard_is_case_insensitive_on_authority():
+    with pytest.raises(ValueError, match='OAUTH_ALLOWED_TENANTS'):
+        require_tenant_allowlist('Organizations', [])
+
+
+def test_guard_passes_for_organizations_with_allowlist():
+    require_tenant_allowlist('organizations', [NEO])
+
+
+def test_guard_passes_for_concrete_tenant_without_allowlist():
+    require_tenant_allowlist(NEO, [])
+
+
+def test_guard_passes_when_sso_not_configured():
+    require_tenant_allowlist('', [])
+    require_tenant_allowlist(None, [])
