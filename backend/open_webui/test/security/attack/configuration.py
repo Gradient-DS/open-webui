@@ -22,6 +22,9 @@ IMPORT = '/api/v1/configs/import'
 # far longer than a driven route: a timeout here loses evidence rather than
 # producing any.
 CONFIG_TIMEOUT_SECONDS = float(os.getenv('ATTACK_CONFIG_TIMEOUT_SECONDS', '300'))
+# Losing the snapshot is losing evidence however it is lost: a timeout, or a
+# connection the server dropped once the client's retry budget was spent.
+NO_RESPONSE = (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
 
 
 def _request(admin, method, path, **kwargs):
@@ -151,8 +154,12 @@ def preserve_configuration(admin, *, report, route, durable=False, unverified=No
     """
     try:
         before = snapshot(admin)
-    except requests.exceptions.Timeout as error:
-        _unverified(unverified, route, f'configuration snapshot timed out before the route: {error}')
+    except NO_RESPONSE as error:
+        _unverified(
+            unverified,
+            route,
+            f'configuration snapshot got no response before the route: {type(error).__name__}: {error}',
+        )
         yield
         return
     journal = _journal(admin) if durable else None
@@ -165,8 +172,12 @@ def preserve_configuration(admin, *, report, route, durable=False, unverified=No
     finally:
         try:
             restore(admin, before, report=report, route=route)
-        except requests.exceptions.Timeout as error:
-            _unverified(unverified, route, f'configuration snapshot timed out after the route: {error}')
+        except NO_RESPONSE as error:
+            _unverified(
+                unverified,
+                route,
+                f'configuration snapshot got no response after the route: {type(error).__name__}: {error}',
+            )
         else:
             # Only a completed restore may drop the journal. A restore that
             # failed -- loudly, or by timing out before it could verify -- is

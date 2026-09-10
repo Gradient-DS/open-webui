@@ -77,7 +77,7 @@ class Seeding:
     crashes: dict[str, str] = field(default_factory=dict)
     config_findings: list[dict] = field(default_factory=list)
     body_failures: list[dict] = field(default_factory=list)
-    timeouts: dict[str, str] = field(default_factory=dict)
+    unanswered: dict[str, str] = field(default_factory=dict)
     config_unverified: dict[str, str] = field(default_factory=dict)
     config_restore_verified: bool = False
 
@@ -140,7 +140,7 @@ def unentered_routes(pass_name=None):
     }
 
 
-def record_timeout(route_id, reason, *, pass_name):
+def record_unanswered(route_id, reason, *, pass_name):
     """Record a route that was driven but never answered.
 
     Deliberately touches neither `entered`, `accepted` nor `statuses`: a request
@@ -150,7 +150,7 @@ def record_timeout(route_id, reason, *, pass_name):
     """
     tally = _PASSES.setdefault(pass_name, Seeding())
     tally.expected.add(route_id)
-    tally.timeouts.setdefault(route_id, reason)
+    tally.unanswered.setdefault(route_id, reason)
     return False
 
 
@@ -341,7 +341,10 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
         try:
             response = actor.request(method, filled, **kwargs)
         except requests.exceptions.Timeout as error:
-            record_timeout(route_id, str(error), pass_name=pass_name)
+            # Only a timeout. A dropped connection stays fatal: the retry budget
+            # is already spent on it, a write may have committed unseen, and the
+            # stack being gone is not something to keep driving 600 routes over.
+            record_unanswered(route_id, f'{type(error).__name__}: {error}', pass_name=pass_name)
             return Outcome(0, False, '', timed_out=True)
         try:
             entered = record(route_id, response.status_code, response, pass_name=pass_name)
@@ -389,7 +392,7 @@ def _report(name, tally):
         f'{name}: {len(tally.entered)}/{len(tally.expected)} routes reached; '
         f'{len(tally.statuses)} driven; {len(tally.unentered)} unentered; '
         f'{len(tally.skipped)} explicitly unseedable; '
-        f'{len(tally.timeouts)} never answered; '
+        f'{len(tally.unanswered)} never answered; '
         f'{len(tally.config_unverified)} unverified for configuration'
     )
 

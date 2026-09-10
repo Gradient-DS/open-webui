@@ -429,11 +429,11 @@ def test_live_seeding_has_its_own_5xx_assertion(live_seeding):
 
 @needs_stack
 def test_live_seeding_reports_its_own_reach(live_seeding, record_property):
-    accounted = live_seeding.statuses.keys() | live_seeding.skipped.keys() | live_seeding.timeouts.keys()
+    accounted = live_seeding.statuses.keys() | live_seeding.skipped.keys() | live_seeding.unanswered.keys()
     assert accounted == live_seeding.expected
     record_property('seeding_reached', len(live_seeding.entered))
     record_property('seeding_unentered', len(live_seeding.unentered))
-    record_property('seeding_timeouts', len(live_seeding.timeouts))
+    record_property('seeding_unanswered', len(live_seeding.unanswered))
     record_property('seeding_config_unverified', len(live_seeding.config_unverified))
     assert live_seeding.entered, 'No seeding request entered a handler'
 
@@ -458,10 +458,38 @@ def test_a_route_that_never_answers_is_measured_rather_than_ending_the_pass():
     assert outcome.timed_out and not outcome.entered
     tally = plane._PASSES['drive']
     assert 'POST /slow' in tally.expected
-    assert 'POST /slow' in tally.timeouts
+    assert 'POST /slow' in tally.unanswered
     assert 'POST /slow' not in tally.entered
     assert 'POST /slow' not in tally.accepted
     assert 'POST /slow' not in tally.statuses
+
+
+def test_a_dropped_connection_on_a_driven_route_stays_fatal():
+    # The opposite of a timeout, deliberately. The client has already spent its
+    # retry budget on the drop; a write may have committed unseen, and a stack
+    # that has gone away is not something to keep driving hundreds of routes
+    # over while reporting them as merely unanswered.
+    client = Mock(spec=plane.transport.AttackClient)
+    client.request.side_effect = requests.exceptions.ConnectionError('Connection aborted, RemoteDisconnected')
+    with pytest.raises(requests.exceptions.ConnectionError):
+        plane._drive_response(client, 'POST /silent', '/silent', 'drive')
+
+
+def test_a_configuration_guard_that_loses_its_connection_leaves_the_pass_unverified(monkeypatch):
+    # The guard is the exception: losing its snapshot is losing evidence, and
+    # ending the pass there would lose every route after it as well. CI drops
+    # this connection where a workstation merely runs slow.
+    monkeypatch.setattr(plane, 'preserve_configuration', configuration.preserve_configuration)
+    monkeypatch.setattr(
+        configuration,
+        'snapshot',
+        Mock(side_effect=requests.exceptions.ConnectionError('Connection aborted, RemoteDisconnected')),
+    )
+    client = fake_client()
+    tally = plane.seed_every_writable_field(client, {}, spec=tiny_spec(['POST /item']), payloads=['hostile'])
+    assert client.request.called, 'the pass stopped instead of driving the route unguarded'
+    assert 'POST /item' in tally.config_unverified
+    assert not tally.config_restore_verified
 
 
 def test_a_timed_out_route_is_never_counted_as_covered():
@@ -475,7 +503,7 @@ def test_a_timed_out_route_is_reported_by_the_reach_control():
     # timeout is a third outcome beside a status and an unseedable skip.
     plane._drive_response(timing_out_client(), 'POST /slow', '/slow', 'seeding')
     tally = plane._PASSES['seeding']
-    assert tally.statuses.keys() | tally.skipped.keys() | tally.timeouts.keys() == tally.expected
+    assert tally.statuses.keys() | tally.skipped.keys() | tally.unanswered.keys() == tally.expected
 
 
 def test_a_timed_out_seed_does_not_spend_the_rest_of_its_payload_batches():
@@ -573,7 +601,7 @@ def test_live_drive_reports_its_own_reach(live_drive, record_property):
     assert live_drive.keys() | tally.skipped.keys() == set(plane.operations())
     record_property('drive_reached', len(tally.entered))
     record_property('drive_unentered', len(tally.unentered))
-    record_property('drive_timeouts', len(tally.timeouts))
+    record_property('drive_unanswered', len(tally.unanswered))
     record_property('drive_config_unverified', len(tally.config_unverified))
     record_property('combined_unentered', len(plane.unentered_routes()))
     assert tally.entered, 'No drive request entered a handler'
