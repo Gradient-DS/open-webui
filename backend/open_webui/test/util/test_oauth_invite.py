@@ -145,6 +145,7 @@ def oauth_manager_with_mocks(monkeypatch):
         OAUTH_ALLOWED_ROLES=['user', 'admin'],
         OAUTH_ADMIN_ROLES=['admin'],
         OAUTH_ALLOWED_DOMAINS=['*'],
+        OAUTH_ALLOWED_TENANTS=[],
         ENABLE_OAUTH_SIGNUP=True,
         OAUTH_INVITE_REQUIRED=False,
         OAUTH_MERGE_ACCOUNTS_BY_EMAIL=False,
