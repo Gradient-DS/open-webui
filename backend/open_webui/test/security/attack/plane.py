@@ -528,7 +528,12 @@ def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
     routes = operations(spec)
     # Without a body, every route whose schema requires one answers 422 and is
     # never entered -- in the pass whose whole job is to reach each route once.
-    skeletons = body_skeletons(spec)
+    # Only where the seeding pass sends nothing, though: this body IS the
+    # skeleton, so on a route that replaces a configuration section it blanks
+    # every required field at once, which is COVERAGE-001. Coverage is the
+    # union across passes, so a route seeding already enters needs no body here.
+    seeded = {route for route, fields in writable_string_fields(spec).items() if fields}
+    skeletons = {route: body for route, body in body_skeletons(spec).items() if route not in seeded}
     tally = _PASSES['drive'] = Seeding(expected=set(routes))
     outcomes = {}
     try:

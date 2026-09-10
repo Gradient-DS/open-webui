@@ -743,12 +743,31 @@ def test_a_route_the_response_refuses_wholesale_is_not_retried_with_the_same_bod
 
 
 def test_the_drive_pass_sends_the_body_the_schema_requires():
+    # A route with no writable string fields is one the seeding pass never
+    # seeds, so this pass is the only one that can reach it -- and without a
+    # body it answers 422 to the request meant to cover it.
     client = fake_client(200)
-    spec = tiny_spec(['POST /item'])
+    spec = {
+        'paths': {
+            '/item': {
+                'post': {
+                    'requestBody': {
+                        'content': {
+                            'application/json': {
+                                'schema': {
+                                    'type': 'object',
+                                    'required': ['count'],
+                                    'properties': {'count': {'type': 'integer'}},
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     plane.drive_every_route(client, {}, spec=spec)
-    # Without this the pass whose one job is to reach every route sends no
-    # body at all, and every route with a required schema answers 422.
-    assert client.request.call_args_list[0].kwargs['json'] == plane.body_skeletons(spec)['POST /item']
+    assert client.request.call_args_list[0].kwargs['json'] == {'count': 0}
 
 
 def test_the_drive_pass_sends_no_body_where_the_route_declares_none():
@@ -789,3 +808,34 @@ def test_only_the_all_fields_body_rides_the_skeleton():
     assert {'engine': '', 'model': ''} not in bodies
     for body in bodies[1:]:
         assert set(body) <= {'a', 'b'}, body
+
+
+def test_the_drive_pass_sends_a_body_only_where_seeding_sends_none():
+    # The other half of COVERAGE-001. The drive pass's body IS the skeleton, so
+    # on a route that replaces a configuration section it blanks every required
+    # field at once -- which is how `retrieval/embedding/update` lost the
+    # embedding engine and model after the seeding pass had been made safe.
+    # Drive exists to reach routes nothing else reaches, and coverage is the
+    # union across passes, so a route the seeding pass already enters needs no
+    # body here and gets none.
+    spec = tiny_spec(['POST /seeded'])
+    spec['paths']['/unseeded'] = {
+        'post': {
+            'requestBody': {
+                'content': {
+                    'application/json': {
+                        'schema': {
+                            'type': 'object',
+                            'required': ['enabled'],
+                            'properties': {'enabled': {'type': 'boolean'}},
+                        }
+                    }
+                }
+            }
+        }
+    }
+    client = fake_client(200)
+    plane.drive_every_route(client, {}, spec=spec)
+    sent = {call.args[1]: call.kwargs.get('json', '<no body>') for call in client.request.call_args_list}
+    assert sent['/seeded'] == '<no body>'
+    assert sent['/unseeded'] == {'enabled': False}
