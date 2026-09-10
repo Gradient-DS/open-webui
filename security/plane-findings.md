@@ -1,14 +1,42 @@
-**Status: 11 open findings (PLANE-001–010, PLANE-012), 1 fixed (PLANE-011);
-BLOCKER-001 resolved; CI-stack gaps: 0 open, 3 fixed (CI-001–003).**
+**Status: 12 open findings (PLANE-001–010, PLANE-012, PLANE-013), 1 fixed
+(PLANE-011); BLOCKER-001 resolved; CI-stack gaps: 1 open (CI-004), 3 fixed
+(CI-001–003); harness gaps: 1 open (COVERAGE-001).**
 
-**The coverage gate is live and red at 96 routes.** `test_every_route_is_driven_or_waived`
-merged 2026-09-10 (PR #290) and `security/route-coverage.toml` does not exist yet,
-so 96 operations in the committed document are driven by no security test and
-explained by no waiver. Reasons must come from observed behaviour. Two groups are
-already evidenced: the 7 notifications routes by CI-003 below, and the 5 OAuth
-routes by the deliberately unconfigured providers. Note that
-`POST /api/v1/auths/signin` and `POST /api/v1/configs/import` are in the 96 while
-being used constantly by the identity helper and the configuration guard — the
+**The coverage gate is red at 57 routes, down from 96, and the 50 that were the
+harness rather than the application are down to 5.** The gate merged
+2026-09-10 (PR #290) with a first verdict of 96. Classifying those 96 by what
+the owner-driving passes observed showed 50 of them were not a property of the
+application at all: `writable_string_fields` reports string leaves, so a body
+built from it omits every required bool, int, dict and nested scalar the schema
+also demands. `POST /api/v1/images/config/update` was driven 91 times and
+entered zero; `POST /api/v1/auths/admin/config` 58 times for 16 missing
+`ENABLE_*` booleans. Waiving those would have been the gate recording its own
+blind spot as a decision.
+
+A schema-derived body skeleton (`Gradient-DS/.github#17`) closes it. Measured on
+the CI stack with every pass completing and **zero errors**:
+
+```
+seeding 225/252 · drive 373/662 · shapes 266/372 · query 48/54 · crossuser 260/415
+```
+
+Drive reached 373 where it had never run a body at all. What remains, by cause:
+
+| Cause | Count | Note |
+| --- | --- | --- |
+| 404 seen — feature off or resource absent | 27 | mostly waivable on evidence |
+| never attempted — skipped by every owner pass | 19 | includes the 5 evidenced OAuth routes |
+| 403/400/302 — a guard answered | 6 | includes `auths/signin`, `auths/signup` |
+| 422 only | 5 | **all five are multipart uploads** |
+
+The 422 cluster that motivated this work is finished except for multipart, which
+needs a different code path in the driver rather than a better body.
+
+The skeleton has a defect of its own, recorded as COVERAGE-001 and fixed here:
+it must not fill required fields a body is not targeting on a route that
+replaces a configuration section. Two of the 57 remain a judgement call rather
+than a measurement: `POST /api/v1/auths/signin` and `POST /api/v1/configs/import`
+are used constantly by the identity helper and the configuration guard — the
 harness using a route is not a security test driving it, and for those the answer
 may be to drive them rather than waive them.
 
@@ -675,6 +703,116 @@ Nothing was ever miscounted as covered: the 404 is the application's own
 NOT_FOUND and `entered_the_handler` refuses 404 unconditionally. The cost was
 that the failing seed aborted every dependent live pass — 54 errors from one
 declaration.
+
+## PLANE-013: restoring a configuration does not reload what was derived from it
+
+Status: **open (application).** Narrowed from a much larger claim; see
+COVERAGE-001 below for the harness half, which was the larger part.
+
+Measured after a full run: `GET /api/v1/configs/export` read correct —
+`rag.embedding_engine: "openai"`, `rag.embedding_model:
+"text-embedding-3-small"`, the right stub URL and key — and
+`POST /api/v1/memories/add` still answered **500** with
+
+    No embedding model is loaded. Set RAG_EMBEDDING_MODEL to a valid
+    SentenceTransformer model name, or configure an external
+    RAG_EMBEDDING_ENGINE (ollama, openai, azure_openai).
+
+A `docker restart` on that same configuration answered 200. Re-importing a
+snapshot that *differs* from the current values also answered 200; importing
+values already equal to the current ones does not, because nothing changes and
+nothing reloads.
+
+The operator-facing shape is the reason this is a finding rather than a harness
+note. An admin who saves a bad embedding configuration and then corrects it back
+to what it was keeps a wedged instance until the process restarts, while the
+configuration UI and `configs/export` report that everything is correct. Nothing
+distinguishes "configured" from "loaded".
+
+**A correction, because it cost this leg two wrong turns.**
+`GET /api/v1/configs/export` returns a **flat** document of ~491 dotted keys —
+`rag.embedding_engine` is a top-level key, not `rag` -> `embedding_engine`.
+Reading it as nested returns `None` for every lookup, which reads exactly like a
+wiped configuration and is not one. Two earlier revisions of this entry recorded
+that phantom.
+
+**The guard's verification is narrower than it sounds.** A pass records
+`config_restore_verified: true` beside its PLANE-001 findings. `restore()`
+compares and re-imports configuration *values*; it says nothing about what the
+application derived from them, and a pass-boundary re-import does not help,
+because the values it writes are already equal. Until that gap is closed,
+`config_restore_verified` should not be read as "the stack is as it was".
+
+## COVERAGE-001: a neutral skeleton value is not neutral on a configuration route
+
+Status: **open, and it is the payload builder's own defect.**
+
+The skeleton added for the 50 uncovered routes fills required fields the caller
+is not targeting with inert defaults — `""` for a string. That is right for a
+name or a title. It is wrong for a field that configures a subsystem, and every
+"replace this whole section" configuration route has several.
+
+The exact body, isolated by driving the pass's real shapes one at a time and
+probing embedding health after each:
+
+    POST /api/v1/retrieval/embedding/update
+    {"RAG_EMBEDDING_ENGINE": "", "RAG_EMBEDDING_MODEL": "",
+     "azure_openai_config": {"key": "[click](file:///etc/passwd#gdsprobe7f3a)"}}
+    -> 200
+
+A single-field probe of `azure_openai_config.key` blanks the embedding engine
+and model as a side effect, the application does exactly what it was told, and
+the model is unloaded for the rest of the process's life. PLANE-013 is then why
+the guard's restore does not undo it, and one failing seed aborts every
+dependent pass: `Seeding POST /api/v1/memories/add failed (HTTP 500)`, 15
+errors.
+
+**A control shows this is reachability, not a new application defect.** The same
+seeding pass on unmodified `dev` leaves `POST /api/v1/memories/add` answering
+200. `retrieval/embedding/update` declares `RAG_EMBEDDING_ENGINE` and
+`RAG_EMBEDDING_MODEL` required, so every single-field and leave-one-out body was
+refused before the handler and only the all-fields body ever ran. The skeleton
+is what made those shapes valid.
+
+The all-fields body is the one that earns coverage; the single-field and
+leave-one-out bodies are controls against a sibling field silently vetoing a
+write. Any fix has to keep both, so it cannot simply stop sending them. The
+options are to seed a configuration route's untargeted required fields from the
+guard's own snapshot rather than from a neutral default, or to treat "required
+here means send the current value" as a property the skeleton cannot supply and
+withhold those shapes only for routes that replace a whole section.
+
+## CI-004: the CI stack image is older than `dev`, and `down -v` reverts the difference
+
+Status: **open**, and it is a trap rather than a bug. The `open-webui-ci` image
+predates PR #289 and PR #291 — nine application files differ from the tree,
+`services/export/service.py` among them. Sessions have been closing that gap by
+`docker cp`-ing application code into the *running container*, which works and
+survives a restart, but **not** a `docker compose down -v`: recreating the
+container restores the image's code, silently.
+
+The failure it produces reads like a regression in whatever changed most
+recently. A run on the recreated stack aborted with
+
+    Data export failed for user <id>:
+    'ModelsTable' object has no attribute 'get_models_by_user_id'
+
+which is PLANE-011 exactly — the regression #289 fixed and this document
+records as fixed. `seed_export` then timed out at 60 seconds, and one failing
+seed aborted every dependent live pass: **54 errors**, the same shape and the
+same count as CI-003.
+
+The control already exists and is written down: verify a sha256 manifest of
+`backend/**/*.py` on both sides before trusting a run. This is the instance
+that shows why. Two cautions for whoever automates it — `docker cp` needs a
+`docker restart` afterwards for the app process to load the new code, and
+macOS `sort` and the container's `sort` collate `_` and `.` differently, so
+compare under `LC_ALL=C` or the manifests differ by ordering alone and the
+check cries wolf.
+
+Rebuilding the image is the durable fix. It is deferred rather than dismissed:
+this document already records two overnight builds OOM-killed here, so the
+build wants the stack stopped and a session that can afford it.
 
 ## BLOCKER-001: live runs cannot set up identities on v0.11.3
 

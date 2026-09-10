@@ -41,13 +41,14 @@ import json
 import os
 import re
 from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import dataclass, field
 from urllib.parse import quote
 from uuid import uuid4
 
 import requests
 from hostile_corpus import REFLECTION_PROBE, fetch_payloads
-from openapi_surface import writable_string_fields
+from openapi_surface import body_skeletons, constrained_string_fields, writable_string_fields
 
 from . import client as transport
 from .configuration import preserve_configuration
@@ -63,6 +64,11 @@ class Outcome:
     body: str
     reflected: bool = False
     timed_out: bool = False
+    #: Dotted paths this response refused, read from the complete body before
+    #: `body` above is truncated for diagnostics. A validation detail naming
+    #: sixteen fields outruns 2000 characters, and a retry built from half of
+    #: one would revert the wrong fields.
+    rejected: frozenset = frozenset()
 
 
 @dataclass
@@ -240,7 +246,9 @@ def _plant(node, tokens, payload):
         return node if isinstance(node, (dict, list)) else payload
     key, *rest = tokens
     if key == 0:
-        if not isinstance(node, list):
+        # `not node` matters once a skeleton is in play: an empty list IS a
+        # list, and indexing [0] into it raises rather than planting.
+        if not isinstance(node, list) or not node:
             node = [None]
     elif not isinstance(node, dict):
         node = {}
@@ -249,12 +257,48 @@ def _plant(node, tokens, payload):
     return node
 
 
-def _body_for(fields, payload):
-    body = None
+def _body_for(fields, payload, skeleton=None):
+    """Plant `fields` onto the schema's skeleton, or onto nothing without one.
+
+    The skeleton carries the required bools, ints, dicts and nested scalars no
+    string derivation can report. Without it a body built from writable fields
+    alone is rejected by validation before the handler runs, and the route is
+    driven without ever being entered -- 50 routes measured exactly that.
+    """
+    body = deepcopy(skeleton) if skeleton is not None else None
     for name in sorted(fields, key=lambda name: (-len(_tokens(name)), name)):
         value = payload[name] if isinstance(payload, dict) else payload
         body = _plant(body, _tokens(name), value)
     return body if body is not None else {}
+
+
+def _rejected_fields(body):
+    """The dotted paths a validation response names, spelled as the derivation spells them.
+
+    Some fields are policed by validators the spec cannot express -- a URL
+    check, a recurrence-rule parse -- so no derived payload enters those
+    handlers and nothing about the schema says why. The response does: it
+    names the field it refused. Reverting exactly those to their skeleton
+    value is the only way to reach the handler behind them, and it is the
+    response's own evidence rather than a guess.
+    """
+    detail = body.get('detail') if isinstance(body, dict) else None
+    if not isinstance(detail, list):
+        return set()
+    rejected = set()
+    for item in detail:
+        location = item.get('loc') if isinstance(item, dict) else None
+        if not isinstance(location, list) or not location:
+            continue
+        path = ''
+        for segment in location[1:]:  # location[0] is the source, e.g. 'body'
+            if isinstance(segment, int):
+                path += '[]'
+            else:
+                path = f'{path}.{segment}' if path else str(segment)
+        if path:
+            rejected.add(path)
+    return rejected
 
 
 def _contains(body, name, payload):
@@ -364,6 +408,7 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
                 entered,
                 response.text[:2000],
                 'text/html' in response.headers.get('Content-Type', '').lower() and REFLECTION_PROBE in response.text,
+                rejected=frozenset() if entered else _rejected_fields(transport.json_body(response)),
             )
         finally:
             response.close()
@@ -380,22 +425,57 @@ def _target(route_id, parameters, tally):
         return None
 
 
-def _seed_route(client, route_id, filled, fields, payloads, full):
+def _seed_route(client, route_id, filled, fields, payloads, full, *, skeleton=None, constrained=()):
+    # A payload written into an enum, a const, a pattern or a modelled format
+    # is refused before the handler runs, so carrying one in the all-fields
+    # body costs the route its only chance of being entered. Those fields keep
+    # their skeleton value here and are still driven individually below, where
+    # the refusal is the measurement rather than a route reported as attacked
+    # and never reached.
+    plantable = [name for name in fields if name not in set(constrained)]
     for batch in _payload_batches(route_id, fields, payloads, full=full):
-        body = _body_for(fields, batch)
+        body = _body_for(plantable, batch, skeleton)
         outcome = _drive_one(client, route_id, filled, 'seeding', json=body)
         if outcome.timed_out:
             # Every follow-up drive would pay the same timeout and measure the
             # same silence. One recorded timeout per route is the measurement.
             continue
+        if not outcome.entered:
+            _retry_without_rejected(client, route_id, filled, plantable, batch, skeleton, outcome)
         for name in fields:
             if (outcome.status >= 400 and len(fields) > 1) or not _contains(body, name, batch[name]):
+                # No skeleton here, and that is COVERAGE-001. The skeleton
+                # fills required fields this body is not targeting, which is
+                # inert for a name and destructive for a field that configures
+                # a subsystem: probing `azure_openai_config.key` on a route
+                # that replaces a whole configuration section also blanked the
+                # embedding engine and model, and the application did exactly
+                # what it was told. The all-fields body above is what earns
+                # coverage; these probe whether a sibling field vetoes a write,
+                # and they do that carrying only what they probe.
                 _drive_one(client, route_id, filled, 'seeding', json=_body_for([name], batch))
         # Deliberately outside the rejection condition: N requests, including
         # after 201 and on one-field routes (where omission sends an empty body).
-        for omitted in fields:
-            kept = [name for name in fields if name != omitted]
+        for omitted in plantable:
+            kept = [name for name in plantable if name != omitted]
             _drive_one(client, route_id, filled, 'seeding', json=_body_for(kept, batch))
+
+
+def _retry_without_rejected(client, route_id, filled, plantable, batch, skeleton, outcome):
+    """Drive once more with the fields the response itself refused reverted.
+
+    Exactly one retry, and only when the response named fields this body
+    actually planted: a second rejection is the application's answer, not an
+    invitation to keep guessing. `outcome` is deliberately not replaced -- the
+    first attempt is what decides whether each field is driven individually,
+    and a retry that succeeds must not silence the evidence that the original
+    payload was refused.
+    """
+    kept = [name for name in plantable if name not in outcome.rejected]
+    # `kept` must still carry something: a retry that plants nothing is not an
+    # attack, it is the bare skeleton, which leave-one-out already sends.
+    if outcome.rejected and kept and len(kept) < len(plantable):
+        _drive_one(client, route_id, filled, 'seeding', json=_body_for(kept, batch, skeleton))
 
 
 def _report(name, tally):
@@ -410,6 +490,8 @@ def _report(name, tally):
 
 def seed_every_writable_field(client, parameters, *, spec=SPEC, payloads=None, full=None) -> Seeding:
     fields_by_route = {route: fields for route, fields in writable_string_fields(spec).items() if fields}
+    skeletons = body_skeletons(spec)
+    constrained = constrained_string_fields(spec)
     tally = _PASSES['seeding'] = Seeding(expected=set(fields_by_route))
     payloads = tuple(fetch_payloads() if payloads is None else payloads)
     full = os.getenv('ATTACK_FULL_CORPUS') == '1' if full is None else full
@@ -424,7 +506,16 @@ def seed_every_writable_field(client, parameters, *, spec=SPEC, payloads=None, f
             for route in sorted(fields_by_route, key=_read_before_destroy):
                 filled = _target(route, parameters, tally)
                 if filled is not None:
-                    _seed_route(client, route, filled, fields_by_route[route], payloads, full)
+                    _seed_route(
+                        client,
+                        route,
+                        filled,
+                        fields_by_route[route],
+                        payloads,
+                        full,
+                        skeleton=skeletons.get(route),
+                        constrained=constrained.get(route, ()),
+                    )
                 flush_hits()
         tally.config_restore_verified = not tally.config_unverified
     finally:
@@ -435,6 +526,14 @@ def seed_every_writable_field(client, parameters, *, spec=SPEC, payloads=None, f
 
 def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
     routes = operations(spec)
+    # Without a body, every route whose schema requires one answers 422 and is
+    # never entered -- in the pass whose whole job is to reach each route once.
+    # Only where the seeding pass sends nothing, though: this body IS the
+    # skeleton, so on a route that replaces a configuration section it blanks
+    # every required field at once, which is COVERAGE-001. Coverage is the
+    # union across passes, so a route seeding already enters needs no body here.
+    seeded = {route for route, fields in writable_string_fields(spec).items() if fields}
+    skeletons = {route: body for route, body in body_skeletons(spec).items() if route not in seeded}
     tally = _PASSES['drive'] = Seeding(expected=set(routes))
     outcomes = {}
     try:
@@ -448,7 +547,8 @@ def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
             for route in routes:
                 filled = _target(route, parameters, tally)
                 if filled is not None:
-                    outcomes[route] = _drive_one(client, route, filled, 'drive')
+                    body = {'json': skeletons[route]} if route in skeletons else {}
+                    outcomes[route] = _drive_one(client, route, filled, 'drive', **body)
                 flush_hits()
         tally.config_restore_verified = not tally.config_unverified
     finally:
