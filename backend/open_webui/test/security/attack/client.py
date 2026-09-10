@@ -111,14 +111,20 @@ def entered_the_handler(response: requests.Response) -> bool:
 
 
 class AuthenticationError(RuntimeError):
-    pass
+    def __init__(self, *args, status: int | None = None):
+        super().__init__(*args)
+        # The refusal that produced this, where one exists. Callers repairing an
+        # identity must distinguish a rejected credential from a throttle or a
+        # 2FA challenge: only the first is repairable, and repairing the others
+        # would destroy a working password to work around a temporary refusal.
+        self.status = status
 
 
 def session_body(response: requests.Response, email: str) -> dict:
     body = json_body(response)
     context = f'Attack identity {email}: authentication failed (HTTP {response.status_code})'
     if not 200 <= response.status_code < 300 or not isinstance(body, dict):
-        raise AuthenticationError(context)
+        raise AuthenticationError(context, status=response.status_code)
     if body.get('requires_2fa') or body.get('requires_2fa_setup'):
         raise AuthenticationError(f'{context}: 2FA challenge or setup is not a session')
     token = body.get('token')

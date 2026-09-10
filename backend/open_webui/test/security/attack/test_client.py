@@ -566,6 +566,30 @@ def test_identities_can_be_adopted_without_local_state(identity_server, tmp_path
         second.close()
 
 
+def test_a_new_setup_leaves_the_previous_passs_sessions_usable(identity_server, tmp_path):
+    from .identities import ensure_identities
+
+    state_path = tmp_path / 'identities.json'
+    first = ensure_identities('http://app', state_path=state_path)
+    earlier_ids = [client.identity['id'] for client in first.clients]
+    second = ensure_identities('http://app', state_path=state_path)
+    try:
+        # Passes are serial, but a pass keeps its identities open through its own
+        # teardown while the next pass has already set up. Repairing by resetting
+        # a password revokes every session that identity holds (v0.11.3), so an
+        # unconditional reset here strands the previous pass mid-cleanup.
+        for client, user_id in zip(first.clients, earlier_ids):
+            assert client.verify_identity(user_id=user_id)
+        for client, user_id in zip(second.clients, earlier_ids):
+            assert client.verify_identity(user_id=user_id)
+        # Distinct jti per pass is still the point; sharing one would mean a
+        # signout driven by either pass took the other down with it.
+        assert {client.token for client in first.clients}.isdisjoint(client.token for client in second.clients)
+    finally:
+        first.close()
+        second.close()
+
+
 def test_repeated_suite_setup_and_wrong_password_check_survive_exhausted_stable_buckets(identity_server, tmp_path):
     from .identities import ADMIN_EMAIL, INTRUDER_EMAIL, USER_EMAIL, ensure_identities
 

@@ -138,11 +138,30 @@ def signin_alias(admin, user_id, email, **fields):
         _update(admin, user_id, email=email)
 
 
+def _restore_password(admin, user_id, alias):
+    """Give an identity back the standard password after a pass destroyed it."""
+    _update(admin, user_id, password=PASSWORD)
+    _wait_out_the_revoked_second()
+    if user_id == admin.user_id:
+        admin.reauthenticate(alias, PASSWORD)
+
+
 def _fresh_login(admin, user_id, email, role):
     client = None
     try:
-        with signin_alias(admin, user_id, email, password=PASSWORD, role=role, name=f'Attack {role}') as alias:
-            client = login(alias, PASSWORD, base_url=admin.base_url, role=role)
+        with signin_alias(admin, user_id, email, role=role, name=f'Attack {role}') as alias:
+            try:
+                client = login(alias, PASSWORD, base_url=admin.base_url, role=role)
+            except AuthenticationError as error:
+                # Reset the password only when it is the thing that is broken.
+                # Since v0.11.3 a reset revokes every session the identity holds,
+                # and the previous pass is still holding one while its teardown
+                # runs, so an unconditional reset strands that pass. A throttle
+                # or a 2FA challenge is not a credential the reset would fix.
+                if error.status != 400:
+                    raise
+                _restore_password(admin, user_id, alias)
+                client = login(alias, PASSWORD, base_url=admin.base_url, role=role)
             if client.identity['id'] != user_id:
                 raise AuthenticationError('Repair signed in as a different user')
         client.verify_identity(email=email, role=role, user_id=user_id)
