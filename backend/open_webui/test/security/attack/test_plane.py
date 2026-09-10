@@ -691,7 +691,8 @@ def test_a_constrained_field_keeps_its_skeleton_value_but_is_still_driven_alone(
     assert {'kind': 'hostile'} in bodies
     # Leave-one-out omits only what the all-fields body actually planted:
     # dropping a field it never carried would repeat a request already sent.
-    assert bodies[-1] == {'kind': 'page'}
+    # It carries no skeleton either, per COVERAGE-001.
+    assert bodies[-1] == {}
 
 
 def test_a_refused_field_is_reverted_once_and_the_refusal_is_still_recorded():
@@ -714,10 +715,9 @@ def test_a_refused_field_is_reverted_once_and_the_refusal_is_still_recorded():
     assert bodies[0] == {'start': 0, 'rrule': 'hostile', 'title': 'hostile'}
     # The retry drops exactly the field the response named, and nothing else.
     assert bodies[1] == {'start': 0, 'title': 'hostile'}
-    # And the original refusal still drives every field individually -- on the
-    # skeleton, so the refusal measured is the field's own and not a missing
-    # `start` -- so the payload that was refused stays in the measurement.
-    assert {'start': 0, 'rrule': 'hostile'} in bodies
+    # And the original refusal still drives every field individually, so the
+    # payload that was refused stays in the measurement.
+    assert {'rrule': 'hostile'} in bodies
 
 
 def test_a_response_that_names_no_field_costs_no_extra_request():
@@ -739,7 +739,7 @@ def test_a_route_the_response_refuses_wholesale_is_not_retried_with_the_same_bod
     ]
     plane._seed_route(client, 'POST /item', '/item', ['a'], ['hostile'], False, skeleton={'x': 0})
     bodies = [call.kwargs['json'] for call in client.request.call_args_list]
-    assert bodies == [{'x': 0, 'a': 'hostile'}, {'x': 0}]
+    assert bodies == [{'x': 0, 'a': 'hostile'}, {}]
 
 
 def test_the_drive_pass_sends_the_body_the_schema_requires():
@@ -763,3 +763,29 @@ def test_every_route_with_a_json_body_in_the_committed_spec_has_a_skeleton():
     writable = plane.writable_string_fields(seeds.SPEC)
     assert set(writable) <= set(skeletons)
     assert len(skeletons) >= len(writable)
+
+
+def test_only_the_all_fields_body_rides_the_skeleton():
+    # COVERAGE-001. The skeleton fills required fields the body is not
+    # targeting, which is inert for a name and destructive for a field that
+    # configures a subsystem: a single-field probe of one key on a route that
+    # replaces a whole configuration section blanks every other required key,
+    # and the application does exactly what it was told. The all-fields body is
+    # what earns coverage, so it keeps the skeleton; the probes that exist to
+    # catch a sibling field vetoing a write go back to carrying only what they
+    # are probing, which is what they carried before the skeleton existed.
+    client = fake_client(400)
+    plane._seed_route(
+        client,
+        'POST /item',
+        '/item',
+        ['a', 'b'],
+        ['hostile'],
+        False,
+        skeleton={'engine': '', 'model': ''},
+    )
+    bodies = [call.kwargs['json'] for call in client.request.call_args_list]
+    assert bodies[0] == {'engine': '', 'model': '', 'a': 'hostile', 'b': 'hostile'}
+    assert {'engine': '', 'model': ''} not in bodies
+    for body in bodies[1:]:
+        assert set(body) <= {'a', 'b'}, body

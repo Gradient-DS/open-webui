@@ -444,12 +444,21 @@ def _seed_route(client, route_id, filled, fields, payloads, full, *, skeleton=No
             _retry_without_rejected(client, route_id, filled, plantable, batch, skeleton, outcome)
         for name in fields:
             if (outcome.status >= 400 and len(fields) > 1) or not _contains(body, name, batch[name]):
-                _drive_one(client, route_id, filled, 'seeding', json=_body_for([name], batch, skeleton))
+                # No skeleton here, and that is COVERAGE-001. The skeleton
+                # fills required fields this body is not targeting, which is
+                # inert for a name and destructive for a field that configures
+                # a subsystem: probing `azure_openai_config.key` on a route
+                # that replaces a whole configuration section also blanked the
+                # embedding engine and model, and the application did exactly
+                # what it was told. The all-fields body above is what earns
+                # coverage; these probe whether a sibling field vetoes a write,
+                # and they do that carrying only what they probe.
+                _drive_one(client, route_id, filled, 'seeding', json=_body_for([name], batch))
         # Deliberately outside the rejection condition: N requests, including
         # after 201 and on one-field routes (where omission sends an empty body).
         for omitted in plantable:
             kept = [name for name in plantable if name != omitted]
-            _drive_one(client, route_id, filled, 'seeding', json=_body_for(kept, batch, skeleton))
+            _drive_one(client, route_id, filled, 'seeding', json=_body_for(kept, batch))
 
 
 def _retry_without_rejected(client, route_id, filled, plantable, batch, skeleton, outcome):
