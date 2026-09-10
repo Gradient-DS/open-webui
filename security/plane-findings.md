@@ -2,44 +2,43 @@
 (PLANE-011); BLOCKER-001 resolved; CI-stack gaps: 1 open (CI-004), 3 fixed
 (CI-001–003); harness gaps: 1 open (COVERAGE-001).**
 
-**The coverage gate is live and red at 96 routes, and 50 of them were the
-harness, not the application.** `test_every_route_is_driven_or_waived` merged
-2026-09-10 (PR #290) and `security/route-coverage.toml` still does not exist.
-Classifying the 96 by what the owner-driving passes actually observed:
+**The coverage gate is red at 57 routes, down from 96, and the 50 that were the
+harness rather than the application are down to 5.** The gate merged
+2026-09-10 (PR #290) with a first verdict of 96. Classifying those 96 by what
+the owner-driving passes observed showed 50 of them were not a property of the
+application at all: `writable_string_fields` reports string leaves, so a body
+built from it omits every required bool, int, dict and nested scalar the schema
+also demands. `POST /api/v1/images/config/update` was driven 91 times and
+entered zero; `POST /api/v1/auths/admin/config` 58 times for 16 missing
+`ENABLE_*` booleans. Waiving those would have been the gate recording its own
+blind spot as a decision.
 
-| Cause | Count |
-| --- | --- |
-| 422 only — attacked repeatedly, body refused before the handler | 50 |
-| 404 seen — feature off or resource absent | 23 |
-| never attempted — skipped by every owner pass | 19 |
-| 403 seen, or other | 4 |
+A schema-derived body skeleton (`Gradient-DS/.github#17`) closes it. Measured on
+the CI stack with every pass completing and **zero errors**:
 
-The 50 were not a property of the application. `writable_string_fields` reports
-string leaves, so a body built from it omits every required bool, int, dict and
-nested scalar the schema also demands —
-`POST /api/v1/images/config/update` was driven 91 times and entered zero,
-`POST /api/v1/auths/admin/config` 58 times for 16 missing `ENABLE_*` booleans.
-Waiving those would have been the gate recording its own blind spot as a
-decision. The fix is a schema-derived body skeleton
-(`Gradient-DS/.github#17`); measured route by route, **38 of the 50 then enter a
-handler**. Of the remainder, five are multipart uploads needing a different code
-path in the driver, five answer 404 for want of a seeded *body* field (the seed
-mechanism covers path parameters only), and two are refused by Pydantic
-validators the spec does not express.
+```
+seeding 225/252 · drive 373/662 · shapes 266/372 · query 48/54 · crossuser 260/415
+```
 
-**Landing it is blocked on COVERAGE-001**, a defect in the skeleton itself: on
-a route that replaces a whole configuration section, filling the *untargeted*
-required fields with a neutral `""` blanks them. A single-field probe of
-`azure_openai_config.key` therefore also clears the embedding engine and model,
-the model is unloaded, and no later pass can seed. PLANE-013 is why restoring
-the configuration does not undo it. A control on unmodified `dev` keeps
-embeddings working, so what changed is reachability, not the application.
+Drive reached 373 where it had never run a body at all. What remains, by cause:
 
-Two of the 96 remain a judgement call rather than a measurement:
-`POST /api/v1/auths/signin` and `POST /api/v1/configs/import` are used constantly
-by the identity helper and the configuration guard — the harness using a route is
-not a security test driving it, and for those the answer may be to drive them
-rather than waive them.
+| Cause | Count | Note |
+| --- | --- | --- |
+| 404 seen — feature off or resource absent | 27 | mostly waivable on evidence |
+| never attempted — skipped by every owner pass | 19 | includes the 5 evidenced OAuth routes |
+| 403/400/302 — a guard answered | 6 | includes `auths/signin`, `auths/signup` |
+| 422 only | 5 | **all five are multipart uploads** |
+
+The 422 cluster that motivated this work is finished except for multipart, which
+needs a different code path in the driver rather than a better body.
+
+The skeleton has a defect of its own, recorded as COVERAGE-001 and fixed here:
+it must not fill required fields a body is not targeting on a route that
+replaces a configuration section. Two of the 57 remain a judgement call rather
+than a measurement: `POST /api/v1/auths/signin` and `POST /api/v1/configs/import`
+are used constantly by the identity helper and the configuration guard — the
+harness using a route is not a security test driving it, and for those the answer
+may be to drive them rather than waive them.
 
 **The live 5xx assertions are EXPECTED to be red while application findings are open.**
 Latest CI run (2026-09-10, first run with every pass completing on v0.11.3):
