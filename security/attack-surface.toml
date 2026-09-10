@@ -738,10 +738,7 @@ reason = "Deletes the caller provider session, removing OAuth credentials needed
 key = "notification_target"
 name = "target_id"
 prefix = "/api/v1/notifications/targets/{target_id}"
-description = "routers/notifications.py:create_notification_target returns the stored target. Arrived with the v0.11.3 upstream merge. delivery/config stay minimal: a target that actually delivers would post off-host, which the sealed network refuses and the egress sensor would report as its own traffic."
-via = "POST /api/v1/notifications/targets"
-body = { "type" = "webhook", "enabled" = false, "events" = [], "delivery" = "webhook", "config" = { "name" = "attack-target-{token}" } }
-extract = "id"
+unseedable = "routers/notifications.py:_check_notifications_access answers 404 for the whole notifications surface unless ui.enable_user_webhooks is on, and it is off everywhere we ship: helm/open-webui-tenant/values.yaml:443 defaults enableUserWebhooks to \"false\" and no tenant overrides it, so the CI stack matching production is correct rather than a stack gap. The 404 is the application's own NOT_FOUND, which entered_the_handler already refuses to count as coverage, so these routes read as unreached rather than falsely driven. Seeded on declaration during the v0.11.3 gate refresh and never exercised live, because identity setup was blocked at the time. Revisit if a tenant turns user webhooks on; a target that actually delivers would also post off-host, which the sealed network refuses and the egress sensor would report as its own traffic."
 
 [[parameter]]
 key = "model_download_job"
