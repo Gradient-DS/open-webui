@@ -601,3 +601,9 @@ is invisible and expensive.
 Offline suite is green (704 passed) on the refreshed gate; only live passes are
 blocked.
 
+**Resume from:** `docs/superpowers/plans/2026-09-10-blocker-001-identity-setup-handoff.md`,
+which carries the step order that keeps the seven controls honest: model the
+revocation in the `IdentityServer` fake FIRST (test_client.py:414), watch the
+tests fail the way the live stack does, and only then apply the helper fix. That
+directory is gitignored, so this entry is the durable record if it is lost.
+
