@@ -134,7 +134,12 @@ def _actor(admin, actor, destructive):
 
 def _request(admin, actor, route, target, tally, kwargs):
     guard = (
-        plane.preserve_configuration(admin, route=route, report=tally.config_findings.append)
+        plane.preserve_configuration(
+            admin,
+            route=route,
+            report=tally.config_findings.append,
+            unverified=lambda reason: tally.config_unverified.setdefault(route, reason),
+        )
         if route.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
         else nullcontext()
     )
@@ -181,6 +186,11 @@ def _same_object(stranger, owner):
 
 def _check(result, route, stranger, owner, markers, *, admin_only, control, resource_ids=()):
     reasons = []
+    if stranger.timed_out or (owner is not None and owner.timed_out):
+        # No response is not a refusal, a disclosure, or an accepted write.
+        # Status 0 would read as "not refused" and invent an authorization
+        # violation out of a slow route.
+        return
     if any(marker in stranger.body for marker in markers):
         reasons.append('seeded owner marker in second-account response (including refusals)')
     if admin_only and stranger.status not in {401, 403}:

@@ -14,6 +14,11 @@ from urllib3.exceptions import ProtocolError
 from urllib3.util.retry import Retry
 
 DEFAULT_BASE_URL = 'http://localhost:8080'
+# A hosted CI runner is slower than a workstation, and the plane drives every
+# operation in the spec. Too short a timeout measures the runner rather than the
+# application: it turns "slow here" into "never answered", and before timeouts
+# were measurements it ended the whole pass.
+DEFAULT_TIMEOUT_SECONDS = float(os.getenv('ATTACK_TIMEOUT_SECONDS', '60'))
 _SESSION_PATH = '/api/v1/auths/'
 _AMBIGUOUS_AUTH = (401, '401 Unauthorized')
 _PROBE_CACHE_SECONDS = 5
@@ -111,14 +116,20 @@ def entered_the_handler(response: requests.Response) -> bool:
 
 
 class AuthenticationError(RuntimeError):
-    pass
+    def __init__(self, *args, status: int | None = None):
+        super().__init__(*args)
+        # The refusal that produced this, where one exists. Callers repairing an
+        # identity must distinguish a rejected credential from a throttle or a
+        # 2FA challenge: only the first is repairable, and repairing the others
+        # would destroy a working password to work around a temporary refusal.
+        self.status = status
 
 
 def session_body(response: requests.Response, email: str) -> dict:
     body = json_body(response)
     context = f'Attack identity {email}: authentication failed (HTTP {response.status_code})'
     if not 200 <= response.status_code < 300 or not isinstance(body, dict):
-        raise AuthenticationError(context)
+        raise AuthenticationError(context, status=response.status_code)
     if body.get('requires_2fa') or body.get('requires_2fa_setup'):
         raise AuthenticationError(f'{context}: 2FA challenge or setup is not a session')
     token = body.get('token')
@@ -226,7 +237,7 @@ class AttackClient:
         if kwargs.pop('allow_redirects', False):
             raise ValueError('AttackClient never follows redirects')
         self.session.cookies.clear()
-        kwargs.setdefault('timeout', 30)
+        kwargs.setdefault('timeout', DEFAULT_TIMEOUT_SECONDS)
         try:
             result = self.session.request(
                 method.upper(),
@@ -252,6 +263,35 @@ class AttackClient:
             self.identity = None
             raise
         return self
+
+    def reauthenticate(self, email: str, password: str):
+        """Replace this client's session in place, pinned to the identity it holds.
+
+        A password change revokes every token the user holds, including the one
+        that made the request (routers/users.py:976), so a helper repairing its
+        own driving identity destroys the session it repairs from. Signing in
+        again is only safe if the replacement is the same user in the same role:
+        a client that quietly came back as somebody else would drive the rest of
+        the pass under an identity nobody chose. The caller passes the email
+        because the repair may have just changed it.
+        """
+        if not self.identity:
+            raise AuthenticationError('Only an authenticated client can reauthenticate')
+        expected_id, expected_role = self.identity['id'], self.identity['role']
+        self.token = None
+        self.identity = None
+        self._probe_cache = None
+        result = self.request('POST', '/api/v1/auths/signin', json={'email': email, 'password': password})
+        self.authenticate(result, email, role=expected_role)
+        if self.identity['id'] != expected_id:
+            self.token = None
+            self.identity = None
+            raise AuthenticationError('Reauthentication returned a different user')
+        return self
+
+    @property
+    def user_id(self):
+        return self.identity['id'] if self.identity else None
 
     def verify_identity(self, *, email=None, role=None, user_id=None):
         result = self.request('GET', '/api/v1/auths/')

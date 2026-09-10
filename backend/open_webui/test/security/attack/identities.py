@@ -2,14 +2,17 @@
 
 Call ensure_identities between passes, serially. A separate admin JWT is saved
 in the worktree's ignored .cache directory (mode 0600), never handed to a pass.
-It survives password changes and revocation of a driven client's distinct jti.
-If that recovery JWT expires after the admin password has been destroyed, HTTP
-alone cannot recover the first admin: provide a valid recovery token or reset
-the test stack. That condition raises; it never returns an anonymous client.
+It survives revocation of a driven client's distinct jti, but not a change to
+the admin password: since v0.11.3 that revokes every token the admin holds
+(routers/users.py:976), this one included, so repair reissues it in place and
+saves the replacement. If the recovery JWT is gone once the admin password has
+been destroyed, HTTP alone cannot recover the first admin: provide a valid
+recovery token or reset the test stack. That condition raises; it never returns
+an anonymous client.
 
-Signin counts attempts by email (routers/auths.py:922; utils/rate_limit.py:42).
+Signin counts attempts by email (routers/auths.py:999; utils/rate_limit.py:47).
 Repair temporarily changes an identity's email through the admin update API,
-signs in once using that fresh bucket, then restores its stable email. IDs and
+signs in using that fresh bucket, then restores its stable email. IDs and
 resource ownership stay intact. No Redis keys or application limits are changed.
 """
 
@@ -18,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,21 +106,62 @@ def _update(admin, user_id, **fields):
     return body
 
 
+def _wait_out_the_revoked_second():
+    """Let the clock leave the second a password change just revoked.
+
+    Revocation is a whole-second marker, not a token list: the change stores
+    `revoked_at` in seconds (utils/auth.py:323) and every token whose `iat` is
+    at or before it is rejected (utils/auth.py:275). `iat` is whole seconds too
+    (utils/auth.py:237), so a replacement session minted in the same second as
+    the change is born revoked. A password reset and the sign-in after it are a
+    few hundred milliseconds apart, so that is the common case, not a rare one.
+    Sleeping a full second of real time guarantees the next `iat` is larger, and
+    needs no assumption about the clock this process shares with the server.
+    """
+    time.sleep(1.05)
+
+
 @contextmanager
 def signin_alias(admin, user_id, email, **fields):
     alias = f'attack-signin-{uuid4().hex}@example.com'
     try:
         _update(admin, user_id, email=alias, **fields)
+        if fields.get('password'):
+            _wait_out_the_revoked_second()
+            if user_id == admin.user_id:
+                # The driver just revoked its own bearer. Nobody else knows the
+                # revocation was deliberate, so nobody else can repair it: the
+                # restore below, and every later repair, runs on this session.
+                admin.reauthenticate(alias, fields['password'])
         yield alias
     finally:
         _update(admin, user_id, email=email)
 
 
+def _restore_password(admin, user_id, alias):
+    """Give an identity back the standard password after a pass destroyed it."""
+    _update(admin, user_id, password=PASSWORD)
+    _wait_out_the_revoked_second()
+    if user_id == admin.user_id:
+        admin.reauthenticate(alias, PASSWORD)
+
+
 def _fresh_login(admin, user_id, email, role):
     client = None
     try:
-        with signin_alias(admin, user_id, email, password=PASSWORD, role=role, name=f'Attack {role}') as alias:
-            client = login(alias, PASSWORD, base_url=admin.base_url, role=role)
+        with signin_alias(admin, user_id, email, role=role, name=f'Attack {role}') as alias:
+            try:
+                client = login(alias, PASSWORD, base_url=admin.base_url, role=role)
+            except AuthenticationError as error:
+                # Reset the password only when it is the thing that is broken.
+                # Since v0.11.3 a reset revokes every session the identity holds,
+                # and the previous pass is still holding one while its teardown
+                # runs, so an unconditional reset strands that pass. A throttle
+                # or a 2FA challenge is not a credential the reset would fix.
+                if error.status != 400:
+                    raise
+                _restore_password(admin, user_id, alias)
+                client = login(alias, PASSWORD, base_url=admin.base_url, role=role)
             if client.identity['id'] != user_id:
                 raise AuthenticationError('Repair signed in as a different user')
         client.verify_identity(email=email, role=role, user_id=user_id)
@@ -232,6 +277,11 @@ def ensure_identities(base_url=None, *, state_path: Path | None = None) -> Attac
         _save(state_path, state)
         # Every pass receives a different jti from the private recovery JWT.
         clients.append(_fresh_login(recovery, admin_id, ADMIN_EMAIL, 'admin'))
+        # Repairing the admin revoked the recovery JWT saved above and minted a
+        # replacement in place. Persisting the dead one would send the next
+        # setup down the bootstrap path, spending the stable email's throttle.
+        state['recovery_token'] = recovery.token
+        _save(state_path, state)
         for label, email in (('user', USER_EMAIL), ('intruder', INTRUDER_EMAIL)):
             user_id = _find_or_create(recovery, state, label, email)
             state['ids'][label] = user_id

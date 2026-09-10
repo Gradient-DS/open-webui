@@ -4,6 +4,7 @@ import ast
 import io
 import json
 import os
+import time
 from http.client import RemoteDisconnected
 from pathlib import Path
 
@@ -412,7 +413,20 @@ def test_streams_are_not_consumed_by_the_transport(monkeypatch):
 
 
 class IdentityServer:
-    """Stateful HTTP boundary double: passwords, email buckets, roles and JWTs."""
+    """Stateful HTTP boundary double: passwords, email buckets, roles and JWTs.
+
+    Models the v0.11.3 revocation an admin password change performs
+    (routers/users.py:976): the user is marked at the current whole second, and
+    every token issued at or before that second stops working
+    (utils/auth.py:275, `token_iat <= revoked_at`). The token making the request
+    is revoked with the rest, so a helper that repairs its own driving identity
+    destroys the session it is repairing from.
+
+    `clock` advances only when the code under test sleeps, so a repair that
+    signs in again without waiting out the revoked second gets a session that is
+    already dead. The live stack behaves the same way, because `iat` and the
+    revocation marker are both whole seconds.
+    """
 
     def __init__(self):
         self.users = {}
@@ -420,11 +434,29 @@ class IdentityServer:
         self.attempts = {}
         self.calls = []
         self.issued = 0
+        self.elapsed = 0.0
+        self.revoked_at = {}
+
+    @property
+    def clock(self):
+        return int(self.elapsed)
+
+    def advance(self, seconds):
+        self.elapsed += float(seconds)
+
+    def holder(self, token):
+        held = self.tokens.get(token)
+        if not held:
+            return None
+        user_id, issued_at = held
+        if issued_at <= self.revoked_at.get(user_id, -1):
+            return None
+        return self.users.get(user_id)
 
     def session(self, user):
         self.issued += 1
         token = f'jwt-{self.issued}'
-        self.tokens[token] = user['id']
+        self.tokens[token] = (user['id'], self.clock)
         return {**user, 'token': token, 'token_type': 'Bearer'}
 
     def signin(self, form):
@@ -452,7 +484,7 @@ class IdentityServer:
     def request(self, client, method, path, **kwargs):
         self.calls.append((method, path))
         form = kwargs.get('json', {})
-        user = self.users.get(self.tokens.get(client.token))
+        user = self.holder(client.token)
         if path == '/api/v1/auths/signup' or path == '/api/v1/auths/add':
             return self.create_user(path, form, user)
         if path == '/api/v1/auths/signin':
@@ -470,6 +502,9 @@ class IdentityServer:
             if not target:
                 return response(400, {'detail': "We could not find what you're looking for :/"})
             if path.endswith('/update'):
+                # Revocation precedes the rest of the update and does not fail it.
+                if form.get('password'):
+                    self.revoked_at[target['id']] = self.clock
                 target.update(form)
             return response(200, target)
         pytest.fail(f'Unexpected HTTP call: {method} {path}')
@@ -480,6 +515,9 @@ def identity_server(monkeypatch):
     server = IdentityServer()
     monkeypatch.delenv('ATTACK_RECOVERY_TOKEN', raising=False)
     monkeypatch.setattr(AttackClient, 'request', lambda client, *a, **kw: server.request(client, *a, **kw))
+    # The only clock the double has. Waiting out a revoked second is a property
+    # of the helper under test, so nothing else may advance it.
+    monkeypatch.setattr(time, 'sleep', server.advance)
     return server
 
 
@@ -523,6 +561,30 @@ def test_identities_can_be_adopted_without_local_state(identity_server, tmp_path
     try:
         assert [c.identity['id'] for c in first.clients] == [c.identity['id'] for c in second.clients]
         assert len(identity_server.users) == 3
+    finally:
+        first.close()
+        second.close()
+
+
+def test_a_new_setup_leaves_the_previous_passs_sessions_usable(identity_server, tmp_path):
+    from .identities import ensure_identities
+
+    state_path = tmp_path / 'identities.json'
+    first = ensure_identities('http://app', state_path=state_path)
+    earlier_ids = [client.identity['id'] for client in first.clients]
+    second = ensure_identities('http://app', state_path=state_path)
+    try:
+        # Passes are serial, but a pass keeps its identities open through its own
+        # teardown while the next pass has already set up. Repairing by resetting
+        # a password revokes every session that identity holds (v0.11.3), so an
+        # unconditional reset here strands the previous pass mid-cleanup.
+        for client, user_id in zip(first.clients, earlier_ids):
+            assert client.verify_identity(user_id=user_id)
+        for client, user_id in zip(second.clients, earlier_ids):
+            assert client.verify_identity(user_id=user_id)
+        # Distinct jti per pass is still the point; sharing one would mean a
+        # signout driven by either pass took the other down with it.
+        assert {client.token for client in first.clients}.isdisjoint(client.token for client in second.clients)
     finally:
         first.close()
         second.close()

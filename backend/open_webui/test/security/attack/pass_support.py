@@ -12,10 +12,14 @@ def pass_run(name, routes, admin):
     tally = plane._PASSES[name] = plane.Seeding(expected=set(routes))
     try:
         with plane.preserve_configuration(
-            admin, route=f'{name} pass', report=tally.config_findings.append, durable=True
+            admin,
+            route=f'{name} pass',
+            report=tally.config_findings.append,
+            unverified=lambda reason: tally.config_unverified.setdefault(f'{name} pass', reason),
+            durable=True,
         ):
             yield tally
-        tally.config_restore_verified = True
+        tally.config_restore_verified = not tally.config_unverified
     finally:
         plane.flush_hits()
         plane._report(name, tally)

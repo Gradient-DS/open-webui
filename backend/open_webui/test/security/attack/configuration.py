@@ -10,15 +10,25 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
+import requests
 from hostile_corpus import FETCH_URLS, REFLECTION_PROBE, fetch_payloads
 
 from .client import json_body
 
 EXPORT = '/api/v1/configs/export'
 IMPORT = '/api/v1/configs/import'
+# The guard runs twice around every write the plane drives, and exports several
+# hundred keys each time. It is instrumentation, not a measurement, so it gets
+# far longer than a driven route: a timeout here loses evidence rather than
+# producing any.
+CONFIG_TIMEOUT_SECONDS = float(os.getenv('ATTACK_CONFIG_TIMEOUT_SECONDS', '300'))
+# Losing the snapshot is losing evidence however it is lost: a timeout, or a
+# connection the server dropped once the client's retry budget was spent.
+NO_RESPONSE = (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
 
 
 def _request(admin, method, path, **kwargs):
+    kwargs.setdefault('timeout', CONFIG_TIMEOUT_SECONDS)
     response = admin.request(method, path, **kwargs)
     try:
         body = json_body(response)
@@ -134,8 +144,24 @@ def recover_configuration(admin, *, report=print):
 
 
 @contextmanager
-def preserve_configuration(admin, *, report, route, durable=False):
-    before = snapshot(admin)
+def preserve_configuration(admin, *, report, route, unverified, durable=False):
+    """Snapshot configuration around a route, and say so when it could not.
+
+    A timeout here is lost evidence, not a measurement: we cannot tell whether
+    the route poisoned configuration. Ending the pass would lose every route
+    after it as well, so the guard steps aside and records that this route went
+    unverified. `unverified` is what stops the pass claiming otherwise.
+    """
+    try:
+        before = snapshot(admin)
+    except NO_RESPONSE as error:
+        _unverified(
+            unverified,
+            route,
+            f'configuration snapshot got no response before the route: {type(error).__name__}: {error}',
+        )
+        yield
+        return
     journal = _journal(admin) if durable else None
     if journal is not None:
         if journal.exists():
@@ -144,6 +170,21 @@ def preserve_configuration(admin, *, report, route, durable=False):
     try:
         yield
     finally:
-        restore(admin, before, report=report, route=route)
-        if journal is not None:
-            journal.unlink()
+        try:
+            restore(admin, before, report=report, route=route)
+        except NO_RESPONSE as error:
+            _unverified(
+                unverified,
+                route,
+                f'configuration snapshot got no response after the route: {type(error).__name__}: {error}',
+            )
+        else:
+            # Only a completed restore may drop the journal. A restore that
+            # failed -- loudly, or by timing out before it could verify -- is
+            # exactly when the next setup needs it to recover from.
+            if journal is not None:
+                journal.unlink()
+
+
+def _unverified(unverified, route, reason):
+    unverified(reason)
