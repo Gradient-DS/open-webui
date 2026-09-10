@@ -1,13 +1,20 @@
-**Status: 10 open findings + 1 live blocker (BLOCKER-001) (PLANE-001–010); CI-stack gaps: 0 open, 2 fixed (CI-001, CI-002).**
+**Status: 11 open findings (PLANE-001–010, PLANE-012), 1 fixed (PLANE-011);
+BLOCKER-001 resolved; CI-stack gaps: 0 open, 3 fixed (CI-001–003).**
 
 **The live 5xx assertions are EXPECTED to be red while application findings are open.**
-Latest reviewer run: **4 failed, 381 passed, 9 errors in 350s**. Three failures
-are per-module 5xx gates reporting application findings. The other failure is
-the model-output control; the nine setup errors report the crossuser reset-token
-surface defect. Harness corrections do not accept or suppress any 5xx.
-The reviewer reports growth from 6 to 13 routes and supplies eight newly surfaced
-method/templates below. The abbreviated log is insufficient to reconcile that
-union; this document retains all supplied routes without inventing a current set.
+Latest run (2026-09-10, first complete live run on v0.11.3, modules in the order
+`.github/workflows/runtime-security.yml` uses): **8 failed, 367 passed, zero
+errors in 490s**; offline **705 passed, 61 skipped**. Every failure is a pass's
+own 5xx assertion or the model-output control. Zero errors is the number that
+changed: BLOCKER-001, a stale seed (CI-003) and a merge regression (PLANE-011)
+had made setup fail outright. The drive pass reaches 354/662 routes with 643
+driven; 129 routes remain unentered across all passes. Nothing is accepted,
+xfailed or suppressed.
+
+An earlier reviewer run recorded **4 failed, 381 passed, 9 errors in 350s**, with
+the nine setup errors reporting the crossuser reset-token surface defect. The
+abbreviated log was insufficient to reconcile the route union, so this document
+retains all supplied routes without inventing a current set.
 
 Quick comparison for a red gate:
 
@@ -23,7 +30,10 @@ Quick comparison for a red gate:
 | `GET /api/v1/chats/archived`, `GET /api/v1/chats/shared`, `GET /api/v1/chats/list/user/{user_id}` | PLANE-008 | Open; shared sorting failure path, live traceback needed |
 | `POST /api/v1/tasks/{follow_up,title,tags,image_prompt}/completions` | PLANE-009 | Open; shared message-template failure path, live traceback needed |
 | `GET /api/v1/utils/gravatar` | PLANE-010 | Open; cause unresolved |
+| `POST /api/v1/export/data` never becomes ready | PLANE-011 | Application bug, fixed 2026-09-10; merge regression in fork code |
+| `POST /api/v1/knowledge/metadata/reindex` exceeds the 30s client timeout | PLANE-012 | Open; cost is unbounded in the number of knowledge bases |
 | Terminal and indexed Ollama DELETE | CI-001 | CI-stack gap confirmed fixed; recurrence needs investigation |
+| `POST /api/v1/notifications/targets` seeded but gated off | CI-003 | Declaration gap confirmed fixed |
 
 Payload sampling varies per run: the routes surfaced by one sampled run are not
 the full failure set. This file accumulates findings across runs; absence from
@@ -570,40 +580,141 @@ which the proxy returned as a 5xx indistinguishable from an application fault.
 Recorded because it was briefly mistaken for one: `PATCH /api/v1/terminals/...`
 appeared in the 5xx set with `HTTP {501: 7}` and an HTML body.
 
+## PLANE-011: data export starts, never completes, and reports success
+
+Status: **fixed 2026-09-10** in this branch, against the plan's usual rule of not
+fixing application bugs alongside the plane. It is recorded as an exception
+because it is a regression the v0.11.3 merge introduced into fork-owned code —
+the same merge this branch's gate refresh is about — and because it blocked every
+live pass, so the plane could not run at all while it stood.
+
+Upstream #28795 (`4df2d9a7a`) removed `ModelsTable.get_models_by_user_id`, folding
+the same owner-or-writable filter into `get_models` in SQL. The fork-owned export
+service (`services/export/service.py:110`) still called the removed method, so the
+background job raised for every user:
+
+    Data export failed for user <id>: 'ModelsTable' object has no attribute
+    'get_models_by_user_id'
+
+`POST /api/v1/export/data` answers 200 with `status: processing`, and
+`GET /api/v1/export/data/status` then answers `status: none` forever. From the
+user's side the GDPR export silently never arrives, with no error anywhere they
+can see. Fixed by calling `Models.get_models(writable_by_user_id=user_id)`, which
+is what upstream replaced its own callers with (`routers/models.py:360`);
+`has_permission_filter` treats the owner as always having access, so the set is
+unchanged.
+
+An AST sweep of the same file found no other call to a method that no longer
+exists. Other fork-owned modules were not swept; the plane reaches them only
+where a route drives them.
+
+## PLANE-012: knowledge metadata reindex has no bound on its own duration
+
+Status: **open**, intermittent, state-dependent. Surfaced 2026-09-10 as a 30s
+client read timeout that aborted the drive and shapes passes:
+
+    requests.exceptions.ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=8080):
+    Read timed out. (read timeout=30)   # POST /api/v1/knowledge/metadata/reindex
+
+`reindex_knowledge_base_metadata_embeddings` (`routers/knowledge.py:512`) deletes
+the metadata collection and then loops over **every** knowledge base, awaiting one
+external embedding call each, inside the request. Its own docstring shows the
+author knew the loop makes N external calls — it deliberately avoids holding a DB
+session for that reason — but nothing bounds how long the request itself takes.
+With no knowledge bases it returns in 0.0s; driven after a seeding pass has
+created many, it exceeds 30s. A tenant with a realistic number of knowledge bases
+would exceed any client or proxy timeout, and there is no way to observe progress
+or resume. Admin-only, so the exposure is availability, not access.
+
+Not reproduced on every run: whether it fires depends on how many knowledge bases
+exist when the drive pass reaches it, which varies with payload sampling and with
+what earlier DELETE routes removed.
+
+**It also shows a plane-level gap worth a separate decision:** a read timeout
+currently aborts the whole pass, so one slow route blinds the coverage
+measurement for every route after it. Recording a timeout as a measurement —
+route not entered, surfaced in the tally like a 5xx — would be the conservative
+behaviour, but it changes what the plane counts and deserves its own control and
+review rather than a late edit.
+
+## CI-003: the notifications surface was seeded but is gated off in production
+
+Status: **fixed**. The v0.11.3 gate refresh declared
+`POST /api/v1/notifications/targets` as a seed from the spec alone; identity
+setup was blocked at the time, so it was never driven. Live, it answers 404 —
+and so does the whole notifications surface, because
+`_check_notifications_access` (`routers/notifications.py:34`) gates it on
+`ui.enable_user_webhooks`, which `helm/open-webui-tenant/values.yaml:443` defaults
+to `"false"` and no tenant overrides. The CI stack matching production is the
+correct state, so the seed was the thing that was wrong; it is now recorded
+`unseedable` with that reasoning.
+
+Nothing was ever miscounted as covered: the 404 is the application's own
+NOT_FOUND and `entered_the_handler` refuses 404 unconditionally. The cost was
+that the failing seed aborted every dependent live pass — 54 errors from one
+declaration.
+
 ## BLOCKER-001: live runs cannot set up identities on v0.11.3
 
-Status: **open, blocks every live pass**. Found 2026-09-09 while refreshing the
-gate for the upstream merge. Not an application bug -- an upstream security
-improvement the plane has not caught up with.
+Status: **resolved 2026-09-10**. Both halves are fixed and verified live; the
+entry is kept because the reasoning is the durable record of why the client was
+not softened.
 
-`routers/users.py:976` now calls `revoke_user_tokens` when an admin changes a
-user's password. The identity helper repairs the driving admin by resetting its
-own password through `POST /api/v1/users/{id}/update`, which therefore destroys
-the bearer making the request. Reproduced on a pristine stack:
+`routers/users.py:976` calls `revoke_user_tokens` when an admin changes a user's
+password. The identity helper repairs an identity by resetting its password
+through `POST /api/v1/users/{id}/update`, so when the target was the driving
+admin it destroyed the bearer making the request:
 
     AuthenticationError: Attack bearer identity was lost at
     POST /api/v1/users/<admin-id>/update: Invalid token
 
-The client is behaving correctly: that response IS a genuine identity-loss
-marker, and it must stay one. The fix belongs in the helper, which knows the
-revocation was deliberate because it just set the password.
+The client was behaving correctly: that response IS a genuine identity-loss
+marker and it must stay one. Softening it would also soften genuinely losing an
+identity mid-pass, which is the failure that reports full coverage of an
+application never entered. The repair therefore belongs in the helper, which is
+the only party that knows the revocation was deliberate.
 
-**Direction, tried and reverted rather than half-landed:** add `user_id`/`email`/
-`role` to AttackClient at authenticate time and a `reauthenticate(password)`
-method, then in `signin_alias` re-authenticate when
-`fields.get('password') and user_id == admin.user_id`. That works, but seven
-offline identity-repair tests fake the transport and do not model the extra
-sign-in, so their fakes need updating too. Those tests are the controls that stop
-the plane running unauthenticated while reporting coverage, so they were left
-untouched rather than adjusted at the end of a long session: a wrong call there
-is invisible and expensive.
+**What the fix turned out to be — three parts, not one.**
 
-Offline suite is green (704 passed) on the refreshed gate; only live passes are
-blocked.
+1. *The driver repairs itself.* `signin_alias` now re-authenticates the admin
+   in place (`AttackClient.reauthenticate`) after a reset that revoked its own
+   bearer, so the restore of the stable email and every later repair run on a
+   live session.
 
-**Resume from:** `docs/superpowers/plans/2026-09-10-blocker-001-identity-setup-handoff.md`,
-which carries the step order that keeps the seven controls honest: model the
-revocation in the `IdentityServer` fake FIRST (test_client.py:414), watch the
-tests fail the way the live stack does, and only then apply the helper fix. That
-directory is gitignored, so this entry is the durable record if it is lost.
+2. *Revocation is a whole-second marker, not a token list.* `revoked_at` is
+   stored in seconds (`utils/auth.py:323`) and every token whose `iat` is at or
+   before it is rejected (`utils/auth.py:275`); `iat` is whole seconds too
+   (`utils/auth.py:237`). A password reset and the sign-in after it are a few
+   hundred milliseconds apart, so a replacement session minted immediately is
+   usually born revoked — the common case, not a rare race. Repair now waits out
+   that second, for every identity. This was not in the original diagnosis and
+   would have produced a fix that passed offline and failed live most runs.
 
+3. *Repair only what is broken.* Resetting unconditionally revoked the previous
+   pass's sessions, which are still open while that pass tears down:
+   `AuthenticationError ... POST /api/tasks/stop/<id>: Invalid token`. Giving each
+   pass a distinct jti was the defence against one pass signing another out, and
+   per-user revocation goes straight through it. The helper now tries the standard
+   credential first and resets only on a 400, so an untouched password is left
+   alone. `AuthenticationError` carries the refusing status for that reason: a
+   throttle or a 2FA challenge is not a credential a reset would fix.
+
+Also: the private recovery JWT in `.cache` is itself revoked when the admin is
+repaired, so the replacement is persisted. Without that, the next setup falls
+back to the bootstrap path and spends the stable admin email's signin throttle.
+
+**The order that kept the controls honest.** The revocation was modelled in the
+`IdentityServer` double first, and its clock advances only when the code under
+test sleeps, so waiting out the revoked second is a tested property rather than a
+comment. The seven identity-repair controls then failed for the same reason the
+live stack did, and the fix is what made them pass; removing either half of it,
+or the recovery-token save, turns them red again. An eighth control now drives
+two consecutive setups and requires both sets of sessions to survive.
+
+**A wrecked stack is recoverable by hand.** A run interrupted between the alias
+sign-in and the email restore leaves the admin stranded under
+`attack-signin-<hex>@example.com` with the standard password and a revoked
+recovery token, which `_recover_admin` cannot repair (it signs in as the stable
+email). Sign in as the alias with `PASSWORD` and `POST /api/v1/users/{id}/update`
+`{"email": "attack-admin@example.com"}` — the restore the interrupted repair
+never finished. Resetting the stack works too, and destroys the config journal.
