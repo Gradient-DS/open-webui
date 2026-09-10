@@ -703,13 +703,15 @@ NOT_FOUND and `entered_the_handler` refuses 404 unconditionally. The cost was
 that the failing seed aborted every dependent live pass — 54 errors from one
 declaration.
 
-## PLANE-013: payloads that reach the retrieval configuration unload the embedding model
+## PLANE-013: driving the retrieval embedding configuration unloads the model for the rest of the run
 
-Status: **open, cause not yet isolated.** Found by making the payload builder
-reach handlers it had never entered; invisible while those routes answered 422.
+Status: **open.** The route is identified; the payload that trips it is not.
+Found by making the payload builder reach handlers it had never entered.
 
-After the seeding pass, the process has unloaded its embedding function, and
-every route needing an embedding fails:
+**The route is `POST /api/v1/retrieval/embedding/update`**, named by
+instrumenting the seeding pass to probe embedding health after every route.
+Once it has been driven with the corpus, the process holds no embedding model
+and every route needing one fails:
 
     POST /api/v1/memories/add -> 500
     open_webui.routers.retrieval:query_collection_handler -
@@ -717,53 +719,53 @@ every route needing an embedding fails:
       SentenceTransformer model name, or configure an external
       RAG_EMBEDDING_ENGINE (ollama, openai, azure_openai).
 
-**A control separates this from the change that found it.** Running the same
-seeding pass against unmodified `dev`, `POST /api/v1/memories/add` still answers
-**200**. With the payload builder, the same pass leaves it answering **500**.
-The difference is not that the plane broke something new: it is that payloads
-now reach handlers that act on the retrieval configuration. `dev` never entered
-them. One failing seed then aborts every dependent pass —
+**A control separates this from the change that found it.** The same seeding
+pass on unmodified `dev` leaves `POST /api/v1/memories/add` answering **200**;
+with the payload builder it answers **500**. What changed is reachability, not
+the application. `retrieval/embedding/update` declares `RAG_EMBEDDING_ENGINE`
+and `RAG_EMBEDDING_MODEL` both required, so the pass's single-field and
+leave-one-out bodies were refused before the handler and only the all-fields
+body ever ran. Riding on the skeleton they now reach it:
+
+    {"RAG_EMBEDDING_ENGINE": "<payload>"}                            -> 422 (before)
+    {"RAG_EMBEDDING_ENGINE": "<payload>", "RAG_EMBEDDING_MODEL": ""} -> 500 (now)
+
+One failing seed then aborts every dependent pass —
 `Seeding POST /api/v1/memories/add failed (HTTP 500)`, 15 errors.
 
-The newly reachable shape is exact and reproducible. `retrieval/embedding/update`
-declares `RAG_EMBEDDING_ENGINE` and `RAG_EMBEDDING_MODEL` both required, so the
-seeding pass's single-field and leave-one-out bodies used to be refused before
-the handler; riding on the skeleton they now reach it:
-
-    {"RAG_EMBEDDING_ENGINE": "<payload>"}                        -> 422 (before)
-    {"RAG_EMBEDDING_ENGINE": "<payload>", "RAG_EMBEDDING_MODEL": ""} -> 500 (now)
+**Restoring the configuration does not bring the model back.** Measured after a
+full run: `configs/export` read correct — `rag.embedding_engine: "openai"`,
+`rag.embedding_model: "text-embedding-3-small"`, the right stub URL and key —
+and `POST /api/v1/memories/add` still answered 500. A `docker restart` on that
+same configuration answered 200, as did re-importing the identical snapshot. So
+the reload is reachable; it does not happen on the path the guard takes, and it
+does not happen on the path an operator takes either. That is the part worth
+fixing regardless of the harness: an admin who saves a bad embedding
+configuration and then corrects it keeps a wedged instance until restart, with
+nothing distinguishing "configured" from "loaded".
 
 **What is not the cause, measured rather than assumed.** Driving all 50 newly
 enterable routes in sequence with no restore between them leaves embeddings
-working, so no single one of them is responsible. Driving
-`retrieval/embedding/update` with either the all-fields or the single-field body
-also leaves embeddings working. The wedge needs something the pass does that
-these replays do not, and isolating it is the open work.
+working, so none of them is responsible. Driving `retrieval/embedding/update`
+by hand with the all-fields body, with either single-field body, and with an
+empty engine and a valid local model, also leaves embeddings working. The trip
+needs a specific corpus payload the hand replays did not use, and finding it is
+the open work. Making the pass boundary re-import its snapshot does not help
+either: the values it restores are already equal.
 
-**A correction worth recording, because it cost time.** `GET /api/v1/configs/export`
-reports `rag.embedding_engine`, `rag.embedding_model` and `openai.api_base_urls`
-as `null` on a **healthy** stack — one where `POST /api/v1/memories/add` answers
-200 — because those values come from the environment and are only exported once
-something persists them. Nulls there are the normal state, not damage, and an
-earlier revision of this entry read them as evidence of a wiped configuration.
-They are not. The measurement that does mean something is the handler's own
-answer.
+**A correction, because it cost this leg two wrong turns.**
+`GET /api/v1/configs/export` returns a **flat** document of ~491 dotted keys —
+`rag.embedding_engine` is a top-level key, not `rag` -> `embedding_engine`.
+Reading it as nested makes every lookup return `None`, which reads exactly like
+a wiped configuration and is not one. Two earlier revisions of this entry
+recorded that phantom. The measurement that means something is the handler's own
+answer, not the shape of the export.
 
-**The guard cannot see any of it.** The seeding pass records
-`config_restore_verified: true` and `config_unverified: {}` beside 11,274
-PLANE-001 findings. `restore()` compares and re-imports configuration *values*,
-so the claim was only ever about values; it says nothing about what the
-application derived from them, and until it does, `config_restore_verified`
-should not be read as "the stack is as it was". Making the pass boundary
-re-import its snapshot unconditionally (so the application rebuilds from
-configuration rather than being assumed unchanged) is committed here and is
-right on its own terms, but it does **not** recover the embedding function — the
-values it restores are already equal.
-
-Repairing it requires a restart today: the same configuration that answers 500
-answers 200 after `docker restart`. The operator-facing shape of that is the
-part worth fixing regardless of the harness — nothing surfaces the difference
-between "configured" and "loaded".
+**The guard's verification is narrower than it sounds.** The seeding pass
+records `config_restore_verified: true` and `config_unverified: {}` beside
+11,274 PLANE-001 findings. `restore()` compares and re-imports configuration
+*values*; it says nothing about what the application derived from them. Until it
+can, `config_restore_verified` should not be read as "the stack is as it was".
 
 ## CI-004: the CI stack image is older than `dev`, and `down -v` reverts the difference
 

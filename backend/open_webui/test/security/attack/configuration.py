@@ -48,28 +48,14 @@ def _different(left, right):
     return json.dumps(left, sort_keys=True) != json.dumps(right, sort_keys=True)
 
 
-def restore(admin, before, *, report, route, reload_derived=False):
-    """Put configuration back, and optionally make the application rebuild from it.
-
-    Comparing exported values answers "is the configuration what it was". It
-    does not answer "is the application what it was": a route can leave the
-    process holding no embedding model while every exported key still compares
-    equal, and PLANE-013 is what that costs -- the guard verified a restore
-    over a stack on which the next pass's seeding could not run.
-
-    Only an import makes the application rebuild what it derived, so a caller
-    that owns a whole pass asks for one unconditionally. A caller guarding a
-    single route does not: the guard runs twice around every write the plane
-    drives, and an import per route would double the writes of a pass that
-    measures hundreds of them.
-    """
+def restore(admin, before, *, report, route):
     after = snapshot(admin)
     changed = sorted(
         key
         for key in before.keys() | after.keys()
         if key not in before or key not in after or _different(before[key], after[key])
     )
-    if not changed and not reload_derived:
+    if not changed:
         return
     payloads = _corpus_values()
     for key in changed:
@@ -85,7 +71,7 @@ def restore(admin, before, *, report, route, reload_derived=False):
                 'corpus': _contaminated(after.get(key), payloads),
             }
         )
-    updates = dict(before) if reload_derived else {key: before[key] for key in changed if key in before}
+    updates = {key: before[key] for key in changed if key in before}
     if updates:
         _request(admin, 'POST', IMPORT, json={'config': updates})
     if _different(snapshot(admin), before):
@@ -185,7 +171,7 @@ def preserve_configuration(admin, *, report, route, unverified, durable=False):
         yield
     finally:
         try:
-            restore(admin, before, report=report, route=route, reload_derived=durable)
+            restore(admin, before, report=report, route=route)
         except NO_RESPONSE as error:
             _unverified(
                 unverified,
