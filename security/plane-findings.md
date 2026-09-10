@@ -1,16 +1,43 @@
-**Status: 11 open findings (PLANE-001–010, PLANE-012), 1 fixed (PLANE-011);
-BLOCKER-001 resolved; CI-stack gaps: 0 open, 3 fixed (CI-001–003).**
+**Status: 12 open findings (PLANE-001–010, PLANE-012, PLANE-013), 1 fixed
+(PLANE-011); BLOCKER-001 resolved; CI-stack gaps: 1 open (CI-004), 3 fixed
+(CI-001–003).**
 
-**The coverage gate is live and red at 96 routes.** `test_every_route_is_driven_or_waived`
-merged 2026-09-10 (PR #290) and `security/route-coverage.toml` does not exist yet,
-so 96 operations in the committed document are driven by no security test and
-explained by no waiver. Reasons must come from observed behaviour. Two groups are
-already evidenced: the 7 notifications routes by CI-003 below, and the 5 OAuth
-routes by the deliberately unconfigured providers. Note that
-`POST /api/v1/auths/signin` and `POST /api/v1/configs/import` are in the 96 while
-being used constantly by the identity helper and the configuration guard — the
-harness using a route is not a security test driving it, and for those the answer
-may be to drive them rather than waive them.
+**The coverage gate is live and red at 96 routes, and 50 of them were the
+harness, not the application.** `test_every_route_is_driven_or_waived` merged
+2026-09-10 (PR #290) and `security/route-coverage.toml` still does not exist.
+Classifying the 96 by what the owner-driving passes actually observed:
+
+| Cause | Count |
+| --- | --- |
+| 422 only — attacked repeatedly, body refused before the handler | 50 |
+| 404 seen — feature off or resource absent | 23 |
+| never attempted — skipped by every owner pass | 19 |
+| 403 seen, or other | 4 |
+
+The 50 were not a property of the application. `writable_string_fields` reports
+string leaves, so a body built from it omits every required bool, int, dict and
+nested scalar the schema also demands —
+`POST /api/v1/images/config/update` was driven 91 times and entered zero,
+`POST /api/v1/auths/admin/config` 58 times for 16 missing `ENABLE_*` booleans.
+Waiving those would have been the gate recording its own blind spot as a
+decision. The fix is a schema-derived body skeleton
+(`Gradient-DS/.github#17`); measured route by route, **38 of the 50 then enter a
+handler**. Of the remainder, five are multipart uploads needing a different code
+path in the driver, five answer 404 for want of a seeded *body* field (the seed
+mechanism covers path parameters only), and two are refused by Pydantic
+validators the spec does not express.
+
+**Landing it is blocked on PLANE-013**, which the same change exposed: once
+payloads reach configuration handlers, the pass's own configuration poisoning
+takes effect and unloads the embedding model, so a full run can no longer
+complete. A control on unmodified `dev` shows the poisoning is older than this
+work.
+
+Two of the 96 remain a judgement call rather than a measurement:
+`POST /api/v1/auths/signin` and `POST /api/v1/configs/import` are used constantly
+by the identity helper and the configuration guard — the harness using a route is
+not a security test driving it, and for those the answer may be to drive them
+rather than waive them.
 
 **The live 5xx assertions are EXPECTED to be red while application findings are open.**
 Latest CI run (2026-09-10, first run with every pass completing on v0.11.3):
@@ -675,6 +702,88 @@ Nothing was ever miscounted as covered: the 404 is the application's own
 NOT_FOUND and `entered_the_handler` refuses 404 unconditionally. The cost was
 that the failing seed aborted every dependent live pass — 54 errors from one
 declaration.
+
+## PLANE-013: a poisoned embedding configuration unloads the model, and restoring the values does not reload it
+
+Status: **open**. Found by making the payload builder reach handlers it had
+never entered; invisible while those routes answered 422.
+
+After the seeding pass, `GET /api/v1/configs/export` reports
+`rag.embedding_engine`, `rag.embedding_model`, `rag.openai.api_base_url` and
+`openai.api_base_urls` as `null` — and the process has unloaded its embedding
+function. Every route that needs an embedding then fails:
+
+    POST /api/v1/memories/add -> 500
+    open_webui.routers.knowledge:embed_knowledge_base_metadata -
+      No embedding model is loaded. Set RAG_EMBEDDING_MODEL to a valid
+      SentenceTransformer model name, or configure an external
+      RAG_EMBEDDING_ENGINE (ollama, openai, azure_openai).
+
+The part that makes it a finding rather than a consequence: **restoring the
+configuration does not bring the model back.** Measured after a full run, with
+later passes having restored the values, `configs/export` read entirely healthy
+— `embedding_engine: "openai"`, `embedding_model: "text-embedding-3-small"`,
+the correct stub URL and key — and `POST /api/v1/memories/add` still answered
+500. A `docker restart` with that same configuration answered 200. Re-importing
+the identical snapshot through `POST /api/v1/configs/import` also answered 200,
+so the reload is reachable; it just does not happen on the path an operator
+would take.
+
+The operator-facing shape is worse than the harness one. An admin who saves a
+bad connection configuration and then fixes it keeps a wedged instance until
+the process restarts, while the configuration UI and `configs/export` report
+that everything is correct. Nothing surfaces the difference between "configured"
+and "loaded".
+
+**A control separates this from the harness change that found it.** Running the
+same seeding pass against unmodified `dev`, the configuration is nulled exactly
+the same way — so the poisoning is PLANE-001 and predates this work — but
+`POST /api/v1/memories/add` still answers **200**, because no payload ever
+reached the handlers that act on the nulled values. The damage was latent. What
+changed is that it now takes effect, and one failing seed then aborts every
+dependent pass: `Seeding POST /api/v1/memories/add failed (HTTP 500)`, 15
+errors.
+
+**The guard claims success over this.** The seeding pass's own artefact records
+`config_restore_verified: true` and `config_unverified: {}` alongside 11,274
+PLANE-001 findings and 169 poisoned keys, `rag.embedding_engine` and
+`rag.embedding_model` among them. `restore()` re-imports `before[key]` for every
+changed key and raises if the resulting snapshot differs, so the claim is about
+configuration values only. It cannot see derived runtime state, and nothing
+currently says so. Until it can, `config_restore_verified` should not be read as
+"the stack is as it was".
+
+## CI-004: the CI stack image is older than `dev`, and `down -v` reverts the difference
+
+Status: **open**, and it is a trap rather than a bug. The `open-webui-ci` image
+predates PR #289 and PR #291 — nine application files differ from the tree,
+`services/export/service.py` among them. Sessions have been closing that gap by
+`docker cp`-ing application code into the *running container*, which works and
+survives a restart, but **not** a `docker compose down -v`: recreating the
+container restores the image's code, silently.
+
+The failure it produces reads like a regression in whatever changed most
+recently. A run on the recreated stack aborted with
+
+    Data export failed for user <id>:
+    'ModelsTable' object has no attribute 'get_models_by_user_id'
+
+which is PLANE-011 exactly — the regression #289 fixed and this document
+records as fixed. `seed_export` then timed out at 60 seconds, and one failing
+seed aborted every dependent live pass: **54 errors**, the same shape and the
+same count as CI-003.
+
+The control already exists and is written down: verify a sha256 manifest of
+`backend/**/*.py` on both sides before trusting a run. This is the instance
+that shows why. Two cautions for whoever automates it — `docker cp` needs a
+`docker restart` afterwards for the app process to load the new code, and
+macOS `sort` and the container's `sort` collate `_` and `.` differently, so
+compare under `LC_ALL=C` or the manifests differ by ordering alone and the
+check cries wolf.
+
+Rebuilding the image is the durable fix. It is deferred rather than dismissed:
+this document already records two overnight builds OOM-killed here, so the
+build wants the stack stopped and a session that can afford it.
 
 ## BLOCKER-001: live runs cannot set up identities on v0.11.3
 
