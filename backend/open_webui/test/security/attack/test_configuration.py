@@ -268,3 +268,32 @@ def test_every_configuration_guard_says_where_a_lost_snapshot_goes():
             if not any(keyword.arg == 'unverified' for keyword in node.keywords):
                 missing.append(f'{module.name}:{node.lineno}')
     assert not missing, f'configuration guards with nowhere to record a lost snapshot: {missing}'
+
+
+def test_a_pass_reloads_derived_state_even_when_every_value_matches():
+    # PLANE-013: value equality is not "the stack is as it was". A pass can
+    # leave the application's derived state -- the loaded embedding model --
+    # unusable while every exported key still compares equal, and the guard
+    # then verified a stack on which the next pass's seeding could not run.
+    # The import is what makes the application rebuild from configuration, so
+    # a pass ends with one whether or not anything drifted.
+    server = ConfigServer()
+    unverified = []
+    with configuration.preserve_configuration(
+        server, report=lambda _: None, route='drive pass', unverified=unverified.append, durable=True
+    ):
+        pass
+    imports = [call for call in server.calls if call[1] == configuration.IMPORT]
+    assert len(imports) == 1
+    assert imports[0][2]['json']['config'] == server.config
+    assert unverified == []
+
+
+def test_a_single_route_that_changed_nothing_still_costs_no_write():
+    # The other half: the guard runs twice around every write the plane drives,
+    # so an unconditional import per route would double the writes of a pass
+    # that measures hundreds of them. Only the pass boundary pays for it.
+    server = ConfigServer()
+    with configuration.preserve_configuration(server, report=lambda _: None, route=ROUTE, unverified=lambda _: None):
+        pass
+    assert [call for call in server.calls if call[1] == configuration.IMPORT] == []
