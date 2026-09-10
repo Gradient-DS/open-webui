@@ -724,7 +724,7 @@ reason = "Deletes the caller API key and invalidates an API-key driving identity
 
 [[destructive]]
 id = "POST /api/v1/auths/update/password"
-reason = "Changes the caller password and breaks subsequent signin/identity recovery using the old credential."
+reason = "Changes the caller password, and since v0.11.3 revokes every token that identity holds (routers/auths.py:489). The driving bearer dies at once, not merely the old credential."
 
 [[destructive]]
 id = "DELETE /api/v1/users/{user_id}"

@@ -253,6 +253,35 @@ class AttackClient:
             raise
         return self
 
+    def reauthenticate(self, email: str, password: str):
+        """Replace this client's session in place, pinned to the identity it holds.
+
+        A password change revokes every token the user holds, including the one
+        that made the request (routers/users.py:976), so a helper repairing its
+        own driving identity destroys the session it repairs from. Signing in
+        again is only safe if the replacement is the same user in the same role:
+        a client that quietly came back as somebody else would drive the rest of
+        the pass under an identity nobody chose. The caller passes the email
+        because the repair may have just changed it.
+        """
+        if not self.identity:
+            raise AuthenticationError('Only an authenticated client can reauthenticate')
+        expected_id, expected_role = self.identity['id'], self.identity['role']
+        self.token = None
+        self.identity = None
+        self._probe_cache = None
+        result = self.request('POST', '/api/v1/auths/signin', json={'email': email, 'password': password})
+        self.authenticate(result, email, role=expected_role)
+        if self.identity['id'] != expected_id:
+            self.token = None
+            self.identity = None
+            raise AuthenticationError('Reauthentication returned a different user')
+        return self
+
+    @property
+    def user_id(self):
+        return self.identity['id'] if self.identity else None
+
     def verify_identity(self, *, email=None, role=None, user_id=None):
         result = self.request('GET', '/api/v1/auths/')
         body = json_body(result)
