@@ -107,7 +107,9 @@ class ExportService:
         data['tools'] = [ExportService._serialize(t) for t in tools]
 
         # Custom models
-        models = await Models.get_models_by_user_id(user_id)
+        # Upstream #28795 dropped get_models_by_user_id and folded the same
+        # owner-or-writable filter into get_models, in SQL. Same set, one query.
+        models = await Models.get_models(writable_by_user_id=user_id)
         data['models'] = [ExportService._serialize(m) for m in models]
 
         # Feedbacks
