@@ -733,3 +733,19 @@ reason = "Can delete the driving user and its owned resources. Schedule with a d
 [[destructive]]
 id = "DELETE /api/v1/auths/oauth/sessions/{provider}"
 reason = "Deletes the caller provider session, removing OAuth credentials needed by later provider requests."
+
+[[parameter]]
+key = "notification_target"
+name = "target_id"
+prefix = "/api/v1/notifications/targets/{target_id}"
+description = "routers/notifications.py:create_notification_target returns the stored target. Arrived with the v0.11.3 upstream merge. delivery/config stay minimal: a target that actually delivers would post off-host, which the sealed network refuses and the egress sensor would report as its own traffic."
+via = "POST /api/v1/notifications/targets"
+body = { "type" = "webhook", "enabled" = false, "events" = [], "delivery" = "webhook", "config" = { "name" = "attack-target-{token}" } }
+extract = "id"
+
+[[parameter]]
+key = "model_download_job"
+name = "job_id"
+prefix = "/openai/models/{url_idx}/download/status/{job_id}"
+unseedable = "routers/openai.py:get_provider_model_download_status reads a job created by an actual provider model download. The CI stub serves model metadata but cannot produce a real download job, and the sealed network has no provider to download from. Arrived with the v0.11.3 upstream merge; revisit only if the stub grows a download-job lifecycle."
+

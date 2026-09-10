@@ -2310,7 +2310,7 @@ from open_webui.utils.anthropic import (
 @app.post('/api/v1/messages/count_tokens')  # Anthropic Messages token-count endpoint
 async def count_message_tokens(
     request: Request,
-    form_data: dict,
+    form_data: dict = Depends(messages_body),
     user=Depends(get_verified_user),
 ):
     return {'input_tokens': await openai.count_anthropic_tokens(request, form_data, user)}

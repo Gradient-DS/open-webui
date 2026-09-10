@@ -19,7 +19,12 @@ from pydantic import BaseModel, ConfigDict, field_validator, validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui.config import UPLOAD_DIR
-from open_webui.services.model_request_bodies import chat_completion_body, completion_body, messages_body
+from open_webui.services.model_request_bodies import (
+    chat_completion_body,
+    completion_body,
+    embeddings_body,
+    messages_body,
+)
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -1267,7 +1272,7 @@ async def generate_openai_completion(
 @router.post('/v1/embeddings/{url_idx}')
 async def generate_openai_embeddings(
     request: Request,
-    form_data: dict,
+    form_data: dict = Depends(embeddings_body),
     url_idx: int | None = None,
     user=Depends(get_verified_user),  # noqa: B008
 ):
