@@ -357,6 +357,20 @@ def test_transport_failure_flushes_only_completed_responses():
     assert data['passes']['drive']['unentered'] == {'GET /b': None}
 
 
+def test_the_artefact_carries_what_the_gate_needs_to_tell_a_miss_apart():
+    # A route the gate finds uncovered could have been never driven, driven
+    # without a response, or driven with its configuration guard lost. Those
+    # need different answers, so the artefact has to keep them apart.
+    client = Mock(spec=plane.transport.AttackClient)
+    client.request.side_effect = requests.exceptions.ReadTimeout('Read timed out. (read timeout=60)')
+    plane._drive_response(client, 'POST /silent', '/silent', 'drive')
+    plane._PASSES['drive'].config_unverified['POST /guarded'] = 'snapshot lost'
+    plane.flush_hits()
+    persisted = json.loads(hits_path().read_text())['passes']['drive']
+    assert 'POST /silent' in persisted['unanswered']
+    assert 'POST /guarded' in persisted['config_unverified']
+
+
 def test_repeated_pass_does_not_inherit_old_entries():
     spec = tiny_spec(['GET /item'])
     plane.drive_every_route(fake_client(), {}, spec=spec)

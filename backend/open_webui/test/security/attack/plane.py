@@ -90,6 +90,11 @@ class Seeding:
 
 
 _PASSES: dict[str, Seeding] = {}
+# Identifies the run that wrote the artefact. The coverage gate runs in the
+# same invocation as the plane, so anything carrying a different id is a
+# leftover from another run -- and measuring one run's coverage against
+# another run's evidence is the quietest way for a gate to be wrong.
+RUN_ID = uuid4().hex
 
 
 def _count(histogram, route, status):
@@ -191,6 +196,11 @@ def flush_hits():
             'accepted': tally.accepted,
             'unentered': tally.unentered,
             'skipped': tally.skipped,
+            # The gate reads this file, so a route driven without a response,
+            # and a route whose configuration could not be verified, have to
+            # survive into it. Otherwise both read as an ordinary miss.
+            'unanswered': tally.unanswered,
+            'config_unverified': tally.config_unverified,
             'crashes': tally.crashes,
             'body_failures': tally.body_failures,
             'config_findings': tally.config_findings,
@@ -201,6 +211,7 @@ def flush_hits():
         for name, tally in _PASSES.items()
     }
     data = {
+        'run_id': RUN_ID,
         'hits': sorted(set().union(*(tally.entered.keys() for tally in _PASSES.values()))),
         'passes': passes,
     }
