@@ -39,9 +39,11 @@ from open_webui.config import (
     ENABLE_OAUTH_ROLE_MANAGEMENT,
     ENABLE_OAUTH_SIGNUP,
     JWT_EXPIRES_IN,
+    MICROSOFT_CLIENT_LOGIN_BASE_URL,
     OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID,
     OAUTH_ADMIN_ROLES,
     OAUTH_ALLOWED_DOMAINS,
+    OAUTH_ALLOWED_TENANTS,
     OAUTH_ALLOWED_ROLES,
     OAUTH_AUDIENCE,
     OAUTH_AUTHORIZE_PARAMS,
@@ -93,6 +95,7 @@ from open_webui.utils.auth import (
 )
 from open_webui.utils.groups import apply_default_group_assignment
 from open_webui.utils.misc import parse_duration
+from open_webui.utils.oauth_issuer import is_issuer_allowed
 from open_webui.utils.validate import validate_profile_image_url
 from starlette.responses import RedirectResponse
 
@@ -169,6 +172,7 @@ OAUTH_RUNTIME_CONFIG = {
     'OAUTH_ALLOWED_ROLES': ('oauth.allowed_roles', OAUTH_ALLOWED_ROLES),
     'OAUTH_ADMIN_ROLES': ('oauth.admin_roles', OAUTH_ADMIN_ROLES),
     'OAUTH_ALLOWED_DOMAINS': ('oauth.allowed_domains', OAUTH_ALLOWED_DOMAINS),
+    'OAUTH_ALLOWED_TENANTS': ('oauth.allowed_tenants', OAUTH_ALLOWED_TENANTS),
     'WEBHOOK_URL': ('webhook_url', WEBHOOK_URL),
     'JWT_EXPIRES_IN': ('auth.jwt_expiry', JWT_EXPIRES_IN),
     'OAUTH_UPDATE_PICTURE_ON_LOGIN': (
@@ -1850,6 +1854,32 @@ class OAuthManager:
 
         return await client.authorize_redirect(request, redirect_uri, **kwargs)
 
+    def _microsoft_claims_options(self, auth_config) -> dict | None:
+        """Return authlib claims_options enforcing the Entra tenant allowlist.
+
+        Returns None when no allowlist is configured, leaving authlib's
+        default metadata-issuer comparison in place for single-tenant setups.
+        """
+        allowed_tenants = auth_config.OAUTH_ALLOWED_TENANTS
+        if not allowed_tenants:
+            return None
+
+        login_base = MICROSOFT_CLIENT_LOGIN_BASE_URL
+
+        def _validate_iss(claims, value):
+            tid = claims.get('tid')
+            if is_issuer_allowed(value, tid, login_base, allowed_tenants):
+                return True
+            log.warning(
+                'OAuth callback rejected — issuer %r (tid %r) is not in OAUTH_ALLOWED_TENANTS %r',
+                value,
+                tid,
+                allowed_tenants,
+            )
+            return False
+
+        return {'iss': {'essential': True, 'validate': _validate_iss}}
+
     async def handle_callback(self, request, provider, response, db=None):
         auth_config = await get_oauth_runtime_config()
         if not auth_config.ENABLE_OAUTH:
@@ -1866,6 +1896,11 @@ class OAuthManager:
             if client:
                 if hasattr(client, 'client_id') and OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID:
                     auth_params['client_id'] = client.client_id
+
+            if provider == 'microsoft':
+                claims_options = self._microsoft_claims_options(auth_config)
+                if claims_options:
+                    auth_params['claims_options'] = claims_options
 
             try:
                 token = await client.authorize_access_token(request, **auth_params)
