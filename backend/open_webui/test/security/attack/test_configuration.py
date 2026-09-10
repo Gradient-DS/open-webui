@@ -5,6 +5,7 @@ from unittest.mock import Mock
 import pytest
 import requests
 
+from . import client as transport
 from . import configuration, plane, seeds
 
 KEY = 'rag.file.max_size'
@@ -211,7 +212,10 @@ def test_malformed_export_fails_before_any_attack():
     server.request.return_value._content = b'[]'
     with pytest.raises(RuntimeError, match='Configuration recovery GET'):
         configuration.snapshot(server)
-    server.request.assert_called_once_with('GET', configuration.EXPORT)
+    # The guard is instrumentation and gets a far longer timeout than a driven
+    # route: a timeout here loses the evidence rather than producing any.
+    server.request.assert_called_once_with('GET', configuration.EXPORT, timeout=configuration.CONFIG_TIMEOUT_SECONDS)
+    assert configuration.CONFIG_TIMEOUT_SECONDS > transport.DEFAULT_TIMEOUT_SECONDS
 
 
 def test_ingest_body_failure_is_recorded_without_hiding_handler_entry():

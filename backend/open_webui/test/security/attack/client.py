@@ -14,6 +14,11 @@ from urllib3.exceptions import ProtocolError
 from urllib3.util.retry import Retry
 
 DEFAULT_BASE_URL = 'http://localhost:8080'
+# A hosted CI runner is slower than a workstation, and the plane drives every
+# operation in the spec. Too short a timeout measures the runner rather than the
+# application: it turns "slow here" into "never answered", and before timeouts
+# were measurements it ended the whole pass.
+DEFAULT_TIMEOUT_SECONDS = float(os.getenv('ATTACK_TIMEOUT_SECONDS', '60'))
 _SESSION_PATH = '/api/v1/auths/'
 _AMBIGUOUS_AUTH = (401, '401 Unauthorized')
 _PROBE_CACHE_SECONDS = 5
@@ -232,7 +237,7 @@ class AttackClient:
         if kwargs.pop('allow_redirects', False):
             raise ValueError('AttackClient never follows redirects')
         self.session.cookies.clear()
-        kwargs.setdefault('timeout', 30)
+        kwargs.setdefault('timeout', DEFAULT_TIMEOUT_SECONDS)
         try:
             result = self.session.request(
                 method.upper(),

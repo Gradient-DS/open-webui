@@ -240,6 +240,16 @@ def live_crossuser():
         identities.close()
 
 
+def test_a_route_that_never_answers_is_not_an_authorization_violation():
+    # Status 0 with admin_only would otherwise read as "not refused" and report
+    # an authorization finding for a route that simply did not answer.
+    result = crossuser.Authorization(tally=plane.Seeding())
+    silence = plane.Outcome(0, False, '', timed_out=True)
+    crossuser._check(result, 'DELETE /api/v1/users/{user_id}', silence, silence, (), admin_only=True, control=True)
+    assert result.violations == []
+    assert result.tally.body_failures == []
+
+
 @needs_stack
 def test_live_crossuser_has_its_own_5xx_assertion(live_crossuser):
     assert not live_crossuser.tally.crashes, crash_details(live_crossuser.tally)

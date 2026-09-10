@@ -9,7 +9,7 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from . import plane, seeds
+from . import configuration, plane, seeds
 from .hits_path import hits_path
 
 
@@ -424,29 +424,112 @@ def live_drive(live_seeding):
 
 @needs_stack
 def test_live_seeding_has_its_own_5xx_assertion(live_seeding):
-    rows = []
-    for route, body in sorted(live_seeding.crashes.items()):
-        statuses = {status: count for status, count in live_seeding.statuses[route].items() if status >= 500}
-        rows.append(f'{route}: HTTP 5xx counts={statuses}; first 5xx body={body!r}')
-    details = '\n'.join(rows)
-    assert not live_seeding.crashes, f'Seeding found server errors:\n{details}'
+    assert not live_seeding.crashes, f'Seeding found server errors:\n{plane.crash_report(live_seeding)}'
 
 
 @needs_stack
 def test_live_seeding_reports_its_own_reach(live_seeding, record_property):
-    assert live_seeding.statuses.keys() | live_seeding.skipped.keys() == live_seeding.expected
+    accounted = live_seeding.statuses.keys() | live_seeding.skipped.keys() | live_seeding.timeouts.keys()
+    assert accounted == live_seeding.expected
     record_property('seeding_reached', len(live_seeding.entered))
     record_property('seeding_unentered', len(live_seeding.unentered))
+    record_property('seeding_timeouts', len(live_seeding.timeouts))
+    record_property('seeding_config_unverified', len(live_seeding.config_unverified))
     assert live_seeding.entered, 'No seeding request entered a handler'
 
 
 @needs_stack
 def test_live_drive_has_its_own_5xx_assertion(live_drive):
     crashes = {route: outcome for route, outcome in live_drive.items() if outcome.status >= 500}
-    details = '\n'.join(
-        f'{route}: HTTP {outcome.status}; body={outcome.body!r}' for route, outcome in sorted(crashes.items())
+    assert not crashes, f'Drive found server errors:\n{plane.drive_report(live_drive)}'
+
+
+def timing_out_client():
+    client = Mock(spec=plane.transport.AttackClient)
+    client.request.side_effect = requests.exceptions.ReadTimeout('Read timed out. (read timeout=60)')
+    return client
+
+
+def test_a_route_that_never_answers_is_measured_rather_than_ending_the_pass():
+    # A hosted runner is slower than a laptop, so a route that merely takes too
+    # long must not abort the pass: everything after it would go undriven while
+    # the job still reported a result. The route is recorded, never entered.
+    outcome = plane._drive_response(timing_out_client(), 'POST /slow', '/slow', 'drive')
+    assert outcome.timed_out and not outcome.entered
+    tally = plane._PASSES['drive']
+    assert 'POST /slow' in tally.expected
+    assert 'POST /slow' in tally.timeouts
+    assert 'POST /slow' not in tally.entered
+    assert 'POST /slow' not in tally.accepted
+    assert 'POST /slow' not in tally.statuses
+
+
+def test_a_timed_out_route_is_never_counted_as_covered():
+    plane._drive_response(timing_out_client(), 'POST /slow', '/slow', 'drive')
+    assert 'POST /slow' in plane.unentered_routes('drive')
+    assert 'POST /slow' in plane.unentered_routes()
+
+
+def test_a_timed_out_route_is_reported_by_the_reach_control():
+    # The reach control requires every expected route to be accounted for. A
+    # timeout is a third outcome beside a status and an unseedable skip.
+    plane._drive_response(timing_out_client(), 'POST /slow', '/slow', 'seeding')
+    tally = plane._PASSES['seeding']
+    assert tally.statuses.keys() | tally.skipped.keys() | tally.timeouts.keys() == tally.expected
+
+
+def test_a_timed_out_seed_does_not_spend_the_rest_of_its_payload_batches():
+    client = timing_out_client()
+    plane._seed_route(client, 'POST /slow', '/slow', ['a', 'b'], ('payload',), False)
+    # One request per batch, not the follow-up single-field and leave-one-out
+    # drives: they would each pay the full timeout for no new measurement.
+    assert client.request.call_count == 1
+
+
+def test_a_configuration_guard_that_times_out_leaves_the_pass_unverified(monkeypatch):
+    # The guard is instrumentation, not a measurement. Losing it for one route
+    # must not end the pass, and must not let the pass claim it verified config:
+    # config_restore_verified is what later readers trust, so it has to mean
+    # "checked", never "attempted".
+    monkeypatch.setattr(plane, 'preserve_configuration', configuration.preserve_configuration)
+    monkeypatch.setattr(
+        configuration,
+        'snapshot',
+        Mock(side_effect=requests.exceptions.ReadTimeout('Read timed out. (read timeout=300)')),
     )
-    assert not crashes, f'Drive found server errors:\n{details}'
+    client = fake_client()
+    tally = plane.seed_every_writable_field(client, {}, spec=tiny_spec(['POST /item']), payloads=['hostile'])
+    assert client.request.called, 'the pass stopped instead of driving the route unguarded'
+    assert 'POST /item' in tally.config_unverified
+    assert not tally.config_restore_verified
+
+
+def test_a_pass_whose_guards_all_held_still_claims_verification(monkeypatch, tmp_path):
+    # The negative control for the above: without it, always-False would pass
+    # and the assertion would prove nothing.
+    monkeypatch.setenv('ATTACK_CONFIG_STATE_DIR', str(tmp_path / 'state'))
+    monkeypatch.setattr(plane, 'preserve_configuration', configuration.preserve_configuration)
+    monkeypatch.setattr(configuration, 'snapshot', Mock(return_value={}))
+    monkeypatch.setattr(configuration, 'restore', Mock())
+    client = fake_client()
+    client.base_url = 'http://offline'
+    tally = plane.seed_every_writable_field(client, {}, spec=tiny_spec(['POST /item']), payloads=['hostile'])
+    assert not tally.config_unverified
+    assert tally.config_restore_verified
+
+
+def test_the_5xx_report_is_the_gate_message_itself_not_pytest_explanation():
+    # This control used to read str(AssertionError), which embeds pytest's own
+    # repr of the tally -- so it passed under -q and failed under -v, which is
+    # what CI runs. Assert on the report the gate builds.
+    tally = plane.Seeding()
+    plane.record('POST /broken', 422, 'Earlier validation refusal', pass_name='seeding')
+    report = plane.crash_report(tally)
+    assert report == ''
+    tally.crashes['POST /broken'] = 'boom'
+    tally.statuses['POST /broken'] = {422: 1, 500: 1}
+    assert '500' in plane.crash_report(tally)
+    assert '422' not in plane.crash_report(tally)
 
 
 @pytest.mark.parametrize('pass_name', ['seeding', 'drive'])
@@ -466,12 +549,15 @@ def test_5xx_gate_message_includes_every_route_status_and_actionable_body(pass_n
         outcomes[route] = plane._drive_response(client, route, route.split(' ', 1)[1], pass_name)
         # A later success must not clear the seeding failure or hide its status.
         plane.record(route, 200, 'Later success', pass_name=pass_name)
-    with pytest.raises(AssertionError) as error:
+    with pytest.raises(AssertionError):
         if pass_name == 'seeding':
             test_live_seeding_has_its_own_5xx_assertion(plane._PASSES[pass_name])
         else:
             test_live_drive_has_its_own_5xx_assertion(outcomes)
-    message = str(error.value)
+    # The gate's own message, not pytest's explanation of the failed assert:
+    # that explanation embeds a repr of the tally, so reading it back asserted
+    # something else entirely and flipped with -q/-v.
+    message = plane.crash_report(plane._PASSES[pass_name]) if pass_name == 'seeding' else plane.drive_report(outcomes)
     for route, status in zip(bodies, [500, 501, 503], strict=True):
         assert route in message
         assert str(status) in message
@@ -487,6 +573,8 @@ def test_live_drive_reports_its_own_reach(live_drive, record_property):
     assert live_drive.keys() | tally.skipped.keys() == set(plane.operations())
     record_property('drive_reached', len(tally.entered))
     record_property('drive_unentered', len(tally.unentered))
+    record_property('drive_timeouts', len(tally.timeouts))
+    record_property('drive_config_unverified', len(tally.config_unverified))
     record_property('combined_unentered', len(plane.unentered_routes()))
     assert tally.entered, 'No drive request entered a handler'
 

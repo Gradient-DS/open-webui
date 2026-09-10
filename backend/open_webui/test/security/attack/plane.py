@@ -62,6 +62,7 @@ class Outcome:
     entered: bool
     body: str
     reflected: bool = False
+    timed_out: bool = False
 
 
 @dataclass
@@ -76,6 +77,8 @@ class Seeding:
     crashes: dict[str, str] = field(default_factory=dict)
     config_findings: list[dict] = field(default_factory=list)
     body_failures: list[dict] = field(default_factory=list)
+    timeouts: dict[str, str] = field(default_factory=dict)
+    config_unverified: dict[str, str] = field(default_factory=dict)
     config_restore_verified: bool = False
 
     @property
@@ -135,6 +138,44 @@ def unentered_routes(pass_name=None):
         route: next((next(iter(tally.statuses[route])) for tally in _PASSES.values() if route in tally.statuses), None)
         for route in sorted(expected - entered)
     }
+
+
+def record_timeout(route_id, reason, *, pass_name):
+    """Record a route that was driven but never answered.
+
+    Deliberately touches neither `entered`, `accepted` nor `statuses`: a request
+    with no response cannot vouch for coverage, and inventing a status for it
+    would let a route that never returned count as driven. It is expected, and
+    it is unentered.
+    """
+    tally = _PASSES.setdefault(pass_name, Seeding())
+    tally.expected.add(route_id)
+    tally.timeouts.setdefault(route_id, reason)
+    return False
+
+
+def crash_report(tally):
+    """The 5xx gate's message, as a value rather than an f-string inside assert.
+
+    Built separately so its content can be asserted directly. Reading it back
+    out of the AssertionError instead means reading pytest's own repr of the
+    tally, which changes with -q/-v and asserts something else entirely.
+    """
+    return '\n'.join(
+        f'{route}: HTTP 5xx counts='
+        f'{ {status: count for status, count in tally.statuses.get(route, {}).items() if status >= 500} }; '
+        f'first 5xx body={body!r}'
+        for route, body in sorted(tally.crashes.items())
+    )
+
+
+def drive_report(outcomes):
+    """The drive pass's 5xx message. A value, for the same reason as crash_report."""
+    return '\n'.join(
+        f'{route}: HTTP {outcome.status}; body={outcome.body!r}'
+        for route, outcome in sorted(outcomes.items())
+        if outcome.status >= 500
+    )
 
 
 def flush_hits():
@@ -280,7 +321,12 @@ def _throwaway(admin):
 def _drive_one(client, route_id, filled, pass_name, **kwargs):
     tally = _PASSES.setdefault(pass_name, Seeding())
     guard = (
-        preserve_configuration(client, route=route_id, report=tally.config_findings.append)
+        preserve_configuration(
+            client,
+            route=route_id,
+            report=tally.config_findings.append,
+            unverified=lambda reason: tally.config_unverified.setdefault(route_id, reason),
+        )
         if route_id.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
         else nullcontext()
     )
@@ -292,7 +338,11 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
     method, _ = route_id.split(' ', 1)
     actor = _throwaway(client) if route_id in DESTRUCTIVE else client
     try:
-        response = actor.request(method, filled, **kwargs)
+        try:
+            response = actor.request(method, filled, **kwargs)
+        except requests.exceptions.Timeout as error:
+            record_timeout(route_id, str(error), pass_name=pass_name)
+            return Outcome(0, False, '', timed_out=True)
         try:
             entered = record(route_id, response.status_code, response, pass_name=pass_name)
             return Outcome(
@@ -320,6 +370,10 @@ def _seed_route(client, route_id, filled, fields, payloads, full):
     for batch in _payload_batches(route_id, fields, payloads, full=full):
         body = _body_for(fields, batch)
         outcome = _drive_one(client, route_id, filled, 'seeding', json=body)
+        if outcome.timed_out:
+            # Every follow-up drive would pay the same timeout and measure the
+            # same silence. One recorded timeout per route is the measurement.
+            continue
         for name in fields:
             if (outcome.status >= 400 and len(fields) > 1) or not _contains(body, name, batch[name]):
                 _drive_one(client, route_id, filled, 'seeding', json=_body_for([name], batch))
@@ -334,7 +388,9 @@ def _report(name, tally):
     print(
         f'{name}: {len(tally.entered)}/{len(tally.expected)} routes reached; '
         f'{len(tally.statuses)} driven; {len(tally.unentered)} unentered; '
-        f'{len(tally.skipped)} explicitly unseedable'
+        f'{len(tally.skipped)} explicitly unseedable; '
+        f'{len(tally.timeouts)} never answered; '
+        f'{len(tally.config_unverified)} unverified for configuration'
     )
 
 
@@ -344,13 +400,19 @@ def seed_every_writable_field(client, parameters, *, spec=SPEC, payloads=None, f
     payloads = tuple(fetch_payloads() if payloads is None else payloads)
     full = os.getenv('ATTACK_FULL_CORPUS') == '1' if full is None else full
     try:
-        with preserve_configuration(client, route='seeding pass', report=tally.config_findings.append, durable=True):
+        with preserve_configuration(
+            client,
+            route='seeding pass',
+            report=tally.config_findings.append,
+            durable=True,
+            unverified=lambda reason: tally.config_unverified.setdefault('seeding pass', reason),
+        ):
             for route in sorted(fields_by_route, key=_read_before_destroy):
                 filled = _target(route, parameters, tally)
                 if filled is not None:
                     _seed_route(client, route, filled, fields_by_route[route], payloads, full)
                 flush_hits()
-        tally.config_restore_verified = True
+        tally.config_restore_verified = not tally.config_unverified
     finally:
         flush_hits()
         _report('seeding', tally)
@@ -362,13 +424,19 @@ def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
     tally = _PASSES['drive'] = Seeding(expected=set(routes))
     outcomes = {}
     try:
-        with preserve_configuration(client, route='drive pass', report=tally.config_findings.append, durable=True):
+        with preserve_configuration(
+            client,
+            route='drive pass',
+            report=tally.config_findings.append,
+            durable=True,
+            unverified=lambda reason: tally.config_unverified.setdefault('drive pass', reason),
+        ):
             for route in routes:
                 filled = _target(route, parameters, tally)
                 if filled is not None:
                     outcomes[route] = _drive_one(client, route, filled, 'drive')
                 flush_hits()
-        tally.config_restore_verified = True
+        tally.config_restore_verified = not tally.config_unverified
     finally:
         flush_hits()
         _report('drive', tally)
