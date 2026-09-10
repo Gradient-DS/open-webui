@@ -2537,6 +2537,9 @@ OAUTH_ADMIN_ROLES = [
 ]
 
 OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv('OAUTH_ALLOWED_DOMAINS', '*').split(',')]
+OAUTH_ALLOWED_TENANTS = [
+    tenant.strip() for tenant in os.getenv('OAUTH_ALLOWED_TENANTS', '').split(',') if tenant.strip()
+]
 
 OAUTH_UPDATE_PICTURE_ON_LOGIN = os.getenv('OAUTH_UPDATE_PICTURE_ON_LOGIN', 'False').lower() == 'true'
 
@@ -3446,6 +3449,7 @@ DEFAULT_CONFIG = {
     'oauth.allowed_roles': OAUTH_ALLOWED_ROLES,
     'oauth.admin_roles': OAUTH_ADMIN_ROLES,
     'oauth.allowed_domains': OAUTH_ALLOWED_DOMAINS,
+    'oauth.allowed_tenants': OAUTH_ALLOWED_TENANTS,
     'oauth.update_picture_on_login': OAUTH_UPDATE_PICTURE_ON_LOGIN,
     'oauth.update_name_on_login': OAUTH_UPDATE_NAME_ON_LOGIN,
     'oauth.update_email_on_login': OAUTH_UPDATE_EMAIL_ON_LOGIN,
