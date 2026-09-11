@@ -1028,13 +1028,11 @@ class Tools:
 route = "POST /api/v1/google-drive/sync/{knowledge_id}/sources/remove"
 description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed. sync/items has no path parameter, so the crossuser pass never sends it as the owner: setup starts the sync at fixture time, as the drive pass's declared body does (200)."
 json = { "item_id" = "attack-item-{token}" }
-setup = [{ via = "POST /api/v1/google-drive/sync/items", body = { "knowledge_id" = "{google_drive_knowledge}", "items" = [{ "type" = "file", "item_id" = "attack-item-{token}", "item_path" = "/attack", "name" = "attack" }] } }]
 
 [[field]]
 route = "POST /api/v1/onedrive/sync/{knowledge_id}/sources/remove"
 description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed. sync/items has no path parameter, so the crossuser pass never sends it as the owner: setup starts the sync at fixture time, as the drive pass's declared body does (200)."
 json = { "item_id" = "attack-item-{token}" }
-setup = [{ via = "POST /api/v1/onedrive/sync/items", body = { "knowledge_id" = "{onedrive_knowledge}", "items" = [{ "type" = "file", "item_id" = "attack-item-{token}", "item_path" = "/attack", "name" = "attack", "drive_id" = "attack-drive" }] } }]
 
 [[field]]
 route = "POST /api/v1/sync-daemon/runs/{knowledge_id}/summary"
@@ -1265,6 +1263,36 @@ route = "GET /api/v1/users/{user_id}/oauth/sessions"
 status = 400
 detail = "could not find"
 reason = "OAuth sessions come from an identity provider's code exchange, which the sealed stack has none of."
+
+[[control]]
+route = "POST /api/v1/google-drive/sync/{knowledge_id}/cancel"
+status = 400
+detail = "No active sync"
+reason = "Google Drive needs an OAuth identity provider the sealed stack lacks, so a knowledge base never has an active Drive sync to cancel."
+
+[[control]]
+route = "POST /api/v1/google-drive/sync/{knowledge_id}/sources/remove"
+status = 404
+detail = "Source not found"
+reason = "As Drive cancel: no Drive, so no synced source to remove."
+
+[[control]]
+route = "POST /api/v1/onedrive/sync/{knowledge_id}/cancel"
+status = 400
+detail = "No active sync"
+reason = "OneDrive needs an OAuth identity provider the sealed stack lacks, so a knowledge base never has an active OneDrive sync to cancel."
+
+[[control]]
+route = "POST /api/v1/onedrive/sync/{knowledge_id}/sources/remove"
+status = 404
+detail = "Source not found"
+reason = "As OneDrive cancel: no OneDrive, so no synced source to remove."
+
+[[control]]
+route = "POST /api/v1/calendars/events/{event_id}/rsvp"
+status = 404
+detail = "Not an attendee of this event"
+reason = "CalendarEventAttendees.update_rsvp records an invitee response, and an event's creator is not one of its attendees: RSVP is scoped to people invited to the event, by design."
 
 [[control]]
 route = "POST /api/v1/confluence/sync/{knowledge_id}/cancel"
