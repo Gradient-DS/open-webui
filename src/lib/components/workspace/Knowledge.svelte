@@ -37,6 +37,7 @@
 	import SyncProgressBadge from './Knowledge/SyncProgressBadge.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
+	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
 	import TypeSelector from './common/TypeSelector.svelte';
 	import TagSelector from './common/TagSelector.svelte';
 	import Loader from '../common/Loader.svelte';
@@ -485,6 +486,8 @@
 					/>
 				</div>
 			</div>
+
+			<SplitCreateButton actions={$workspaceActions} />
 		</div>
 
 		{#if items !== null && total !== null}

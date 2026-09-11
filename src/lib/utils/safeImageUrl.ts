@@ -20,19 +20,28 @@ const PLACEHOLDER_IMAGE = '/favicon.png';
  * rejected to prevent client-side IP/UA/Referer leaks to attacker-controlled servers.
  */
 export function safeImageUrl(url: string, allowExternal = false): string {
-	if (!url || url === '') {
-		return `${WEBUI_BASE_URL}${PLACEHOLDER_IMAGE}`;
-	}
-
-	if (
-		(WEBUI_BASE_URL && url.startsWith(WEBUI_BASE_URL)) ||
-		url.startsWith('https://www.gravatar.com/avatar/') ||
-		(allowExternal && /^https?:\/\//i.test(url)) ||
-		url.startsWith('data:') ||
-		url.startsWith('/')
-	) {
+	if (isSafeImageUrl(url, allowExternal)) {
 		return url;
 	}
 
 	return `${WEBUI_BASE_URL}${PLACEHOLDER_IMAGE}`;
+}
+
+/**
+ * [Gradient] True when safeImageUrl would pass the URL through rather than
+ * substitute the placeholder, so content images can tell "rejected" apart
+ * from a real picture.
+ */
+export function isSafeImageUrl(url: string, allowExternal = false): boolean {
+	if (!url) {
+		return false;
+	}
+
+	return (
+		(!!WEBUI_BASE_URL && url.startsWith(WEBUI_BASE_URL)) ||
+		url.startsWith('https://www.gravatar.com/avatar/') ||
+		(allowExternal && /^https?:\/\//i.test(url)) ||
+		url.startsWith('data:') ||
+		url.startsWith('/')
+	);
 }

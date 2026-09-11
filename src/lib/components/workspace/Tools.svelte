@@ -45,6 +45,7 @@
 	import XMark from '../icons/XMark.svelte';
 	import ImportModal from '../ImportModal.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
+	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
 	import CommunityDiscover from './common/CommunityDiscover.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 	import ChevronDown from '../icons/ChevronDown.svelte';
@@ -382,6 +383,8 @@
 					/>
 				</div>
 			</div>
+
+			<SplitCreateButton actions={$workspaceActions} />
 		</div>
 
 		{#if (filteredItems ?? []).length !== 0}
