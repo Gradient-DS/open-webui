@@ -1,6 +1,6 @@
 """Mint OWUI runtime authority and register its public signing key.
-
 Run with python -m open_webui.soev.bootstrap; save the single JSON output as deployment secrets.
+If the key is lost, revoke the credential and bootstrap again under a new SOEV_API_SIGNING_KID.
 """
 
 import asyncio
@@ -53,16 +53,28 @@ async def bootstrap() -> None:
         idempotency_key=f'owui-bootstrap:{operation}',
     )
     credential_id = credential.get('id') if credential else None
-    secret = (credential.get('secret') or credential.get('key')) if credential else None
-    if not isinstance(credential_id, str) or not credential_id or not isinstance(secret, str) or not secret:
+    secret = credential.get('secret') if credential else None
+    if not isinstance(credential_id, str) or not credential_id or not isinstance(secret, str):
         raise ValueError('soev-api did not return a credential id and plaintext key')
-    await client.send(
-        'POST',
-        f'/v1/credentials/{quote(credential_id, safe="")}/signing-keys',
-        {'public_jwk': jwk},
-        idempotency_key=f'owui-signing-key:{operation}',
-    )
-    print(json.dumps({'SOEV_API_KEY': secret, 'SOEV_API_CREDENTIAL_ID': credential_id}))
+    if secret:
+        print(json.dumps({'SOEV_API_KEY': secret, 'SOEV_API_CREDENTIAL_ID': credential_id}), flush=True)
+    try:
+        await client.send(
+            'POST',
+            f'/v1/credentials/{quote(credential_id, safe="")}/signing-keys',
+            {'public_jwk': jwk},
+            idempotency_key=f'owui-signing-key:{operation}',
+        )
+    except SoevApiError as error:
+        if secret:
+            raise ValueError(
+                f'Signing-key registration failed (HTTP {error.status}); '
+                'the credential was minted and printed; rerunning will register the key'
+            ) from None
+        raise
+    if not secret:
+        print(json.dumps({'SOEV_API_CREDENTIAL_ID': credential_id}), flush=True)
+        print('The key was issued on the first run.', file=sys.stderr)
 
 
 def main() -> None:
