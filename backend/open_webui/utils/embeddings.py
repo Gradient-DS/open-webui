@@ -2,7 +2,8 @@ import logging
 import random
 import sys
 
-from fastapi import Request
+from fastapi import HTTPException, Request
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel
@@ -62,7 +63,7 @@ async def generate_embeddings(
 
     model_id = form_data.get('model')
     if model_id not in models:
-        raise Exception('Model not found')
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.MODEL_NOT_FOUND(model_id))
     model = models[model_id]
 
     # Access filtering

@@ -157,7 +157,7 @@ async def generate_title(
     else:
         models = request.app.state.MODELS
 
-    model_id = form_data['model']
+    model_id = form_data.get('model')
     if not model_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -232,7 +232,7 @@ async def generate_follow_ups(
     else:
         models = request.app.state.MODELS
 
-    model_id = form_data['model']
+    model_id = form_data.get('model')
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -299,7 +299,7 @@ async def generate_chat_tags(
     else:
         models = request.app.state.MODELS
 
-    model_id = form_data['model']
+    model_id = form_data.get('model')
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -360,7 +360,7 @@ async def generate_image_prompt(
     else:
         models = request.app.state.MODELS
 
-    model_id = form_data['model']
+    model_id = form_data.get('model')
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -439,7 +439,7 @@ async def generate_queries(
     else:
         models = request.app.state.MODELS
 
-    model_id = form_data['model']
+    model_id = form_data.get('model')
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -501,6 +501,10 @@ async def generate_autocompletion(
     prompt = form_data.get('prompt')
     messages = form_data.get('messages')
 
+    if not isinstance(prompt, str):
+        # Measured below and templated later; without one len() raised (500).
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='A prompt is required.')
+
     autocomplete_input_max_length = await Config.get('task.autocomplete.input_max_length')
     if autocomplete_input_max_length > 0:
         if len(prompt) > autocomplete_input_max_length:
@@ -517,7 +521,7 @@ async def generate_autocompletion(
     else:
         models = request.app.state.MODELS
 
-    model_id = form_data['model']
+    model_id = form_data.get('model')
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -578,7 +582,7 @@ async def generate_emoji(
     else:
         models = request.app.state.MODELS
 
-    model_id = form_data['model']
+    model_id = form_data.get('model')
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -634,7 +638,7 @@ async def generate_moa_response(
     else:
         models = request.app.state.MODELS
 
-    model_id = form_data['model']
+    model_id = form_data.get('model')
 
     if model_id not in models:
         raise HTTPException(

@@ -281,12 +281,15 @@ async def verify_connection(
                 res = await r.json(loads=JSONCodec.loads)
                 if 'error' in res:
                     detail = f'External Error: {res["error"]}'
-                raise Exception(detail)
+                raise HTTPException(status_code=400, detail=detail)
 
             return await r.json(loads=JSONCodec.loads)
+    except HTTPException:
+        raise
     except aiohttp.ClientError as exc:
+        # The connection being verified is unreachable or malformed: that is the answer, not a fault.
         log.exception(f'Client error: {exc}')
-        raise HTTPException(status_code=500, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
+        raise HTTPException(status_code=400, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
     except Exception as exc:
         log.exception(f'Unexpected error: {exc}')
         raise HTTPException(status_code=500, detail=f'Unexpected error: {exc}')
@@ -1398,6 +1401,9 @@ async def generate_anthropic_messages(
 
     payload = {**form_data}
     model_id = payload.get('model', '')
+    if not model_id:
+        # Resolution below indexes payload['model']; without one it raised KeyError (500).
+        raise HTTPException(status_code=400, detail='A model is required.')
 
     model_info = await Models.get_model_by_id(model_id)
     if model_info:

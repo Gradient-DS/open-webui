@@ -1014,6 +1014,9 @@ async def test_email_config(request: Request, user=Depends(get_admin_user)):
             html_body='<p>This is a test email. Your email configuration is working correctly.</p>',
         )
         return {'status': 'ok', 'message': f'Test email sent to {user.email}'}
+    except ValueError as e:
+        # The sender raises ValueError for its own configuration: the admin's to fix.
+        raise HTTPException(400, detail=f'Failed to send test email: {str(e)}')
     except Exception as e:
         raise HTTPException(500, detail=f'Failed to send test email: {str(e)}')
 

@@ -880,14 +880,21 @@ async def _get_external_source_test_result(
         created_at=int(time.time()),
         updated_at=int(time.time()),
     )
-    result = await retrieve_external_knowledge_for_connection(
-        request,
-        test_knowledge,
-        connection,
-        [query.strip()],
-        count,
-        user=user,
-    )
+    try:
+        result = await retrieve_external_knowledge_for_connection(
+            request,
+            test_knowledge,
+            connection,
+            [query.strip()],
+            count,
+            user=user,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        # A connection test that cannot use its store has failed: that is the answer, not a fault.
+        log.warning('External retrieval test failed for connection %s', connection.get('id'), exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'External retrieval test failed: {e}')
     return {
         'documents': result.get('documents', [[]])[0],
         'metadatas': result.get('metadatas', [[]])[0],

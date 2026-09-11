@@ -143,6 +143,9 @@ async def load_function_from_url(request: Request, form_data: LoadUrlForm, user=
         }
     except HTTPException:
         raise
+    except aiohttp.ClientError as e:
+        # The admin-supplied URL could not be fetched: a bad URL, not a server fault.
+        raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(e, 'Error fetching function'))
     except Exception as e:
         raise HTTPException(
             status_code=500,
