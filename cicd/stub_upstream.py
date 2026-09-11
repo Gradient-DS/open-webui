@@ -62,7 +62,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        # HEAD reuses GET's answer but must stop at the headers: a body after it is
+        # a protocol error the terminal proxy reported as 502.
+        if self.command != 'HEAD':
+            self.wfile.write(body)
 
     def _capture_control(self, path):
         if path not in {'/_recorded', '/_recorded/reset'}:
@@ -339,6 +342,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/v1/audio/transcriptions':
             # Multipart upstream too; the speech-to-text handler reads `text`.
             self._send({'text': 'stub transcription'})
+        elif path == '/sync/run':
+            # services/sync/daemon_client.py treats only 202 or 409 as a started run.
+            self._send({'status': 'accepted'}, status=202)
         elif path == '/jobs':
             self._send({'job_id': 'ci-document-job', 'status': 'pending'}, status=201)
         elif path == '/api/show':

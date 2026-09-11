@@ -157,3 +157,32 @@ def test_malformed_model_body_is_an_explicit_refusal(stub, raw):
         request(stub, '/v1/chat/completions', raw=raw)
     assert error.value.code == 400
     assert json.loads(error.value.read())['error'] == 'expected a JSON object'
+
+
+def test_head_answers_headers_without_a_body(stub):
+    # The terminal proxy forwards HEAD. A body after a HEAD response is a protocol
+    # error to aiohttp (BadHttpMessage), which the proxy answered as a 502.
+    import socket
+
+    host, port = stub[1].removeprefix('http://').split(':')
+    with socket.create_connection((host, int(port)), timeout=5) as sock:
+        sock.sendall(b'HEAD /v1/models HTTP/1.0\r\nHost: stub\r\n\r\n')
+        data = b''
+        while chunk := sock.recv(65536):
+            data += chunk
+    head, _, body = data.partition(b'\r\n\r\n')
+    assert b' 200 ' in head.split(b'\r\n')[0]
+    assert body == b''
+
+
+def test_the_sync_daemon_accepts_a_run(stub):
+    # services/sync/daemon_client.py treats only 202 or 409 as a started run; the
+    # catch-all 200 made every sync/items answer 502 "sync service unreachable".
+    req = Request(
+        stub[1] + '/sync/run',
+        data=json.dumps({'knowledge_id': 'k', 'provider': 'google_drive', 'user_id': 'u'}).encode(),
+        method='POST',
+        headers={'Content-Type': 'application/json'},
+    )
+    with build_opener(ProxyHandler({})).open(req, timeout=5) as response:
+        assert response.status == 202

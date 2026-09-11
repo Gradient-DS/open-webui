@@ -161,6 +161,9 @@ services:
       SEARCH_API_BASE_URL: "http://stub:8000"
       SEARCH_API_KEY: "ci-stub-key"
       SYNC_DAEMON_URL: "http://stub:8000"
+      # Without a key the client sends "Bearer " and httpx refuses the header, so every
+      # sync/items answered 502 "sync service unreachable" before reaching the stub.
+      SYNC_DAEMON_API_KEY: "ci-stub-key"
       PIPELINE_API_BASE_URL: "http://stub:8000"
       PIPELINE_API_KEY: "ci-stub-key"
       # config.py resets scalar OPENAI_API_BASE_URL after forming the URL list;
