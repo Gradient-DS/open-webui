@@ -477,9 +477,23 @@ class IdentityServer:
         if any(u['email'] == form['email'] for u in self.users.values()):
             return response(400, {'detail': _EMAIL_TAKEN})
         user_id = f'user-{self.issued}'
-        user = {**form, 'id': user_id, 'role': 'admin' if not self.users else form['role']}
+        role = 'admin' if not self.users else form['role']
+        user = {**form, 'id': user_id, 'role': role, 'created_at': self.clock}
         self.users[user_id] = user
         return response(200, self.session(user))
+
+    def update_user(self, target, form, user):
+        # The primary-admin guard reads models/users.py:get_first_user, which
+        # orders by whole-second created_at alone: any account created in the
+        # first second can come back as the primary admin (PLANE-018).
+        first = min(u['created_at'] for u in self.users.values())
+        if target['created_at'] == first and target['id'] != user['id']:
+            return response(403, {'detail': 'action prohibited'})
+        # Revocation precedes the rest of the update and does not fail it.
+        if form.get('password'):
+            self.revoked_at[target['id']] = self.clock
+        target.update(form)
+        return response(200, target)
 
     def request(self, client, method, path, **kwargs):
         self.calls.append((method, path))
@@ -502,10 +516,7 @@ class IdentityServer:
             if not target:
                 return response(400, {'detail': "We could not find what you're looking for :/"})
             if path.endswith('/update'):
-                # Revocation precedes the rest of the update and does not fail it.
-                if form.get('password'):
-                    self.revoked_at[target['id']] = self.clock
-                target.update(form)
+                return self.update_user(target, form, user)
             return response(200, target)
         pytest.fail(f'Unexpected HTTP call: {method} {path}')
 
@@ -680,6 +691,20 @@ def test_an_unrecoverable_admin_fails_loudly(identity_server, tmp_path):
     original.close()
     with pytest.raises(AuthenticationError):
         ensure_identities('http://app', state_path=state_path)
+
+
+def test_no_identity_shares_the_bootstrap_admins_second(identity_server, tmp_path):
+    # PLANE-018: an account created in the admin's signup second can be taken for
+    # the primary admin, and then the admin's own repair of it is refused.
+    from .identities import ADMIN_EMAIL, INTRUDER_EMAIL, USER_EMAIL, ensure_identities
+
+    identities = ensure_identities('http://app', state_path=tmp_path / 'identities.json')
+    try:
+        created = {u['email']: u['created_at'] for u in identity_server.users.values()}
+        assert created[USER_EMAIL] > created[ADMIN_EMAIL]
+        assert created[INTRUDER_EMAIL] > created[ADMIN_EMAIL]
+    finally:
+        identities.close()
 
 
 @needs_stack

@@ -333,6 +333,12 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif path == '/v1/images/generations':
             self._send({'created': 0, 'data': [{'b64_json': PNG_BASE64} for _ in range(payload.get('n', 1))]})
+        elif path == '/v1/images/edits':
+            # Multipart upstream, so the body never parses as JSON; only the answer's shape matters.
+            self._send({'created': 0, 'data': [{'b64_json': PNG_BASE64}]})
+        elif path == '/v1/audio/transcriptions':
+            # Multipart upstream too; the speech-to-text handler reads `text`.
+            self._send({'text': 'stub transcription'})
         elif path == '/jobs':
             self._send({'job_id': 'ci-document-job', 'status': 'pending'}, status=201)
         elif path == '/api/show':

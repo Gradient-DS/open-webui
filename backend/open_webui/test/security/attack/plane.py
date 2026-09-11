@@ -272,6 +272,29 @@ def _body_for(fields, payload, skeleton=None):
     return body if body is not None else {}
 
 
+def _declared(parameters, route_id):
+    """The real ids a route's request fields need; see [[field]] in the attack surface."""
+    return getattr(parameters, 'fields', {}).get(route_id, {})
+
+
+def _overlaps(name, other):
+    left, right = _tokens(name), _tokens(other)
+    return left[: len(right)] == right or right[: len(left)] == left
+
+
+def _hold_declared(skeleton, fields, declared):
+    """Plant declared ids onto the skeleton, and name every field that would overwrite one.
+
+    A field on the same path -- `image[]` under a declared `image` -- replaces the
+    id when planted, so it is held like a constrained field: at its skeleton
+    value in the all-fields body, and still probed alone.
+    """
+    if not declared:
+        return skeleton, []
+    skeleton = _body_for(list(declared), declared, skeleton if skeleton is not None else {})
+    return skeleton, [name for name in fields if any(_overlaps(name, held) for held in declared)]
+
+
 def _rejected_fields(body):
     """The dotted paths a validation response names, spelled as the derivation spells them.
 
@@ -506,6 +529,9 @@ def seed_every_writable_field(client, parameters, *, spec=SPEC, payloads=None, f
             for route in sorted(fields_by_route, key=_read_before_destroy):
                 filled = _target(route, parameters, tally)
                 if filled is not None:
+                    skeleton, held = _hold_declared(
+                        skeletons.get(route), fields_by_route[route], _declared(parameters, route).get('json')
+                    )
                     _seed_route(
                         client,
                         route,
@@ -513,8 +539,8 @@ def seed_every_writable_field(client, parameters, *, spec=SPEC, payloads=None, f
                         fields_by_route[route],
                         payloads,
                         full,
-                        skeleton=skeletons.get(route),
-                        constrained=constrained.get(route, ()),
+                        skeleton=skeleton,
+                        constrained=[*constrained.get(route, ()), *held],
                     )
                 flush_hits()
         tally.config_restore_verified = not tally.config_unverified
@@ -547,7 +573,19 @@ def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
             for route in routes:
                 filled = _target(route, parameters, tally)
                 if filled is not None:
-                    body = {'json': skeletons[route]} if route in skeletons else {}
+                    declared = _declared(parameters, route)
+                    body = {}
+                    if route in skeletons:
+                        body['json'] = _hold_declared(skeletons[route], (), declared.get('json'))[0]
+                    elif declared.get('json'):
+                        # Seeding sends every field a payload, so only drive sends the real ids
+                        # together. The declared ids alone: never the skeleton, COVERAGE-001.
+                        body['json'] = _hold_declared(None, (), declared['json'])[0]
+                    if declared.get('params'):
+                        body['params'] = declared['params']
+                    # Multipart: the derivation models JSON bodies only, so nothing else sends one.
+                    if declared.get('files'):
+                        body.update(files=declared['files'], data=declared.get('form', {}))
                     outcomes[route] = _drive_one(client, route, filled, 'drive', **body)
                 flush_hits()
         tally.config_restore_verified = not tally.config_unverified

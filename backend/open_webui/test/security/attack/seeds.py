@@ -442,11 +442,74 @@ def _seed_endpoint(ctx, p):
     return _extract(body, ctx.fill(p['extract'], p), name=p['key'], via=p['via'])
 
 
+def apply_stack_configuration(ctx):
+    """Turn on what the stack's environment cannot; see [stack_configuration] in the surface."""
+    wanted = ctx.surface['stack_configuration']
+    applied = ctx.request('POST', '/api/v1/configs/import', actor=ctx.admin, json={'config': wanted})
+    missing = {key: applied.get(key) for key, value in wanted.items() if applied.get(key) != value}
+    if missing:
+        raise RuntimeError(f'Stack configuration did not take effect: {missing}')
+
+
+class Resolved(dict):
+    """Path parameters keyed by (path, name), plus `fields`: route -> json/params/form/files.
+
+    A dict, so every caller that only wants path parameters is unaffected.
+    """
+
+    def __init__(self, *args, fields=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields = fields or {}
+
+
+def _fill_field(value, ctx, *, path=False):
+    if isinstance(value, dict):
+        return {key: _fill_field(item, ctx, path=path) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_fill_field(item, ctx, path=path) for item in value]
+    if not isinstance(value, str):
+        return value
+
+    def substitute(match):
+        key = match.group(1)
+        if key not in ctx.values:
+            raise RuntimeError(f'field value references {key!r}, which is not a seeded parameter')
+        return quote(ctx.values[key], safe='') if path else ctx.values[key]
+
+    # Identifier-shaped keys only: a JSON file part's own braces are content, not references.
+    return re.sub(r'\{([A-Za-z_][A-Za-z0-9_]*)\}', substitute, _fill_token(value, ctx.token))
+
+
+def resolve_fields(ctx):
+    """Fill every [[field]] from seeded values, making its setup requests first, in order."""
+    fields = {}
+    for entry in ctx.surface.get('field', []):
+        for step in entry.get('setup', []):
+            method, path = step['via'].split(' ', 1)
+            ctx.request(
+                method, _fill_field(path, ctx, path=True), actor=ctx.admin, json=_fill_field(step.get('body', {}), ctx)
+            )
+        resolved = {kind: _fill_field(entry[kind], ctx) for kind in ('json', 'params', 'form') if kind in entry}
+        if 'files' in entry:
+            resolved['files'] = [
+                (
+                    part['field'],
+                    (_fill_field(part['filename'], ctx), _fill_field(part['content'], ctx), part['content_type']),
+                )
+                for part in entry['files']
+            ]
+        fields[entry['route']] = resolved
+    return fields
+
+
 def resolve_parameters(client: AttackClient, *, admin: AttackClient | None = None, surface=SURFACE, spec=SPEC):
     ordered = dependency_order(surface)
     ctx = SeedContext(client, admin or client, surface)
     if surface.get('preserve_configuration'):
         recover_configuration(ctx.admin)
+    # After recovery: an interrupted pass's snapshot would otherwise turn it back off.
+    if surface.get('stack_configuration'):
+        apply_stack_configuration(ctx)
     for p in ordered:
         key = p['key']
         if 'unseedable' in p:
@@ -464,4 +527,4 @@ def resolve_parameters(client: AttackClient, *, admin: AttackClient | None = Non
             p = parameter_for(path, name, surface)
             if 'unseedable' not in p:
                 resolved[path, name] = ctx.values[p['key']]
-    return resolved
+    return Resolved(resolved, fields=resolve_fields(ctx))

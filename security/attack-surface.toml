@@ -31,6 +31,17 @@
 # corpus values from older runs before resolving any fixtures.
 preserve_configuration = true
 
+# Configuration a tenant admin can switch on at runtime but the stack cannot set
+# from its environment. Applied after configuration recovery and before any
+# pass snapshots, so every restore keeps it. Chart values only seed
+# PersistentConfig, so each key here is production surface; route-coverage.toml
+# states the rule. CI-005 in plane-findings.md.
+[stack_configuration]
+# Five tenants run self-signup. The first signup turns signup off in-process
+# (routers/auths.py:signup), and identity bootstrap is that signup, so an
+# ENABLE_SIGNUP environment variable cannot keep it on.
+"ui.enable_signup" = true
+
 [[parameter]]
 key = "namespace"
 name = "namespace"
@@ -76,9 +87,9 @@ actor = "admin"
 key = "chat"
 name = "id"
 prefix = "/api/v1/chats/{id}"
-description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. Use the admin folder owner; create_new_chat validates folder ownership even for admins."
+description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. The message carries one pending function_call so utils/tool_approval.py:resolve_tool_call_output finds a tool call to resolve. Use the admin folder owner; create_new_chat validates folder ownership even for admins."
 via = "POST /api/v1/chats/new"
-body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-{token}", "models" = ["{model}"], "history" = { "currentId" = "message_{token}", "messages" = { "message_{token}" = { "id" = "message_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fixture message.", "childrenIds" = [] } } } } }
+body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-{token}", "models" = ["{model}"], "history" = { "currentId" = "message_{token}", "messages" = { "message_{token}" = { "id" = "message_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fixture message.", "childrenIds" = [], "output" = [{ "type" = "function_call", "call_id" = "call_{token}", "name" = "attack_tool", "status" = "pending" }] } } } } }
 extract = "id"
 depends_on = ["folder", "model"]
 actor = "admin"
@@ -731,6 +742,10 @@ id = "DELETE /api/v1/users/{user_id}"
 reason = "Can delete the driving user and its owned resources. Schedule with a disposable identity after ordinary targets."
 
 [[destructive]]
+id = "POST /api/v1/knowledge/{id}/reset"
+reason = "Wipes the KB's files and, by default (include_directories=true), its directories, so every later request against the seeded directory reads 404. Measured: DELETE /api/v1/knowledge/{id}/dirs/{dir_id}/delete answered 404 in every pass because reset ran first."
+
+[[destructive]]
 id = "DELETE /api/v1/auths/oauth/sessions/{provider}"
 reason = "Deletes the caller provider session, removing OAuth credentials needed by later provider requests."
 
@@ -738,7 +753,7 @@ reason = "Deletes the caller provider session, removing OAuth credentials needed
 key = "notification_target"
 name = "target_id"
 prefix = "/api/v1/notifications/targets/{target_id}"
-unseedable = "routers/notifications.py:_check_notifications_access answers 404 for the whole notifications surface unless ui.enable_user_webhooks is on, and it is off everywhere we ship: helm/open-webui-tenant/values.yaml:443 defaults enableUserWebhooks to \"false\" and no tenant overrides it, so the CI stack matching production is correct rather than a stack gap. The 404 is the application's own NOT_FOUND, which entered_the_handler already refuses to count as coverage, so these routes read as unreached rather than falsely driven. Seeded on declaration during the v0.11.3 gate refresh and never exercised live, because identity setup was blocked at the time. Revisit if a tenant turns user webhooks on; a target that actually delivers would also post off-host, which the sealed network refuses and the egress sensor would report as its own traffic."
+unseedable = "routers/notifications.py:create_notification_target stores a target only after utils/notifications.py:_normalize_target has passed its URL through retrieval/web/utils.py:validate_url, which refuses every host resolving to a non-global address: in-network hosts (stub, minio) resolve to private Docker addresses, and external hosts do not resolve at all on the internal network. Observed live with ENABLE_USER_WEBHOOKS on (CI-005): an in-network URL answers 400 'The URL you provided is invalid'. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard the gate exists to observe, so this is recorded rather than worked around, exactly like event_webhook: the parameter is unseedable because the guard works. Delivery re-validates at send time (utils/webhook.py:post_webhook), so a target stored another way still cannot reach a private address. Before CI-005 this read 'feature off'; a tenant admin can turn user webhooks on at runtime, so that was never a reason."
 
 [[parameter]]
 key = "model_download_job"
@@ -746,3 +761,149 @@ name = "job_id"
 prefix = "/openai/models/{url_idx}/download/status/{job_id}"
 unseedable = "routers/openai.py:get_provider_model_download_status reads a job created by an actual provider model download. The CI stub serves model metadata but cannot produce a real download job, and the sealed network has no provider to download from. Arrived with the v0.11.3 upstream merge; revisit only if the stub grows a download-job lifecycle."
 
+
+# Request fields -- body or query -- that must carry a real id for the handler to
+# get past its lookup. A random string reads 404 ("not found") and the route is
+# driven without being entered: 17 routes measured exactly that. Values name
+# seeded parameter keys ({file}, {knowledge}) or the pass token ({token}).
+#
+# The seeding pass plants `json` onto the all-fields body's skeleton and holds
+# those fields there, as it holds constrained ones: the body that earns coverage
+# carries the real id, and each held field is still probed alone with the
+# corpus. The drive pass sends `params`. `setup` is a list of non-destructive
+# requests made while resolving, for a fixture no path parameter owns.
+#
+# Multipart routes declare `files`, in the file seed's own format, and `form`
+# text parts; the drive pass sends them. The derivation models JSON bodies only,
+# so without these no pass sends a body and the route reads 422 in every pass.
+
+[[field]]
+route = "GET /api/v1/files/search"
+description = "routers/files.py:search_files answers 404 when no file matches the pattern; the seeded file's own name matches."
+params = { "filename" = "{filename}" }
+
+[[field]]
+route = "GET /api/v1/models/model"
+description = "routers/models.py reads the model by the id query parameter; the seeded model exists and is readable."
+params = { "id" = "{model}" }
+
+[[field]]
+route = "GET /api/v1/pipelines/"
+description = "routers/pipelines.py:get_pipelines indexes the OpenAI connection list with urlIdx; without it base_urls[None] raises and reads as 404 'Pipeline not found'. The query pass drives string parameters only."
+params = { "urlIdx" = "{openai_index}" }
+
+[[field]]
+route = "GET /api/v1/prompts/id/{prompt_id}/history/diff"
+description = "models/prompt_history.py:compute_diff returns None unless both ids are history rows of this prompt. The same row on both sides is a valid, empty diff. Reachable since PLANE-017: history/{history_id} was registered first and answered for diff."
+params = { "from_id" = "{prompt_history}", "to_id" = "{prompt_history}" }
+
+[[field]]
+route = "POST /api/models/unload"
+description = "main.py:unload_model walks the model's base_model_id chain to an upstream model and answers 404 for an unknown id."
+json = { "model" = "{model}" }
+
+[[field]]
+route = "POST /openai/chat/completions"
+description = "routers/openai.py:generate_chat_completion answers 404 MODEL_NOT_FOUND unless the model resolves to a configured upstream model (404 x389 measured with sampled ids)."
+json = { "model" = "{model}" }
+
+[[field]]
+route = "POST /api/v1/calendars/events/create"
+description = "routers/calendar.py needs an existing calendar the caller can write."
+json = { "calendar_id" = "{calendar}" }
+
+[[field]]
+route = "POST /api/v1/chats/new"
+description = "routers/chats.py:create_new_chat answers 404 when folder_id is not a folder the caller can write."
+json = { "folder_id" = "{folder}" }
+
+[[field]]
+route = "POST /api/v1/chats/{id}/messages/{message_id}/resolve"
+description = "utils/tool_approval.py:resolve_tool_call_output answers 404 'Tool call not found' unless call_id names a function_call in the message output; the chat fixture seeds one, pending. Reject, because approve and answer need a real tool or an ask_user call."
+json = { "call_id" = "call_{token}", "action" = "reject" }
+
+[[field]]
+route = "POST /api/v1/google-drive/sync/items"
+description = "The sync handler answers 404 'Knowledge base not found' for an unknown knowledge_id; the provider-typed KB fixture exists."
+json = { "knowledge_id" = "{google_drive_knowledge}" }
+
+[[field]]
+route = "POST /api/v1/onedrive/sync/items"
+description = "The sync handler answers 404 'Knowledge base not found' for an unknown knowledge_id; the provider-typed KB fixture exists."
+json = { "knowledge_id" = "{onedrive_knowledge}" }
+
+[[field]]
+route = "POST /api/v1/images/edit"
+description = "routers/images.py:image_edits resolves a non-URL image as a file id through get_file_content_by_id, which answers 404 for an unknown id."
+json = { "image" = "{file}" }
+
+[[field]]
+route = "POST /api/v1/knowledge/external/knowledge/create"
+description = "Creating an external KB needs an existing connection; the connection fixture exists."
+json = { "connection_id" = "{connection}" }
+
+[[field]]
+route = "POST /api/v1/knowledge/{id}/file/move"
+description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. Setup processes the seeded file first -- file/add refuses a file with no extracted content, and the file fixture uploads with process=false to avoid an ingestion race -- then adds it to the KB."
+json = { "file_id" = "{file}" }
+setup = [
+    { via = "POST /api/v1/retrieval/process/file", body = { "file_id" = "{file}" } },
+    { via = "POST /api/v1/knowledge/{knowledge}/file/add", body = { "file_id" = "{file}" } },
+]
+
+[[field]]
+route = "POST /api/v1/retrieval/process/file"
+description = "routers/retrieval.py:process_file looks the file up by file_id and answers 404 for an unknown one."
+json = { "file_id" = "{file}" }
+
+[[field]]
+route = "POST /api/v1/retrieval/process/files/batch"
+description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot write; a KB's collection is its id. Each file must also exist."
+json = { "collection_name" = "{knowledge}", "files[].id" = "{file}" }
+
+[[field]]
+route = "POST /api/v1/retrieval/query/collection"
+description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot read; a KB's collection is its id."
+json = { "collection_names[]" = "{knowledge}" }
+
+[[field]]
+route = "POST /api/v1/auths/signin"
+description = "routers/auths.py:signin answers 400 INVALID_CRED unless email and password name an account, and throttles by email (15 per 3 minutes). Setup adds a disposable account per pass, so a real sign-in never spends a bucket the driving identities need. The client clears its cookie jar around every request, so the session it mints does not follow the driver."
+json = { "email" = "attack-signin-{token}@example.com", "password" = "Attack-Signin-Passw0rd!" }
+setup = [
+    { via = "POST /api/v1/auths/add", body = { "email" = "attack-signin-{token}@example.com", "name" = "Attack signin {token}", "password" = "Attack-Signin-Passw0rd!", "role" = "user" } },
+]
+
+[[field]]
+route = "GET /api/v1/models/model/profile/image"
+description = "routers/models.py:get_model_profile_image serves only a data:image URL inline; everything else, the seeded model's default included, is a 302 to a static image, and a redirect cannot vouch for coverage. Setup creates a model with a 1x1 PNG data URL."
+params = { "id" = "attack-image-{token}" }
+setup = [
+    { via = "POST /api/v1/models/create", body = { "id" = "attack-image-{token}", "name" = "Attack image {token}", "meta" = { "profile_image_url" = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" }, "params" = {} } },
+]
+
+[[field]]
+route = "POST /api/v1/files/"
+description = "Multipart: routers/files.py:upload_file takes an UploadFile, which the derivation does not model, so no pass sent a body (422 only). A small text file."
+files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
+
+[[field]]
+route = "POST /api/v1/audio/transcriptions"
+description = "Multipart: an audio part. routers/audio.py:transcription refuses a content type outside audio.stt.supported_content_types, which defaults to audio/* and video/webm. CI runs speech-to-text on the stub (CI-005)."
+files = [{ field = "file", filename = "attack-{token}.wav", content = "RIFF attack {token}", content_type = "audio/wav" }]
+
+[[field]]
+route = "POST /api/v1/integrations/ingest"
+description = "Multipart: the JSON payload is itself a file part named data (routers/integrations.py:ingest_documents), an IngestForm with a collection and documents."
+files = [{ field = "data", filename = "data.json", content = '{"collection": {"source_id": "attack-{token}", "name": "Attack ingest"}, "documents": []}', content_type = "application/json" }]
+
+[[field]]
+route = "POST /api/v1/pipelines/upload"
+description = "Multipart: routers/pipelines.py:upload_pipeline accepts only a .py filename, and urlIdx is a required integer form part naming the OpenAI connection."
+files = [{ field = "file", filename = "attack_{token}.py", content = "# attack pipeline {token}\n", content_type = "text/x-python" }]
+form = { "urlIdx" = "{openai_index}" }
+
+[[field]]
+route = "POST /ollama/models/upload"
+description = "Multipart: routers/ollama.py:upload_model streams the file to the Ollama upstream as a blob, then creates a model from it."
+files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]

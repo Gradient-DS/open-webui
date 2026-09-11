@@ -1,0 +1,111 @@
+# Routes no security test drives, each with the reason it cannot be driven on
+# the sealed CI stack. Read by backend/open_webui/test/security/test_route_coverage.py,
+# which fails on an empty reason, on a waiver for a route that no longer exists,
+# and on a waiver for a route the plane actually reached.
+#
+# "The feature is off" is never a reason here. Tenant charts only seed
+# PersistentConfig (enablePersistentConfig is "true" everywhere), so any tenant
+# admin can switch a feature on at runtime and a route behind a flag is
+# production surface. Turn the flag on in docker-compose.ci.yaml and drive it.
+# What remains is a route the sealed stack cannot reach without an external
+# system it deliberately lacks, or one a working guard keeps unseedable. Each
+# reason names what would close it.
+
+# --- OAuth: the sealed stack has no identity provider ------------------------
+# Production runs OAuth login (multi-tenant Entra SSO, #291), so these are real
+# surface. An OIDC issuer stub on the CI network would close all seven.
+
+[[waived]]
+id = "GET /oauth/{provider}/login"
+reason = "Never attempted: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_login_provider). utils/oauth.py registers login providers only from environment configuration and the sealed stack has no OAuth issuer to register. Closes with an OIDC issuer stub."
+
+[[waived]]
+id = "GET /oauth/{provider}/callback"
+reason = "Never attempted: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_login_provider). utils/oauth.py registers login providers only from environment configuration and the sealed stack has no OAuth issuer to register. Closes with an OIDC issuer stub."
+
+[[waived]]
+id = "GET /oauth/{provider}/login/callback"
+reason = "Never attempted: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_login_provider). utils/oauth.py registers login providers only from environment configuration and the sealed stack has no OAuth issuer to register. Closes with an OIDC issuer stub."
+
+[[waived]]
+id = "GET /oauth/clients/{client_id}/authorize"
+reason = "Never attempted: every owner pass skips it because `client_id` is declared unseedable (attack-surface.toml, key oauth_client). main.py:oauth_client_authorize needs a registered OAuth client, and configs.py:/oauth/clients/register performs external discovery and registration the CI stub does not serve. Closes with discovery and registration endpoints on the stub."
+
+[[waived]]
+id = "GET /oauth/clients/{client_id}/callback"
+reason = "Never attempted: every owner pass skips it because `client_id` is declared unseedable (attack-surface.toml, key oauth_client). main.py:oauth_client_authorize needs a registered OAuth client, and configs.py:/oauth/clients/register performs external discovery and registration the CI stub does not serve. Closes with discovery and registration endpoints on the stub."
+
+[[waived]]
+id = "POST /api/v1/auths/oauth/{provider}/token/exchange"
+reason = "Never attempted: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_exchange_provider). auths.py:token_exchange needs an environment-registered OAUTH_PROVIDERS entry and an access token from its issuer; neither can be created through the application's HTTP API. Closes with an OIDC issuer stub."
+
+[[waived]]
+id = "DELETE /api/v1/auths/oauth/sessions/{provider}"
+reason = "Never attempted: every owner pass skips it because `provider` is declared unseedable (attack-surface.toml, key oauth_session_provider). auths.py:delete_oauth_session_by_provider needs an OAuthSessions row for the caller, which only a completed external authorization-code exchange creates. Closes with an OIDC issuer stub."
+
+# --- Pipelines: creation is delegated to an external Pipelines server --------
+
+[[waived]]
+id = "GET /api/v1/pipelines/{pipeline_id}/valves"
+reason = "Never attempted: every owner pass skips it because `pipeline_id` is declared unseedable (attack-surface.toml, key pipeline). pipelines.py:/upload and /add delegate creation to an external Pipelines server; the CI stub's catch-all 200 creates nothing, and an id extracted from it would be invented. Closes with a pipeline registry on the stub."
+
+[[waived]]
+id = "GET /api/v1/pipelines/{pipeline_id}/valves/spec"
+reason = "Never attempted: every owner pass skips it because `pipeline_id` is declared unseedable (attack-surface.toml, key pipeline). pipelines.py:/upload and /add delegate creation to an external Pipelines server; the CI stub's catch-all 200 creates nothing, and an id extracted from it would be invented. Closes with a pipeline registry on the stub."
+
+[[waived]]
+id = "POST /api/v1/pipelines/{pipeline_id}/valves/update"
+reason = "Never attempted: every owner pass skips it because `pipeline_id` is declared unseedable (attack-surface.toml, key pipeline). pipelines.py:/upload and /add delegate creation to an external Pipelines server; the CI stub's catch-all 200 creates nothing, and an id extracted from it would be invented. Closes with a pipeline registry on the stub."
+
+# --- Event webhooks: unseedable because the SSRF guard works -----------------
+# These should outlive the others. Seeding them means switching the guard off.
+
+[[waived]]
+id = "PUT /api/events/webhooks/{webhook_id}"
+reason = "Never attempted: every owner pass skips it because `webhook_id` is declared unseedable (attack-surface.toml, key event_webhook). main.py:create_event_webhook validates the target with retrieval/web/utils.py:validate_url, which refuses every in-network host (private Docker addresses), and external hosts do not resolve on the internal network. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard, and production leaves it unset. Does not close: the route is unseedable because the guard works."
+
+[[waived]]
+id = "DELETE /api/events/webhooks/{webhook_id}"
+reason = "Never attempted: every owner pass skips it because `webhook_id` is declared unseedable (attack-surface.toml, key event_webhook). main.py:create_event_webhook validates the target with retrieval/web/utils.py:validate_url, which refuses every in-network host (private Docker addresses), and external hosts do not resolve on the internal network. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard, and production leaves it unset. Does not close: the route is unseedable because the guard works."
+
+# --- Notification targets: unseedable because the same SSRF guard works --------
+
+[[waived]]
+id = "PUT /api/v1/notifications/targets/{target_id}"
+reason = "Never attempted: every owner pass skips it because `target_id` is declared unseedable (attack-surface.toml, key notification_target). With user webhooks on (CI-005), POST /api/v1/notifications/targets answers 400 'The URL you provided is invalid' for an in-network URL: utils/notifications.py:_normalize_target runs retrieval/web/utils.py:validate_url on every target, which refuses private Docker addresses, and external hosts do not resolve on the internal network. Does not close: the route is unseedable because the guard works."
+
+[[waived]]
+id = "DELETE /api/v1/notifications/targets/{target_id}"
+reason = "Never attempted: every owner pass skips it because `target_id` is declared unseedable (attack-surface.toml, key notification_target). With user webhooks on (CI-005), POST /api/v1/notifications/targets answers 400 'The URL you provided is invalid' for an in-network URL: utils/notifications.py:_normalize_target runs retrieval/web/utils.py:validate_url on every target, which refuses private Docker addresses, and external hosts do not resolve on the internal network. Does not close: the route is unseedable because the guard works."
+
+[[waived]]
+id = "PUT /api/v1/notifications/targets/{target_id}/default"
+reason = "Never attempted: every owner pass skips it because `target_id` is declared unseedable (attack-surface.toml, key notification_target). With user webhooks on (CI-005), POST /api/v1/notifications/targets answers 400 'The URL you provided is invalid' for an in-network URL: utils/notifications.py:_normalize_target runs retrieval/web/utils.py:validate_url on every target, which refuses private Docker addresses, and external hosts do not resolve on the internal network. Does not close: the route is unseedable because the guard works."
+
+[[waived]]
+id = "POST /api/v1/notifications/targets/{target_id}/test"
+reason = "Never attempted: every owner pass skips it because `target_id` is declared unseedable (attack-surface.toml, key notification_target). With user webhooks on (CI-005), POST /api/v1/notifications/targets answers 400 'The URL you provided is invalid' for an in-network URL: utils/notifications.py:_normalize_target runs retrieval/web/utils.py:validate_url on every target, which refuses private Docker addresses, and external hosts do not resolve on the internal network. Does not close: the route is unseedable because the guard works."
+
+# --- Singletons -----------------------------------------------------------------
+
+[[waived]]
+id = "GET /api/v1/auths/password/reset/{token}/validate"
+reason = "Never attempted: every owner pass skips it because `token` is declared unseedable (attack-surface.toml, key reset_token). auths.py:forgot_password stores only a hash and sends the raw token by email, the response is deliberately generic, and the plane reads neither mail nor the database. Closes with a mail sink on the CI network that the plane can read."
+
+[[waived]]
+id = "GET /api/v1/confluence/page/{cloud_id}/{page_id}/content"
+reason = "Never attempted: every owner pass skips it because `cloud_id` and `page_id` are declared unseedable (attack-surface.toml, keys confluence_cloud and confluence_page). confluence_sync.py needs a real authorized Atlassian site, and the application exposes no endpoint that creates a site or a page. Confluence is enabled in production (staging tenant). Closes with a Confluence stub."
+
+[[waived]]
+id = "GET /openai/models/{url_idx}/download/status/{job_id}"
+reason = "Never attempted: every owner pass skips it because `job_id` is declared unseedable (attack-surface.toml, key model_download_job). routers/openai.py:get_provider_model_download_status reads a job an actual provider model download created; the CI stub serves model metadata but has no download-job lifecycle. Closes when the stub grows one."
+
+# --- Shared Confluence knowledge base: cannot be provisioned without Atlassian ---
+
+[[waived]]
+id = "POST /api/v1/confluence/shared/sync"
+reason = "Observed 404 'No shared Confluence knowledge base has been provisioned.' on every owner request: the handler runs and finds no shared KB. confluence_sync.py:provision_shared_kb needs a stored Confluence OAuth token (oauth mode, the chart default) or a service site (basic or scoped mode); both require a real Atlassian site, and CI has no Confluence credentials. Confluence is enabled in production (staging tenant). Closes with a Confluence stub."
+
+[[waived]]
+id = "DELETE /api/v1/confluence/shared"
+reason = "Observed 404 'No shared Confluence knowledge base has been provisioned.' on every owner request: the handler runs and finds no shared KB to delete. confluence_sync.py:provision_shared_kb needs a stored Confluence OAuth token (oauth mode, the chart default) or a service site (basic or scoped mode); both require a real Atlassian site, and CI has no Confluence credentials. Confluence is enabled in production (staging tenant). Closes with a Confluence stub."
