@@ -270,7 +270,7 @@ async def accept_invite(
     name = form_data.name if form_data.name else invite.name
 
     # Hash password and create user
-    hashed = get_password_hash(form_data.password)
+    hashed = await get_password_hash(form_data.password)
 
     try:
         new_user = await Auths.insert_new_auth(
