@@ -185,22 +185,48 @@ class SoevKnowledgeTable:
         row = await self._collection(id, user_id=user_id)
         return bool(row and (permission == 'read' or (permission == 'write' and row.get('caller_may_write'))))
 
+    async def accessible_collection_ids(self, user_id, resource_ids, permission='read'):
+        requested = set(resource_ids)
+        return {
+            row['key']
+            for row in await self._collections(user_id=user_id)
+            if row['key'] in requested
+            and (permission == 'read' or (permission == 'write' and row.get('caller_may_write')))
+        }
+
+    def collection_grants(self, row):
+        return self._projection.grants_of(row, service_principal=self._service_principal) if row else []
+
+    async def get_collection_grants(self, id):
+        try:
+            row = await self._client.get(self._path(id))
+        except SoevApiError as error:
+            if error.status == 404:
+                return []
+            raise
+        return self.collection_grants(row)
+
+    async def set_collection_access(self, id, access_grants, *, fields=None):
+        current = await self._collection(id)
+        if current is None:
+            return None
+        visibility, readers, writers = self._projection.access_of(
+            access_grants, service_principal=self._service_principal
+        )
+        owner = current.get('created_by')
+        owners = {owner} if owner else set()
+        body = {**(fields or {}), 'writers': sorted(set(writers) | owners)}
+        access = {'visibility': visibility, 'principals': sorted(set(readers) | owners)}
+        result = await self._send('PATCH', self._path(id), body)
+        await self._send('PUT', self._path(id) + '/access', access)
+        return result
+
     async def update_knowledge_by_id(self, id, form_data, overwrite=False, db=None):
         body = {'name': form_data.name, 'description': form_data.description}
-        access = None
         if form_data.access_grants is not None:
-            current = await self._collection(id)
-            if current is None:
-                return None
-            visibility, readers, writers = self._projection.access_of(
-                form_data.access_grants, service_principal=self._service_principal
-            )
-            owner = current.get('created_by')
-            body['writers'] = sorted(set(writers) | ({owner} if owner else set()))
-            access = {'visibility': visibility, 'principals': sorted(set(readers) | ({owner} if owner else set()))}
-        result = await self._send('PATCH', self._path(id), body)
-        if access is not None:
-            await self._send('PUT', self._path(id) + '/access', access)
+            result = await self.set_collection_access(id, form_data.access_grants, fields=body)
+        else:
+            result = await self._send('PATCH', self._path(id), body)
         return self._knowledge(result)
 
     async def delete_knowledge_by_id(self, id, db=None):
