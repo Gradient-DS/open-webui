@@ -1031,6 +1031,31 @@ route = "POST /api/v1/invites/{token}/accept"
 allow = ["owner-marker", "write"]
 reason = "Unauthenticated on purpose: the token in the path is the credential, and accepting creates the invitee's account from the invite's email and role."
 
+[[shared]]
+route = "POST /ollama/api/chat/{url_idx}"
+allow = ["same-object", "write"]
+reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
+
+[[shared]]
+route = "POST /ollama/v1/chat/completions/{url_idx}"
+allow = ["same-object", "write"]
+reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
+
+[[shared]]
+route = "POST /ollama/v1/completions/{url_idx}"
+allow = ["same-object", "write"]
+reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
+
+[[shared]]
+route = "POST /ollama/v1/embeddings/{url_idx}"
+allow = ["same-object", "write"]
+reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
+
+[[shared]]
+route = "POST /ollama/v1/messages/{url_idx}"
+allow = ["same-object", "write"]
+reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
+
 # ---------------------------------------------------------------------------
 # Service callers
 #
