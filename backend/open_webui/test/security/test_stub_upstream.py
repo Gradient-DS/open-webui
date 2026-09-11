@@ -186,3 +186,17 @@ def test_the_sync_daemon_accepts_a_run(stub):
     )
     with build_opener(ProxyHandler({})).open(req, timeout=5) as response:
         assert response.status == 202
+
+
+def test_qdrant_point_queries_get_an_empty_result(stub):
+    # The external-knowledge connection fixture points at the stub. The Qdrant
+    # client reads result.points; the catch-all {"status": "ok"} made it return
+    # None and the connection test fail.
+    req = Request(
+        stub[1] + '/collections/attack/points/query',
+        data=json.dumps({'query': [0.1], 'limit': 1}).encode(),
+        method='POST',
+        headers={'Content-Type': 'application/json'},
+    )
+    with build_opener(ProxyHandler({})).open(req, timeout=5) as response:
+        assert json.loads(response.read())['result'] == {'points': []}
