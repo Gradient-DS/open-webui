@@ -457,7 +457,7 @@ async def get_feedbacks(
 
 @router.get('/feedback/conversation/{chat_id}')
 async def get_conversation_feedback(chat_id: str, user=Depends(get_verified_user)):
-    feedback = Feedbacks.get_conversation_feedback_by_chat_id_and_user_id(chat_id=chat_id, user_id=user.id)
+    feedback = await Feedbacks.get_conversation_feedback_by_chat_id_and_user_id(chat_id=chat_id, user_id=user.id)
     return feedback
 
 

@@ -674,7 +674,7 @@ async def speech(request: Request, user=Depends(get_verified_user)):
             )
 
     except ValueError:
-        raise HTTPException(status_code=401, detail=ERROR_MESSAGES.OPENAI_NOT_FOUND)
+        raise HTTPException(status_code=401, detail=ERROR_MESSAGES.OPENAI_NOT_FOUND())
 
 
 async def get_all_models_responses(request: Request, user: UserModel) -> list:
@@ -1145,9 +1145,10 @@ async def verify_connection(
                     return response_data
 
         except aiohttp.ClientError as e:
-            # ClientError covers all aiohttp requests issues
+            # ClientError covers all aiohttp requests issues. The connection being
+            # verified is unreachable or malformed: that is the answer, not a fault.
             log.exception(f'Client error: {str(e)}')
-            raise HTTPException(status_code=500, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
+            raise HTTPException(status_code=400, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
         except Exception as e:
             log.exception(f'Unexpected error: {e}')
             raise HTTPException(status_code=500, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)

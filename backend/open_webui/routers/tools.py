@@ -307,6 +307,9 @@ async def load_tool_from_url(request: Request, form_data: LoadUrlForm, user=Depe
         }
     except HTTPException:
         raise
+    except aiohttp.ClientError as e:
+        # The admin-supplied URL could not be fetched: a bad URL, not a server fault.
+        raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(e, 'Error fetching tool'))
     except Exception as e:
         raise HTTPException(
             status_code=500,

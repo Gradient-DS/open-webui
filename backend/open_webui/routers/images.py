@@ -614,7 +614,11 @@ async def image_generations(
     if form_data.size and 'x' in form_data.size:
         size = form_data.size
 
-    width, height = tuple(map(int, size.split('x')))
+    try:
+        width, height = tuple(map(int, size.split('x')))
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f'Invalid image size {size!r}: expected WIDTHxHEIGHT.')
 
     metadata = metadata or {}
 
@@ -909,7 +913,10 @@ async def image_edits(
         form_data.size and 'x' in form_data.size
     ):
         size = form_data.size if form_data.size else image_config.IMAGE_EDIT_SIZE
-        width, height = tuple(map(int, size.split('x')))
+        try:
+            width, height = tuple(map(int, size.split('x')))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f'Invalid image size {size!r}: expected WIDTHxHEIGHT.')
 
     model = image_config.IMAGE_EDIT_MODEL if form_data.model is None else form_data.model
 

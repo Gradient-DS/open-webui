@@ -30,11 +30,33 @@ from .identities import PASSWORD
 from .pass_support import pass_run
 
 
+# Violation kinds a [[shared]] declaration in the attack surface may allow for
+# one route. An administrator operation that is not refused is never sharing.
+SHAREABLE = frozenset({'owner-marker', 'resource-id', 'same-object', 'write'})
+
+
 @dataclass
 class Authorization:
     tally: plane.Seeding
     controls: dict = field(default_factory=dict)
     violations: list = field(default_factory=list)
+    shared: dict = field(default_factory=dict)
+
+
+def _shared(surface=None):
+    """Route -> the violation kinds its [[shared]] declaration allows.
+
+    Read from the unfilled surface: own_fixtures fills {token} throughout its
+    copy, which would rewrite a route such as invites/{token}/validate.
+    """
+    surface = seeds.SURFACE if surface is None else surface
+    return {entry['route']: frozenset(entry['allow']) for entry in surface.get('shared', [])}
+
+
+def _nothing_happened(answer):
+    # A handler that reports its own no-op -- `false` from a delete, `null` from an
+    # update that matched no row the caller owns -- wrote nothing.
+    return answer.body.strip() in {'false', 'null'}
 
 
 def _is_seedable(route, surface):
@@ -192,28 +214,47 @@ def _check(result, route, stranger, owner, markers, *, admin_only, control, reso
         # violation out of a slow route.
         return
     if any(marker in stranger.body for marker in markers):
-        reasons.append('seeded owner marker in second-account response (including refusals)')
+        reasons.append(('owner-marker', 'seeded owner marker in second-account response (including refusals)'))
     if admin_only and stranger.status not in {401, 403}:
-        reasons.append(f'administrator operation was not refused: HTTP {stranger.status}')
+        reasons.append(('admin', f'administrator operation was not refused: HTTP {stranger.status}'))
     if 200 <= stranger.status < 300:
         disclosed = set(_object_ids(_json_or_text(stranger.body))) & set(resource_ids)
         if disclosed:
-            reasons.append('second account received an object containing the seeded resource id')
+            reasons.append(('resource-id', 'second account received an object containing the seeded resource id'))
     if owner is not None:
         if control:
             result.controls[route] = owner.status
         if _same_object(stranger, owner):
-            reasons.append('second account received the same nonempty object as the owner')
-        if route.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'} and 200 <= stranger.status < 300:
-            reasons.append('second account accepted a write to the owner resource')
-    for reason in reasons:
+            reasons.append(('same-object', 'second account received the same nonempty object as the owner'))
+        write = route.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
+        if write and 200 <= stranger.status < 300 and not _nothing_happened(stranger):
+            reasons.append(('write', 'second account accepted a write to the owner resource'))
+    allowed = result.shared.get(route, frozenset())
+    for kind, reason in reasons:
+        if kind in allowed:
+            continue
         item = {'route': route, 'reason': reason, 'status': stranger.status, 'body': stranger.body[:2000]}
         result.violations.append(item)
         result.tally.body_failures.append(item)
 
 
+def _benign(route, parameters, spec):
+    """The schema's benign request, carrying the ids [[field]] declares for the route.
+
+    Without them a route that needs a real id in a request field answers 404 to
+    the owner too, and an owner control that fails proves nothing about isolation.
+    """
+    request = benign_request(route, parameters, spec)
+    declared = plane._declared(parameters, route)
+    if declared.get('json'):
+        request['json'] = plane._hold_declared(request.get('json'), (), declared['json'])[0]
+    if declared.get('params'):
+        request['params'] = {**request.get('params', {}), **declared['params']}
+    return request
+
+
 def _requests(route, parameters, spec, fields, payloads, full):
-    yield True, benign_request(route, parameters, spec)
+    yield True, _benign(route, parameters, spec)
     names = fields.get(route, [])
     if names:
         for batch in plane._payload_batches(route, names, payloads, full=full):
@@ -227,7 +268,7 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
     fields = writable_string_fields(spec)
     with own_fixtures(identities, spec=spec) as (parameters, markers, surface, owners):
         with pass_run('crossuser', routes, identities.admin) as tally:
-            result = Authorization(tally)
+            result = Authorization(tally, shared=_shared())
             # Delete children before parents within the shared removal group.
             ordered = sorted(
                 routes,

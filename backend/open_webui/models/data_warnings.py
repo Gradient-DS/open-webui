@@ -58,7 +58,7 @@ class DataWarningLogs:
             db.add(log)
             await db.commit()
             await db.refresh(log)
-            return DataWarningLogModel.model_validate(log)
+            return DataWarningLogModel.model_validate(log, from_attributes=True)
 
     @staticmethod
     async def get_logs_by_user(user_id: str, db: Optional[AsyncSession] = None) -> list[DataWarningLogModel]:
@@ -68,7 +68,7 @@ class DataWarningLogs:
                 .filter(DataWarningLog.user_id == user_id)
                 .order_by(DataWarningLog.created_at.desc())
             )
-            return [DataWarningLogModel.model_validate(log) for log in result.scalars().all()]
+            return [DataWarningLogModel.model_validate(log, from_attributes=True) for log in result.scalars().all()]
 
     @staticmethod
     async def get_logs_by_chat(chat_id: str, db: Optional[AsyncSession] = None) -> list[DataWarningLogModel]:
@@ -78,4 +78,4 @@ class DataWarningLogs:
                 .filter(DataWarningLog.chat_id == chat_id)
                 .order_by(DataWarningLog.created_at.desc())
             )
-            return [DataWarningLogModel.model_validate(log) for log in result.scalars().all()]
+            return [DataWarningLogModel.model_validate(log, from_attributes=True) for log in result.scalars().all()]

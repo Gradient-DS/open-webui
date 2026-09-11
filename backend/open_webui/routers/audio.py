@@ -599,6 +599,9 @@ async def speech(request: Request, user=Depends(get_verified_user)):
     except Exception as exc:
         log.exception(exc)
         raise HTTPException(status_code=400, detail='Invalid JSON payload')
+    if not isinstance(payload, dict):
+        # Every engine handler writes into the payload as an object (PLANE-015).
+        raise HTTPException(status_code=400, detail='Invalid JSON payload')
 
     handler = _TTS_ENGINES.get(engine)
     if handler is None:
