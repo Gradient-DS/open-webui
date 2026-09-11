@@ -65,8 +65,9 @@ def bootstrap_http(identity_http):
         if request.url.path == '/v1/credentials':
             operation = request.headers['Idempotency-Key']
             if operation not in credentials:
-                credentials[operation] = {'id': 'new-credential', 'secret': 'test-new-runtime-key', **body}
-            return httpx.Response(201, json=credentials[operation])
+                credentials[operation] = {'id': 'new-credential', **body}
+                return httpx.Response(201, json={**credentials[operation], 'secret': 'test-new-runtime-key'})
+            return httpx.Response(200, json={**credentials[operation], 'secret': ''})
         assert request.url.path == '/v1/credentials/new-credential/signing-keys'
         jwk = body['public_jwk']
         previous = signing_keys.get(jwk['kid'])

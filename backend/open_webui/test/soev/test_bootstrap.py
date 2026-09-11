@@ -65,18 +65,23 @@ async def test_bootstrap_mints_a_credential_without_mint(bootstrap, identity_con
     assert not hasattr(identity.config, 'SOEV_BOOTSTRAP_MINT_KEY')
 
 
-@pytest.mark.asyncio
-async def test_bootstrap_rerun_changes_nothing(bootstrap, bootstrap_http, capsys):
+def test_bootstrap_rerun_changes_nothing(bootstrap, bootstrap_http, capsys, caplog):
     """A repeated invocation replays the mint and registers the identical kid and material."""
     requests, credentials, signing_keys = bootstrap_http
-    await bootstrap.bootstrap()
+    bootstrap.main()
     capsys.readouterr()
     before = json.dumps([credentials, signing_keys], sort_keys=True)
-    await bootstrap.bootstrap()
+    with caplog.at_level(logging.INFO):
+        bootstrap.main()
     assert json.dumps([credentials, signing_keys], sort_keys=True) == before
     assert requests[0].headers['Idempotency-Key'] == requests[2].headers['Idempotency-Key']
     assert requests[1].headers['Idempotency-Key'] == requests[3].headers['Idempotency-Key']
     assert len(credentials) == len(signing_keys) == 1
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {'SOEV_API_CREDENTIAL_ID': 'new-credential'}
+    assert 'key was issued on the first run' in output.err
+    assert 'test-new-runtime-key' not in output.out + output.err
+    assert [record.status for record in caplog.records if record.name == 'open_webui.soev.client'] == [200, 200]
 
 
 @pytest.mark.asyncio
@@ -111,8 +116,8 @@ async def test_bootstrap_requires_the_ephemeral_mint_key(bootstrap, identity_htt
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('field', ['secret', 'key'])
-async def test_bootstrap_reads_the_once_returned_secret(bootstrap, identity_http, field, capsys):
-    """CredentialWithSecret supplies its plaintext through a secret or key field."""
+async def test_the_secret_field_is_secret(bootstrap, identity_http, field, capsys):
+    """Only the contract's secret field supplies the plaintext credential."""
     _, responses = identity_http
     responses.extend(
         [
@@ -120,8 +125,39 @@ async def test_bootstrap_reads_the_once_returned_secret(bootstrap, identity_http
             httpx.Response(201, json={'public_jwk': {}}),
         ]
     )
-    await bootstrap.bootstrap()
-    assert json.loads(capsys.readouterr().out)['SOEV_API_KEY'] == 'test-new-runtime-key'
+    if field == 'secret':
+        await bootstrap.bootstrap()
+        assert json.loads(capsys.readouterr().out)['SOEV_API_KEY'] == 'test-new-runtime-key'
+    else:
+        with pytest.raises(ValueError, match='credential id and plaintext key'):
+            await bootstrap.bootstrap()
+        assert capsys.readouterr().out == ''
+
+
+def test_a_failed_key_registration_still_prints_the_new_secret(bootstrap, identity_http, capsys):
+    """A registration failure leaves the freshly minted secret recoverable on stdout."""
+    _, responses = identity_http
+
+    async def refuse_registration(request):
+        assert json.loads(capsys.readouterr().out) == {
+            'SOEV_API_KEY': 'test-new-runtime-key',
+            'SOEV_API_CREDENTIAL_ID': 'new-credential',
+        }
+        return httpx.Response(503, json={'detail': 'test-mint-key'})
+
+    responses.extend(
+        [
+            httpx.Response(201, json={'id': 'new-credential', 'secret': 'test-new-runtime-key'}),
+            refuse_registration,
+        ]
+    )
+    with pytest.raises(SystemExit) as caught:
+        bootstrap.main()
+    assert caught.value.code == 1
+    output = capsys.readouterr()
+    assert 'credential was minted and printed' in output.err
+    assert 'rerunning will register the key' in output.err
+    assert 'test-mint-key' not in output.err
 
 
 @pytest.mark.asyncio
