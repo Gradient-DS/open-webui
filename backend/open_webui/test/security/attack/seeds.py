@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
 
-from .client import AttackClient, json_body
+from .client import AttackClient, json_body, totp_code
 from .configuration import recover_configuration
 
 ROOT = Path(__file__).resolve().parents[5]
@@ -131,6 +131,16 @@ def _validate_entries(entries, by_key):
                 raise ValueError(f'{p["key"]}: seeded_by requires depends_on (even when empty)')
         if not isinstance(p.get('depends_on', []), list):
             raise ValueError(f'{p["key"]}: depends_on must be a list')
+        if 'provides' in p:
+            provided = p['provides']
+            if 'seeded_by' not in p:
+                raise ValueError(f'{p["key"]}: only a seeder can provide further values')
+            if not isinstance(provided, list) or not all(
+                isinstance(name, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) for name in provided
+            ):
+                raise ValueError(f'{p["key"]}: provides must be a list of identifiers')
+            if set(provided) & by_key.keys():
+                raise ValueError(f'{p["key"]}: provides a value named like a seed key')
         for key in _dependencies(p):
             if key not in by_key or 'unseedable' in by_key[key]:
                 raise ValueError(f'{p["key"]}: unavailable dependency {key}')
@@ -162,6 +172,12 @@ class SeedContext:
             replacement = self.values[key]
             value = value.replace('{' + key + '}', quote(replacement, safe='') if path else replacement)
         return value
+
+    def provide(self, parameter, name, value):
+        """Publish a value a seeder made besides its own id, for [[field]] entries to reference."""
+        if name not in parameter.get('provides', []):
+            raise RuntimeError(f'{parameter["key"]}: does not declare that it provides {name}')
+        self.values[name] = _extract({'value': value}, 'value', name=name, via=parameter['key'])
 
     def request(self, method, path, *, actor=None, **kwargs):
         if is_destructive(method, path, self.surface):
@@ -339,24 +355,95 @@ def seed_model(ctx, parameter):
     return model_id
 
 
-def seed_task(ctx, parameter):
-    model_id = f'attack_task_{ctx.token}'
+def _create_active_function(ctx, parameter, function_id):
+    # FunctionForm has no is_active: a function is created off and /toggle turns
+    # it on. The toggle is an ordinary route the passes drive against the shared
+    # {function}, so an always-active function must be one it never targets.
     body = ctx.request(
         'POST',
         '/api/v1/functions/create',
         actor=ctx.admin,
+        json={'id': function_id, 'name': function_id, 'meta': {}, 'content': parameter['content']},
+    )
+    if _extract(body, 'id', name=parameter['key'], via='POST functions/create') != function_id:
+        raise RuntimeError(f'{parameter["key"]}: function creation returned a different function')
+    enabled = ctx.request('POST', f'/api/v1/functions/id/{function_id}/toggle', actor=ctx.admin)
+    if enabled.get('is_active') is not True:
+        raise RuntimeError(f'{parameter["key"]}: function was not activated')
+    return function_id
+
+
+def seed_active_function(ctx, parameter):
+    return _create_active_function(ctx, parameter, f'attack_active_{ctx.token}')
+
+
+def seed_removable_knowledge(ctx, parameter):
+    # file/remove deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION
+    # is on, so it gets a KB and a file nothing else uses; the shared {file} and
+    # {knowledge} stay in place for add, move and update.
+    upload = ctx.request(
+        'POST',
+        '/api/v1/files/',
+        actor=ctx.admin,
+        params={'process': False},
+        files=[('file', (f'attack-removable-{ctx.token}.txt', f'Attack removable file {ctx.token}', 'text/plain'))],
+    )
+    file_id = _extract(upload, 'id', name=parameter['key'], via='POST /api/v1/files/')
+    # file/add refuses a file with no extracted content.
+    ctx.request('POST', '/api/v1/retrieval/process/file', actor=ctx.admin, json={'file_id': file_id}, timeout=120)
+    knowledge = ctx.request(
+        'POST',
+        '/api/v1/knowledge/create',
+        actor=ctx.admin,
+        json={'name': f'attack-removable-{ctx.token}', 'description': 'Attack knowledge for file/remove'},
+    )
+    knowledge_id = _extract(knowledge, 'id', name=parameter['key'], via='POST /api/v1/knowledge/create')
+    added = ctx.request(
+        'POST',
+        f'/api/v1/knowledge/{quote(knowledge_id, safe="")}/file/add',
+        actor=ctx.admin,
+        json={'file_id': file_id},
+        timeout=120,
+    )
+    if not any(isinstance(item, dict) and item.get('id') == file_id for item in added.get('files') or []):
+        raise RuntimeError(f'{parameter["key"]}: the file did not join its knowledge base')
+    ctx.provide(parameter, 'removable_file', file_id)
+    return knowledge_id
+
+
+def seed_totp_user(ctx, parameter):
+    # A user of its own: the shared {user} is also the exporter, which signs in
+    # with its password, and an enrolled account answers that with a 2FA challenge.
+    body = ctx.request(
+        'POST',
+        '/api/v1/auths/add',
+        actor=ctx.admin,
         json={
-            'id': model_id,
-            'name': model_id,
-            'meta': {},
-            'content': parameter['content'],
+            'email': f'attack-totp-{ctx.token}@example.com',
+            'name': f'Attack TOTP {ctx.token}',
+            'password': parameter['password'],
+            'role': 'user',
         },
     )
-    if _extract(body, 'id', name=parameter['key'], via='POST functions/create') != model_id:
-        raise RuntimeError('Task filter creation returned a different function')
-    enabled = ctx.request('POST', f'/api/v1/functions/id/{model_id}/toggle', actor=ctx.admin)
-    if enabled.get('is_active') is not True:
-        raise RuntimeError('Task filter was not activated')
+    user_id = _extract(body, 'id', name=parameter['key'], via='POST /api/v1/auths/add')
+    token = _extract(body, 'token', name=parameter['key'], via='POST /api/v1/auths/add')
+    with AttackClient(ctx.client.base_url, token=token) as enrolee:
+        enrolee.verify_identity(user_id=user_id, role='user')
+        setup = ctx.request('POST', '/api/v1/auths/2fa/totp/setup', actor=enrolee)
+        secret = _extract(setup, 'secret', name=parameter['key'], via='POST /api/v1/auths/2fa/totp/setup')
+        enabled = ctx.request(
+            'POST',
+            '/api/v1/auths/2fa/totp/enable',
+            actor=enrolee,
+            json={'password': parameter['password'], 'secret': secret, 'code': totp_code(secret)},
+        )
+    if enabled.get('totp_enabled') is not True:
+        raise RuntimeError(f'{parameter["key"]}: TOTP enrolment did not take effect')
+    return user_id
+
+
+def seed_task(ctx, parameter):
+    model_id = _create_active_function(ctx, parameter, f'attack_task_{ctx.token}')
     # Inlets run before agent routing. A Pipe's wait is skipped by CI's
     # production-matching AGENT_API_ENABLED=true / FEATURE_AGENT_PICKER=false.
     ctx.request(
@@ -419,6 +506,9 @@ _SEEDERS = {
         seed_export,
         seed_model,
         seed_task,
+        seed_active_function,
+        seed_removable_knowledge,
+        seed_totp_user,
     )
 }
 
@@ -518,6 +608,9 @@ def resolve_parameters(client: AttackClient, *, admin: AttackClient | None = Non
             value = ctx.values[p['same_as']]
         elif 'seeded_by' in p:
             value = _SEEDERS[p['seeded_by']](ctx, p)
+            missing = [name for name in p.get('provides', []) if name not in ctx.values]
+            if missing:
+                raise RuntimeError(f'{key}: seeder did not provide {missing}')
         else:
             value = _seed_endpoint(ctx, p)
         ctx.values[key] = _extract({'value': value}, 'value', name=key, via=p.get('via', p.get('seeded_by', 'alias')))

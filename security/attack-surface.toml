@@ -497,11 +497,33 @@ extract = "id"
 actor = "admin"
 
 [[parameter]]
+key = "active_function"
+name = "id"
+prefix = "/api/v1/functions/id/{id}/valves/user"
+description = "routers/functions.py:update_function_user_valves_by_id answers 400 'Function is not active' for an inactive function, and FunctionForm has no is_active: a function is created off. seed_active_function creates an Action and turns it on with /toggle, which the passes drive against the shared {function} only, so this one stays active through every pass."
+seeded_by = "seed_active_function"
+depends_on = []
+actor = "admin"
+content = """
+from pydantic import BaseModel
+
+class Action:
+    class Valves(BaseModel):
+        label: str = "seed"
+    class UserValves(BaseModel):
+        label: str = "seed"
+    def __init__(self):
+        self.valves = self.Valves()
+    async def action(self, body: dict) -> dict:
+        return body
+"""
+
+[[parameter]]
 key = "action"
 name = "action_id"
 prefix = "/api/chat/actions/{action_id}"
-description = "utils/actions.py:chat_action resolves Functions.id and calls its Action.action method."
-same_as = "function"
+description = "utils/actions.py:chat_action resolves Functions.id and refuses 'Action not available' unless the function is an active Action, so it takes the always-active one."
+same_as = "active_function"
 
 [[parameter]]
 key = "tool"
@@ -761,9 +783,25 @@ class Filter:
         return body
 """
 
-[[destructive]]
-id = "POST /api/v1/knowledge/{id}/file/remove"
-reason = "Removes the seeded file from the seeded KB, which file/update and file/move -- driven after it alphabetically -- need in place."
+[[parameter]]
+key = "removable_knowledge"
+name = "id"
+prefix = "/api/v1/knowledge/{id}/file/remove"
+description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400 unless the file is in this KB, and deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION is on (measured: the file reads 404 afterwards). Sharing {file} and {knowledge} made it break add, move and update, or, declared destructive, find the KB already gone. seed_removable_knowledge uploads, processes and adds a file of its own and provides its id as {removable_file}."
+seeded_by = "seed_removable_knowledge"
+depends_on = []
+provides = ["removable_file"]
+actor = "admin"
+
+[[parameter]]
+key = "totp_user"
+name = "user_id"
+prefix = "/api/v1/users/{user_id}/2fa"
+description = "routers/users.py:admin_disable_user_2fa answers 400 '2FA is not enabled for this user' unless the user enrolled. seed_totp_user adds a user and enrols TOTP with that user's own session (setup, then enable with the code computed from the returned secret). Not the shared {user}: it is also the exporter, which signs in with its password, and an enrolled account answers that with a 2FA challenge."
+seeded_by = "seed_totp_user"
+depends_on = []
+password = "Attack-Fixture-Passw0rd!"
+actor = "admin"
 
 [[destructive]]
 id = "POST /api/v1/auths/signout"
@@ -993,6 +1031,11 @@ description = "As the connection PATCH: the provider must be one the app support
 json = { "name" = "attack-{token}", "connection.name" = "attack-{token}", "connection.provider" = "qdrant", "connection.endpoint" = "http://stub:8000", "source.name" = "attack", "source.config.content_field" = "text" }
 
 [[field]]
+route = "POST /api/chat/actions/{action_id}"
+description = "utils/actions.py:chat_action answers 400 'Model not found' without a registered model and reads chat_id, id and session_id from the body for its event emitter; main.py:chat_action checks chat_id against the caller's chats. The seeded model, the admin's chat and a message id reach the Action."
+json = { "model" = "{model}", "chat_id" = "{chat}", "id" = "message_{token}", "session_id" = "attack-{token}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
+
+[[field]]
 route = "POST /api/v1/functions/id/{id}/update"
 description = "The update loads the submitted module; the placeholder content failed to load (400). The fixture's own Action code updates it in place."
 json = { "id" = "{function}", "name" = "Attack action", "content" = '''from pydantic import BaseModel
@@ -1051,8 +1094,8 @@ json = { "file_id" = "{file}" }
 
 [[field]]
 route = "POST /api/v1/knowledge/{id}/file/remove"
-description = "file/remove answers 404 unless the file is in this KB; the file/move setup adds it. Declared destructive so it runs after the routes that need the file."
-json = { "file_id" = "{file}" }
+description = "file/remove answers 400 unless the file is in this KB; seed_removable_knowledge adds its own file to its own KB."
+json = { "file_id" = "{removable_file}" }
 
 [[field]]
 route = "POST /api/v1/knowledge/{id}/files/batch/add"
@@ -1108,6 +1151,16 @@ reason = "Presence: whether a user is online, shown beside them in channels and 
 route = "GET /api/v1/users/{user_id}/profile/image"
 allow = ["same-object"]
 reason = "A user's avatar, shown wherever the user appears to any verified user."
+
+[[shared]]
+route = "GET /api/v1/functions/id/{id}/valves/user/spec"
+allow = ["same-object"]
+reason = "routers/functions.py:get_function_user_valves_spec_by_id serves an active function's UserValves JSON schema to any verified user: the form the per-user settings dialog renders. It is the function's code, identical for every caller, and carries no user's values."
+
+[[shared]]
+route = "POST /api/v1/functions/id/{id}/valves/user/update"
+allow = ["same-object", "write"]
+reason = "routers/functions.py:update_function_user_valves_by_id writes the caller's own user.settings.functions.valves[id] (models/functions.py:update_user_valves_by_id_and_user_id), never the function or another user's settings; the answer echoes the caller's own values. Measured live: after both accounts wrote, each read back only its own label. Functions carry no access grants to check against, unlike tools (routers/tools.py checks read access before a user-valves write)."
 
 [[shared]]
 route = "GET /api/v1/groups/id/{id}/info"

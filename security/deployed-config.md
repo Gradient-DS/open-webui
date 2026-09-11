@@ -42,6 +42,9 @@ agentApiEnabled=true and enableAgentProxy=true.
 | imageGenerationEngine | IMAGE_GENERATION_ENGINE | — | "openai" | |
 | enableEmailInvites | — | — | "true" | MS Graph mail |
 | enableOauthSignup | ENABLE_OAUTH_SIGNUP | — | "true" | Microsoft IdP |
+| enable2fa | ENABLE_2FA | "false" | "true" | TOTP routes; also soev-max, soev-test, staging (soev-gitops 105c694) |
+| require2fa | REQUIRE_2FA | "false" | "true" | enrolment enforced at sign-in; also soev-test, staging |
+| twoFaGracePeriodDays | TWO_FA_GRACE_PERIOD_DAYS | "7" | "7" | a password account without TOTP keeps a capped session until the deadline |
 | bypassAdminAccessControl | BYPASS_ADMIN_ACCESS_CONTROL | "false" | "false" | admins follow access control |
 | enableWeaviateMultitenancyMode | ENABLE_WEAVIATE_MULTITENANCY_MODE | "false" | "true" | |
 | telemetry.otel.enabled | ENABLE_OTEL | — | true (alloy.observability.svc:4317) | |

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import hmac
 import os
+import struct
 import time
 from dataclasses import dataclass
 from http.client import RemoteDisconnected
@@ -326,3 +329,12 @@ def login(email: str, password: str, *, base_url: str | None = None, role: str |
     except Exception:
         client.close()
         raise
+
+
+def totp_code(secret: str, *, at: float | None = None) -> str:
+    """The RFC 6238 code pyotp's defaults verify (SHA-1, 6 digits, 30 s), without importing pyotp."""
+    key = base64.b32decode(secret.upper() + '=' * (-len(secret) % 8))
+    counter = int(time.time() if at is None else at) // 30
+    digest = hmac.new(key, struct.pack('>Q', counter), 'sha1').digest()
+    offset = digest[-1] & 0x0F
+    return f'{(struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF) % 1_000_000:06d}'

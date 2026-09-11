@@ -1,5 +1,6 @@
 import ast
 import asyncio
+import base64
 import json
 import os
 import re
@@ -206,6 +207,10 @@ def test_resolver_calls_seeder_with_resolved_dependencies(monkeypatch):
         [declaration(unseedable='')],
         [declaration(same_as='other'), declaration('other', unseedable='No HTTP creator')],
         [declaration(same_as='other', via='POST /parent')],
+        [declaration(via='POST /parent', extract='id', provides=['extra'])],
+        [declaration(seeded_by='seed_task', depends_on=[], provides='extra')],
+        [declaration(seeded_by='seed_task', depends_on=[], provides=['not-an-identifier'])],
+        [declaration(seeded_by='seed_task', depends_on=[], provides=['other']), declaration('other', same_as='parent')],
     ],
 )
 def test_bad_dependency_graph_fails_before_any_http(entries):
@@ -423,6 +428,126 @@ def test_integration_2xx_with_document_or_attachment_failure_is_rejected():
         ctx.request = Mock(side_effect=[{'id': 'owner'}, {'providers': {}}, {'providers': {}}, outcome])
         with pytest.raises(RuntimeError, match='did not create'):
             seeds.seed_integration(ctx, {'key': 'integration_source'})
+
+
+def test_a_seeder_must_provide_what_it_declares_and_only_that(monkeypatch):
+    def provides_extra(ctx, entry):
+        ctx.provide(entry, 'extra', 'extra-value')
+        return 'own-id'
+
+    monkeypatch.setitem(seeds._SEEDERS, 'provides_extra', provides_extra)
+    monkeypatch.setitem(seeds._SEEDERS, 'provides_nothing', lambda ctx, entry: 'own-id')
+    client = Mock(spec=seeds.AttackClient)
+    spec = {'paths': {'/parent/{id}': {'get': {}}}}
+    surface = tiny_surface(declaration(seeded_by='provides_extra', depends_on=[], provides=['extra']))
+    surface['field'] = [{'route': 'GET /parent/{id}', 'params': {'q': '{extra}'}}]
+    assert seeds.resolve_parameters(client, surface=surface, spec=spec).fields == {
+        'GET /parent/{id}': {'params': {'q': 'extra-value'}}
+    }
+    undeclared = tiny_surface(declaration(seeded_by='provides_extra', depends_on=[]))
+    with pytest.raises(RuntimeError, match='does not declare'):
+        seeds.resolve_parameters(client, surface=undeclared, spec=spec)
+    silent = tiny_surface(declaration(seeded_by='provides_nothing', depends_on=[], provides=['extra']))
+    with pytest.raises(RuntimeError, match='did not provide'):
+        seeds.resolve_parameters(client, surface=silent, spec=spec)
+
+
+def test_active_function_seeder_turns_its_own_function_on():
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
+    ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': True}])
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'active_function')
+    assert seeds.seed_active_function(ctx, parameter) == 'attack_active_fixture'
+    create, toggle = ctx.request.call_args_list
+    assert create.args == ('POST', '/api/v1/functions/create')
+    assert create.kwargs['json']['content'] == parameter['content']
+    assert toggle.args == ('POST', '/api/v1/functions/id/attack_active_fixture/toggle')
+    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
+    # The passes toggle the shared {function}; this one must never be its target.
+    function = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'function')
+    assert seeds.parameter_for('/api/v1/functions/id/{id}/toggle', 'id') is function
+    ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': False}])
+    with pytest.raises(RuntimeError, match='not activated'):
+        seeds.seed_active_function(ctx, parameter)
+
+
+def test_active_function_serves_chat_actions_and_user_valves():
+    for path, name in [
+        ('/api/chat/actions/{action_id}', 'action_id'),
+        ('/api/v1/functions/id/{id}/valves/user/update', 'id'),
+    ]:
+        declaration = seeds.parameter_for(path, name)
+        key = declaration.get('same_as', declaration['key'])
+        assert key == 'active_function', path
+
+
+def test_removable_knowledge_seeder_adds_a_file_nothing_else_uses():
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
+    ctx.request = Mock(
+        side_effect=[
+            {'id': 'own-file'},
+            {'status': True},
+            {'id': 'own-kb'},
+            {'id': 'own-kb', 'files': [{'id': 'own-file'}]},
+        ]
+    )
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'removable_knowledge')
+    assert seeds.seed_removable_knowledge(ctx, parameter) == 'own-kb'
+    assert ctx.values['removable_file'] == 'own-file'
+    upload, process, create, add = ctx.request.call_args_list
+    assert upload.args == ('POST', '/api/v1/files/') and upload.kwargs['params'] == {'process': False}
+    assert process.kwargs['json'] == {'file_id': 'own-file'}
+    assert add.args == ('POST', '/api/v1/knowledge/own-kb/file/add')
+    assert add.kwargs['json'] == {'file_id': 'own-file'}
+    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
+    assert not seeds.is_destructive('POST', '/api/v1/knowledge/{id}/file/remove')
+    ctx.request = Mock(
+        side_effect=[{'id': 'own-file'}, {'status': True}, {'id': 'own-kb'}, {'id': 'own-kb', 'files': []}]
+    )
+    with pytest.raises(RuntimeError, match='did not join'):
+        seeds.seed_removable_knowledge(ctx, parameter)
+
+
+def test_totp_code_matches_rfc_6238_sha1_vectors():
+    # RFC 6238 appendix B, SHA-1 seed "12345678901234567890", truncated to 6 digits.
+    secret = base64.b32encode(b'12345678901234567890').decode()
+    for at, code in [(59, '287082'), (1111111109, '081804'), (1234567890, '005924'), (2000000000, '279037')]:
+        assert seeds.totp_code(secret, at=at) == code
+    assert seeds.totp_code(secret.rstrip('=').lower(), at=59) == '287082'
+
+
+def test_totp_user_seeder_enrols_with_the_new_users_own_session(monkeypatch):
+    sessions = []
+
+    class Enrolee:
+        def __init__(self, base_url, token):
+            sessions.append(token)
+            self.verify_identity = Mock()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(seeds, 'AttackClient', Enrolee)
+    monkeypatch.setattr(seeds, 'totp_code', lambda secret: f'code-for-{secret}')
+    ctx = seeds.SeedContext(Mock(base_url='http://app'), Mock(), seeds.SURFACE, token='fixture')
+    ctx.request = Mock(
+        side_effect=[{'id': 'totp-user', 'token': 'totp-session'}, {'secret': 'SECRET'}, {'totp_enabled': True}]
+    )
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'totp_user')
+    assert seeds.seed_totp_user(ctx, parameter) == 'totp-user'
+    assert sessions == ['totp-session']
+    add, setup, enable = ctx.request.call_args_list
+    assert add.kwargs['actor'] is ctx.admin and add.kwargs['json']['role'] == 'user'
+    assert setup.args == ('POST', '/api/v1/auths/2fa/totp/setup') and setup.kwargs['actor'] is not ctx.admin
+    assert enable.kwargs['json'] == {'password': parameter['password'], 'secret': 'SECRET', 'code': 'code-for-SECRET'}
+    # Not the shared {user}: the exporter signs in with that user's password.
+    assert seeds.parameter_for('/api/v1/users/{user_id}/2fa/disable', 'user_id') is parameter
+    assert seeds.parameter_for('/api/v1/users/{user_id}/groups', 'user_id')['key'] == 'user'
+    ctx.request = Mock(side_effect=[{'id': 'totp-user', 'token': 't'}, {'secret': 'S'}, {'totp_enabled': False}])
+    with pytest.raises(RuntimeError, match='did not take effect'):
+        seeds.seed_totp_user(ctx, parameter)
 
 
 def test_task_seeder_rejects_an_id_that_has_already_finished(monkeypatch):
@@ -837,6 +962,7 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
     }
     templates = {re.sub(r'\{[^}]+\}', '{}', route) for route in operations}
     seeded = {p['key'] for p in seeds.SURFACE['parameter'] if 'unseedable' not in p}
+    seeded |= {name for p in seeds.SURFACE['parameter'] for name in p.get('provides', [])}
     writable = writable_string_fields(SPEC)
     skeletons = body_skeletons(SPEC)
     assert len({entry['route'] for entry in seeds.SURFACE['field']}) == len(seeds.SURFACE['field'])

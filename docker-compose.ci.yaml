@@ -263,9 +263,13 @@ services:
       # whatever the chart seeds (PersistentConfig), so it runs on here and the
       # plane drives it rather than a waiver hiding it. CI-005.
       ENABLE_2FA: "true"
-      # soev-test, gradient and staging require 2FA; driving that needs the plane
-      # to enrol TOTP for its identities. Off until it does. CI-005.
-      REQUIRE_2FA: "false"
+      # soev-test, gradient and staging require 2FA with a 7-day grace period.
+      # Within grace a password account without TOTP still gets a session, capped
+      # at the deadline (routers/auths.py:evaluate_2fa_grace), and a fresh stack
+      # never ages past it, so the plane's identities sign in as they would on
+      # those tenants. CI-005.
+      REQUIRE_2FA: "true"
+      TWO_FA_GRACE_PERIOD_DAYS: "7"
       ENABLE_FORGOT_PASSWORD: "true"
       ENABLE_USER_WEBHOOKS: "true"
       AUDIO_TTS_ENGINE: "openai"
