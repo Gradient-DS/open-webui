@@ -6,7 +6,18 @@ import json
 from uuid import NAMESPACE_URL, uuid5
 
 from open_webui.models.access_grants import AccessGrantModel
-from open_webui.models.knowledge import KnowledgeDirectoryModel, KnowledgeForm, KnowledgeModel
+from open_webui.models.knowledge import (
+    FileUserMetadataResponse,
+    FileUserResponse,
+    KnowledgeDirectoryEntry,
+    KnowledgeDirectoryModel,
+    KnowledgeFileListResponse,
+    KnowledgeFileModel,
+    KnowledgeForm,
+    KnowledgeListResponse,
+    KnowledgeModel,
+    KnowledgeUserModel,
+)
 
 
 def knowledge_of(collection: dict, *, service_principal: str) -> KnowledgeModel:
@@ -119,3 +130,76 @@ def directory_model(key: str, path: tuple[str, ...], *, created_at: int, owner_i
         created_at=created_at,
         updated_at=created_at,
     )
+
+
+def knowledge_user_of(collection: dict, *, service_principal: str, user: dict | None = None) -> KnowledgeUserModel:
+    return KnowledgeUserModel(
+        **knowledge_of(collection, service_principal=service_principal).model_dump(),
+        user=user,
+        file_count=collection['document_count'],
+    )
+
+
+def knowledge_list_of(items: list, total: int) -> KnowledgeListResponse:
+    return KnowledgeListResponse(items=items, total=total)
+
+
+def file_response_of(file: dict, document: dict, *, metadata_only: bool) -> FileUserMetadataResponse | FileUserResponse:
+    fields = {key: file[key] for key in ('id', 'user_id', 'hash', 'filename', 'meta', 'created_at', 'updated_at')}
+    fields.update(user=None, added_at=int(dt.datetime.fromisoformat(document['ingested_at']).timestamp()))
+    if metadata_only:
+        meta = file['meta'] or {}
+        return FileUserMetadataResponse(**fields, status=meta.get('status'), error=meta.get('error'))
+    return FileUserResponse(**fields)
+
+
+def knowledge_link_of(collection: dict, document: dict, *, service_principal: str) -> KnowledgeFileModel:
+    key, source_id = collection['key'], document['source_id']
+    path = tuple(document['path'].split('/')) if document['path'] else ()
+    created_at = int(dt.datetime.fromisoformat(document['ingested_at']).timestamp())
+    return KnowledgeFileModel(
+        id=str(uuid5(NAMESPACE_URL, json.dumps(['knowledge_file', key, source_id]))),
+        knowledge_id=key,
+        file_id=source_id,
+        directory_id=directory_id(key, path) if path else None,
+        user_id=knowledge_of(collection, service_principal=service_principal).user_id,
+        relative_path=document['path'],
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+
+def knowledge_file_list_of(
+    items: list,
+    *,
+    total: int,
+    directories: list | None = None,
+    breadcrumbs: list | None = None,
+    rollups: dict | None = None,
+) -> KnowledgeFileListResponse:
+    return KnowledgeFileListResponse(
+        items=items,
+        total=total,
+        directories=[
+            KnowledgeDirectoryEntry(
+                **directory.model_dump(),
+                **(rollups or {}).get(directory.id, {'child_count': 0, 'status_counts': status_counts()}),
+            )
+            for directory in directories or []
+        ],
+        breadcrumbs=breadcrumbs or [],
+    )
+
+
+def status_counts() -> dict[str, int]:
+    return {'pending': 0, 'completed': 0, 'failed': 0, 'unknown': 0}
+
+
+def status_bucket(status: str | None) -> str:
+    if status == 'completed':
+        return 'completed'
+    if status in ('failed', 'error'):
+        return 'failed'
+    if status in ('pending', 'processing', 'downloading', 'parsing', 'ingesting'):
+        return 'pending'
+    return 'unknown'
