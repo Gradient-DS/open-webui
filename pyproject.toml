@@ -180,8 +180,6 @@ all = [
 ]
 
 soev = [
-    "hostile-corpus @ https://github.com/Gradient-DS/.github/archive/1fb8c12d75bdb42ac5313ec405a502bcaa4b3cc3.tar.gz#subdirectory=packages/hostile-corpus",
-    "openapi-surface @ https://github.com/Gradient-DS/.github/archive/d3a9895c3eaab02c0462a3d23729ccfa3ac8d052.tar.gz#subdirectory=packages/openapi-surface",
     "pytest-asyncio>=1.0.0",
     "weaviate-client==4.20.3",
     "psycopg2-binary==2.9.12",

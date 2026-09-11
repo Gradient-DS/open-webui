@@ -207,6 +207,26 @@ RUN set -e; \
 # instead of failing on a missing pip.
 ENV ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS=False
 
+# CI-only: the runtime security gate's test tooling, from the private
+# Gradient-DS/security-ci. Off by default, so no production image carries the
+# hostile corpus; docker-compose.ci.yaml turns it on for the gate's own stack.
+#
+# The credential is a BuildKit secret and reaches git through GIT_CONFIG_*
+# environment variables only -- no ARG (an ARG persists in image history and
+# would surface in the scanned image), no netrc, no file, and nothing recorded
+# in the installed package's own metadata, since the rewrite happens inside git.
+ARG INSTALL_SECURITY_CI_DEPS=false
+COPY --chown=$UID:$GID ./backend/requirements-security-ci.txt ./requirements-security-ci.txt
+RUN --mount=type=secret,id=gh_token \
+    if [ "$INSTALL_SECURITY_CI_DEPS" = "true" ]; then \
+    if [ ! -s /run/secrets/gh_token ]; then echo "INSTALL_SECURITY_CI_DEPS=true needs the gh_token build secret (GH_TOKEN in the environment)"; exit 1; fi; \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/gh_token)@github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_0="https://github.com/" \
+    uv pip install --system -r requirements-security-ci.txt --no-cache-dir; \
+    python -c "import hostile_corpus, openapi_surface"; \
+    fi
+
 # Optional: PPTX parsing through unstructured may need spaCy's English model.
 # Keep this out of the default image to avoid the extra image bloat; deployments
 # with read-only site-packages can uncomment it and bake the model in.

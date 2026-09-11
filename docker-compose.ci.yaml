@@ -108,6 +108,11 @@ services:
         # this stack stubs. Building the full image here would drive code paths
         # production does not ship and miss the ones it does.
         USE_SLIM: 'true'
+        # The gate's own test tooling, from the private Gradient-DS/security-ci.
+        # Production images leave this off and carry none of it.
+        INSTALL_SECURITY_CI_DEPS: 'true'
+      secrets:
+        - gh_token
     environment:
       # Stop GitHub update checks and Hugging Face downloads on normal requests.
       OFFLINE_MODE: "true"
@@ -340,3 +345,10 @@ networks:
   internal:
     internal: true # No external gateway for the guarded app or its dependencies.
   edge: {} # Only the fixed-destination entry proxy may join this network.
+
+secrets:
+  # A token that may read Gradient-DS/security-ci: in CI the org App's, on a
+  # workstation your own (GH_TOKEN=$(gh auth token)). Never a build ARG -- an
+  # ARG persists in image history and would surface in the scanned image.
+  gh_token:
+    environment: GH_TOKEN

@@ -1,0 +1,20 @@
+# Test tooling for the runtime security gate. CI only.
+#
+# These are installed into the open-webui-ci image that docker-compose.ci.yaml
+# builds (INSTALL_SECURITY_CI_DEPS=true) and into no production image, which is
+# why they are not in requirements.txt. They used to be, so every shipped image
+# carried the hostile corpus.
+#
+# They must be baked in at build time rather than installed into the running
+# stack: the final image drops pip, and the CI stack's app container has no
+# route off its internal network.
+#
+# They live in the private Gradient-DS/security-ci, so the install needs a
+# credential. CI mounts a BuildKit secret holding an App token; a workstation
+# uses its own gh login (`gh auth setup-git`, then GH_TOKEN=$(gh auth token)).
+#
+# Pin a commit with the tag in this comment, and never move a tag that a
+# consumer pins: 2d823df9e1701adb5a3eae257a130d2114c8a5e7 is tag v3, the first
+# release of the tooling under its own repository name.
+hostile-corpus @ git+https://github.com/Gradient-DS/security-ci@2d823df9e1701adb5a3eae257a130d2114c8a5e7#subdirectory=packages/hostile-corpus
+openapi-surface @ git+https://github.com/Gradient-DS/security-ci@2d823df9e1701adb5a3eae257a130d2114c8a5e7#subdirectory=packages/openapi-surface
