@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from urllib.parse import quote
 from uuid import uuid4
 
+import requests
 from hostile_corpus import fetch_payloads
 from openapi_surface import writable_string_fields
 
@@ -28,7 +29,6 @@ from .benign_requests import benign_request
 from .client import AttackClient, login
 from .identities import PASSWORD
 from .pass_support import pass_run
-
 
 # Violation kinds a [[shared]] declaration in the attack surface may allow for
 # one route. An administrator operation that is not refused is never sharing.
@@ -51,6 +51,57 @@ def _shared(surface=None):
     """
     surface = seeds.SURFACE if surface is None else surface
     return {entry['route']: frozenset(entry['allow']) for entry in surface.get('shared', [])}
+
+
+class ServiceClient:
+    """A service bearer acting for one user, as the agents-api and sync daemon call in.
+
+    Not an AttackClient: a service key has no session, so a 401 is an answer to
+    record rather than an identity to probe and lose.
+    """
+
+    def __init__(self, base_url, token, acting_user_id, headers=None):
+        self.base_url = base_url.rstrip('/')
+        self.identity = {'id': acting_user_id, 'role': 'service'}
+        self._session = requests.Session()
+        self._session.trust_env = False
+        self._headers = {'Authorization': f'Bearer {token}', 'X-Acting-User-Id': acting_user_id, **(headers or {})}
+
+    def request(self, method, path, **kwargs):
+        headers = {**self._headers, **kwargs.pop('headers', {})}
+        return self._session.request(
+            method, self.base_url + path, headers=headers, allow_redirects=False, timeout=60, **kwargs
+        )
+
+    def close(self):
+        self._session.close()
+
+
+def _service(path, surface=None):
+    """The [[service]] declaration whose prefix covers this path, if any."""
+    surface = seeds.SURFACE if surface is None else surface
+    for entry in surface.get('service', []):
+        if path == entry['prefix'] or path.startswith(entry['prefix'] + '/'):
+            return entry
+    return None
+
+
+@contextmanager
+def _as_service(declaration, base_url, *users):
+    """The service acting for each user on a [[service]] route; the users themselves elsewhere."""
+    if declaration is None:
+        yield users
+        return
+    clients = [
+        ServiceClient(base_url, declaration['token'], user.identity['id'], declaration.get('headers')) if user else None
+        for user in users
+    ]
+    try:
+        yield clients
+    finally:
+        for client in clients:
+            if client:
+                client.close()
 
 
 def _nothing_happened(answer):
@@ -281,18 +332,20 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                 path = route.split(' ', 1)[1]
                 owner = owners[_owner_key(path, surface)] if '{' in path else None
                 resource_ids = [parameters[path, name] for name in re.findall(r'\{([^}]+)\}', path)]
-                for control, kwargs in _requests(route, parameters, spec, fields, payloads, full):
-                    stranger = _request(identities.admin, identities.intruder, route, target, tally, kwargs)
-                    positive = _request(identities.admin, owner, route, target, tally, kwargs) if owner else None
-                    _check(
-                        result,
-                        route,
-                        stranger,
-                        positive,
-                        markers,
-                        admin_only=route in admins,
-                        control=control,
-                        resource_ids=resource_ids,
-                    )
+                service = _service(path)
+                with _as_service(service, identities.admin.base_url, identities.intruder, owner) as (intruder, owner):
+                    for control, kwargs in _requests(route, parameters, spec, fields, payloads, full):
+                        stranger = _request(identities.admin, intruder, route, target, tally, kwargs)
+                        positive = _request(identities.admin, owner, route, target, tally, kwargs) if owner else None
+                        _check(
+                            result,
+                            route,
+                            stranger,
+                            positive,
+                            markers,
+                            admin_only=route in admins,
+                            control=control,
+                            resource_ids=resource_ids,
+                        )
                 plane.flush_hits()
     return result

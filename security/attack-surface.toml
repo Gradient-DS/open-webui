@@ -1030,3 +1030,23 @@ reason = "routers/openai.py:proxy forwards to the admin-configured upstream for 
 route = "POST /api/v1/invites/{token}/accept"
 allow = ["owner-marker", "write"]
 reason = "Unauthenticated on purpose: the token in the path is the credential, and accepting creates the invitee's account from the invite's email and role."
+
+# ---------------------------------------------------------------------------
+# Service callers
+#
+# Route families the agents-api and the sync daemon call with a service key and
+# an acting user (utils/service_auth.py). The crossuser pass drives both sides
+# as the service: acting for the owner is the owner control, acting for the
+# intruder is the isolation check. The keys are CI's (docker-compose.ci.yaml).
+
+[[service]]
+prefix = "/api/v1/internal/retrieval"
+token = "ci-stub-key"
+reason = "utils/service_auth.py:get_agent_principal: the AGENT_API_KEY bearer, acting for the user in X-Acting-User-Id. A user's own bearer is refused outright (401)."
+
+[[service]]
+prefix = "/api/v1/sync-daemon"
+token = "ci-stub-key"
+headers = { "X-Acting-Provider" = "google_drive" }
+reason = "utils/service_auth.py:get_sync_principal: the SYNC_API_KEY bearer, acting for X-Acting-User-Id through X-Acting-Provider. A user's own bearer is refused outright (401)."
+

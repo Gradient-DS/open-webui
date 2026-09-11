@@ -355,3 +355,46 @@ def test_sharing_declarations_on_token_routes_stay_matchable():
     route = 'GET /api/v1/invites/{token}/validate'
     assert route in crossuser._shared()
     assert route not in crossuser._shared(seeds._fill_token(deepcopy(seeds.SURFACE), 'marker'))
+
+
+def test_a_service_route_is_driven_as_the_service_acting_for_each_side(monkeypatch):
+    # The agents-api and the sync daemon call in with a service key and an acting
+    # user. Isolation there means: acting for the intruder must not reach the
+    # owner's resource, and acting for the owner must.
+    from types import SimpleNamespace
+
+    import requests
+
+    sent = []
+
+    def fake(self, method, url, **kwargs):
+        sent.append((method, url, kwargs['headers']))
+        answer = requests.Response()
+        answer.status_code = 200
+        answer._content = b'{}'
+        return answer
+
+    monkeypatch.setattr(crossuser.requests.Session, 'request', fake)
+    declaration = {'prefix': '/svc', 'token': 'k', 'headers': {'X-Acting-Provider': 'p'}}
+    users = [SimpleNamespace(identity={'id': 'intruder-id'}), SimpleNamespace(identity={'id': 'owner-id'})]
+    with crossuser._as_service(declaration, 'http://app', *users) as (intruder, owner):
+        intruder.request('GET', '/svc/x')
+        owner.request('GET', '/svc/x')
+    assert [headers['X-Acting-User-Id'] for _, _, headers in sent] == ['intruder-id', 'owner-id']
+    assert all(h['Authorization'] == 'Bearer k' and h['X-Acting-Provider'] == 'p' for _, _, h in sent)
+    assert sent[0][1] == 'http://app/svc/x'
+
+
+def test_an_ordinary_route_keeps_its_users():
+    with crossuser._as_service(None, 'http://app', 'intruder', 'owner') as actors:
+        assert actors == ('intruder', 'owner')
+    assert crossuser._service('/api/v1/chats/x') is None
+
+
+def test_every_service_declaration_covers_a_route_and_names_its_key():
+    paths = {route.split(' ', 1)[1] for route in plane.operations(seeds.SPEC)}
+    declarations = seeds.SURFACE.get('service', [])
+    assert declarations
+    for entry in declarations:
+        assert any(p == entry['prefix'] or p.startswith(entry['prefix'] + '/') for p in paths), entry['prefix']
+        assert entry['token'] and entry['reason'].strip(), entry
