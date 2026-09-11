@@ -28,7 +28,6 @@ from open_webui.models.knowledge import KnowledgeFileListResponse, Knowledges
 from open_webui.routers.files import upload_file_handler
 from open_webui.services.retrieval.agent_search import (
     resolve_accessible_kb,
-    resolve_accessible_kbs,
     run_agent_search,
 )
 from open_webui.socket.main import sio
@@ -59,68 +58,9 @@ class AgentSearchResponse(BaseModel):
     results: list[AgentSearchResult]
 
 
-class AccessibleKB(BaseModel):
-    id: str
-    collection_name: str
-    name: str
-    description: str = ''
-    type: Optional[str] = None
-    owner_id: Optional[str] = None
-
-
-class AccessibleKBsResponse(BaseModel):
-    user_id: str
-    kbs: list[AccessibleKB]
-    kb_index_collection_name: str
-
-
 class AccessibleFilesResponse(BaseModel):
     user_id: str
     file_ids: list[str]
-
-
-@router.get('/accessible-kbs', response_model=AccessibleKBsResponse)
-async def list_accessible_kbs(
-    request: Request,
-    principal: AgentPrincipal = Depends(get_agent_principal),
-    kb_ids: Optional[str] = None,
-) -> AccessibleKBsResponse:
-    """List the KBs the acting user may read, plus the meta-collection name.
-
-    Shaped for agents that prefer to query the per-tenant Weaviate directly:
-    ``collection_name`` is the sanitised class name as it lives in the vector
-    DB; ``kb_index_collection_name`` points at the meta-collection where each
-    KB has a ``(name, description)`` embedding indexed by
-    ``metadata.knowledge_base_id``. Open-webui owns the ACL pass; the agent
-    owns the query construction.
-
-    :param kb_ids: Optional comma-separated subset filter. KBs not in the
-        subset are dropped before the suspended-KB filter runs.
-    """
-
-    if not await Config.get('agent_search.enabled', False):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail='agent search not enabled',
-        )
-
-    parsed_kb_ids: Optional[list[str]] = None
-    if kb_ids:
-        parsed_kb_ids = [kb_id.strip() for kb_id in kb_ids.split(',') if kb_id.strip()]
-
-    log.info(
-        'agent_accessible_kbs: agent=%s acting_user=%s kb_ids=%s',
-        principal.agent_id,
-        principal.user.id,
-        'all' if parsed_kb_ids is None else f'{len(parsed_kb_ids)} kbs',
-    )
-
-    payload = await resolve_accessible_kbs(principal.user, kb_ids=parsed_kb_ids)
-    return AccessibleKBsResponse(
-        user_id=payload['user_id'],
-        kbs=[AccessibleKB(**kb) for kb in payload['kbs']],
-        kb_index_collection_name=payload['kb_index_collection_name'],
-    )
 
 
 @router.get('/accessible-files', response_model=AccessibleFilesResponse)
