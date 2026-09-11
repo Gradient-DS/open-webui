@@ -2113,4 +2113,4 @@ class KnowledgeTable:
                 return False
 
 
-Knowledges = KnowledgeTable()
+Knowledges = __import__('open_webui.soev.knowledge_store', fromlist=['SoevKnowledgeTable']).SoevKnowledgeTable()
