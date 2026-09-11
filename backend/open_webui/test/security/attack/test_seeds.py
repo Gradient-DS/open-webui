@@ -305,6 +305,7 @@ def test_destructive_routes_have_reasons_exist_in_spec_and_never_become_ordinary
 def test_resolver_refuses_destructive_http_requests_even_with_concrete_ids(route):
     method, path = route.split(' ', 1)
     path = path.replace('{user_id}', 'disposable-user').replace('{provider}', 'mcp:server')
+    path = re.sub(r'\{[^}]+\}', 'concrete-id', path)
     client = Mock(spec=seeds.AttackClient)
     surface = tiny_surface(declaration(via=f'{method} {path}', extract='id'))
     with pytest.raises(RuntimeError, match='Destructive route'):
@@ -749,3 +750,142 @@ def test_live_shared_clone_uses_the_share_id_not_the_admin_chat_fallback(live_se
     result = identities.admin.request('POST', f'/api/v1/chats/{share_id}/clone/shared')
     assert result.status_code == 200
     assert result.json()['id'] not in (share_id, resolved['/api/v1/chats/{id}', 'id'])
+
+
+def test_stack_configuration_is_imported_and_verified():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(200, {'ui.enable_signup': True, 'other.key': 1})
+    surface = {**tiny_surface(), 'stack_configuration': {'ui.enable_signup': True}}
+    assert seeds.resolve_parameters(client, surface=surface, spec={'paths': {}}) == {}
+    call = client.request.call_args
+    assert call.args == ('POST', '/api/v1/configs/import')
+    assert call.kwargs['json'] == {'config': {'ui.enable_signup': True}}
+
+
+def test_stack_configuration_that_does_not_take_effect_fails_setup():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(200, {'ui.enable_signup': False})
+    surface = {**tiny_surface(), 'stack_configuration': {'ui.enable_signup': True}}
+    with pytest.raises(RuntimeError, match='did not take effect'):
+        seeds.resolve_parameters(client, surface=surface, spec={'paths': {}})
+
+
+def test_fields_fill_seed_keys_and_the_token_after_their_setup_request():
+    parent = declaration(via='POST /parent', extract='id')
+    surface = {
+        **tiny_surface(parent),
+        'field': [
+            {
+                'route': 'POST /thing',
+                'json': {'parent_id': '{parent}', 'call': 'call_{token}'},
+                'params': {'id': '{parent}'},
+                'setup': [{'via': 'POST /parent/{parent}/attach', 'body': {'member': '{parent}'}}],
+            }
+        ],
+    }
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [response(200, {'id': 'p/1'}), response(200, {})]
+    result = seeds.resolve_parameters(client, surface=surface, spec={'paths': {}})
+    assert result == {}
+    fields = result.fields['POST /thing']
+    assert fields['json']['parent_id'] == 'p/1'
+    assert fields['params'] == {'id': 'p/1'}
+    assert fields['json']['call'].startswith('call_') and '{token}' not in fields['json']['call']
+    setup = client.request.call_args_list[1]
+    assert setup.args == ('POST', '/parent/p%2F1/attach')
+    assert setup.kwargs['json'] == {'member': 'p/1'}
+
+
+def test_a_field_naming_a_key_nothing_seeded_fails_resolution():
+    surface = {**tiny_surface(), 'field': [{'route': 'POST /thing', 'json': {'id': '{missing}'}}]}
+    with pytest.raises(RuntimeError, match="'missing'"):
+        seeds.resolve_parameters(Mock(spec=seeds.AttackClient), surface=surface, spec={'paths': {}})
+
+
+def _strings(value):
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+    elif isinstance(value, str):
+        yield value
+
+
+def _multipart_properties(operation):
+    content = operation.get('requestBody', {}).get('content', {}).get('multipart/form-data')
+    if not content:
+        return set()
+    schema = content.get('schema', {})
+    if '$ref' in schema:
+        schema = SPEC['components']['schemas'][schema['$ref'].split('/')[-1]]
+    return set(schema.get('properties', {}))
+
+
+def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
+    # A declaration outliving its field, or naming a key nothing seeds, would
+    # send a plausible body the handler never reads -- the route reported driven
+    # and never entered, which is the failure [[field]] exists to remove.
+    from openapi_surface import writable_string_fields
+
+    operations = {
+        f'{method.upper()} {path}': operation
+        for path, item in SPEC['paths'].items()
+        for method, operation in item.items()
+        if method in METHODS
+    }
+    templates = {re.sub(r'\{[^}]+\}', '{}', route) for route in operations}
+    seeded = {p['key'] for p in seeds.SURFACE['parameter'] if 'unseedable' not in p}
+    writable = writable_string_fields(SPEC)
+    assert len({entry['route'] for entry in seeds.SURFACE['field']}) == len(seeds.SURFACE['field'])
+    for entry in seeds.SURFACE['field']:
+        route = entry['route']
+        assert route in operations, route
+        assert entry['description'].strip(), route
+        assert entry.keys() & {'json', 'params', 'files', 'form'}, route
+        for name in entry.get('json', {}):
+            assert name in writable.get(route, ()), f'{route}: {name} is not a field of its body'
+        query = {p['name'] for p in operations[route].get('parameters', []) if p.get('in') == 'query'}
+        for name in entry.get('params', {}):
+            assert name in query, f'{route}: {name} is not a query parameter'
+        parts = _multipart_properties(operations[route])
+        for name in [part['field'] for part in entry.get('files', [])] + list(entry.get('form', {})):
+            assert name in parts, f'{route}: {name} is not a part of its multipart body'
+        for step in entry.get('setup', []):
+            assert re.sub(r'\{[^}]+\}', '{}', step['via']) in templates, step['via']
+        values = [
+            *_strings(entry.get('json', {})),
+            *_strings(entry.get('params', {})),
+            *_strings(entry.get('setup', [])),
+        ]
+        values += [*_strings(entry.get('form', {})), *_strings(entry.get('files', []))]
+        referenced = {key for value in values for key in re.findall(r'\{([A-Za-z_][A-Za-z0-9_]*)\}', value)} - {'token'}
+        assert referenced <= seeded, f'{route}: {sorted(referenced - seeded)}'
+
+
+def test_fields_turn_declared_files_into_request_parts_and_leave_json_braces_alone():
+    surface = {
+        **tiny_surface(declaration(via='POST /parent', extract='id')),
+        'field': [
+            {
+                'route': 'POST /upload',
+                'files': [
+                    {
+                        'field': 'data',
+                        'filename': 'f-{token}.json',
+                        'content': '{"a": {"b": "{parent}"}}',
+                        'content_type': 'application/json',
+                    }
+                ],
+                'form': {'idx': '{parent}'},
+            }
+        ],
+    }
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(200, {'id': 'p1'})
+    fields = seeds.resolve_parameters(client, surface=surface, spec={'paths': {}}).fields['POST /upload']
+    ((name, (filename, content, content_type)),) = fields['files']
+    assert (name, content, content_type) == ('data', '{"a": {"b": "p1"}}', 'application/json')
+    assert filename.startswith('f-') and filename.endswith('.json') and '{token}' not in filename
+    assert fields['form'] == {'idx': 'p1'}

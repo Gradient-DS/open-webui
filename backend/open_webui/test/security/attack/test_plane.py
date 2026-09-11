@@ -839,3 +839,52 @@ def test_the_drive_pass_sends_a_body_only_where_seeding_sends_none():
     sent = {call.args[1]: call.kwargs.get('json', '<no body>') for call in client.request.call_args_list}
     assert sent['/seeded'] == '<no body>'
     assert sent['/unseeded'] == {'enabled': False}
+
+
+def test_seeding_holds_a_declared_id_in_the_all_fields_body_and_still_probes_it_alone():
+    client = fake_client(201)
+    parameters = seeds.Resolved(fields={'POST /item': {'json': {'a': 'real-id'}}})
+    plane.seed_every_writable_field(client, parameters, spec=tiny_spec(['POST /item']), payloads=['hostile'])
+    bodies = [call.kwargs['json'] for call in client.request.call_args_list]
+    assert bodies[0] == {'a': 'real-id', 'b': 'hostile', 'c': 'hostile'}
+    assert {'a': 'hostile'} in bodies  # the id field is still attacked, alone
+    assert not any(body.get('a') == 'hostile' and len(body) > 1 for body in bodies)
+
+
+def test_a_field_on_a_declared_path_is_held_not_planted_over_it():
+    # `image[]` planted after a declared `image` turns the id into a list of payloads.
+    assert plane._overlaps('image[]', 'image')
+    assert plane._overlaps('image', 'image[]')
+    assert plane._overlaps('files[].id', 'files[].id')
+    assert not plane._overlaps('files[].filename', 'files[].id')
+    assert not plane._overlaps('collection_name', 'collection_names[]')
+
+
+def test_the_drive_pass_sends_declared_query_parameters():
+    client = fake_client(200)
+    parameters = seeds.Resolved(fields={'GET /item': {'params': {'id': 'real-id'}}})
+    plane.drive_every_route(client, parameters, spec={'paths': {'/item': {'get': {}}}})
+    kwargs = client.request.call_args_list[0].kwargs
+    assert kwargs['params'] == {'id': 'real-id'}
+    assert 'json' not in kwargs
+
+
+def test_the_drive_pass_sends_declared_multipart_parts_and_no_json():
+    client = fake_client(200)
+    parts = [('file', ('attack.py', '# attack', 'text/x-python'))]
+    parameters = seeds.Resolved(fields={'POST /upload': {'files': parts, 'form': {'urlIdx': '0'}}})
+    plane.drive_every_route(client, parameters, spec={'paths': {'/upload': {'post': {}}}})
+    kwargs = client.request.call_args_list[0].kwargs
+    assert kwargs['files'] == parts
+    assert kwargs['data'] == {'urlIdx': '0'}
+    assert 'json' not in kwargs
+
+
+def test_the_drive_pass_sends_declared_json_alone_on_a_seeded_route():
+    # `knowledge/{id}/file/move`: seeding probes every field with a payload, so no
+    # pass sent the real file id with a null directory, and drive sent no body.
+    # Only the declared ids go -- never the skeleton, which is COVERAGE-001.
+    client = fake_client(200)
+    parameters = seeds.Resolved(fields={'POST /seeded': {'json': {'a': 'real-id'}}})
+    plane.drive_every_route(client, parameters, spec=tiny_spec(['POST /seeded']))
+    assert client.request.call_args_list[0].kwargs['json'] == {'a': 'real-id'}
