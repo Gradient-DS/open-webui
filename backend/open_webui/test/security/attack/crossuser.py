@@ -43,8 +43,13 @@ class Authorization:
     shared: dict = field(default_factory=dict)
 
 
-def _shared(surface):
-    """Route -> the violation kinds its [[shared]] declaration allows."""
+def _shared(surface=None):
+    """Route -> the violation kinds its [[shared]] declaration allows.
+
+    Read from the unfilled surface: own_fixtures fills {token} throughout its
+    copy, which would rewrite a route such as invites/{token}/validate.
+    """
+    surface = seeds.SURFACE if surface is None else surface
     return {entry['route']: frozenset(entry['allow']) for entry in surface.get('shared', [])}
 
 
@@ -263,7 +268,7 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
     fields = writable_string_fields(spec)
     with own_fixtures(identities, spec=spec) as (parameters, markers, surface, owners):
         with pass_run('crossuser', routes, identities.admin) as tally:
-            result = Authorization(tally, shared=_shared(surface))
+            result = Authorization(tally, shared=_shared())
             # Delete children before parents within the shared removal group.
             ordered = sorted(
                 routes,

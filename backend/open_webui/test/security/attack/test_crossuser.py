@@ -345,3 +345,13 @@ def test_the_owner_control_carries_declared_fields():
     assert control and get['params'] == {'from_id': 'h1'}
     [(_, post)] = list(crossuser._requests('POST /y', parameters, spec, {}, (), False))
     assert post['json']['file_id'] == 'f1'
+
+
+def test_sharing_declarations_on_token_routes_stay_matchable():
+    # own_fixtures fills {token} throughout its copy of the surface, which
+    # rewrote routes like invites/{token}/validate so no declaration matched.
+    from copy import deepcopy
+
+    route = 'GET /api/v1/invites/{token}/validate'
+    assert route in crossuser._shared()
+    assert route not in crossuser._shared(seeds._fill_token(deepcopy(seeds.SURFACE), 'marker'))
