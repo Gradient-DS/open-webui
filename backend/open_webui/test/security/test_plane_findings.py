@@ -440,3 +440,27 @@ def test_ollama_embeddings_without_an_input_are_refused():
     with pytest.raises(HTTPException) as refused:
         asyncio.run(generate_embeddings(request, {'model': 'm'}, user))
     assert refused.value.status_code == 400
+
+
+def test_moving_a_folder_to_its_current_parent_is_not_a_clash(monkeypatch):
+    # folders/{id}/update/parent found the folder itself as "already exists" when
+    # the target parent was its current one: a no-op move answered 400.
+    from open_webui.routers import folders
+
+    folder = SimpleNamespace(id='f1', name='Attack', parent_id=None, user_id='control-user')
+
+    async def found(*args, **kwargs):
+        return folder
+
+    async def no_subtree(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(folders, 'check_folders_permission', _nothing)
+    monkeypatch.setattr(folders.Folders, 'get_folder_by_id_and_user_id', found)
+    monkeypatch.setattr(folders.Folders, 'get_folder_by_parent_id_and_user_id_and_name', found)
+    monkeypatch.setattr(folders.Folders, 'get_folder_ids_by_id_and_user_id_in_subtree', no_subtree)
+    monkeypatch.setattr(folders.Folders, 'update_folder_parent_id_by_id_and_user_id', found)
+    monkeypatch.setattr(folders, 'publish_event', _nothing)
+    path = '/{id}/update/parent'
+    response = _client(_endpoint(folders.router, path), path).post('/f1/update/parent', json={'parent_id': None})
+    assert response.status_code == 200, (response.status_code, response.text)

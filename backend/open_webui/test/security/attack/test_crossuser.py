@@ -262,8 +262,21 @@ def test_live_crossuser_refuses_other_users_and_admin_operations(live_crossuser)
 
 @needs_stack
 def test_live_crossuser_owner_controls_are_positive(live_crossuser):
-    gaps = {route: status for route, status in live_crossuser.controls.items() if not 200 <= status < 300}
-    assert not gaps, f'Owner positive controls did not succeed; isolation remains unproven: {gaps}'
+    expected = crossuser.expected_refusals()
+    bodies = live_crossuser.control_bodies
+    gaps = {
+        route: status
+        for route, status in live_crossuser.controls.items()
+        if not 200 <= status < 300
+        and not crossuser.refused_as_expected(expected.get(route), status, bodies.get(route, ''))
+    }
+    stale = sorted(route for route in expected if 200 <= live_crossuser.controls.get(route, 0) < 300)
+    assert not stale, f'Declared refusals now succeed; drop their [[control]] entries: {stale}'
+    reasons = '\n'.join(
+        f'  {route}: HTTP {status} {live_crossuser.control_bodies.get(route, "")}'
+        for route, status in sorted(gaps.items())
+    )
+    assert not gaps, f'Owner positive controls did not succeed; isolation remains unproven:\n{reasons}'
     assert live_crossuser.controls, 'No owner positive controls ran'
 
 
@@ -355,3 +368,87 @@ def test_sharing_declarations_on_token_routes_stay_matchable():
     route = 'GET /api/v1/invites/{token}/validate'
     assert route in crossuser._shared()
     assert route not in crossuser._shared(seeds._fill_token(deepcopy(seeds.SURFACE), 'marker'))
+
+
+def test_a_service_route_is_driven_as_the_service_acting_for_each_side(monkeypatch):
+    # The agents-api and the sync daemon call in with a service key and an acting
+    # user. Isolation there means: acting for the intruder must not reach the
+    # owner's resource, and acting for the owner must.
+    from types import SimpleNamespace
+
+    import requests
+
+    sent = []
+
+    def fake(self, method, url, **kwargs):
+        sent.append((method, url, kwargs['headers']))
+        answer = requests.Response()
+        answer.status_code = 200
+        answer._content = b'{}'
+        return answer
+
+    monkeypatch.setattr(crossuser.requests.Session, 'request', fake)
+    declaration = {'prefix': '/svc', 'token': 'k', 'headers': {'X-Acting-Provider': 'p'}}
+    users = [SimpleNamespace(identity={'id': 'intruder-id'}), SimpleNamespace(identity={'id': 'owner-id'})]
+    with crossuser._as_service(declaration, 'http://app', *users) as (intruder, owner):
+        intruder.request('GET', '/svc/x')
+        owner.request('GET', '/svc/x')
+    assert [headers['X-Acting-User-Id'] for _, _, headers in sent] == ['intruder-id', 'owner-id']
+    assert all(h['Authorization'] == 'Bearer k' and h['X-Acting-Provider'] == 'p' for _, _, h in sent)
+    assert sent[0][1] == 'http://app/svc/x'
+
+
+def test_an_ordinary_route_keeps_its_users():
+    with crossuser._as_service(None, 'http://app', 'intruder', 'owner') as actors:
+        assert actors == ('intruder', 'owner')
+    assert crossuser._service('/api/v1/chats/x') is None
+
+
+def test_every_service_declaration_covers_a_route_and_names_its_key():
+    paths = {route.split(' ', 1)[1] for route in plane.operations(seeds.SPEC)}
+    declarations = seeds.SURFACE.get('service', [])
+    assert declarations
+    for entry in declarations:
+        assert any(p == entry['prefix'] or p.startswith(entry['prefix'] + '/') for p in paths), entry['prefix']
+        assert entry['token'] and entry['reason'].strip(), entry
+
+
+def test_a_failed_owner_control_keeps_the_reason():
+    # 59 owner controls failed with a bare status; the body says why, so a live
+    # run explains every gap at once instead of one replay per route.
+    result = crossuser.Authorization(tally=plane.Seeding())
+    crossuser._check(
+        result,
+        'POST /x/{id}',
+        _answer(403, '{"detail": "not a member"}'),
+        _answer(403, '{"detail": "not a member"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert result.controls['POST /x/{id}'] == 403
+    assert 'not a member' in result.control_bodies['POST /x/{id}']
+
+
+def test_a_marker_the_request_carried_is_not_a_disclosure():
+    # chat/actions refused with "Action not available: attack_function_<marker>": the
+    # id is in the path the second account sent, not something the owner disclosed.
+    assert crossuser._markers_outside('/api/chat/actions/attack_function_m1', ('m1', 'ns1')) == ('ns1',)
+
+
+def test_a_declared_refusal_matches_only_its_status_and_detail():
+    declaration = {'route': 'DELETE /x', 'status': 400, 'detail': 'in use', 'reason': 'guard'}
+    assert crossuser.refused_as_expected(declaration, 400, '{"detail": "still in use"}')
+    assert not crossuser.refused_as_expected(declaration, 403, '{"detail": "still in use"}')
+    assert not crossuser.refused_as_expected(declaration, 400, '{"detail": "other"}')
+    assert not crossuser.refused_as_expected(None, 400, 'in use')
+
+
+def test_every_declared_refusal_names_a_route_a_4xx_a_detail_and_a_reason():
+    operations = set(plane.operations(seeds.SPEC))
+    declarations = seeds.SURFACE.get('control', [])
+    assert declarations
+    for entry in declarations:
+        assert entry['route'] in operations, entry['route']
+        assert 400 <= entry['status'] < 500, entry
+        assert entry['detail'].strip() and entry['reason'].strip(), entry

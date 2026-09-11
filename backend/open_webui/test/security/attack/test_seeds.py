@@ -827,7 +827,7 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
     # A declaration outliving its field, or naming a key nothing seeds, would
     # send a plausible body the handler never reads -- the route reported driven
     # and never entered, which is the failure [[field]] exists to remove.
-    from openapi_surface import writable_string_fields
+    from openapi_surface import body_skeletons, writable_string_fields
 
     operations = {
         f'{method.upper()} {path}': operation
@@ -838,6 +838,7 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
     templates = {re.sub(r'\{[^}]+\}', '{}', route) for route in operations}
     seeded = {p['key'] for p in seeds.SURFACE['parameter'] if 'unseedable' not in p}
     writable = writable_string_fields(SPEC)
+    skeletons = body_skeletons(SPEC)
     assert len({entry['route'] for entry in seeds.SURFACE['field']}) == len(seeds.SURFACE['field'])
     for entry in seeds.SURFACE['field']:
         route = entry['route']
@@ -845,7 +846,13 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
         assert entry['description'].strip(), route
         assert entry.keys() & {'json', 'params', 'files', 'form'}, route
         for name in entry.get('json', {}):
-            assert name in writable.get(route, ()), f'{route}: {name} is not a field of its body'
+            # A string leaf, or a field the body skeleton builds or nests under (a required bool, a config).
+            skeleton = skeletons.get(route, {})
+            root = name.split('.', 1)[0].split('[', 1)[0]
+            known = name in writable.get(route, ()) or (
+                isinstance(skeleton, dict) and (name in skeleton or root in skeleton)
+            )
+            assert known, f'{route}: {name} is not a field of its body'
         query = {p['name'] for p in operations[route].get('parameters', []) if p.get('in') == 'query'}
         for name in entry.get('params', {}):
             assert name in query, f'{route}: {name} is not a query parameter'
