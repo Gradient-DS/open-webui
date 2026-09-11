@@ -20,6 +20,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from open_webui.routers import integrations as integrations_router
+from open_webui.soev.client import SoevApiError
+from open_webui.soev.knowledge_store import NotOnSoev
 from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
 
 
@@ -68,6 +70,11 @@ def app(loader_principal, monkeypatch):
     return app
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=SoevApiError,
+    reason='knowledge writes moved to soev-api; this path returns with the ingest plan',
+)
 def test_ingest_with_loader_bearer_attributes_files_to_acting_user(app, loader_principal, acting_user_id):
     fake_kb = MagicMock()
     fake_kb.id = 'kb-uuid-1'
@@ -138,6 +145,11 @@ def test_ingest_with_loader_bearer_attributes_files_to_acting_user(app, loader_p
         assert call['provider'] == 'onedrive'  # from LoaderPrincipal.provider_slug, not user.info
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=SoevApiError,
+    reason='knowledge writes moved to soev-api; this path returns with the ingest plan',
+)
 def test_ingest_routes_original_files_to_chunked_text_processor(app, loader_principal):
     """``original_files`` is matched to documents by ``source_id`` and the
     matched UploadFile is forwarded to ``_process_chunked_text_document``.
@@ -286,6 +298,11 @@ async def test_process_chunked_text_without_original_file_keeps_path_empty(actin
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=True,
+    raises=NotOnSoev,
+    reason='knowledge writes moved to soev-api; this path returns with the ingest plan',
+)
 async def test_create_or_update_file_record_updates_path_when_stub_row_gets_bytes(acting_user_id):
     """The stub File row created by ``services/sync/base_worker._create_stub_file_rows``
     has ``path=''``. When the loader-worker's /ingest callback arrives with
@@ -335,6 +352,11 @@ async def test_create_or_update_file_record_updates_path_when_stub_row_gets_byte
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=True,
+    raises=NotOnSoev,
+    reason='knowledge writes moved to soev-api; this path returns with the ingest plan',
+)
 async def test_create_or_update_file_record_does_not_overwrite_path_with_empty(acting_user_id):
     """A re-sync that drops the bytes (e.g. kill-switch flipped off) must not
     silently break previews on rows that already had a valid path.

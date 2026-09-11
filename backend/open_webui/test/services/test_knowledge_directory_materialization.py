@@ -5,6 +5,7 @@ cascade parity, and remove-source subtree cleanup.
 Fixtures mirror ``test_knowledge_file_path_columns.py`` (in-memory async
 SQLite + monkeypatched ``get_async_db_context`` in every module that opens
 sessions).
+These tests cover the SQL class that soev-api replaced for the product.
 """
 
 from __future__ import annotations
@@ -64,6 +65,7 @@ async def db_session(monkeypatch):
                 yield s
 
     monkeypatch.setattr(knowledge_module, 'get_async_db_context', _get_async_db_context)
+    monkeypatch.setitem(globals(), 'Knowledges', knowledge_module.KnowledgeTable())
     monkeypatch.setattr(files_module, 'get_async_db_context', _get_async_db_context)
     yield Session
     await engine.dispose()
@@ -545,6 +547,10 @@ class _FakeStorage:
 async def deletion_env(db_session, monkeypatch):
     """DeletionService with vector + storage + chat-reference seams faked."""
     from open_webui.services.deletion import service as deletion_service_module
+    from open_webui.services.sync import router as sync_router_module
+
+    monkeypatch.setattr(deletion_service_module, 'Knowledges', Knowledges)
+    monkeypatch.setattr(sync_router_module, 'Knowledges', Knowledges)
 
     vector = _FakeVectorClient()
     storage = _FakeStorage()

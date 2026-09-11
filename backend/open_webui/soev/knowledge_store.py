@@ -4,6 +4,8 @@ Configuration and model imports are deferred so either singleton import order is
 """
 
 import datetime as dt
+import hashlib
+import json
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
@@ -59,9 +61,12 @@ class SoevKnowledgeTable:
         ref = await self._as_user(user_id)
         return [row async for row in self._client.pages(path, as_user=ref, params=params)]
 
-    async def _send(self, method, path, body=None, *, user_id=None):
+    async def _send(self, method, path, body=None, *, user_id=None, idempotency_key=None):
+        if idempotency_key is None:
+            operation = json.dumps([method, path, body], sort_keys=True, separators=(',', ':'))
+            idempotency_key = hashlib.sha256(operation.encode()).hexdigest()
         return await self._client.send(
-            method, path, body, as_user=await self._as_user(user_id), idempotency_key=str(uuid4())
+            method, path, body, as_user=await self._as_user(user_id), idempotency_key=idempotency_key
         )
 
     @staticmethod
@@ -105,7 +110,9 @@ class SoevKnowledgeTable:
     async def insert_new_knowledge(self, user_id, form_data, db=None):
         body = self._projection.collection_create_body(form_data, service_principal=self._service_principal)
         body['key'] = str(uuid4())
-        return self._knowledge(await self._send('POST', '/v1/collections', body, user_id=user_id))
+        return self._knowledge(
+            await self._send('POST', '/v1/collections', body, user_id=user_id, idempotency_key='kb:' + body['key'])
+        )
 
     async def get_knowledge_by_id(self, id, db=None):
         return self._knowledge(await self._collection(id))
@@ -197,7 +204,7 @@ class SoevKnowledgeTable:
         return self._knowledge(result)
 
     async def delete_knowledge_by_id(self, id, db=None):
-        await self._send('DELETE', self._path(id))
+        await self._send('DELETE', self._path(id), idempotency_key='kb-delete:' + id)
         return True
 
     async def soft_delete_by_id(self, id, db=None):
@@ -206,7 +213,7 @@ class SoevKnowledgeTable:
     async def soft_delete_by_user_id(self, user_id, db=None):
         rows = await self.get_knowledge_items_by_user_id(user_id)
         for row in rows:
-            await self._send('DELETE', self._path(row.id), user_id=user_id)
+            await self._send('DELETE', self._path(row.id), user_id=user_id, idempotency_key='kb-delete:' + row.id)
         return len(rows)
 
     async def delete_all_knowledge(self, db=None):
@@ -272,7 +279,11 @@ class SoevKnowledgeTable:
         return {document['source_id'] for _, document in await self._references(set(file_ids))}
 
     async def remove_file_from_knowledge_by_id(self, knowledge_id, file_id, db=None):
-        await self._send('DELETE', self._path(knowledge_id) + '/documents/' + quote(file_id, safe=''))
+        await self._send(
+            'DELETE',
+            self._path(knowledge_id) + '/documents/' + quote(file_id, safe=''),
+            idempotency_key='doc-delete:' + knowledge_id + ':' + file_id,
+        )
         return True
 
     async def reset_knowledge_by_id(self, id, include_directories=True, db=None):
