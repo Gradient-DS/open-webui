@@ -241,6 +241,24 @@ services:
       EMAIL_GRAPH_TENANT_ID: ""
       EMAIL_GRAPH_CLIENT_ID: ""
       EMAIL_GRAPH_CLIENT_SECRET: ""
+      # A feature a tenant admin can switch on at runtime is production surface
+      # whatever the chart seeds (PersistentConfig), so it runs on here and the
+      # plane drives it rather than a waiver hiding it. CI-005.
+      ENABLE_2FA: "true"
+      # soev-test, gradient and staging require 2FA; driving that needs the plane
+      # to enrol TOTP for its identities. Off until it does. CI-005.
+      REQUIRE_2FA: "false"
+      ENABLE_FORGOT_PASSWORD: "true"
+      ENABLE_USER_WEBHOOKS: "true"
+      AUDIO_TTS_ENGINE: "openai"
+      AUDIO_STT_ENGINE: "openai" # Empty means local Whisper, which the slim image does not ship.
+      ENABLE_IMAGE_EDIT: "true"
+      # Same reset as the other image defaults: without these, edits go to OpenAI.
+      IMAGES_EDIT_OPENAI_API_BASE_URL: "http://stub:8000/v1"
+      IMAGES_EDIT_OPENAI_API_KEY: "ci-stub-key"
+      # ENABLE_SIGNUP is not set here: the first signup turns it off in-process
+      # (routers/auths.py), and the plane's bootstrap is that signup. The plane
+      # turns it back on after bootstrap instead.
       # Stable disposable-stack signing key, not a production credential.
       # Must NOT be exactly 44 characters. OAUTH_SESSION_TOKEN_ENCRYPTION_KEY
       # defaults to this value (env.py:782), and OAuthSessionTable treats a
