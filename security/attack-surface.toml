@@ -950,7 +950,8 @@ json = { "is_active" = true }
 
 [[field]]
 route = "POST /api/chat/actions/{action_id}"
-description = "utils/actions.py:chat_action reads the body's model and answered 400 \"'model'\" to the owner without one; the CI model and a message let the seeded Action run."
+description = "utils/actions.py:chat_action reads the body's model (400 \"'model'\" without one) and runs only an active action: setup switches on this pass's fresh function, once."
+setup = [{ via = "POST /api/v1/functions/id/{function}/toggle" }]
 json = { "model" = "{model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
 
 [[field]]
@@ -981,7 +982,7 @@ json = { "name" = "attack-{token}", "provider" = "qdrant", "endpoint" = "http://
 [[field]]
 route = "PATCH /api/v1/knowledge/external/source/{id}"
 description = "As the connection PATCH: the provider must be one the app supports, and the fixture is Qdrant on the stub."
-json = { "name" = "attack-{token}", "connection.name" = "attack-{token}", "connection.provider" = "qdrant", "connection.endpoint" = "http://stub:8000", "source.name" = "attack" }
+json = { "name" = "attack-{token}", "connection.name" = "attack-{token}", "connection.provider" = "qdrant", "connection.endpoint" = "http://stub:8000", "source.name" = "attack", "source.config.content_field" = "text" }
 
 [[field]]
 route = "POST /api/v1/functions/id/{id}/update"
@@ -1189,6 +1190,69 @@ reason = "utils/service_auth.py:get_sync_service_principal authenticates the dae
 route = "GET /api/v1/integrations/file-status/{file_id}"
 allow = ["same-object"]
 reason = "routers/integrations.py:get_file_status requires the loader-worker credential and returns a file's processing status by id, not checked against the acting user: the loader is a tenant-wide machine credential. Recorded in CROSSUSER-001 as a choice to confirm."
+
+# ---------------------------------------------------------------------------
+# Owner refusals that are a guard working
+#
+# The crossuser owner control proves isolation only where the owner's own request
+# succeeds. Where the owner is refused by a guard working, or for want of a system
+# the sealed stack lacks, [[control]] names the refusal (status and a fragment of
+# its detail) and why; a different answer is still a gap, and a declared route
+# that starts succeeding fails the test until its declaration goes.
+
+[[control]]
+route = "DELETE /api/v1/agent-configs/{slug}"
+status = 400
+detail = "still in AGENT_API_AGENTS"
+reason = "routers/agent_configs.py refuses to delete a configuration whose slug the environment still lists, and agent slugs are in-environment selectors by design (seed_agent_config)."
+
+[[control]]
+route = "POST /api/v1/agent-configs/{slug}"
+status = 409
+detail = "already exists"
+reason = "Creation refuses a slug that already has a configuration; the in-environment slug has one."
+
+[[control]]
+route = "DELETE /api/v1/knowledge/external/connections/{id}"
+status = 400
+detail = "still used by knowledge bases"
+reason = "A connection a knowledge base still uses cannot be deleted, and the external knowledge fixture uses this one."
+
+[[control]]
+route = "POST /api/v1/invites/{token}/accept"
+status = 410
+detail = "already been used"
+reason = "The invite token is single-use, and the second account's request, sent first, used it: the 410 proves it cannot be replayed."
+
+[[control]]
+route = "POST /ollama/models/download/{url_idx}"
+status = 400
+detail = "allowed hosts"
+reason = "The model download refuses a file URL outside the allowed hosts, and the stub is not one: a guard working."
+
+[[control]]
+route = "GET /api/v1/users/{user_id}/oauth/sessions"
+status = 400
+detail = "could not find"
+reason = "OAuth sessions come from an identity provider's code exchange, which the sealed stack has none of."
+
+[[control]]
+route = "POST /api/v1/confluence/sync/{knowledge_id}/cancel"
+status = 400
+detail = "No active sync"
+reason = "A Confluence sync needs Atlassian, which the sealed stack lacks; ENABLE_CONFLUENCE_INTEGRATION stays off for the egress test."
+
+[[control]]
+route = "POST /api/v1/confluence/sync/{knowledge_id}/sources/remove"
+status = 404
+detail = "Source not found"
+reason = "As Confluence cancel: no Atlassian, so no synced source to remove."
+
+[[control]]
+route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
+status = 400
+detail = "active production version"
+reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
 
 # ---------------------------------------------------------------------------
 # Service callers

@@ -846,8 +846,12 @@ def test_every_declared_field_names_a_real_route_field_and_a_seeded_key():
         assert entry['description'].strip(), route
         assert entry.keys() & {'json', 'params', 'files', 'form'}, route
         for name in entry.get('json', {}):
-            # A string leaf, or a field the body skeleton builds (a required bool, say).
-            known = name in writable.get(route, ()) or name in skeletons.get(route, {})
+            # A string leaf, or a field the body skeleton builds or nests under (a required bool, a config).
+            skeleton = skeletons.get(route, {})
+            root = name.split('.', 1)[0].split('[', 1)[0]
+            known = name in writable.get(route, ()) or (
+                isinstance(skeleton, dict) and (name in skeleton or root in skeleton)
+            )
             assert known, f'{route}: {name} is not a field of its body'
         query = {p['name'] for p in operations[route].get('parameters', []) if p.get('in') == 'query'}
         for name in entry.get('params', {}):
