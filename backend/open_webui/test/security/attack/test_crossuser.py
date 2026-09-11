@@ -262,7 +262,16 @@ def test_live_crossuser_refuses_other_users_and_admin_operations(live_crossuser)
 
 @needs_stack
 def test_live_crossuser_owner_controls_are_positive(live_crossuser):
-    gaps = {route: status for route, status in live_crossuser.controls.items() if not 200 <= status < 300}
+    expected = crossuser.expected_refusals()
+    bodies = live_crossuser.control_bodies
+    gaps = {
+        route: status
+        for route, status in live_crossuser.controls.items()
+        if not 200 <= status < 300
+        and not crossuser.refused_as_expected(expected.get(route), status, bodies.get(route, ''))
+    }
+    stale = sorted(route for route in expected if 200 <= live_crossuser.controls.get(route, 0) < 300)
+    assert not stale, f'Declared refusals now succeed; drop their [[control]] entries: {stale}'
     reasons = '\n'.join(
         f'  {route}: HTTP {status} {live_crossuser.control_bodies.get(route, "")}'
         for route, status in sorted(gaps.items())
@@ -419,3 +428,27 @@ def test_a_failed_owner_control_keeps_the_reason():
     )
     assert result.controls['POST /x/{id}'] == 403
     assert 'not a member' in result.control_bodies['POST /x/{id}']
+
+
+def test_a_marker_the_request_carried_is_not_a_disclosure():
+    # chat/actions refused with "Action not available: attack_function_<marker>": the
+    # id is in the path the second account sent, not something the owner disclosed.
+    assert crossuser._markers_outside('/api/chat/actions/attack_function_m1', ('m1', 'ns1')) == ('ns1',)
+
+
+def test_a_declared_refusal_matches_only_its_status_and_detail():
+    declaration = {'route': 'DELETE /x', 'status': 400, 'detail': 'in use', 'reason': 'guard'}
+    assert crossuser.refused_as_expected(declaration, 400, '{"detail": "still in use"}')
+    assert not crossuser.refused_as_expected(declaration, 403, '{"detail": "still in use"}')
+    assert not crossuser.refused_as_expected(declaration, 400, '{"detail": "other"}')
+    assert not crossuser.refused_as_expected(None, 400, 'in use')
+
+
+def test_every_declared_refusal_names_a_route_a_4xx_a_detail_and_a_reason():
+    operations = set(plane.operations(seeds.SPEC))
+    declarations = seeds.SURFACE.get('control', [])
+    assert declarations
+    for entry in declarations:
+        assert entry['route'] in operations, entry['route']
+        assert 400 <= entry['status'] < 500, entry
+        assert entry['detail'].strip() and entry['reason'].strip(), entry

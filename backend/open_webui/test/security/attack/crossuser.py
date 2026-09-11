@@ -105,6 +105,21 @@ def _as_service(declaration, base_url, *users):
                 client.close()
 
 
+def _markers_outside(target, markers):
+    """Markers the request itself did not carry: echoing a path the caller sent discloses nothing."""
+    return tuple(marker for marker in markers if marker not in target)
+
+
+def expected_refusals(surface=None):
+    """Route -> the [[control]] declaring an owner refusal that is a guard working, not a gap."""
+    surface = seeds.SURFACE if surface is None else surface
+    return {entry['route']: entry for entry in surface.get('control', [])}
+
+
+def refused_as_expected(declaration, status, body):
+    return bool(declaration) and status == declaration['status'] and declaration['detail'] in body
+
+
 def _nothing_happened(answer):
     # A handler that reports its own no-op -- `false` from a delete, `null` from an
     # update that matched no row the caller owns -- wrote nothing.
@@ -344,7 +359,7 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                             route,
                             stranger,
                             positive,
-                            markers,
+                            _markers_outside(target, markers),
                             admin_only=route in admins,
                             control=control,
                             resource_ids=resource_ids,
