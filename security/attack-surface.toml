@@ -766,10 +766,6 @@ id = "POST /api/v1/knowledge/{id}/file/remove"
 reason = "Removes the seeded file from the seeded KB, which file/update and file/move -- driven after it alphabetically -- need in place."
 
 [[destructive]]
-id = "POST /api/v1/functions/id/{id}/toggle"
-reason = "Flips the seeded function's active flag; chat actions and the function's user valves need it active, and valves sorts after toggle."
-
-[[destructive]]
 id = "POST /api/v1/auths/signout"
 reason = "Revokes the caller JWT jti when Redis is present. CI runs real Redis; the same bearer cannot drive subsequent routes."
 
@@ -965,12 +961,6 @@ json = { "model" = "{model}", "input" = "Attack probe {token}" }
 route = "POST /api/v1/channels/{id}/members/active"
 description = "routers/channels.py:update_is_active_member_by_id_and_user_id sets the caller's own membership active flag. The benign body's false deactivated the owner's membership, and every later message route answered 403 to the owner (the five channel owner-control gaps)."
 json = { "is_active" = true }
-
-[[field]]
-route = "POST /api/chat/actions/{action_id}"
-description = "utils/actions.py:chat_action reads the body's model (400 \"'model'\" without one) and runs only an active action: setup switches on this pass's fresh function, once."
-setup = [{ via = "POST /api/v1/functions/id/{function}/toggle" }]
-json = { "model" = "{model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
 
 [[field]]
 route = "POST /api/v1/automations/{id}/update"
