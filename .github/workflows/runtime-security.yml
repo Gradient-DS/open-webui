@@ -35,7 +35,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v4.0.2
         id: filter
         with:
           filters: |
@@ -59,12 +59,15 @@ jobs:
       needs.changes.outputs.relevant == 'true'
       || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch'
-    uses: Gradient-DS/.github/.github/workflows/runtime-security.yml@aff6862f8ad62be52a45b76b91239d4381247dcc # main, 2026-09-11 (#18 app-log capture)
+    uses: Gradient-DS/security-ci/.github/workflows/runtime-security.yml@8ba4fd31b6a55c0d9687900131ca0f45b3282d65 # v4
+    # The tooling repository is private, so the workflow needs the org App
+    # credentials to check itself out; without them it fails at that checkout.
+    secrets: inherit
     with:
       compose-file: 'docker-compose.ci.yaml'
       guarded-containers: 'open-webui-ci'
       health-url: 'http://127.0.0.1:8080/health'
-      tooling-ref: 'aff6862f8ad62be52a45b76b91239d4381247dcc'
+      tooling-ref: '8ba4fd31b6a55c0d9687900131ca0f45b3282d65' # v4
       # Paths are relative to the container's workdir, /app/backend, not to the
       # repository root: the image copies ./backend to /app/backend.
       # Test order is load-bearing. The plane writes the hits file that the
@@ -117,10 +120,19 @@ jobs:
     permissions:
       contents: read
     steps:
+      - id: tooling-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v4.2.0
+        with:
+          app-id: ${{ secrets.SECURITY_CI_APP_ID }}
+          private-key: ${{ secrets.SECURITY_CI_APP_PRIVATE_KEY }}
+          owner: Gradient-DS
+          repositories: security-ci
+
       - uses: actions/checkout@v6
         with:
-          repository: Gradient-DS/.github
-          ref: 84000662a5bd08ce56468ede3b38e1563039492b
+          repository: Gradient-DS/security-ci
+          ref: 8ba4fd31b6a55c0d9687900131ca0f45b3282d65 # v4
+          token: ${{ steps.tooling-token.outputs.token }}
           path: .security-tooling
       - uses: actions/setup-python@v6
         with:
