@@ -263,7 +263,11 @@ def test_live_crossuser_refuses_other_users_and_admin_operations(live_crossuser)
 @needs_stack
 def test_live_crossuser_owner_controls_are_positive(live_crossuser):
     gaps = {route: status for route, status in live_crossuser.controls.items() if not 200 <= status < 300}
-    assert not gaps, f'Owner positive controls did not succeed; isolation remains unproven: {gaps}'
+    reasons = '\n'.join(
+        f'  {route}: HTTP {status} {live_crossuser.control_bodies.get(route, "")}'
+        for route, status in sorted(gaps.items())
+    )
+    assert not gaps, f'Owner positive controls did not succeed; isolation remains unproven:\n{reasons}'
     assert live_crossuser.controls, 'No owner positive controls ran'
 
 
@@ -398,3 +402,20 @@ def test_every_service_declaration_covers_a_route_and_names_its_key():
     for entry in declarations:
         assert any(p == entry['prefix'] or p.startswith(entry['prefix'] + '/') for p in paths), entry['prefix']
         assert entry['token'] and entry['reason'].strip(), entry
+
+
+def test_a_failed_owner_control_keeps_the_reason():
+    # 59 owner controls failed with a bare status; the body says why, so a live
+    # run explains every gap at once instead of one replay per route.
+    result = crossuser.Authorization(tally=plane.Seeding())
+    crossuser._check(
+        result,
+        'POST /x/{id}',
+        _answer(403, '{"detail": "not a member"}'),
+        _answer(403, '{"detail": "not a member"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert result.controls['POST /x/{id}'] == 403
+    assert 'not a member' in result.control_bodies['POST /x/{id}']

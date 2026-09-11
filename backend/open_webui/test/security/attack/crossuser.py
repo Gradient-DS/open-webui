@@ -39,6 +39,7 @@ SHAREABLE = frozenset({'owner-marker', 'resource-id', 'same-object', 'write'})
 class Authorization:
     tally: plane.Seeding
     controls: dict = field(default_factory=dict)
+    control_bodies: dict = field(default_factory=dict)
     violations: list = field(default_factory=list)
     shared: dict = field(default_factory=dict)
 
@@ -275,6 +276,7 @@ def _check(result, route, stranger, owner, markers, *, admin_only, control, reso
     if owner is not None:
         if control:
             result.controls[route] = owner.status
+            result.control_bodies[route] = owner.body[:300]
         if _same_object(stranger, owner):
             reasons.append(('same-object', 'second account received the same nonempty object as the owner'))
         write = route.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
