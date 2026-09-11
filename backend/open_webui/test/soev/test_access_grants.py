@@ -115,6 +115,58 @@ async def test_batch_access_lists_once_and_intersects_requested_ids(env, permiss
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('permission,expected', [('read', {'kb', 'read-only'}), ('write', {'kb', 'write-only'})])
+@pytest.mark.parametrize('user_id', ['', None])
+async def test_group_scoped_access_matches_collection_principals(env, permission, expected, user_id):
+    """Group previews match explicit principals without inheriting the request user's audience."""
+    base = env.api.collections['kb']
+    for key, readers, writers in (
+        ('read-only', ['owui:group:readers'], []),
+        ('write-only', [], ['owui:group:writers']),
+        ('unrelated', ['owui:group:other'], ['owui:group:other']),
+        ('unrequested', ['owui:group:readers'], ['owui:group:writers']),
+        ('public', [], []),
+        ('deleted', ['owui:group:readers'], ['owui:group:writers']),
+    ):
+        env.api.collections[key] = {
+            **base,
+            'key': key,
+            'principals': [SERVICE, *readers],
+            'writers': writers,
+            'visibility': 'public' if key == 'public' else 'restricted',
+        }
+    await env.store.delete_knowledge_by_id('deleted')
+    env.api.requests.clear()
+    acting = importlib.import_module('open_webui.soev.acting')
+    token = acting._acting_ref.set('owui:user:outsider')
+    try:
+        result = await env.table.get_accessible_resource_ids(
+            user_id,
+            'knowledge',
+            ['kb', 'read-only', 'write-only', 'unrelated', 'public', 'deleted', 'missing'],
+            permission,
+            {'readers', 'writers'},
+        )
+        assert result == expected
+        assert await env.table.get_accessible_resource_ids(user_id, 'knowledge', ['kb'], permission, set()) == set()
+    finally:
+        acting._acting_ref.reset(token)
+    assert env.api.requests
+    assert all(request.method == 'GET' and 'X-Soev-Subject' not in request.headers for request in env.api.requests)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('permission,expected', [('read', {'kb'}), ('write', set())])
+async def test_a_user_query_still_uses_the_assertion(env, permission, expected):
+    """A supplied user takes precedence over local group IDs for both permissions."""
+    result = await env.table.get_accessible_resource_ids('reader', 'knowledge', ['kb'], permission, {'writers'})
+    assert result == expected
+    gets = [request for request in env.api.requests if request.method == 'GET']
+    assert gets
+    assert all(subject(request) == 'owui:user:reader' for request in gets)
+
+
+@pytest.mark.asyncio
 async def test_grant_reads_are_identity_free_projections(env):
     """Grant reads use the service credential and exclude the owner and service from the projection."""
     acting = importlib.import_module('open_webui.soev.acting')
