@@ -897,6 +897,31 @@ description = "The same handler as POST /api/embeddings: 404 for a model outside
 json = { "model" = "{model}" }
 
 [[field]]
+route = "POST /ollama/api/chat/{url_idx}"
+description = "routers/ollama.py:generate_chat_completion validates the body as GenerateChatCompletionForm (a model and role/content messages) and answers 400 otherwise, so no owner control succeeded. The stub's /api/tags lists the CI model."
+json = { "model" = "{model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
+
+[[field]]
+route = "POST /ollama/v1/chat/completions/{url_idx}"
+description = "The OpenAI-compatible Ollama proxy resolves the model and forwards the messages; the schema-derived body carries neither."
+json = { "model" = "{model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
+
+[[field]]
+route = "POST /ollama/v1/messages/{url_idx}"
+description = "The Anthropic-compatible Ollama proxy answers 400 without a model (PLANE-019); the stub's /api/tags lists the CI model."
+json = { "model" = "{model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
+
+[[field]]
+route = "POST /ollama/v1/completions/{url_idx}"
+description = "The completions proxy needs a model the Ollama connection lists and a prompt."
+json = { "model" = "{model}", "prompt" = "Attack probe {token}" }
+
+[[field]]
+route = "POST /ollama/v1/embeddings/{url_idx}"
+description = "The embeddings proxy needs a model the Ollama connection lists and an input."
+json = { "model" = "{model}", "input" = "Attack probe {token}" }
+
+[[field]]
 route = "POST /api/v1/files/"
 description = "Multipart: routers/files.py:upload_file takes an UploadFile, which the derivation does not model, so no pass sent a body (422 only). A small text file."
 files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
