@@ -1489,15 +1489,23 @@ class AdminConfig(BaseModel):
     ENABLE_WELCOME_MESSAGE: bool = False
 
 
+def _whole_number(value, name):
+    """An int|str limit from the admin form, or '' when unset; int() raised a 500 (PLANE-001)."""
+    if not value:
+        return ''
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f'{name} must be a whole number.')
+
+
 @router.post('/admin/config')
 async def update_admin_config(request: Request, form_data: AdminConfig, user=Depends(get_admin_user)):
     updates = config_updates(form_data.model_dump(), ADMIN_CONFIG_KEYS)
     updates['ui.default_interface_settings'] = form_data.DEFAULT_INTERFACE_SETTINGS or {}
-    updates['folders.max_file_count'] = int(form_data.FOLDER_MAX_FILE_COUNT) if form_data.FOLDER_MAX_FILE_COUNT else ''
-    updates['automations.max_count'] = int(form_data.AUTOMATION_MAX_COUNT) if form_data.AUTOMATION_MAX_COUNT else ''
-    updates['automations.min_interval'] = (
-        int(form_data.AUTOMATION_MIN_INTERVAL) if form_data.AUTOMATION_MIN_INTERVAL else ''
-    )
+    updates['folders.max_file_count'] = _whole_number(form_data.FOLDER_MAX_FILE_COUNT, 'FOLDER_MAX_FILE_COUNT')
+    updates['automations.max_count'] = _whole_number(form_data.AUTOMATION_MAX_COUNT, 'AUTOMATION_MAX_COUNT')
+    updates['automations.min_interval'] = _whole_number(form_data.AUTOMATION_MIN_INTERVAL, 'AUTOMATION_MIN_INTERVAL')
 
     if form_data.DEFAULT_USER_ROLE not in ['pending', 'user', 'admin']:
         updates.pop('ui.default_user_role', None)

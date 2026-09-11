@@ -568,16 +568,17 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             config.RAG_AZURE_OPENAI_API_KEY = form_data.azure_openai_config.key or ''
             config.RAG_AZURE_OPENAI_API_VERSION = form_data.azure_openai_config.version or ''
 
-        await Config.upsert({RAG_CONFIG_KEYS[k]: v for k, v in vars(config).items() if _original_config.get(k) != v})
-        request.app.state.ef = get_ef(
+        # Build before saving: an engine get_embedding_function refuses must not be
+        # persisted for every later request (PLANE-001).
+        ef = get_ef(
             config.RAG_EMBEDDING_ENGINE,
             config.RAG_EMBEDDING_MODEL,
         )
 
-        request.app.state.EMBEDDING_FUNCTION = get_embedding_function(
+        embedding_function = get_embedding_function(
             config.RAG_EMBEDDING_ENGINE,
             config.RAG_EMBEDDING_MODEL,
-            request.app.state.ef,
+            ef,
             (
                 config.RAG_OPENAI_API_BASE_URL
                 if config.RAG_EMBEDDING_ENGINE == 'openai'
@@ -604,6 +605,10 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             concurrent_requests=config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
         )
 
+        await Config.upsert({RAG_CONFIG_KEYS[k]: v for k, v in vars(config).items() if _original_config.get(k) != v})
+        request.app.state.ef = ef
+        request.app.state.EMBEDDING_FUNCTION = embedding_function
+
         return {
             'status': True,
             'RAG_EMBEDDING_ENGINE': config.RAG_EMBEDDING_ENGINE,
@@ -625,6 +630,9 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
                 'version': config.RAG_AZURE_OPENAI_API_VERSION,
             },
         }
+    except ValueError as e:
+        log.warning(f'Refused embedding configuration: {e}')
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT(e))
     except Exception as e:
         log.exception(f'Problem updating embedding model: {e}')
         raise HTTPException(
