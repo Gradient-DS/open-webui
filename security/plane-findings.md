@@ -1,6 +1,32 @@
-**Status: 12 open findings (PLANE-001–010, PLANE-012, PLANE-013), 1 fixed
-(PLANE-011); BLOCKER-001 resolved; CI-stack gaps: 1 open (CI-004), 3 fixed
-(CI-001–003); harness gaps: 1 open (COVERAGE-001).**
+**Status: 16 open findings (PLANE-001–010, PLANE-012–016, PLANE-018), 2 fixed
+(PLANE-011, PLANE-017); BLOCKER-001 resolved; CI-stack gaps: 1 open (CI-004), 1 fixed in
+part (CI-005), 3 fixed (CI-001–003); harness gaps: 1 open (COVERAGE-001).**
+
+**Update, route-coverage waivers, CI-005, field seeding and multipart: 57
+uncovered routes down to 0, with 21 waived; the coverage gate passes** (the
+table below is the state at 25, before `[[field]]` seeding and multipart
+landed; measured 2026-09-10 on a fresh stack, every pass completing with zero
+errors: seeding 244/252 · drive 394/662 · shapes 272/371 · query 48/54 ·
+crossuser 261/415). The last three: `prompts/.../history/diff` once PLANE-017
+was fixed, and `auths/signin` and `models/model/profile/image` through
+`[[field]]` setups (a disposable account; a model with a PNG data URL). A fresh
+stack could also abort every pass in identity setup (PLANE-018); the harness
+now waits that out. Every waiver in `security/route-coverage.toml` names an
+external system the sealed stack lacks, or a guard that works. "The feature is
+off" is not accepted: tenant charts only seed PersistentConfig, so a tenant
+admin can switch features on at runtime, and CI now runs them on (CI-005). That
+put 11 hidden routes in front of the plane, and three crashed at once
+(PLANE-014–016). What remains:
+
+| Cause | Count | Note |
+| --- | --- | --- |
+| a real id needed in a request field | 17 | new seeding mechanism; confirmed by reading for `images/edit` and the two retrieval 403s, the rest by status shape |
+| multipart upload | 5 | the driver only sends JSON |
+| integer query parameter never sent | 1 | `GET /api/v1/pipelines/`: without `urlIdx`, `base_urls[None]` raises and reads as 404 "Pipeline not found" |
+| judgement call | 2 | `POST /api/v1/auths/signin` (400 is the INVALID_CRED refusal), `GET /api/v1/models/model/profile/image` (302) |
+
+`POST /api/v1/configs/import`, named below as a judgement call, is driven and
+not among the uncovered.
 
 **The coverage gate is red at 57 routes, down from 96, and the 50 that were the
 harness rather than the application are down to 5.** The gate merged
@@ -810,9 +836,136 @@ macOS `sort` and the container's `sort` collate `_` and `.` differently, so
 compare under `LC_ALL=C` or the manifests differ by ordering alone and the
 check cries wolf.
 
+**The manifest does not cover the test packages, and a recreate reverts those
+too.** The image's `openapi_surface` predates `body_skeletons`
+(`Gradient-DS/.github#17`). A recreated container passed the application
+manifest and then failed collection in 0.35 seconds: six modules, `cannot import
+name 'body_skeletons' from 'openapi_surface'`. After a recreate, copy
+`packages/openapi-surface/openapi_surface` from `Gradient-DS/.github` at the
+pinned commit into `/usr/local/lib/python3.11/site-packages/`, and compare both
+`openapi_surface` and `hostile_corpus` by the same sha256 manifest before
+measuring.
+
 Rebuilding the image is the durable fix. It is deferred rather than dismissed:
 this document already records two overnight builds OOM-killed here, so the
 build wants the stack stopped and a session that can afford it.
+
+## CI-005: the CI stack ran with production features switched off
+
+Status: **fixed in part**: `REQUIRE_2FA` stays off, see below.
+
+The first waiver batch drafted from the 57 would have waived eight routes as
+"feature off". Checked against `soev-gitops` `origin/main` (61ce7d8): 2FA is on
+in soev-max, soev-test, gradient and staging; forgot-password defaults on in
+the chart and only kwink pins it off; self-signup is on in five tenants
+(soev-max, haagsebeek, haute-equipe, mkbot, octobox). And the chart only seeds
+PersistentConfig (`enablePersistentConfig: "true"`; `tenants/CLAUDE.md`: "the
+DB values win"), so a tenant admin can switch user webhooks, TTS and image edit
+on at runtime whatever the chart says. A feature flag is therefore never a
+waiver reason, and `route-coverage.toml` says so in its header.
+
+`docker-compose.ci.yaml` now turns on `ENABLE_2FA`, `ENABLE_FORGOT_PASSWORD`,
+`ENABLE_USER_WEBHOOKS`, `AUDIO_TTS_ENGINE=openai`, `AUDIO_STT_ENGINE=openai` (empty
+means local Whisper, which the slim image does not ship) and `ENABLE_IMAGE_EDIT`, with
+the image-edit OpenAI base URL on the stub, which now answers
+`/v1/images/edits`. Signup cannot be set from the environment: the first signup
+upserts `ui.enable_signup: false` (`routers/auths.py:signup`), which with
+`ENABLE_PERSISTENT_CONFIG=false` lands in the process's in-memory defaults, and
+identity bootstrap *is* that first signup. Observed live: `ENABLE_SIGNUP` false
+after bootstrap, with no environment override. `[stack_configuration]` in
+`attack-surface.toml` turns it back on after configuration recovery and before
+any pass snapshot, so every restore keeps it.
+
+Measured on a fresh stack: 11 routes that were hidden now enter a handler —
+signup, the five 2FA routes, `password/reset`, `notifications/events`, both
+`notifications/targets` routes and `audio/speech`. Reach: seeding 225→231,
+drive 373→378, shapes 266→273, every restore verified.
+
+Not done. `REQUIRE_2FA` stays false although soev-test, gradient and staging
+require 2FA: driving that means the plane enrolling TOTP for its own identities
+(`pyotp` is already a dependency). `ENABLE_CONFLUENCE_INTEGRATION` stays false
+although staging runs it: `test_runtime_egress.py` audits every Confluence sink
+on the premise that the integration is off, and no uncovered route reads
+`confluence.enable`, so turning it on buys an egress re-audit and no coverage.
+
+## PLANE-014: TOTP enable raises on a secret that is not base32
+
+Status: **open (application).** `POST /api/v1/auths/2fa/totp/enable` takes the
+secret from the request body (`routers/totp.py:enable_totp`) and hands it to
+`verify_totp` unchecked. A value that is not base32 raises in pyotp
+(`otp.py:byte_secret`, `binascii.Error: Non-base32 digit found`) and answers
+500; observed in the seeding and shapes passes. It runs after the password
+re-check, so only the account holder reaches it: an availability bug, not an
+authentication one. A 400 for a secret that is not base32 closes it.
+
+## PLANE-015: text-to-speech assumes the request body is a JSON object
+
+Status: **open (application).** `POST /api/v1/audio/speech` parses the body
+with `JSONCodec.loads` and passes whatever it gets to the engine handler, and
+`routers/audio.py:_tts_openai` starts with `payload['model'] = ...`. A list,
+string, number, boolean or null body raises `TypeError` and answers 500: seven
+in one shapes pass, one per JSON type. Reached only because CI-005 turned TTS
+on. A 400 for a body that is not an object closes it.
+
+## PLANE-016: one stored legacy webhook URL breaks the notifications page
+
+Status: **open (application).** `GET /api/v1/notifications/targets` answered
+500. `utils/notifications.py:_load_notifications` migrates a legacy
+`webhook_url` (`settings.notifications.webhook_url` or
+`settings.ui.notifications.webhook_url`) through `_normalize_target`, whose
+`validate_url` raises `ValueError` for any URL it refuses, and `list_targets`
+does not catch it. `routers/users.py:update_user_settings_by_session_user`
+stores that field unvalidated for any user holding `features.webhooks`, and for
+every admin.
+
+The SSRF guard itself holds: delivery re-validates in
+`utils/webhook.py:post_webhook`, so a refused URL is never posted to. What
+breaks is the user's own notifications page, until the setting is cleared.
+Same shape as PLANE-003: stored input breaking a later read.
+
+## PLANE-017: the prompt version diff is unreachable behind `history/{history_id}`
+
+Status: **fixed (application; upstream still has it).** `GET
+/api/v1/prompts/id/{prompt_id}/history/diff` answered 404 in every pass, with
+declared `from_id`/`to_id` naming a real history row of the prompt.
+`routers/prompts.py` registers `GET /id/{prompt_id}/history/{history_id}`
+before `/history/diff`, so the router matches `diff` as a `history_id` and the
+history-entry handler answers 404 NOT_FOUND. Verified live: with no query
+parameters at all the route still answers 404, where the diff handler would
+answer 422. Upstream `main` and `dev` register the two in the same order.
+
+The frontend calls it (`src/lib/apis/prompts/index.ts`), so comparing prompt
+versions never loads. Not a security defect; recorded because it is why the
+route stayed uncovered, and no waiver applies. Fixed by registering
+`/history/diff` before `/history/{history_id}`;
+`test/security/test_route_shadowing.py` now fails for any route an earlier one
+answers (this was the only one of 653).
+
+## PLANE-018: the primary admin is whichever account shares the first second
+
+Status: **open (application, upstream).** `models/users.py:get_first_user`
+orders by `created_at` alone, and `created_at` is whole seconds. Signup grants
+admin by counting users after the insert (`routers/auths.py`), so the role is
+right, but every later "primary admin" check reads `get_first_user`: the
+update guard and the delete guard in `routers/users.py`, and the admin contact
+details in `routers/auths.py` when `auth.admin.email` is unset. PostgreSQL does
+not order ties, so when a second account is created in the first admin's
+second, either may come back.
+
+Observed live on a fresh CI stack, 2026-09-10: `attack-user` (role `user`) and
+`attack-admin` both created at 16:52:04. The admin's update of `attack-user`
+answered 403 ACTION_PROHIBITED and every pass aborted in setup (22 errors).
+Upstream `dev` is identical.
+
+In a tenant: an ordinary account created in the bootstrap second becomes
+something no admin can modify or delete, the real primary admin loses its
+protection against another admin demoting or deleting it, and the contact page
+names the wrong person. It needs a second account in the tenant's first second
+(scripted onboarding, trusted-header or OAuth sign-ins arriving together), so
+the likelihood is low. The fix is a tie-break on something monotonic, or
+recording the primary admin explicitly. The harness waits out the bootstrap
+signup's second before it creates any other identity
+(`identities.py:_bootstrap`).
 
 ## BLOCKER-001: live runs cannot set up identities on v0.11.3
 
