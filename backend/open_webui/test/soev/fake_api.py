@@ -54,6 +54,14 @@ class FakeSoevApi:
         operation = request.headers.get('Idempotency-Key', '')
         if not 8 <= len(operation) <= 255:
             raise Problem(400, 'invalid_idempotency_key')
+        parts = request.url.path.strip('/').split('/')
+        if (request.method == 'POST' and parts == ['v1', 'identity', 'links']) or (
+            request.method == 'PUT'
+            and len(parts) == 5
+            and parts[:3] == ['v1', 'directory', 'groups']
+            and parts[-1] == 'members'
+        ):
+            return self._route(request, body, credential, subject)
         key = (credential, operation)
         fingerprint = (request.method, str(request.url), body, subject)
         if key in self.replays:
