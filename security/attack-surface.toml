@@ -922,6 +922,11 @@ description = "The embeddings proxy needs a model the Ollama connection lists an
 json = { "model" = "{model}", "input" = "Attack probe {token}" }
 
 [[field]]
+route = "POST /api/v1/channels/{id}/members/active"
+description = "routers/channels.py:update_is_active_member_by_id_and_user_id sets the caller's own membership active flag. The benign body's false deactivated the owner's membership, and every later message route answered 403 to the owner (the five channel owner-control gaps)."
+json = { "is_active" = true }
+
+[[field]]
 route = "POST /api/v1/files/"
 description = "Multipart: routers/files.py:upload_file takes an UploadFile, which the derivation does not model, so no pass sent a body (422 only). A small text file."
 files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
@@ -1056,6 +1061,21 @@ route = "POST /ollama/v1/messages/{url_idx}"
 allow = ["same-object", "write"]
 reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
 
+[[shared]]
+route = "POST /openai/{path}"
+allow = ["same-object", "write"]
+reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configured upstream for any verified user (CI turns it on; no tenant does yet). The answer is the upstream's, and the call changes nothing an owner holds."
+
+[[shared]]
+route = "PUT /openai/{path}"
+allow = ["same-object", "write"]
+reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configured upstream for any verified user (CI turns it on; no tenant does yet). The answer is the upstream's, and the call changes nothing an owner holds."
+
+[[shared]]
+route = "DELETE /openai/{path}"
+allow = ["same-object", "write"]
+reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configured upstream for any verified user (CI turns it on; no tenant does yet). The answer is the upstream's, and the call changes nothing an owner holds."
+
 # ---------------------------------------------------------------------------
 # Service callers
 #
@@ -1074,4 +1094,10 @@ prefix = "/api/v1/sync-daemon"
 token = "ci-stub-key"
 headers = { "X-Acting-Provider" = "google_drive" }
 reason = "utils/service_auth.py:get_sync_principal: the SYNC_API_KEY bearer, acting for X-Acting-User-Id through X-Acting-Provider. A user's own bearer is refused outright (401)."
+
+[[service]]
+prefix = "/api/v1/integrations/file-status"
+token = "ci-stub-key"
+headers = { "X-Acting-Provider" = "google_drive" }
+reason = "utils/service_auth.py:get_integration_principal: the loader-worker's LOADER_INGEST_API_KEY bearer, acting for X-Acting-User-Id through X-Acting-Provider (routers/integrations.py:_require_loader). A user's own bearer is refused (403)."
 

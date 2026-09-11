@@ -172,6 +172,13 @@ services:
       # The daemon's own calls into open-webui (routers/sync_daemon.py) authenticate
       # with SYNC_API_KEY (utils/service_auth.py:_sync_key_matches), a different key.
       SYNC_API_KEY: "ci-stub-key"
+      # The per-tenant sync switch (chart syncDaemon.owuiFlagEnabled; staging runs it).
+      SYNC_DAEMON_ENABLED: "true"
+      # The loader-worker's bearer for the integrations cloud-sync routes.
+      LOADER_INGEST_API_KEY: "ci-stub-key"
+      # No tenant sets it yet, but it forwards arbitrary requests upstream: the
+      # plane drives it rather than leave it unmeasured.
+      ENABLE_OPENAI_API_PASSTHROUGH: "true"
       PIPELINE_API_BASE_URL: "http://stub:8000"
       PIPELINE_API_KEY: "ci-stub-key"
       # config.py resets scalar OPENAI_API_BASE_URL after forming the URL list;
