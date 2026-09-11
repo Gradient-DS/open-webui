@@ -1,6 +1,19 @@
-**Status: 16 open findings (PLANE-001–010, PLANE-012–016, PLANE-018), 2 fixed
-(PLANE-011, PLANE-017); BLOCKER-001 resolved; CI-stack gaps: 1 open (CI-004), 1 fixed in
-part (CI-005), 3 fixed (CI-001–003); harness gaps: 1 open (COVERAGE-001).**
+**Status: 6 open findings (PLANE-001 in part, PLANE-002, PLANE-010, PLANE-012,
+PLANE-013, PLANE-018); 13 fixed (PLANE-003–009, PLANE-011, PLANE-014–017,
+PLANE-019), PLANE-007 as a CI-stack gap; BLOCKER-001 resolved; CI-stack gaps:
+1 open (CI-004), 1 fixed in part (CI-005), 4 fixed (CI-001–003, CI-006); harness
+gaps: 1 open (COVERAGE-001); CROSSUSER-001 addressed.**
+
+**Update, 5xx triage (2026-09-11): no route answers 5xx, and the crossuser pass
+reports no violation.** Measured on a fresh CI stack, every pass completing with
+zero errors: seeding 240/252 · drive 396/662 · shapes 264/371 · query 48/54 ·
+crossuser 264/415 · model_path 9/9, configuration restore verified in every
+pass. The live suite went from 8 failed / 420 passed to **1 failed / 436
+passed**; coverage stays at 0 uncovered with 21 waived. The 37 routes that
+answered 5xx were application defects (PLANE-001 in part, 003–006, 008, 009,
+014–016, 019) and stack gaps (PLANE-007, CI-006). The one red test is the owner
+positive control: on 59 routes the owner's own request still fails, so
+isolation there is unproven. That is the next leg.
 
 **Update, route-coverage waivers, CI-005, field seeding and multipart: 57
 uncovered routes down to 0, with 21 waived; the coverage gate passes** (the
@@ -123,7 +136,7 @@ RUN-TAG: owui-phase7b-fix-live-defects
 
 ## PLANE-001: Unvalidated configuration writes poison typed downstream consumers
 
-Status: **open, to be fixed on dev**. Reported by the live reviewer on
+Status: **fixed in part (application), 2026-09-11.** The two writes the plane measured crashing now refuse bad values before anything is saved: `retrieval/embedding/update` builds the embedding function first and answers 400 for an engine it cannot build, and `auths/admin/config` answers 400 for a limit that is not a whole number. The wider claim below, other keys a later consumer misreads, stays open until a run shows one. Originally: open, to be fixed on dev. Reported by the live reviewer on
 2026-09-08; this branch changes only the attack plane, not the application.
 
 Configuration accepts corpus strings that later consumers interpret as integers,
@@ -248,7 +261,7 @@ the config snapshot afterwards. No endpoint status behavior was fixed here.
 
 ## PLANE-003: Stored note content breaks subsequent note listings and search
 
-Status: **open, to be fixed on dev**. The live reviewer reported
+Status: **fixed (application), 2026-09-11.** `_truncate_note_data` reads only a dict `content` and a string `md`; any other stored shape lists as an empty preview. Originally: open, to be fixed on dev. The live reviewer reported
 `GET /api/v1/notes/` among the failures on both earlier 2026-09-08 passes,
 and `GET /api/v1/notes/search` on the latest run. Both consume stored data
 through `_truncate_note_data` and belong to this same finding.
@@ -300,7 +313,7 @@ after reproduction via `DELETE /api/v1/notes/{id}/delete` using the same bearer.
 
 ## PLANE-004: Both embeddings aliases raise an unhandled exception for unknown models
 
-Status: **open, to be fixed on dev**. Both `POST /api/embeddings` and
+Status: **fixed (application), 2026-09-11.** `generate_embeddings` answers 404 MODEL_NOT_FOUND for a model outside the registry, and `[[field]]` seeds the CI model so both aliases stay covered. Seeding the model exposed the next layer: a body naming an Ollama model but no input reached `GenerateEmbedForm`, whose ValidationError was uncaught; it now answers 400. Originally: open, to be fixed on dev. Both `POST /api/embeddings` and
 `POST /api/v1/embeddings` returned 5xx in the reviewer's repeated passes.
 They are one finding because they register the same handler and dispatcher.
 
@@ -336,7 +349,7 @@ for these two requests. These HTTP reproductions were not run in this sandbox.
 
 ## PLANE-005: Data-warning acceptance commits an audit row then fails ORM validation
 
-Status: **open, to be fixed on dev**. The reviewer observed
+Status: **fixed (application), 2026-09-11.** All three `DataWarningLogModel.model_validate` calls pass `from_attributes=True`. Originally: open, to be fixed on dev. The reviewer observed
 `POST /api/v1/data-warnings/accept` returning 5xx on both passes.
 
 `routers/data_warnings.py:18,29` calls `DataWarningLogs.insert_log` when
@@ -372,7 +385,7 @@ run here. This is independent of hostile corpus content.
 
 ## PLANE-006: Image size parsing raises before upstream generation
 
-Status: **open application bug, to be fixed on dev**. The latest reviewer run
+Status: **fixed (application), 2026-09-11.** Both size parses answer 400 for a size that is not WIDTHxHEIGHT. Originally: open application bug, to be fixed on dev. The latest reviewer run
 reported `POST /api/v1/images/generations` returning **500** with the literal
 body **`Internal Server Error`**. The recovered frames are
 `routers/images.py:576` in `generate_images`, awaiting `image_generations`, and
@@ -415,7 +428,7 @@ line to pin the original sampled input. This HTTP reproduction was not run here.
 
 ## PLANE-007: Discovery document catalog returns an unexplained HTTP 500
 
-Status: **open, cause unresolved**. This is a known failing application route,
+Status: **resolved 2026-09-11: a CI-stack gap, not an application defect.** The route answers 503 until `rag.enable_filter_ui` is on. That is a PersistentConfig a tenant admin flips in the admin UI (mkbot runs it), so CI now turns it on in `[stack_configuration]` and the stub answers the agents-api catalog (CI-006). Originally: open, cause unresolved. This is a known failing application route,
 not yet a demonstrated application defect or CI-stack gap. The latest reviewer
 run reported `GET /api/v1/discovery/documents` returning **500**. Only
 `Exception in ASGI application` was recoverable from the logs; no handler frame,
@@ -470,7 +483,7 @@ state explain it; a passing probe alone does not close it.
 
 ## PLANE-008: Chat list sorting inputs raise uncaught exceptions
 
-Status: **open, to be fixed on dev**. The reviewer reports 5xx for
+Status: **fixed (application), 2026-09-11.** `models/ordering.py:request_order` orders only by a real, non-JSON column and an asc/desc direction; anything else keeps the default order. The archived, shared and user lists all use it. Originally: open, to be fixed on dev. The reviewer reports 5xx for
 `GET /api/v1/chats/archived`, `GET /api/v1/chats/shared`, and
 `GET /api/v1/chats/list/user/{user_id}` after enabling the query pass.
 Exact per-route statuses, query values, response bodies and tracebacks were not
@@ -517,7 +530,7 @@ claiming a pass. A control that cannot succeed cannot demonstrate isolation.
 
 ## PLANE-009: Task completion templates consume incompletely validated messages
 
-Status: **open, to be fixed on dev**. The reviewer reports 5xx on
+Status: **fixed (application), 2026-09-11.** Every task handler reads the model with `.get`, so a body without one gets the handler's own 400 or 404 (the live cause was `KeyError: 'model'`, 75 per task, also on emoji, moa and queries). The `KeyError: 'type'` path described below was already guarded: `get_content_from_message` uses `.get`. Originally: open, to be fixed on dev. The reviewer reports 5xx on
 `POST /api/v1/tasks/follow_up/completions` (**HTTP {500: 16}**),
 `POST /api/v1/tasks/title/completions`,
 `POST /api/v1/tasks/tags/completions`, and
@@ -890,7 +903,7 @@ on the premise that the integration is off, and no uncovered route reads
 
 ## PLANE-014: TOTP enable raises on a secret that is not base32
 
-Status: **open (application).** `POST /api/v1/auths/2fa/totp/enable` takes the
+Status: **fixed (application), 2026-09-11.** `verify_totp` answers not-valid for a secret that is not base32, so enable answers 400 'Invalid TOTP code'. Originally: open (application). `POST /api/v1/auths/2fa/totp/enable` takes the
 secret from the request body (`routers/totp.py:enable_totp`) and hands it to
 `verify_totp` unchecked. A value that is not base32 raises in pyotp
 (`otp.py:byte_secret`, `binascii.Error: Non-base32 digit found`) and answers
@@ -900,7 +913,7 @@ authentication one. A 400 for a secret that is not base32 closes it.
 
 ## PLANE-015: text-to-speech assumes the request body is a JSON object
 
-Status: **open (application).** `POST /api/v1/audio/speech` parses the body
+Status: **fixed (application), 2026-09-11.** speech answers 400 for a body that is not a JSON object. Originally: open (application). `POST /api/v1/audio/speech` parses the body
 with `JSONCodec.loads` and passes whatever it gets to the engine handler, and
 `routers/audio.py:_tts_openai` starts with `payload['model'] = ...`. A list,
 string, number, boolean or null body raises `TypeError` and answers 500: seven
@@ -909,7 +922,7 @@ on. A 400 for a body that is not an object closes it.
 
 ## PLANE-016: one stored legacy webhook URL breaks the notifications page
 
-Status: **open (application).** `GET /api/v1/notifications/targets` answered
+Status: **fixed (application), 2026-09-11.** A legacy URL the SSRF guard refuses is skipped rather than migrated, and the page loads; delivery still re-validates. Originally: open (application). `GET /api/v1/notifications/targets` answered
 500. `utils/notifications.py:_load_notifications` migrates a legacy
 `webhook_url` (`settings.notifications.webhook_url` or
 `settings.ui.notifications.webhook_url`) through `_normalize_target`, whose
@@ -966,6 +979,72 @@ the likelihood is low. The fix is a tie-break on something monotonic, or
 recording the primary admin explicitly. The harness waits out the bootstrap
 signup's second before it creates any other identity
 (`identities.py:_bootstrap`).
+
+## PLANE-019: sixteen more 5xx the field-seeding run reached, fixed together
+
+Status: **fixed (application), 2026-09-11.** The field-seeding measurement left
+16 routes answering 5xx that no entry named. Each fix has a regression test in
+`test/security/test_plane_findings.py` that failed first.
+
+- `POST /api/v1/invites/{token}/accept`: `get_password_hash` is async and was
+  not awaited, so the account insert bound a coroutine. **Every invite
+  acceptance failed.**
+- `GET /api/v1/evaluations/feedback/conversation/{chat_id}`: called
+  `Feedbacks.get_conversation_feedback_by_chat_id_and_user_id`, which the
+  v0.11.3 merge had dropped, and without `await`. Restored from `cec138835`.
+- `POST /openai/audio/speech`: raised `HTTPException(detail=ERROR_MESSAGES.OPENAI_NOT_FOUND)`,
+  the lambda itself, which the exception handler cannot serialise.
+  `test_no_error_message_factory_is_used_uncalled` scans for the class; this was
+  the only instance.
+- `GET /api/v1/users/usage`: a stored timezone that is not a zone key (a URL)
+  raised `ValueError` in `ZoneInfo`; only `ZoneInfoNotFoundError` was caught.
+  Stored input breaking a read, the PLANE-003 shape.
+- `POST /api/v1/tasks/{emoji,moa,queries}/completions`: PLANE-009. With
+  autocompletion on (CI-006), `tasks/auto/completions` also measured a missing
+  prompt with `len(None)`.
+- `POST /ollama/v1/messages` and `/{url_idx}`: resolved the model with `.get`,
+  then indexed `payload['model']`.
+- `POST /api/v1/{functions,tools}/load/url`, `POST /ollama/verify`,
+  `POST /openai/verify`: an admin-supplied URL that cannot be fetched answered
+  500. It is a bad URL, not a server fault: now 400.
+- `POST /api/v1/configs/email/test`: unconfigured Graph credentials answered
+  500; now 400.
+- `POST /api/v1/knowledge/external/connections/{id}/retrieve-test`: a store the
+  connection cannot use raised inside the Qdrant client; the connection test
+  now answers 400 with the error.
+
+## CI-006: three stack gaps that read as application 5xx
+
+Status: **fixed 2026-09-11.**
+
+- `HEAD /api/v1/terminals/{server_id}/{path}` answered 502: the stub's HEAD
+  reused GET and wrote a body, which aiohttp refuses (`BadHttpMessage`), and the
+  proxy reported it. CI-001 added the missing methods but not this.
+- `POST /api/v1/{google-drive,onedrive}/sync/items` answered 502: CI set
+  `SYNC_DAEMON_URL` without `SYNC_DAEMON_API_KEY`, so the client sent `Bearer `
+  and httpx refused the header. The stub also answered `/sync/run` with the
+  catch-all 200, where the client accepts only 202 or 409.
+- `rag.enable_filter_ui` (PLANE-007) and `task.autocomplete.enable` are
+  PersistentConfig a tenant admin can turn on; CI-005's rule puts both in
+  `[stack_configuration]`.
+
+## CROSSUSER-001: sharing by design needed a declaration, not silence
+
+Status: **addressed 2026-09-11; one product question open.** The crossuser pass
+reported every second-account answer that matched the owner's, including routes
+that serve every verified user on purpose. `[[shared]]` in the attack surface
+now names the route, the violation kinds it allows and why; an unrefused
+administrator operation can never be declared. A 2xx whose body is exactly
+`false` or `null` (a delete or update that matched nothing the caller owns) is
+no longer an accepted write. The owner control now carries the ids `[[field]]`
+declares, so routes like `prompts/.../history/diff` can prove isolation at all.
+Declarations are read from the unfilled surface: the pass fills `{token}` in
+its own copy, which rewrote `invites/{token}/*` and the webhook route.
+
+Open question for Lex: `GET /api/v1/users/{user_id}/info` serves a user's
+email, role and groups to any verified user. That is upstream behaviour and a
+tenant is one organisation's instance, so it is declared as sharing; restricting
+it is a product decision.
 
 ## BLOCKER-001: live runs cannot set up identities on v0.11.3
 
