@@ -199,6 +199,45 @@ def test_identity_groups_and_credential_scoped_jobs(api):
     assert send(client, 'GET', '/v1/collections/kb', user='owui:user:bob').status_code == 404
 
 
+def test_identity_link_and_group_routes_replay_freely(api):
+    """Links and group replacements require valid keys without caching bodies or bypassing assertion checks."""
+    fake, client = api
+    link_path = '/v1/identity/links'
+    group_path = '/v1/directory/groups/owui%3Agroup%3Astaff/members'
+    operation = 'directory:repeated'
+    for _ in range(2):
+        response = send(
+            client,
+            'POST',
+            link_path,
+            {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
+            operation=operation,
+        )
+        assert response.status_code == 204
+    assert fake.links == {'owui:user:alice': 'person'}
+    for members in (['owui:user:alice'], [], ['owui:user:alice']):
+        response = send(client, 'PUT', group_path, {'members': members}, operation=operation)
+        assert response.status_code == 204
+        assert fake.groups['owui:group:staff'] == members
+    assert not fake.replays
+    body = {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')}
+    assert send(client, 'POST', link_path, body, operation=operation).status_code == 204
+    replayed_assertion = send(client, 'POST', link_path, body, operation=operation)
+    assert replayed_assertion.status_code == 401
+    assert replayed_assertion.json()['code'] == 'assertion_replayed'
+    for method, path, body in (
+        ('POST', link_path, {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')}),
+        ('PUT', group_path, {'members': []}),
+    ):
+        for invalid in (None, 'short', 'x' * 256):
+            headers = {'Authorization': 'Bearer test-runtime-key'}
+            if invalid is not None:
+                headers['Idempotency-Key'] = invalid
+            response = client.request(method, path, json=body, headers=headers)
+            assert response.status_code == 400
+            assert response.json()['code'] == 'invalid_idempotency_key'
+
+
 def test_pages_and_document_acl_follow_the_wire_contract(api):
     """Pages cap at 200 and independently unreadable documents never enter a readable collection's listing."""
     fake, client = api
