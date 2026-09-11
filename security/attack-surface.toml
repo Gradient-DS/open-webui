@@ -927,6 +927,73 @@ description = "routers/channels.py:update_is_active_member_by_id_and_user_id set
 json = { "is_active" = true }
 
 [[field]]
+route = "POST /api/chat/actions/{action_id}"
+description = "utils/actions.py:chat_action reads the body's model and answered 400 \"'model'\" to the owner without one; the CI model and a message let the seeded Action run."
+json = { "model" = "{model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
+
+[[field]]
+route = "POST /api/v1/automations/{id}/update"
+description = "The benign body's placeholder RRULE failed to parse (400); the automation fixture's own name, prompt, model and RRULE update it in place."
+json = { "name" = "attack-{token}", "data.prompt" = "Attack automation", "data.model_id" = "{model}", "data.rrule" = "FREQ=DAILY;INTERVAL=30" }
+
+[[field]]
+route = "POST /api/v1/calendars/events/{event_id}/rsvp"
+description = "routers/calendar.py:rsvp_event accepts accepted, declined, tentative or pending and answered 400 'Invalid status' to the placeholder."
+json = { "status" = "accepted" }
+
+[[field]]
+route = "POST /api/v1/memories/{memory_id}/update"
+description = "routers/memories.py answers 400 'No memory update provided' to a body with no content."
+json = { "content" = "Attack memory update {token}" }
+
+[[field]]
+route = "POST /api/v1/prompts/id/{prompt_id}/update/version"
+description = "update_prompt_version refuses a version_id that is not a history row of this prompt; the seeded one is."
+json = { "version_id" = "{prompt_history}" }
+
+[[field]]
+route = "PATCH /api/v1/knowledge/external/connections/{id}"
+description = "The benign provider placeholder answered 400 'Unsupported external knowledge provider'; the fixture is a Qdrant connection on the stub."
+json = { "name" = "attack-{token}", "provider" = "qdrant", "endpoint" = "http://stub:8000" }
+
+[[field]]
+route = "PATCH /api/v1/knowledge/external/source/{id}"
+description = "As the connection PATCH: the provider must be one the app supports, and the fixture is Qdrant on the stub."
+json = { "name" = "attack-{token}", "connection.name" = "attack-{token}", "connection.provider" = "qdrant", "connection.endpoint" = "http://stub:8000", "source.name" = "attack" }
+
+[[field]]
+route = "POST /api/v1/functions/id/{id}/update"
+description = "The update loads the submitted module; the placeholder content failed to load (400). The fixture's own Action code updates it in place."
+json = { "id" = "{function}", "name" = "Attack action", "content" = '''from pydantic import BaseModel
+
+class Action:
+    class Valves(BaseModel):
+        label: str = "seed"
+    class UserValves(BaseModel):
+        label: str = "seed"
+    def __init__(self):
+        self.valves = self.Valves()
+    async def action(self, body: dict) -> dict:
+        return body
+''' }
+
+[[field]]
+route = "POST /api/v1/tools/id/{id}/update"
+description = "The update loads the submitted module; the placeholder content failed to load (400). The fixture's own Tools code updates it in place."
+json = { "id" = "{tool}", "name" = "Attack tool", "content" = '''from pydantic import BaseModel
+
+class Tools:
+    class Valves(BaseModel):
+        label: str = "seed"
+    class UserValves(BaseModel):
+        label: str = "seed"
+    def __init__(self):
+        self.valves = self.Valves()
+    def echo(self, text: str) -> str:
+        return text
+''' }
+
+[[field]]
 route = "POST /api/v1/files/"
 description = "Multipart: routers/files.py:upload_file takes an UploadFile, which the derivation does not model, so no pass sent a body (422 only). A small text file."
 files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
