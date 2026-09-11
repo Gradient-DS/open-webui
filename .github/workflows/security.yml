@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   source:
-    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@2d823df9e1701adb5a3eae257a130d2114c8a5e7 # v3
+    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@8ba4fd31b6a55c0d9687900131ca0f45b3282d65 # v4
     secrets: inherit
     permissions:
       contents: read
@@ -34,7 +34,7 @@ jobs:
       node-dirs: '.'
 
   image:
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@2d823df9e1701adb5a3eae257a130d2114c8a5e7 # v3
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@8ba4fd31b6a55c0d9687900131ca0f45b3282d65 # v4
     secrets: inherit
     with:
       context: .
