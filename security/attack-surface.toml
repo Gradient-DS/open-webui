@@ -41,6 +41,10 @@ preserve_configuration = true
 # (routers/auths.py:signup), and identity bootstrap is that signup, so an
 # ENABLE_SIGNUP environment variable cannot keep it on.
 "ui.enable_signup" = true
+# PersistentConfig a tenant admin flips in the admin UI (mkbot runs it); discovery/* answered 503 without it.
+"rag.enable_filter_ui" = true
+# PersistentConfig; the model-path pass drives tasks/auto/completions as a control.
+"task.autocomplete.enable" = true
 
 [[parameter]]
 key = "namespace"
@@ -883,6 +887,16 @@ setup = [
 ]
 
 [[field]]
+route = "POST /api/embeddings"
+description = "utils/embeddings.py:generate_embeddings answers 404 for a model outside the registry (PLANE-004); the seeded model is the CI upstream's, which embeds."
+json = { "model" = "{model}" }
+
+[[field]]
+route = "POST /api/v1/embeddings"
+description = "The same handler as POST /api/embeddings: 404 for a model outside the registry (PLANE-004); the seeded model embeds."
+json = { "model" = "{model}" }
+
+[[field]]
 route = "POST /api/v1/files/"
 description = "Multipart: routers/files.py:upload_file takes an UploadFile, which the derivation does not model, so no pass sent a body (422 only). A small text file."
 files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
@@ -907,3 +921,87 @@ form = { "urlIdx" = "{openai_index}" }
 route = "POST /ollama/models/upload"
 description = "Multipart: routers/ollama.py:upload_model streams the file to the Ollama upstream as a blob, then creates a model from it."
 files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]
+
+# ---------------------------------------------------------------------------
+# Sharing by design
+#
+# Second-account answers the crossuser pass would report, which the application
+# serves to every verified user on purpose. Each declaration names the route,
+# the violation kinds it allows (owner-marker, resource-id, same-object, write;
+# an unrefused administrator operation is never sharing) and why. Anything else
+# the pass sees on the route is still a violation.
+
+[[shared]]
+route = "GET /api/v1/users/{user_id}/info"
+allow = ["owner-marker", "resource-id", "same-object"]
+reason = "routers/users.py:get_user_info_by_id serves id, name, email, role, bio, groups and status to any verified user: the directory the sharing, mention and group dialogs read. A tenant is one organisation's instance."
+
+[[shared]]
+route = "GET /api/v1/users/{user_id}/active"
+allow = ["same-object"]
+reason = "Presence: whether a user is online, shown beside them in channels and direct messages to any verified user."
+
+[[shared]]
+route = "GET /api/v1/users/{user_id}/profile/image"
+allow = ["same-object"]
+reason = "A user's avatar, shown wherever the user appears to any verified user."
+
+[[shared]]
+route = "GET /api/v1/groups/id/{id}/info"
+allow = ["owner-marker", "resource-id", "same-object"]
+reason = "routers/groups.py:get_group_info_by_id serves a group's name, description and member count to any verified user, for the access-control picker."
+
+[[shared]]
+route = "GET /api/v1/invites/{token}/validate"
+allow = ["owner-marker", "same-object"]
+reason = "Unauthenticated on purpose: the token in the path is the credential, and the invitee sees who invited them before signing up."
+
+[[shared]]
+route = "GET /api/v1/channels/webhooks/{webhook_id}/profile/image"
+allow = ["same-object"]
+reason = "A channel webhook's avatar, shown on its messages to any verified user."
+
+[[shared]]
+route = "POST /api/v1/channels/webhooks/{webhook_id}/{token}"
+allow = ["write"]
+reason = "An incoming webhook: the token in the path is the credential, so whoever holds it posts, by design."
+
+[[shared]]
+route = "GET /api/v1/terminals/{server_id}/{path}"
+allow = ["same-object"]
+reason = "The seeded terminal server is an admin-registered connection with no access grant, which terminals.py serves to every user; the answer comes from the shared backend."
+
+[[shared]]
+route = "OPTIONS /api/v1/terminals/{server_id}/{path}"
+allow = ["same-object", "write"]
+reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
+
+[[shared]]
+route = "PATCH /api/v1/terminals/{server_id}/{path}"
+allow = ["same-object", "write"]
+reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
+
+[[shared]]
+route = "POST /api/v1/terminals/{server_id}/{path}"
+allow = ["same-object", "write"]
+reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
+
+[[shared]]
+route = "PUT /api/v1/terminals/{server_id}/{path}"
+allow = ["same-object", "write"]
+reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
+
+[[shared]]
+route = "DELETE /api/v1/terminals/{server_id}/{path}"
+allow = ["same-object", "write"]
+reason = "As GET: an admin-registered terminal server with no access grant is every user's; the proxy forwards the method to the shared backend."
+
+[[shared]]
+route = "GET /openai/{path}"
+allow = ["same-object"]
+reason = "routers/openai.py:proxy forwards to the admin-configured upstream for any verified user; the answer is the upstream's, not the owner's."
+
+[[shared]]
+route = "POST /api/v1/invites/{token}/accept"
+allow = ["owner-marker", "write"]
+reason = "Unauthenticated on purpose: the token in the path is the credential, and accepting creates the invitee's account from the invite's email and role."

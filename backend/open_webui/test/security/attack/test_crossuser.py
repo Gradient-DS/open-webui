@@ -274,3 +274,74 @@ def test_live_crossuser_reports_its_own_reach(live_crossuser, record_property):
     assert tally.config_restore_verified
     record_property('crossuser_unentered', tally.unentered)
     assert tally.entered, 'No authorization request entered a handler'
+
+
+def _answer(status, body):
+    return plane.Outcome(status, 200 <= status < 300, body)
+
+
+def test_a_declared_sharing_kind_is_allowed_and_only_that_kind():
+    result = crossuser.Authorization(tally=plane.Seeding(), shared={'GET /x/{id}': frozenset({'same-object'})})
+    body = '{"id": "r1", "name": "owner marker-1"}'
+    crossuser._check(
+        result,
+        'GET /x/{id}',
+        _answer(200, body),
+        _answer(200, body),
+        ('marker-1',),
+        admin_only=False,
+        control=True,
+        resource_ids=('r1',),
+    )
+    reasons = {violation['reason'] for violation in result.violations}
+    assert 'second account received the same nonempty object as the owner' not in reasons
+    assert 'second account received an object containing the seeded resource id' in reasons
+    assert 'seeded owner marker in second-account response (including refusals)' in reasons
+
+
+@pytest.mark.parametrize(
+    'body, accepted', [('false', False), ('null', False), ('true', True), ('{"id": "r1"}', True), ('', True)]
+)
+def test_a_2xx_that_reports_nothing_happened_is_not_an_accepted_write(body, accepted):
+    # folders/{id}/update/expanded answers 200 null and memories DELETE 200 false
+    # for a folder or memory the caller does not own: nothing was written.
+    result = crossuser.Authorization(tally=plane.Seeding())
+    crossuser._check(
+        result,
+        'POST /x/{id}/update',
+        _answer(200, body),
+        _answer(200, '{"ok": 1}'),
+        (),
+        admin_only=False,
+        control=False,
+    )
+    wrote = any(v['reason'] == 'second account accepted a write to the owner resource' for v in result.violations)
+    assert wrote is accepted
+
+
+def test_every_sharing_declaration_names_a_route_allowed_kinds_and_a_reason():
+    operations = set(plane.operations(seeds.SPEC))
+    for entry in seeds.SURFACE.get('shared', []):
+        assert entry['route'] in operations, entry['route']
+        assert entry['reason'].strip(), entry['route']
+        assert entry['allow'] and set(entry['allow']) <= crossuser.SHAREABLE, entry
+
+
+def test_the_owner_control_carries_declared_fields():
+    # prompts/.../history/diff and chats/.../resolve 404 without the ids [[field]]
+    # declares, so without them the owner control never succeeded and isolation
+    # on those routes stayed unproven.
+    schema = {'type': 'object', 'properties': {'file_id': {'type': 'string'}, 'directory_id': {'type': 'string'}}}
+    spec = {
+        'paths': {
+            '/x': {'get': {}},
+            '/y': {'post': {'requestBody': {'content': {'application/json': {'schema': schema}}}}},
+        }
+    }
+    parameters = seeds.Resolved(
+        fields={'GET /x': {'params': {'from_id': 'h1'}}, 'POST /y': {'json': {'file_id': 'f1'}}}
+    )
+    [(control, get)] = list(crossuser._requests('GET /x', parameters, spec, {}, (), False))
+    assert control and get['params'] == {'from_id': 'h1'}
+    [(_, post)] = list(crossuser._requests('POST /y', parameters, spec, {}, (), False))
+    assert post['json']['file_id'] == 'f1'
