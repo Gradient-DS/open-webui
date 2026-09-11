@@ -59,12 +59,12 @@ jobs:
       needs.changes.outputs.relevant == 'true'
       || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch'
-    uses: Gradient-DS/.github/.github/workflows/runtime-security.yml@84000662a5bd08ce56468ede3b38e1563039492b # main, 2026-09-08
+    uses: Gradient-DS/.github/.github/workflows/runtime-security.yml@aff6862f8ad62be52a45b76b91239d4381247dcc # main, 2026-09-11 (#18 app-log capture)
     with:
       compose-file: 'docker-compose.ci.yaml'
       guarded-containers: 'open-webui-ci'
       health-url: 'http://127.0.0.1:8080/health'
-      tooling-ref: '84000662a5bd08ce56468ede3b38e1563039492b'
+      tooling-ref: 'aff6862f8ad62be52a45b76b91239d4381247dcc'
       # Paths are relative to the container's workdir, /app/backend, not to the
       # repository root: the image copies ./backend to /app/backend.
       # Test order is load-bearing. The plane writes the hits file that the
