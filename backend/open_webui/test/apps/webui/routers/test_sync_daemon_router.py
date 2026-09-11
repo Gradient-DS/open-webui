@@ -310,6 +310,11 @@ def test_summary_heartbeat_writes_heartbeat_without_touching_cursor(client, summ
     summary_seams.files.set_status.assert_not_awaited()  # no fail-mark on non-terminal
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason='knowledge writes moved to soev-api; this path returns with the cloud-sync slice',
+)
 def test_summary_completed_persists_cursor(client, summary_seams):
     new_sources = [{'id': 's1', 'delta_link': 'fresh-cursor'}]
     resp = client.post(
@@ -326,6 +331,11 @@ def test_summary_completed_persists_cursor(client, summary_seams):
     assert info['last_result']['files_added'] == 3
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason='knowledge writes moved to soev-api; this path returns with the cloud-sync slice',
+)
 def test_summary_failed_does_not_persist_cursor(client, summary_seams):
     resp = client.post(
         f'/api/v1/sync-daemon/runs/{KB_ID}/summary',
@@ -341,6 +351,11 @@ def test_summary_failed_does_not_persist_cursor(client, summary_seams):
     assert isinstance(info['last_sync_at'], int)  # terminal statuses still stamp
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason='knowledge writes moved to soev-api; this path returns with the cloud-sync slice',
+)
 def test_summary_completed_with_errors_retryable_codes_freezes_cursor(client, summary_seams):
     resp = client.post(
         f'/api/v1/sync-daemon/runs/{KB_ID}/summary',
@@ -357,6 +372,11 @@ def test_summary_completed_with_errors_retryable_codes_freezes_cursor(client, su
     assert info['sources'] == [{'id': 'old', 'delta_link': 'old-cursor'}]  # frozen
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason='knowledge writes moved to soev-api; this path returns with the cloud-sync slice',
+)
 def test_summary_completed_with_errors_only_non_retryable_advances_cursor(client, summary_seams):
     new_sources = [{'id': 's1', 'delta_link': 'fresh-cursor'}]
     resp = client.post(
@@ -373,6 +393,11 @@ def test_summary_completed_with_errors_only_non_retryable_advances_cursor(client
     assert _written_sync_info(summary_seams)['sources'] == new_sources
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason='knowledge writes moved to soev-api; this path returns with the cloud-sync slice',
+)
 def test_summary_fail_marks_staged_non_terminal_files(client, summary_seams):
     rows = {
         'onedrive-done': SimpleNamespace(data={'status': 'completed'}),
@@ -400,6 +425,11 @@ def test_summary_fail_marks_staged_non_terminal_files(client, summary_seams):
         assert call.kwargs['error'] == 'boom'
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason='knowledge writes moved to soev-api; this path returns with the cloud-sync slice',
+)
 def test_summary_cancelled_fail_marks_with_cancelled_status(client, summary_seams):
     rows = {'onedrive-stuck': SimpleNamespace(data={'status': 'processing'})}
     summary_seams.files.get_file_by_id = AsyncMock(side_effect=lambda file_id: rows.get(file_id))

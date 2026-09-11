@@ -14,6 +14,7 @@ Scenarios:
 
 Fixtures follow the same in-memory SQLite + monkeypatch pattern as
 ``test_knowledge_suspension.py`` and ``test_invites_model.py``.
+These tests cover the SQL class that soev-api replaced for the product.
 """
 
 from __future__ import annotations
@@ -73,6 +74,7 @@ async def db_session(monkeypatch):
                 yield s
 
     monkeypatch.setattr(knowledge_module, 'get_async_db_context', _get_async_db_context)
+    monkeypatch.setitem(globals(), 'Knowledges', knowledge_module.KnowledgeTable())
     yield Session
     await engine.dispose()
 

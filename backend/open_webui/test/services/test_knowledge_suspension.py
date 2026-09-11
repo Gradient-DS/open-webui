@@ -15,6 +15,7 @@ We use an in-memory SQLite DB and monkeypatch the module's
 ``get_async_db_context`` (mirrors ``test_invites_model``). The ``access_grant``
 table is created too because ``get_suspended_expired_knowledge`` round-trips
 through ``_to_knowledge_model`` → access-grant lookup.
+These tests cover the SQL class that soev-api replaced for the product.
 """
 
 from __future__ import annotations
@@ -75,6 +76,7 @@ async def db_session(monkeypatch):
                 yield s
 
     monkeypatch.setattr(knowledge_module, 'get_async_db_context', _get_async_db_context)
+    monkeypatch.setitem(globals(), 'Knowledges', knowledge_module.KnowledgeTable())
     yield Session
     await engine.dispose()
 

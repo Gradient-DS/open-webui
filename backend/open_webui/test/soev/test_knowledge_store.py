@@ -2,6 +2,7 @@
 
 import importlib
 import inspect
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -233,6 +234,92 @@ async def test_insert_sends_readers_writers_and_the_subject(env):
     relevant = [request for request in env.api.requests if request.method == 'POST']
     assert relevant[-2].url.path == '/v1/identity/links'
     assert relevant[-1].url.path == '/v1/collections'
+
+
+@pytest.mark.asyncio
+async def test_create_replays_with_the_collection_key(env, monkeypatch):
+    """Retrying creation with the same generated collection identity replays the original response."""
+    monkeypatch.setattr(env.module, 'uuid4', lambda: 'retry-collection')
+    form = env.models.KnowledgeForm(name='Retry', description='')
+    first = await env.store.insert_new_knowledge('alice', form)
+    second = await env.store.insert_new_knowledge('alice', form)
+    requests = [r for r in env.api.requests if r.url.path == '/v1/collections']
+    assert first == second
+    assert [r.headers['Idempotency-Key'] for r in requests] == ['kb:retry-collection'] * 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method', ['delete_knowledge_by_id', 'soft_delete_by_id', 'soft_delete_by_user_id'])
+async def test_collection_deletion_retry_commissions_one_job(env, method, monkeypatch):
+    """All collection deletion entry points reuse the collection's deletion identity."""
+    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:alice')
+    argument = 'alice' if method == 'soft_delete_by_user_id' else 'kb'
+    await getattr(env.store, method)(argument)
+    await env.store.delete_knowledge_by_id('kb')
+    requests = [r for r in env.api.requests if r.method == 'DELETE']
+    assert requests[0].headers['Idempotency-Key'] == 'kb-delete:kb'
+    assert requests[-1].headers['Idempotency-Key'] == 'kb-delete:kb'
+    assert len(env.api.jobs) == 1
+
+
+@pytest.mark.asyncio
+async def test_document_deletion_retry_commissions_one_job(env):
+    """A repeated document deletion replays its job without affecting another source."""
+    env.api.add_document('kb', 'first')
+    env.api.add_document('kb', 'second')
+    for source in ('first', 'first', 'second'):
+        await env.store.remove_file_from_knowledge_by_id('kb', source)
+    requests = [r for r in env.api.requests if r.method == 'DELETE']
+    assert [r.headers['Idempotency-Key'] for r in requests] == [
+        'doc-delete:kb:first',
+        'doc-delete:kb:first',
+        'doc-delete:kb:second',
+    ]
+    assert len(env.api.jobs) == 2
+
+
+@pytest.mark.asyncio
+async def test_access_and_patch_replay_by_sorted_body(env):
+    """Equivalent bodies replay, while changed bodies and different routes retain distinct identities."""
+    form = env.models.KnowledgeForm(name='Renamed', description='New', access_grants=[])
+    for _ in range(2):
+        await env.store.update_knowledge_by_id('kb', form)
+    writes = [r for r in env.api.requests if r.method in ('PATCH', 'PUT')]
+    assert writes[0].headers['Idempotency-Key'] == writes[2].headers['Idempotency-Key']
+    assert writes[1].headers['Idempotency-Key'] == writes[3].headers['Idempotency-Key']
+    assert len(env.api.jobs) == 1
+    reversed_body = dict(reversed(list(json.loads(writes[0].content).items())))
+    await env.store._send('PATCH', '/v1/collections/kb', reversed_body)
+    assert env.api.requests[-1].headers['Idempotency-Key'] == writes[0].headers['Idempotency-Key']
+    await env.store.update_knowledge_by_id('kb', form.model_copy(update={'name': 'Different'}))
+    patches = [r for r in env.api.requests if r.method == 'PATCH']
+    assert patches[-1].headers['Idempotency-Key'] != patches[0].headers['Idempotency-Key']
+    await seed(env, key='other')
+    await env.store.update_knowledge_by_id('other', form)
+    assert len({r.headers['Idempotency-Key'] for r in env.api.requests if r.method == 'PUT'}) == 2
+
+
+@pytest.mark.asyncio
+async def test_folder_and_document_moves_replay_by_paths(env):
+    """Folder creation, movement, deletion and document movement retain their path identities on retry."""
+    for _ in range(2):
+        folder = await env.store.create_directory('kb', 'Folder', 'alice')
+    env.api.add_document('kb', 'source')
+    for _ in range(2):
+        assert await env.store.move_file_to_directory('kb', 'source', folder.id)
+    for _ in range(2):
+        renamed = await env.store.rename_directory(folder.id, 'Renamed')
+        assert renamed.name == 'Renamed'
+    for _ in range(2):
+        assert await env.store.move_file_to_directory('kb', 'source')
+    for _ in range(2):
+        assert await env.store.delete_directory(renamed.id)
+    writes = [r for r in env.api.requests if '/folders' in r.url.path or '/move' in r.url.path]
+    writes = [r for r in writes if r.method != 'GET']
+    assert len(writes) == 10
+    keys = [r.headers['Idempotency-Key'] for r in writes]
+    assert keys[::2] == keys[1::2]
+    assert len(set(keys)) == 5
 
 
 @pytest.mark.asyncio

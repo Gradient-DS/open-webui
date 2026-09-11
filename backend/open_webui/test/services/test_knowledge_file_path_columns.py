@@ -14,6 +14,7 @@ and ``knowledge_file.source_item_id`` mirrored from ``file.meta``:
 
 Fixtures mirror ``test_knowledge_metadata_mode.py`` (in-memory async SQLite +
 monkeypatched ``get_async_db_context``).
+These tests cover the SQL class that soev-api replaced for the product.
 """
 
 from __future__ import annotations
@@ -72,6 +73,7 @@ async def db_session(monkeypatch):
                 yield s
 
     monkeypatch.setattr(knowledge_module, 'get_async_db_context', _get_async_db_context)
+    monkeypatch.setitem(globals(), 'Knowledges', knowledge_module.KnowledgeTable())
     yield Session
     await engine.dispose()
 
