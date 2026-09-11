@@ -146,6 +146,11 @@ services:
       OPENAI_API_BASE_URLS: "http://stub:8000/v1"
       OPENAI_API_KEY: "ci-stub-key"
       OPENAI_API_KEYS: "ci-stub-key"
+      # A tenant admin can give a connection a model-management provider
+      # (routers/openai.py:MODEL_MANAGEMENT_ENDPOINTS); without one every
+      # openai/models/{url_idx}/* route answers 400 to its owner. The provider only
+      # changes where management calls go (the stub root); listing and chat do not.
+      OPENAI_API_CONFIGS: '{"0": {"enable": true, "provider": "llama.cpp"}}'
       # An explicit URL bypasses the import-time Ollama port probes.
       OLLAMA_BASE_URL: "http://stub:8000"
       OLLAMA_BASE_URLS: "http://stub:8000"
@@ -164,6 +169,9 @@ services:
       # Without a key the client sends "Bearer " and httpx refuses the header, so every
       # sync/items answered 502 "sync service unreachable" before reaching the stub.
       SYNC_DAEMON_API_KEY: "ci-stub-key"
+      # The daemon's own calls into open-webui (routers/sync_daemon.py) authenticate
+      # with SYNC_API_KEY (utils/service_auth.py:_sync_key_matches), a different key.
+      SYNC_API_KEY: "ci-stub-key"
       PIPELINE_API_BASE_URL: "http://stub:8000"
       PIPELINE_API_KEY: "ci-stub-key"
       # config.py resets scalar OPENAI_API_BASE_URL after forming the URL list;
