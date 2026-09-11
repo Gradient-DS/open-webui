@@ -17,6 +17,7 @@ from typing import Optional
 # local imports
 from open_webui.env import ENABLE_ADMIN_CHAT_ACCESS
 from open_webui.internal.db import Base, JSONField, get_async_db_context
+from open_webui.models.ordering import request_order
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.automations import AutomationRun
 from open_webui.models.chat_messages import ChatMessage, ChatMessages
@@ -1455,15 +1456,7 @@ class ChatTable:
                 direction = filter.get('direction')
 
                 if order_by and direction:
-                    if not getattr(Chat, order_by, None):
-                        raise ValueError('Invalid order_by field')
-
-                    if direction.lower() == 'asc':
-                        stmt = stmt.order_by(getattr(Chat, order_by).asc(), Chat.id)
-                    elif direction.lower() == 'desc':
-                        stmt = stmt.order_by(getattr(Chat, order_by).desc(), Chat.id)
-                    else:
-                        raise ValueError('Invalid direction for ordering')
+                    stmt = stmt.order_by(*request_order(Chat, order_by, direction, (Chat.updated_at.desc(),)), Chat.id)
             else:
                 stmt = stmt.order_by(Chat.updated_at.desc(), Chat.id)
 
@@ -1538,13 +1531,8 @@ class ChatTable:
                 order_by = filter.get('order_by')
                 direction = filter.get('direction')
 
-                if order_by and direction and getattr(Chat, order_by):
-                    if direction.lower() == 'asc':
-                        stmt = stmt.order_by(getattr(Chat, order_by).asc(), Chat.id)
-                    elif direction.lower() == 'desc':
-                        stmt = stmt.order_by(getattr(Chat, order_by).desc(), Chat.id)
-                    else:
-                        raise ValueError('Invalid direction for ordering')
+                if order_by and direction:
+                    stmt = stmt.order_by(*request_order(Chat, order_by, direction, (Chat.updated_at.desc(),)), Chat.id)
             else:
                 stmt = stmt.order_by(Chat.updated_at.desc(), Chat.id)
 

@@ -109,17 +109,24 @@ async def _load_notifications(user_id: str) -> dict[str, Any]:
     ).strip()
 
     if not isinstance(targets, list) or not targets:
+        target = None
         if legacy_url:
-            target = _normalize_target(
-                {
-                    'id': DEFAULT_TARGET_ID,
-                    'type': 'webhook',
-                    'enabled': True,
-                    'events': sorted(VALID_EVENTS),
-                    'delivery': 'away',
-                    'config': {'url': legacy_url},
-                }
-            )
+            try:
+                target = _normalize_target(
+                    {
+                        'id': DEFAULT_TARGET_ID,
+                        'type': 'webhook',
+                        'enabled': True,
+                        'events': sorted(VALID_EVENTS),
+                        'delivery': 'away',
+                        'config': {'url': legacy_url},
+                    }
+                )
+            except ValueError:
+                # The SSRF guard refuses the stored legacy URL. Skip the migration
+                # rather than break the page; delivery re-validates anyway (PLANE-016).
+                pass
+        if target:
             notifications = {
                 **notifications,
                 'targets': [target],

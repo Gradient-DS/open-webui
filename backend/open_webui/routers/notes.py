@@ -43,8 +43,10 @@ router = APIRouter()
 def _truncate_note_data(data: Optional[dict], max_length: int = 1000) -> Optional[dict]:
     if not data:
         return data
-    md = (data.get('content') or {}).get('md') or ''
-    return {'content': {'md': md[:max_length]}}
+    # Stored data is user-written: one malformed note must not break its owner's listing (PLANE-003).
+    content = data.get('content') if isinstance(data, dict) else None
+    md = content.get('md') if isinstance(content, dict) else None
+    return {'content': {'md': md[:max_length] if isinstance(md, str) else ''}}
 
 
 ############################

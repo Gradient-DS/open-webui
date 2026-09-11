@@ -51,7 +51,7 @@ def _normalize_timestamp(timestamp: int) -> float:
 def _timezone(tz: Optional[str]) -> ZoneInfo:
     try:
         return ZoneInfo(tz or 'UTC')
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError):
         return ZoneInfo('UTC')
 
 

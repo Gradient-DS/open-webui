@@ -4,6 +4,7 @@ import uuid
 from typing import Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
+from open_webui.models.ordering import request_order
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import JSON, BigInteger, Column, ForeignKey, Text, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -151,15 +152,8 @@ class SharedChatsTable:
                 direction = filter.get('direction')
 
                 if order_by and direction:
-                    col = getattr(SharedChat, order_by, None)
-                    if not col:
-                        raise ValueError('Invalid order_by field')
-                    if direction.lower() == 'asc':
-                        stmt = stmt.order_by(col.asc())
-                    elif direction.lower() == 'desc':
-                        stmt = stmt.order_by(col.desc())
-                    else:
-                        raise ValueError('Invalid direction for ordering')
+                    default = (SharedChat.updated_at.desc(),)
+                    stmt = stmt.order_by(*request_order(SharedChat, order_by, direction, default))
             else:
                 stmt = stmt.order_by(SharedChat.updated_at.desc())
 
