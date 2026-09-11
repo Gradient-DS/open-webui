@@ -1046,6 +1046,14 @@ email, role and groups to any verified user. That is upstream behaviour and a
 tenant is one organisation's instance, so it is declared as sharing; restricting
 it is a product decision.
 
+Second question, from the service identity: `GET
+/api/v1/integrations/file-status/{file_id}` requires the loader-worker's
+credential and returns any file's processing status by id, without checking the
+file against the acting user (`routers/integrations.py:get_file_status`). The
+loader is a tenant-wide machine credential and the answer is only a status, so
+it is declared as sharing; scoping it to the acting user is the stricter choice
+if Lex wants one.
+
 ## BLOCKER-001: live runs cannot set up identities on v0.11.3
 
 Status: **resolved 2026-09-10**. Both halves are fixed and verified live; the
