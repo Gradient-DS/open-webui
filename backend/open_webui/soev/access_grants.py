@@ -29,6 +29,17 @@ class SoevAccessGrantsTable(AccessGrantsTable):
             )
         if not resource_ids:
             return set()
+        if not user_id and user_group_ids is not None:
+            principals = {f'owui:group:{group_id}' for group_id in user_group_ids}
+            field = {'read': 'principals', 'write': 'writers'}.get(permission)
+            if not principals or field is None:
+                return set()
+            requested = set(resource_ids)
+            return {
+                row['key']
+                for row in await self._store._collections(as_service=True)
+                if row['key'] in requested and principals.intersection(row.get(field, []))
+            }
         return await self._store.accessible_collection_ids(user_id, resource_ids, permission)
 
     async def get_grants_by_resource(self, resource_type, resource_id, db=None):

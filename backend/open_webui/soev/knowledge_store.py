@@ -57,8 +57,8 @@ class SoevKnowledgeTable:
     async def _get(self, path, *, user_id=None, params=None):
         return await self._client.get(path, as_user=await self._as_user(user_id), params=params)
 
-    async def _pages(self, path, *, user_id=None, params=None):
-        ref = await self._as_user(user_id)
+    async def _pages(self, path, *, user_id=None, params=None, as_service=False):
+        ref = None if as_service else await self._as_user(user_id)
         return [row async for row in self._client.pages(path, as_user=ref, params=params)]
 
     async def _send(self, method, path, body=None, *, user_id=None, idempotency_key=None):
@@ -81,12 +81,16 @@ class SoevKnowledgeTable:
                 return None
             raise
 
-    async def _collections(self, *, user_id=None):
+    async def _collections(self, *, user_id=None, as_service=False):
         hidden = set()
         for status in ('QUEUED', 'RUNNING', 'AWAITING_UPLOAD'):
-            jobs = await self._pages('/v1/jobs', user_id=user_id, params={'status': status})
+            jobs = await self._pages('/v1/jobs', user_id=user_id, params={'status': status}, as_service=as_service)
             hidden.update(job['collection_key'] for job in jobs if job['kind'] == 'delete_collection')
-        return [row for row in await self._pages('/v1/collections', user_id=user_id) if row['key'] not in hidden]
+        return [
+            row
+            for row in await self._pages('/v1/collections', user_id=user_id, as_service=as_service)
+            if row['key'] not in hidden
+        ]
 
     def _knowledge(self, row):
         return self._projection.knowledge_of(row, service_principal=self._service_principal) if row else None
