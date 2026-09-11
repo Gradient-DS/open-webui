@@ -423,3 +423,20 @@ def test_autocompletion_without_a_prompt_is_refused(monkeypatch):
     path = '/auto/completions'
     response = _client(_endpoint(tasks.router, path), path).post(path, json={'model': 'm', 'messages': []})
     assert response.status_code == 400, (response.status_code, response.text)
+
+
+def test_ollama_embeddings_without_an_input_are_refused():
+    # With PLANE-004's model check passing, a body with no input reached
+    # GenerateEmbedForm, whose ValidationError nobody caught: 500.
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from open_webui.utils.embeddings import generate_embeddings
+
+    models = {'m': {'id': 'm', 'owned_by': 'ollama'}}
+    request = SimpleNamespace(state=SimpleNamespace(), app=SimpleNamespace(state=SimpleNamespace(MODELS=models)))
+    user = SimpleNamespace(id='control-user', role='admin')
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(generate_embeddings(request, {'model': 'm'}, user))
+    assert refused.value.status_code == 400

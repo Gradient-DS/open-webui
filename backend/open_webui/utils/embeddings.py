@@ -3,6 +3,7 @@ import random
 import sys
 
 from fastapi import HTTPException, Request
+from pydantic import ValidationError
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL
 from open_webui.models.models import Models
@@ -74,9 +75,14 @@ async def generate_embeddings(
     # Ollama backend — use /api/embed which supports batch input natively
     if model.get('owned_by') == 'ollama':
         ollama_payload = convert_embed_payload_openai_to_ollama(form_data)
+        try:
+            embed_form = GenerateEmbedForm(**ollama_payload)
+        except ValidationError as exc:
+            # A body the Ollama form refuses (no input, say) is the caller's to fix.
+            raise HTTPException(status_code=400, detail=str(exc))
         response = await ollama_embed(
             request=request,
-            form_data=GenerateEmbedForm(**ollama_payload),
+            form_data=embed_form,
             user=user,
         )
         return convert_embedding_response_ollama_to_openai(response)
