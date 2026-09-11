@@ -93,10 +93,26 @@ def _bootstrap(base_url):
         ):
             client.close()
             return login(ADMIN_EMAIL, PASSWORD, base_url=base_url, role='admin')
-        return client.authenticate(result, ADMIN_EMAIL, role='admin')
+        admin = client.authenticate(result, ADMIN_EMAIL, role='admin')
+        _wait_out_the_first_second()
+        return admin
     except Exception:
         client.close()
         raise
+
+
+def _wait_out_the_first_second():
+    """Let the clock leave the second the bootstrap admin was created in.
+
+    models/users.py:get_first_user names the primary admin by `created_at`
+    alone, in whole seconds, with no tie-break (PLANE-018). An identity created
+    in the admin's second can come back as the primary admin, and the guard in
+    routers/users.py then refuses the admin's repair of it with 403. The other
+    identities follow the signup by a few hundred milliseconds, so on a fresh
+    stack that is the common case. One sleep per fresh stack, as for a revoked
+    second below.
+    """
+    time.sleep(1.05)
 
 
 def _update(admin, user_id, **fields):
