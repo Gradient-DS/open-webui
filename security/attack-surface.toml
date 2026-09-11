@@ -91,9 +91,20 @@ actor = "admin"
 key = "chat"
 name = "id"
 prefix = "/api/v1/chats/{id}"
-description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. The message carries one pending function_call so utils/tool_approval.py:resolve_tool_call_output finds a tool call to resolve. Use the admin folder owner; create_new_chat validates folder ownership even for admins."
+description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. The message carries one pending function_call so utils/tool_approval.py:resolve_tool_call_output finds a tool call to resolve, under a user message: resuming reads the assistant message's parentId and answered 409 without one. Use the admin folder owner; create_new_chat validates folder ownership even for admins."
 via = "POST /api/v1/chats/new"
-body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-{token}", "models" = ["{model}"], "history" = { "currentId" = "message_{token}", "messages" = { "message_{token}" = { "id" = "message_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fixture message.", "childrenIds" = [], "output" = [{ "type" = "function_call", "call_id" = "call_{token}", "name" = "attack_tool", "status" = "pending" }] } } } } }
+body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-{token}", "models" = ["{model}"], "history" = { "currentId" = "message_{token}", "messages" = { "user_{token}" = { "id" = "user_{token}", "role" = "user", "content" = "Attack fixture question.", "childrenIds" = ["message_{token}"] }, "message_{token}" = { "id" = "message_{token}", "parentId" = "user_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fixture message.", "childrenIds" = [], "output" = [{ "type" = "function_call", "call_id" = "call_{token}", "name" = "attack_tool", "status" = "pending" }] } } } } }
+extract = "id"
+depends_on = ["folder", "model"]
+actor = "admin"
+
+[[parameter]]
+key = "chat_fork"
+name = "id"
+prefix = "/api/v1/chats/{id}/fork"
+description = "routers/chats.py refuses to fork a chat whose last response is still running (409); the chat fixture's tool call is pending on purpose, so fork gets its own finished chat."
+via = "POST /api/v1/chats/new"
+body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-fork-{token}", "models" = ["{model}"], "history" = { "currentId" = "fork_{token}", "messages" = { "fork_{token}" = { "id" = "fork_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fork message.", "done" = true, "childrenIds" = [] } } } } }
 extract = "id"
 depends_on = ["folder", "model"]
 actor = "admin"
@@ -409,6 +420,17 @@ description = "routers/notes.py:create_new_note returns the inserted NoteModel. 
 via = "POST /api/v1/notes/create"
 body = { "title" = "attack-{token}", "data" = { "content" = "Attack note" } }
 extract = "id"
+actor = "admin"
+
+[[parameter]]
+key = "calendar_delete"
+name = "calendar_id"
+prefix = "/api/v1/calendars/{calendar_id}/delete"
+description = "routers/calendar.py:delete_calendar refuses the user's default calendar, and POST /api/v1/calendars/{calendar_id}/default -- driven before the DELETE group -- makes the shared calendar fixture the default. Delete gets a calendar nothing else touches."
+via = "POST /api/v1/calendars/create"
+body = { "name" = "attack-delete-{token}" }
+extract = "id"
+depends_on = ["namespace"]
 actor = "admin"
 
 [[parameter]]
@@ -829,12 +851,12 @@ json = { "call_id" = "call_{token}", "action" = "reject" }
 [[field]]
 route = "POST /api/v1/google-drive/sync/items"
 description = "The sync handler answers 404 'Knowledge base not found' for an unknown knowledge_id; the provider-typed KB fixture exists."
-json = { "knowledge_id" = "{google_drive_knowledge}" }
+json = { "knowledge_id" = "{google_drive_knowledge}", "items[].type" = "file", "items[].item_id" = "attack-item-{token}", "items[].item_path" = "/attack", "items[].name" = "attack" }
 
 [[field]]
 route = "POST /api/v1/onedrive/sync/items"
 description = "The sync handler answers 404 'Knowledge base not found' for an unknown knowledge_id; the provider-typed KB fixture exists."
-json = { "knowledge_id" = "{onedrive_knowledge}" }
+json = { "knowledge_id" = "{onedrive_knowledge}", "items[].type" = "file", "items[].item_id" = "attack-item-{token}", "items[].item_path" = "/attack", "items[].name" = "attack", "items[].drive_id" = "attack-drive" }
 
 [[field]]
 route = "POST /api/v1/images/edit"
@@ -994,6 +1016,21 @@ class Tools:
 ''' }
 
 [[field]]
+route = "POST /api/v1/google-drive/sync/{knowledge_id}/sources/remove"
+description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed."
+json = { "item_id" = "attack-item-{token}" }
+
+[[field]]
+route = "POST /api/v1/onedrive/sync/{knowledge_id}/sources/remove"
+description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed."
+json = { "item_id" = "attack-item-{token}" }
+
+[[field]]
+route = "POST /api/v1/sync-daemon/runs/{knowledge_id}/summary"
+description = "routers/sync_daemon.py validates the run status against the daemon's run states and answered 400 to the placeholder; a completed google_drive run is one the daemon reports."
+json = { "status" = "completed", "provider" = "google_drive" }
+
+[[field]]
 route = "POST /api/v1/files/"
 description = "Multipart: routers/files.py:upload_file takes an UploadFile, which the derivation does not model, so no pass sent a body (422 only). A small text file."
 files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
@@ -1142,6 +1179,16 @@ reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configu
 route = "DELETE /openai/{path}"
 allow = ["same-object", "write"]
 reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configured upstream for any verified user (CI turns it on; no tenant does yet). The answer is the upstream's, and the call changes nothing an owner holds."
+
+[[shared]]
+route = "GET /api/v1/sync-daemon/config/{provider}"
+allow = ["same-object"]
+reason = "utils/service_auth.py:get_sync_service_principal authenticates the daemon with no acting user: the provider config is the tenant's, read the same whoever the daemon acts for."
+
+[[shared]]
+route = "GET /api/v1/integrations/file-status/{file_id}"
+allow = ["same-object"]
+reason = "routers/integrations.py:get_file_status requires the loader-worker credential and returns a file's processing status by id, not checked against the acting user: the loader is a tenant-wide machine credential. Recorded in CROSSUSER-001 as a choice to confirm."
 
 # ---------------------------------------------------------------------------
 # Service callers
