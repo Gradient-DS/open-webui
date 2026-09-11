@@ -59,6 +59,7 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
+	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
 	import TagSelector from './common/TagSelector.svelte';
 	import CommunityDiscover from './common/CommunityDiscover.svelte';
 	import Pagination from '../common/Pagination.svelte';
@@ -648,6 +649,8 @@
 					</div>
 				</Dropdown>
 			</div>
+
+			<SplitCreateButton actions={$workspaceActions} />
 		</div>
 
 		{#if models !== null}

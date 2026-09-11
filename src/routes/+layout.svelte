@@ -1427,7 +1427,7 @@
 				: 'light'
 			: 'light'}
 	richColors
-	position="top-right"
+	position="top-center"
 	closeButton
 	toastOptions={{
 		classes: {

@@ -22,13 +22,11 @@
 	import { getToolList } from '$lib/apis/tools';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
-	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	let loaded = false;
 	let lastPath = '';
-	let visibleActions = [];
 
 	$: if ($page.url.pathname !== lastPath) {
 		lastPath = $page.url.pathname;
@@ -38,8 +36,6 @@
 	$: if (loaded && $page.url.pathname.startsWith('/workspace')) {
 		loadWorkspaceCounts();
 	}
-
-	$: visibleActions = $workspaceActions.filter((action) => action.visible ?? true);
 
 	const getCount = (res: any) => res?.total ?? (Array.isArray(res) ? res.length : null);
 
@@ -179,12 +175,8 @@
 
 				<!-- [Gradient] No section tabs here: the sidebar is the only navigation for
 				     Knowledge, Agents, Prompts, Skills and Tools. Upstream's always-on
-				     workspace nav duplicated it row for row. The create action stays. -->
-				<div class="flex w-full items-center">
-					<div class="ml-auto flex shrink-0 items-center gap-1">
-						<SplitCreateButton actions={visibleActions} />
-					</div>
-				</div>
+				     workspace nav duplicated it row for row. The create action lives in
+				     each list page's toolbar, next to the view filter. -->
 
 				<!-- <div class="flex items-center text-xl font-normal">{$i18n.t('Workspace')}</div> -->
 			</div>

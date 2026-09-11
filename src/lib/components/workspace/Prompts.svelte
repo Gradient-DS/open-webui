@@ -35,6 +35,7 @@
 	import XMark from '../icons/XMark.svelte';
 	import GarbageBin from '../icons/GarbageBin.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
+	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
 	import TagSelector from './common/TagSelector.svelte';
 	import CommunityDiscover from './common/CommunityDiscover.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
@@ -509,6 +510,8 @@
 					{/if}
 				</div>
 			</div>
+
+			<SplitCreateButton actions={$workspaceActions} />
 		</div>
 
 		{#if prompts === null || loading}

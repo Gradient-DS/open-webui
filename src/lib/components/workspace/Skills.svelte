@@ -50,6 +50,7 @@
 	import XMark from '../icons/XMark.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
+	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 	import Switch from '../common/Switch.svelte';
 	import SkillMenu from './Skills/SkillMenu.svelte';
@@ -507,6 +508,8 @@
 					/>
 				</div>
 			</div>
+
+			<SplitCreateButton actions={$workspaceActions} />
 		</div>
 
 		{#if filteredItems === null || loading}
