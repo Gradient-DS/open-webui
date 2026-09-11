@@ -267,6 +267,16 @@ extract = "id"
 actor = "admin"
 
 [[parameter]]
+key = "knowledge_reset"
+name = "id"
+prefix = "/api/v1/knowledge/{id}/reset"
+description = "knowledge/{id}/reset is destructive and runs after the DELETE group, which has deleted the shared knowledge fixture by then: the owner's reset answered 404. Reset gets a knowledge base nothing else touches."
+via = "POST /api/v1/knowledge/create"
+body = { "name" = "attack-reset-{token}", "description" = "Attack knowledge for reset" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
 key = "directory"
 name = "dir_id"
 prefix = "/api/v1/knowledge/{id}/dirs/{dir_id}"
@@ -752,6 +762,14 @@ class Filter:
 """
 
 [[destructive]]
+id = "POST /api/v1/knowledge/{id}/file/remove"
+reason = "Removes the seeded file from the seeded KB, which file/update and file/move -- driven after it alphabetically -- need in place."
+
+[[destructive]]
+id = "POST /api/v1/functions/id/{id}/toggle"
+reason = "Flips the seeded function's active flag; chat actions and the function's user valves need it active, and valves sorts after toggle."
+
+[[destructive]]
 id = "POST /api/v1/auths/signout"
 reason = "Revokes the caller JWT jti when Redis is present. CI runs real Redis; the same bearer cannot drive subsequent routes."
 
@@ -1018,18 +1036,40 @@ class Tools:
 
 [[field]]
 route = "POST /api/v1/google-drive/sync/{knowledge_id}/sources/remove"
-description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed."
+description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed. sync/items has no path parameter, so the crossuser pass never sends it as the owner: setup starts the sync at fixture time, as the drive pass's declared body does (200)."
 json = { "item_id" = "attack-item-{token}" }
+setup = [{ via = "POST /api/v1/google-drive/sync/items", body = { "knowledge_id" = "{google_drive_knowledge}", "items" = [{ "type" = "file", "item_id" = "attack-item-{token}", "item_path" = "/attack", "name" = "attack" }] } }]
 
 [[field]]
 route = "POST /api/v1/onedrive/sync/{knowledge_id}/sources/remove"
-description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed."
+description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed. sync/items has no path parameter, so the crossuser pass never sends it as the owner: setup starts the sync at fixture time, as the drive pass's declared body does (200)."
 json = { "item_id" = "attack-item-{token}" }
+setup = [{ via = "POST /api/v1/onedrive/sync/items", body = { "knowledge_id" = "{onedrive_knowledge}", "items" = [{ "type" = "file", "item_id" = "attack-item-{token}", "item_path" = "/attack", "name" = "attack", "drive_id" = "attack-drive" }] } }]
 
 [[field]]
 route = "POST /api/v1/sync-daemon/runs/{knowledge_id}/summary"
 description = "routers/sync_daemon.py validates the run status against the daemon's run states and answered 400 to the placeholder; a completed google_drive run is one the daemon reports."
 json = { "status" = "completed", "provider" = "google_drive" }
+
+[[field]]
+route = "POST /api/v1/knowledge/{id}/file/add"
+description = "add_file_to_knowledge_by_id needs a real, processed file; the file/move setup processes the seeded file and adds it to this KB."
+json = { "file_id" = "{file}" }
+
+[[field]]
+route = "POST /api/v1/knowledge/{id}/file/update"
+description = "file/update answers 404 unless the file is in this KB; the file/move setup adds it."
+json = { "file_id" = "{file}" }
+
+[[field]]
+route = "POST /api/v1/knowledge/{id}/file/remove"
+description = "file/remove answers 404 unless the file is in this KB; the file/move setup adds it. Declared destructive so it runs after the routes that need the file."
+json = { "file_id" = "{file}" }
+
+[[field]]
+route = "POST /api/v1/knowledge/{id}/files/batch/add"
+description = "Each batch entry must name a real, processed file; the file/move setup processes the seeded one."
+json = { "[].file_id" = "{file}" }
 
 [[field]]
 route = "POST /api/v1/files/"
