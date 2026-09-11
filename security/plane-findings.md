@@ -4,6 +4,19 @@ PLANE-019), PLANE-007 as a CI-stack gap; BLOCKER-001 resolved; CI-stack gaps:
 1 open (CI-004), 1 fixed in part (CI-005), 4 fixed (CI-001–003, CI-006); harness
 gaps: 1 open (COVERAGE-001); CROSSUSER-001 addressed.**
 
+**Update, owner-control fixtures and `REQUIRE_2FA` (2026-09-11): the live suite
+is green.** The last four owner controls failed because the owner's own request
+needed a fixture the shared seeds could not give: an active function
+(`chat/actions`, `functions/.../valves/user/update`), a knowledge base whose file
+`file/remove` may delete, and an account with TOTP enrolled
+(`users/{user_id}/2fa/disable`). Each now has a seeder of its own, and all four
+owner controls answer 2xx. `REQUIRE_2FA` runs on with the tenants' 7-day grace
+(CI-005). Measured twice on a fresh CI stack, before and after the flag, both
+identical: **457 passed, 0 failed, 0 errors**; seeding 239/252 · drive 411/662 ·
+shapes 264/371 · query 48/54 · crossuser 264/415 · model_path 9/9, configuration
+restore verified in every pass, 0 uncovered with 21 waived, 0 crossuser
+violations, 0 owner-control gaps.
+
 **Update, 5xx triage (2026-09-11): no route answers 5xx, and the crossuser pass
 reports no violation.** Measured on a fresh CI stack, every pass completing with
 zero errors: seeding 240/252 · drive 396/662 · shapes 264/371 · query 48/54 ·
@@ -865,7 +878,7 @@ build wants the stack stopped and a session that can afford it.
 
 ## CI-005: the CI stack ran with production features switched off
 
-Status: **fixed in part**: `REQUIRE_2FA` stays off, see below.
+Status: **fixed in part**: `REQUIRE_2FA` on since 2026-09-11; Confluence stays off, see below.
 
 The first waiver batch drafted from the 57 would have waived eight routes as
 "feature off". Checked against `soev-gitops` `origin/main` (61ce7d8): 2FA is on
@@ -894,9 +907,19 @@ signup, the five 2FA routes, `password/reset`, `notifications/events`, both
 `notifications/targets` routes and `audio/speech`. Reach: seeding 225→231,
 drive 373→378, shapes 266→273, every restore verified.
 
-Not done. `REQUIRE_2FA` stays false although soev-test, gradient and staging
-require 2FA: driving that means the plane enrolling TOTP for its own identities
-(`pyotp` is already a dependency). `ENABLE_CONFLUENCE_INTEGRATION` stays false
+`REQUIRE_2FA` (2026-09-11) is on, with `TWO_FA_GRACE_PERIOD_DAYS=7` as gradient,
+soev-test and staging run it, and `deployed-config.md` now pins both so the
+parity test catches drift. It did not need the plane to enrol its identities, as
+first assumed: within the grace period a password account without TOTP still
+gets a session, capped at the deadline (`routers/auths.py:evaluate_2fa_grace`),
+and a fresh stack never ages past it. Verified live: the identities' sessions
+expire 6.99 days out. The gated branch, an account past its grace answered with
+a setup token, is driven by `test_client.py::test_real_2fa_signin_success_status_is_rejected`,
+which sets the grace to 0 for one sign-in; the setup token's own session
+issuance (`totp/enable` under `2fa_setup_pending`) is not driven. Enrolment
+itself is: `seed_totp_user` enrols a disposable account every pass.
+
+Not done. `ENABLE_CONFLUENCE_INTEGRATION` stays false
 although staging runs it: `test_runtime_egress.py` audits every Confluence sink
 on the premise that the integration is off, and no uncovered route reads
 `confluence.enable`, so turning it on buys an egress re-audit and no coverage.
@@ -1053,6 +1076,17 @@ file against the acting user (`routers/integrations.py:get_file_status`). The
 loader is a tenant-wide machine credential and the answer is only a status, so
 it is declared as sharing; scoping it to the acting user is the stricter choice
 if Lex wants one.
+
+Owner controls (2026-09-11): **0 gaps**, down from 59. The last four needed
+fixtures of their own (see the update at the top). Making the function active
+put its per-user valves in front of the pass for the first time: any verified
+user can store its own valves for any active function by id, and read the
+function's valves schema. Both are declared as sharing, because the write lands
+in the caller's own `user.settings` (measured: after both accounts wrote, each
+read back only its own value) and functions carry no access grants. Tools do
+check read access before a user-valves write (`routers/tools.py`); requiring the
+function to be one the caller's models surface, as `chat_action` does, is the
+stricter choice if Lex wants one.
 
 ## BLOCKER-001: live runs cannot set up identities on v0.11.3
 
