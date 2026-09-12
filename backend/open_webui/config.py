@@ -3133,6 +3133,16 @@ INTEGRATION_PROVIDERS = {}
 
 TENANT_NAME = os.environ.get('TENANT_NAME', '')
 
+# Deployment-only soev-api settings; never register these in DEFAULT_CONFIG.
+# The signing key is the PEM value, including its original newlines.
+SOEV_API_URL = os.environ.get('SOEV_API_URL', '')
+SOEV_API_KEY = os.environ.get('SOEV_API_KEY', '')
+SOEV_API_CREDENTIAL_ID = os.environ.get('SOEV_API_CREDENTIAL_ID', '')
+SOEV_API_SIGNING_KEY = os.environ.get('SOEV_API_SIGNING_KEY', '')
+SOEV_API_SIGNING_KID = os.environ.get('SOEV_API_SIGNING_KID', '')
+SOEV_API_AUDIENCE = os.environ.get('SOEV_API_AUDIENCE', '')
+SOEV_API_SERVICE_PRINCIPAL = os.environ.get('SOEV_API_SERVICE_PRINCIPAL', '')
+
 DISTRIBUTED_DOC_PIPELINE_ENABLED = os.environ.get('DISTRIBUTED_DOC_PIPELINE_ENABLED', 'False').lower() == 'true'
 
 DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = (

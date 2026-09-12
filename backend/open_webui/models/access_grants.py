@@ -935,4 +935,6 @@ class AccessGrantsTable:
         return query
 
 
-AccessGrants = AccessGrantsTable()
+from open_webui.soev.access_grants import SoevAccessGrantsTable  # noqa: E402
+
+AccessGrants = SoevAccessGrantsTable()
