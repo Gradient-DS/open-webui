@@ -507,6 +507,7 @@
   "Choose a dedicated model for context compaction summaries. Current Model follows the active chat model.": "",
   "Choose a model before saving...": "",
   "Choose agent": "",
+  "Choose an agent before sending a message.": "",
   "Choose automatic, left-to-right, or right-to-left text flow.": "",
   "Choose channel": "",
   "Choose fallback models for background tasks. Current Model follows the active chat model.": "",
