@@ -522,6 +522,23 @@ class ChatTable:
         except Exception:
             return None
 
+    async def bind_chat_agent_by_id(self, id: str, agent_id: str) -> bool:
+        """[Gradient] Record which agent a chat runs on, in ``meta.agent_id``.
+
+        Written when a chat without a binding falls back to the picker
+        default, so the row says what actually served it and later turns
+        and the navbar agree. Only the meta column is touched.
+
+        :return: Whether a row was updated.
+        """
+        async with get_async_db_context() as session:
+            chat = await session.get(Chat, id)
+            if chat is None:
+                return False
+            chat.meta = {**(chat.meta or {}), 'agent_id': agent_id}
+            await session.commit()
+            return True
+
     async def update_chat_tags_by_id(self, id: str, tags: list[str], user) -> ChatModel | None:
         async with get_async_db_context() as session:
             chat = await session.get(Chat, id)

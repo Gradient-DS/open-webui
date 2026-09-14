@@ -2477,6 +2477,16 @@
 			toast.error($i18n.t('Model not selected'));
 			return;
 		}
+		// [Gradient] A new chat under the picker must name an agent: the
+		// binding is written once, at creation, and a chat created without
+		// one would run on the raw model. The server refuses such a request
+		// too; this keeps the user from ever seeing that error.
+		const agentPickerActive =
+			isFeatureEnabled('agent_picker') && Boolean($config?.features?.feature_agent_api_enabled);
+		if (agentPickerActive && !$chatId && !$pendingAgentId) {
+			toast.error($i18n.t('Choose an agent before sending a message.'));
+			return;
+		}
 
 		if (
 			files.length > 0 &&

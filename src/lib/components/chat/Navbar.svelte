@@ -13,7 +13,8 @@
 		showControls,
 		showSidebar,
 		temporaryChatEnabled,
-		user
+		user,
+		pendingAgentId
 	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
@@ -141,7 +142,10 @@
 					     back to the ModelSelector — they genuinely run on the
 					     raw model. -->
 					{#if agentSelectorActive}
-						<AgentSelector agentId={chat?.meta?.agent_id} editable={!chat?.id} />
+						<AgentSelector
+							agentId={chat?.id ? chat?.meta?.agent_id : $pendingAgentId}
+							editable={!chat?.id}
+						/>
 					{:else if showModelSelector}
 						<ModelSelector
 							bind:selectedModels
