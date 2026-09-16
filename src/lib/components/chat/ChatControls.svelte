@@ -1,8 +1,11 @@
 <script context="module" lang="ts">
-	let savedTab: 'controls' | 'files' | 'overview' | 'document' = 'controls';
+	// [Gradient] Remember Sources alongside the other tabs.
+	let savedTab: 'controls' | 'files' | 'overview' | 'document' | 'sources' = 'controls';
 </script>
 
 <script lang="ts">
+	import type { i18n as I18n } from 'i18next';
+	import type { Readable } from 'svelte/store';
 	import { onMount, tick, getContext } from 'svelte';
 	import {
 		config,
@@ -13,6 +16,7 @@
 		showDocument,
 		openDocumentTabSignal,
 		showEmbeds,
+		openSourcesTabSignal,
 		settings,
 		showFileNavPath,
 		selectedTerminalId,
@@ -28,12 +32,15 @@
 	import Artifacts from './Artifacts.svelte';
 	import Document from './Document.svelte';
 	import Embeds from './ChatControls/Embeds.svelte';
+	// [Gradient] Sources share the tabbed panel with Document Writer.
+	import CitationPanel from './ChatControls/CitationPanel.svelte';
 	import FileNav from './FileNav.svelte';
 	import PyodideFileNav from './PyodideFileNav.svelte';
 	import Overview from './Overview.svelte';
 	import { isSavedChatId } from '$lib/utils/chatId';
 
-	const i18n = getContext('i18n');
+	// [Gradient] Type the shared translation store for citation controls.
+	const i18n = getContext<Readable<I18n>>('i18n');
 
 	export let history;
 	export let models = [];
@@ -58,6 +65,9 @@
 	let mounted = false;
 	// [Gradient] Preserve the wider first-open document panel.
 	let controlsWidth = 600;
+	// [Gradient] Sources can expand from the partial mobile sheet.
+	let citationSheetExpanded = false;
+	$: if (activeTab !== 'sources' || !$showControls) citationSheetExpanded = false;
 
 	// Tab state for Controls+Files panel
 	let activeTab = savedTab;
@@ -68,7 +78,10 @@
 
 	$: hasMessages = history?.messages && Object.keys(history.messages).length > 0;
 
-	$: showControlsTab = $user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true);
+	// [Gradient] The Controls tab (incl. its Files section) is switched off: the panel is
+	// the sources drawer. Upstream gate kept for reference:
+	//   $user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true)
+	$: showControlsTab = false;
 	const chatContext = (terminal: any) => terminal?.contexts?.chat ?? {};
 	const chatContextAvailable = (terminal: any) => chatContext(terminal) !== false;
 	const chatContextNeedsSavedChat = (terminal: any) =>
@@ -92,18 +105,34 @@
 	$: showOverviewTab = hasMessages && isFeatureEnabled('chat_overview');
 	$: showDocumentTab = isFeatureEnabled('document_writer') && ($documentContents?.length ?? 0) > 0;
 
+	// [Gradient] Keep Sources available before the first citation click.
+	// [Gradient] Always available, so the drawer opens on Sources with a
+	// placeholder before the first answer with sources.
+	$: showSourcesTab = true;
+
 	// Tab fallback: if active tab becomes hidden, switch to next available
+	// [Gradient] A hidden Sources tab must yield to an available tab.
+	$: if (!showSourcesTab && activeTab === 'sources') activeTab = 'controls';
 	$: if (!showOverviewTab && activeTab === 'overview') activeTab = 'controls';
 	$: if (!showFilesTab && activeTab === 'files') activeTab = 'controls';
 	$: if (!showDocumentTab && activeTab === 'document') activeTab = 'controls';
 	$: if (!showControlsTab && activeTab === 'controls') {
-		if (showDocumentTab) activeTab = 'document';
+		// [Gradient] Sources remain usable when Controls are restricted.
+		if (showSourcesTab) activeTab = 'sources';
+		else if (showDocumentTab) activeTab = 'document';
 		else if (showFilesTab) activeTab = 'files';
 		else if (showOverviewTab) activeTab = 'overview';
 	}
 
 	// Auto-close if there are no visible tabs
-	$: if (!showControlsTab && !showFilesTab && !showOverviewTab && !showDocumentTab) {
+	$: if (
+		!specialPanel &&
+		!showControlsTab &&
+		!showFilesTab &&
+		!showOverviewTab &&
+		!showDocumentTab &&
+		!showSourcesTab
+	) {
 		showControls.set(false);
 	}
 
@@ -124,6 +153,26 @@
 	$: if ($openDocumentTabSignal && showDocumentTab) {
 		activeTab = 'document';
 		showControls.set(true);
+	}
+
+	// [Gradient] Citation clicks select Sources even when the panel is already open.
+	// Only react to signals raised after this instance mounted: the store keeps its
+	// count across chat switches, and a fresh ChatControls must not pop the panel
+	// open just because a citation was clicked in an earlier chat.
+	let handledSourcesSignal = $openSourcesTabSignal;
+	$: if ($openSourcesTabSignal !== handledSourcesSignal && showSourcesTab) {
+		handledSourcesSignal = $openSourcesTabSignal;
+		activeTab = 'sources';
+		showEmbeds.set(false);
+		showArtifacts.set(false);
+		showCallOverlay.set(false);
+		showControls.set(true);
+		widenSourcesPanel();
+	}
+
+	// [Gradient] Keep width changes from retriggering the tab-opening signal.
+	function widenSourcesPanel() {
+		if (largeScreen && controlsWidth < 560) controlsWidth = 620;
 	}
 
 	// Auto-switch to Files tab when display_file is triggered
@@ -230,9 +279,23 @@
 		<Drawer
 			show={$showControls}
 			onClose={() => showControls.set(false)}
-			className="min-h-[100dvh] !bg-white dark:!bg-gray-850"
+			className="!bg-white dark:!bg-gray-850"
+			heightClass={activeTab === 'sources'
+				? `${citationSheetExpanded ? 'h-[100dvh]' : 'h-[72dvh]'} rounded-t-2xl`
+				: 'min-h-[100dvh]'}
 		>
-			<div class="h-[100dvh] flex flex-col">
+			<div class="{activeTab === 'sources' ? 'h-full' : 'h-[100dvh]'} flex flex-col min-h-0">
+				<!-- [Gradient] A partial sheet keeps the answer visible above the citation. -->
+				{#if activeTab === 'sources'}
+					<button
+						class="shrink-0 w-full flex justify-center py-3"
+						aria-label={$i18n.t('Toggle citation panel height')}
+						aria-expanded={citationSheetExpanded}
+						on:click={() => (citationSheetExpanded = !citationSheetExpanded)}
+					>
+						<span class="w-10 h-1 rounded-full bg-gray-300 dark:bg-gray-600"></span>
+					</button>
+				{/if}
 				{#if $showCallOverlay}
 					<div
 						class="h-full max-h-[100dvh] bg-white text-gray-700 dark:bg-black dark:text-gray-300 flex justify-center"
@@ -257,6 +320,18 @@
 						<!-- Tab bar -->
 						<div class="flex items-center justify-between px-2 pt-2 pb-2 shrink-0">
 							<div class="flex gap-1 min-w-0 overflow-x-auto scrollbar-hidden">
+								<!-- [Gradient] Sources is the first panel tab. -->
+								{#if showSourcesTab}
+									<button
+										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+										'sources'
+											? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
+											: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
+										on:click={() => (activeTab = 'sources')}
+									>
+										{$i18n.t('Sources')}
+									</button>
+								{/if}
 								{#if showControlsTab}
 									<button
 										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
@@ -325,7 +400,7 @@
 								? 'h-full'
 								: activeTab === 'controls'
 									? 'overflow-y-auto px-3 pt-1'
-									: activeTab === 'document'
+									: activeTab === 'document' || activeTab === 'sources'
 										? 'h-full'
 										: ''}"
 						>
@@ -344,6 +419,9 @@
 								<PyodideFileNav />
 							{:else if activeTab === 'document'}
 								<Document />
+							{:else if activeTab === 'sources'}
+								<!-- [Gradient] The tab initializes from the current branch when needed. -->
+								<CitationPanel {history} {chatId} overlay={dragged} />
 							{:else}
 								<Controls embed={true} {models} bind:chatFiles bind:params />
 							{/if}
@@ -395,6 +473,18 @@
 						<!-- Tab bar -->
 						<div class="flex items-center justify-between px-2 pt-2 pb-2 shrink-0">
 							<div class="flex gap-1 min-w-0 overflow-x-auto scrollbar-hidden">
+								<!-- [Gradient] Sources is the first panel tab. -->
+								{#if showSourcesTab}
+									<button
+										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+										'sources'
+											? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
+											: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
+										on:click={() => (activeTab = 'sources')}
+									>
+										{$i18n.t('Sources')}
+									</button>
+								{/if}
 								{#if showControlsTab}
 									<button
 										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
@@ -460,7 +550,9 @@
 						</div>
 
 						<div
-							class="flex-1 min-h-0 {activeTab === 'overview' || activeTab === 'document'
+							class="flex-1 min-h-0 {activeTab === 'overview' ||
+							activeTab === 'document' ||
+							activeTab === 'sources'
 								? 'h-full'
 								: activeTab === 'controls'
 									? 'overflow-y-auto px-3 pt-1'
@@ -486,6 +578,9 @@
 								<PyodideFileNav overlay={dragged} />
 							{:else if activeTab === 'document'}
 								<Document overlay={dragged} />
+							{:else if activeTab === 'sources'}
+								<!-- [Gradient] The tab initializes from the current branch when needed. -->
+								<CitationPanel {history} {chatId} overlay={dragged} />
 							{:else}
 								<Controls embed={true} {models} bind:chatFiles bind:params />
 							{/if}

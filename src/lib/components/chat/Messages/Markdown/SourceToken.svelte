@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { LinkPreview } from 'bits-ui';
 	import { decodeString } from '$lib/utils';
+	// [Gradient] Markdown ids start with the chat and message ids, then token suffixes.
+	import { activeCitationIndex, citationPanel } from '$lib/stores';
 	import Source from './Source.svelte';
 
 	export let id;
@@ -8,7 +10,14 @@
 	export let sourceIds = [];
 	export let onClick: Function = () => {};
 
-	let containerElement;
+	$: messagePrefix = $citationPanel ? `${$citationPanel.chatId}-${$citationPanel.messageId}` : '';
+	$: messageId =
+		messagePrefix && (id === messagePrefix || id?.startsWith(`${messagePrefix}-`))
+			? $citationPanel?.messageId
+			: null;
+	$: activeIndex =
+		messageId && messageId === $activeCitationIndex?.messageId ? $activeCitationIndex.index : null;
+	$: active = activeIndex !== null && (token?.ids ?? []).includes(activeIndex);
 	let openPreview = false;
 
 	// Helper function to return only the domain from a URL
@@ -43,13 +52,17 @@
 	{#if (token?.ids ?? []).length == 1}
 		{@const id = token.ids[0]}
 		{@const identifier = token.citationIdentifiers ? token.citationIdentifiers[0] : id - 1}
-		<Source id={identifier} title={sourceIds[id - 1]} {onClick} />
+		<Source active={id === activeIndex} id={identifier} title={sourceIds[id - 1]} {onClick} />
 	{:else}
 		<LinkPreview.Root openDelay={0} bind:open={openPreview}>
 			<LinkPreview.Trigger>
 				<button
 					aria-label={`${getDisplayTitle(formattedTitle(decodeString(sourceIds[token.ids[0] - 1])))} +${(token?.ids ?? []).length - 1} more sources`}
 					class="text-[0.625rem] w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
+					class:ring-2={active}
+					class:ring-gray-400={active}
+					class:!bg-gray-200={active}
+					class:dark:!bg-gray-700={active}
 					on:click={() => {
 						openPreview = !openPreview;
 					}}
@@ -67,7 +80,12 @@
 							{@const id =
 								typeof identifier === 'string' ? parseInt(identifier.split('#')[0]) : identifier}
 							<div class="">
-								<Source id={identifier} title={sourceIds[id - 1]} {onClick} />
+								<Source
+									active={id === activeIndex}
+									id={identifier}
+									title={sourceIds[id - 1]}
+									{onClick}
+								/>
 							</div>
 						{/each}
 					</div>

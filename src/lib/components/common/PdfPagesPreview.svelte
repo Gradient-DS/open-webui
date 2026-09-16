@@ -52,8 +52,9 @@
 	const selectPage = async (index: number) => {
 		currentSlide = Math.min(Math.max(0, index), Math.max(0, thumbnails.length - 1));
 		pageTarget = currentSlide + 1;
-		await tick();
+		// [Gradient] Set scroll intent before the targetPage prop effect can position instantly.
 		await pdfViewerRef?.scrollToPage?.(pageTarget);
+		await tick();
 		scrollSelectedThumbnailIntoView();
 	};
 

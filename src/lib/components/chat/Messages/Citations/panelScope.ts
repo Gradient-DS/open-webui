@@ -1,14 +1,14 @@
 import type { DisplayCitation } from './reduceSources';
 
 /**
- * [Gradient] Per-message source-panel scope.
+ * [Gradient] Legacy per-message source-panel scope.
  *
  * The agent tags each cumulative source with provenance flags: `current_turn`
  * (a tool retrieved it this turn) and `cited_this_turn` (the model wrote its
  * `[N]` in this turn's answer, including a cross-turn re-cite of an earlier
- * turn's source). The bottom panel shows the union — everything this message
- * actually surfaced — while inline `[N]` still resolves against the full
- * cumulative `sources` array.
+ * turn's source). This helper retains the retrieved/cited union for legacy
+ * callers. Question groups and message pills now use `usedCitations` below;
+ * inline `[N]` still resolves against the full cumulative `sources` array.
  *
  * Gating is on `cited_this_turn` PRESENCE, deliberately NOT on `current_turn`.
  * A pre-change agent emits only `current_turn` (the `cited_this_turn` field
@@ -22,4 +22,15 @@ export function scopePanelCitations(citations: DisplayCitation[]): DisplayCitati
 	const speaksProvenance = citations.some((c) => c.cited_this_turn !== undefined);
 	if (!speaksProvenance) return citations;
 	return citations.filter((c) => c.current_turn || c.cited_this_turn);
+}
+
+// [Gradient] Answer groups prefer explicit cites; older agents can only identify retrievals.
+export function usedCitations(citations: DisplayCitation[]): DisplayCitation[] {
+	if (citations.some((citation) => citation.cited_this_turn !== undefined)) {
+		return citations.filter((citation) => citation.cited_this_turn);
+	}
+	if (citations.some((citation) => citation.current_turn !== undefined)) {
+		return citations.filter((citation) => citation.current_turn);
+	}
+	return citations;
 }
