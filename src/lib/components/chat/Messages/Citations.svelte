@@ -66,13 +66,20 @@
 		}
 		if (
 			$showCitationPanel &&
-			$citationPanel?.citation.id === citation.id &&
+			$citationPanel?.citation?.id === citation.id &&
+			$citationPanel.level !== 'list' &&
 			$citationPanel.messageId === id &&
 			$citationPanel.chatId === chatId
 		)
 			return;
+		openPanel(citation, 'detail');
+	};
+
+	// [Gradient] Navigator's pill opens the message list without selecting a source.
+	const openPanel = (citation: DisplayCitation | null, level: 'list' | 'detail') => {
 		citationPanel.set({
 			citation,
+			level,
 			citations,
 			visibleCitations,
 			showPercentage: citationRelevanceEnabled && showPercentage,
@@ -83,6 +90,7 @@
 		showCitationPanel.set(true);
 		showControls.set(true);
 	};
+	$: navigatorEnabled = !readOnly && $citationPanelVariant === 'navigator';
 
 	export const showSourceModal = (sourceId: string | number) => {
 		let index;
@@ -174,12 +182,20 @@
 	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
 		<button
 			class="text-xs font-normal text-gray-600 dark:text-gray-300 px-3.5 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-1 border border-gray-50 dark:border-gray-850/30"
-			aria-label={visibleCitations.length === 1
-				? $i18n.t('Toggle 1 source')
-				: $i18n.t('Toggle {{COUNT}} sources', { COUNT: visibleCitations.length })}
-			aria-expanded={showCitations}
+			aria-label={navigatorEnabled
+				? $i18n.t('Sources')
+				: visibleCitations.length === 1
+					? $i18n.t('Toggle 1 source')
+					: $i18n.t('Toggle {{COUNT}} sources', { COUNT: visibleCitations.length })}
+			aria-expanded={navigatorEnabled
+				? $showCitationPanel &&
+					$citationPanel?.messageId === id &&
+					$citationPanel?.chatId === chatId
+				: showCitations}
 			on:click={() => {
-				showCitations = !showCitations;
+				// [Gradient] Navigator owns the source list in the side panel.
+				if (navigatorEnabled) openPanel(null, 'list');
+				else showCitations = !showCitations;
 			}}
 		>
 			{#if urlCitations.length > 0}
@@ -220,12 +236,14 @@
 	</div>
 {/if}
 
-{#if showCitations}
+{#if showCitations && !navigatorEnabled}
 	<div class="py-1.5">
 		<div class="text-xs gap-2 flex flex-col">
-			{#each visibleCitations as citation, idx}
+			<!-- [Gradient] Keep labels and DOM ids aligned with cumulative inline [N] references. -->
+			{#each visibleCitations as citation}
+				{@const index = citations.indexOf(citation) + 1}
 				<button
-					id={`source-${id}-${idx + 1}`}
+					id={`source-${id}-${index}`}
 					aria-label={$i18n.t('View source: {{name}}', {
 						name: decodeString(citation.source.name)
 					})}
@@ -235,7 +253,7 @@
 					}}
 				>
 					<div class=" font-normal bg-gray-50 dark:bg-gray-850 rounded-md px-1">
-						{idx + 1}
+						{index}
 					</div>
 					<div
 						class="flex-1 truncate hover:text-black dark:text-white/60 dark:hover:text-white transition text-left"

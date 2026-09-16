@@ -194,7 +194,8 @@ export const embed = writable(null);
 // [Gradient] Citation side panel (spike). Mirrors showEmbeds/embed.
 export const showCitationPanel = writable(false);
 export const citationPanel = writable<null | {
-	citation: DisplayCitation;
+	citation: DisplayCitation | null;
+	level?: 'list' | 'detail';
 	citations: DisplayCitation[];
 	visibleCitations: DisplayCitation[];
 	showPercentage: boolean;
