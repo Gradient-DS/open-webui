@@ -58,6 +58,99 @@ async def test_the_bearer_key_and_subject_assertion_are_both_sent(recorded_http)
 
 
 @pytest.mark.asyncio
+async def test_put_bytes_sends_the_presigned_headers_and_no_bearer(recorded_http):
+    """Presigned uploads send raw bytes and supplied headers without minting an assertion."""
+    requests, responses = recorded_http
+    responses.append(httpx.Response(200))
+    minter = Mock(return_value='test-assertion')
+    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=minter, timeout=7.0)
+    url = 'https://s3.invalid/bucket/file?X-Amz-Signature=private-signature'
+    body = b'\x00uploaded bytes\xff'
+    headers = {'x-amz-checksum-sha256': 'test-checksum', 'Content-Length': str(len(body))}
+
+    assert await client.put_bytes(url, headers=headers, body=body) is None
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == 'PUT'
+    assert str(request.url) == url
+    assert request.content == body
+    for name, value in headers.items():
+        assert request.headers[name] == value
+    for name in ('Authorization', 'X-Soev-Subject', 'Idempotency-Key'):
+        assert name not in request.headers
+    assert request.extensions['timeout']['read'] == 7.0
+    minter.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', [403, 302])
+async def test_put_bytes_maps_a_rejected_upload_to_a_soev_api_error(recorded_http, status):
+    """Rejected uploads expose only their status and never follow redirects."""
+    requests, responses = recorded_http
+    url = 'https://s3.invalid/bucket/file?X-Amz-Signature=private-signature'
+    responses.append(
+        httpx.Response(
+            status,
+            text=f'<Error><Code>AccessDenied</Code><Resource>{url}</Resource></Error>',
+            headers={'Content-Type': 'application/xml', 'Location': 'https://other.invalid/'},
+        )
+    )
+
+    with pytest.raises(SoevApiError) as caught:
+        await SoevClient('https://soev.invalid', 'test-api-key').put_bytes(url, headers={}, body=b'upload')
+
+    assert caught.value.status == 502
+    assert caught.value.code == 'upload_failed'
+    assert str(status) in caught.value.detail
+    assert url not in str(caught.value)
+    assert 'private-signature' not in str(caught.value)
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_text_returns_markdown_without_json_parsing(recorded_http):
+    """Markdown responses retain their exact text without JSON decoding."""
+    requests, responses = recorded_http
+    markdown = '# Title\n\nSome **markdown**, café.\n'
+    responses.append(httpx.Response(200, text=markdown, headers={'Content-Type': 'text/markdown'}))
+
+    assert await SoevClient('https://soev.invalid', 'test-api-key').get_text('/v1/files/file/text') == markdown
+
+    assert requests[0].method == 'GET'
+    assert str(requests[0].url) == 'https://soev.invalid/v1/files/file/text'
+    assert requests[0].headers['Authorization'] == 'Bearer test-api-key'
+    assert 'X-Soev-Subject' not in requests[0].headers
+
+
+@pytest.mark.asyncio
+async def test_get_text_carries_the_subject_assertion(recorded_http):
+    """Text reads carry user authority and preserve API problem errors."""
+    requests, responses = recorded_http
+    problem = {'code': 'file_not_found', 'detail': 'The file does not exist.'}
+    responses.extend(
+        [
+            httpx.Response(200, text='# Title\n', headers={'Content-Type': 'text/markdown'}),
+            httpx.Response(404, json=problem, headers={'Content-Type': 'application/problem+json'}),
+        ]
+    )
+    minter = Mock(return_value='test-assertion')
+    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=minter)
+
+    assert await client.get_text('/v1/files/file/text', as_user='owui:user:alice') == '# Title\n'
+    with pytest.raises(SoevApiError) as caught:
+        await client.get_text('/v1/files/missing/text', as_user='owui:user:alice')
+
+    assert minter.call_count == 2
+    minter.assert_called_with('owui:user:alice')
+    assert all(request.headers['X-Soev-Subject'] == 'test-assertion' for request in requests)
+    assert all(request.headers['Authorization'] == 'Bearer test-api-key' for request in requests)
+    assert caught.value.status == 404
+    assert caught.value.code == problem['code']
+    assert caught.value.detail == problem['detail']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('method', ['POST', 'PATCH', 'PUT', 'DELETE'])
 async def test_a_mutation_requires_an_idempotency_key(recorded_http, method):
     """Every mutation requires a nonempty caller-owned key before any I/O."""
@@ -264,15 +357,19 @@ async def test_an_invalid_problem_uses_a_safe_fallback(recorded_http, body, stat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('error_type, status', [(httpx.ConnectError, 502), (httpx.ReadTimeout, 504)])
-async def test_transport_failures_are_safe_and_are_not_retried(recorded_http, caplog, error_type, status):
+@pytest.mark.parametrize('method', ['get', 'get_text', 'put_bytes'])
+async def test_transport_failures_are_safe_and_are_not_retried(recorded_http, caplog, error_type, status, method):
     """Transport exceptions cannot expose credentials or replay a subject assertion."""
     requests, responses = recorded_http
     responses.append(error_type('private-transport-detail test-api-key test-assertion'))
     with caplog.at_level(logging.DEBUG), pytest.raises(SoevApiError) as caught:
-        await SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda _: 'test-assertion').get(
-            '/v1/collections', as_user='owui:user:alice'
-        )
+        client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda _: 'test-assertion')
+        if method == 'put_bytes':
+            await client.put_bytes('https://s3.invalid/file?signature=private-signature', headers={}, body=b'upload')
+        else:
+            await getattr(client, method)('/v1/collections', as_user='owui:user:alice')
     assert caught.value.status == status
+    assert caught.value.code == ('upload_failed' if method == 'put_bytes' else 'upstream_error')
     assert len(requests) == 1
     assert caught.value.__suppress_context__
     assert 'private-transport-detail' not in str(caught.value) + caplog.text
