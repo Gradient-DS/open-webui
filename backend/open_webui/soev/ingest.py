@@ -1,4 +1,4 @@
-"""Submit one ingest job per file and collection, retaining upload progress on the file row."""
+"""Submit file ingest jobs, retain upload progress, and read renditions on demand."""
 
 import asyncio
 import datetime as dt
@@ -33,6 +33,29 @@ async def _as_user(user_id: str, client: SoevClient) -> str:
     ref = f'owui:user:{user_id}'
     await identity.ensure_link(ref, client)
     return ref
+
+
+async def rendition_of(file: FileModel, user_id: str, *, client: SoevClient | None = None) -> str | None:
+    content = (file.data or {}).get('content')
+    if content:
+        return content
+    if not config.SOEV_API_URL:
+        return None
+    client = client if client is not None else identity.build_client()
+    ref = await _as_user(user_id, client)
+    response = await client.get('/v1/documents', params={'source_id': file.id}, as_user=ref)
+    keys = [document['collection_key'] for document in response['data']]
+    keys.sort(key=lambda key: key != attachments_collection_key(user_id))
+    if not keys:
+        return None
+    try:
+        return await client.get_text(
+            f'/v1/collections/{quote(keys[0], safe="")}/documents/{quote(file.id, safe="")}/content', as_user=ref
+        )
+    except SoevApiError as error:
+        if error.status == 404 or (error.status == 409 and error.code == 'rendition_missing'):
+            return None
+        raise
 
 
 def _read_file(file_path: str) -> bytes:

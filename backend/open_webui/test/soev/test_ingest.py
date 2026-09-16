@@ -10,6 +10,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
@@ -397,3 +398,158 @@ async def test_pending_files_use_soev_collection_and_data_status_without_a_knowl
         processing.id,
     }
     assert await env.files.Files.get_pending_files_for_knowledge('absent') == []
+
+
+async def rendition_file(env, data=None):
+    return await env.files.Files.insert_new_file(
+        'alice', env.files.FileForm(id=str(uuid4()), filename='report.pdf', path='', data=data or {})
+    )
+
+
+async def data_content(file):
+    from open_webui.routers.files import get_file_data_content_by_id
+
+    return await get_file_data_content_by_id(file.id, user=SimpleNamespace(id='alice', role='user'), db=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('data', [{}, {'content': ''}, {'content': None}])
+async def test_data_content_serves_the_rendition_for_a_landed_file(env, data):
+    """The content route reads markdown on demand without persisting it on the file row."""
+    file = await rendition_file(env, data)
+    env.api.add_document('kb', file.id, rendition='# Landed\n\nMarkdown content.')
+    assert await data_content(file) == {'content': '# Landed\n\nMarkdown content.'}
+    assert (await env.files.Files.get_file_by_id(file.id)).model_dump() == file.model_dump()
+    assert [(r.method, r.url.path) for r in env.api.requests] == [
+        ('GET', '/v1/documents'),
+        ('GET', f'/v1/collections/kb/documents/{file.id}/content'),
+    ]
+    assert dict(env.api.requests[0].url.params) == {'source_id': file.id}
+
+
+@pytest.mark.asyncio
+async def test_data_content_prefers_stored_text_for_a_legacy_file(env):
+    """Legacy text wins over a remote rendition without issuing any API request."""
+    file = await rendition_file(env, {'content': 'Legacy text'})
+    env.api.add_document('kb', file.id, rendition='# New rendition')
+    assert await data_content(file) == {'content': 'Legacy text'}
+    assert not env.api.requests
+
+
+@pytest.mark.asyncio
+async def test_data_content_is_empty_while_in_flight(env):
+    """A file without a landed document returns None from the helper and an empty route response."""
+    file = await rendition_file(env)
+    assert await env.module.rendition_of(file, 'alice', client=env.client) is None
+    assert await data_content(file) == {'content': ''}
+    assert all(r.url.path == '/v1/documents' for r in env.api.requests)
+
+
+@pytest.mark.asyncio
+async def test_the_rendition_is_read_under_the_users_assertion(env):
+    """Both HTTP reads carry fresh assertions naming the requesting user."""
+    file = await rendition_file(env)
+    env.api.add_document('kb', file.id, rendition='# Markdown')
+    assert await env.module.rendition_of(file, 'alice', client=env.client) == '# Markdown'
+    assert len(env.api.requests) == 2
+    tokens = [request.headers['X-Soev-Subject'] for request in env.api.requests]
+    assert len(set(tokens)) == 2
+    for token in tokens:
+        encoded = token.split('.')[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+        assert claims['sub'] == 'owui:user:alice'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('has_attachment', [False, True])
+async def test_rendition_prefers_own_attachments_then_returned_order(env, has_attachment):
+    """Own attachments take precedence, while other collections retain their returned order."""
+    file = await rendition_file(env)
+    for user in ('alice', 'bob'):
+        key = env.module.attachments_collection_key(user)
+        env.api.collections[key] = {**env.api.collections['kb'], 'key': key}
+        if user == 'bob' or has_attachment:
+            env.api.add_document(key, file.id, rendition=f'# {user}')
+    env.api.add_document('kb', file.id, rendition='# Knowledge')
+    env.api.requests.clear()
+    expected = '# alice' if has_attachment else '# Knowledge'
+    assert await env.module.rendition_of(file, 'alice', client=env.client) == expected
+    assert len(env.api.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_rendition_keeps_returned_order_and_quotes_path_segments(env, monkeypatch):
+    """Non-attachment keys keep server ordering and reserved characters remain inside path segments."""
+    file = await rendition_file(env)
+    file.id = 'file/with ?#%'
+    lookup = AsyncMock(return_value={'data': [{'collection_key': 'z/ ?#%'}, {'collection_key': 'a'}]})
+    read = AsyncMock(return_value='# Markdown')
+    monkeypatch.setattr(env.client, 'get', lookup)
+    monkeypatch.setattr(env.client, 'get_text', read)
+    assert await env.module.rendition_of(file, 'alice', client=env.client) == '# Markdown'
+    lookup.assert_awaited_once_with('/v1/documents', params={'source_id': file.id}, as_user='owui:user:alice')
+    read.assert_awaited_once_with(
+        '/v1/collections/z%2F%20%3F%23%25/documents/file%2Fwith%20%3F%23%25/content', as_user='owui:user:alice'
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', [404, 409])
+async def test_rendition_missing_does_not_try_another_collection(env, monkeypatch, status):
+    """A missing first rendition yields None even when another collection has markdown."""
+    file = await rendition_file(env)
+    key = await env.module.ensure_attachments_collection('alice', env.client)
+    env.api.add_document(key, file.id)
+    env.api.add_document('kb', file.id, rendition='# Other')
+    if status == 404:
+        original_get = env.client.get
+
+        async def get_then_delete(*args, **kwargs):
+            response = await original_get(*args, **kwargs)
+            del env.api.documents[key, file.id]
+            return response
+
+        monkeypatch.setattr(env.client, 'get', get_then_delete)
+    env.api.requests.clear()
+    assert await env.module.rendition_of(file, 'alice', client=env.client) is None
+    assert [r.url.path for r in env.api.requests] == [
+        '/v1/documents',
+        f'/v1/collections/{key}/documents/{file.id}/content',
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'operation,status,code',
+    [
+        ('get', 404, 'document_not_found'),
+        ('get', 409, 'rendition_missing'),
+        ('get', 403, 'forbidden'),
+        ('get', 500, 'upstream_error'),
+        ('get_text', 403, 'forbidden'),
+        ('get_text', 409, 'other_conflict'),
+        ('get_text', 500, 'upstream_error'),
+    ],
+)
+async def test_rendition_propagates_other_api_errors(env, monkeypatch, operation, status, code):
+    """Lookup and content errors propagate unless the content rendition is missing."""
+    file = await rendition_file(env)
+    env.api.add_document('kb', file.id, rendition='# Markdown')
+    error = env.module.SoevApiError(status, code, 'Read failed')
+    monkeypatch.setattr(env.client, operation, AsyncMock(side_effect=error))
+    with pytest.raises(env.module.SoevApiError) as caught:
+        await env.module.rendition_of(file, 'alice', client=env.client)
+    assert caught.value is error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('content', [None, '', 'Legacy text'])
+async def test_rendition_without_soev_uses_only_stored_content(env, monkeypatch, content):
+    """Disabling soev prevents client construction and preserves legacy content."""
+    file = await rendition_file(env, {'content': content})
+    monkeypatch.setattr(env.module.config, 'SOEV_API_URL', '')
+    build = AsyncMock(side_effect=AssertionError('Unexpected client construction'))
+    monkeypatch.setattr(env.identity, 'build_client', build)
+    assert await env.module.rendition_of(file, 'alice') == (content or None)
+    build.assert_not_called()
+    assert not env.api.requests
