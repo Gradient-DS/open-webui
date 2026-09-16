@@ -185,9 +185,6 @@
 				bind:this={groupList}
 				{groups}
 				expanded={expandedGroups}
-				selectedMessageId={panel?.messageId}
-				selectedCitation={citation}
-				{relevanceEnabled}
 				onToggle={toggleGroup}
 				onSelect={selectSource}
 			/>

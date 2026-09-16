@@ -8,13 +8,11 @@
 	import CitationSourceList from './CitationSourceList.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
+	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 
 	const i18n = getContext<Readable<I18n>>('i18n');
 	export let groups: SourceGroup[] = [];
 	export let expanded: Set<string> = new Set();
-	export let selectedMessageId: string | undefined = undefined;
-	export let selectedCitation: DisplayCitation | null = null;
-	export let relevanceEnabled = true;
 	export let onToggle: (messageId: string) => void;
 	export let onSelect: (citation: DisplayCitation, group: SourceGroup) => void;
 	const headers = new Map<string, HTMLButtonElement>();
@@ -36,13 +34,21 @@
 <div class="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-2 space-y-1">
 	{#each groups.filter((group) => group.used.length > 0) as group (group.messageId)}
 		<section>
+			<!-- [Gradient] The header reads as the user's question: bubble icon, italic, own surface. -->
 			<button
 				use:registerHeader={group.messageId}
-				class="flex w-full items-center gap-2 rounded-lg p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-850"
+				class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left border transition {expanded.has(
+					group.messageId
+				)
+					? 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+					: 'bg-gray-50 dark:bg-gray-850 border-gray-100 dark:border-gray-800 hover:bg-gray-100 dark:hover:bg-gray-800'}"
 				aria-expanded={expanded.has(group.messageId)}
 				on:click={() => onToggle(group.messageId)}
 			>
-				<span class="min-w-0 flex-1 line-clamp-2 text-sm">{group.question}</span>
+				<ChatBubbleOval className="size-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
+				<span class="min-w-0 flex-1 truncate text-sm italic text-gray-800 dark:text-gray-200"
+					>{group.question}</span
+				>
 				<span class="shrink-0 text-xs text-gray-500 dark:text-gray-400"
 					>{$i18n.t('{{count}} sources', { count: group.used.length })}</span
 				>
@@ -56,11 +62,6 @@
 				<CitationSourceList
 					embedded
 					visibleCitations={group.used}
-					selectedCitation={selectedMessageId === group.messageId
-						? (group.used.find((citation) => citation.id === selectedCitation?.id) ?? null)
-						: null}
-					showPercentage={relevanceEnabled && group.showPercentage}
-					showRelevance={relevanceEnabled && group.showRelevance}
 					onSelect={(citation) => onSelect(citation, group)}
 				/>
 			{/if}

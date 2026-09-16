@@ -1,51 +1,30 @@
 <script lang="ts">
 	// [Gradient] Derive message-level rows locally; listing sources never loads their files.
-	import { getContext, onMount } from 'svelte';
+	import { getContext } from 'svelte';
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
 	import type { DisplayCitation } from './reduceSources';
 	import { mergeCitationDocuments } from './citationDocuments';
-	import { calculatePercentage, decodeString, getRelevanceColor } from './useCitationDocument';
+	import { decodeString } from './useCitationDocument';
 	import Document from '$lib/components/icons/Document.svelte';
 	const i18n = getContext<Readable<I18n>>('i18n');
 	// [Gradient] Groups own scrolling and header positioning when this list is embedded.
 	export let embedded = false;
 	export let visibleCitations: DisplayCitation[] = [];
-	export let selectedCitation: DisplayCitation | null = null;
-	export let showPercentage = false;
-	export let showRelevance = true;
 	export let onSelect: (citation: DisplayCitation) => void;
-	let list: HTMLDivElement;
 	$: rows = visibleCitations.map((citation) => {
-		const documents = mergeCitationDocuments(citation);
-		const scores = documents
-			.map((doc) => doc.distance)
-			.filter((score): score is number => typeof score === 'number' && Number.isFinite(score));
-		return {
-			citation,
-			count: documents.length,
-			best: scores.length ? Math.max(...scores) : undefined
-		};
-	});
-	onMount(() => {
-		if (!embedded)
-			list?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
+		// [Gradient] No relevance in the list: a per-source maximum over its passages
+		// misrepresents how the scores work. Relevance stays on the passages.
+		return { citation, count: mergeCitationDocuments(citation).length };
 	});
 </script>
 
-<div
-	bind:this={list}
-	class="space-y-1 {embedded ? '' : 'flex-1 min-h-0 overflow-y-auto scrollbar-thin p-2'}"
->
+<div class="space-y-1 {embedded ? '' : 'flex-1 min-h-0 overflow-y-auto scrollbar-thin p-2'}">
 	{#each rows as row}
 		{@const name = decodeString(row.citation.source.name ?? '')}
 		<button
-			class="flex w-full items-start gap-2 rounded-xl p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-850 {selectedCitation ===
-			row.citation
-				? 'bg-gray-100 dark:bg-gray-800'
-				: ''}"
+			class="flex w-full items-start gap-2 rounded-xl p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-850"
 			aria-label={$i18n.t('View source: {{name}}', { name })}
-			aria-current={selectedCitation === row.citation ? 'true' : undefined}
 			on:click={() => onSelect(row.citation)}
 		>
 			{#if row.citation.source.name?.startsWith('http')}
@@ -65,14 +44,6 @@
 				<div class="line-clamp-1 text-sm">{name}</div>
 				<div class="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
 					<span>{$i18n.t('{{count}} passages', { count: row.count })}</span>
-					{#if showRelevance && row.best !== undefined}
-						{#if showPercentage}
-							{@const percentage = calculatePercentage(row.best)}
-							{#if percentage !== null}<span class="px-1 rounded-sm {getRelevanceColor(percentage)}"
-									>{percentage.toFixed(0)}%</span
-								>{/if}
-						{:else}<span>({row.best.toFixed(4)})</span>{/if}
-					{/if}
 				</div>
 			</div>
 		</button>
