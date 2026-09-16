@@ -57,7 +57,7 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 
 	import Error from './Error.svelte';
-	import Citations from './Citations.svelte';
+	import Citations from './SoevCitations.svelte'; // [Gradient]
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import PresentUIDispatcher from './Markdown/PresentUIDispatcher.svelte';

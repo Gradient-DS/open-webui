@@ -10,7 +10,7 @@
 	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
 
 	import ContentRenderer from './Messages/ContentRenderer.svelte';
-	import Citations from './Messages/Citations.svelte';
+	import Citations from './Messages/SoevCitations.svelte';
 	import {
 		normalizeCitations,
 		buildFullSourceList,
@@ -260,7 +260,7 @@
 										{$i18n.t('PDF document (.pdf)')}
 									</div>
 								</button>
-							{#if $config?.features?.enable_docx_export ?? true}
+								{#if $config?.features?.enable_docx_export ?? true}
 									<button
 										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 										on:click={downloadDocx}
@@ -269,7 +269,7 @@
 											{$i18n.t('Word document (.docx)')}
 										</div>
 									</button>
-							{/if}
+								{/if}
 							</div>
 						</Dropdown>
 					</div>
