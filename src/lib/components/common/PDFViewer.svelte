@@ -503,84 +503,96 @@
 		const scrollRatio = outerContainer.scrollTop / (outerContainer.scrollHeight || 1);
 		let succeeded = false;
 		try {
-			const pdfjs = await import('pdfjs-dist');
-			if (token !== renderToken || !pdfDoc) return;
-			const dpr = window.devicePixelRatio || 1;
-
-			const pageWrappers = sceneElement.querySelectorAll('.pdf-page-wrapper');
-
-			cancelTextLayers();
-			// [Gradient] Clear page-indexed citation layers on document replacement.
-			pageTextLayerDivs = [];
-			bboxLayerDivs = [];
-			pageBaseDims = [];
-
-			for (let i = 0; i < pageWrappers.length; i++) {
-				// [Gradient] Zoom loops over rendered wrappers, not absolute PDF pages.
-				const pageNumber = singlePage ? selectedPage : i + 1;
-				const page = await pdfDoc.getPage(pageNumber);
-				if (token !== renderToken) return;
-				const viewport = page.getViewport({ scale: 1 });
-				const cssScale = getCssScale(viewport, width);
-				const renderScale = cssScale * forZoom * dpr;
-				const scaledViewport = page.getViewport({ scale: renderScale });
-				const cssViewport = page.getViewport({ scale: cssScale });
-
-				const wrapper = pageWrappers[i] as HTMLElement;
-				// [Gradient] Fit both layout boxes and text layers to the new container width.
-				wrapper.style.width = `${Math.round(cssViewport.width)}px`;
-				wrapper.style.height = `${Math.round(cssViewport.height)}px`;
-				const bboxLayer = wrapper.querySelector('.bboxLayer') as HTMLElement | null;
-				if (bboxLayer) bboxLayerDivs[pageNumber - 1] = bboxLayer;
-				pageBaseDims[pageNumber - 1] = { width: viewport.width, height: viewport.height };
-				// Update the CSS custom property so textLayer dimensions resolve correctly
-				wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
-
-				const canvas = wrapper.querySelector('canvas')!;
-				canvas.style.width = wrapper.style.width;
-				canvas.style.height = wrapper.style.height;
-				canvas.width = scaledViewport.width;
-				canvas.height = scaledViewport.height;
-
-				const ctx = canvas.getContext('2d');
-				if (ctx) {
-					await page.render({ canvas, canvasContext: ctx, viewport: scaledViewport }).promise;
-					if (token !== renderToken) return;
-				}
-
-				// Rebuild text layer
-				const textLayerDiv = wrapper.querySelector('.textLayer') as HTMLElement;
-				if (textLayerDiv) {
-					textLayerDiv.innerHTML = '';
-
-					const textContent = await page.getTextContent();
-					if (token !== renderToken) return;
-					const textLayer = new pdfjs.TextLayer({
-						textContentSource: textContent,
-						container: textLayerDiv,
-						viewport: cssViewport
-					});
-					await textLayer.render();
-					if (token !== renderToken) return;
-					textLayerInstances.push(textLayer);
-					pageTextLayerDivs[pageNumber - 1] = textLayerDiv;
-				}
-			}
-			lastRenderedZoom = forZoom;
-			lastRenderedWidth = width;
-			_applyBestMatchHighlight(preservePosition ? null : 'auto');
-			if (preservePosition) {
-				outerContainer.scrollTo({
-					top: scrollRatio * outerContainer.scrollHeight,
-					behavior: 'auto'
-				});
-			}
-			succeeded = true;
+			succeeded =
+				(await rerenderPageContent(forZoom, preservePosition, token, width, scrollRatio)) === true;
 		} catch (error) {
 			if (token === renderToken) console.error('PDF rerender error:', error);
 		} finally {
 			finishRender(token, succeeded);
 		}
+	};
+
+	// [Gradient] Keep the render loop at its upstream indentation; the caller owns cleanup.
+	const rerenderPageContent = async (
+		forZoom: number,
+		preservePosition: boolean,
+		token: number,
+		width: number,
+		scrollRatio: number
+	) => {
+		const pdfjs = await import('pdfjs-dist');
+		if (token !== renderToken || !pdfDoc) return;
+		const dpr = window.devicePixelRatio || 1;
+
+		const pageWrappers = sceneElement.querySelectorAll('.pdf-page-wrapper');
+
+		cancelTextLayers();
+		// [Gradient] Clear page-indexed citation layers on document replacement.
+		pageTextLayerDivs = [];
+		bboxLayerDivs = [];
+		pageBaseDims = [];
+
+		for (let i = 0; i < pageWrappers.length; i++) {
+			// [Gradient] Zoom loops over rendered wrappers, not absolute PDF pages.
+			const pageNumber = singlePage ? selectedPage : i + 1;
+			const page = await pdfDoc.getPage(pageNumber);
+			if (token !== renderToken) return;
+			const viewport = page.getViewport({ scale: 1 });
+			const cssScale = getCssScale(viewport, width);
+			const renderScale = cssScale * forZoom * dpr;
+			const scaledViewport = page.getViewport({ scale: renderScale });
+			const cssViewport = page.getViewport({ scale: cssScale });
+
+			const wrapper = pageWrappers[i] as HTMLElement;
+			// [Gradient] Fit both layout boxes and text layers to the new container width.
+			wrapper.style.width = `${Math.round(cssViewport.width)}px`;
+			wrapper.style.height = `${Math.round(cssViewport.height)}px`;
+			const bboxLayer = wrapper.querySelector('.bboxLayer') as HTMLElement | null;
+			if (bboxLayer) bboxLayerDivs[pageNumber - 1] = bboxLayer;
+			pageBaseDims[pageNumber - 1] = { width: viewport.width, height: viewport.height };
+			// Update the CSS custom property so textLayer dimensions resolve correctly
+			wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
+
+			const canvas = wrapper.querySelector('canvas')!;
+			canvas.style.width = wrapper.style.width;
+			canvas.style.height = wrapper.style.height;
+			canvas.width = scaledViewport.width;
+			canvas.height = scaledViewport.height;
+
+			const ctx = canvas.getContext('2d');
+			if (ctx) {
+				await page.render({ canvas, canvasContext: ctx, viewport: scaledViewport }).promise;
+				if (token !== renderToken) return;
+			}
+
+			// Rebuild text layer
+			const textLayerDiv = wrapper.querySelector('.textLayer') as HTMLElement;
+			if (textLayerDiv) {
+				textLayerDiv.innerHTML = '';
+
+				const textContent = await page.getTextContent();
+				if (token !== renderToken) return;
+				const textLayer = new pdfjs.TextLayer({
+					textContentSource: textContent,
+					container: textLayerDiv,
+					viewport: cssViewport
+				});
+				await textLayer.render();
+				if (token !== renderToken) return;
+				textLayerInstances.push(textLayer);
+				pageTextLayerDivs[pageNumber - 1] = textLayerDiv;
+			}
+		}
+		lastRenderedZoom = forZoom;
+		lastRenderedWidth = width;
+		_applyBestMatchHighlight(preservePosition ? null : 'auto');
+		if (preservePosition) {
+			outerContainer.scrollTo({
+				top: scrollRatio * outerContainer.scrollHeight,
+				behavior: 'auto'
+			});
+		}
+		return true;
 	};
 
 	const getCssScale = (viewport: { width: number; height: number }, width: number) => {
@@ -631,111 +643,116 @@
 		layersRendered = false;
 		const width = outerContainer.clientWidth;
 		try {
-			// Clear previous content
-			sceneElement.innerHTML = '';
-
-			cancelTextLayers();
-			// [Gradient] Citation arrays use absolute page indices in single-page mode too.
-			pageTextLayerDivs = [];
-			bboxLayerDivs = [];
-			pageBaseDims = [];
-
-			const pdfjs = await import('pdfjs-dist');
-			if (token !== renderToken || !pdfDoc) return;
-			const dpr = window.devicePixelRatio || 1;
-			const wrappers: HTMLElement[] = [];
-			const firstPage = singlePage ? selectedPage : 1;
-			const lastPage = singlePage ? selectedPage : pdfDoc.numPages;
-
-			for (let i = firstPage; i <= lastPage; i++) {
-				const page = await pdfDoc.getPage(i);
-				if (token !== renderToken) return;
-				const viewport = page.getViewport({ scale: 1 });
-
-				// Scale to fit container width
-				const cssScale = getCssScale(viewport, width);
-				const renderScale = cssScale * dpr;
-				const scaledViewport = page.getViewport({ scale: renderScale });
-				const cssViewport = page.getViewport({ scale: cssScale });
-
-				// Create page wrapper (positioned container for canvas + text layer)
-				const wrapper = document.createElement('div');
-				wrapper.className = 'pdf-page-wrapper';
-				wrapper.dataset.pageNumber = String(i);
-				wrapper.style.position = 'relative';
-				wrapper.style.width = `${Math.round(cssScale * viewport.width)}px`;
-				wrapper.style.height = `${Math.round(cssScale * viewport.height)}px`;
-				wrapper.style.display = 'block';
-				// pdfjs TextLayer uses --total-scale-factor (= --scale-factor * --user-unit)
-				// to position/size text spans. We must set --scale-factor so the calc resolves.
-				wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
-
-				if (i > 1) {
-					wrapper.style.marginTop = '4px';
-				}
-
-				// Create canvas
-				const canvas = document.createElement('canvas');
-				canvas.width = scaledViewport.width;
-				canvas.height = scaledViewport.height;
-				// CSS size stays at the CSS-pixel dimensions for layout
-				canvas.style.width = `${Math.round(cssScale * viewport.width)}px`;
-				canvas.style.height = `${Math.round(cssScale * viewport.height)}px`;
-				canvas.style.display = 'block';
-				wrapper.appendChild(canvas);
-
-				const ctx = canvas.getContext('2d');
-				if (!ctx) continue;
-
-				await page.render({
-					canvas,
-					canvasContext: ctx,
-					viewport: scaledViewport
-				}).promise;
-				if (token !== renderToken) return;
-
-				// Create text layer overlay — pdfjs setLayerDimensions handles its sizing
-				const textLayerDiv = document.createElement('div');
-				textLayerDiv.className = 'textLayer';
-				wrapper.appendChild(textLayerDiv);
-
-				const textContent = await page.getTextContent();
-				if (token !== renderToken) return;
-				const textLayer = new pdfjs.TextLayer({
-					textContentSource: textContent,
-					container: textLayerDiv,
-					viewport: cssViewport
-				});
-				await textLayer.render();
-				if (token !== renderToken) return;
-				textLayerInstances.push(textLayer);
-				pageTextLayerDivs[i - 1] = textLayerDiv;
-
-				// Bbox overlay — sits above the text layer but is click-transparent
-				// so selection/search still hit the text spans underneath.
-				const bboxLayerDiv = document.createElement('div');
-				bboxLayerDiv.className = 'bboxLayer';
-				wrapper.appendChild(bboxLayerDiv);
-				bboxLayerDivs[i - 1] = bboxLayerDiv;
-				pageBaseDims[i - 1] = { width: viewport.width, height: viewport.height };
-
-				wrappers.push(wrapper);
-			}
-
-			sceneElement.replaceChildren(...wrappers);
-			lastRenderedZoom = 1;
-			lastRenderedWidth = width;
-			layersRendered = true;
-			renderedPage = singlePage ? selectedPage : 0;
-			initPanzoom();
-			await scrollToTargetPage();
-			if (token !== renderToken) return;
-			syncVisiblePage();
-			// [Gradient] Citation scroll must follow the normal page scroll.
-			_applyBestMatchHighlight();
+			await renderPageContent(token, width);
 		} finally {
 			finishRender(token);
 		}
+	};
+
+	// [Gradient] The caller releases the busy token even on cancellation or failure.
+	const renderPageContent = async (token: number, width: number) => {
+		// Clear previous content
+		sceneElement.innerHTML = '';
+
+		cancelTextLayers();
+		// [Gradient] Citation arrays use absolute page indices in single-page mode too.
+		pageTextLayerDivs = [];
+		bboxLayerDivs = [];
+		pageBaseDims = [];
+
+		const pdfjs = await import('pdfjs-dist');
+		if (token !== renderToken || !pdfDoc) return;
+		const dpr = window.devicePixelRatio || 1;
+		const wrappers: HTMLElement[] = [];
+		const firstPage = singlePage ? selectedPage : 1;
+		const lastPage = singlePage ? selectedPage : pdfDoc.numPages;
+
+		for (let i = firstPage; i <= lastPage; i++) {
+			const page = await pdfDoc.getPage(i);
+			if (token !== renderToken) return;
+			const viewport = page.getViewport({ scale: 1 });
+
+			// Scale to fit container width
+			const cssScale = getCssScale(viewport, width);
+			const renderScale = cssScale * dpr;
+			const scaledViewport = page.getViewport({ scale: renderScale });
+			const cssViewport = page.getViewport({ scale: cssScale });
+
+			// Create page wrapper (positioned container for canvas + text layer)
+			const wrapper = document.createElement('div');
+			wrapper.className = 'pdf-page-wrapper';
+			wrapper.dataset.pageNumber = String(i);
+			wrapper.style.position = 'relative';
+			wrapper.style.width = `${Math.round(cssScale * viewport.width)}px`;
+			wrapper.style.height = `${Math.round(cssScale * viewport.height)}px`;
+			wrapper.style.display = 'block';
+			// pdfjs TextLayer uses --total-scale-factor (= --scale-factor * --user-unit)
+			// to position/size text spans. We must set --scale-factor so the calc resolves.
+			wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
+
+			if (i > 1) {
+				wrapper.style.marginTop = '4px';
+			}
+
+			// Create canvas
+			const canvas = document.createElement('canvas');
+			canvas.width = scaledViewport.width;
+			canvas.height = scaledViewport.height;
+			// CSS size stays at the CSS-pixel dimensions for layout
+			canvas.style.width = `${Math.round(cssScale * viewport.width)}px`;
+			canvas.style.height = `${Math.round(cssScale * viewport.height)}px`;
+			canvas.style.display = 'block';
+			wrapper.appendChild(canvas);
+
+			const ctx = canvas.getContext('2d');
+			if (!ctx) continue;
+
+			await page.render({
+				canvas,
+				canvasContext: ctx,
+				viewport: scaledViewport
+			}).promise;
+			if (token !== renderToken) return;
+
+			// Create text layer overlay — pdfjs setLayerDimensions handles its sizing
+			const textLayerDiv = document.createElement('div');
+			textLayerDiv.className = 'textLayer';
+			wrapper.appendChild(textLayerDiv);
+
+			const textContent = await page.getTextContent();
+			if (token !== renderToken) return;
+			const textLayer = new pdfjs.TextLayer({
+				textContentSource: textContent,
+				container: textLayerDiv,
+				viewport: cssViewport
+			});
+			await textLayer.render();
+			if (token !== renderToken) return;
+			textLayerInstances.push(textLayer);
+			pageTextLayerDivs[i - 1] = textLayerDiv;
+
+			// Bbox overlay — sits above the text layer but is click-transparent
+			// so selection/search still hit the text spans underneath.
+			const bboxLayerDiv = document.createElement('div');
+			bboxLayerDiv.className = 'bboxLayer';
+			wrapper.appendChild(bboxLayerDiv);
+			bboxLayerDivs[i - 1] = bboxLayerDiv;
+			pageBaseDims[i - 1] = { width: viewport.width, height: viewport.height };
+
+			wrappers.push(wrapper);
+		}
+
+		sceneElement.replaceChildren(...wrappers);
+		lastRenderedZoom = 1;
+		lastRenderedWidth = width;
+		layersRendered = true;
+		renderedPage = singlePage ? selectedPage : 0;
+		initPanzoom();
+		await scrollToTargetPage();
+		if (token !== renderToken) return;
+		syncVisiblePage();
+		// [Gradient] Citation scroll must follow the normal page scroll.
+		_applyBestMatchHighlight();
 	};
 
 	const handleWheel = (e: WheelEvent) => {
