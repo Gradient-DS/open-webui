@@ -40,8 +40,7 @@ def fake_request():
     return request
 
 
-def _patch_knowledges(monkeypatch, *, kbs, suspended_ids=None, owned_kbs=None):
-    suspended = set(suspended_ids or [])
+def _patch_knowledges(monkeypatch, *, kbs, owned_kbs=None):
     owned = list(owned_kbs) if owned_kbs is not None else []
 
     async def _get_kbs(user_id, permission='read', db=None):
@@ -50,12 +49,8 @@ def _patch_knowledges(monkeypatch, *, kbs, suspended_ids=None, owned_kbs=None):
     async def _get_owned(user_id, db=None):
         return owned
 
-    async def _is_suspended(kb_id):
-        return kb_id in suspended
-
     monkeypatch.setattr(agent_search.Knowledges, 'get_knowledge_bases_by_user_id', _get_kbs)
     monkeypatch.setattr(agent_search.Knowledges, 'get_knowledge_items_by_user_id', _get_owned)
-    monkeypatch.setattr(agent_search.Knowledges, 'is_suspended', _is_suspended)
 
 
 def _qr(distances, documents, metadatas):
@@ -125,23 +120,6 @@ async def test_run_agent_search_filters_by_kb_ids(monkeypatch, fake_user, fake_r
 
     assert queried == ['kb-alice']
     assert all(r['kb_id'] == 'kb-alice' for r in results)
-
-
-@pytest.mark.asyncio
-async def test_run_agent_search_skips_suspended_kbs(monkeypatch, fake_user, fake_request):
-    _patch_knowledges(monkeypatch, kbs=[_kb('kb-active'), _kb('kb-frozen')], suspended_ids={'kb-frozen'})
-
-    queried = []
-
-    async def fake_query_collection(request, *, collection_names, queries, embedding_function, k):
-        queried.append(collection_names[0])
-        return _qr([0.3], ['c'], [{'file_id': 'fa'}])
-
-    monkeypatch.setattr(agent_search, 'query_collection', fake_query_collection)
-
-    await agent_search.run_agent_search(request=fake_request, user=fake_user, query='hi', top_k=5)
-
-    assert queried == ['kb-active']
 
 
 @pytest.mark.asyncio

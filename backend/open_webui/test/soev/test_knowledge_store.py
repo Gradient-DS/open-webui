@@ -58,10 +58,10 @@ SOEV = {
     'update_directory',
     'delete_directory',
     'move_file_to_directory',
-}
-VACUOUS = {
     'set_path_fields_by_file_id',
     'update_knowledge_data_by_id',
+}
+REMOVED = {
     'get_pending_deletions',
     'get_stale_knowledge',
     'get_suspended_expired_knowledge',
@@ -182,15 +182,16 @@ def test_every_knowledge_table_method_is_classified(env):
         for name, value in inspect.getmembers(env.models.KnowledgeTable, inspect.iscoroutinefunction)
         if not name.startswith('_')
     }
-    assert not SOEV & VACUOUS and not SOEV & REFUSED and not VACUOUS & REFUSED
-    assert methods == SOEV | VACUOUS | REFUSED
+    assert not SOEV & REMOVED and not SOEV & REFUSED and not REMOVED & REFUSED
+    assert methods == SOEV | REMOVED | REFUSED
     assert not issubclass(type(env.store), env.models.KnowledgeTable)
-    assert methods <= set(type(env.store).__dict__)
+    assert methods - REMOVED <= set(type(env.store).__dict__)
+    assert all(not hasattr(env.store, name) for name in REMOVED)
 
 
 def test_signatures_accept_every_argument_callers_pass(env):
     """Store methods preserve all upstream positional and keyword arguments and their defaults."""
-    for name in SOEV | VACUOUS | REFUSED:
+    for name in SOEV | REFUSED:
         original = inspect.signature(getattr(env.models.KnowledgeTable, name))
         replacement = inspect.signature(getattr(type(env.store), name))
         names = list(original.parameters)
@@ -732,17 +733,6 @@ async def test_reset_preserves_the_original_failure_result_until_folders_are_emp
         env.api.advance(job_id, 'SUCCEEDED')
     assert (await env.store.reset_knowledge_by_id('kb')).id == 'kb'
     assert env.api.folders['kb'] == {}
-
-
-@pytest.mark.asyncio
-async def test_suspension_is_false_and_the_sweeps_are_empty(env):
-    """Cloud suspension and local retention sweeps have no corresponding soev state and perform no requests."""
-    assert await env.store.is_suspended('kb') is False
-    assert await env.store.get_suspension_info('kb') is None
-    assert await env.store.get_pending_deletions() == []
-    assert await env.store.get_stale_knowledge(0) == []
-    assert await env.store.get_suspended_expired_knowledge() == []
-    assert env.api.requests == []
 
 
 @pytest.mark.asyncio

@@ -666,21 +666,6 @@ class SoevKnowledgeTable:
         except (SoevApiError, ValueError):
             return False
 
-    async def get_pending_deletions(self, limit=50, db=None):
-        return []
-
-    async def get_stale_knowledge(self, stale_before, limit=50, exclude_user_ids=None, db=None):
-        return []
-
-    async def get_suspended_expired_knowledge(self, limit=50, db=None):
-        return []
-
-    async def is_suspended(self, id, db=None):
-        return False
-
-    async def get_suspension_info(self, id, db=None):
-        return None
-
     async def add_file_to_knowledge_by_id(self, knowledge_id, file_id, user_id, directory_id=None, db=None):
         from open_webui.models.files import Files
 

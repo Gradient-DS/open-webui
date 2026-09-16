@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 
 from open_webui.models.users import Users
 from open_webui.models.chats import Chats
-from open_webui.models.knowledge import Knowledges
 from open_webui.services.retention.config import (
     get_effective_ttl_days,
     get_cutoff_timestamp,
@@ -75,11 +74,6 @@ class DataRetentionService:
         effective_chat_ttl = get_effective_ttl_days(master_ttl, chat_ttl)
         if effective_chat_ttl > 0:
             await DataRetentionService._cleanup_stale_chats(effective_chat_ttl, report)
-
-        # Phase 3: Stale knowledge bases (only local type, active users)
-        effective_kb_ttl = get_effective_ttl_days(master_ttl, knowledge_ttl)
-        if effective_kb_ttl > 0:
-            await DataRetentionService._cleanup_stale_knowledge(effective_kb_ttl, report)
 
         return report
 
@@ -239,23 +233,3 @@ class DataRetentionService:
 
         if stale_chats:
             log.info(f'Retention: soft-deleted {report.chats_deleted} stale chats (older than {ttl_days} days)')
-
-    @staticmethod
-    async def _cleanup_stale_knowledge(ttl_days: int, report: RetentionReport) -> None:
-        """Phase 3: Soft-delete stale local KBs. Cleanup worker handles cascade."""
-        cutoff = get_cutoff_timestamp(ttl_days)
-        stale_kbs = await Knowledges.get_stale_knowledge(stale_before=cutoff, limit=50)
-
-        for kb in stale_kbs:
-            try:
-                await Knowledges.soft_delete_by_id(kb.id)
-                report.knowledge_deleted += 1
-            except Exception as e:
-                error_msg = f'Retention: failed to soft-delete KB {kb.id}: {e}'
-                log.error(error_msg)
-                report.errors.append(error_msg)
-
-        if stale_kbs:
-            log.info(
-                f'Retention: soft-deleted {report.knowledge_deleted} stale knowledge bases (older than {ttl_days} days)'
-            )

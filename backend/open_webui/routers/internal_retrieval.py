@@ -137,9 +137,6 @@ async def list_knowledge_files(
     Used by soev-agents' ``OwuiKnowledgeFilesClient`` (the source of truth
     for ``list_documents`` / ``find_documents`` in the OpenWebUI retrieval
     provider). Returns the same ``{items, total}`` shape that client expects.
-
-    A suspended KB returns HTTP 403 for everyone; there is no admin bypass
-    on this surface — tenant-isolated agents must not circumvent suspension.
     """
 
     if not await Config.get('agent_search.enabled', False):
@@ -155,19 +152,6 @@ async def list_knowledge_files(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"knowledge '{knowledge_id}' not found or not accessible",
-        )
-
-    # [Gradient] Suspended KB → 403 for everyone; no admin bypass on this surface.
-    suspension_info = await Knowledges.get_suspension_info(kb.id)
-    if suspension_info:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                'This knowledge base is suspended. '
-                f'It will be permanently deleted in '
-                f'{suspension_info["days_remaining"]} days unless the '
-                'owner restores access.'
-            ),
         )
 
     filter_dict: dict = {}
