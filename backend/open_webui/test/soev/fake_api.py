@@ -384,6 +384,16 @@ class FakeSoevApi:
             view['uploads'] = []
         if include_items:
             view['items'] = copy.deepcopy(job.get('items', []))
+            if job['kind'] == 'delete_document':
+                view['items'] = [
+                    {
+                        'source_id': self.job_effects[job['job_id']],
+                        'status': 'pending',
+                        'code': None,
+                        'detail': None,
+                        'chunk_count': None,
+                    }
+                ]
         return view
 
     def _jobs(self, request, parts, body, credential, subject):

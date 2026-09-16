@@ -576,6 +576,22 @@ def test_get_job_with_items_lists_each_document(api):
     assert fake.jobs[job['job_id']]['progress']['total'] == 2
 
 
+def test_get_delete_document_job_with_items_names_its_document(api):
+    fake, client = api
+    seed(client)
+    fake.add_document('kb', 'file')
+    job = send(client, 'DELETE', '/v1/collections/kb/documents/file').json()
+    path = f'/v1/jobs/{job["job_id"]}'
+    assert 'items' not in send(client, 'GET', path).json()
+    response = send(client, 'GET', path + '?include_items=true')
+    assert response.status_code == 200
+    assert response.json()['items'] == [
+        {'source_id': 'file', 'status': 'pending', 'code': None, 'detail': None, 'chunk_count': None}
+    ]
+    listed = send(client, 'GET', '/v1/jobs?collection_key=kb&status=QUEUED&include_items=true').json()['data']
+    assert listed == [send(client, 'GET', path).json()]
+
+
 def test_advance_to_succeeded_materialises_the_documents(api):
     """Success lands metadata and one successful item per proposal at the fake clock."""
     fake, client = api

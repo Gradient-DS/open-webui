@@ -286,6 +286,15 @@ class SoevKnowledgeTable:
         for file in await self._unlanded(key, documents=documents, user_id=user_id):
             job = (file.meta or {}).get('soev_job') or {}
             members[file.id] = (None, job.get('path'))
+        for status in ('QUEUED', 'RUNNING'):
+            jobs = await self._pages('/v1/jobs', user_id=user_id, params={'collection_key': key, 'status': status})
+            for job in jobs:
+                if job['kind'] == 'delete_document':
+                    detail = await self._get(
+                        '/v1/jobs/' + quote(job['job_id'], safe=''), user_id=user_id, params={'include_items': 'true'}
+                    )
+                    for item in detail['items']:
+                        members.pop(item['source_id'], None)
         return members
 
     async def get_files_by_id(self, knowledge_id, db=None):

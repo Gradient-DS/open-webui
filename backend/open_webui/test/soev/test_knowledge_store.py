@@ -686,6 +686,30 @@ async def test_delete_directory_moves_direct_files_and_handles_queued_deletion(e
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('status', ['QUEUED', 'RUNNING'])
+async def test_a_file_with_a_pending_delete_leaves_the_listing_at_once(env, status):
+    await file(env, soev_collection_key='kb')
+    assert [row.id for row in await env.store.get_files_by_id('kb')] == ['f1']
+    assert await env.store.remove_file_from_knowledge_by_id('kb', 'f1') is True
+    job = next(iter(env.api.jobs.values()))
+    assert job['kind'] == 'delete_document' and job['status'] == 'QUEUED'
+    if status == 'RUNNING':
+        env.api.advance(job['job_id'], status)
+    assert ('kb', 'f1') in env.api.documents
+    assert await env.store.get_files_by_id('kb') == []
+    assert await env.store.has_file('kb', 'f1') is False
+    listing = await env.store.search_files_by_id('kb', 'alice', {})
+    assert listing.items == [] and listing.total == 0
+    assert job['status'] == status
+
+    env.api.advance(job['job_id'], 'SUCCEEDED')
+    assert await env.store.get_files_by_id('kb') == []
+    assert await env.store.has_file('kb', 'f1') is False
+    listing = await env.store.search_files_by_id('kb', 'alice', {})
+    assert listing.items == [] and listing.total == 0
+
+
+@pytest.mark.asyncio
 async def test_removing_and_resetting_files_commissions_document_jobs(env):
     """Removing a file and resetting a collection use document deletions and keep the collection itself."""
     await file(env, soev_collection_key='kb')
