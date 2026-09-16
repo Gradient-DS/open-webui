@@ -1,3 +1,4 @@
+import type { DisplayCitation } from '$lib/components/chat/Messages/Citations/reduceSources';
 import { APP_NAME } from '$lib/constants';
 import { type Writable, derived, writable } from 'svelte/store';
 import type { ComponentType, SvelteComponent } from 'svelte';
@@ -189,6 +190,36 @@ export const documentContents: Writable<Array<{
 }> | null> = writable(null);
 
 export const embed = writable(null);
+
+// [Gradient] Citation side panel (spike). Mirrors showEmbeds/embed.
+export const showCitationPanel = writable(false);
+export const citationPanel = writable<null | {
+	citation: DisplayCitation;
+	citations: DisplayCitation[];
+	visibleCitations: DisplayCitation[];
+	showPercentage: boolean;
+	showRelevance: boolean;
+	messageId: string;
+	chatId: string;
+}>(null);
+export type CitationPanelVariant = 'modal' | 'stack' | 'focus' | 'navigator';
+function storedCitationPanelVariant(): CitationPanelVariant {
+	try {
+		const value =
+			typeof localStorage !== 'undefined' ? localStorage.getItem('citationPanelVariant') : null;
+		return value === 'modal' || value === 'focus' || value === 'navigator' ? value : 'stack';
+	} catch {
+		return 'stack';
+	}
+}
+export const citationPanelVariant = writable<CitationPanelVariant>(storedCitationPanelVariant());
+citationPanelVariant.subscribe((value) => {
+	try {
+		if (typeof localStorage !== 'undefined') localStorage.setItem('citationPanelVariant', value);
+	} catch {
+		/* Storage can be disabled; the switcher still works for this session. */
+	}
+});
 
 export const temporaryChatEnabled = writable(false);
 
@@ -450,6 +481,8 @@ type Config = {
 		enable_tool_permissions?: boolean;
 		enable_community_sharing: boolean;
 		enable_citation_relevance: boolean;
+		// [Gradient] Existing server flag consumed by the shared citation viewer.
+		enable_citation_text_highlight?: boolean;
 		enable_memories: boolean;
 		enable_plugins?: boolean;
 		enable_autocomplete_generation: boolean;

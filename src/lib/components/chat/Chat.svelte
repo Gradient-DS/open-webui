@@ -44,6 +44,8 @@
 		functions,
 		selectedFolder,
 		showEmbeds,
+		showCitationPanel,
+		citationPanel,
 		selectedTerminalId,
 		showFileNavPath,
 		showFileNavDir,
@@ -119,6 +121,8 @@
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/chat/Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
+	// [Gradient] SPIKE — remove before merge.
+	import CitationVariantSwitcher from './ChatControls/CitationVariantSwitcher.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DataWarningConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
@@ -1713,6 +1717,9 @@
 				showCallOverlay.set(false);
 				showArtifacts.set(false);
 				showEmbeds.set(false);
+				// [Gradient] Clear citation state when the controls host closes.
+				showCitationPanel.set(false);
+				citationPanel.set(null);
 			}
 		});
 
@@ -5141,6 +5148,8 @@
 				</div>
 
 				{#if !embedded}
+					<!-- [Gradient] SPIKE — remove before merge. -->
+					<CitationVariantSwitcher />
 					<ChatControls
 						bind:history
 						bind:chatFiles

@@ -1,6 +1,14 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { config, embed, showControls, showEmbeds } from '$lib/stores';
+	import {
+		config,
+		embed,
+		showControls,
+		showEmbeds,
+		citationPanel,
+		showCitationPanel,
+		citationPanelVariant
+	} from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
 	import { reduceSources, type DisplayCitation } from './Citations/reduceSources';
@@ -37,24 +45,42 @@
 
 	$: citationRelevanceEnabled = $config?.features?.enable_citation_relevance ?? true;
 
-	let citationModal = null;
-
 	let showCitations = false;
 	let showCitationModal = false;
 
-	let selectedCitation: any = null;
+	let selectedCitation: DisplayCitation | null = null;
+
+	// [Gradient] Route both source pills and inline references through the selected prototype.
+	const openCitation = (citation: DisplayCitation) => {
+		if (citation.source?.embed_url) {
+			showSourceModal(citations.indexOf(citation) + 1);
+			return;
+		}
+		if (readOnly || $citationPanelVariant === 'modal') {
+			selectedCitation = citation;
+			showCitationModal = true;
+			return;
+		}
+		if ($showCitationPanel && $citationPanel?.citation === citation) return;
+		citationPanel.set({
+			citation,
+			citations,
+			visibleCitations,
+			showPercentage: citationRelevanceEnabled && showPercentage,
+			showRelevance: citationRelevanceEnabled && showRelevance,
+			messageId: id,
+			chatId
+		});
+		showCitationPanel.set(true);
+		showControls.set(true);
+	};
 
 	export const showSourceModal = (sourceId) => {
 		let index;
-		let suffix = null;
 
 		if (typeof sourceId === 'string') {
 			const output = sourceId.split('#');
 			index = parseInt(output[0]) - 1;
-
-			if (output.length > 1) {
-				suffix = output[1];
-			}
 		} else {
 			index = sourceId - 1;
 		}
@@ -82,12 +108,10 @@
 						});
 					}
 				} else {
-					selectedCitation = citations[index];
-					showCitationModal = true;
+					openCitation(citations[index]);
 				}
 			} else {
-				selectedCitation = citations[index];
-				showCitationModal = true;
+				openCitation(citations[index]);
 			}
 		}
 	};
@@ -131,9 +155,7 @@
 />
 
 {#if visibleCitations.length > 0 && messageDone}
-	{@const urlCitations = visibleCitations.filter((c) =>
-		c?.source?.name?.startsWith('http')
-	)}
+	{@const urlCitations = visibleCitations.filter((c) => c?.source?.name?.startsWith('http'))}
 	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
 		<button
 			class="text-xs font-normal text-gray-600 dark:text-gray-300 px-3.5 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-1 border border-gray-50 dark:border-gray-850/30"
@@ -194,8 +216,7 @@
 					})}
 					class="no-toggle outline-hidden flex dark:text-gray-300 bg-transparent text-gray-600 rounded-xl gap-1.5 items-center"
 					on:click={() => {
-						showCitationModal = true;
-						selectedCitation = citation;
+						openCitation(citation);
 					}}
 				>
 					<div class=" font-normal bg-gray-50 dark:bg-gray-850 rounded-md px-1">
