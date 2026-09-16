@@ -17,13 +17,12 @@ import httpx
 import pytest
 import pytest_asyncio
 from open_webui.soev.client import SoevApiError
-from open_webui.test.soev.fake_api import FakeSoevApi
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest_asyncio.fixture
-async def env(identity_config, monkeypatch):
+async def env(identity_config, fake_api, monkeypatch):
     """Seed original SQL classes, then reject every SQL write and rebound singleton call."""
     identity, _ = identity_config
     knowledge = importlib.import_module('open_webui.models.knowledge')
@@ -51,7 +50,8 @@ async def env(identity_config, monkeypatch):
                 ],
             )
         )
-    api = FakeSoevApi(page_size=1)
+    api = fake_api
+    api.page_size = 1
     original = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',

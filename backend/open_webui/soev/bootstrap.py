@@ -1,6 +1,6 @@
 """Mint OWUI runtime authority and register its public signing key.
-Run with python -m open_webui.soev.bootstrap; save the single JSON output as deployment secrets.
-If the key is lost, revoke the credential and bootstrap again under a new SOEV_API_SIGNING_KID.
+Run with python -m open_webui.soev.bootstrap; save every JSON line as deployment settings.
+The principal and public key identify replays; after key loss, revoke the credential and bootstrap with a new key.
 """
 
 import asyncio
@@ -22,23 +22,23 @@ async def bootstrap() -> None:
     mint_key = os.environ.get('SOEV_BOOTSTRAP_MINT_KEY', '')
     if not mint_key:
         raise ValueError('SOEV_BOOTSTRAP_MINT_KEY is required for this run')
-    if not all((config.SOEV_API_URL, config.SOEV_API_SERVICE_PRINCIPAL, config.SOEV_API_SIGNING_KID)):
-        raise ValueError('SOEV_API_URL, SOEV_API_SERVICE_PRINCIPAL and SOEV_API_SIGNING_KID are required')
+    if not all((config.SOEV_API_URL, config.SOEV_API_SERVICE_PRINCIPAL)):
+        raise ValueError('SOEV_API_URL and SOEV_API_SERVICE_PRINCIPAL are required')
     public_bytes = (
         identity.signing_key().public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     )
+    # The API assigns the kid and ignores a submitted one.
     jwk = {
         'kty': 'OKP',
         'crv': 'Ed25519',
         'x': base64.urlsafe_b64encode(public_bytes).decode().rstrip('='),
-        'kid': config.SOEV_API_SIGNING_KID,
         'alg': 'Ed25519',
         'use': 'sig',
     }
     client = SoevClient(config.SOEV_API_URL, mint_key)
     operation = uuid5(
         identity.OWUI_PLATFORM_NAMESPACE,
-        json.dumps([config.SOEV_API_SERVICE_PRINCIPAL, config.SOEV_API_SIGNING_KID]),
+        json.dumps([config.SOEV_API_SERVICE_PRINCIPAL, jwk['x']]),
     )
     credential = await client.send(
         'POST',
@@ -59,7 +59,7 @@ async def bootstrap() -> None:
     if secret:
         print(json.dumps({'SOEV_API_KEY': secret, 'SOEV_API_CREDENTIAL_ID': credential_id}), flush=True)
     try:
-        await client.send(
+        registration = await client.send(
             'POST',
             f'/v1/credentials/{quote(credential_id, safe="")}/signing-keys',
             {'public_jwk': jwk},
@@ -72,8 +72,11 @@ async def bootstrap() -> None:
                 'the credential was minted and printed; rerunning will register the key'
             ) from None
         raise
+    kid = registration.get('kid') if registration else None
+    if not isinstance(kid, str):
+        raise ValueError('soev-api signing-key registration did not return a string kid')
+    print(json.dumps({'SOEV_API_CREDENTIAL_ID': credential_id, 'SOEV_API_SIGNING_KID': kid}), flush=True)
     if not secret:
-        print(json.dumps({'SOEV_API_CREDENTIAL_ID': credential_id}), flush=True)
         print('The key was issued on the first run.', file=sys.stderr)
 
 

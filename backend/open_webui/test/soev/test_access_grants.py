@@ -14,7 +14,6 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
-from open_webui.test.soev.fake_api import FakeSoevApi
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -22,13 +21,13 @@ SERVICE = 'owui:service:webui'
 
 
 @pytest_asyncio.fixture
-async def env(identity_config, monkeypatch):
+async def env(identity_config, fake_api, monkeypatch):
     """Use real signed HTTP requests and forbid knowledge access to the SQL context."""
     identity, _ = identity_config
     models = importlib.import_module('open_webui.models.access_grants')
     module = importlib.import_module('open_webui.soev.access_grants')
     stores = importlib.import_module('open_webui.soev.knowledge_store')
-    api = FakeSoevApi()
+    api = fake_api
     original = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',

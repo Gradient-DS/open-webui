@@ -55,6 +55,7 @@ def mint_assertion(user_ref: str, *, now: dt.datetime) -> str:
     if now.utcoffset() is None:
         raise ValueError('Assertion time must include a timezone')
     issued_at = int(now.timestamp())
+    # SOEV_API_SIGNING_KID holds the API-assigned kid printed by bootstrap.
     header = {'alg': 'Ed25519', 'kid': config.SOEV_API_SIGNING_KID, 'typ': 'JWT'}
     payload = {
         'iss': config.SOEV_API_CREDENTIAL_ID,

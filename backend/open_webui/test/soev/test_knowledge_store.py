@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import pytest_asyncio
-from open_webui.test.soev.fake_api import FakeSoevApi
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -74,7 +73,7 @@ REFUSED = {
 
 
 @pytest_asyncio.fixture
-async def env(identity_config, monkeypatch):
+async def env(identity_config, fake_api, monkeypatch):
     """Use the real client and Files methods without creating any local knowledge or grant tables."""
     identity, _ = identity_config
     module = importlib.import_module('open_webui.soev.knowledge_store')
@@ -82,7 +81,8 @@ async def env(identity_config, monkeypatch):
     files = importlib.import_module('open_webui.models.files')
     database = importlib.import_module('open_webui.internal.db')
     projection = importlib.import_module('open_webui.soev.projection')
-    api = FakeSoevApi(page_size=1)
+    api = fake_api
+    api.page_size = 1
     original_client = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',

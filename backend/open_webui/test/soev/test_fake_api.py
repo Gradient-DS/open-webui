@@ -1,8 +1,8 @@
 """Exercise the reusable fake through HTTP against the recorded B5 wire contract."""
 
 import base64
+import datetime as dt
 import importlib
-import json
 from uuid import uuid4
 
 import httpx
@@ -12,15 +12,15 @@ SERVICE = 'owui:service:webui'
 
 
 def assertion(ref):
-    payload = json.dumps({'sub': ref, 'jti': str(uuid4())}).encode()
-    return 'e30.' + base64.urlsafe_b64encode(payload).decode().rstrip('=') + '.signature'
+    identity = importlib.import_module('open_webui.soev.identity')
+    return identity.mint_assertion(ref, now=dt.datetime.now(dt.UTC))
 
 
 @pytest.fixture
-def api():
+def api(fake_api):
     """Use a real HTTP client over MockTransport with inspectable fake state."""
-    module = importlib.import_module('open_webui.test.soev.fake_api')
-    fake = module.FakeSoevApi(page_size=1)
+    fake = fake_api
+    fake.page_size = 1
     with httpx.Client(transport=httpx.MockTransport(fake.handle), base_url='https://soev.invalid') as client:
         yield fake, client
 
@@ -252,3 +252,64 @@ def test_pages_and_document_acl_follow_the_wire_contract(api):
     assert send(client, 'DELETE', '/v1/collections/kb/documents/private', user='owui:user:alice').status_code == 404
     missing_key = client.post('/v1/collections', json={}, headers={'Authorization': 'Bearer test-runtime-key'})
     assert missing_key.status_code == 400
+
+
+def test_an_assertion_signed_with_the_configured_kid_is_accepted_by_the_fake(api):
+    """The registered public key verifies assertions minted with the configured kid."""
+    fake, client = api
+    response = send(
+        client,
+        'POST',
+        '/v1/identity/links',
+        {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
+    )
+    assert response.status_code == 204
+    assert fake.links == {'owui:user:alice': 'person'}
+
+
+def test_an_assertion_with_an_unregistered_kid_is_refused_by_the_fake(api, identity_config, monkeypatch):
+    """A valid signature cannot authenticate an unregistered kid."""
+    fake, client = api
+    identity, _ = identity_config
+    monkeypatch.setattr(identity.config, 'SOEV_API_SIGNING_KID', 'unregistered-key')
+    response = send(
+        client,
+        'POST',
+        '/v1/identity/links',
+        {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
+    )
+    assert response.status_code == 401
+    assert response.json()['code'] == 'credential_invalid'
+    assert not fake.links
+
+
+def test_an_assertion_with_a_forged_signature_is_refused_by_the_fake(api):
+    """A registered kid cannot authenticate a forged signature."""
+    fake, client = api
+    header, payload, _ = assertion('owui:user:alice').split('.')
+    forged = base64.urlsafe_b64encode(bytes(64)).decode().rstrip('=')
+    response = send(
+        client,
+        'POST',
+        '/v1/identity/links',
+        {'platform_user_id': 'person', 'assertion': f'{header}.{payload}.{forged}'},
+    )
+    assert response.status_code == 401
+    assert response.json()['code'] == 'credential_invalid'
+    assert not fake.links
+
+
+@pytest.mark.parametrize('setting', ['SOEV_API_CREDENTIAL_ID', 'SOEV_API_AUDIENCE'])
+def test_an_assertion_with_wrong_claims_is_refused_by_the_fake(api, identity_config, monkeypatch, setting):
+    """A valid signature still requires the credential issuer and configured audience."""
+    _, client = api
+    identity, _ = identity_config
+    monkeypatch.setattr(identity.config, setting, 'wrong-value')
+    response = send(
+        client,
+        'POST',
+        '/v1/identity/links',
+        {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
+    )
+    assert response.status_code == 401
+    assert response.json()['code'] == 'credential_invalid'

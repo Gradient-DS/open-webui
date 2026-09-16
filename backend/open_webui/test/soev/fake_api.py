@@ -1,7 +1,4 @@
-"""Inspectable in-memory implementation of the recorded B5 HTTP contract.
-
-Assertions are decoded for identity and replay checks; cryptography is tested by B2.
-"""
+"""Inspectable in-memory HTTP contract with signature, identity, and replay checks."""
 
 import base64
 import copy
@@ -10,6 +7,8 @@ from urllib.parse import unquote
 from uuid import uuid4
 
 import httpx
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 
 class Problem(Exception):
@@ -22,6 +21,9 @@ class FakeSoevApi:
         self.page_size = page_size
         self.now = '2026-09-11T12:00:00Z'
         self.credentials = {'test-runtime-key': 'owui:service:webui'}
+        self.credential_id = 'runtime-credential'
+        self.audience = None
+        self.signing_keys: dict[str, dict] = {}
         self.collections, self.documents, self.folders = {}, {}, {}
         self.inherited_access = set()
         self.jobs, self.job_owners, self.job_effects = {}, {}, {}
@@ -75,11 +77,20 @@ class FakeSoevApi:
 
     def _assertion(self, token):
         try:
-            encoded = token.split('.')[1]
+            header_part, encoded, signature_part = token.split('.')
+            header = json.loads(base64.urlsafe_b64decode(header_part + '=' * (-len(header_part) % 4)))
+            if header['alg'] != 'Ed25519':
+                raise Problem(401, 'credential_invalid')
+            jwk = self.signing_keys[header['kid']]
+            key = Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(jwk['x'] + '=' * (-len(jwk['x']) % 4)))
+            signature = base64.urlsafe_b64decode(signature_part + '=' * (-len(signature_part) % 4))
+            key.verify(signature, f'{header_part}.{encoded}'.encode())
             payload = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+            if payload['iss'] != self.credential_id or (self.audience is not None and payload['aud'] != self.audience):
+                raise Problem(401, 'credential_invalid')
             ref, jti = payload['sub'], payload['jti']
-        except (ValueError, KeyError, IndexError):
-            raise Problem(401, 'invalid_assertion') from None
+        except (ValueError, KeyError, TypeError, InvalidSignature):
+            raise Problem(401, 'credential_invalid') from None
         if jti in self.seen_jtis:
             raise Problem(401, 'assertion_replayed')
         self.seen_jtis.add(jti)
