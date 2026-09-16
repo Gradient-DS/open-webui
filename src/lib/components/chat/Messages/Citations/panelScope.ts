@@ -23,3 +23,14 @@ export function scopePanelCitations(citations: DisplayCitation[]): DisplayCitati
 	if (!speaksProvenance) return citations;
 	return citations.filter((c) => c.current_turn || c.cited_this_turn);
 }
+
+// [Gradient] Answer groups prefer explicit cites; older agents can only identify retrievals.
+export function usedCitations(citations: DisplayCitation[]): DisplayCitation[] {
+	if (citations.some((citation) => citation.cited_this_turn !== undefined)) {
+		return citations.filter((citation) => citation.cited_this_turn);
+	}
+	if (citations.some((citation) => citation.current_turn !== undefined)) {
+		return citations.filter((citation) => citation.current_turn);
+	}
+	return citations;
+}
