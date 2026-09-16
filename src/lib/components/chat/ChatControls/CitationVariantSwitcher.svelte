@@ -12,8 +12,6 @@
 			label: 'Modal',
 			description: 'Show citations in the original centered modal'
 		},
-		{ value: 'stack', label: 'Stack', description: 'Stack passages above the source preview' },
-		{ value: 'focus', label: 'Focus', description: 'Focus on one passage at a time' },
 		{
 			value: 'navigator',
 			label: 'Navigator',
@@ -32,20 +30,22 @@
 			class="rounded-full px-2.5 py-1 text-xs transition {$citationPanelVariant === variant.value
 				? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
 				: 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'}"
-			title={variant.description}
+			title={$i18n.t(variant.description)}
 			aria-pressed={$citationPanelVariant === variant.value}
 			on:click={() => citationPanelVariant.set(variant.value)}
 		>
 			{$i18n.t(variant.label)}
 		</button>
 	{/each}
-	<!-- [Gradient] Spike-only dev help; intentionally not translated. -->
+	<!-- [Gradient] Help for the two exposed citation layouts. -->
 	<Tooltip
-		content="Stack: passages above the document.<br>Focus: one passage with a stepper and more document space.<br>Navigator: all message sources, then source detail."
+		content={$i18n.t(
+			'Modal: citations in a centered window. Navigator: all message sources, then source detail.'
+		)}
 	>
 		<button
 			class="rounded-full px-2 text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-			aria-label="About citation panel variants">?</button
+			aria-label={$i18n.t('About citation panel variants')}>?</button
 		>
 	</Tooltip>
 </div>

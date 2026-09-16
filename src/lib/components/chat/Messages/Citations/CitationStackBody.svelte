@@ -21,6 +21,7 @@
 	export let showRelevance = true;
 	export let previewAvailable = true;
 	export let preview = true;
+	export let showDocumentNote = false;
 	let expanded = true;
 	let viewer: CitationViewer;
 	function selectSnippet(idx: number) {
@@ -90,6 +91,11 @@
 			</div>
 		{/if}
 	</div>
+	{#if showDocumentNote && mergedDocuments[activeSnippetIdx]?.metadata?.granularity === 'document'}
+		<p class="shrink-0 px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+			{$i18n.t('Whole-document citation — no specific passage to highlight')}
+		</p>
+	{/if}
 	<div class="flex-1 min-h-0 p-2">
 		{#key citation}
 			<CitationViewer

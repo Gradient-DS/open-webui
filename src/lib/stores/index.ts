@@ -214,9 +214,10 @@ function storedCitationPanelVariant(): CitationPanelVariant {
 	try {
 		const value =
 			typeof localStorage !== 'undefined' ? localStorage.getItem('citationPanelVariant') : null;
-		return value === 'modal' || value === 'focus' || value === 'navigator' ? value : 'stack';
+		// [Gradient] Retired prototypes migrate to the chosen navigator layout.
+		return value === 'modal' ? 'modal' : 'navigator';
 	} catch {
-		return 'stack';
+		return 'navigator';
 	}
 }
 export const citationPanelVariant = writable<CitationPanelVariant>(storedCitationPanelVariant());

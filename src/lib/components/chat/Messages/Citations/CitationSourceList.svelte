@@ -9,7 +9,6 @@
 	import Document from '$lib/components/icons/Document.svelte';
 	const i18n = getContext<Readable<I18n>>('i18n');
 	export let visibleCitations: DisplayCitation[] = [];
-	export let citations: DisplayCitation[] = [];
 	export let selectedCitation: DisplayCitation | null = null;
 	export let showPercentage = false;
 	export let showRelevance = true;
@@ -43,9 +42,6 @@
 			aria-current={selectedCitation === row.citation ? 'true' : undefined}
 			on:click={() => onSelect(row.citation)}
 		>
-			<span class="shrink-0 rounded bg-gray-50 dark:bg-gray-850 px-1 text-xs text-gray-500"
-				>[{citations.indexOf(row.citation) + 1}]</span
-			>
 			{#if row.citation.source.name?.startsWith('http')}
 				<img
 					src="https://www.google.com/s2/favicons?sz=32&domain={row.citation.source.name}"

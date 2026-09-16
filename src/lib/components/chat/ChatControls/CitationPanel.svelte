@@ -119,7 +119,6 @@
 			</div>
 			<CitationSourceList
 				{visibleCitations}
-				citations={$citationPanel.citations}
 				selectedCitation={citation}
 				{showPercentage}
 				{showRelevance}
@@ -215,6 +214,7 @@
 						/>
 					{:else}
 						<CitationStackBody
+							showDocumentNote={navigator}
 							{citation}
 							{mergedDocuments}
 							bind:activeSnippetIdx
