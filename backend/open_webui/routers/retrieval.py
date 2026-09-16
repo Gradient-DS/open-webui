@@ -43,7 +43,10 @@ from langchain_text_splitters import (
 )
 from langchain_core.documents import Document
 
+from open_webui import config as soev_config
 from open_webui.models.files import FileModel, FileUpdateForm, Files
+from open_webui.soev import identity, ingest
+from open_webui.soev.client import SoevApiError
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.env import AIOHTTP_CLIENT_ALLOW_REDIRECTS, AIOHTTP_CLIENT_SESSION_SSL
 from open_webui.events import EVENTS, publish_event
@@ -2069,29 +2072,23 @@ async def process_file(
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
 
-            # Distributed doc-pipeline gate: when enabled, hand the uploaded file
-            # to warren instead of parsing + embedding it here. Skipped when the
-            # caller supplies inline content (STT transcript / manual content
-            # update — nothing to fetch + parse). Flag off → native path below.
-            #   - KB-bound upload (collection_name set)  → route_file_to_pipeline.
-            #   - Chat attachment (collection_name None) → route_chat_file_to_pipeline
-            #     (its own flag; lands chunks in the file-{id} cache, no KB).
-            if not form_data.content:
-                config = await get_rag_config_state()
-                file_format = doc_pipeline.resolve_format(file.filename, (file.meta or {}).get('content_type'))
-                if form_data.collection_name and doc_pipeline.should_route_to_pipeline(
-                    enabled=config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
-                    collection_name=form_data.collection_name,
-                    file_path=file.path,
-                    file_format=file_format,
-                ):
-                    return await route_file_to_pipeline(request, file, form_data.collection_name, user)
-                if form_data.collection_name is None and doc_pipeline.should_route_chat_to_pipeline(
-                    enabled=config.DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED,
-                    file_path=file.path,
-                    file_format=file_format,
-                ):
-                    return await route_chat_file_to_pipeline(request, file, user)
+            if soev_config.SOEV_API_URL:
+                try:
+                    collection_key = form_data.collection_name or await ingest.ensure_attachments_collection(
+                        user.id, identity.build_client()
+                    )
+                    job_id = await ingest.submit(
+                        file, collection_key=collection_key, user_id=user.id, text=form_data.content
+                    )
+                except SoevApiError as e:
+                    raise ValueError(f'{e.code}: {e.detail}') from e
+                return {
+                    'status': True,
+                    'collection_name': form_data.collection_name,
+                    'filename': file.filename,
+                    'content': '',
+                    'job_id': job_id,
+                }
 
             if form_data.content:
                 # Update the content in the file
@@ -2298,6 +2295,8 @@ async def process_file(
                 except Exception as e:
                     raise e
 
+        except ingest.IngestBusy as e:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='file is being processed') from e
         except Exception as e:
             log.exception(e)
             # Fresh session for error status update.
@@ -3500,19 +3499,14 @@ async def process_files_batch(
                 )
                 continue
 
-            # Distributed doc-pipeline gate (per file): hand KB-bound files to
-            # warren instead of the native batch embed. One warren job per file
-            # (the OwuiIngestWorker targets a single document). The file is
-            # linked + marked 'processing' here, so it is excluded from the
-            # native all_docs batch below.
-            if doc_pipeline.should_route_to_pipeline(
-                enabled=config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
-                collection_name=collection_name,
-                file_path=db_file.path,
-                file_format=doc_pipeline.resolve_format(db_file.filename, (db_file.meta or {}).get('content_type')),
-            ):
-                await route_file_to_pipeline(request, db_file, collection_name, user)
-                file_results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))
+            if soev_config.SOEV_API_URL:
+                try:
+                    await ingest.submit(db_file, collection_key=collection_name, user_id=user.id)
+                except (SoevApiError, ingest.IngestBusy) as e:
+                    error = f'{e.code}: {e.detail}' if isinstance(e, SoevApiError) else 'file is being processed'
+                    file_errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error=error))
+                else:
+                    file_results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))
                 continue
 
             text_content = file.data.get('content', '')

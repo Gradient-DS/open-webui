@@ -256,22 +256,10 @@ async def process_uploaded_file(
 
             # (KB link moved above process_file — see the ordering note there.)
 
-            # Notify frontend via Socket.IO of the file's ACTUAL persisted
-            # status. For the native path process_file has already embedded +
-            # set 'completed' synchronously, so this stays 'completed'. For a
-            # warren-routed file process_file returns right after submitting the
-            # job (status still 'processing', vectors not yet in Weaviate);
-            # emitting 'completed' here would be premature — the real 'completed'
-            # is emitted from /ingest once the vectors land. Both file:status
-            # listeners (Chat.svelte, KnowledgeBase.svelte) act only on
-            # completed/failed and ignore 'processing', so the spinner persists.
-            #
-            # _process_handler is async — we're already on the main loop, so
-            # await the emit directly. (The earlier `run_on_main_loop(...)`
-            # call here deadlocked: that helper schedules a coroutine on the
-            # main loop then blocks the current thread on the result, which
-            # works from a sync worker thread but freezes the loop when the
-            # caller already IS the main loop.)
+            # Emit the persisted status: native processing has already completed,
+            # while a submitted soev-api job is still processing. Both UI listeners
+            # ignore processing, keeping the spinner until the soev-api poller
+            # emits the terminal event. Await directly on the running event loop.
             file_data = await Files.get_file_by_id(file_item.id)
             meta = (file_data.meta or {}) if file_data else {}
             current_status = meta.get('status') or 'completed'
@@ -942,19 +930,12 @@ async def update_file_data_content_by_id(
         knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
         for knowledge in knowledges:
             try:
-                old_vectors = await ASYNC_VECTOR_DB_CLIENT.query(collection_name=knowledge.id, filter={'file_id': id})
-                old_vector_ids = old_vectors.ids[0] if old_vectors and old_vectors.ids else []
-
-                # Re-add from the now-updated file-{file_id} collection before
-                # removing old vectors, so a failed reindex keeps the KB usable.
                 await process_file(
                     request,
                     ProcessFileForm(file_id=id, collection_name=knowledge.id),
                     user=user,
                     db=db,
                 )
-                if old_vector_ids:
-                    await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, ids=old_vector_ids)
             except Exception as e:
                 log.warning(f'Failed to update knowledge {knowledge.id} after content change for file {id}: {e}')
 
