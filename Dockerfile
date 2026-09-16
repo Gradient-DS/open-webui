@@ -139,11 +139,14 @@ RUN chown -R $UID:$GID /app $HOME
 # mesa packages (libgl1-mesa-dri/libglx-mesa0/libglapi-mesa/libgbm1) added for
 # CVE-2026-40393 (CRITICAL), fixed in 22.3.6-1+deb12u2.
 # linux-libc-dev added for CVE-2026-53215 (CRITICAL), fixed in 6.1.176-1.
+# libpcre2-8-0 added for CVE-2026-86145 and CVE-2026-89161 (both HIGH), fixed
+# in 10.42-1+deb12u1.
 RUN apt-get update && \
     apt-get install --only-upgrade -y libcap2 libsystemd0 libudev1 libgnutls30 \
     libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 \
     libmariadb3 libmariadb-dev mariadb-common \
-    libgl1-mesa-dri libglx-mesa0 libglapi-mesa libgbm1 linux-libc-dev && \
+    libgl1-mesa-dri libglx-mesa0 libglapi-mesa libgbm1 linux-libc-dev \
+    libpcre2-8-0 && \
     apt-get install -y --no-install-recommends \
     git build-essential pandoc gcc curl jq ca-certificates \
     libmariadb-dev \
