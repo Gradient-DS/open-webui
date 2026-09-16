@@ -55,7 +55,7 @@ class SoevKnowledgeTable:
         return projection
 
     async def _as_user(self, explicit_user_id: str | None = None) -> str | None:
-        ref = f'owui:user:{explicit_user_id}' if explicit_user_id is not None else acting_ref()
+        ref = f'owui:user:{explicit_user_id}' if explicit_user_id else acting_ref()
         if ref is not None:
             from open_webui.soev import identity
 

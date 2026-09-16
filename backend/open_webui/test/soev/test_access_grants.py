@@ -65,6 +65,25 @@ def subject(request):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('ref', [None, 'owui:user:owner'])
+async def test_empty_user_id_falls_back_to_the_acting_ref(env, ref):
+    """An empty explicit user ID uses the request context without asserting or linking an empty identity."""
+    acting = importlib.import_module('open_webui.soev.acting')
+    token = acting._acting_ref.set(ref)
+    try:
+        assert await env.table.has_access('', 'knowledge', 'kb', 'read') is True
+    finally:
+        acting._acting_ref.reset(token)
+    assert env.api.requests
+    assert all(request.method == 'GET' for request in env.api.requests)
+    for request in env.api.requests:
+        if ref is None:
+            assert 'X-Soev-Subject' not in request.headers
+        else:
+            assert subject(request) == ref
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     'user,read,write', [('reader', True, False), ('writer', True, True), ('outsider', False, False)]
 )
