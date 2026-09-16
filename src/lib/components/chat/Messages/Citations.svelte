@@ -55,7 +55,7 @@
 
 	// [Gradient] Route both source pills and inline references through the selected prototype.
 	const openCitation = (citation: DisplayCitation) => {
-		if (citation.source?.embed_url) {
+		if (citation.source?.embed_url && !navigatorEnabled) {
 			showSourceModal(citations.indexOf(citation) + 1);
 			return;
 		}
@@ -103,6 +103,11 @@
 		}
 
 		if (citations[index]) {
+			// [Gradient] Navigator keeps every inline source in its message's detail view.
+			if (navigatorEnabled) {
+				openCitation(citations[index]);
+				return;
+			}
 			console.log('Showing citation modal for:', citations[index]);
 
 			// [Gradient] Yield the citation special mode before the existing embed route.

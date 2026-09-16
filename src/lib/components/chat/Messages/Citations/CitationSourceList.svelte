@@ -55,7 +55,7 @@
 						// LICENSE covers this Open WebUI fallback logo.
 						// Do not alter, remove, obscure, or replace it except as LICENSE permits:
 						// https://docs.openwebui.com/license.
-						event.currentTarget.src = '/favicon.png';
+						(event.currentTarget as HTMLImageElement).src = '/favicon.png';
 					}}
 				/>
 			{:else}<Document className="size-4 mt-0.5 shrink-0 text-gray-500" />{/if}
