@@ -63,8 +63,6 @@ def _setup(monkeypatch, *, api_url='https://soev.invalid', bypass=False):
     monkeypatch.setattr(retrieval_router, 'ASYNC_VECTOR_DB_CLIENT', vector_client)
     config = SimpleNamespace(
         BYPASS_EMBEDDING_AND_RETRIEVAL=bypass,
-        DISTRIBUTED_DOC_PIPELINE_ENABLED=True,
-        DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED=True,
     )
     monkeypatch.setattr(retrieval_router, 'get_rag_config_state', AsyncMock(return_value=config))
     return SimpleNamespace(

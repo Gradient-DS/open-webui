@@ -17,7 +17,7 @@
 # multipart filenames/content, and dictionary keys. Call once per pass.
 # fresh=false marks immutable inputs/environment selectors, not shared fixtures.
 # actor=admin avoids feature permissions during setup; dependent owner checks use the same actor.
-# The integration attachment remains owned by the supplied client.
+# Attachment bytes require an externally created render artefact.
 # Configuration setup enables the creation gates it names, and integration/
 # terminal setup merges existing configuration. Resolution is serial.
 #
@@ -391,36 +391,29 @@ same_as = "file"
 key = "integration_source"
 name = "source_id"
 prefix = "/api/v1/integrations/collections/{source_id}"
-description = "routers/configs.py:set_integrations_config binds the owner to a provider. integrations.py:ingest_documents creates meta.integration.source_id, a document File, its bytes and its attachment."
-seeded_by = "seed_integration"
-depends_on = ["namespace"]
+description = "Integration DELETE routes resolve provider-owned external source ids."
+unseedable = "POST /integrations/ingest was removed; no remaining HTTP route creates integration source metadata for these legacy DELETE routes."
 
 [[parameter]]
 key = "integration_document"
 name = "document_source_id"
 prefix = "/api/v1/integrations/collections/{source_id}/documents/{document_source_id}"
 description = "integrations.py:delete_document prefixes this external source_id with the provider; it is NOT the File UUID."
-seeded_by = "integration_value"
-depends_on = ["integration_source"]
-extract = "documents.0.source_id"
+unseedable = "POST /integrations/ingest was removed; no remaining HTTP route creates a provider-owned integration collection and document."
 
 [[parameter]]
 key = "attachment_file"
 name = "id"
 prefix = "/api/v1/files/{id}/attachments"
-description = "Longest-prefix override: files.py:get_file_attachment_bytes checks attachment.file_id == id. Use the ingested parent, not the independently uploaded plain file."
-seeded_by = "integration_value"
-depends_on = ["integration_source"]
-extract = "documents.0.file_id"
+description = "Attachment listing uses a real uploaded parent file; bytes additionally require a render artefact."
+same_as = "file"
 
 [[parameter]]
 key = "attachment"
 name = "attachment_id"
 prefix = "/api/v1/files/{id}/attachments/{attachment_id}"
-description = "integrations.py:_persist_attachments inserts the manifest row and stores bytes. files.py:list_file_attachments exposes its real id; ingestion 2xx alone is insufficient."
-via = "GET /api/v1/files/{attachment_file}/attachments"
-extract = "0.id"
-depends_on = ["attachment_file"]
+description = "Attachment bytes resolve a persisted render artefact belonging to the parent file."
+unseedable = "The ingest callback and its attachment persistence were removed; there is no HTTP endpoint that creates render artefacts."
 
 [[parameter]]
 key = "note"
@@ -773,7 +766,7 @@ name = "task_id"
 prefix = "/api/tasks/stop/{task_id}"
 description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh custom model inherits the readable upstream fixture and has public read access. Its model-scoped inlet Filter waits asynchronously for at most one hour before agent routing, keeping the id live until tasks.stop cancels it. A Pipe would be skipped by CI's production-matching agent routing. Seed late, cancel after the pass, and re-seed each pass. The finite wait bounds leaked fixtures if a driver crashes."
 seeded_by = "seed_task"
-depends_on = ["model", "chat", "cache", "attachment", "prompt_history", "channel_message", "external_source", "terminal_path"]
+depends_on = ["model", "chat", "cache", "prompt_history", "channel_message", "external_source", "terminal_path"]
 content = """
 import asyncio
 
@@ -1113,11 +1106,6 @@ description = "Multipart: an audio part. routers/audio.py:transcription refuses 
 files = [{ field = "file", filename = "attack-{token}.wav", content = "RIFF attack {token}", content_type = "audio/wav" }]
 
 [[field]]
-route = "POST /api/v1/integrations/ingest"
-description = "Multipart: the JSON payload is itself a file part named data (routers/integrations.py:ingest_documents), an IngestForm with a collection and documents."
-files = [{ field = "data", filename = "data.json", content = '{"collection": {"source_id": "attack-{token}", "name": "Attack ingest"}, "documents": []}', content_type = "application/json" }]
-
-[[field]]
 route = "POST /api/v1/pipelines/upload"
 description = "Multipart: routers/pipelines.py:upload_pipeline accepts only a .py filename, and urlIdx is a required integer form part naming the OpenAI connection."
 files = [{ field = "file", filename = "attack_{token}.py", content = "# attack pipeline {token}\n", content_type = "text/x-python" }]
@@ -1395,4 +1383,3 @@ prefix = "/api/v1/integrations/file-status"
 token = "ci-stub-key"
 headers = { "X-Acting-Provider" = "google_drive" }
 reason = "utils/service_auth.py:get_integration_principal: the loader-worker's LOADER_INGEST_API_KEY bearer, acting for X-Acting-User-Id through X-Acting-Provider (routers/integrations.py:_require_loader). A user's own bearer is refused (403)."
-

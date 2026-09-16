@@ -88,10 +88,6 @@ id = "POST /api/v1/files/"
 reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
 
 [[waived]]
-id = "POST /api/v1/integrations/ingest"
-reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
-
-[[waived]]
 id = "POST /api/v1/internal/retrieval/files/upload"
 reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
 

@@ -3147,14 +3147,8 @@ SOEV_API_JOB_POLL_SECONDS = int(os.environ.get('SOEV_API_JOB_POLL_SECONDS', '5')
 SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS = int(os.environ.get('SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS', '21600'))
 SOEV_API_INLINE_DOCUMENT_BYTES = int(os.environ.get('SOEV_API_INLINE_DOCUMENT_BYTES', '262144'))
 
-DISTRIBUTED_DOC_PIPELINE_ENABLED = os.environ.get('DISTRIBUTED_DOC_PIPELINE_ENABLED', 'False').lower() == 'true'
-
 DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = (
     os.environ.get('DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED', 'False').lower() == 'true'
-)
-
-DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED = (
-    os.environ.get('DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED', 'False').lower() == 'true'
 )
 
 # Per-tenant switch for the external sync-daemon (soev-solutions
@@ -3171,22 +3165,6 @@ SYNC_DAEMON_URL = os.environ.get('SYNC_DAEMON_URL', '')
 
 # Bearer token OWUI presents to the sync-daemon on trigger/cancel calls.
 SYNC_DAEMON_API_KEY = os.environ.get('SYNC_DAEMON_API_KEY', '')
-
-PIPELINE_API_BASE_URL = os.environ.get('PIPELINE_API_BASE_URL', '')
-
-PIPELINE_API_KEY = os.environ.get('PIPELINE_API_KEY', '')
-
-PIPELINE_INGEST_CALLBACK_URL = os.environ.get('PIPELINE_INGEST_CALLBACK_URL', '')
-
-PIPELINE_PRESIGN_TTL_SECONDS = int(os.environ.get('PIPELINE_PRESIGN_TTL_SECONDS', '3600'))
-
-PIPELINE_CHUNK_SIZE = int(os.environ.get('PIPELINE_CHUNK_SIZE', '1000'))
-
-PIPELINE_CHUNK_OVERLAP = int(os.environ.get('PIPELINE_CHUNK_OVERLAP', '100'))
-
-PIPELINE_RECONCILE_INTERVAL_SECONDS = int(os.environ.get('PIPELINE_RECONCILE_INTERVAL_SECONDS', '120'))
-
-PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS = int(os.environ.get('PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS', '21600'))
 
 ENABLE_AGENT_PROXY = os.environ.get('ENABLE_AGENT_PROXY', 'False').lower() == 'true'
 
@@ -3631,16 +3609,6 @@ DEFAULT_CONFIG = {
     'confluence.scoped_api_token': CONFLUENCE_SCOPED_API_TOKEN,
     'confluence.site_url': CONFLUENCE_SITE_URL,
     'confluence.sync_interval_minutes': CONFLUENCE_SYNC_INTERVAL_MINUTES,
-    'doc_pipeline.api_base_url': PIPELINE_API_BASE_URL,
-    'doc_pipeline.api_key': PIPELINE_API_KEY,
-    'doc_pipeline.chat_enabled': DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED,
-    'doc_pipeline.chunk_overlap': PIPELINE_CHUNK_OVERLAP,
-    'doc_pipeline.chunk_size': PIPELINE_CHUNK_SIZE,
-    'doc_pipeline.enabled': DISTRIBUTED_DOC_PIPELINE_ENABLED,
-    'doc_pipeline.ingest_callback_url': PIPELINE_INGEST_CALLBACK_URL,
-    'doc_pipeline.job_max_wall_clock_seconds': PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS,
-    'doc_pipeline.presign_ttl_seconds': PIPELINE_PRESIGN_TTL_SECONDS,
-    'doc_pipeline.reconcile_interval_seconds': PIPELINE_RECONCILE_INTERVAL_SECONDS,
     'document_writer.enable': ENABLE_DOCUMENT_WRITER,
     'document_writer.prompt_template': DOCUMENT_WRITER_PROMPT_TEMPLATE,
     'email.enable_forgot_password': ENABLE_FORGOT_PASSWORD,

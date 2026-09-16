@@ -379,3 +379,21 @@ async def test_unlanded_files_select_on_the_flat_collection_key(env):
     assert {row.id for row in await env.files.Files.get_unlanded_files_for_collection('kb')} == {flat.id, quoted.id}
     assert {row.id for row in await env.files.Files.get_files_with_soev_jobs()} == {flat.id, quoted.id}
     assert await env.files.Files.get_unlanded_files_for_collection('absent') == []
+
+
+@pytest.mark.asyncio
+async def test_pending_files_use_soev_collection_and_data_status_without_a_knowledge_join(env):
+    """Pending results accept bare and quoted collection keys and exclude terminal or legacy rows."""
+    pending = await new_file(env, soev_collection_key='kb')
+    processing = await new_file(env, soev_collection_key='"kb"', status='completed')
+    await env.files.Files.update_file_data_by_id(processing.id, {'status': 'processing'})
+    for status in ('completed', 'error'):
+        terminal = await new_file(env, soev_collection_key='kb')
+        await env.files.Files.update_file_data_by_id(terminal.id, {'status': status})
+    await new_file(env, soev_collection_key='other')
+    await new_file(env, data={'knowledge_id': 'kb'})
+    assert {row.id for row in await env.files.Files.get_pending_files_for_knowledge('kb')} == {
+        pending.id,
+        processing.id,
+    }
+    assert await env.files.Files.get_pending_files_for_knowledge('absent') == []
