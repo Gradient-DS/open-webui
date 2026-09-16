@@ -144,9 +144,12 @@ def knowledge_list_of(items: list, total: int) -> KnowledgeListResponse:
     return KnowledgeListResponse(items=items, total=total)
 
 
-def file_response_of(file: dict, document: dict, *, metadata_only: bool) -> FileUserMetadataResponse | FileUserResponse:
+def file_response_of(
+    file: dict, document: dict | None, *, metadata_only: bool
+) -> FileUserMetadataResponse | FileUserResponse:
     fields = {key: file[key] for key in ('id', 'user_id', 'hash', 'filename', 'meta', 'created_at', 'updated_at')}
-    fields.update(user=None, added_at=int(dt.datetime.fromisoformat(document['ingested_at']).timestamp()))
+    added_at = int(dt.datetime.fromisoformat(document['ingested_at']).timestamp()) if document else file['created_at']
+    fields.update(user=None, added_at=added_at)
     if metadata_only:
         meta = file['meta'] or {}
         return FileUserMetadataResponse(**fields, status=meta.get('status'), error=meta.get('error'))

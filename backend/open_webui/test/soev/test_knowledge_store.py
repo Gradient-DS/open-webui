@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 SERVICE = 'owui:service:webui'
 SOEV = {
+    'add_file_to_knowledge_by_id',
     'insert_new_knowledge',
     'get_knowledge_bases',
     'search_knowledge_bases',
@@ -59,6 +60,8 @@ SOEV = {
     'move_file_to_directory',
 }
 VACUOUS = {
+    'set_path_fields_by_file_id',
+    'update_knowledge_data_by_id',
     'get_pending_deletions',
     'get_stale_knowledge',
     'get_suspended_expired_knowledge',
@@ -66,10 +69,7 @@ VACUOUS = {
     'get_suspension_info',
 }
 REFUSED = {
-    'add_file_to_knowledge_by_id',
-    'set_path_fields_by_file_id',
     'update_knowledge_meta_by_id',
-    'update_knowledge_data_by_id',
     'update_knowledge_user_id_by_id',
 }
 
@@ -164,6 +164,15 @@ async def file(env, source='f1', path=None, key='kb', **meta):
             )
         )
         await session.commit()
+
+
+async def in_flight(env, source='upload', key='kb', **meta):
+    ingest = importlib.import_module('open_webui.soev.ingest')
+    row = await env.files.Files.insert_new_file(
+        'alice', env.files.FileForm(id=source, filename=source + '.txt', path='', meta=meta)
+    )
+    await ingest.submit(row, collection_key=key, user_id='alice', text='inline content', client=env.client)
+    return await env.files.Files.get_file_by_id(source)
 
 
 def test_every_knowledge_table_method_is_classified(env):
@@ -501,7 +510,7 @@ async def test_file_reference_methods_use_document_membership(env):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('metadata_only', [True, False])
 async def test_search_files_preserves_directory_filter_and_slim_rows(env, metadata_only):
-    """Absent, null, and populated directory filters differ, and both search paths avoid loading File.data."""
+    """Directory filters differ, and search hydration stays slim apart from unlanded membership reads."""
     await file(env, 'root', status='completed')
     await file(env, 'nested', path='a', status='processing')
     await file(env, 'deep', path='a/b', status='error')
@@ -516,7 +525,9 @@ async def test_search_files_preserves_directory_filter_and_slim_rows(env, metada
     assert [row.name for row in result.directories] == ['a']
     assert result.directories[0].child_count == 2
     assert result.directories[0].status_counts == {'pending': 1, 'failed': 1, 'completed': 0, 'unknown': 0}
-    assert all('file.data' not in statement for statement in statements)
+    assert all(
+        'file.data' not in statement for statement in statements if 'WHERE JSON_EXTRACT(file.meta,' not in statement
+    )
     assert all(row.model_dump().get('data') is None for row in result.items)
     root = await env.store.search_files_by_id('kb', 'alice', {'directory_id': None}, metadata_only=metadata_only)
     assert [row.id for row in root.items] == ['root']
@@ -677,8 +688,9 @@ async def test_delete_directory_moves_direct_files_and_handles_queued_deletion(e
 @pytest.mark.asyncio
 async def test_removing_and_resetting_files_commissions_document_jobs(env):
     """Removing a file and resetting a collection use document deletions and keep the collection itself."""
-    await file(env)
+    await file(env, soev_collection_key='kb')
     assert await env.store.remove_file_from_knowledge_by_id('kb', 'f1') is True
+    assert (await env.files.Files.get_file_by_id('f1')).meta['soev_collection_key'] is None
     assert next(iter(env.api.jobs.values()))['kind'] == 'delete_document'
     env.api.advance(next(iter(env.api.jobs)), 'SUCCEEDED')
     await file(env, 'second')
@@ -713,10 +725,7 @@ async def test_suspension_is_false_and_the_sweeps_are_empty(env):
 @pytest.mark.parametrize(
     ('method', 'args', 'reason'),
     [
-        ('add_file_to_knowledge_by_id', ('kb', 'file', 'alice'), 'ingest'),
-        ('set_path_fields_by_file_id', ('file', {}), 'ingest'),
         ('update_knowledge_meta_by_id', ('kb', {}), 'cloud sync'),
-        ('update_knowledge_data_by_id', ('kb', {}), 'ingest'),
         ('update_knowledge_user_id_by_id', ('kb', 'bob'), 'owner transfer'),
     ],
 )
@@ -725,4 +734,243 @@ async def test_a_refused_method_names_the_plan_it_moves_with(env, method, args, 
     with pytest.raises(env.module.NotOnSoev) as caught:
         await getattr(env.store, method)(*args)
     assert method in str(caught.value) and reason in str(caught.value)
+    assert env.api.requests == []
+
+
+@pytest.mark.asyncio
+async def test_add_file_is_a_no_op_for_a_landed_document(env):
+    """Landed membership returns the existing link without sending a mutation."""
+    await file(env, path='a')
+    env.api.requests.clear()
+    result = await env.store.add_file_to_knowledge_by_id('kb', 'f1', 'alice')
+    assert result == env.projection.knowledge_link_of(
+        env.api.collections['kb'], env.api.documents['kb', 'f1'], service_principal=SERVICE
+    )
+    assert all(request.method == 'GET' for request in env.api.requests)
+    await env.files.Files.insert_new_file('alice', env.files.FileForm(id='unsubmitted', filename='new.txt', path=''))
+    assert await env.store.add_file_to_knowledge_by_id('kb', 'unsubmitted', 'alice') is None
+    assert await env.store.add_file_to_knowledge_by_id('kb', 'missing', 'alice') is None
+    await seed(env, 'other')
+    upload = await in_flight(env, key='other')
+    assert await env.store.add_file_to_knowledge_by_id('kb', upload.id, 'alice') is None
+
+
+@pytest.mark.asyncio
+async def test_add_file_with_a_directory_moves_a_landed_document(env):
+    """Adding landed membership to a directory moves the document and returns its new link."""
+    await file(env)
+    directory = await env.store.create_directory('kb', 'a', 'alice')
+    env.api.requests.clear()
+    result = await env.store.add_file_to_knowledge_by_id('kb', 'f1', 'alice', directory.id)
+    assert result.directory_id == directory.id and result.relative_path == 'a'
+    assert env.api.documents['kb', 'f1']['path'] == 'a'
+    writes = [request for request in env.api.requests if request.method != 'GET']
+    assert [(request.method, request.url.path) for request in writes] == [
+        ('POST', '/v1/collections/kb/documents/f1/move')
+    ]
+    assert json.loads(writes[0].content) == {'to': 'a'}
+    encoded = writes[0].headers['X-Soev-Subject'].split('.')[1]
+    assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+
+
+@pytest.mark.asyncio
+async def test_add_file_with_a_directory_records_the_path_for_an_in_flight_job(env, monkeypatch):
+    """An intended folder preserves job fields and is applied by the poller after landing."""
+    row = await in_flight(env, relative_path='old/upload.txt', preserved='metadata')
+    job = row.meta['soev_job']
+    directory = await env.store.create_directory('kb', 'a', 'alice')
+    original = await env.store.add_file_to_knowledge_by_id('kb', row.id, 'alice')
+    assert original.relative_path == 'old' and original.created_at == row.created_at
+    env.api.requests.clear()
+    result = await env.store.add_file_to_knowledge_by_id('kb', row.id, 'alice', directory.id)
+    updated = await env.files.Files.get_file_by_id(row.id)
+    assert updated.meta == {**row.meta, 'soev_job': {**job, 'path': 'a'}}
+    assert result.file_id == row.id and result.directory_id == directory.id
+    assert result.created_at == result.updated_at == row.created_at
+    assert all(request.method == 'GET' for request in env.api.requests)
+    jobs = importlib.import_module('open_webui.soev.jobs')
+    monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
+    env.api.advance(job['job_id'], 'SUCCEEDED')
+    assert await jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    assert env.api.documents['kb', row.id]['path'] == 'a'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('metadata_only', [True, False])
+async def test_in_flight_files_are_listed_with_their_processing_status(env, metadata_only):
+    """Unlanded membership participates in search, directory filters, rollups, and collection counts."""
+    directory = await env.store.create_directory('kb', 'a', 'alice')
+    row = await in_flight(env, relative_path='a/upload.txt')
+    await in_flight(env, 'sibling', relative_path='ab/sibling.txt')
+    assert {item.id for item in await env.store.get_files_by_id('kb')} == {row.id, 'sibling'}
+    assert {item.id for item in await env.store.get_file_metadatas_by_id('kb')} == {row.id, 'sibling'}
+    assert await env.store.has_file('kb', row.id)
+    result = await env.store.search_files_by_id('kb', 'alice', {}, metadata_only=metadata_only)
+    assert result.total == 2
+    item = next(item for item in result.items if item.id == row.id)
+    assert item.added_at == row.created_at
+    assert (item.status if metadata_only else item.meta.status) == 'processing'
+    assert result.directories[0].child_count == 1
+    assert result.directories[0].status_counts == {'pending': 1, 'failed': 0, 'completed': 0, 'unknown': 0}
+    assert (await env.store.search_files_by_id('kb', 'alice', {'directory_id': None})).total == 0
+    nested = await env.store.search_files_by_id('kb', 'alice', {'directory_id': directory.id})
+    assert [item.id for item in nested.items] == [row.id]
+    assert await env.store.get_file_ids_in_directory_subtree('kb', directory.id) == [row.id]
+    pairs = await env.store.get_files_with_directory_ids('kb')
+    assert dict((item.id, folder) for item, folder in pairs)[row.id] == directory.id
+    assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == {'kb': 2}
+    cross = await env.store.search_knowledge_files({'user_id': 'alice', 'query': 'upload'})
+    assert [item.id for item in cross.items] == [row.id] and cross.items[0].status == 'processing'
+    await seed(env, 'private', owner='bob')
+    await env.files.Files.update_file_metadata_by_id(row.id, {'soev_collection_key': 'private'})
+    assert (await env.store.search_files_by_id('private', 'alice', {})).total == 0
+
+
+@pytest.mark.asyncio
+async def test_a_failed_file_stays_listed_as_error_until_removed(env, monkeypatch):
+    """Poller failures keep root membership and error details until removal clears the retained key."""
+    row = await in_flight(env, relative_path='a/upload.txt')
+    job = row.meta['soev_job']
+    jobs = importlib.import_module('open_webui.soev.jobs')
+    monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
+    env.api.advance(
+        job['job_id'], 'COMPLETED_WITH_ERRORS', item_code='unsupported_content_type', item_detail='Cannot parse'
+    )
+    assert await jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    result = await env.store.search_files_by_id('kb', 'alice', {'directory_id': None}, metadata_only=True)
+    assert result.total == 1 and result.items[0].status == 'failed'
+    assert result.items[0].error == 'unsupported_content_type: Cannot parse'
+    root = env.projection.directory_id('kb', ())
+    rollups = await env.store.get_directory_rollups('kb', [root])
+    assert rollups[root]['status_counts']['failed'] == 1
+    assert (await env.store.get_files_with_directory_ids('kb'))[0][1] is None
+    assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == {'kb': 1}
+    assert await env.store.has_file('kb', row.id)
+    env.api.requests.clear()
+    assert await env.store.remove_file_from_knowledge_by_id('kb', row.id)
+    assert all(request.method == 'GET' for request in env.api.requests)
+    assert (await env.files.Files.get_file_by_id(row.id)).meta['soev_collection_key'] is None
+    assert await env.store.get_files_by_id('kb') == []
+    assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_landed_file_is_listed_once(env):
+    """A document visible before the poller clears its job wins over the retained unlanded row."""
+    directory = await env.store.create_directory('kb', 'a', 'alice')
+    row = await in_flight(env, relative_path='a/upload.txt')
+    env.api.advance(row.meta['soev_job']['job_id'], 'SUCCEEDED')
+    assert await env.store._unlanded('kb') == []
+    assert [item.id for item in await env.store.get_files_by_id('kb')] == [row.id]
+    assert [item.id for item in await env.store.get_file_metadatas_by_id('kb')] == [row.id]
+    assert (await env.store.search_files_by_id('kb', 'alice', {})).total == 1
+    assert (await env.store.search_knowledge_files({'user_id': 'alice'})).total == 1
+    assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == {'kb': 1}
+    assert len(await env.store.get_files_with_directory_ids('kb')) == 1
+    assert await env.store.get_file_ids_in_directory_subtree('kb', directory.id) == [row.id]
+    rollups = await env.store.get_directory_rollups('kb', [directory.id])
+    assert rollups[directory.id]['child_count'] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('acting_user', [None, 'alice'])
+async def test_references_use_the_source_lookup_route(env, acting_user):
+    """One lookup per source resolves each collection once under the same acting identity."""
+    await file(env, 'first')
+    await file(env, 'second')
+    await seed(env, 'other')
+    env.api.add_document('other', 'first')
+    await seed(env, 'private', owner='bob')
+    env.api.add_document('private', 'first')
+    acting = importlib.import_module('open_webui.soev.acting')
+    token = acting._acting_ref.set(f'owui:user:{acting_user}' if acting_user else None)
+    env.api.requests.clear()
+    try:
+        pairs = await env.store._references({'first', 'second', 'missing'})
+    finally:
+        acting._acting_ref.reset(token)
+    expected = {('kb', 'first'), ('kb', 'second'), ('other', 'first')}
+    if acting_user is None:
+        expected.add(('private', 'first'))
+    assert {(collection['key'], document['source_id']) for collection, document in pairs} == expected
+    lookups = [request for request in env.api.requests if request.url.path == '/v1/documents']
+    assert [str(request.url).split('/v1/')[1] for request in lookups] == [
+        'documents?source_id=first',
+        'documents?source_id=missing',
+        'documents?source_id=second',
+    ]
+    assert all(request.method == 'GET' for request in env.api.requests)
+    assert not any(request.url.path.endswith('/documents') and request not in lookups for request in env.api.requests)
+    assert sum(request.url.path == '/v1/collections/kb' for request in env.api.requests) == 1
+    assert not any(request.url.path == '/v1/collections' for request in env.api.requests)
+    for request in env.api.requests:
+        if acting_user:
+            encoded = request.headers['X-Soev-Subject'].split('.')[1]
+            assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+        else:
+            assert 'X-Soev-Subject' not in request.headers
+
+
+@pytest.mark.asyncio
+async def test_attachments_collections_are_hidden_from_every_listing(env):
+    """Knowledge listings and cross-collection file search exclude reserved attachment collections."""
+    attachment = 'owui-attachments-alice'
+    await seed(env, attachment)
+    await file(env, 'attachment', key=attachment)
+    assert [item.id for item in await env.store.get_knowledge_bases()] == ['kb']
+    assert [item.id for item in (await env.store.search_knowledge_bases('alice', {})).items] == ['kb']
+    assert [item.id for item in await env.store.get_knowledge_bases_by_type('local')] == ['kb']
+    for permission in ('read', 'write'):
+        assert [item.id for item in await env.store.get_knowledge_bases_by_user_id('alice', permission)] == ['kb']
+    assert [item.id for item in await env.store.get_knowledge_items_by_user_id('alice')] == ['kb']
+    assert await env.store.accessible_collection_ids('alice', ['kb', attachment]) == {'kb'}
+    assert [item['key'] for item in await env.store._collections(as_service=True)] == ['kb']
+    assert (await env.store.search_knowledge_files({'user_id': 'alice'})).total == 0
+
+
+@pytest.mark.asyncio
+async def test_removing_an_in_flight_file_cancels_its_job(env):
+    """Removing pending membership cancels the ingest job and clears both durable keys."""
+    row = await in_flight(env)
+    job_id = row.meta['soev_job']['job_id']
+    env.api.requests.clear()
+    assert await env.store.remove_file_from_knowledge_by_id('kb', row.id)
+    assert [(request.method, request.url.path) for request in env.api.requests] == [
+        ('POST', f'/v1/jobs/{job_id}/cancel')
+    ]
+    updated = await env.files.Files.get_file_by_id(row.id)
+    assert updated.meta['soev_job'] is None and updated.meta['soev_collection_key'] is None
+    assert env.api.jobs[job_id]['status'] == 'CANCELLED'
+    assert not await env.store.has_file('kb', row.id)
+
+
+@pytest.mark.asyncio
+async def test_reset_cancels_in_flight_jobs_before_deleting_documents(env):
+    """Reset clears pending and failed membership before commissioning any landed document deletion."""
+    await file(env, 'landed')
+    row = await in_flight(env)
+    landed = await in_flight(env, 'just-landed')
+    env.api.advance(landed.meta['soev_job']['job_id'], 'SUCCEEDED')
+    failed = await in_flight(env, 'failed')
+    env.api.advance(failed.meta['soev_job']['job_id'], 'FAILED')
+    await env.files.Files.update_file_metadata_by_id(failed.id, {'soev_job': None, 'status': 'failed'})
+    env.api.requests.clear()
+    assert (await env.store.reset_knowledge_by_id('kb', include_directories=False)).id == 'kb'
+    writes = [request for request in env.api.requests if request.method != 'GET']
+    assert [request.method for request in writes] == ['POST', 'POST', 'DELETE', 'DELETE']
+    assert {request.url.path for request in writes[:2]} == {
+        f'/v1/jobs/{file.meta["soev_job"]["job_id"]}/cancel' for file in (row, landed)
+    }
+    assert env.api.jobs[row.meta['soev_job']['job_id']]['status'] == 'CANCELLED'
+    assert await env.files.Files.get_unlanded_files_for_collection('kb') == []
+    for member in (row, landed, failed):
+        updated = await env.files.Files.get_file_by_id(member.id)
+        assert updated.meta['soev_job'] is None and updated.meta['soev_collection_key'] is None
+
+
+@pytest.mark.asyncio
+async def test_vacuous_path_fields_and_data_updates_make_no_request(env):
+    """Obsolete path and knowledge data writes return their vacuous results without network requests."""
+    assert await env.store.set_path_fields_by_file_id('file', {'relative_path': 'a'}) is True
+    assert await env.store.update_knowledge_data_by_id('kb', {'file_ids': ['file']}) is None
     assert env.api.requests == []
