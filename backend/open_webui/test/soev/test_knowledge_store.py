@@ -747,12 +747,52 @@ async def test_add_file_is_a_no_op_for_a_landed_document(env):
         env.api.collections['kb'], env.api.documents['kb', 'f1'], service_principal=SERVICE
     )
     assert all(request.method == 'GET' for request in env.api.requests)
-    await env.files.Files.insert_new_file('alice', env.files.FileForm(id='unsubmitted', filename='new.txt', path=''))
-    assert await env.store.add_file_to_knowledge_by_id('kb', 'unsubmitted', 'alice') is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('job_meta', [{}, {'soev_job': None}])
+async def test_add_file_before_submit_records_the_collection_key(env, job_meta):
+    row = await env.files.Files.insert_new_file(
+        'alice',
+        env.files.FileForm(
+            id='unsubmitted',
+            filename='new.txt',
+            path='',
+            data={'status': 'pending'},
+            meta={'status': 'pending', 'preserved': 'metadata', **job_meta},
+        ),
+    )
+    result = await env.store.add_file_to_knowledge_by_id('kb', row.id, 'alice')
+    updated = await env.files.Files.get_file_by_id(row.id)
+    assert updated.meta == {**row.meta, 'soev_collection_key': 'kb'}
+    assert result.file_id == row.id and result.knowledge_id == 'kb'
+    assert result.relative_path is None and result.directory_id is None
+    assert result.created_at == result.updated_at == row.created_at
+    assert [item.id for item in await env.files.Files.get_pending_files_for_knowledge('kb')] == [row.id]
+    listed = await env.store.search_files_by_id('kb', 'alice', {}, metadata_only=True)
+    assert [(item.id, item.status) for item in listed.items] == [(row.id, 'pending')]
+    assert all(request.method == 'GET' for request in env.api.requests)
+
+
+@pytest.mark.asyncio
+async def test_add_file_for_a_missing_file_is_none(env):
     assert await env.store.add_file_to_knowledge_by_id('kb', 'missing', 'alice') is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('directory_path', [None, ('target',)])
+async def test_add_file_in_another_collection_preserves_the_in_flight_job(env, directory_path):
     await seed(env, 'other')
-    upload = await in_flight(env, key='other')
-    assert await env.store.add_file_to_knowledge_by_id('kb', upload.id, 'alice') is None
+    row = await in_flight(env, key='other', relative_path='original/upload.txt')
+    directory_id = env.projection.directory_id('kb', directory_path) if directory_path else None
+    env.api.requests.clear()
+    result = await env.store.add_file_to_knowledge_by_id('kb', row.id, 'alice', directory_id)
+    updated = await env.files.Files.get_file_by_id(row.id)
+    assert updated == row
+    assert result.file_id == row.id and result.knowledge_id == 'kb'
+    assert result.relative_path is None and result.directory_id is None
+    assert result.created_at == result.updated_at == row.created_at
+    assert all(request.method == 'GET' for request in env.api.requests)
 
 
 @pytest.mark.asyncio

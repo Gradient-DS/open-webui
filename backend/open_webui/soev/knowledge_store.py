@@ -688,15 +688,17 @@ class SoevKnowledgeTable:
                 document = {**document, 'path': '/'.join(path) or None}
         else:
             file = await Files.get_file_by_id(file_id)
-            job = ((file.meta or {}).get('soev_job') or {}) if file else {}
-            if job.get('collection_key') != knowledge_id:
+            if file is None:
                 return None
-            if path is not None:
+            job = (file.meta or {}).get('soev_job') or {}
+            if not job:
+                await Files.update_file_metadata_by_id(file_id, {'soev_collection_key': knowledge_id})
+            elif job.get('collection_key') == knowledge_id and path is not None:
                 job = {**job, 'path': '/'.join(path) or None}
                 await Files.update_file_metadata_by_id(file_id, {'soev_job': job})
             document = {
                 'source_id': file.id,
-                'path': job.get('path'),
+                'path': job.get('path') if job.get('collection_key') == knowledge_id else None,
                 'ingested_at': dt.datetime.fromtimestamp(file.created_at, dt.UTC).isoformat(),
             }
         return self._projection.knowledge_link_of(collection, document, service_principal=self._service_principal)
