@@ -905,7 +905,7 @@
 	<div
 		class={singlePage
 			? 'overflow-hidden h-full flex items-center justify-center overscroll-contain'
-			: 'overflow-y-auto h-full'}
+			: 'overflow-y-auto h-full [scrollbar-gutter:stable]'}
 		bind:this={outerContainer}
 		role="application"
 		aria-label={`${itemLabel} viewer`}

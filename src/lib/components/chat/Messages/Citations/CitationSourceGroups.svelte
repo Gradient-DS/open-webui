@@ -6,8 +6,8 @@
 	import type { SourceGroup } from '../../ChatControls/citationTab';
 	import type { DisplayCitation } from './reduceSources';
 	import CitationSourceList from './CitationSourceList.svelte';
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
+	import { slide } from 'svelte/transition';
 	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 
 	const i18n = getContext<Readable<I18n>>('i18n');
@@ -52,18 +52,23 @@
 				<span class="shrink-0 text-xs text-gray-500 dark:text-gray-400"
 					>{$i18n.t('{{count}} sources', { count: group.used.length })}</span
 				>
-				{#if expanded.has(group.messageId)}
-					<ChevronDown className="size-4 shrink-0 text-gray-500" />
-				{:else}
-					<ChevronRight className="size-4 shrink-0 text-gray-500" />
-				{/if}
+				<ChevronRight
+					className="size-4 shrink-0 text-gray-500 transition-transform duration-200 {expanded.has(
+						group.messageId
+					)
+						? 'rotate-90'
+						: ''}"
+				/>
 			</button>
 			{#if expanded.has(group.messageId)}
-				<CitationSourceList
-					embedded
-					visibleCitations={group.used}
-					onSelect={(citation) => onSelect(citation, group)}
-				/>
+				<!-- [Gradient] Slide the group body open/closed instead of snapping. -->
+				<div transition:slide={{ duration: 200 }}>
+					<CitationSourceList
+						embedded
+						visibleCitations={group.used}
+						onSelect={(citation) => onSelect(citation, group)}
+					/>
+				</div>
 			{/if}
 		</section>
 	{/each}
