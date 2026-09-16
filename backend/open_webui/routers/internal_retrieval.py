@@ -347,13 +347,10 @@ async def agent_query(
 ) -> AgentSearchResponse:
     """**Deprecated** — kept for compatibility with the rev-2 simple-default path.
 
-    The canonical agent retrieval flow is ``GET /accessible-kbs`` followed by
-    direct Weaviate access from the agent (rev-3 amendment in
-    `2026-04-25-shared-services-loader-worker.md`). All current Gradient agents
-    use that path; nothing in the soev monorepo calls ``/query`` today. The
-    endpoint stays on the wire so an external simple-agent integration that
-    prefers a single open-webui call doesn't have to be rewritten, but new
-    agents should not target it.
+    Agents read through the remaining internal retrieval routes, acting as
+    the user supplied in ``X-Acting-User-Id``. This endpoint stays on the wire
+    for external simple-agent integrations that prefer a single open-webui
+    call, but new agents should use the remaining retrieval routes.
     """
     if not await Config.get('agent_search.enabled', False):
         raise HTTPException(
