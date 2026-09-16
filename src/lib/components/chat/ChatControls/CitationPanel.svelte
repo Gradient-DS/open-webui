@@ -243,6 +243,6 @@
 	<div
 		class="flex h-full min-h-0 items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-gray-400"
 	>
-		{$i18n.t('No sources in this chat yet')}
+		{$i18n.t('Sources will appear here when you add them or when soev.ai finds them')}
 	</div>
 {/if}

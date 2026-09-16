@@ -17,7 +17,6 @@
 		openDocumentTabSignal,
 		showEmbeds,
 		openSourcesTabSignal,
-		citationPanel,
 		settings,
 		showFileNavPath,
 		selectedTerminalId,
@@ -35,7 +34,6 @@
 	import Embeds from './ChatControls/Embeds.svelte';
 	// [Gradient] Sources share the tabbed panel with Document Writer.
 	import CitationPanel from './ChatControls/CitationPanel.svelte';
-	import { latestMessageWithSources } from './ChatControls/citationTab';
 	import FileNav from './FileNav.svelte';
 	import PyodideFileNav from './PyodideFileNav.svelte';
 	import Overview from './Overview.svelte';
@@ -80,7 +78,10 @@
 
 	$: hasMessages = history?.messages && Object.keys(history.messages).length > 0;
 
-	$: showControlsTab = $user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true);
+	// [Gradient] SPIKE: the Controls tab (incl. its Files section) is switched off; the
+	// panel is the sources drawer. Upstream gate kept for reference:
+	//   $user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true)
+	$: showControlsTab = false;
 	const chatContext = (terminal: any) => terminal?.contexts?.chat ?? {};
 	const chatContextAvailable = (terminal: any) => chatContext(terminal) !== false;
 	const chatContextNeedsSavedChat = (terminal: any) =>
@@ -105,7 +106,9 @@
 	$: showDocumentTab = isFeatureEnabled('document_writer') && ($documentContents?.length ?? 0) > 0;
 
 	// [Gradient] Keep Sources available before the first citation click.
-	$: showSourcesTab = !!latestMessageWithSources(history) || !!$citationPanel;
+	// [Gradient] SPIKE: always available, so the drawer opens on Sources with a
+	// placeholder before the first answer with sources.
+	$: showSourcesTab = true;
 
 	// Tab fallback: if active tab becomes hidden, switch to next available
 	// [Gradient] A hidden Sources tab must yield to an available tab.
@@ -153,7 +156,12 @@
 	}
 
 	// [Gradient] Citation clicks select Sources even when the panel is already open.
-	$: if ($openSourcesTabSignal && showSourcesTab) {
+	// Only react to signals raised after this instance mounted: the store keeps its
+	// count across chat switches, and a fresh ChatControls must not pop the panel
+	// open just because a citation was clicked in an earlier chat.
+	let handledSourcesSignal = $openSourcesTabSignal;
+	$: if ($openSourcesTabSignal !== handledSourcesSignal && showSourcesTab) {
+		handledSourcesSignal = $openSourcesTabSignal;
 		activeTab = 'sources';
 		showEmbeds.set(false);
 		showArtifacts.set(false);
