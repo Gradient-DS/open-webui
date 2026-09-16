@@ -204,6 +204,27 @@ async def test_get_knowledge_by_id_reads_as_the_service_principal(env):
 
 
 @pytest.mark.asyncio
+async def test_get_knowledge_by_id_inside_a_request_runs_as_the_acting_user(env):
+    """Collection reads assert the acting user while grant reads remain identity-free in the same context."""
+    acting = importlib.import_module('open_webui.soev.acting')
+    token = acting._acting_ref.set('owui:user:alice')
+    try:
+        assert (await env.store.get_knowledge_by_id('kb')).id == 'kb'
+        request = env.api.requests[-1]
+        assert request.method == 'GET' and request.url.path == '/v1/collections/kb'
+        encoded = request.headers['X-Soev-Subject'].split('.')[1]
+        assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+        env.api.requests.clear()
+        assert await env.store.get_collection_grants('kb') == []
+        assert len(env.api.requests) == 1
+        request = env.api.requests[0]
+        assert request.method == 'GET' and request.url.path == '/v1/collections/kb'
+        assert 'X-Soev-Subject' not in request.headers
+    finally:
+        acting._acting_ref.reset(token)
+
+
+@pytest.mark.asyncio
 async def test_search_knowledge_bases_reads_under_the_users_assertion(env):
     """Search uses explicit identity over request context, filters, sorts, and counts before pagination."""
     acting = importlib.import_module('open_webui.soev.acting')
