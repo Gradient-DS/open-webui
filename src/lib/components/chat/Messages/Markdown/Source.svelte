@@ -4,6 +4,8 @@
 
 	const i18n = getContext('i18n');
 
+	// [Gradient] Mark the source currently being read beside the answer.
+	export let active = false;
 	export let id;
 
 	export let title: string = 'N/A';
@@ -42,6 +44,10 @@
 	<button
 		aria-label={$i18n.t('View source: {{title}}', { title: formattedTitle(decodeString(title)) })}
 		class="text-[0.625rem] w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
+		class:ring-2={active}
+		class:ring-gray-400={active}
+		class:!bg-gray-200={active}
+		class:dark:!bg-gray-700={active}
 		on:click={() => {
 			onClick(id);
 		}}

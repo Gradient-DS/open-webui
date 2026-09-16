@@ -1,5 +1,6 @@
 <script lang="ts">
 	// [Gradient] SPIKE — remove before merge.
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { getContext } from 'svelte';
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
@@ -12,11 +13,11 @@
 			description: 'Show citations in the original centered modal'
 		},
 		{ value: 'stack', label: 'Stack', description: 'Stack passages above the source preview' },
-		{ value: 'focus', label: 'Focus', description: 'Focus on one passage at a time (coming soon)' },
+		{ value: 'focus', label: 'Focus', description: 'Focus on one passage at a time' },
 		{
 			value: 'navigator',
 			label: 'Navigator',
-			description: 'Navigate sources and passages (coming soon)'
+			description: 'Browse all message sources and open their passages'
 		}
 	];
 </script>
@@ -31,11 +32,20 @@
 			class="rounded-full px-2.5 py-1 text-xs transition {$citationPanelVariant === variant.value
 				? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
 				: 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'}"
-			title={$i18n.t(variant.description)}
+			title={variant.description}
 			aria-pressed={$citationPanelVariant === variant.value}
 			on:click={() => citationPanelVariant.set(variant.value)}
 		>
 			{$i18n.t(variant.label)}
 		</button>
 	{/each}
+	<!-- [Gradient] Spike-only dev help; intentionally not translated. -->
+	<Tooltip
+		content="Stack: passages above the document.<br>Focus: one passage with a stepper and more document space.<br>Navigator: all message sources, then source detail."
+	>
+		<button
+			class="rounded-full px-2 text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+			aria-label="About citation panel variants">?</button
+		>
+	</Tooltip>
 </div>

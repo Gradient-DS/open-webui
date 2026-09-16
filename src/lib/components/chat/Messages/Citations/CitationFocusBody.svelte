@@ -108,30 +108,32 @@
 			>
 			<div slot="content">
 				<DropdownMenu className="w-80 max-w-[calc(100vw-2rem)]">
-					{#each mergedDocuments as document, idx}
-						<button
-							role="menuitem"
-							class="flex w-full items-start gap-2 rounded-lg p-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-800 {activeSnippetIdx ===
-							idx
-								? 'bg-gray-100 dark:bg-gray-800'
-								: ''}"
-							on:click={() => {
-								selectSnippet(idx);
-								dropdown.close();
-							}}
-						>
-							<span class="shrink-0 text-gray-500">{idx + 1}</span>
-							<div class="min-w-0">
-								{#if isDocumentSnippet(document)}<div class="text-gray-500">
-										{$i18n.t('Full document')}
-									</div>
-								{:else if snippetPage(document) !== undefined}<div class="text-gray-500">
-										{$i18n.t('p. {{page}}', { page: Number(snippetPage(document)) + 1 })}
-									</div>{/if}
-								<div class="line-clamp-2">{truncate(document.document.trim(), 80)}</div>
-							</div>
-						</button>
-					{/each}
+					<div>
+						{#each mergedDocuments as document, idx}
+							<button
+								role="menuitem"
+								class="flex w-full items-start gap-2 rounded-lg p-2 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-800 {activeSnippetIdx ===
+								idx
+									? 'bg-gray-100 dark:bg-gray-800'
+									: ''}"
+								on:click={() => {
+									selectSnippet(idx);
+									dropdown.close();
+								}}
+							>
+								<span class="shrink-0 text-gray-500">{idx + 1}</span>
+								<div class="min-w-0">
+									{#if isDocumentSnippet(document)}<div class="text-gray-500">
+											{$i18n.t('Full document')}
+										</div>
+									{:else if snippetPage(document) !== undefined}<div class="text-gray-500">
+											{$i18n.t('p. {{page}}', { page: Number(snippetPage(document)) + 1 })}
+										</div>{/if}
+									<div class="line-clamp-2">{truncate(document.document.trim(), 80)}</div>
+								</div>
+							</button>
+						{/each}
+					</div>
 				</DropdownMenu>
 			</div>
 		</Dropdown>
