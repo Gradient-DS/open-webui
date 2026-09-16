@@ -21,7 +21,10 @@ def install(app: FastAPI) -> None:
         return await get_current_user(*args, **kwargs)
 
     async def with_acting_user(user=Depends(upstream_user)):
-        _acting_ref.set(identity.external_ref(user))
-        return user
+        token = _acting_ref.set(identity.external_ref(user))
+        try:
+            yield user
+        finally:
+            _acting_ref.reset(token)
 
     app.dependency_overrides[get_current_user] = with_acting_user

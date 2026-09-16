@@ -1,9 +1,11 @@
 """Request identity follows the real FastAPI authentication dependency chain."""
 
+import asyncio
 import importlib
 import inspect
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -55,6 +57,36 @@ def test_a_request_sets_the_acting_ref_only_for_its_handler(acting_app):
         assert client.get('/verified').status_code == 401
     assert lookup.await_count == 2
     assert acting.acting_ref() is None
+
+
+@pytest.mark.asyncio
+async def test_request_resets_the_acting_ref_in_the_callers_context(acting_app):
+    """Request cleanup resets the caller's context while an existing child task retains its copied context."""
+    app, acting, auth, _, _ = acting_app
+    released = asyncio.Event()
+    tasks = []
+
+    async def child():
+        await released.wait()
+        return acting.acting_ref()
+
+    @app.get('/spawn')
+    async def spawn(user=Depends(auth.get_verified_user)):
+        tasks.append(asyncio.create_task(child()))
+        return {'ref': acting.acting_ref()}
+
+    assert acting.acting_ref() is None
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            response = await client.get('/spawn', headers={'Authorization': 'Bearer sk-test'})
+            assert response.status_code == 200
+            assert response.json() == {'ref': 'owui:user:alice'}
+            assert acting.acting_ref() is None
+            assert (await client.get('/anonymous')).json() == {'ref': None}
+    finally:
+        released.set()
+        refs = await asyncio.gather(*tasks)
+    assert refs == ['owui:user:alice']
 
 
 def test_the_override_returns_the_upstream_user_unchanged(acting_app):
