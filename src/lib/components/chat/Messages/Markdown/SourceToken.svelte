@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { LinkPreview } from 'bits-ui';
 	import { decodeString } from '$lib/utils';
-	// [Gradient] Markdown ids start with the chat and message ids, then token suffixes.
-	import { activeCitationIndex, citationPanel } from '$lib/stores';
+	import { activeCitationIndex, citationPanel } from '$lib/stores'; // [Gradient]
+	import { activeCitationIndexFor } from './activeCitation'; // [Gradient]
 	import Source from './Source.svelte';
 
 	export let id;
@@ -10,14 +10,9 @@
 	export let sourceIds = [];
 	export let onClick: Function = () => {};
 
-	$: messagePrefix = $citationPanel ? `${$citationPanel.chatId}-${$citationPanel.messageId}` : '';
-	$: messageId =
-		messagePrefix && (id === messagePrefix || id?.startsWith(`${messagePrefix}-`))
-			? $citationPanel?.messageId
-			: null;
-	$: activeIndex =
-		messageId && messageId === $activeCitationIndex?.messageId ? $activeCitationIndex.index : null;
-	$: active = activeIndex !== null && (token?.ids ?? []).includes(activeIndex);
+	$: activeIndex = activeCitationIndexFor(id, $citationPanel, $activeCitationIndex); // [Gradient]
+	$: active = activeIndex !== null && (token?.ids ?? []).includes(activeIndex); // [Gradient]
+	let containerElement;
 	let openPreview = false;
 
 	// Helper function to return only the domain from a URL
@@ -80,12 +75,8 @@
 							{@const id =
 								typeof identifier === 'string' ? parseInt(identifier.split('#')[0]) : identifier}
 							<div class="">
-								<Source
-									active={id === activeIndex}
-									id={identifier}
-									title={sourceIds[id - 1]}
-									{onClick}
-								/>
+								<!-- prettier-ignore -->
+								<Source active={id === activeIndex} id={identifier} title={sourceIds[id - 1]} {onClick} />
 							</div>
 						{/each}
 					</div>
