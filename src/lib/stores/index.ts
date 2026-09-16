@@ -208,11 +208,6 @@ export const activeCitationIndex = derived(citationPanel, (panel) => {
 	const index = panel.citations.indexOf(panel.citation) + 1;
 	return index > 0 ? { messageId: panel.messageId, index } : null;
 });
-export type CitationPanelVariant = 'modal' | 'stack' | 'focus' | 'navigator';
-// [Gradient] The side panel (drawer on mobile) is the only citation view. The
-// modal remains solely as the read-only fallback (shared chat pages have no panel).
-export const citationPanelVariant = writable<CitationPanelVariant>('navigator');
-
 export const temporaryChatEnabled = writable(false);
 
 // Transient one-shot event from the desktop shell (Spotlight, drag-and-drop, etc.).

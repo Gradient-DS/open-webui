@@ -8,8 +8,7 @@
 		showControls,
 		showEmbeds,
 		citationPanel,
-		openSourcesTabSignal,
-		citationPanelVariant
+		openSourcesTabSignal
 	} from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
@@ -82,7 +81,8 @@
 		});
 		openSourcesTabSignal.update((value) => value + 1);
 	};
-	$: navigatorEnabled = !readOnly && $citationPanelVariant === 'navigator';
+	// [Gradient] The side panel is the only citation view; read-only pages keep the modal.
+	$: navigatorEnabled = !readOnly;
 
 	export const showSourceModal = (sourceId: string | number) => {
 		let index;

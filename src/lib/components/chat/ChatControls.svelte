@@ -78,8 +78,8 @@
 
 	$: hasMessages = history?.messages && Object.keys(history.messages).length > 0;
 
-	// [Gradient] SPIKE: the Controls tab (incl. its Files section) is switched off; the
-	// panel is the sources drawer. Upstream gate kept for reference:
+	// [Gradient] The Controls tab (incl. its Files section) is switched off: the panel is
+	// the sources drawer. Upstream gate kept for reference:
 	//   $user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true)
 	$: showControlsTab = false;
 	const chatContext = (terminal: any) => terminal?.contexts?.chat ?? {};
@@ -106,7 +106,7 @@
 	$: showDocumentTab = isFeatureEnabled('document_writer') && ($documentContents?.length ?? 0) > 0;
 
 	// [Gradient] Keep Sources available before the first citation click.
-	// [Gradient] SPIKE: always available, so the drawer opens on Sources with a
+	// [Gradient] Always available, so the drawer opens on Sources with a
 	// placeholder before the first answer with sources.
 	$: showSourcesTab = true;
 

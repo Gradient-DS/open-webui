@@ -3,9 +3,8 @@
 	import { getContext, onDestroy, tick } from 'svelte';
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
-	import { citationPanel, citationPanelVariant, config } from '$lib/stores';
+	import { citationPanel, config } from '$lib/stores';
 	import CitationStackBody from '../Messages/Citations/CitationStackBody.svelte';
-	import CitationFocusBody from '../Messages/Citations/CitationFocusBody.svelte';
 	import CitationSourceGroups from '../Messages/Citations/CitationSourceGroups.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
@@ -34,7 +33,6 @@
 	let expandedDocs: Set<number> = new Set();
 	let selectedTab: 'preview' | 'content' = 'preview';
 	let previewAvailable = true;
-	let focusBody: CitationFocusBody;
 	let panelElement: HTMLElement;
 	let probeVersion = 0;
 
@@ -107,7 +105,6 @@
 		citation && !groupUsed.some((item) => item.id === citation.id)
 			? cumulativeCitations
 			: groupUsed;
-	$: navigator = $citationPanelVariant === 'navigator' || $citationPanelVariant === 'modal';
 	$: listLevel = panel?.level === 'list' || !citation;
 	$: sourcePosition = citation ? visibleCitations.findIndex((item) => item.id === citation.id) : -1;
 	$: showPercentage = relevanceEnabled && shouldShowPercentage(visibleCitations);
@@ -153,20 +150,6 @@
 	});
 </script>
 
-<svelte:window
-	on:keydown={(event) => {
-		if (
-			event.target instanceof Node &&
-			panelElement?.contains(event.target) &&
-			$citationPanelVariant === 'focus' &&
-			selectedTab === 'preview' &&
-			isPreviewable &&
-			previewAvailable
-		)
-			focusBody?.handleKeydown(event);
-	}}
-/>
-
 {#if groups.length > 0}
 	<section
 		class="relative flex flex-col h-full min-h-0 w-full text-gray-900 dark:text-gray-100"
@@ -186,13 +169,11 @@
 			<div
 				class="flex items-center justify-between gap-2 px-3 py-3 shrink-0 border-b border-gray-100 dark:border-gray-800"
 			>
-				{#if navigator}
-					<button
-						class="shrink-0 rounded-lg p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
-						aria-label={$i18n.t('Back to sources')}
-						on:click={backToSources}><ChevronLeft className="size-4" /></button
-					>
-				{/if}
+				<button
+					class="shrink-0 rounded-lg p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
+					aria-label={$i18n.t('Back to sources')}
+					on:click={backToSources}><ChevronLeft className="size-4" /></button
+				>
 				<CitationHeader {citation} {mergedDocuments} {previewAvailable} {externalUrl} size="sm">
 					<div slot="actions" class="flex items-center gap-1 shrink-0 whitespace-nowrap">
 						{#if isPreviewable && previewAvailable}
@@ -220,7 +201,7 @@
 					</div>
 				</CitationHeader>
 			</div>
-			{#if navigator && sourcePosition >= 0}
+			{#if sourcePosition >= 0}
 				<div
 					class="flex items-center gap-1 px-3 py-1 shrink-0 text-xs text-gray-500 dark:text-gray-400"
 				>
@@ -248,29 +229,17 @@
 			{/if}
 			<div class="relative flex flex-col flex-1 min-h-0 overflow-hidden">
 				{#key citation}
-					{#if $citationPanelVariant === 'focus' && isPreviewable && previewAvailable && selectedTab === 'preview'}
-						<CitationFocusBody
-							bind:this={focusBody}
-							{citation}
-							{mergedDocuments}
-							bind:activeSnippetIdx
-							{showPercentage}
-							{showRelevance}
-							{previewAvailable}
-						/>
-					{:else}
-						<CitationStackBody
-							showDocumentNote={navigator}
-							{citation}
-							{mergedDocuments}
-							bind:activeSnippetIdx
-							bind:expandedDocs
-							{showPercentage}
-							{showRelevance}
-							{previewAvailable}
-							preview={isPreviewable && previewAvailable && selectedTab === 'preview'}
-						/>
-					{/if}
+					<CitationStackBody
+						showDocumentNote
+						{citation}
+						{mergedDocuments}
+						bind:activeSnippetIdx
+						bind:expandedDocs
+						{showPercentage}
+						{showRelevance}
+						{previewAvailable}
+						preview={isPreviewable && previewAvailable && selectedTab === 'preview'}
+					/>
 				{/key}
 			</div>
 		{/if}
