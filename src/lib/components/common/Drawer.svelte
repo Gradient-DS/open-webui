@@ -5,8 +5,6 @@
 
 	export let show = false;
 	export let className = '';
-	// [Gradient] Optional sheet sizing; existing drawer callers retain their classes.
-	export let heightClass = '';
 	export let zIndexClass = 'z-999';
 	export let onClose = () => {};
 
@@ -67,7 +65,7 @@
 		}}
 	>
 		<div
-			class=" mt-auto w-full bg-gray-50 dark:bg-gray-900 dark:text-gray-100 {className} {heightClass} scrollbar-hidden max-h-[100dvh] overflow-y-auto"
+			class=" mt-auto w-full bg-gray-50 dark:bg-gray-900 dark:text-gray-100 {className} scrollbar-hidden max-h-[100dvh] overflow-y-auto"
 			on:mousedown={(e) => {
 				e.stopPropagation();
 			}}
