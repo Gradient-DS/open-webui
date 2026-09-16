@@ -1,22 +1,4 @@
-"""Router tests for the loader-authenticated warren cloud-sync endpoints:
-``/integrations/stage``, ``/integrations/submit`` and
-``/integrations/file-status/{file_id}`` (Task B-O4).
-
-These three routes let the loader-worker, in ``warren`` pipeline mode, stage a
-downloaded file into S3 via an OWUI-issued presigned PUT, submit one warren job
-per file, and poll the File's processing status to terminal.
-
-The tests mount the router on a throwaway app, inject a ``LoaderPrincipal`` via
-the auth dependency override (bearer/header matching is covered by
-``test_service_auth.py``), and mock the ``Storage`` + model collaborators so the
-tests exercise only the wiring these routes add.
-
-The canonical-key convention is the one wiring detail flagged during design: the
-presigned PUT MUST target the exact S3 key ``File.path`` records and warren's
-later presigned GET reads. That derivation is owned by
-``S3StorageProvider.get_object_path`` and proven against ``upload_file`` in
-``test_s3_get_object_path_matches_upload_file_key_convention`` below.
-"""
+"""Loader-authenticated staging, soev submission, and file-status route tests."""
 
 from __future__ import annotations
 
@@ -27,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from open_webui.routers import integrations as integrations_router
 from open_webui.services.sync.provider import file_id_prefix_for
 from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
@@ -52,17 +33,9 @@ def loader_principal():
 
 @pytest.fixture(autouse=True)
 def config_values(monkeypatch):
-    """Per-key Config store for the routes' reads.
-
-    stage/submit read ``rag.distributed_doc_pipeline_sync_enabled``
-    (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED) and ``doc_pipeline.presign_ttl_seconds``
-    (PIPELINE_PRESIGN_TTL_SECONDS) via ``await Config.get(...)``. The sync flag
-    defaults on here so the stage/submit/file-status tests keep exercising the
-    happy path; the flag-off 403 gate mutates this dict (proven separately below).
-    """
+    """Enable the sync gate unless a test explicitly disables it."""
     values = {
         'rag.distributed_doc_pipeline_sync_enabled': True,
-        'doc_pipeline.presign_ttl_seconds': PRESIGN_TTL,
     }
 
     async def fake_get(key, default=None):
@@ -246,41 +219,29 @@ def test_stage_does_not_overwrite_nonempty_path(app):
 # --- submit -----------------------------------------------------------------
 
 
-def test_submit_routes_to_warren_and_returns_job_id(app, loader_principal):
-    """submit delegates to submit_existing_file_to_pipeline with the fetched
-    File + the acting user, and returns its pipeline_job_id."""
-    file_id = 'onedrive-doc-A'
-    fake_file = SimpleNamespace(id=file_id, filename='report.pdf', path='s3://b/k/report.pdf', meta={})
-
-    submit_calls = []
-
-    async def fake_submit(request, file, knowledge_id, user):
-        submit_calls.append({'file': file, 'knowledge_id': knowledge_id, 'user': user})
-        return {'status': True, 'collection_name': knowledge_id, 'pipeline_job_id': 'job-99'}
-
+def test_submit_calls_the_ingest_helper_with_the_file_and_knowledge_id(app, loader_principal):
+    """Submit forwards the staged file, collection, and acting user to ingest."""
+    fake_file = SimpleNamespace(id='onedrive-doc-A', filename='report.pdf', path='s3://b/k/report.pdf', meta={})
     with (
         patch.object(integrations_router.Files, 'get_file_by_id', new=AsyncMock(return_value=fake_file)),
-        patch.object(integrations_router, 'submit_existing_file_to_pipeline', side_effect=fake_submit),
+        patch.object(integrations_router.Knowledges, 'add_file_to_knowledge_by_id', new=AsyncMock()) as link,
+        patch('open_webui.routers.integrations.ingest.submit', new=AsyncMock(return_value='job-99')) as submit,
     ):
         resp = TestClient(app).post(
             '/api/v1/integrations/submit',
-            json={'file_id': file_id, 'knowledge_id': 'kb-uuid-1'},
+            json={'file_id': fake_file.id, 'knowledge_id': 'kb-uuid-1'},
         )
 
     assert resp.status_code == 200, resp.text
     assert resp.json() == {'pipeline_job_id': 'job-99'}
-    assert len(submit_calls) == 1
-    call = submit_calls[0]
-    assert call['file'] is fake_file
-    assert call['knowledge_id'] == 'kb-uuid-1'
-    # A real user object (not a bare id) is forwarded — it exposes .id.
-    assert call['user'].id == ACTING_USER_ID
+    link.assert_awaited_once_with('kb-uuid-1', fake_file.id, loader_principal.user.id)
+    submit.assert_awaited_once_with(fake_file, collection_key='kb-uuid-1', user_id=loader_principal.user.id)
 
 
 def test_submit_404_when_file_missing(app):
     with (
         patch.object(integrations_router.Files, 'get_file_by_id', new=AsyncMock(return_value=None)),
-        patch.object(integrations_router, 'submit_existing_file_to_pipeline', new=AsyncMock()) as submit_mock,
+        patch.object(integrations_router.ingest, 'submit', new=AsyncMock()) as submit_mock,
     ):
         resp = TestClient(app).post(
             '/api/v1/integrations/submit',

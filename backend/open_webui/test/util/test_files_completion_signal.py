@@ -1,13 +1,6 @@
-"""Phase 1 (Track 1 honest signal): _process_handler emits the file's ACTUAL
-persisted status after process_file returns, not a hard-coded 'completed'.
-
-- Native path → process_file embedded + persisted 'completed' synchronously →
-  emits 'completed' (byte-identical to before).
-- warren path → process_file returned right after submitting the job → persisted
-  status is still 'processing' (no vectors yet) → emits 'processing', which both
-  file:status listeners (Chat.svelte, KnowledgeBase.svelte) ignore, so the
-  spinner persists until /ingest emits the real 'completed'.
-- process_file raising → emits 'failed' (unchanged).
+"""Uploads emit their persisted status after process_file returns.
+Submitted soev-api jobs emit processing, which both UI listeners ignore until
+the poller emits a terminal event; native completion and failures emit directly.
 """
 
 from __future__ import annotations
@@ -16,7 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from open_webui.routers import files as files_router
 
 
@@ -73,8 +65,8 @@ async def test_native_completed_emits_completed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_warren_processing_emits_processing(monkeypatch):
-    # warren: process_file returned right after submitting the job — persisted
+async def test_a_submitted_file_emits_processing_which_the_ui_ignores(monkeypatch):
+    # soev-api: process_file returned right after submitting the job — persisted
     # status is still 'processing' and there is no collection yet.
     request, file, file_item, user, file_data = _run_args(file_status='processing')
     emit, files, _ = _patch(monkeypatch, file_data=file_data)

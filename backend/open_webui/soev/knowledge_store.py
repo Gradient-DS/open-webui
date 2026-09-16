@@ -90,6 +90,8 @@ class SoevKnowledgeTable:
             raise
 
     async def _collections(self, *, user_id=None, as_service=False):
+        from open_webui.soev import ingest
+
         hidden = set()
         for status in ('QUEUED', 'RUNNING'):
             jobs = await self._pages('/v1/jobs', user_id=user_id, params={'status': status}, as_service=as_service)
@@ -97,7 +99,7 @@ class SoevKnowledgeTable:
         return [
             row
             for row in await self._pages('/v1/collections', user_id=user_id, as_service=as_service)
-            if row['key'] not in hidden
+            if row['key'] not in hidden and not ingest.is_attachments_collection(row['key'])
         ]
 
     def _knowledge(self, row):
@@ -267,35 +269,70 @@ class SoevKnowledgeTable:
                 return []
             raise
 
+    async def _unlanded(self, key, *, documents=None, user_id=None):
+        from open_webui.models.files import Files
+
+        files = await Files.get_unlanded_files_for_collection(key)
+        if not files or await self._collection(key, user_id=user_id) is None:
+            return []
+        if documents is None:
+            documents = await self._documents(key, user_id=user_id)
+        landed = {doc['source_id'] for doc in documents}
+        return [file for file in files if file.id not in landed]
+
+    async def _members(self, key, *, user_id=None):
+        documents = await self._documents(key, user_id=user_id)
+        members = {doc['source_id']: (doc, doc['path']) for doc in documents}
+        for file in await self._unlanded(key, documents=documents, user_id=user_id):
+            job = (file.meta or {}).get('soev_job') or {}
+            members[file.id] = (None, job.get('path'))
+        for status in ('QUEUED', 'RUNNING'):
+            jobs = await self._pages('/v1/jobs', user_id=user_id, params={'collection_key': key, 'status': status})
+            for job in jobs:
+                if job['kind'] == 'delete_document':
+                    detail = await self._get(
+                        '/v1/jobs/' + quote(job['job_id'], safe=''), user_id=user_id, params={'include_items': 'true'}
+                    )
+                    for item in detail['items']:
+                        members.pop(item['source_id'], None)
+        return members
+
     async def get_files_by_id(self, knowledge_id, db=None):
         from open_webui.models.files import Files
 
-        ids = [row['source_id'] for row in await self._documents(knowledge_id)]
+        ids = list(await self._members(knowledge_id))
         return await Files.get_files_by_ids(ids) if ids else []
 
     async def get_file_metadatas_by_id(self, knowledge_id, db=None):
         from open_webui.models.files import Files
 
-        ids = [row['source_id'] for row in await self._documents(knowledge_id)]
+        ids = list(await self._members(knowledge_id))
         return await Files.get_file_metadatas_by_ids(ids) if ids else []
 
     async def get_file_counts_by_knowledge_ids(self, knowledge_ids, db=None):
         result = {}
         for key in knowledge_ids:
             row = await self._collection(key)
-            if row and row['document_count']:
-                result[key] = row['document_count']
+            if row:
+                count = row['document_count'] + len(await self._unlanded(key))
+                if count:
+                    result[key] = count
         return result
 
     async def has_file(self, knowledge_id, file_id, db=None):
-        return any(row['source_id'] == file_id for row in await self._documents(knowledge_id))
+        return file_id in await self._members(knowledge_id)
 
     async def _references(self, ids):
         result = []
-        for collection in await self._collections():
-            for document in await self._documents(collection['key']):
-                if document['source_id'] in ids:
-                    result.append((collection, document))
+        collections = {}
+        for source_id in sorted(ids):
+            response = await self._get('/v1/documents', params={'source_id': source_id})
+            for document in response['data']:
+                key = document['collection_key']
+                if key not in collections:
+                    collections[key] = await self._collection(key)
+                if collections[key] is not None:
+                    result.append((collections[key], document))
         return result
 
     async def get_knowledges_by_file_id(self, file_id, db=None):
@@ -317,15 +354,38 @@ class SoevKnowledgeTable:
         return {document['source_id'] for _, document in await self._references(set(file_ids))}
 
     async def remove_file_from_knowledge_by_id(self, knowledge_id, file_id, db=None):
+        from open_webui.models.files import Files
+        from open_webui.soev import ingest
+
+        file = await Files.get_file_by_id(file_id)
+        meta = (file.meta or {}) if file else {}
+        if (meta.get('soev_job') or {}).get('collection_key') == knowledge_id:
+            await ingest.cancel(file, client=self._client)
+            return True
+        if meta.get('soev_collection_key') == knowledge_id:
+            landed = any(doc['source_id'] == file_id for doc in await self._documents(knowledge_id))
+            if not landed:
+                await Files.update_file_metadata_by_id(file_id, {'soev_collection_key': None})
+                return True
         await self._send(
             'DELETE',
             self._path(knowledge_id) + '/documents/' + quote(file_id, safe=''),
             idempotency_key='doc-delete:' + knowledge_id + ':' + file_id,
         )
+        if meta.get('soev_collection_key') == knowledge_id:
+            await Files.update_file_metadata_by_id(file_id, {'soev_collection_key': None})
         return True
 
     async def reset_knowledge_by_id(self, id, include_directories=True, db=None):
+        from open_webui.models.files import Files
+        from open_webui.soev import ingest
+
         try:
+            for file in await Files.get_unlanded_files_for_collection(id):
+                if ((file.meta or {}).get('soev_job') or {}).get('collection_key') == id:
+                    await ingest.cancel(file, client=self._client)
+                else:
+                    await Files.update_file_metadata_by_id(file.id, {'soev_collection_key': None})
             for document in await self._documents(id):
                 await self.remove_file_from_knowledge_by_id(id, document['source_id'])
             if include_directories:
@@ -376,10 +436,10 @@ class SoevKnowledgeTable:
     async def search_files_by_id(self, knowledge_id, user_id, filter, skip=0, limit=30, metadata_only=False, db=None):
         filters = filter or {}
         path = self._directory_path(knowledge_id, filters.get('directory_id'))
-        documents = await self._documents(knowledge_id, user_id=user_id)
+        members = await self._members(knowledge_id, user_id=user_id)
         if 'directory_id' in filters:
-            documents = [doc for doc in documents if (doc['path'] or '') == '/'.join(path)]
-        by_id = {doc['source_id']: doc for doc in documents}
+            members = {source: member for source, member in members.items() if (member[1] or '') == '/'.join(path)}
+        by_id = {source: member[0] for source, member in members.items()}
         rows = await self._file_rows(list(by_id), filters=filters, user_id=user_id)
         _sort_file_rows(rows, filters)
         total = len(rows)
@@ -402,9 +462,8 @@ class SoevKnowledgeTable:
         collections = await self._collections(user_id=user_id)
         by_id = {}
         for collection in collections:
-            documents = await self._documents(collection['key'], user_id=user_id)
-            for document in documents:
-                by_id.setdefault(document['source_id'], (collection, document))
+            for source_id, (document, _) in (await self._members(collection['key'], user_id=user_id)).items():
+                by_id.setdefault(source_id, (collection, document))
         rows = await self._file_rows(list(by_id), filters=filter, user_id=user_id)
         _sort_file_rows(rows, filter, default_order='updated_at', default_descending=True)
         total = len(rows)
@@ -506,13 +565,15 @@ class SoevKnowledgeTable:
         return await self._breadcrumbs(directory_id)
 
     async def get_files_with_directory_ids(self, knowledge_id, db=None):
-        documents = {doc['source_id']: doc for doc in await self._documents(knowledge_id)}
-        files = await self.get_files_by_id(knowledge_id)
+        from open_webui.models.files import Files
+
+        members = await self._members(knowledge_id)
+        files = await Files.get_files_by_ids(list(members)) if members else []
         return [
             (
                 file,
-                self._projection.directory_id(knowledge_id, tuple(documents[file.id]['path'].split('/')))
-                if documents[file.id]['path']
+                self._projection.directory_id(knowledge_id, tuple(members[file.id][1].split('/')))
+                if members[file.id][1]
                 else None,
             )
             for file in files
@@ -522,21 +583,20 @@ class SoevKnowledgeTable:
         paths = {identifier: '/'.join(self._directory_path(knowledge_id, identifier)) for identifier in directory_ids}
         if not paths:
             return {}
-        documents = await self._documents(knowledge_id, user_id=user_id)
-        files = {row['id']: row for row in await self._file_rows([doc['source_id'] for doc in documents])}
+        members = await self._members(knowledge_id, user_id=user_id)
+        files = {row['id']: row for row in await self._file_rows(list(members))}
         result = {}
         for identifier, path in paths.items():
             matches = [
-                doc
-                for doc in documents
-                if doc['source_id'] in files
-                and ((doc['path'] or '') == path or (doc['path'] or '').startswith(path + '/'))
+                source_id
+                for source_id, (_, member_path) in members.items()
+                if source_id in files and ((member_path or '') == path or (member_path or '').startswith(path + '/'))
             ]
             if not matches:
                 continue
             counts = self._projection.status_counts()
-            for doc in matches:
-                counts[self._projection.status_bucket((files[doc['source_id']]['meta'] or {}).get('status'))] += 1
+            for source_id in matches:
+                counts[self._projection.status_bucket((files[source_id]['meta'] or {}).get('status'))] += 1
             result[identifier] = {'child_count': len(matches), 'status_counts': counts}
         return result
 
@@ -546,9 +606,9 @@ class SoevKnowledgeTable:
     async def get_file_ids_in_directory_subtree(self, knowledge_id, directory_id, db=None):
         path = '/'.join(self._directory_path(knowledge_id, directory_id))
         return [
-            doc['source_id']
-            for doc in await self._documents(knowledge_id)
-            if (doc['path'] or '') == path or (doc['path'] or '').startswith(path + '/')
+            source_id
+            for source_id, (_, member_path) in (await self._members(knowledge_id)).items()
+            if (member_path or '') == path or (member_path or '').startswith(path + '/')
         ]
 
     async def rename_directory(self, directory_id, name, db=None):
@@ -591,9 +651,12 @@ class SoevKnowledgeTable:
         except SoevApiError:
             return False
 
-    async def _move_document(self, key, source_id, path):
+    async def _move_document(self, key, source_id, path, *, user_id=None):
         await self._send(
-            'POST', self._path(key) + '/documents/' + quote(source_id, safe='') + '/move', {'to': '/'.join(path)}
+            'POST',
+            self._path(key) + '/documents/' + quote(source_id, safe='') + '/move',
+            {'to': '/'.join(path)},
+            user_id=user_id,
         )
 
     async def move_file_to_directory(self, knowledge_id, file_id, directory_id=None, db=None):
@@ -619,16 +682,44 @@ class SoevKnowledgeTable:
         return None
 
     async def add_file_to_knowledge_by_id(self, knowledge_id, file_id, user_id, directory_id=None, db=None):
-        raise NotOnSoev('add_file_to_knowledge_by_id', moves_with='ingest')
+        from open_webui.models.files import Files
+
+        collection = await self._collection(knowledge_id, user_id=user_id)
+        if collection is None:
+            return None
+        document = next(
+            (doc for doc in await self._documents(knowledge_id, user_id=user_id) if doc['source_id'] == file_id), None
+        )
+        path = self._directory_path(knowledge_id, directory_id) if directory_id is not None else None
+        if document is not None:
+            if path is not None:
+                await self._move_document(knowledge_id, file_id, path, user_id=user_id)
+                document = {**document, 'path': '/'.join(path) or None}
+        else:
+            file = await Files.get_file_by_id(file_id)
+            if file is None:
+                return None
+            job = (file.meta or {}).get('soev_job') or {}
+            if not job:
+                await Files.update_file_metadata_by_id(file_id, {'soev_collection_key': knowledge_id})
+            elif job.get('collection_key') == knowledge_id and path is not None:
+                job = {**job, 'path': '/'.join(path) or None}
+                await Files.update_file_metadata_by_id(file_id, {'soev_job': job})
+            document = {
+                'source_id': file.id,
+                'path': job.get('path') if job.get('collection_key') == knowledge_id else None,
+                'ingested_at': dt.datetime.fromtimestamp(file.created_at, dt.UTC).isoformat(),
+            }
+        return self._projection.knowledge_link_of(collection, document, service_principal=self._service_principal)
 
     async def set_path_fields_by_file_id(self, file_id, meta, db=None):
-        raise NotOnSoev('set_path_fields_by_file_id', moves_with='ingest')
+        return True
 
     async def update_knowledge_meta_by_id(self, id, meta, db=None):
         raise NotOnSoev('update_knowledge_meta_by_id', moves_with='cloud sync')
 
     async def update_knowledge_data_by_id(self, id, data, db=None):
-        raise NotOnSoev('update_knowledge_data_by_id', moves_with='ingest')
+        return None
 
     async def update_knowledge_user_id_by_id(self, id, user_id, db=None):
         raise NotOnSoev('update_knowledge_user_id_by_id', moves_with='owner transfer route')

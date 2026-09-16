@@ -131,10 +131,6 @@ def record(route_id, status, body, *, pass_name='manual') -> bool:
         _count(tally.entered, route_id, status)
     if 200 <= status < 300:
         tally.accepted[route_id] = tally.accepted.get(route_id, 0) + 1
-    if route_id == 'POST /api/v1/integrations/ingest' and 200 <= status < 300:
-        payload = transport.json_body(response)
-        if isinstance(payload, dict) and isinstance(payload.get('errors'), int) and payload['errors'] > 0:
-            tally.body_failures.append({'finding': 'PLANE-002', 'route': route_id, 'status': status, 'body': payload})
     if status >= 500:
         tally.crashes.setdefault(route_id, response.text[:2000])
     return entered

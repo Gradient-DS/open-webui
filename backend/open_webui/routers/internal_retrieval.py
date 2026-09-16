@@ -31,6 +31,7 @@ from open_webui.services.retrieval.agent_search import (
     run_agent_search,
 )
 from open_webui.socket.main import sio
+from open_webui.soev import ingest
 from open_webui.storage.provider import Storage
 from open_webui.services.email.graph_mail_client import render_document_email, send_mail
 from open_webui.utils.access_control.files import has_access_to_file
@@ -243,7 +244,7 @@ async def file_content(
         file_id,
     )
 
-    content = (file.data or {}).get('content', '') if isinstance(file.data, dict) else ''
+    content = await ingest.rendition_of(file, user.id) or ''
     return FileContentResponse(
         doc_id=file_id,
         title=file.filename or '',

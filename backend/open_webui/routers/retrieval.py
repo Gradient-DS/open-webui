@@ -1,79 +1,83 @@
 from __future__ import annotations
 
-import json
+import asyncio
 import io
 import logging
 import mimetypes
 import os
-import shutil
-import asyncio
-import time
-
 import re
+import shutil
 import uuid
-import requests
-from datetime import datetime
-from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable, Iterator, List, Optional, Sequence, Union
+from typing import List, Optional, Union
 from urllib.parse import unquote, urlparse
 
-from fastapi import (
-    Depends,
-    FastAPI,
-    Query,
-    File,
-    Form,
-    HTTPException,
-    UploadFile,
-    Request,
-    status,
-    APIRouter,
-)
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
 import tiktoken
-
-
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
+from fastapi.concurrency import run_in_threadpool
+from langchain_core.documents import Document
 from langchain_text_splitters import (
+    MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
     TokenTextSplitter,
-    MarkdownHeaderTextSplitter,
 )
-from langchain_core.documents import Document
-
-from open_webui.models.files import FileModel, FileUpdateForm, Files
-from open_webui.utils.access_control.files import has_access_to_file
-from open_webui.env import AIOHTTP_CLIENT_ALLOW_REDIRECTS, AIOHTTP_CLIENT_SESSION_SSL
+from open_webui import config as soev_config
+from open_webui.config import (
+    DEFAULT_LOCALE,
+    ENV,
+    RAG_EMBEDDING_CONTENT_PREFIX,
+    RAG_EMBEDDING_MODEL_AUTO_UPDATE,
+    RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
+    RAG_EMBEDDING_QUERY_PREFIX,
+    RAG_RERANKING_MODEL_AUTO_UPDATE,
+    RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
+    UPLOAD_DIR,
+)
+from open_webui.constants import ERROR_MESSAGES
+from open_webui.env import (
+    AIOHTTP_CLIENT_ALLOW_REDIRECTS,
+    AIOHTTP_CLIENT_SESSION_SSL,
+    DEVICE_TYPE,
+    DOCKER,
+    RAG_EMBEDDING_TIMEOUT,
+    SENTENCE_TRANSFORMERS_BACKEND,
+    SENTENCE_TRANSFORMERS_CROSS_ENCODER_BACKEND,
+    SENTENCE_TRANSFORMERS_CROSS_ENCODER_MODEL_KWARGS,
+    SENTENCE_TRANSFORMERS_CROSS_ENCODER_SIGMOID_ACTIVATION_FUNCTION,
+    SENTENCE_TRANSFORMERS_MODEL_KWARGS,
+)
 from open_webui.events import EVENTS, publish_event
-from open_webui.models.knowledge import Knowledges
-from open_webui.models.config import Config
-from open_webui.storage.provider import Storage
 from open_webui.internal.db import get_async_db, get_async_session
-from open_webui.utils import doc_pipeline
-from sqlalchemy.ext.asyncio import AsyncSession
-
-
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
-from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
+from open_webui.models.config import Config
+from open_webui.models.files import FileModel, Files, FileUpdateForm
+from open_webui.models.knowledge import Knowledges
 
 # Document loaders
-from open_webui.retrieval.loaders.youtube import YoutubeLoader, YoutubeTranscriptError
+from open_webui.retrieval.loaders.youtube import YoutubeTranscriptError
 from open_webui.retrieval.utils import (
     build_loader_from_config,
     filter_accessible_collections,
     get_content_from_url,
-    get_loader_config,
     get_embedding_function,
-    get_reranking_function,
+    get_loader_config,
     get_model_path,
+    get_reranking_function,
     is_youtube_url,
     query_collection,
     query_collection_with_hybrid_search,
     query_doc,
     query_doc_with_hybrid_search,
 )
+from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.retrieval.vector.utils import filter_metadata
 from open_webui.retrieval.web.azure import search_azure
 from open_webui.retrieval.web.bing import search_bing
@@ -87,17 +91,17 @@ from open_webui.retrieval.web.firecrawl import search_firecrawl
 from open_webui.retrieval.web.google_pse import search_google_pse
 from open_webui.retrieval.web.jina_search import search_jina
 from open_webui.retrieval.web.kagi import search_kagi
-from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
+from open_webui.retrieval.web.linkup import search_linkup
 
 # Web search engines
 from open_webui.retrieval.web.main import SearchResult
 from open_webui.retrieval.web.microsoft_web_iq import search_microsoft_web_iq
 from open_webui.retrieval.web.mojeek import search_mojeek
 from open_webui.retrieval.web.ollama import search_ollama_cloud
+from open_webui.retrieval.web.openserp import search_openserp
 from open_webui.retrieval.web.perplexity import search_perplexity
 from open_webui.retrieval.web.perplexity_search import search_perplexity_search
 from open_webui.retrieval.web.searchapi import search_searchapi
-from open_webui.retrieval.web.openserp import search_openserp
 from open_webui.retrieval.web.searxng import search_searxng
 from open_webui.retrieval.web.serpapi import search_serpapi
 from open_webui.retrieval.web.serper import search_serper
@@ -106,42 +110,22 @@ from open_webui.retrieval.web.serply import search_serply
 from open_webui.retrieval.web.serpstack import search_serpstack
 from open_webui.retrieval.web.sougou import search_sougou
 from open_webui.retrieval.web.tavily import search_tavily
-from open_webui.retrieval.web.utils import get_web_loader
+from open_webui.retrieval.web.utils import get_ssrf_safe_session, get_web_loader, validate_url
 from open_webui.retrieval.web.yacy import search_yacy
 from open_webui.retrieval.web.yandex import search_yandex
 from open_webui.retrieval.web.ydc import search_youcom
-from open_webui.retrieval.web.linkup import search_linkup
+from open_webui.soev import identity, ingest
+from open_webui.soev.client import SoevApiError
+from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.loop_bridge import run_on_main_loop
 from open_webui.utils.misc import (
     calculate_sha256_string,
     sanitize_text_for_db,
 )
-from open_webui.utils.loop_bridge import run_on_main_loop
-
-from open_webui.config import (
-    ENV,
-    RAG_EMBEDDING_MODEL_AUTO_UPDATE,
-    RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
-    RAG_RERANKING_MODEL_AUTO_UPDATE,
-    RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
-    UPLOAD_DIR,
-    DEFAULT_LOCALE,
-    RAG_EMBEDDING_CONTENT_PREFIX,
-    RAG_EMBEDDING_QUERY_PREFIX,
-)
-from open_webui.env import (
-    DEVICE_TYPE,
-    DOCKER,
-    RAG_EMBEDDING_TIMEOUT,
-    SENTENCE_TRANSFORMERS_BACKEND,
-    SENTENCE_TRANSFORMERS_MODEL_KWARGS,
-    SENTENCE_TRANSFORMERS_CROSS_ENCODER_BACKEND,
-    SENTENCE_TRANSFORMERS_CROSS_ENCODER_MODEL_KWARGS,
-    SENTENCE_TRANSFORMERS_CROSS_ENCODER_SIGMOID_ACTIVATION_FUNCTION,
-)
-
-from open_webui.constants import ERROR_MESSAGES
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -151,15 +135,6 @@ TIKTOKEN_DISALLOWED_SPECIAL = ()
 # Legacy UPPERCASE attribute name -> per-key Config storage key. Authoritative mapping
 # derived from config.py::DEFAULT_CONFIG (upstream renamed several rag.* keys).
 RAG_CONFIG_KEYS: dict[str, str] = {
-    # doc-pipeline (warren) keys — read via a local ``config`` alias in the
-    # submit/route helpers, so add them explicitly to the namespace.
-    'DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED': 'doc_pipeline.chat_enabled',
-    'PIPELINE_API_BASE_URL': 'doc_pipeline.api_base_url',
-    'PIPELINE_API_KEY': 'doc_pipeline.api_key',
-    'PIPELINE_CHUNK_OVERLAP': 'doc_pipeline.chunk_overlap',
-    'PIPELINE_CHUNK_SIZE': 'doc_pipeline.chunk_size',
-    'PIPELINE_INGEST_CALLBACK_URL': 'doc_pipeline.ingest_callback_url',
-    'PIPELINE_PRESIGN_TTL_SECONDS': 'doc_pipeline.presign_ttl_seconds',
     'ALLOWED_FILE_EXTENSIONS': 'rag.file.allowed_extensions',
     'AZURE_AI_SEARCH_API_KEY': 'web.search.azure_ai_search_api_key',
     'AZURE_AI_SEARCH_ENDPOINT': 'web.search.azure_ai_search_endpoint',
@@ -189,7 +164,6 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'DATALAB_MARKER_STRIP_EXISTING_OCR': 'rag.datalab_marker_strip_existing_ocr',
     'DATALAB_MARKER_USE_LLM': 'rag.datalab_marker_use_llm',
     'DDGS_BACKEND': 'web.search.ddgs_backend',
-    'DISTRIBUTED_DOC_PIPELINE_ENABLED': 'doc_pipeline.enabled',
     'DOCLING_API_KEY': 'rag.docling_api_key',
     'DOCLING_PARAMS': 'rag.docling_params',
     'DOCLING_SERVER_URL': 'rag.docling_server_url',
@@ -1906,141 +1880,6 @@ class ProcessFileForm(BaseModel):
     collection_name: Optional[str] = None
 
 
-async def submit_existing_file_to_pipeline(request: Request, file, knowledge_id: str, user) -> dict:
-    """Submit an already-stored File to the distributed doc-pipeline (warren).
-
-    Presigns the file's stored object, submits one warren job, links the file
-    to the KB, and marks it 'processing'. Warren parses + chunks the file and
-    POSTs chunked_text back to /ingest, which embeds + inserts via the native
-    path and sets the file 'completed'. No native parse/embed runs here; the
-    file's original bytes are untouched. Raises if the KB is missing or the
-    submit fails (the caller marks the file 'error').
-
-    Reusable body extracted out of :func:`route_file_to_pipeline` so callers
-    other than the upload route (e.g. the cloud-sync integrations submit
-    endpoint) can submit an existing File the same way."""
-    config = await get_rag_config_state()
-    knowledge = await Knowledges.get_knowledge_by_id(knowledge_id)
-    if knowledge is None:
-        raise ValueError(f'Knowledge base {knowledge_id!r} not found')
-
-    presigned_url = await asyncio.to_thread(Storage.get_presigned_url, file.path, config.PIPELINE_PRESIGN_TTL_SECONDS)
-    submission = doc_pipeline.build_job_submission(
-        file_id=file.id,
-        filename=file.filename,
-        content_type=(file.meta or {}).get('content_type') or 'application/octet-stream',
-        file_format=doc_pipeline.resolve_format(file.filename, (file.meta or {}).get('content_type')),
-        presigned_url=presigned_url,
-        kb_id=knowledge_id,
-        kb_name=knowledge.name,
-        acting_user_id=user.id,
-        ingest_url=config.PIPELINE_INGEST_CALLBACK_URL,
-        chunk_size=config.PIPELINE_CHUNK_SIZE,
-        chunk_overlap=config.PIPELINE_CHUNK_OVERLAP,
-    )
-    job_id = await doc_pipeline.submit_job(
-        base_url=config.PIPELINE_API_BASE_URL,
-        api_key=config.PIPELINE_API_KEY,
-        submission=submission,
-    )
-
-    # Link (idempotent upsert) + mark processing only after a successful submit.
-    # pipeline_submitted_at lets the restart-safe reconciler apply its wall-clock
-    # backstop purely from persisted state.
-    await Knowledges.add_file_to_knowledge_by_id(knowledge_id, file.id, user.id)
-    async with get_async_db() as session:
-        await Files.update_file_metadata_by_id(
-            file.id,
-            {
-                'collection_name': knowledge_id,
-                'pipeline_job_id': job_id,
-                'pipeline_submitted_at': int(time.time()),
-            },
-            db=session,
-        )
-        await Files.set_status(file.id, 'processing', db=session)
-
-    log.info(f'Routed file {file.id} to doc-pipeline job {job_id} (kb={knowledge_id})')
-    return {
-        'status': True,
-        'collection_name': knowledge_id,
-        'filename': file.filename,
-        'content': '',
-        'pipeline_job_id': job_id,
-    }
-
-
-async def route_file_to_pipeline(request: Request, file, knowledge_id: str, user) -> dict:
-    """Hand a KB-bound file to the distributed doc-pipeline (warren).
-
-    Thin wrapper kept for the upload route's call sites; delegates the actual
-    submit body to :func:`submit_existing_file_to_pipeline` (see that
-    docstring for behavior). Raises if the KB is missing or the submit fails
-    (the caller marks the file 'error')."""
-    return await submit_existing_file_to_pipeline(request, file, knowledge_id, user)
-
-
-async def route_chat_file_to_pipeline(request: Request, file, user) -> dict:
-    """Hand a non-KB chat attachment to warren, preserving the file-{id} cache.
-
-    Mirrors :func:`route_file_to_pipeline` but with NO KB: warren parses + chunks
-    the file and POSTs chunked_text back to /ingest with ``collection.target=
-    'file'``, which embeds into ``file-{file.id}`` and updates this same File row
-    without linking it to any KB. The file's original bytes are untouched, and
-    retrieval already resolves the attachment to ``file-{id}`` via
-    ``get_sources_from_items`` (native) and ``/accessible-files`` (agent). Raises
-    on submit failure (the caller marks the file 'error')."""
-    config = await get_rag_config_state()
-
-    presigned_url = await asyncio.to_thread(Storage.get_presigned_url, file.path, config.PIPELINE_PRESIGN_TTL_SECONDS)
-    submission = doc_pipeline.build_job_submission(
-        file_id=file.id,
-        filename=file.filename,
-        content_type=(file.meta or {}).get('content_type') or 'application/octet-stream',
-        file_format=doc_pipeline.resolve_format(file.filename, (file.meta or {}).get('content_type')),
-        presigned_url=presigned_url,
-        # Per-file: echoed as collection.source_id but ignored by the /ingest
-        # per-file branch (which derives file-{file_id} from doc.source_id).
-        kb_id=file.id,
-        kb_name=file.filename,
-        acting_user_id=user.id,
-        ingest_url=config.PIPELINE_INGEST_CALLBACK_URL,
-        chunk_size=config.PIPELINE_CHUNK_SIZE,
-        chunk_overlap=config.PIPELINE_CHUNK_OVERLAP,
-        collection_target='file',
-    )
-    job_id = await doc_pipeline.submit_job(
-        base_url=config.PIPELINE_API_BASE_URL,
-        api_key=config.PIPELINE_API_KEY,
-        submission=submission,
-    )
-
-    # Mark processing only after a successful submit. Deliberately NO
-    # add_file_to_knowledge_by_id and NO collection_name on the File metadata —
-    # the attachment's retrieval already resolves to file-{id}. pipeline_job_id /
-    # pipeline_submitted_at let the restart-safe reconciler apply its wall-clock
-    # backstop purely from persisted state (identical to the KB path).
-    async with get_async_db() as session:
-        await Files.update_file_metadata_by_id(
-            file.id,
-            {
-                'pipeline_job_id': job_id,
-                'pipeline_submitted_at': int(time.time()),
-            },
-            db=session,
-        )
-        await Files.set_status(file.id, 'processing', db=session)
-
-    log.info(f'Routed chat file {file.id} to doc-pipeline job {job_id} (per-file)')
-    return {
-        'status': True,
-        'collection_name': None,
-        'filename': file.filename,
-        'content': '',
-        'pipeline_job_id': job_id,
-    }
-
-
 @router.post('/process/file')
 async def process_file(
     request: Request,
@@ -2069,29 +1908,23 @@ async def process_file(
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
 
-            # Distributed doc-pipeline gate: when enabled, hand the uploaded file
-            # to warren instead of parsing + embedding it here. Skipped when the
-            # caller supplies inline content (STT transcript / manual content
-            # update — nothing to fetch + parse). Flag off → native path below.
-            #   - KB-bound upload (collection_name set)  → route_file_to_pipeline.
-            #   - Chat attachment (collection_name None) → route_chat_file_to_pipeline
-            #     (its own flag; lands chunks in the file-{id} cache, no KB).
-            if not form_data.content:
-                config = await get_rag_config_state()
-                file_format = doc_pipeline.resolve_format(file.filename, (file.meta or {}).get('content_type'))
-                if form_data.collection_name and doc_pipeline.should_route_to_pipeline(
-                    enabled=config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
-                    collection_name=form_data.collection_name,
-                    file_path=file.path,
-                    file_format=file_format,
-                ):
-                    return await route_file_to_pipeline(request, file, form_data.collection_name, user)
-                if form_data.collection_name is None and doc_pipeline.should_route_chat_to_pipeline(
-                    enabled=config.DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED,
-                    file_path=file.path,
-                    file_format=file_format,
-                ):
-                    return await route_chat_file_to_pipeline(request, file, user)
+            if soev_config.SOEV_API_URL:
+                try:
+                    collection_key = form_data.collection_name or await ingest.ensure_attachments_collection(
+                        user.id, identity.build_client()
+                    )
+                    job_id = await ingest.submit(
+                        file, collection_key=collection_key, user_id=user.id, text=form_data.content
+                    )
+                except SoevApiError as e:
+                    raise ValueError(f'{e.code}: {e.detail}') from e
+                return {
+                    'status': True,
+                    'collection_name': form_data.collection_name,
+                    'filename': file.filename,
+                    'content': '',
+                    'job_id': job_id,
+                }
 
             if form_data.content:
                 # Update the content in the file
@@ -2298,6 +2131,8 @@ async def process_file(
                 except Exception as e:
                     raise e
 
+        except ingest.IngestBusy as e:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='file is being processed') from e
         except Exception as e:
             log.exception(e)
             # Fresh session for error status update.
@@ -3500,19 +3335,14 @@ async def process_files_batch(
                 )
                 continue
 
-            # Distributed doc-pipeline gate (per file): hand KB-bound files to
-            # warren instead of the native batch embed. One warren job per file
-            # (the OwuiIngestWorker targets a single document). The file is
-            # linked + marked 'processing' here, so it is excluded from the
-            # native all_docs batch below.
-            if doc_pipeline.should_route_to_pipeline(
-                enabled=config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
-                collection_name=collection_name,
-                file_path=db_file.path,
-                file_format=doc_pipeline.resolve_format(db_file.filename, (db_file.meta or {}).get('content_type')),
-            ):
-                await route_file_to_pipeline(request, db_file, collection_name, user)
-                file_results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))
+            if soev_config.SOEV_API_URL:
+                try:
+                    await ingest.submit(db_file, collection_key=collection_name, user_id=user.id)
+                except (SoevApiError, ingest.IngestBusy) as e:
+                    error = f'{e.code}: {e.detail}' if isinstance(e, SoevApiError) else 'file is being processed'
+                    file_errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error=error))
+                else:
+                    file_results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))
                 continue
 
             text_content = file.data.get('content', '')

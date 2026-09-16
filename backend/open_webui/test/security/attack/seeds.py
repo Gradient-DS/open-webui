@@ -201,57 +201,6 @@ def prepare_configuration(ctx, parameter):
     return namespace
 
 
-def seed_integration(ctx, parameter):
-    owner = ctx.request('GET', '/api/v1/auths/')
-    owner_id = _extract(owner, 'id', name='integration owner', via='GET /api/v1/auths/')
-    config = ctx.request('GET', '/api/v1/configs/integrations', actor=ctx.admin)
-    providers = config.get('providers') or {}
-    # Reuse this owner's provider binding across passes, but create fresh rows.
-    # Binding another owner gets a different provider and a different file prefix.
-    provider = f'attack_{owner_id.replace("-", "_")}'
-    providers[provider] = {'name': 'Attack fixtures', 'service_account_id': owner_id}
-    ctx.request('POST', '/api/v1/configs/integrations', actor=ctx.admin, json={'providers': providers})
-    source, document = f'collection-{ctx.token}', f'document-{ctx.token}'
-    data = {
-        'collection': {'source_id': source, 'name': source, 'data_type': 'chunked_text'},
-        'documents': [
-            {
-                'source_id': document,
-                'filename': f'{document}.txt',
-                'chunks': ['Attack seed document.'],
-                'attachments': [{'kind': 'preview', 'content_type': 'text/plain', 'part_name': 'preview.txt'}],
-            }
-        ],
-    }
-    body = ctx.request(
-        'POST',
-        '/api/v1/integrations/ingest',
-        files=[
-            ('data', ('data.json', json.dumps(data), 'application/json')),
-            ('original_files', (document, b'Attack seed document.', 'text/plain')),
-            ('attachments', ('preview.txt', b'Attack seed attachment.', 'text/plain')),
-        ],
-        timeout=120,
-    )
-    documents = body.get('documents') if isinstance(body, dict) else None
-    if (
-        not isinstance(documents, list)
-        or len(documents) != 1
-        or not isinstance(documents[0], dict)
-        or body.get('errors') != 0
-        or body.get('created') != 1
-        or body.get('total') != 1
-        or documents[0].get('attachments_saved') != 1
-    ):
-        raise RuntimeError('Integration seed did not create its document and attachment')
-    ctx.state['integration'] = body
-    return _extract(body, 'collection_source_id', name=parameter['key'], via='POST /api/v1/integrations/ingest')
-
-
-def integration_value(ctx, parameter):
-    return _extract(ctx.state['integration'], parameter['extract'], name=parameter['key'], via='integration seed')
-
-
 def seed_agent_config(ctx, parameter):
     rows = ctx.request('GET', '/api/v1/agent-configs/detect', actor=ctx.admin)
     row = next((row for row in rows if row.get('in_env')), None)
@@ -497,8 +446,6 @@ _SEEDERS = {
     function.__name__: function
     for function in (
         prepare_configuration,
-        seed_integration,
-        integration_value,
         seed_agent_config,
         connection_index,
         upstream_path,

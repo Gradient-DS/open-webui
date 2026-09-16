@@ -94,7 +94,6 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
     'utils/automations.py': 'No automation webhook is seeded; request-supplied public webhooks are findings.',
     'utils/code_interpreter.py': 'Code flags enabled; pyodide selected, with Jupyter coverage gap documented in security/deployed-config.md.',
-    'utils/doc_pipeline.py': 'Document submission and polling use PIPELINE_API_BASE_URL at stub.',
     'utils/feedback_report.py': 'Feedback Slack and notification-router URLs both point at stub.',
     'utils/files.py': 'Remote file download consumes supplied URLs; off-network destinations are findings.',
     'utils/images/comfyui.py': 'ComfyUI is not the selected image engine and its base URL is empty.',
@@ -205,7 +204,7 @@ def _session_attributes(tree: ast.AST) -> set[str]:
     bound = set()
     factories = set()
     # A small fixed point sees wrappers that return/yield a bound session, e.g.
-    # self._get_client() and doc_pipeline._client(), without importing code.
+    # self._get_client(), without importing code.
     previous = None
     while previous != (bound, factories):
         previous = (bound.copy(), factories.copy())
@@ -402,7 +401,6 @@ STUB_URLS = {
     'AGENT_API_BASE_URL': 'http://stub:8000',
     'SEARCH_API_BASE_URL': 'http://stub:8000',
     'SYNC_DAEMON_URL': 'http://stub:8000',
-    'PIPELINE_API_BASE_URL': 'http://stub:8000',
     'RAG_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
     'RAG_EXTERNAL_RERANKER_URL': 'http://stub:8000/v1/rerank',
     'SEARXNG_QUERY_URL': 'http://stub:8000/search',

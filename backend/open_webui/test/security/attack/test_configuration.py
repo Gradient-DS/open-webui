@@ -230,23 +230,6 @@ def test_malformed_export_fails_before_any_attack():
     assert configuration.CONFIG_TIMEOUT_SECONDS > transport.DEFAULT_TIMEOUT_SECONDS
 
 
-def test_ingest_body_failure_is_recorded_without_hiding_handler_entry():
-    route = 'POST /api/v1/integrations/ingest'
-    assert plane.record(route, 200, {'created': 0, 'errors': 1}, pass_name='seeding')
-    tally = plane._PASSES['seeding']
-    assert tally.accepted == {route: 1}  # This counter explicitly measures HTTP 2xx only.
-    assert tally.body_failures == [
-        {
-            'finding': 'PLANE-002',
-            'route': route,
-            'status': 200,
-            'body': {'created': 0, 'errors': 1},
-        }
-    ]
-    plane.flush_hits()
-    assert json.loads(plane.hits_path().read_text())['passes']['seeding']['body_failures'] == tally.body_failures
-
-
 def test_every_configuration_guard_says_where_a_lost_snapshot_goes():
     """A guard that loses its snapshot must have somewhere to record it.
 

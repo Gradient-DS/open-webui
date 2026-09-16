@@ -27,8 +27,8 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_db_context, get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
-from open_webui.models.chats import Chats
 from open_webui.models.config import Config
+from open_webui.models.file_attachments import FileAttachments
 from open_webui.models.files import (
     FileForm,
     FileListResponse,
@@ -36,20 +36,19 @@ from open_webui.models.files import (
     FileModelResponse,
     Files,
 )
-from open_webui.models.groups import Groups
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.users import Users
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.audio import transcribe
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
+from open_webui.soev import ingest
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import strict_match_mime_type
 from open_webui.utils.upload_guard import check_upload
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.models.file_attachments import FileAttachments
 
 log = logging.getLogger(__name__)
 
@@ -163,15 +162,6 @@ async def process_uploaded_file(
             # round-trip. Write access is verified up-front in
             # upload_file_handler, so a client-supplied metadata.knowledge_id
             # can never let a non-writer attach files (CWE-862/863).
-            #
-            # Ordering is load-bearing: process_file's warren path calls
-            # submit_existing_file_to_pipeline, which links with NO directory_id
-            # (routers/retrieval.py) — so when this ran afterwards the row was
-            # created at the KB root and only re-parented ~1s later. A root-level
-            # refresh landing in that window rendered subfolder files at the
-            # root. Linking first makes retrieval.py's call hit the "existing"
-            # branch with directory_id=None, which preserves placement by
-            # contract (see add_file_to_knowledge_by_id's docstring).
             if knowledge_id:
                 # D2 bridge: a file placed via the upstream directory model
                 # carries only a directory_id — derive a relative_path from the
@@ -256,22 +246,10 @@ async def process_uploaded_file(
 
             # (KB link moved above process_file — see the ordering note there.)
 
-            # Notify frontend via Socket.IO of the file's ACTUAL persisted
-            # status. For the native path process_file has already embedded +
-            # set 'completed' synchronously, so this stays 'completed'. For a
-            # warren-routed file process_file returns right after submitting the
-            # job (status still 'processing', vectors not yet in Weaviate);
-            # emitting 'completed' here would be premature — the real 'completed'
-            # is emitted from /ingest once the vectors land. Both file:status
-            # listeners (Chat.svelte, KnowledgeBase.svelte) act only on
-            # completed/failed and ignore 'processing', so the spinner persists.
-            #
-            # _process_handler is async — we're already on the main loop, so
-            # await the emit directly. (The earlier `run_on_main_loop(...)`
-            # call here deadlocked: that helper schedules a coroutine on the
-            # main loop then blocks the current thread on the result, which
-            # works from a sync worker thread but freezes the loop when the
-            # caller already IS the main loop.)
+            # Emit the persisted status: native processing has already completed,
+            # while a submitted soev-api job is still processing. Both UI listeners
+            # ignore processing, keeping the spinner until the soev-api poller
+            # emits the terminal event. Await directly on the running event loop.
             file_data = await Files.get_file_by_id(file_item.id)
             meta = (file_data.meta or {}) if file_data else {}
             current_status = meta.get('status') or 'completed'
@@ -872,7 +850,7 @@ async def get_file_data_content_by_id(
         )
 
     if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
-        return {'content': file.data.get('content', '')}
+        return {'content': await ingest.rendition_of(file, user.id) or ''}
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -942,19 +920,12 @@ async def update_file_data_content_by_id(
         knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
         for knowledge in knowledges:
             try:
-                old_vectors = await ASYNC_VECTOR_DB_CLIENT.query(collection_name=knowledge.id, filter={'file_id': id})
-                old_vector_ids = old_vectors.ids[0] if old_vectors and old_vectors.ids else []
-
-                # Re-add from the now-updated file-{file_id} collection before
-                # removing old vectors, so a failed reindex keeps the KB usable.
                 await process_file(
                     request,
                     ProcessFileForm(file_id=id, collection_name=knowledge.id),
                     user=user,
                     db=db,
                 )
-                if old_vector_ids:
-                    await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, ids=old_vector_ids)
             except Exception as e:
                 log.warning(f'Failed to update knowledge {knowledge.id} after content change for file {id}: {e}')
 
@@ -1272,24 +1243,18 @@ async def delete_file_by_id(
         )
 
     if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
-        # Clean up KB associations and embeddings before deleting
+        if (file.meta or {}).get('soev_job') is not None:
+            await ingest.cancel(file)
+
+        # Remove knowledge memberships before deleting the file.
         knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
         for knowledge in knowledges:
             # Remove KB-file relationship
             await Knowledges.remove_file_from_knowledge_by_id(knowledge.id, id, db=db)
-            # Clean KB embeddings (same logic as /knowledge/{id}/file/remove)
-            try:
-                await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'file_id': id})
-                if file.hash:
-                    await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'hash': file.hash})
-            except Exception as e:
-                log.debug('KB embedding cleanup for %s: %s', knowledge.id, e)
-
         result = await Files.delete_file_by_id(id, db=db)
         if result:
             try:
                 await asyncio.to_thread(Storage.delete_file, file.path)
-                await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=f'file-{id}')
             except Exception as e:
                 log.exception(e)
                 log.error('Error deleting files')

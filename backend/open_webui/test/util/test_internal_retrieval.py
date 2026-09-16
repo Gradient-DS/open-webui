@@ -1,9 +1,4 @@
-"""Router-level test for ``/api/v1/internal/retrieval/query``.
-
-The endpoint is a thin shim over :func:`run_agent_search`; this test focuses
-on the wiring this plan introduced — auth dependency override, feature flag
-gating, request-validation envelope, and the response shape.
-"""
+"""Router-level checks for internal retrieval auth, feature flags, validation, and response shapes."""
 
 from __future__ import annotations
 
@@ -13,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from open_webui.routers import internal_retrieval as internal_retrieval_router
 from open_webui.utils.service_auth import AgentPrincipal, get_agent_principal
 
@@ -504,9 +498,22 @@ def test_knowledge_files_401_when_bearer_missing(monkeypatch):
 # ---------- /files/{id}/content tightening ------------------------------------------
 
 
+@pytest.mark.parametrize('content', ['# Markdown rendition', None])
+def test_internal_file_content_uses_the_same_source(monkeypatch, fake_principal, content):
+    """The agent content route uses the shared rendition reader and maps pending content to empty text."""
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
+    file = SimpleNamespace(id='file-1', user_id=fake_principal.user.id, filename='report.pdf', data={})
+    monkeypatch.setattr(internal_retrieval_router.Files, 'get_file_by_id', AsyncMock(return_value=file))
+    rendition = AsyncMock(return_value=content)
+    monkeypatch.setattr(internal_retrieval_router.ingest, 'rendition_of', rendition)
+    response = TestClient(app).get('/api/v1/internal/retrieval/files/file-1/content')
+    assert response.status_code == 200
+    assert response.json() == {'doc_id': file.id, 'title': file.filename, 'content': content or ''}
+    rendition.assert_awaited_once_with(file, fake_principal.user.id)
+
+
 def test_files_id_content_admin_no_longer_shortcut(monkeypatch):
-    """Admin role does not grant /files/{id}/content access on files the admin
-    doesn't own and has no grant on."""
+    """An admin without ownership or a read grant cannot trigger a rendition read."""
     admin_principal = _admin_principal()
     app = _build_app(monkeypatch, fake_principal=admin_principal)
 
@@ -523,6 +530,8 @@ def test_files_id_content_admin_no_longer_shortcut(monkeypatch):
             return fake_file if file_id == fake_file.id else None
 
     monkeypatch.setattr(internal_retrieval_router, 'Files', _FakeFiles)
+    rendition = AsyncMock()
+    monkeypatch.setattr(internal_retrieval_router.ingest, 'rendition_of', rendition)
     monkeypatch.setattr(
         internal_retrieval_router,
         'has_access_to_file',
@@ -534,6 +543,7 @@ def test_files_id_content_admin_no_longer_shortcut(monkeypatch):
         '/api/v1/internal/retrieval/files/file-private-other-user/content',
     )
     assert resp.status_code == 403
+    rendition.assert_not_awaited()
 
 
 # ---------- /files/{id}/raw (raw bytes for BIM agent) -------------------------

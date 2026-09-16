@@ -417,19 +417,6 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
         assert order['namespace'] < order[key]
 
 
-def test_integration_2xx_with_document_or_attachment_failure_is_rejected():
-    for outcome in [
-        {'errors': 1, 'created': 0, 'total': 1},
-        {'errors': 0, 'created': 1, 'total': 1, 'documents': [{'attachments_saved': 0}]},
-        {'errors': 0, 'created': 1, 'total': 1, 'documents': []},
-        {'errors': 0, 'created': 1, 'total': 1, 'documents': [None]},
-    ]:
-        ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-        ctx.request = Mock(side_effect=[{'id': 'owner'}, {'providers': {}}, {'providers': {}}, outcome])
-        with pytest.raises(RuntimeError, match='did not create'):
-            seeds.seed_integration(ctx, {'key': 'integration_source'})
-
-
 def test_a_seeder_must_provide_what_it_declares_and_only_that(monkeypatch):
     def provides_extra(ctx, entry):
         ctx.provide(entry, 'extra', 'extra-value')

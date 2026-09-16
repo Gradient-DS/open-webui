@@ -41,7 +41,6 @@ def loader_principal():
 def config_values(monkeypatch):
     values = {
         'rag.distributed_doc_pipeline_sync_enabled': True,
-        'doc_pipeline.presign_ttl_seconds': 3600,
     }
 
     async def fake_get(key, default=None):
@@ -143,7 +142,7 @@ def test_file_hash_staged_on_new_row_branch(app, seams_factory):
     seams.insert_new_file.assert_awaited_once()
     _, form = seams.insert_new_file.await_args.args
     assert form.meta['pending_cloud_hash'] == 'provider-hash-1'
-    # cloud_hash is never written at stage time — only /ingest promotes (R4).
+    # cloud_hash is never written at stage time — promotion waits for processing (R4).
     assert 'cloud_hash' not in form.meta
 
 

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 
 # local imports
-from open_webui.internal.db import Base, JSONField, get_async_db_context
+from open_webui.internal.db import Base, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
 from pydantic import BaseModel, ConfigDict, model_validator
-from sqlalchemy import JSON, BigInteger, Column, String, Text, cast, delete, func, select
+from sqlalchemy import JSON, BigInteger, Column, String, Text, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -238,33 +239,6 @@ class FilesTable:
             result = await db.execute(select(File).filter(File.id.in_(ids)).order_by(File.updated_at.desc()))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
-    # Non-terminal statuses a warren-submitted file can sit at. Direct KB/chat
-    # uploads use 'processing'; cloud-sync mirrors the loader-worker's per-item
-    # stage onto meta.status (see services/sync/base_worker._track_job_progress),
-    # so a cloud-sync warren file waiting on /ingest is parked at 'ingesting'
-    # (and can pass through 'downloading'/'parsing'). All of these must be swept
-    # or the reconciler can never rescue a cloud-sync file whose warren job
-    # failed / produced zero chunks — it would deadlock the loader-worker's
-    # file-status poll and hang the whole sync until the wall-clock backstop.
-    _RECONCILABLE_STATUSES = ('processing', 'ingesting', 'parsing', 'downloading')
-
-    async def get_processing_files_with_pipeline_job(self, db: AsyncSession | None = None) -> list[FileModel]:
-        """Non-terminal files that carry a distributed-pipeline job id.
-
-        Drives the restart-safe reconciler. Filters on the cheap ``meta.status``
-        JSON column (the same one the KB file-list reads); the cast yields
-        JSON-encoded text on both SQLite and Postgres, so match quoted + bare.
-        The pipeline-job-id narrowing is done in Python — the non-terminal set is
-        small, and this dodges JSON-key-presence dialect quirks. The job-id
-        narrowing also means the extra cloud-sync stages are safe: a file with no
-        job id (e.g. still downloading pre-submit) is never returned."""
-        statuses = [q for s in self._RECONCILABLE_STATUSES for q in (f'"{s}"', s)]
-        async with get_async_db_context(db) as db:
-            raw_status = cast(File.meta['status'], Text)
-            result = await db.execute(select(File).filter(raw_status.in_(statuses)))
-            files = [FileModel.model_validate(file) for file in result.scalars().all()]
-        return [f for f in files if (f.meta or {}).get('pipeline_job_id')]
-
     async def get_file_metadatas_by_ids(
         self, ids: list[str], db: AsyncSession | None = None
     ) -> list[FileMetadataResponse]:
@@ -482,32 +456,14 @@ class FilesTable:
     async def get_pending_files_for_knowledge(
         self, knowledge_id: str, db: AsyncSession | None = None
     ) -> list[FileModelResponse]:
-        """Return files still being processed for this knowledge base.
-
-        These are files uploaded with ``meta.data.knowledge_id`` set, whose
-        ``data.status`` is still ``pending`` or ``processing``, and which
-        have not yet been added to the ``knowledge_file`` join table.
-
-        The JSON subscript syntax (``Column['key']['subkey'].as_string()``)
-        is supported by both SQLite (``json_extract``) and PostgreSQL
-        (``->>``/``->``).
-        """
+        """Return pending or processing files assigned to this soev collection."""
         async with get_async_db_context(db) as db:
             try:
-                # Lazy import to avoid circular dependency
-                from open_webui.models.knowledge import KnowledgeFile
-
-                # Subquery: file IDs already linked to this knowledge base
-                linked_ids = (
-                    select(KnowledgeFile.file_id).filter(KnowledgeFile.knowledge_id == knowledge_id).correlate(None)
-                )
-
                 stmt = (
                     select(File)
                     .filter(
-                        File.meta['data']['knowledge_id'].as_string() == knowledge_id,
+                        File.meta['soev_collection_key'].as_string().in_([knowledge_id, json.dumps(knowledge_id)]),
                         File.data['status'].as_string().in_(['pending', 'processing']),
-                        File.id.notin_(linked_ids),
                     )
                     .order_by(File.created_at.desc())
                 )
@@ -516,6 +472,26 @@ class FilesTable:
             except Exception as e:
                 log.warning(f'Error fetching pending files for knowledge {knowledge_id}: {e}')
                 return []
+
+    async def get_files_with_soev_jobs(self, db: AsyncSession | None = None) -> list[FileModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(File).filter(File.meta['soev_job'].as_string().is_not(None)))
+            return [
+                FileModel.model_validate(file)
+                for file in result.scalars().all()
+                if isinstance(file.meta.get('soev_job'), dict)
+            ]
+
+    async def get_unlanded_files_for_collection(
+        self, collection_key: str, db: AsyncSession | None = None
+    ) -> list[FileModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(File).filter(
+                    File.meta['soev_collection_key'].as_string().in_([collection_key, json.dumps(collection_key)])
+                )
+            )
+            return [FileModel.model_validate(file) for file in result.scalars().all()]
 
     async def delete_file_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
         # FileAttachments has no FK CASCADE — cascade-clean orphan rows

@@ -602,13 +602,11 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_data_retention_cleanup())
     asyncio.create_task(periodic_export_cleanup())
 
-    # [Gradient] Start the distributed doc-pipeline reconciler (restart-safe sweep that
-    # marks files 'error' when their warren job fails/hangs; success is handled
-    # by the /ingest callback). Reads its enable flag per-tick, so starting it
-    # unconditionally is fine.
-    from open_webui.services.doc_pipeline_reconciler import start_pipeline_reconciler
+    # Reconcile soev ingest jobs from File metadata, including after a restart.
+    # The poller stays idle when SOEV_API_URL is unset.
+    from open_webui.soev.jobs import start_job_poller
 
-    start_pipeline_reconciler(app)
+    start_job_poller(app)
 
     # [Gradient] Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
@@ -705,6 +703,8 @@ async def lifespan(app: FastAPI):
 
     app.state.periodic_usage_pool_cleanup.cancel()
     app.state.periodic_session_pool_cleanup.cancel()
+    app.state.soev_job_poller.cancel()
+    await app.state.soev_job_poller
     app.state.scheduler_worker_loop.cancel()
 
     await publish_event(app, EVENTS.SYSTEM_SHUTDOWN_COMPLETED, source='system')

@@ -61,6 +61,22 @@ class SoevClient:
         response = await self._request('GET', path, as_user=as_user, params=params)
         return self._json_object(response)
 
+    async def get_text(self, path: str, *, as_user: str | None = None) -> str:
+        """Read API text with the same authority and error handling as JSON reads."""
+        response = await self._request('GET', path, as_user=as_user)
+        return response.text
+
+    async def put_bytes(self, url: str, *, headers: dict[str, str], body: bytes) -> None:
+        """Upload bytes using the presigned URL as the sole credential."""
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=False) as client:
+                response = await client.put(url, headers=headers, content=body)
+        except httpx.TransportError as error:
+            status = 504 if isinstance(error, httpx.TimeoutException) else 502
+            raise SoevApiError(status, 'upload_failed', 'File upload failed') from None
+        if not response.is_success:
+            raise SoevApiError(502, 'upload_failed', f'File upload returned HTTP {response.status_code}')
+
     async def pages(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> AsyncIterator[dict]:
         """Yield each page's data items, minting a fresh assertion for every cursor request."""
         query = dict(params or {})
