@@ -91,7 +91,7 @@ class SoevKnowledgeTable:
 
     async def _collections(self, *, user_id=None, as_service=False):
         hidden = set()
-        for status in ('QUEUED', 'RUNNING', 'AWAITING_UPLOAD'):
+        for status in ('QUEUED', 'RUNNING'):
             jobs = await self._pages('/v1/jobs', user_id=user_id, params={'status': status}, as_service=as_service)
             hidden.update(job['collection_key'] for job in jobs if job['kind'] == 'delete_collection')
         return [

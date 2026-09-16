@@ -374,20 +374,26 @@ async def test_update_patches_and_regrants_through_the_access_job(env):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('method', ['delete_knowledge_by_id', 'soft_delete_by_id'])
-async def test_delete_commissions_a_job_and_the_list_hides_it(env, method):
-    """All active deletion states hide a collection across new store instances, while failed jobs reveal it again."""
+async def test_delete_commissions_a_job_and_the_list_hides_it(env, method, monkeypatch):
+    """The deleting user's listing hides queued and running deletions immediately and reveals failed ones."""
+    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:alice')
     assert await getattr(env.store, method)('kb') is True
     job = next(iter(env.api.jobs.values()))
     assert job['kind'] == 'delete_collection'
     store = env.module.SoevKnowledgeTable(client=env.client, service_principal=SERVICE)
-    for status in ('QUEUED', 'RUNNING', 'AWAITING_UPLOAD'):
-        env.api.advance(job['job_id'], status)
-        assert await store.get_knowledge_bases() == []
+    assert job['status'] == 'QUEUED'
+    assert await store.get_knowledge_bases() == []
+    env.api.advance(job['job_id'], 'RUNNING')
+    assert await store.get_knowledge_bases() == []
     assert (await store.get_knowledge_by_id_unfiltered('kb')).id == 'kb'
     env.api.advance(job['job_id'], 'FAILED')
     assert [row.id for row in await store.get_knowledge_bases()] == ['kb']
     queries = [r.url.params['status'] for r in env.api.requests if r.url.path == '/v1/jobs']
-    assert queries[:3] == ['QUEUED', 'RUNNING', 'AWAITING_UPLOAD']
+    assert queries == ['QUEUED', 'RUNNING'] * 3
+    for request in env.api.requests:
+        if request.method == 'DELETE' or (request.method == 'GET' and request.url.path == '/v1/jobs'):
+            encoded = request.headers['X-Soev-Subject'].split('.')[1]
+            assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
 
 
 @pytest.mark.asyncio
