@@ -131,11 +131,7 @@
 		aria-label={listLevel ? $i18n.t('Sources') : $i18n.t('Citation')}
 	>
 		{#if listLevel}
-			<div
-				class="flex items-center justify-between gap-2 px-3 py-3 shrink-0 border-b border-gray-100 dark:border-gray-800"
-			>
-				<h2 class="text-lg font-medium">{$i18n.t('Sources')}</h2>
-			</div>
+			<!-- [Gradient] The tab label already titles the list; no second heading. -->
 			<CitationSourceList
 				{visibleCitations}
 				selectedCitation={citation}
@@ -154,7 +150,7 @@
 						on:click={backToSources}><ChevronLeft className="size-4" /></button
 					>
 				{/if}
-				<CitationHeader {citation} {mergedDocuments} {previewAvailable} {externalUrl}>
+				<CitationHeader {citation} {mergedDocuments} {previewAvailable} {externalUrl} size="sm">
 					<div slot="actions" class="flex items-center gap-1 shrink-0 whitespace-nowrap">
 						{#if isPreviewable && previewAvailable}
 							<div

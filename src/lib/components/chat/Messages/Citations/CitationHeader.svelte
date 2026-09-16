@@ -14,10 +14,16 @@
 	export let mergedDocuments: CitationDocument[] = [];
 	export let previewAvailable = true;
 	export let externalUrl: string | null = null;
+	// [Gradient] 'sm' matches the side-panel tab labels; 'lg' is the modal title.
+	export let size: 'sm' | 'lg' = 'lg';
 </script>
 
 <!-- [Gradient] Let long source titles shrink while the adjacent actions keep their width. -->
-<div class="text-lg font-medium self-center flex-1 flex items-center gap-1.5 min-w-0">
+<div
+	class="{size === 'sm'
+		? 'text-sm'
+		: 'text-lg'} font-medium self-center flex-1 flex items-center gap-1.5 min-w-0"
+>
 	{#if citation?.source?.name}
 		{@const document = mergedDocuments?.[0]}
 		{@const docFileId = document?.metadata?.file_id}
