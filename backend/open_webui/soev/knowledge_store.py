@@ -13,6 +13,14 @@ from open_webui.soev.acting import acting_ref
 from open_webui.soev.client import SoevApiError
 
 
+def _sort_file_rows(rows, filters, *, default_order='filename', default_descending=False):
+    order = {'name': 'filename', 'created_at': 'created_at', 'updated_at': 'updated_at'}.get(filters.get('order_by'))
+    descending = filters.get('direction') != 'asc' if order else default_descending
+    field = order or default_order
+    rows.sort(key=lambda row: row['id'])
+    rows.sort(key=lambda row: (row[field] is not None, row[field]), reverse=descending)
+
+
 class NotOnSoev(NotImplementedError):
     def __init__(self, method: str, *, moves_with: str):
         super().__init__(f'{method} is not available on soev-api; moves with {moves_with}')
@@ -373,12 +381,7 @@ class SoevKnowledgeTable:
             documents = [doc for doc in documents if (doc['path'] or '') == '/'.join(path)]
         by_id = {doc['source_id']: doc for doc in documents}
         rows = await self._file_rows(list(by_id), filters=filters, user_id=user_id)
-        order = {'name': 'filename', 'created_at': 'created_at', 'updated_at': 'updated_at'}.get(
-            filters.get('order_by')
-        )
-        descending = order is not None and filters.get('direction') != 'asc'
-        rows.sort(key=lambda row: row['id'])
-        rows.sort(key=lambda row: (row[order or 'filename'] is not None, row[order or 'filename']), reverse=descending)
+        _sort_file_rows(rows, filters)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
         directories = await self._directory_models(knowledge_id, path, user_id=user_id)
@@ -393,7 +396,24 @@ class SoevKnowledgeTable:
         )
 
     async def search_knowledge_files(self, filter, skip=0, limit=30, db=None):
-        return self._projection.knowledge_file_list_of([], total=0)
+        user_id = filter.get('user_id')
+        if user_id is None:
+            return self._projection.knowledge_file_list_of([], total=0)
+        collections = await self._collections(user_id=user_id)
+        by_id = {}
+        for collection in collections:
+            documents = await self._documents(collection['key'], user_id=user_id)
+            for document in documents:
+                by_id.setdefault(document['source_id'], (collection, document))
+        rows = await self._file_rows(list(by_id), filters=filter, user_id=user_id)
+        _sort_file_rows(rows, filter, default_order='updated_at', default_descending=True)
+        total = len(rows)
+        rows = rows[skip : skip + limit] if limit else rows[skip:]
+        items = [
+            self._projection.file_response_of(row, by_id[row['id']][1], metadata_only=not filter.get('include_content'))
+            for row in rows
+        ]
+        return self._projection.knowledge_file_list_of(items, total=total)
 
     def _directory_path(self, key, directory_id):
         if not directory_id:

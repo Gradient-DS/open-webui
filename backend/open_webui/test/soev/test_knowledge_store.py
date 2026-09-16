@@ -1,5 +1,7 @@
 """Knowledge store behavior against recorded HTTP and isolated OWUI file rows."""
 
+import base64
+import datetime as dt
 import importlib
 import inspect
 import json
@@ -503,6 +505,82 @@ async def test_search_files_preserves_directory_filter_and_slim_rows(env, metada
     assert (await env.store.search_files_by_id('kb', 'alice', {'query': 'needle', 'include_content': True})).total == 3
     empty = await env.store.search_knowledge_files({'query': 'needle'})
     assert empty.model_dump() == {'items': [], 'directories': [], 'breadcrumbs': [], 'total': 0}
+
+
+@pytest.mark.asyncio
+async def test_search_knowledge_files_spans_every_readable_collection(env, monkeypatch):
+    """Cross-collection search reads only accessible documents as the user and keeps the first duplicate."""
+    await seed(env, 'second', owner='bob')
+    env.api.collections['second']['principals'].append('owui:user:alice')
+    await seed(env, 'private', owner='bob')
+    await file(env, 'first')
+    await file(env, 'shared', key='second')
+    await file(env, 'secret', key='private')
+    env.api.add_document('second', 'first')
+    env.api.documents['second', 'first']['ingested_at'] = '2026-09-12T12:00:00Z'
+    lookup = AsyncMock(wraps=env.store._file_rows)
+    monkeypatch.setattr(env.store, '_file_rows', lookup)
+    listing = AsyncMock(wraps=env.store._collections)
+    monkeypatch.setattr(env.store, '_collections', listing)
+    env.api.requests.clear()
+    filters = {'user_id': 'alice', 'group_ids': ['irrelevant']}
+    result = await env.store.search_knowledge_files(filters)
+    assert [row.id for row in result.items] == ['first', 'shared']
+    assert result.total == 2 and result.directories == [] and result.breadcrumbs == []
+    assert result.items[0].added_at == int(
+        dt.datetime.fromisoformat(env.api.documents['kb', 'first']['ingested_at']).timestamp()
+    )
+    listing.assert_awaited_once_with(user_id='alice')
+    lookup.assert_awaited_once_with(['first', 'shared'], filters=filters, user_id='alice')
+    requests = [request for request in env.api.requests if request.method == 'GET']
+    assert requests
+    for request in requests:
+        encoded = request.headers['X-Soev-Subject'].split('.')[1]
+        assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+    assert not any('/private' in request.url.path for request in requests)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('order_by', 'direction', 'expected'),
+    [
+        (None, None, ['z', 'a', 'b']),
+        ('invalid', 'asc', ['z', 'a', 'b']),
+        ('name', 'asc', ['a', 'b', 'z']),
+        ('name', 'desc', ['z', 'b', 'a']),
+        ('created_at', 'asc', ['b', 'a', 'z']),
+        ('created_at', 'desc', ['z', 'a', 'b']),
+        ('updated_at', 'asc', ['a', 'b', 'z']),
+        ('updated_at', 'desc', ['z', 'a', 'b']),
+    ],
+)
+async def test_search_knowledge_files_filters_by_query_and_pages(env, order_by, direction, expected):
+    """Filename and optional content filters precede ordering and pagination with an unsliced total."""
+    await seed(env, 'second')
+    await file(env, 'b')
+    await file(env, 'z', key='second')
+    await file(env, 'a')
+    async with env.sessions() as session:
+        for source, created_at, updated_at in [('a', 3, 2), ('b', 1, 2), ('z', 4, 3)]:
+            row = await session.get(env.files.File, source)
+            row.created_at, row.updated_at = created_at, updated_at
+        row.user_id = 'bob'
+        await session.commit()
+    filters = {'user_id': 'alice', 'order_by': order_by, 'direction': direction}
+    match = await env.store.search_knowledge_files({**filters, 'query': 'B.TXT'})
+    assert [row.id for row in match.items] == ['b'] and match.total == 1
+    assert isinstance(match.items[0], env.models.FileUserMetadataResponse)
+    page = await env.store.search_knowledge_files({**filters, 'query': '.txt'}, skip=1, limit=1)
+    assert [row.id for row in page.items] == expected[1:2] and page.total == 3
+    remaining = await env.store.search_knowledge_files(filters, skip=1, limit=0)
+    assert [row.id for row in remaining.items] == expected[1:] and remaining.total == 3
+    assert (await env.store.search_knowledge_files({**filters, 'query': 'needle'})).total == 0
+    content = await env.store.search_knowledge_files({**filters, 'query': 'needle', 'include_content': True})
+    assert [row.id for row in content.items] == expected and content.total == 3
+    assert all(isinstance(row, env.models.FileUserResponse) for row in content.items)
+    shared = await env.store.search_knowledge_files({**filters, 'view_option': 'shared'})
+    assert [row.id for row in shared.items] == ['z'] and shared.total == 1
+    assert (await env.store.search_knowledge_files({**filters, 'view_option': 'created'})).total == 2
 
 
 @pytest.mark.asyncio
