@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 
@@ -516,6 +517,26 @@ class FilesTable:
             except Exception as e:
                 log.warning(f'Error fetching pending files for knowledge {knowledge_id}: {e}')
                 return []
+
+    async def get_files_with_soev_jobs(self, db: AsyncSession | None = None) -> list[FileModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(File).filter(File.meta['soev_job'].as_string().is_not(None)))
+            return [
+                FileModel.model_validate(file)
+                for file in result.scalars().all()
+                if isinstance(file.meta.get('soev_job'), dict)
+            ]
+
+    async def get_unlanded_files_for_collection(
+        self, collection_key: str, db: AsyncSession | None = None
+    ) -> list[FileModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(File).filter(
+                    File.meta['soev_collection_key'].as_string().in_([collection_key, json.dumps(collection_key)])
+                )
+            )
+            return [FileModel.model_validate(file) for file in result.scalars().all()]
 
     async def delete_file_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
         # FileAttachments has no FK CASCADE — cascade-clean orphan rows
