@@ -24,11 +24,13 @@
 	let previewAvailable = true;
 	let selectedTab: 'preview' | 'content' = 'preview';
 	let activeSnippetIdx = 0;
+	let expandedDocs: Set<number> = new Set();
 	let viewer: CitationViewer;
 	let probeVersion = 0;
 	$: if (citation) {
 		selectedTab = 'preview';
 		activeSnippetIdx = 0;
+		expandedDocs = new Set();
 		mergedDocuments = mergeCitationDocuments(citation);
 	}
 	$: ({ fileId, isPreviewable, showSnippetRail, isImage, isAudio } = citationFileInfo(
@@ -133,7 +135,12 @@
 						<div
 							class="flex flex-col w-full dark:text-gray-200 overflow-y-scroll max-h-[22rem] scrollbar-thin gap-1"
 						>
-							<CitationContent {mergedDocuments} {showPercentage} {showRelevance} />
+							<CitationContent
+								bind:expandedDocs
+								{mergedDocuments}
+								{showPercentage}
+								{showRelevance}
+							/>
 						</div>
 					</div>
 				{/if}

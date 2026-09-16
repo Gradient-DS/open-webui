@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { i18n as I18n } from 'i18next';
+	import type { Readable } from 'svelte/store';
 	import { getContext } from 'svelte';
 	import {
 		config,
@@ -11,15 +13,16 @@
 	} from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
-	import { reduceSources, type DisplayCitation } from './Citations/reduceSources';
+	import { reduceSources, type DisplayCitation, type RawSource } from './Citations/reduceSources';
 	import { calculateShowRelevance, shouldShowPercentage } from './Citations/relevanceDisplay';
 
-	const i18n = getContext('i18n');
+	// [Gradient] Type the shared translation store for citation controls.
+	const i18n = getContext<Readable<I18n>>('i18n');
 
 	export let id = '';
 	export let chatId = '';
 
-	export let sources = [];
+	export let sources: RawSource[] = [];
 	export let readOnly = false;
 	/**
 	 * [Gradient] Whether the parent message has finished streaming. Used to
@@ -38,8 +41,8 @@
 	 */
 	export let messageDone: boolean = true;
 
-	let citations = [];
-	let visibleCitations = [];
+	let citations: DisplayCitation[] = [];
+	let visibleCitations: DisplayCitation[] = [];
 	let showPercentage = false;
 	let showRelevance = true;
 
@@ -61,7 +64,13 @@
 			showCitationModal = true;
 			return;
 		}
-		if ($showCitationPanel && $citationPanel?.citation === citation) return;
+		if (
+			$showCitationPanel &&
+			$citationPanel?.citation.id === citation.id &&
+			$citationPanel.messageId === id &&
+			$citationPanel.chatId === chatId
+		)
+			return;
 		citationPanel.set({
 			citation,
 			citations,
@@ -75,7 +84,7 @@
 		showControls.set(true);
 	};
 
-	export const showSourceModal = (sourceId) => {
+	export const showSourceModal = (sourceId: string | number) => {
 		let index;
 
 		if (typeof sourceId === 'string') {
@@ -88,8 +97,14 @@
 		if (citations[index]) {
 			console.log('Showing citation modal for:', citations[index]);
 
+			// [Gradient] Yield the citation special mode before the existing embed route.
+			if (citations[index]?.source?.embed_url && !readOnly) {
+				showCitationPanel.set(false);
+				citationPanel.set(null);
+			}
+
 			if (citations[index]?.source?.embed_url) {
-				const embedUrl = citations[index].source.embed_url;
+				const embedUrl = citations[index].source.embed_url as string;
 				if (embedUrl) {
 					if (readOnly) {
 						// Open in new tab if readOnly
@@ -138,7 +153,7 @@
 		visibleCitations = hasProvenance ? all.filter((c) => c.current_turn || c.cited_this_turn) : all;
 	}
 
-	const decodeString = (str: string) => {
+	const decodeString = (str: string = '') => {
 		try {
 			return decodeURIComponent(str);
 		} catch (e) {

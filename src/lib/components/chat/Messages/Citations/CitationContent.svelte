@@ -19,8 +19,7 @@
 	export let showPercentage = false;
 	export let showRelevance = true;
 	const CONTENT_PREVIEW_LIMIT = 10000;
-	let expandedDocs: Set<number> = new Set();
-	$: if (mergedDocuments) expandedDocs = new Set();
+	export let expandedDocs: Set<number> = new Set();
 </script>
 
 {#each mergedDocuments as document, documentIdx}
@@ -80,7 +79,7 @@
 				{#if Number.isInteger(document?.metadata?.page)}
 					<span class="text-sm text-gray-500 dark:text-gray-400">
 						({$i18n.t('page')}
-						{Number(document.metadata.page) + 1})
+						{Number(document.metadata?.page) + 1})
 					</span>
 				{/if}
 			</div>

@@ -61,7 +61,7 @@
 				{:else if Number.isInteger(document?.metadata?.page)}
 					<span class="text-xs text-gray-500 dark:text-gray-400">
 						({$i18n.t('page')}
-						{Number(document.metadata.page) + 1})
+						{Number(document.metadata?.page) + 1})
 					</span>
 				{/if}
 			</div>

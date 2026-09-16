@@ -3,6 +3,8 @@
 </script>
 
 <script lang="ts">
+	import type { i18n as I18n } from 'i18next';
+	import type { Readable } from 'svelte/store';
 	import { onMount, tick, getContext } from 'svelte';
 	import {
 		config,
@@ -38,7 +40,8 @@
 	import Overview from './Overview.svelte';
 	import { isSavedChatId } from '$lib/utils/chatId';
 
-	const i18n = getContext('i18n');
+	// [Gradient] Type the shared translation store for citation controls.
+	const i18n = getContext<Readable<I18n>>('i18n');
 
 	export let history;
 	export let models = [];
