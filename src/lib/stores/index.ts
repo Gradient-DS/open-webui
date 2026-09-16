@@ -197,7 +197,6 @@ export const citationPanel = writable<null | {
 	citation: DisplayCitation | null;
 	level?: 'list' | 'detail';
 	citations: DisplayCitation[];
-	visibleCitations: DisplayCitation[];
 	showPercentage: boolean;
 	showRelevance: boolean;
 	messageId: string;

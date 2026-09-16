@@ -1,12 +1,12 @@
 <script lang="ts">
 	// [Gradient] Citation prototype host. Additional layouts reuse the same document state.
-	import { getContext, onDestroy } from 'svelte';
+	import { getContext, onDestroy, tick } from 'svelte';
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
 	import { citationPanel, citationPanelVariant, config } from '$lib/stores';
 	import CitationStackBody from '../Messages/Citations/CitationStackBody.svelte';
 	import CitationFocusBody from '../Messages/Citations/CitationFocusBody.svelte';
-	import CitationSourceList from '../Messages/Citations/CitationSourceList.svelte';
+	import CitationSourceGroups from '../Messages/Citations/CitationSourceGroups.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import CitationHeader from '../Messages/Citations/CitationHeader.svelte';
@@ -17,13 +17,13 @@
 		type CitationDocument
 	} from '../Messages/Citations/citationDocuments';
 	import { citationFileInfo, resolveExternalUrl } from '../Messages/Citations/useCitationDocument';
-	import { reduceSources, type DisplayCitation } from '../Messages/Citations/reduceSources';
-	import { scopePanelCitations } from '../Messages/Citations/panelScope';
+	import type { DisplayCitation } from '../Messages/Citations/reduceSources';
+	import { usedCitations } from '../Messages/Citations/panelScope';
 	import {
 		calculateShowRelevance,
 		shouldShowPercentage
 	} from '../Messages/Citations/relevanceDisplay';
-	import { latestMessageWithSources, type CitationHistory } from './citationTab';
+	import { sourceGroups, type SourceGroup, type CitationHistory } from './citationTab';
 	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
 
 	const i18n = getContext<Readable<I18n>>('i18n');
@@ -41,48 +41,97 @@
 	let panelElement: HTMLElement;
 	let probeVersion = 0;
 
-	// [Gradient] Opening the tab directly starts at the latest sourced answer on this branch.
-	$: if (!$citationPanel || $citationPanel.chatId !== chatId) {
-		const message = latestMessageWithSources(history);
-		if (message) {
-			const citations = reduceSources(message.sources ?? []);
-			const relevanceEnabled = $config?.features?.enable_citation_relevance ?? true;
-			citationPanel.set({
-				citation: null,
-				citations,
-				visibleCitations: scopePanelCitations(citations),
-				showRelevance: relevanceEnabled && calculateShowRelevance(citations),
-				showPercentage: relevanceEnabled && shouldShowPercentage(citations),
-				messageId: message.id,
-				chatId,
-				level: 'list'
-			});
-		} else if ($citationPanel) {
-			citationPanel.set(null);
+	// [Gradient] The list comes from the live branch; payloads identify only the target answer.
+	$: groups = sourceGroups(history);
+	$: panel = $citationPanel?.chatId === chatId ? $citationPanel : null;
+	$: activeGroup = groups.find((group) => group.messageId === panel?.messageId);
+	$: if ($citationPanel && ($citationPanel.chatId !== chatId || !activeGroup)) {
+		citationPanel.set(null);
+	}
+	$: relevanceEnabled = $config?.features?.enable_citation_relevance ?? true;
+	let expandedGroups = new Set<string>();
+	let expandedChatId: string | null = null;
+	let handledPayload: typeof $citationPanel = null;
+	let defaultMessageId: string | undefined;
+	let groupList: CitationSourceGroups | undefined;
+	let scrollVersion = 0;
+	$: syncExpandedGroups(groups, panel, chatId);
+
+	function syncExpandedGroups(
+		currentGroups: SourceGroup[],
+		payload: typeof $citationPanel,
+		currentChatId: string
+	) {
+		if (expandedChatId !== currentChatId) {
+			expandedChatId = currentChatId;
+			expandedGroups = new Set();
+			handledPayload = null;
+			defaultMessageId = undefined;
+			scrollVersion++;
 		}
+		const ids = new Set(currentGroups.map((group) => group.messageId));
+		if ([...expandedGroups].some((id) => !ids.has(id))) {
+			expandedGroups = new Set([...expandedGroups].filter((id) => ids.has(id)));
+		}
+		if (payload && ids.has(payload.messageId)) {
+			if (payload !== handledPayload) {
+				expandedGroups = new Set([...expandedGroups, payload.messageId]);
+				void scrollToGroup(payload.messageId);
+			}
+		} else if (!payload) {
+			const latestId = currentGroups[currentGroups.length - 1]?.messageId;
+			if (latestId !== defaultMessageId || handledPayload) {
+				expandedGroups = new Set(latestId ? [latestId] : []);
+				defaultMessageId = latestId;
+				if (latestId) void scrollToGroup(latestId);
+			}
+		}
+		handledPayload = payload;
 	}
 
-	// [Gradient] Keep the last selected citation in the payload when returning to the list.
-	$: visibleCitations = $citationPanel?.visibleCitations ?? [];
-	// [Gradient] The Sources tab also provides a list when citation clicks use modals.
-	$: navigator = $citationPanelVariant === 'navigator' || $citationPanelVariant === 'modal';
-	$: listLevel = navigator && ($citationPanel?.level === 'list' || !$citationPanel?.citation);
-	$: sourcePosition = citation ? visibleCitations.indexOf(citation) : -1;
-	$: if (!navigator && $citationPanel?.level === 'list') {
-		const selected = $citationPanel.citation ?? visibleCitations[0];
-		if (selected) selectSource(selected);
+	async function scrollToGroup(messageId: string) {
+		const version = ++scrollVersion;
+		await tick();
+		if (version === scrollVersion) groupList?.scrollToGroup(messageId);
 	}
-	function selectSource(selected: DisplayCitation) {
-		if ($citationPanel)
-			citationPanel.set({ ...$citationPanel, citation: selected, level: 'detail' });
+
+	function toggleGroup(messageId: string) {
+		const next = new Set(expandedGroups);
+		if (next.has(messageId)) next.delete(messageId);
+		else next.add(messageId);
+		expandedGroups = next;
+	}
+
+	// [Gradient] Match by stable source id: history reduction creates new citation objects.
+	$: citation = panel?.citation ?? null;
+	$: cumulativeCitations = activeGroup?.citations ?? panel?.citations ?? [];
+	$: groupUsed = activeGroup?.used ?? usedCitations(cumulativeCitations);
+	$: visibleCitations =
+		citation && !groupUsed.some((item) => item.id === citation.id)
+			? cumulativeCitations
+			: groupUsed;
+	$: navigator = $citationPanelVariant === 'navigator' || $citationPanelVariant === 'modal';
+	$: listLevel = panel?.level === 'list' || !citation;
+	$: sourcePosition = citation ? visibleCitations.findIndex((item) => item.id === citation.id) : -1;
+	$: showPercentage = relevanceEnabled && shouldShowPercentage(visibleCitations);
+	$: showRelevance = relevanceEnabled && calculateShowRelevance(visibleCitations);
+
+	function selectSource(selected: DisplayCitation, group: SourceGroup | undefined = activeGroup) {
+		if (!group) return;
+		citationPanel.set({
+			citation: selected,
+			citations: group.citations,
+			showPercentage: relevanceEnabled && group.showPercentage,
+			showRelevance: relevanceEnabled && group.showRelevance,
+			messageId: group.messageId,
+			chatId,
+			level: 'detail'
+		});
 	}
 	function backToSources() {
-		if ($citationPanel) citationPanel.set({ ...$citationPanel, level: 'list' });
+		if (panel) citationPanel.set({ ...panel, level: 'list' });
 	}
 
-	$: citation = $citationPanel?.citation ?? null;
-	$: showPercentage = $citationPanel?.showPercentage ?? false;
-	$: showRelevance = $citationPanel?.showRelevance ?? true;
 	$: if (citation !== previousCitation) {
 		previousCitation = citation;
 		mergedDocuments = mergeCitationDocuments(citation);
@@ -104,6 +153,7 @@
 	}
 	onDestroy(() => {
 		probeVersion++;
+		scrollVersion++;
 	});
 </script>
 
@@ -122,7 +172,7 @@
 	}}
 />
 
-{#if $citationPanel}
+{#if groups.length > 0}
 	<CitationModal bind:show={showModal} {citation} {showPercentage} {showRelevance} />
 	<section
 		class="relative flex flex-col h-full min-h-0 w-full text-gray-900 dark:text-gray-100"
@@ -131,12 +181,14 @@
 		aria-label={listLevel ? $i18n.t('Sources') : $i18n.t('Citation')}
 	>
 		{#if listLevel}
-			<!-- [Gradient] The tab label already titles the list; no second heading. -->
-			<CitationSourceList
-				{visibleCitations}
+			<CitationSourceGroups
+				bind:this={groupList}
+				{groups}
+				expanded={expandedGroups}
+				selectedMessageId={panel?.messageId}
 				selectedCitation={citation}
-				{showPercentage}
-				{showRelevance}
+				{relevanceEnabled}
+				onToggle={toggleGroup}
 				onSelect={selectSource}
 			/>
 		{:else if citation}

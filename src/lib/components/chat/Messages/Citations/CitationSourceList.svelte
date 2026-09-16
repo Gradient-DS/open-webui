@@ -8,6 +8,8 @@
 	import { calculatePercentage, decodeString, getRelevanceColor } from './useCitationDocument';
 	import Document from '$lib/components/icons/Document.svelte';
 	const i18n = getContext<Readable<I18n>>('i18n');
+	// [Gradient] Groups own scrolling and header positioning when this list is embedded.
+	export let embedded = false;
 	export let visibleCitations: DisplayCitation[] = [];
 	export let selectedCitation: DisplayCitation | null = null;
 	export let showPercentage = false;
@@ -26,11 +28,15 @@
 		};
 	});
 	onMount(() => {
-		list?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
+		if (!embedded)
+			list?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
 	});
 </script>
 
-<div bind:this={list} class="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-2 space-y-1">
+<div
+	bind:this={list}
+	class="space-y-1 {embedded ? '' : 'flex-1 min-h-0 overflow-y-auto scrollbar-thin p-2'}"
+>
 	{#each rows as row}
 		{@const name = decodeString(row.citation.source.name ?? '')}
 		<button

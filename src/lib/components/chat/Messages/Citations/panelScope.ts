@@ -1,14 +1,14 @@
 import type { DisplayCitation } from './reduceSources';
 
 /**
- * [Gradient] Per-message source-panel scope.
+ * [Gradient] Legacy per-message source-panel scope.
  *
  * The agent tags each cumulative source with provenance flags: `current_turn`
  * (a tool retrieved it this turn) and `cited_this_turn` (the model wrote its
  * `[N]` in this turn's answer, including a cross-turn re-cite of an earlier
- * turn's source). The bottom panel shows the union — everything this message
- * actually surfaced — while inline `[N]` still resolves against the full
- * cumulative `sources` array.
+ * turn's source). This helper retains the retrieved/cited union for legacy
+ * callers. Question groups and message pills now use `usedCitations` below;
+ * inline `[N]` still resolves against the full cumulative `sources` array.
  *
  * Gating is on `cited_this_turn` PRESENCE, deliberately NOT on `current_turn`.
  * A pre-change agent emits only `current_turn` (the `cited_this_turn` field

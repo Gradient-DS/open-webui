@@ -14,6 +14,8 @@
 
 	import CitationModal from './Citations/CitationModal.svelte';
 	import { reduceSources, type DisplayCitation, type RawSource } from './Citations/reduceSources';
+	// [Gradient] Share answer-used scope with the grouped Sources tab.
+	import { usedCitations } from './Citations/panelScope';
 	import { calculateShowRelevance, shouldShowPercentage } from './Citations/relevanceDisplay';
 
 	// [Gradient] Type the shared translation store for citation controls.
@@ -73,7 +75,6 @@
 			citation,
 			level,
 			citations,
-			visibleCitations,
 			showPercentage: citationRelevanceEnabled && showPercentage,
 			showRelevance: citationRelevanceEnabled && showRelevance,
 			messageId: id,
@@ -129,32 +130,16 @@
 		}
 	};
 
-	$: {
-		citations = reduceSources(sources);
-		showRelevance = calculateShowRelevance(citations);
-		showPercentage = shouldShowPercentage(citations);
-	}
-
-	// [Gradient] Per-message panel scope from the agent's provenance flags:
-	// `current_turn` (a tool retrieved the source this turn) ∪ `cited_this_turn`
-	// (the model wrote its `[N]` in this turn's answer, incl. cross-turn cites).
-	// Prior-turn sources neither retrieved nor cited this turn stay out of the
-	// panel. Falls back to show-all when no citation carries provenance flags
-	// (legacy chats / upstream providers). The filter does NOT touch the
-	// underlying `citations` array — inline `[N]` clicks still resolve via
-	// `showSourceModal(N)` against the cumulative list.
-	$: {
-		const all = citations as DisplayCitation[];
-		const hasProvenance = all.some(
-			(c) => c.current_turn !== undefined || c.cited_this_turn !== undefined
-		);
-		visibleCitations = hasProvenance ? all.filter((c) => c.current_turn || c.cited_this_turn) : all;
-	}
+	// [Gradient] Inline [N] retains cumulative numbering; the pill lists only answer-used sources.
+	$: citations = reduceSources(sources);
+	$: visibleCitations = usedCitations(citations);
+	$: showRelevance = calculateShowRelevance(visibleCitations);
+	$: showPercentage = shouldShowPercentage(visibleCitations);
 
 	const decodeString = (str: string = '') => {
 		try {
 			return decodeURIComponent(str);
-		} catch (e) {
+		} catch {
 			return str;
 		}
 	};
@@ -186,7 +171,7 @@
 		>
 			{#if urlCitations.length > 0}
 				<div class="flex -space-x-1 items-center">
-					{#each urlCitations.slice(0, 3) as citation, idx}
+					{#each urlCitations.slice(0, 3) as citation}
 						<img
 							src="https://www.google.com/s2/favicons?sz=32&domain={citation.source.name}"
 							alt="favicon"
@@ -199,12 +184,13 @@
 							}}
 						/>
 					{/each}
-					{#if citations.length > 3}
+					<!-- [Gradient] The favicon overflow counts this answer's used sources too. -->
+					{#if visibleCitations.length > 3}
 						<div
 							class="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[0.5rem] font-normal text-gray-500 dark:text-gray-400 whitespace-nowrap tracking-tighter"
 							aria-hidden="true"
 						>
-							+{citations.length - Math.min(urlCitations.length, 3)}
+							+{visibleCitations.length - Math.min(urlCitations.length, 3)}
 						</div>
 					{/if}
 				</div>

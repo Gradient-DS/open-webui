@@ -3803,6 +3803,7 @@
   "{{count}} selected": "",
   "{{count}} selected_one": "",
   "{{count}} selected_other": "",
+    "{{count}} sources": "",
   "{{count}} suspended": "",
   "{{count}} suspended_one": "{{count}} suspended",
   "{{count}} suspended_other": "{{count}} suspended",
