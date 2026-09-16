@@ -118,6 +118,7 @@ from open_webui.config import (
 )
 from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
+from open_webui.soev.acting import install
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -723,6 +724,7 @@ app = FastAPI(
     redoc_url=None,
     lifespan=lifespan,
 )
+install(app)
 
 # Used by readiness checks to gate traffic until startup work is done.
 app.state.startup_complete = False

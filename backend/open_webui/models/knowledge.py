@@ -2113,4 +2113,6 @@ class KnowledgeTable:
                 return False
 
 
-Knowledges = KnowledgeTable()
+from open_webui.soev.knowledge_store import SoevKnowledgeTable  # noqa: E402
+
+Knowledges = SoevKnowledgeTable()

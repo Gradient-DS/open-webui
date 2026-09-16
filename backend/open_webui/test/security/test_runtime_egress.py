@@ -87,6 +87,7 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'services/onedrive/graph_client.py': 'No OneDrive integration credentials or stored OAuth tokens in the fresh CI database.',
     'services/onedrive/token_refresh.py': 'No stored OneDrive refresh token in the fresh CI database; refresh returns before HTTP.',
     'services/sync/daemon_client.py': 'Manual sync and cancellation use SYNC_DAEMON_URL at stub.',
+    'soev/client.py': 'Targets SOEV_API_URL, empty in CI; tests use httpx.MockTransport.',
     'storage/provider.py': 'S3 uploads/downloads use S3_ENDPOINT_URL at in-network MinIO with disposable credentials; STORAGE_PROVIDER=s3 leaves Azure Blob and GCS unselected.',
     'utils/agent.py': 'Agent completions use AGENT_API_BASE_URL at stub, including streaming requests.',
     'utils/anthropic.py': 'Provider passthrough uses configured OpenAI connections at stub; no Anthropic connection is seeded.',

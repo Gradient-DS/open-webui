@@ -256,9 +256,8 @@ async def chat_completions(
     """Proxy POST /v1/chat/completions to the agent service with SSE streaming.
 
     Injects the verified user's UUID into the body as ``user_id`` so the
-    agent service can set its acting-user ContextVar. Without this, KB
-    retrieval tools that gate on ``/accessible-kbs`` fail with
-    "acting user is not set".
+    agent service can read through the internal retrieval routes as that
+    user by sending ``X-Acting-User-Id``.
 
     Each ``files[]`` entry of type ``collection`` may be addressed by KB
     UUID (``id``) or by the integration ingest pair (``source_id`` +

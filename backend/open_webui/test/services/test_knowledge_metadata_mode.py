@@ -14,6 +14,7 @@ Scenarios:
 
 Fixtures follow the same in-memory SQLite + monkeypatch pattern as
 ``test_knowledge_suspension.py`` and ``test_invites_model.py``.
+These tests cover the SQL class that soev-api replaced for the product.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from open_webui.models import knowledge as knowledge_module
-from open_webui.models.access_grants import AccessGrant
+from open_webui.models.access_grants import AccessGrant, AccessGrantsTable
 from open_webui.models.files import File
 from open_webui.models.knowledge import (
     Knowledge,
@@ -73,6 +74,8 @@ async def db_session(monkeypatch):
                 yield s
 
     monkeypatch.setattr(knowledge_module, 'get_async_db_context', _get_async_db_context)
+    monkeypatch.setattr(knowledge_module, 'AccessGrants', AccessGrantsTable())
+    monkeypatch.setitem(globals(), 'Knowledges', knowledge_module.KnowledgeTable())
     yield Session
     await engine.dispose()
 

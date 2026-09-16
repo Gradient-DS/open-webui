@@ -655,4 +655,6 @@ class GroupTable:
             return False
 
 
-Groups = GroupTable()
+from open_webui.soev.groups import SoevGroupTable  # noqa: E402
+
+Groups = SoevGroupTable()

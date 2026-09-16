@@ -12,10 +12,9 @@ chat-retrieval router and the new ``/api/v1/internal/retrieval/query``
 endpoint should both call into this so a future ACL refinement (e.g.
 file-level visibility) lands in one place.
 
-The sibling :func:`resolve_accessible_kbs` returns the same KB set in
-metadata-only form (id, name, description, sanitized collection_name) for
-agents that prefer to query the per-tenant Weaviate directly. Both functions
-share the same ACL + suspension filter so they cannot drift.
+The metadata-only sibling that listed KBs for agents querying Weaviate
+directly (``/accessible-kbs``) was removed when knowledge moved to soev-api;
+agents read through their own gated reader instead.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ from open_webui.models.knowledge import KnowledgeUserModel, Knowledges
 from open_webui.models.users import UserModel
 from open_webui.retrieval.utils import query_collection
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
-from open_webui.routers.knowledge import KNOWLEDGE_BASES_COLLECTION
 
 log = logging.getLogger(__name__)
 
@@ -83,46 +81,12 @@ async def _filter_to_accessible_kbs(
     return filtered
 
 
-async def resolve_accessible_kbs(
-    user: UserModel,
-    *,
-    kb_ids: Optional[list[str]] = None,
-) -> dict:
-    """Return KBs the user may read, plus the meta-collection for KB selection.
-
-    Shaped for agents that query Weaviate directly: ``collection_name`` is the
-    sanitised class name as it lives in the vector DB (so the agent doesn't
-    have to re-implement the sanitiser). ``kb_index_collection_name`` points
-    at the meta-collection where each KB has a ``(name, description)``
-    embedding under ``metadata.knowledge_base_id`` — the agent can run a
-    semantic / keyword search against it (filtered by ``id`` from the kbs
-    list) to pick which KBs are worth querying.
-    """
-
-    accessible = await _filter_to_accessible_kbs(user, kb_ids=kb_ids)
-    return {
-        'user_id': user.id,
-        'kbs': [
-            {
-                'id': kb.id,
-                'collection_name': _sanitize_collection_name(kb.id),
-                'name': kb.name,
-                'description': kb.description or '',
-                'type': getattr(kb, 'type', None),
-                'owner_id': kb.user_id,
-            }
-            for kb in accessible
-        ],
-        'kb_index_collection_name': _sanitize_collection_name(KNOWLEDGE_BASES_COLLECTION),
-    }
-
-
 async def resolve_accessible_kb(
     user: UserModel,
     *,
     kb_id: str,
 ) -> Optional[KnowledgeUserModel]:
-    """Single-KB form of :func:`resolve_accessible_kbs`; shares the same ACL.
+    """Resolve one KB under the same ACL and suspension filter as the search.
 
     Returns ``None`` if the KB does not exist, the user has no read access,
     or the KB is suspended. Reusing ``_filter_to_accessible_kbs`` keeps the
