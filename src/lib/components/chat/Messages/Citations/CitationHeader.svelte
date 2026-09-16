@@ -16,7 +16,8 @@
 	export let externalUrl: string | null = null;
 </script>
 
-<div class=" text-lg font-medium self-center flex items-center gap-1.5 min-w-0">
+<!-- [Gradient] Let long source titles shrink while the adjacent actions keep their width. -->
+<div class="text-lg font-medium self-center flex-1 flex items-center gap-1.5 min-w-0">
 	{#if citation?.source?.name}
 		{@const document = mergedDocuments?.[0]}
 		{@const docFileId = document?.metadata?.file_id}
@@ -34,12 +35,12 @@
 				tippyOptions={{ duration: [500, 0] }}
 			>
 				{#if isFileMissing && !externalUrl}
-					<span class="grow line-clamp-1 text-gray-500 dark:text-gray-400 cursor-not-allowed">
+					<span class="block min-w-0 truncate text-gray-500 dark:text-gray-400 cursor-not-allowed">
 						{decodeString(citation?.source?.name)}
 					</span>
 				{:else}
 					<a
-						class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
+						class="hover:text-gray-500 dark:hover:text-gray-100 underline block min-w-0 truncate"
 						href={linksToFile
 							? `${WEBUI_API_BASE_URL}/files/${docFileId}/content${document?.metadata?.page !== undefined ? `#page=${Number(document.metadata.page) + 1}` : ''}`
 							: (externalUrl ?? `#`)}
@@ -73,7 +74,7 @@
 				</Tooltip>
 			{/if}
 		{:else}
-			{decodeString(citation?.source?.name)}
+			<span class="min-w-0 truncate">{decodeString(citation?.source?.name)}</span>
 		{/if}
 	{:else}
 		{$i18n.t('Citation')}

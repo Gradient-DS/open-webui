@@ -3,7 +3,7 @@
 	import { getContext, onDestroy } from 'svelte';
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
-	import { citationPanel, citationPanelVariant, showCitationPanel } from '$lib/stores';
+	import { citationPanel, citationPanelVariant, config } from '$lib/stores';
 	import CitationStackBody from '../Messages/Citations/CitationStackBody.svelte';
 	import CitationFocusBody from '../Messages/Citations/CitationFocusBody.svelte';
 	import CitationSourceList from '../Messages/Citations/CitationSourceList.svelte';
@@ -17,12 +17,19 @@
 		type CitationDocument
 	} from '../Messages/Citations/citationDocuments';
 	import { citationFileInfo, resolveExternalUrl } from '../Messages/Citations/useCitationDocument';
-	import type { DisplayCitation } from '../Messages/Citations/reduceSources';
-	import XMark from '$lib/components/icons/XMark.svelte';
+	import { reduceSources, type DisplayCitation } from '../Messages/Citations/reduceSources';
+	import { scopePanelCitations } from '../Messages/Citations/panelScope';
+	import {
+		calculateShowRelevance,
+		shouldShowPercentage
+	} from '../Messages/Citations/relevanceDisplay';
+	import { latestMessageWithSources, type CitationHistory } from './citationTab';
 	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
 
 	const i18n = getContext<Readable<I18n>>('i18n');
 	export let overlay = false;
+	export let history: CitationHistory | null = null;
+	export let chatId = '';
 	let previousCitation: DisplayCitation | null = null;
 	let mergedDocuments: CitationDocument[] = [];
 	let activeSnippetIdx = 0;
@@ -34,9 +41,31 @@
 	let panelElement: HTMLElement;
 	let probeVersion = 0;
 
+	// [Gradient] Opening the tab directly starts at the latest sourced answer on this branch.
+	$: if (!$citationPanel || $citationPanel.chatId !== chatId) {
+		const message = latestMessageWithSources(history);
+		if (message) {
+			const citations = reduceSources(message.sources ?? []);
+			const relevanceEnabled = $config?.features?.enable_citation_relevance ?? true;
+			citationPanel.set({
+				citation: null,
+				citations,
+				visibleCitations: scopePanelCitations(citations),
+				showRelevance: relevanceEnabled && calculateShowRelevance(citations),
+				showPercentage: relevanceEnabled && shouldShowPercentage(citations),
+				messageId: message.id,
+				chatId,
+				level: 'list'
+			});
+		} else if ($citationPanel) {
+			citationPanel.set(null);
+		}
+	}
+
 	// [Gradient] Keep the last selected citation in the payload when returning to the list.
 	$: visibleCitations = $citationPanel?.visibleCitations ?? [];
-	$: navigator = $citationPanelVariant === 'navigator';
+	// [Gradient] The Sources tab also provides a list when citation clicks use modals.
+	$: navigator = $citationPanelVariant === 'navigator' || $citationPanelVariant === 'modal';
 	$: listLevel = navigator && ($citationPanel?.level === 'list' || !$citationPanel?.citation);
 	$: sourcePosition = citation ? visibleCitations.indexOf(citation) : -1;
 	$: if (!navigator && $citationPanel?.level === 'list') {
@@ -76,11 +105,6 @@
 	onDestroy(() => {
 		probeVersion++;
 	});
-
-	function close() {
-		showCitationPanel.set(false);
-		citationPanel.set(null);
-	}
 </script>
 
 <svelte:window
@@ -111,11 +135,6 @@
 				class="flex items-center justify-between gap-2 px-3 py-3 shrink-0 border-b border-gray-100 dark:border-gray-800"
 			>
 				<h2 class="text-lg font-medium">{$i18n.t('Sources')}</h2>
-				<button
-					class="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-					aria-label={$i18n.t('Close citation panel')}
-					on:click={close}><XMark className="size-4" /></button
-				>
 			</div>
 			<CitationSourceList
 				{visibleCitations}
@@ -136,7 +155,7 @@
 					>
 				{/if}
 				<CitationHeader {citation} {mergedDocuments} {previewAvailable} {externalUrl}>
-					<div slot="actions" class="flex items-center gap-1 shrink-0">
+					<div slot="actions" class="flex items-center gap-1 shrink-0 whitespace-nowrap">
 						{#if isPreviewable && previewAvailable}
 							<div
 								class="flex gap-0.5 rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5"
@@ -164,12 +183,6 @@
 							title={$i18n.t('Open in modal')}
 							aria-label={$i18n.t('Open in modal')}
 							on:click={() => (showModal = true)}><ArrowsPointingOut className="size-4" /></button
-						>
-						<button
-							class="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-							title={$i18n.t('Close citation panel')}
-							aria-label={$i18n.t('Close citation panel')}
-							on:click={close}><XMark className="size-4" /></button
 						>
 					</div>
 				</CitationHeader>
@@ -230,4 +243,10 @@
 		{/if}
 		{#if overlay}<div class="absolute inset-0 z-10"></div>{/if}
 	</section>
+{:else}
+	<div
+		class="flex h-full min-h-0 items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-gray-400"
+	>
+		{$i18n.t('No sources in this chat yet')}
+	</div>
 {/if}

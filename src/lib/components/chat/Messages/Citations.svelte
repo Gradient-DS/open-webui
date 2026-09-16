@@ -8,7 +8,7 @@
 		showControls,
 		showEmbeds,
 		citationPanel,
-		showCitationPanel,
+		openSourcesTabSignal,
 		citationPanelVariant
 	} from '$lib/stores';
 
@@ -64,14 +64,6 @@
 			showCitationModal = true;
 			return;
 		}
-		if (
-			$showCitationPanel &&
-			$citationPanel?.citation?.id === citation.id &&
-			$citationPanel.level !== 'list' &&
-			$citationPanel.messageId === id &&
-			$citationPanel.chatId === chatId
-		)
-			return;
 		openPanel(citation, 'detail');
 	};
 
@@ -87,8 +79,7 @@
 			messageId: id,
 			chatId
 		});
-		showCitationPanel.set(true);
-		showControls.set(true);
+		openSourcesTabSignal.update((value) => value + 1);
 	};
 	$: navigatorEnabled = !readOnly && $citationPanelVariant === 'navigator';
 
@@ -109,12 +100,6 @@
 				return;
 			}
 			console.log('Showing citation modal for:', citations[index]);
-
-			// [Gradient] Yield the citation special mode before the existing embed route.
-			if (citations[index]?.source?.embed_url && !readOnly) {
-				showCitationPanel.set(false);
-				citationPanel.set(null);
-			}
 
 			if (citations[index]?.source?.embed_url) {
 				const embedUrl = citations[index].source.embed_url as string;
@@ -192,11 +177,7 @@
 				: visibleCitations.length === 1
 					? $i18n.t('Toggle 1 source')
 					: $i18n.t('Toggle {{COUNT}} sources', { COUNT: visibleCitations.length })}
-			aria-expanded={navigatorEnabled
-				? $showCitationPanel &&
-					$citationPanel?.messageId === id &&
-					$citationPanel?.chatId === chatId
-				: showCitations}
+			aria-expanded={navigatorEnabled ? undefined : showCitations}
 			on:click={() => {
 				// [Gradient] Navigator owns the source list in the side panel.
 				if (navigatorEnabled) openPanel(null, 'list');

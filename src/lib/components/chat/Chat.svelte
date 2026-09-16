@@ -44,8 +44,6 @@
 		functions,
 		selectedFolder,
 		showEmbeds,
-		showCitationPanel,
-		citationPanel,
 		selectedTerminalId,
 		showFileNavPath,
 		showFileNavDir,
@@ -1717,9 +1715,6 @@
 				showCallOverlay.set(false);
 				showArtifacts.set(false);
 				showEmbeds.set(false);
-				// [Gradient] Clear citation state when the controls host closes.
-				showCitationPanel.set(false);
-				citationPanel.set(null);
 			}
 		});
 

@@ -1,5 +1,6 @@
 <script context="module" lang="ts">
-	let savedTab: 'controls' | 'files' | 'overview' | 'document' = 'controls';
+	// [Gradient] Remember Sources alongside the other tabs.
+	let savedTab: 'controls' | 'files' | 'overview' | 'document' | 'sources' = 'controls';
 </script>
 
 <script lang="ts">
@@ -15,9 +16,8 @@
 		showDocument,
 		openDocumentTabSignal,
 		showEmbeds,
-		showCitationPanel,
+		openSourcesTabSignal,
 		citationPanel,
-		citationPanelVariant,
 		settings,
 		showFileNavPath,
 		selectedTerminalId,
@@ -33,8 +33,9 @@
 	import Artifacts from './Artifacts.svelte';
 	import Document from './Document.svelte';
 	import Embeds from './ChatControls/Embeds.svelte';
-	// [Gradient] Citation prototype shares the existing special-panel host.
+	// [Gradient] Sources share the tabbed panel with Document Writer.
 	import CitationPanel from './ChatControls/CitationPanel.svelte';
+	import { latestMessageWithSources } from './ChatControls/citationTab';
 	import FileNav from './FileNav.svelte';
 	import PyodideFileNav from './PyodideFileNav.svelte';
 	import Overview from './Overview.svelte';
@@ -66,16 +67,9 @@
 	let mounted = false;
 	// [Gradient] Preserve the wider first-open document panel.
 	let controlsWidth = 600;
-	// [Gradient] Capture synchronously, before the opener sets showControls in the same tick.
-	let controlsWereOpen = false;
-	let citationWasOpen = false;
+	// [Gradient] Sources can expand from the partial mobile sheet.
 	let citationSheetExpanded = false;
-	$: if ($showCitationPanel !== citationWasOpen) {
-		if ($showCitationPanel && largeScreen && controlsWidth < 560) controlsWidth = 620;
-		citationWasOpen = $showCitationPanel;
-		if (!$showCitationPanel) citationSheetExpanded = false;
-	}
-	$: if ($showCitationPanel && $citationPanelVariant === 'modal') closeHandler();
+	$: if (activeTab !== 'sources' || !$showControls) citationSheetExpanded = false;
 
 	// Tab state for Controls+Files panel
 	let activeTab = savedTab;
@@ -110,12 +104,19 @@
 	$: showOverviewTab = hasMessages && isFeatureEnabled('chat_overview');
 	$: showDocumentTab = isFeatureEnabled('document_writer') && ($documentContents?.length ?? 0) > 0;
 
+	// [Gradient] Keep Sources available before the first citation click.
+	$: showSourcesTab = !!latestMessageWithSources(history) || !!$citationPanel;
+
 	// Tab fallback: if active tab becomes hidden, switch to next available
+	// [Gradient] A hidden Sources tab must yield to an available tab.
+	$: if (!showSourcesTab && activeTab === 'sources') activeTab = 'controls';
 	$: if (!showOverviewTab && activeTab === 'overview') activeTab = 'controls';
 	$: if (!showFilesTab && activeTab === 'files') activeTab = 'controls';
 	$: if (!showDocumentTab && activeTab === 'document') activeTab = 'controls';
 	$: if (!showControlsTab && activeTab === 'controls') {
-		if (showDocumentTab) activeTab = 'document';
+		// [Gradient] Sources remain usable when Controls are restricted.
+		if (showSourcesTab) activeTab = 'sources';
+		else if (showDocumentTab) activeTab = 'document';
 		else if (showFilesTab) activeTab = 'files';
 		else if (showOverviewTab) activeTab = 'overview';
 	}
@@ -126,7 +127,8 @@
 		!showControlsTab &&
 		!showFilesTab &&
 		!showOverviewTab &&
-		!showDocumentTab
+		!showDocumentTab &&
+		!showSourcesTab
 	) {
 		showControls.set(false);
 	}
@@ -148,6 +150,21 @@
 	$: if ($openDocumentTabSignal && showDocumentTab) {
 		activeTab = 'document';
 		showControls.set(true);
+	}
+
+	// [Gradient] Citation clicks select Sources even when the panel is already open.
+	$: if ($openSourcesTabSignal && showSourcesTab) {
+		activeTab = 'sources';
+		showEmbeds.set(false);
+		showArtifacts.set(false);
+		showCallOverlay.set(false);
+		showControls.set(true);
+		widenSourcesPanel();
+	}
+
+	// [Gradient] Keep width changes from retriggering the tab-opening signal.
+	function widenSourcesPanel() {
+		if (largeScreen && controlsWidth < 560) controlsWidth = 620;
 	}
 
 	// Auto-switch to Files tab when display_file is triggered
@@ -201,14 +218,6 @@
 	};
 
 	onMount(() => {
-		// [Gradient] Store subscriptions run before the opener changes showControls.
-		let citationOpen = false;
-		const unsubscribeCitation = showCitationPanel.subscribe((open) => {
-			if (open && !citationOpen) controlsWereOpen = $showControls;
-			const closing = citationOpen && !open;
-			citationOpen = open;
-			if (closing && !controlsWereOpen) showControls.set(false);
-		});
 		const mediaQuery = window.matchMedia('(min-width: 1024px)');
 		mediaQuery.addEventListener('change', handleMediaQuery);
 		handleMediaQuery(mediaQuery);
@@ -230,7 +239,6 @@
 		document.addEventListener('mouseup', onMouseUp);
 
 		return () => {
-			unsubscribeCitation();
 			isDestroyed = true;
 			mounted = false;
 			if (!largeScreen) {
@@ -243,11 +251,6 @@
 	});
 
 	const closeHandler = () => {
-		// [Gradient] Returning from a citation preserves the previously selected tab.
-		const closingCitation = $showCitationPanel;
-		showCitationPanel.set(false);
-		citationPanel.set(null);
-		if (closingCitation) return;
 		if (!largeScreen) {
 			showControls.set(false);
 		}
@@ -260,155 +263,165 @@
 	$: if (mounted && !chatId) closeHandler();
 
 	// Helper: is a "special" full-screen panel active?
-	$: specialPanel = $showCallOverlay || $showArtifacts || $showEmbeds || $showCitationPanel;
+	$: specialPanel = $showCallOverlay || $showArtifacts || $showEmbeds;
 </script>
 
 {#if !largeScreen}
 	{#if $showControls}
-		{#key $showCitationPanel}
-			<Drawer
-				show={$showControls}
-				onClose={() => ($showCitationPanel ? closeHandler() : showControls.set(false))}
-				className="!bg-white dark:!bg-gray-850"
-				heightClass={$showCitationPanel
-					? `${citationSheetExpanded ? 'h-[100dvh]' : 'h-[72dvh]'} rounded-t-2xl`
-					: 'min-h-[100dvh]'}
-			>
-				<div class="{$showCitationPanel ? 'h-full' : 'h-[100dvh]'} flex flex-col min-h-0">
-					<!-- [Gradient] A partial sheet keeps the answer visible above the citation. -->
-					{#if $showCitationPanel}
-						<button
-							class="shrink-0 w-full flex justify-center py-3"
-							aria-label={$i18n.t('Toggle citation panel height')}
-							aria-expanded={citationSheetExpanded}
-							on:click={() => (citationSheetExpanded = !citationSheetExpanded)}
-						>
-							<span class="w-10 h-1 rounded-full bg-gray-300 dark:bg-gray-600"></span>
-						</button>
-					{/if}
-					{#if $showCallOverlay}
-						<div
-							class="h-full max-h-[100dvh] bg-white text-gray-700 dark:bg-black dark:text-gray-300 flex justify-center"
-						>
-							<CallOverlay
-								bind:files
-								{submitPrompt}
-								{stopResponse}
-								{modelId}
-								{chatId}
-								{eventTarget}
-								on:close={() => showControls.set(false)}
-							/>
-						</div>
-					{:else if $showCitationPanel}
-						<!-- [Gradient] Citation special mode, shared by desktop and mobile. -->
-						<CitationPanel overlay={dragged} />
-					{:else if $showEmbeds}
-						<Embeds />
-					{:else if $showArtifacts}
-						<Artifacts {history} />
-					{:else}
-						<!-- Controls + Files + Document tabs -->
-						<div class="flex flex-col h-full min-h-0">
-							<!-- Tab bar -->
-							<div class="flex items-center justify-between px-2 pt-2 pb-2 shrink-0">
-								<div class="flex gap-1 min-w-0 overflow-x-auto scrollbar-hidden">
-									{#if showControlsTab}
-										<button
-											class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
-											'controls'
-												? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
-												: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
-											on:click={() => (activeTab = 'controls')}
-										>
-											{$i18n.t('Controls')}
-										</button>
-									{/if}
-									{#if showDocumentTab}
-										<button
-											class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
-											'document'
-												? 'bg-gray-100 dark:bg-gray-800 font-medium text-gray-900 dark:text-white'
-												: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
-											on:click={() => (activeTab = 'document')}
-										>
-											{$i18n.t('Document')}
-										</button>
-									{/if}
-									{#if showFilesTab}
-										<button
-											class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
-											'files'
-												? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
-												: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
-											on:click={() => (activeTab = 'files')}
-										>
-											{$i18n.t('Files')}
-										</button>
-									{/if}
-									{#if showOverviewTab}
-										<button
-											class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
-											'overview'
-												? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
-												: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
-											on:click={() => (activeTab = 'overview')}
-										>
-											{$i18n.t('Overview')}
-										</button>
-									{/if}
-								</div>
-								<button
-									class="p-1 rounded-lg text-gray-500 dark:text-gray-400"
-									on:click={() => showControls.set(false)}
-									aria-label={$i18n.t('Close')}
-								>
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										viewBox="0 0 24 24"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="1.5"
-										class="size-4"
+		<Drawer
+			show={$showControls}
+			onClose={() => showControls.set(false)}
+			className="!bg-white dark:!bg-gray-850"
+			heightClass={activeTab === 'sources'
+				? `${citationSheetExpanded ? 'h-[100dvh]' : 'h-[72dvh]'} rounded-t-2xl`
+				: 'min-h-[100dvh]'}
+		>
+			<div class="{activeTab === 'sources' ? 'h-full' : 'h-[100dvh]'} flex flex-col min-h-0">
+				<!-- [Gradient] A partial sheet keeps the answer visible above the citation. -->
+				{#if activeTab === 'sources'}
+					<button
+						class="shrink-0 w-full flex justify-center py-3"
+						aria-label={$i18n.t('Toggle citation panel height')}
+						aria-expanded={citationSheetExpanded}
+						on:click={() => (citationSheetExpanded = !citationSheetExpanded)}
+					>
+						<span class="w-10 h-1 rounded-full bg-gray-300 dark:bg-gray-600"></span>
+					</button>
+				{/if}
+				{#if $showCallOverlay}
+					<div
+						class="h-full max-h-[100dvh] bg-white text-gray-700 dark:bg-black dark:text-gray-300 flex justify-center"
+					>
+						<CallOverlay
+							bind:files
+							{submitPrompt}
+							{stopResponse}
+							{modelId}
+							{chatId}
+							{eventTarget}
+							on:close={() => showControls.set(false)}
+						/>
+					</div>
+				{:else if $showEmbeds}
+					<Embeds />
+				{:else if $showArtifacts}
+					<Artifacts {history} />
+				{:else}
+					<!-- Controls + Files + Document tabs -->
+					<div class="flex flex-col h-full min-h-0">
+						<!-- Tab bar -->
+						<div class="flex items-center justify-between px-2 pt-2 pb-2 shrink-0">
+							<div class="flex gap-1 min-w-0 overflow-x-auto scrollbar-hidden">
+								<!-- [Gradient] Sources is the first panel tab. -->
+								{#if showSourcesTab}
+									<button
+										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+										'sources'
+											? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
+											: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
+										on:click={() => (activeTab = 'sources')}
 									>
-										<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-									</svg>
-								</button>
-							</div>
-
-							<div
-								class="flex-1 min-h-0 {activeTab === 'overview'
-									? 'h-full'
-									: activeTab === 'controls'
-										? 'overflow-y-auto px-3 pt-1'
-										: activeTab === 'document'
-											? 'h-full'
-											: ''}"
-							>
-								{#if activeTab === 'overview'}
-									<Overview
-										{history}
-										{chatUser}
-										onNodeClick={(e) => {
-											const node = e.node;
-											showMessage(node.data.message, true);
-										}}
-									/>
-								{:else if activeTab === 'files' && terminalFilesAvailable && $selectedTerminalId}
-									<FileNav {chatId} />
-								{:else if activeTab === 'files' && codeInterpreterEnabled}
-									<PyodideFileNav />
-								{:else if activeTab === 'document'}
-									<Document />
-								{:else}
-									<Controls embed={true} {models} bind:chatFiles bind:params />
+										{$i18n.t('Sources')}
+									</button>
+								{/if}
+								{#if showControlsTab}
+									<button
+										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+										'controls'
+											? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
+											: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
+										on:click={() => (activeTab = 'controls')}
+									>
+										{$i18n.t('Controls')}
+									</button>
+								{/if}
+								{#if showDocumentTab}
+									<button
+										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+										'document'
+											? 'bg-gray-100 dark:bg-gray-800 font-medium text-gray-900 dark:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+										on:click={() => (activeTab = 'document')}
+									>
+										{$i18n.t('Document')}
+									</button>
+								{/if}
+								{#if showFilesTab}
+									<button
+										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+										'files'
+											? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
+											: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
+										on:click={() => (activeTab = 'files')}
+									>
+										{$i18n.t('Files')}
+									</button>
+								{/if}
+								{#if showOverviewTab}
+									<button
+										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+										'overview'
+											? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
+											: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
+										on:click={() => (activeTab = 'overview')}
+									>
+										{$i18n.t('Overview')}
+									</button>
 								{/if}
 							</div>
+							<button
+								class="p-1 rounded-lg text-gray-500 dark:text-gray-400"
+								on:click={() => showControls.set(false)}
+								aria-label={$i18n.t('Close')}
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.5"
+									class="size-4"
+								>
+									<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+								</svg>
+							</button>
 						</div>
-					{/if}
-				</div>
-			</Drawer>
-		{/key}
+
+						<div
+							class="flex-1 min-h-0 {activeTab === 'overview'
+								? 'h-full'
+								: activeTab === 'controls'
+									? 'overflow-y-auto px-3 pt-1'
+									: activeTab === 'document' || activeTab === 'sources'
+										? 'h-full'
+										: ''}"
+						>
+							{#if activeTab === 'overview'}
+								<Overview
+									{history}
+									{chatUser}
+									onNodeClick={(e) => {
+										const node = e.node;
+										showMessage(node.data.message, true);
+									}}
+								/>
+							{:else if activeTab === 'files' && terminalFilesAvailable && $selectedTerminalId}
+								<FileNav {chatId} />
+							{:else if activeTab === 'files' && codeInterpreterEnabled}
+								<PyodideFileNav />
+							{:else if activeTab === 'document'}
+								<Document />
+							{:else if activeTab === 'sources'}
+								<!-- [Gradient] The tab initializes from the current branch when needed. -->
+								<CitationPanel {history} {chatId} overlay={dragged} />
+							{:else}
+								<Controls embed={true} {models} bind:chatFiles bind:params />
+							{/if}
+						</div>
+					</div>
+				{/if}
+			</div>
+		</Drawer>
 	{/if}
 {:else}
 	<ResizableSidePanel
@@ -442,9 +455,6 @@
 							on:close={() => showControls.set(false)}
 						/>
 					</div>
-				{:else if $showCitationPanel}
-					<!-- [Gradient] Citation special mode, shared by desktop and mobile. -->
-					<CitationPanel overlay={dragged} />
 				{:else if $showEmbeds}
 					<Embeds overlay={dragged} />
 				{:else if $showArtifacts}
@@ -455,6 +465,18 @@
 						<!-- Tab bar -->
 						<div class="flex items-center justify-between px-2 pt-2 pb-2 shrink-0">
 							<div class="flex gap-1 min-w-0 overflow-x-auto scrollbar-hidden">
+								<!-- [Gradient] Sources is the first panel tab. -->
+								{#if showSourcesTab}
+									<button
+										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+										'sources'
+											? 'bg-gray-100/40 dark:bg-gray-800/25 font-normal text-gray-700 dark:text-gray-200'
+											: 'text-gray-500 dark:text-gray-400 hover:bg-gray-100/30 dark:hover:bg-gray-800/20 hover:text-gray-600 dark:hover:text-gray-300'}"
+										on:click={() => (activeTab = 'sources')}
+									>
+										{$i18n.t('Sources')}
+									</button>
+								{/if}
 								{#if showControlsTab}
 									<button
 										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
@@ -520,7 +542,9 @@
 						</div>
 
 						<div
-							class="flex-1 min-h-0 {activeTab === 'overview' || activeTab === 'document'
+							class="flex-1 min-h-0 {activeTab === 'overview' ||
+							activeTab === 'document' ||
+							activeTab === 'sources'
 								? 'h-full'
 								: activeTab === 'controls'
 									? 'overflow-y-auto px-3 pt-1'
@@ -546,6 +570,9 @@
 								<PyodideFileNav overlay={dragged} />
 							{:else if activeTab === 'document'}
 								<Document overlay={dragged} />
+							{:else if activeTab === 'sources'}
+								<!-- [Gradient] The tab initializes from the current branch when needed. -->
+								<CitationPanel {history} {chatId} overlay={dragged} />
 							{:else}
 								<Controls embed={true} {models} bind:chatFiles bind:params />
 							{/if}

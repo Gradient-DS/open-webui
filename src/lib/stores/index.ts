@@ -191,8 +191,8 @@ export const documentContents: Writable<Array<{
 
 export const embed = writable(null);
 
-// [Gradient] Citation side panel (spike). Mirrors showEmbeds/embed.
-export const showCitationPanel = writable(false);
+// [Gradient] Sources tab opening is independent of its retained citation state.
+export const openSourcesTabSignal = writable(0);
 export const citationPanel = writable<null | {
 	citation: DisplayCitation | null;
 	level?: 'list' | 'detail';
