@@ -15,6 +15,9 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
+# Presigned PUT lifetime the cloud-sync loader gets for a staged file.
+STAGE_PRESIGN_TTL_SECONDS = 3600
+
 
 # --- Pydantic Models ---
 
@@ -197,8 +200,9 @@ async def stage_file(
             await Knowledges.add_file_to_knowledge_by_id(body.knowledge_id, file_id, user_id)
         await Knowledges.move_file_to_directory(body.knowledge_id, file_id, body.directory_id)
 
-    ttl = 3600
-    presigned_put_url = await run_in_threadpool(Storage.get_presigned_put_url, path, ttl, body.content_type)
+    presigned_put_url = await run_in_threadpool(
+        Storage.get_presigned_put_url, path, STAGE_PRESIGN_TTL_SECONDS, body.content_type
+    )
 
     return {'file_id': file_id, 'presigned_put_url': presigned_put_url}
 
