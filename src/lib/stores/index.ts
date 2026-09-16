@@ -209,24 +209,9 @@ export const activeCitationIndex = derived(citationPanel, (panel) => {
 	return index > 0 ? { messageId: panel.messageId, index } : null;
 });
 export type CitationPanelVariant = 'modal' | 'stack' | 'focus' | 'navigator';
-function storedCitationPanelVariant(): CitationPanelVariant {
-	try {
-		const value =
-			typeof localStorage !== 'undefined' ? localStorage.getItem('citationPanelVariant') : null;
-		// [Gradient] Retired prototypes migrate to the chosen navigator layout.
-		return value === 'modal' ? 'modal' : 'navigator';
-	} catch {
-		return 'navigator';
-	}
-}
-export const citationPanelVariant = writable<CitationPanelVariant>(storedCitationPanelVariant());
-citationPanelVariant.subscribe((value) => {
-	try {
-		if (typeof localStorage !== 'undefined') localStorage.setItem('citationPanelVariant', value);
-	} catch {
-		/* Storage can be disabled; the switcher still works for this session. */
-	}
-});
+// [Gradient] The side panel (drawer on mobile) is the only citation view. The
+// modal remains solely as the read-only fallback (shared chat pages have no panel).
+export const citationPanelVariant = writable<CitationPanelVariant>('navigator');
 
 export const temporaryChatEnabled = writable(false);
 

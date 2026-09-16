@@ -119,8 +119,6 @@
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/chat/Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
-	// [Gradient] SPIKE — remove before merge.
-	import CitationVariantSwitcher from './ChatControls/CitationVariantSwitcher.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DataWarningConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
@@ -5143,8 +5141,6 @@
 				</div>
 
 				{#if !embedded}
-					<!-- [Gradient] SPIKE — remove before merge. -->
-					<CitationVariantSwitcher />
 					<ChatControls
 						bind:history
 						bind:chatFiles

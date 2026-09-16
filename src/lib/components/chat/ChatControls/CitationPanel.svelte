@@ -10,7 +10,6 @@
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import CitationHeader from '../Messages/Citations/CitationHeader.svelte';
-	import CitationModal from '../Messages/Citations/CitationModal.svelte';
 	import {
 		mergeCitationDocuments,
 		probeFileAvailable,
@@ -24,7 +23,6 @@
 		shouldShowPercentage
 	} from '../Messages/Citations/relevanceDisplay';
 	import { sourceGroups, type SourceGroup, type CitationHistory } from './citationTab';
-	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
 
 	const i18n = getContext<Readable<I18n>>('i18n');
 	export let overlay = false;
@@ -36,7 +34,6 @@
 	let expandedDocs: Set<number> = new Set();
 	let selectedTab: 'preview' | 'content' = 'preview';
 	let previewAvailable = true;
-	let showModal = false;
 	let focusBody: CitationFocusBody;
 	let panelElement: HTMLElement;
 	let probeVersion = 0;
@@ -138,7 +135,6 @@
 		activeSnippetIdx = 0;
 		expandedDocs = new Set();
 		selectedTab = 'preview';
-		showModal = false;
 	}
 	$: ({ fileId, isPreviewable } = citationFileInfo(citation, mergedDocuments));
 	$: externalUrl = resolveExternalUrl(citation, mergedDocuments);
@@ -165,15 +161,13 @@
 			$citationPanelVariant === 'focus' &&
 			selectedTab === 'preview' &&
 			isPreviewable &&
-			previewAvailable &&
-			!showModal
+			previewAvailable
 		)
 			focusBody?.handleKeydown(event);
 	}}
 />
 
 {#if groups.length > 0}
-	<CitationModal bind:show={showModal} {citation} {showPercentage} {showRelevance} />
 	<section
 		class="relative flex flex-col h-full min-h-0 w-full text-gray-900 dark:text-gray-100"
 		bind:this={panelElement}
@@ -223,12 +217,6 @@
 								>
 							</div>
 						{/if}
-						<button
-							class="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
-							title={$i18n.t('Open in modal')}
-							aria-label={$i18n.t('Open in modal')}
-							on:click={() => (showModal = true)}><ArrowsPointingOut className="size-4" /></button
-						>
 					</div>
 				</CitationHeader>
 			</div>

@@ -61,7 +61,7 @@
 			showSourceModal(citations.indexOf(citation) + 1);
 			return;
 		}
-		if (readOnly || $citationPanelVariant === 'modal') {
+		if (readOnly) {
 			selectedCitation = citation;
 			showCitationModal = true;
 			return;
