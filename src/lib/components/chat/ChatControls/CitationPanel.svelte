@@ -3,7 +3,8 @@
 	import { getContext, onDestroy, tick } from 'svelte';
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
-	import { citationPanel, config } from '$lib/stores';
+	import { config } from '$lib/stores';
+	import { citationPanel } from '$lib/stores/citations';
 	import CitationStackBody from '../Messages/Citations/CitationStackBody.svelte';
 	import CitationSourceGroups from '../Messages/Citations/CitationSourceGroups.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';

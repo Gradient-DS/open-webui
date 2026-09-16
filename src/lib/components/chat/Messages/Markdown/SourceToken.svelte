@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { LinkPreview } from 'bits-ui';
 	import { decodeString } from '$lib/utils';
-	import { activeCitationIndex, citationPanel } from '$lib/stores'; // [Gradient]
+	import { activeCitationIndex, citationPanel } from '$lib/stores/citations'; // [Gradient]
 	import { activeCitationIndexFor } from './activeCitation'; // [Gradient]
 	import Source from './Source.svelte';
 

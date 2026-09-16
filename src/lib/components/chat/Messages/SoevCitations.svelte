@@ -2,7 +2,8 @@
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
 	import { getContext } from 'svelte';
-	import { config, citationPanel, openSourcesTabSignal } from '$lib/stores';
+	import { config } from '$lib/stores';
+	import { citationPanel, openSourcesTabSignal } from '$lib/stores/citations';
 
 	import Citations from './Citations.svelte';
 	import { reduceSources, type DisplayCitation, type RawSource } from './Citations/reduceSources';

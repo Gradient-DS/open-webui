@@ -1,11 +1,6 @@
 <script lang="ts">
-	import {
-		showEmbeds,
-		showArtifacts,
-		showCallOverlay,
-		showControls,
-		openSourcesTabSignal
-	} from '$lib/stores';
+	import { showEmbeds, showArtifacts, showCallOverlay, showControls } from '$lib/stores';
+	import { openSourcesTabSignal } from '$lib/stores/citations';
 
 	export let activeTab: 'controls' | 'files' | 'overview' | 'document' | 'sources';
 	export let controlsWidth: number;
