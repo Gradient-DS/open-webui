@@ -2,7 +2,10 @@
 
 import base64
 import copy
+import datetime as dt
+import hashlib
 import json
+import re
 from urllib.parse import unquote
 from uuid import uuid4
 
@@ -21,12 +24,14 @@ class FakeSoevApi:
         self.page_size = page_size
         self.now = '2026-09-11T12:00:00Z'
         self.credentials = {'test-runtime-key': 'owui:service:webui'}
+        self.capabilities = {'test-runtime-key': {'*'}}
         self.credential_id = 'runtime-credential'
         self.audience = None
         self.signing_keys: dict[str, dict] = {}
         self.collections, self.documents, self.folders = {}, {}, {}
         self.inherited_access = set()
         self.jobs, self.job_owners, self.job_effects = {}, {}, {}
+        self.uploads = {}
         self.links, self.groups, self.replays, self.creation_bodies = {}, {}, {}, {}
         self.seen_jtis = set()
         self.requests, self.failures = [], []
@@ -44,6 +49,8 @@ class FakeSoevApi:
             return httpx.Response(error.status, json=body, headers={'Content-Type': 'application/problem+json'})
 
     def _handle(self, request):
+        if request.method == 'PUT' and request.url.host == 'soev.invalid' and request.url.path.startswith('/uploads/'):
+            return self._upload(request)
         credential = request.headers.get('Authorization', '').removeprefix('Bearer ')
         if credential not in self.credentials:
             raise Problem(401, 'invalid_credential')
@@ -57,6 +64,11 @@ class FakeSoevApi:
         if not 8 <= len(operation) <= 255:
             raise Problem(400, 'invalid_idempotency_key')
         parts = request.url.path.strip('/').split('/')
+        ingest_create = request.method == 'POST' and parts == ['v1', 'jobs']
+        if ingest_create:
+            self._admit_ingest(body, credential, subject)
+        if request.method == 'POST' and len(parts) == 4 and parts[:2] == ['v1', 'jobs']:
+            return self._route(request, body, credential, subject)
         if (request.method == 'POST' and parts == ['v1', 'identity', 'links']) or (
             request.method == 'PUT'
             and len(parts) == 5
@@ -67,13 +79,46 @@ class FakeSoevApi:
         key = (credential, operation)
         fingerprint = (request.method, str(request.url), body, subject)
         if key in self.replays:
-            previous, status, content = self.replays[key]
-            if previous != fingerprint:
-                raise Problem(409, 'idempotency_conflict')
-            return httpx.Response(200 if status == 201 else status, content=content)
+            return self._replay(key, fingerprint, ingest_create)
         response = self._route(request, body, credential, subject)
         self.replays[key] = (copy.deepcopy(fingerprint), response.status_code, response.content)
         return response
+
+    def _replay(self, key, fingerprint, ingest_create):
+        previous, status, content = self.replays[key]
+        if previous != fingerprint:
+            raise Problem(409, 'idempotency_conflict')
+        if ingest_create:
+            job = self.jobs[json.loads(content)['job_id']]
+            return httpx.Response(200, json=self._job_view(job))
+        return httpx.Response(200 if status == 201 else status, content=content)
+
+    def _require(self, credential, capability):
+        capabilities = self.capabilities.get(credential, set())
+        if '*' not in capabilities and capability not in capabilities:
+            raise Problem(403, 'scope_insufficient', f'capability:{capability}')
+
+    def _upload(self, request):
+        if 'Authorization' in request.headers:
+            raise Problem(400, 'bearer_on_presigned_put')
+        digest = request.url.path.removeprefix('/uploads/')
+        targets = [
+            (job['job_id'], document)
+            for job in self.jobs.values()
+            for document in job.get('documents', [])
+            if document.get('sha256') == digest
+        ]
+        if not targets:
+            raise Problem(404, 'upload_not_found')
+        if any(request.headers.get('Content-Length') != str(document['size']) for _, document in targets):
+            raise Problem(400, 'upload_length_mismatch')
+        if any(len(request.content) != document['size'] for _, document in targets):
+            raise Problem(400, 'upload_length_mismatch')
+        if hashlib.sha256(request.content).hexdigest() != digest:
+            raise Problem(400, 'upload_digest_mismatch')
+        for job_id, document in targets:
+            self.uploads[job_id, document['source_id']] = request.content
+        return httpx.Response(200)
 
     def _assertion(self, token):
         try:
@@ -137,7 +182,9 @@ class FakeSoevApi:
         if parts[:2] == ['v1', 'identity'] or parts[:2] == ['v1', 'directory']:
             return self._identity(request.method, parts, body)
         if parts[:2] == ['v1', 'jobs']:
-            return self._jobs(request, parts, credential)
+            return self._jobs(request, parts, body, credential, subject)
+        if parts == ['v1', 'documents'] and request.method == 'GET':
+            return self._lookup_documents(request, credential, subject)
         if parts == ['v1', 'collections']:
             if request.method == 'POST':
                 return self._create(body, subject)
@@ -151,14 +198,27 @@ class FakeSoevApi:
             raise Problem(404, 'route_not_found')
         key = parts[2]
         document_route = len(parts) > 3 and parts[3] == 'documents'
-        row = self._collection(key, credential, subject, write=request.method != 'GET' and not document_route)
+        if document_route:
+            return self._documents(request, parts, body, credential, subject)
+        row = self._collection(key, credential, subject, write=request.method != 'GET')
         if len(parts) == 3 or parts[3] == 'access':
             return self._collection_route(request.method, parts, body, row, credential, subject)
-        if parts[3] == 'documents':
-            return self._documents(request, parts, body, credential, subject)
         if parts[3] == 'folders':
             return self._folders(request, parts, body, credential, subject)
         raise Problem(404, 'route_not_found')
+
+    def _lookup_documents(self, request, credential, subject):
+        source_id = request.url.params.get('source_id')
+        if not source_id:
+            raise Problem(400, 'malformed_request')
+        rows = [
+            row
+            for key, collection in sorted(self.collections.items())
+            if self._readable(collection, subject or self.credentials[credential])
+            for row in self._document_rows(key, credential, subject)
+            if row['source_id'] == source_id
+        ]
+        return httpx.Response(200, json={'data': rows, 'next_cursor': None})
 
     def _identity(self, method, parts, body):
         if parts == ['v1', 'identity', 'links'] and method == 'POST':
@@ -232,22 +292,153 @@ class FakeSoevApi:
         self.jobs[job_id], self.job_owners[job_id], self.job_effects[job_id] = job, credential, effect
         return httpx.Response(202, json=job)
 
-    def _jobs(self, request, parts, credential):
+    def _validate_ingest(self, body):
+        if not isinstance(body, dict):
+            raise Problem(422, 'invalid_field', 'request:schema')
+        if set(body) - {'collection_key', 'documents'}:
+            raise Problem(400, 'unknown_field', 'request:extra_forbidden')
+        key, documents = body.get('collection_key'), body.get('documents')
+        if not isinstance(key, str) or not 1 <= len(key) <= 128:
+            raise Problem(422, 'invalid_field', 'request:schema')
+        if not isinstance(documents, list) or not 1 <= len(documents) <= 1000:
+            raise Problem(422, 'invalid_field', 'request:schema')
+        for document in documents:
+            self._validate_document(document)
+
+    def _admit_ingest(self, body, credential, subject):
+        self._validate_ingest(body)
+        self._require(credential, 'ingest')
+        if subject:
+            self._collection(body['collection_key'], credential, subject, write=True)
+
+    def _validate_document(self, document):
+        common = {
+            'source_id',
+            'filename',
+            'title',
+            'content_type',
+            'language',
+            'author',
+            'source_url',
+            'created_at',
+            'path',
+            'modified_at',
+            'visibility',
+            'principals',
+            'metadata',
+            'tags',
+        }
+        if not isinstance(document, dict):
+            raise Problem(422, 'invalid_field', 'request:schema')
+        file = 'size' in document or 'sha256' in document
+        if set(document) - common - ({'size', 'sha256'} if file else {'text', 'chunks'}):
+            raise Problem(400, 'unknown_field', 'request:extra_forbidden')
+        for field in ('source_id', 'filename'):
+            if not isinstance(document.get(field), str) or not 1 <= len(document[field]) <= 512:
+                raise Problem(422, 'invalid_field', 'request:schema')
+        if file:
+            size, digest = document.get('size'), document.get('sha256')
+            if not isinstance(size, int) or size < 1 or not isinstance(digest, str):
+                raise Problem(422, 'invalid_field', 'request:schema')
+            if not re.fullmatch('[0-9a-f]{64}', digest):
+                raise Problem(422, 'invalid_field', 'request:schema')
+        elif not isinstance(document.get('text'), str):
+            raise Problem(422, 'invalid_field', 'document:one_of')
+
+    def _create_ingest(self, body, credential, subject):
+        self._collection(body['collection_key'], credential, subject, write=True)
+        documents = body['documents']
+        if sum(len(document.get('text', '').encode()) for document in documents) > 262144:
+            raise Problem(413, 'inline_budget_exceeded', 'inline:budget')
+        response = self._job('ingest', body['collection_key'], credential)
+        job = self.jobs[response.json()['job_id']]
+        job['documents'] = copy.deepcopy(documents)
+        job['items'] = [
+            {'source_id': document['source_id'], 'status': 'pending', 'code': None, 'detail': None, 'chunk_count': None}
+            for document in documents
+        ]
+        job['progress'].update(total=len(documents), pending=len(documents))
+        job['expires_at'] = self.now
+        expires_at = (dt.datetime.fromisoformat(self.now) + dt.timedelta(minutes=15)).isoformat().replace('+00:00', 'Z')
+        uploads = [
+            {
+                'source_id': document['source_id'],
+                'method': 'PUT',
+                'url': 'https://soev.invalid/uploads/' + document['sha256'],
+                'headers': {
+                    'x-amz-checksum-sha256': base64.b64encode(bytes.fromhex(document['sha256'])).decode(),
+                    'Content-Length': str(document['size']),
+                },
+                'expires_at': expires_at,
+            }
+            for document in documents
+            if 'size' in document
+        ]
+        if uploads:
+            job['status'] = 'AWAITING_UPLOAD'
+        return httpx.Response(201, json={**self._job_view(job), 'uploads': uploads})
+
+    def _job_view(self, job, *, include_items=False):
+        view = {key: copy.deepcopy(value) for key, value in job.items() if key not in {'documents', 'items'}}
+        if job['kind'] == 'ingest':
+            view['uploads'] = []
+        if include_items:
+            view['items'] = copy.deepcopy(job.get('items', []))
+        return view
+
+    def _jobs(self, request, parts, body, credential, subject):
+        if len(parts) == 2 and request.method == 'POST':
+            return self._create_ingest(body, credential, subject)
         rows = [row for jid, row in self.jobs.items() if self.job_owners[jid] == credential]
-        if len(parts) == 3:
+        if len(parts) >= 3:
             rows = [row for row in rows if row['job_id'] == parts[2]]
             if not rows:
                 raise Problem(404, 'job_not_found')
-            return httpx.Response(200, json=rows[0])
+            job = rows[0]
+            if len(parts) == 4 and request.method == 'POST':
+                self._require(credential, 'ingest')
+                self._job_action(job, parts[3])
+            elif len(parts) != 3 or request.method != 'GET':
+                raise Problem(404, 'route_not_found')
+            return httpx.Response(
+                200,
+                json=self._job_view(
+                    job, include_items=request.method == 'GET' and request.url.params.get('include_items') == 'true'
+                ),
+            )
         for field in ('status', 'collection_key'):
             if field in request.url.params:
                 rows = [row for row in rows if row[field] == request.url.params[field]]
-        return self._page(rows, request)
+        return self._page([self._job_view(row) for row in rows], request)
 
-    def advance(self, job_id, status):
+    def _job_action(self, job, action):
+        if action == 'commit':
+            if job['status'] == 'AWAITING_UPLOAD':
+                if any(
+                    (job['job_id'], document['source_id']) not in self.uploads
+                    for document in job['documents']
+                    if 'size' in document
+                ):
+                    raise Problem(409, 'upload_missing')
+                self.advance(job['job_id'], 'QUEUED')
+        elif action == 'cancel':
+            if job['status'] in {'SUCCEEDED', 'COMPLETED_WITH_ERRORS', 'FAILED', 'CANCELLED', 'EXPIRED'}:
+                raise Problem(409, 'job_already_terminal', 'job:terminal')
+            if job['status'] != 'RUNNING':
+                self.advance(job['job_id'], 'CANCELLED')
+        else:
+            raise Problem(404, 'route_not_found')
+
+    def advance(self, job_id, status, *, item_code=None, item_detail=None):
         job = self.jobs[job_id]
         previous = job['status']
         job.update(status=status, updated_at=self.now)
+        if job['kind'] == 'ingest':
+            self._advance_ingest(job, previous, item_code, item_detail)
+            return
+        if status == 'CANCELLED':
+            job['progress']['skipped'] += job['progress']['pending']
+            job['progress']['pending'] = 0
         if status != 'SUCCEEDED' or previous == 'SUCCEEDED':
             return
         job['progress'].update(succeeded=1, pending=0)
@@ -263,6 +454,38 @@ class FakeSoevApi:
             for pair in self.inherited_access:
                 if pair[0] == key and pair in self.documents:
                     self.documents[pair].update(copy.deepcopy(effect))
+
+    def _advance_ingest(self, job, previous, item_code, item_detail):
+        status = job['status']
+        if status == 'SUCCEEDED' and previous != 'SUCCEEDED':
+            for item, document in zip(job['items'], job['documents']):
+                item.update(status='succeeded', code=None, detail=None, chunk_count=1)
+                fields = {
+                    key: copy.deepcopy(value)
+                    for key, value in document.items()
+                    if key not in {'source_id', 'size', 'text', 'chunks'} and value is not None
+                }
+                if 'size' in document:
+                    fields['byte_size'] = document['size']
+                self.add_document(
+                    job['collection_key'],
+                    document['source_id'],
+                    **fields,
+                    chunk_count=1,
+                    last_job_id=job['job_id'],
+                    ingested_at=self.now,
+                )
+            job['progress'].update(succeeded=len(job['items']), failed=0, pending=0, skipped=0)
+        elif status == 'COMPLETED_WITH_ERRORS':
+            for item in job['items']:
+                item.update(status='failed', code=item_code, detail=item_detail, chunk_count=None)
+            job['progress'].update(succeeded=0, failed=len(job['items']), pending=0, skipped=0)
+        elif status in {'FAILED', 'CANCELLED', 'EXPIRED'}:
+            for item in job['items']:
+                if item['status'] == 'pending':
+                    item['status'] = 'skipped'
+            job['progress']['skipped'] += job['progress']['pending']
+            job['progress']['pending'] = 0
 
     def add_document(self, key, source_id, **fields):
         collection = self.collections[key]
@@ -304,6 +527,7 @@ class FakeSoevApi:
 
     def _documents(self, request, parts, body, credential, subject):
         key = parts[2]
+        self._document_collection(parts, credential, subject)
         rows = self._document_rows(key, credential, subject)
         if len(parts) == 4:
             return self._page(rows, request)
@@ -311,6 +535,15 @@ class FakeSoevApi:
         if document is None:
             raise Problem(404, 'document_not_found')
         self._collection(key, credential, subject, write=request.method != 'GET')
+        if request.method == 'GET':
+            if len(parts) == 5:
+                return httpx.Response(200, json=document)
+            if len(parts) == 6 and parts[-1] == 'content':
+                if document.get('rendition') is None:
+                    raise Problem(409, 'rendition_missing')
+                return httpx.Response(
+                    200, text=document['rendition'], headers={'Content-Type': 'text/markdown; charset=utf-8'}
+                )
         if request.method == 'DELETE':
             return self._job('delete_document', key, credential, parts[4])
         if request.method == 'POST' and parts[-1] == 'move':
@@ -318,6 +551,14 @@ class FakeSoevApi:
             document['path'] = body['to'] or None
             return httpx.Response(204)
         raise Problem(404, 'route_not_found')
+
+    def _document_collection(self, parts, credential, subject):
+        try:
+            self._collection(parts[2], credential, subject)
+        except Problem as error:
+            if len(parts) == 6 and parts[-1] == 'content' and error.status == 404:
+                raise Problem(404, 'document_not_found') from None
+            raise
 
     def _mkdir(self, key, path):
         segments = path.split('/') if path else []
