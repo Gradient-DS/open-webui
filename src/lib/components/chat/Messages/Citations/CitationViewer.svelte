@@ -1,4 +1,6 @@
 <script lang="ts">
+	// [Gradient] Explicit scroll intent keeps initial positioning instant.
+	type ScrollBehavior = 'auto' | 'smooth';
 	import { getContext } from 'svelte';
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
@@ -129,10 +131,11 @@
 
 	// Re-highlight the rendered DOCX for the active snippet (no-op without match).
 	// Skipped entirely when text-match highlighting is disabled.
-	const highlightDocxFor = (text: string) => {
+	// [Gradient] DOCX passage switches animate, while the initial render positions instantly.
+	const highlightDocxFor = (text: string, behavior: ScrollBehavior = 'auto') => {
 		if (!citationTextHighlightEnabled || !docxContainer) return;
 		highlightDocx(docxContainer, text);
-		scrollToFirstDocxHighlight(docxContainer);
+		scrollToFirstDocxHighlight(docxContainer, behavior);
 	};
 
 	const highlightActiveDocx = () => highlightDocxFor(activeIsDocument ? '' : activeSnippetText);
@@ -154,7 +157,7 @@
 			return;
 		}
 		if (isDocx) {
-			highlightDocxFor(documentLevel ? '' : text);
+			highlightDocxFor(documentLevel ? '' : text, 'smooth');
 		}
 	}
 </script>

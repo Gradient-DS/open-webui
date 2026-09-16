@@ -1,4 +1,6 @@
 <script lang="ts">
+	// [Gradient] Explicit scroll intent keeps initial positioning instant.
+	type ScrollBehavior = 'auto' | 'smooth';
 	import { onMount, onDestroy, tick } from 'svelte';
 	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 	import panzoom, { type PanZoom } from 'panzoom';
@@ -53,11 +55,27 @@
 		page: number | null,
 		rects: HighlightRect[] | null
 	) => {
-		if (text === hlText && page === hlPage && rects === hlRects) return;
+		// [Gradient] Parent props follow setHighlight with newly allocated, equivalent rects.
+		// Do not interrupt its smooth scroll with a second instant positioning pass.
+		const sameRects =
+			rects === hlRects ||
+			((rects?.length ?? 0) === (hlRects?.length ?? 0) &&
+				(rects ?? []).every((rect, i) => {
+					const previous = hlRects?.[i];
+					return (
+						previous &&
+						rect.page === previous.page &&
+						rect.x0 === previous.x0 &&
+						rect.y0 === previous.y0 &&
+						rect.x1 === previous.x1 &&
+						rect.y1 === previous.y1
+					);
+				}));
+		if (text === hlText && page === hlPage && sameRects) return;
 		hlText = text;
 		hlPage = page;
 		hlRects = rects;
-		if (layersRendered) {
+		if (layersRendered && activeRenderToken === null) {
 			_applyBestMatchHighlight();
 		}
 	};
@@ -96,6 +114,11 @@
 	let activePage = 1;
 	let loadToken = 0;
 	let renderToken = 0;
+	// [Gradient] Track the active token separately: renderToken is a generation, not a busy flag.
+	let activeRenderToken: number | null = null;
+	let lastRenderedWidth = 0;
+	let resizeObserver: ResizeObserver | null = null;
+	let resizeTimer: ReturnType<typeof setTimeout> | null = null;
 	let scrollFrame: number | null = null;
 	let mounted = false;
 	let loadedSource: ArrayBuffer | Uint8Array | string | null = null;
@@ -178,7 +201,15 @@
 	// top with a small margin. Citations use 'top' so the START of the matched
 	// passage (or the cited page) is at the top and reads downward, instead of
 	// centering on the first matched line and pushing the rest below the fold.
-	const _scrollContainerTo = (target: HTMLElement, align: 'center' | 'top' = 'center') => {
+	// [Gradient] Only explicit user navigation animates; load and prop positioning stay instant.
+	const scrollBehavior = (behavior: ScrollBehavior): ScrollBehavior =>
+		window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : behavior;
+
+	const _scrollContainerTo = (
+		target: HTMLElement,
+		align: 'center' | 'top' = 'center',
+		behavior: ScrollBehavior = 'auto'
+	) => {
 		if (!outerContainer) return;
 		const containerRect = outerContainer.getBoundingClientRect();
 		const targetRect = target.getBoundingClientRect();
@@ -187,23 +218,26 @@
 				? Math.min(56, outerContainer.clientHeight * 0.12)
 				: (outerContainer.clientHeight - targetRect.height) / 2;
 		const delta = targetRect.top - containerRect.top - margin;
-		outerContainer.scrollTop += delta;
+		outerContainer.scrollTo({
+			top: outerContainer.scrollTop + delta,
+			behavior: scrollBehavior(behavior)
+		});
 	};
 
-	const _scrollToFirstHighlight = (): boolean => {
+	const _scrollToFirstHighlight = (behavior: ScrollBehavior): boolean => {
 		const first = sceneElement?.querySelector<HTMLElement>(`span.${HIGHLIGHT_CLASS}`);
 		if (!first) return false;
-		_scrollContainerTo(first, 'top');
+		_scrollContainerTo(first, 'top', behavior);
 		return true;
 	};
 
-	const _scrollToPage = (page: number) => {
+	const _scrollToPage = (page: number, behavior: ScrollBehavior) => {
 		if (!page || page < 1) return;
 		const wrapper = sceneElement?.querySelector<HTMLElement>(
 			`.pdf-page-wrapper[data-page-number="${page}"]`
 		);
 		if (wrapper) {
-			_scrollContainerTo(wrapper, 'top');
+			_scrollContainerTo(wrapper, 'top', behavior);
 		}
 	};
 
@@ -214,7 +248,7 @@
 	 * switching to a snippet without geometry removes stale boxes). Returns
 	 * whether anything was drawn.
 	 */
-	const _applyRectHighlights = (): boolean => {
+	const _applyRectHighlights = (behavior: ScrollBehavior | null): boolean => {
 		for (const layer of bboxLayerDivs) {
 			if (!layer) continue;
 			layer.innerHTML = '';
@@ -249,7 +283,7 @@
 			hlPage
 		);
 		const target = drawn.find((d) => d.rect === anchor)?.el ?? drawn[0].el;
-		_scrollContainerTo(target, 'top');
+		if (behavior !== null) _scrollContainerTo(target, 'top', behavior);
 		return true;
 	};
 
@@ -262,9 +296,10 @@
 	 * Fallback chain: exact bbox rects -> best-page text highlight+scroll ->
 	 * cited-page jump -> nothing. Clears prior highlights first.
 	 */
-	const _applyBestMatchHighlight = () => {
+	// [Gradient] null redraws text/bbox highlights without changing the reading position.
+	const _applyBestMatchHighlight = (behavior: ScrollBehavior | null = 'auto') => {
 		_clearHighlights();
-		if (_applyRectHighlights()) return;
+		if (_applyRectHighlights(behavior)) return;
 		const needle = hlText?.trim();
 		if (needle) {
 			let best: PageMatch | null = null;
@@ -279,12 +314,12 @@
 				for (const i of best.hits) {
 					best.spans[i]?.classList.add(HIGHLIGHT_CLASS);
 				}
-				_scrollToFirstHighlight();
+				if (behavior !== null) _scrollToFirstHighlight(behavior);
 				return;
 			}
 		}
-		if (hlPage) {
-			_scrollToPage(hlPage);
+		if (hlPage && behavior !== null) {
+			_scrollToPage(hlPage, behavior);
 		}
 	};
 
@@ -302,7 +337,8 @@
 		hlText = text;
 		hlPage = page;
 		hlRects = rects;
-		_applyBestMatchHighlight();
+		// [Gradient] Rendering applies pending state instantly on first load.
+		if (layersRendered && activeRenderToken === null) _applyBestMatchHighlight('smooth');
 	}
 	let textLayerInstances: PdfTextLayer[] = [];
 
@@ -391,7 +427,7 @@
 		if (singlePage) {
 			if (targetPage) onPageChange?.(targetPage);
 		} else {
-			await scrollToTargetPage();
+			await scrollToTargetPage('smooth');
 		}
 	};
 
@@ -403,22 +439,23 @@
 		targetPage = nextPage;
 		activePage = nextPage;
 		onPageChange?.(nextPage);
-		if (!singlePage) await scrollToTargetPage();
+		if (!singlePage) await scrollToTargetPage('smooth');
 	};
 
-	const scrollToTargetPage = async () => {
+	const scrollToTargetPage = async (behavior: ScrollBehavior = 'auto') => {
 		if (!outerContainer || !sceneElement || !pdfDoc) return;
 		const page = clampDocumentTargetPage(targetPage, pdfDoc.numPages);
 		if (!page) return;
 
 		if (singlePage) return;
 
+		// [Gradient] Claim this page before yielding so the prop effect cannot duplicate the scroll.
+		scrolledPage = page;
 		await tick();
 		const pageWrapper = sceneElement.querySelectorAll('.pdf-page-wrapper')[page - 1] as
 			| HTMLElement
 			| undefined;
-		pageWrapper?.scrollIntoView({ block: 'start' });
-		scrolledPage = page;
+		pageWrapper?.scrollIntoView({ block: 'start', behavior: scrollBehavior(behavior) });
 		activePage = page;
 		onPageChange?.(page);
 	};
@@ -457,175 +494,248 @@
 	};
 
 	// Re-render existing canvases at a new zoom level (preserves panzoom transform)
-	const rerenderPages = async (forZoom: number) => {
-		if (!pdfDoc || !sceneElement) return;
-		const pdfjs = await import('pdfjs-dist');
-		const dpr = window.devicePixelRatio || 1;
+	const rerenderPages = async (forZoom: number, preservePosition = false) => {
+		if (!pdfDoc || !sceneElement || activeRenderToken !== null) return;
+		// [Gradient] Resize shares the zoom renderer, preserving its panzoom transform.
+		const token = ++renderToken;
+		activeRenderToken = token;
+		const width = outerContainer.clientWidth;
+		const scrollRatio = outerContainer.scrollTop / (outerContainer.scrollHeight || 1);
+		let succeeded = false;
+		try {
+			const pdfjs = await import('pdfjs-dist');
+			if (token !== renderToken || !pdfDoc) return;
+			const dpr = window.devicePixelRatio || 1;
 
-		const pageWrappers = sceneElement.querySelectorAll('.pdf-page-wrapper');
+			const pageWrappers = sceneElement.querySelectorAll('.pdf-page-wrapper');
 
-		cancelTextLayers();
-		// [Gradient] Clear page-indexed citation layers on document replacement.
-		pageTextLayerDivs = [];
-		bboxLayerDivs = [];
-		pageBaseDims = [];
+			cancelTextLayers();
+			// [Gradient] Clear page-indexed citation layers on document replacement.
+			pageTextLayerDivs = [];
+			bboxLayerDivs = [];
+			pageBaseDims = [];
 
-		for (let i = 0; i < pageWrappers.length; i++) {
-			// [Gradient] Zoom loops over rendered wrappers, not absolute PDF pages.
-			const pageNumber = singlePage ? selectedPage : i + 1;
-			const page = await pdfDoc.getPage(pageNumber);
-			const viewport = page.getViewport({ scale: 1 });
-			const cssScale = getCssScale(viewport);
-			const renderScale = cssScale * forZoom * dpr;
-			const scaledViewport = page.getViewport({ scale: renderScale });
-			const cssViewport = page.getViewport({ scale: cssScale });
+			for (let i = 0; i < pageWrappers.length; i++) {
+				// [Gradient] Zoom loops over rendered wrappers, not absolute PDF pages.
+				const pageNumber = singlePage ? selectedPage : i + 1;
+				const page = await pdfDoc.getPage(pageNumber);
+				if (token !== renderToken) return;
+				const viewport = page.getViewport({ scale: 1 });
+				const cssScale = getCssScale(viewport, width);
+				const renderScale = cssScale * forZoom * dpr;
+				const scaledViewport = page.getViewport({ scale: renderScale });
+				const cssViewport = page.getViewport({ scale: cssScale });
 
-			const wrapper = pageWrappers[i] as HTMLElement;
-			const bboxLayer = wrapper.querySelector('.bboxLayer') as HTMLElement | null;
-			if (bboxLayer) bboxLayerDivs[pageNumber - 1] = bboxLayer;
-			pageBaseDims[pageNumber - 1] = { width: viewport.width, height: viewport.height };
-			// Update the CSS custom property so textLayer dimensions resolve correctly
-			wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
+				const wrapper = pageWrappers[i] as HTMLElement;
+				// [Gradient] Fit both layout boxes and text layers to the new container width.
+				wrapper.style.width = `${Math.round(cssViewport.width)}px`;
+				wrapper.style.height = `${Math.round(cssViewport.height)}px`;
+				const bboxLayer = wrapper.querySelector('.bboxLayer') as HTMLElement | null;
+				if (bboxLayer) bboxLayerDivs[pageNumber - 1] = bboxLayer;
+				pageBaseDims[pageNumber - 1] = { width: viewport.width, height: viewport.height };
+				// Update the CSS custom property so textLayer dimensions resolve correctly
+				wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
 
-			const canvas = wrapper.querySelector('canvas')!;
-			canvas.width = scaledViewport.width;
-			canvas.height = scaledViewport.height;
+				const canvas = wrapper.querySelector('canvas')!;
+				canvas.style.width = wrapper.style.width;
+				canvas.style.height = wrapper.style.height;
+				canvas.width = scaledViewport.width;
+				canvas.height = scaledViewport.height;
 
-			const ctx = canvas.getContext('2d');
-			if (ctx) {
-				await page.render({ canvas, canvasContext: ctx, viewport: scaledViewport }).promise;
+				const ctx = canvas.getContext('2d');
+				if (ctx) {
+					await page.render({ canvas, canvasContext: ctx, viewport: scaledViewport }).promise;
+					if (token !== renderToken) return;
+				}
+
+				// Rebuild text layer
+				const textLayerDiv = wrapper.querySelector('.textLayer') as HTMLElement;
+				if (textLayerDiv) {
+					textLayerDiv.innerHTML = '';
+
+					const textContent = await page.getTextContent();
+					if (token !== renderToken) return;
+					const textLayer = new pdfjs.TextLayer({
+						textContentSource: textContent,
+						container: textLayerDiv,
+						viewport: cssViewport
+					});
+					await textLayer.render();
+					if (token !== renderToken) return;
+					textLayerInstances.push(textLayer);
+					pageTextLayerDivs[pageNumber - 1] = textLayerDiv;
+				}
 			}
-
-			// Rebuild text layer
-			const textLayerDiv = wrapper.querySelector('.textLayer') as HTMLElement;
-			if (textLayerDiv) {
-				textLayerDiv.innerHTML = '';
-
-				const textContent = await page.getTextContent();
-				const textLayer = new pdfjs.TextLayer({
-					textContentSource: textContent,
-					container: textLayerDiv,
-					viewport: cssViewport
+			lastRenderedZoom = forZoom;
+			lastRenderedWidth = width;
+			_applyBestMatchHighlight(preservePosition ? null : 'auto');
+			if (preservePosition) {
+				outerContainer.scrollTo({
+					top: scrollRatio * outerContainer.scrollHeight,
+					behavior: 'auto'
 				});
-				await textLayer.render();
-				textLayerInstances.push(textLayer);
-				pageTextLayerDivs[pageNumber - 1] = textLayerDiv;
 			}
+			succeeded = true;
+		} catch (error) {
+			if (token === renderToken) console.error('PDF rerender error:', error);
+		} finally {
+			finishRender(token, succeeded);
 		}
-		lastRenderedZoom = forZoom;
-		_applyBestMatchHighlight();
 	};
 
-	const getCssScale = (viewport: { width: number; height: number }) => {
-		if (!singlePage) return (outerContainer?.clientWidth || 800) / viewport.width;
+	const getCssScale = (viewport: { width: number; height: number }, width: number) => {
+		if (!singlePage) return (width || 800) / viewport.width;
 
 		const availableWidth = Math.max(320, (outerContainer?.clientWidth || 800) - 64);
 		const availableHeight = Math.max(220, (outerContainer?.clientHeight || 600) - 64);
 		return Math.min(1, availableWidth / viewport.width, availableHeight / viewport.height);
 	};
 
+	// [Gradient] Ignore observer notifications during rendering, then recheck once it finishes.
+	const scheduleResize = () => {
+		if (resizeTimer) clearTimeout(resizeTimer);
+		resizeTimer = null;
+		if (
+			!mounted ||
+			singlePage ||
+			!layersRendered ||
+			activeRenderToken !== null ||
+			!outerContainer?.clientWidth ||
+			Math.abs(outerContainer.clientWidth - lastRenderedWidth) <= 2
+		)
+			return;
+		resizeTimer = setTimeout(() => {
+			resizeTimer = null;
+			if (
+				!mounted ||
+				singlePage ||
+				activeRenderToken !== null ||
+				!outerContainer?.clientWidth ||
+				Math.abs(outerContainer.clientWidth - lastRenderedWidth) <= 2
+			)
+				return;
+			void rerenderPages(lastRenderedZoom, true);
+		}, 150);
+	};
+
+	const finishRender = (token: number, succeeded = true) => {
+		if (activeRenderToken !== token) return;
+		activeRenderToken = null;
+		if (succeeded) scheduleResize();
+	};
+
 	const renderAllPages = async () => {
 		if (!pdfDoc || !sceneElement) return;
 		const token = ++renderToken;
+		activeRenderToken = token;
+		layersRendered = false;
+		const width = outerContainer.clientWidth;
+		try {
+			// Clear previous content
+			sceneElement.innerHTML = '';
 
-		// Clear previous content
-		sceneElement.innerHTML = '';
+			cancelTextLayers();
+			// [Gradient] Citation arrays use absolute page indices in single-page mode too.
+			pageTextLayerDivs = [];
+			bboxLayerDivs = [];
+			pageBaseDims = [];
 
-		cancelTextLayers();
-		// [Gradient] Citation arrays use absolute page indices in single-page mode too.
-		pageTextLayerDivs = [];
-		bboxLayerDivs = [];
-		pageBaseDims = [];
+			const pdfjs = await import('pdfjs-dist');
+			if (token !== renderToken || !pdfDoc) return;
+			const dpr = window.devicePixelRatio || 1;
+			const wrappers: HTMLElement[] = [];
+			const firstPage = singlePage ? selectedPage : 1;
+			const lastPage = singlePage ? selectedPage : pdfDoc.numPages;
 
-		const pdfjs = await import('pdfjs-dist');
-		const dpr = window.devicePixelRatio || 1;
-		const wrappers: HTMLElement[] = [];
-		const firstPage = singlePage ? selectedPage : 1;
-		const lastPage = singlePage ? selectedPage : pdfDoc.numPages;
+			for (let i = firstPage; i <= lastPage; i++) {
+				const page = await pdfDoc.getPage(i);
+				if (token !== renderToken) return;
+				const viewport = page.getViewport({ scale: 1 });
 
-		for (let i = firstPage; i <= lastPage; i++) {
-			const page = await pdfDoc.getPage(i);
-			if (token !== renderToken) return;
-			const viewport = page.getViewport({ scale: 1 });
+				// Scale to fit container width
+				const cssScale = getCssScale(viewport, width);
+				const renderScale = cssScale * dpr;
+				const scaledViewport = page.getViewport({ scale: renderScale });
+				const cssViewport = page.getViewport({ scale: cssScale });
 
-			// Scale to fit container width
-			const cssScale = getCssScale(viewport);
-			const renderScale = cssScale * dpr;
-			const scaledViewport = page.getViewport({ scale: renderScale });
-			const cssViewport = page.getViewport({ scale: cssScale });
+				// Create page wrapper (positioned container for canvas + text layer)
+				const wrapper = document.createElement('div');
+				wrapper.className = 'pdf-page-wrapper';
+				wrapper.dataset.pageNumber = String(i);
+				wrapper.style.position = 'relative';
+				wrapper.style.width = `${Math.round(cssScale * viewport.width)}px`;
+				wrapper.style.height = `${Math.round(cssScale * viewport.height)}px`;
+				wrapper.style.display = 'block';
+				// pdfjs TextLayer uses --total-scale-factor (= --scale-factor * --user-unit)
+				// to position/size text spans. We must set --scale-factor so the calc resolves.
+				wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
 
-			// Create page wrapper (positioned container for canvas + text layer)
-			const wrapper = document.createElement('div');
-			wrapper.className = 'pdf-page-wrapper';
-			wrapper.dataset.pageNumber = String(i);
-			wrapper.style.position = 'relative';
-			wrapper.style.width = `${Math.round(cssScale * viewport.width)}px`;
-			wrapper.style.height = `${Math.round(cssScale * viewport.height)}px`;
-			wrapper.style.display = 'block';
-			// pdfjs TextLayer uses --total-scale-factor (= --scale-factor * --user-unit)
-			// to position/size text spans. We must set --scale-factor so the calc resolves.
-			wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
+				if (i > 1) {
+					wrapper.style.marginTop = '4px';
+				}
 
-			if (i > 1) {
-				wrapper.style.marginTop = '4px';
+				// Create canvas
+				const canvas = document.createElement('canvas');
+				canvas.width = scaledViewport.width;
+				canvas.height = scaledViewport.height;
+				// CSS size stays at the CSS-pixel dimensions for layout
+				canvas.style.width = `${Math.round(cssScale * viewport.width)}px`;
+				canvas.style.height = `${Math.round(cssScale * viewport.height)}px`;
+				canvas.style.display = 'block';
+				wrapper.appendChild(canvas);
+
+				const ctx = canvas.getContext('2d');
+				if (!ctx) continue;
+
+				await page.render({
+					canvas,
+					canvasContext: ctx,
+					viewport: scaledViewport
+				}).promise;
+				if (token !== renderToken) return;
+
+				// Create text layer overlay — pdfjs setLayerDimensions handles its sizing
+				const textLayerDiv = document.createElement('div');
+				textLayerDiv.className = 'textLayer';
+				wrapper.appendChild(textLayerDiv);
+
+				const textContent = await page.getTextContent();
+				if (token !== renderToken) return;
+				const textLayer = new pdfjs.TextLayer({
+					textContentSource: textContent,
+					container: textLayerDiv,
+					viewport: cssViewport
+				});
+				await textLayer.render();
+				if (token !== renderToken) return;
+				textLayerInstances.push(textLayer);
+				pageTextLayerDivs[i - 1] = textLayerDiv;
+
+				// Bbox overlay — sits above the text layer but is click-transparent
+				// so selection/search still hit the text spans underneath.
+				const bboxLayerDiv = document.createElement('div');
+				bboxLayerDiv.className = 'bboxLayer';
+				wrapper.appendChild(bboxLayerDiv);
+				bboxLayerDivs[i - 1] = bboxLayerDiv;
+				pageBaseDims[i - 1] = { width: viewport.width, height: viewport.height };
+
+				wrappers.push(wrapper);
 			}
 
-			// Create canvas
-			const canvas = document.createElement('canvas');
-			canvas.width = scaledViewport.width;
-			canvas.height = scaledViewport.height;
-			// CSS size stays at the CSS-pixel dimensions for layout
-			canvas.style.width = `${Math.round(cssScale * viewport.width)}px`;
-			canvas.style.height = `${Math.round(cssScale * viewport.height)}px`;
-			canvas.style.display = 'block';
-			wrapper.appendChild(canvas);
-
-			const ctx = canvas.getContext('2d');
-			if (!ctx) continue;
-
-			await page.render({
-				canvas,
-				canvasContext: ctx,
-				viewport: scaledViewport
-			}).promise;
+			sceneElement.replaceChildren(...wrappers);
+			lastRenderedZoom = 1;
+			lastRenderedWidth = width;
+			layersRendered = true;
+			renderedPage = singlePage ? selectedPage : 0;
+			initPanzoom();
+			await scrollToTargetPage();
 			if (token !== renderToken) return;
-
-			// Create text layer overlay — pdfjs setLayerDimensions handles its sizing
-			const textLayerDiv = document.createElement('div');
-			textLayerDiv.className = 'textLayer';
-			wrapper.appendChild(textLayerDiv);
-
-			const textContent = await page.getTextContent();
-			const textLayer = new pdfjs.TextLayer({
-				textContentSource: textContent,
-				container: textLayerDiv,
-				viewport: cssViewport
-			});
-			await textLayer.render();
-			if (token !== renderToken) return;
-			textLayerInstances.push(textLayer);
-			pageTextLayerDivs[i - 1] = textLayerDiv;
-
-			// Bbox overlay — sits above the text layer but is click-transparent
-			// so selection/search still hit the text spans underneath.
-			const bboxLayerDiv = document.createElement('div');
-			bboxLayerDiv.className = 'bboxLayer';
-			wrapper.appendChild(bboxLayerDiv);
-			bboxLayerDivs[i - 1] = bboxLayerDiv;
-			pageBaseDims[i - 1] = { width: viewport.width, height: viewport.height };
-
-			wrappers.push(wrapper);
+			syncVisiblePage();
+			// [Gradient] Citation scroll must follow the normal page scroll.
+			_applyBestMatchHighlight();
+		} finally {
+			finishRender(token);
 		}
-
-		sceneElement.replaceChildren(...wrappers);
-		lastRenderedZoom = 1;
-		layersRendered = true;
-		renderedPage = singlePage ? selectedPage : 0;
-		initPanzoom();
-		await scrollToTargetPage();
-		syncVisiblePage();
-		// [Gradient] Citation scroll must follow the normal page scroll.
-		_applyBestMatchHighlight();
 	};
 
 	const handleWheel = (e: WheelEvent) => {
@@ -688,6 +798,10 @@
 		const token = ++loadToken;
 		loadedSource = source;
 		loading = true;
+		// [Gradient] Invalidate resize/zoom work before replacing its document.
+		renderToken++;
+		activeRenderToken = null;
+		layersRendered = false;
 		error = '';
 		renderedPage = 0;
 		scrolledPage = 0;
@@ -736,6 +850,9 @@
 
 	onMount(() => {
 		mounted = true;
+		// [Gradient] Multi-page previews follow their host width without citation navigation.
+		resizeObserver = new ResizeObserver(scheduleResize);
+		resizeObserver.observe(outerContainer);
 		loadPdf();
 	});
 
@@ -757,6 +874,10 @@
 	}
 
 	onDestroy(() => {
+		// [Gradient] Stop pending geometry work before disposing the PDF.
+		mounted = false;
+		resizeObserver?.disconnect();
+		if (resizeTimer) clearTimeout(resizeTimer);
 		loadToken++;
 		renderToken++;
 		if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
