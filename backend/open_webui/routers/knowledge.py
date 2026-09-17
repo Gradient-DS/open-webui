@@ -9,9 +9,8 @@ import zipfile
 from typing import List, Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from fastapi.security import HTTPAuthorizationCredentials
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.config import (
     ENABLE_KNOWLEDGE_FILE_RETENTION,
@@ -47,13 +46,12 @@ from open_webui.routers.retrieval import (
 )
 from open_webui.storage.provider import Storage
 from open_webui.services.deletion import DeletionService
-from open_webui.services.sync.shared_kb import is_managed_shared_kb
+from open_webui.models.knowledge import is_managed_shared_kb
 from open_webui.utils.features import require_feature
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
 from open_webui.utils.access_control.files import has_access_to_file
-from open_webui.utils.auth import bearer_security, get_admin_user, get_current_user, get_verified_user
-from open_webui.utils.service_auth import maybe_sync_principal
+from open_webui.utils.auth import get_admin_user, get_verified_user
 from fastapi.concurrency import run_in_threadpool
 from open_webui.utils.json_codec import JSONCodec
 from pydantic import BaseModel
@@ -2050,231 +2048,6 @@ async def reset_knowledge_by_id(
 
 
 ############################
-# SyncKnowledgeDiff
-############################
-
-
-async def get_sync_daemon_or_verified_user(
-    request: Request,
-    response: Response,
-    background_tasks: BackgroundTasks,
-    auth_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_security),
-    x_acting_user_id: Optional[str] = Header(default=None, alias='X-Acting-User-Id'),
-    x_acting_provider: Optional[str] = Header(default=None, alias='X-Acting-Provider'),
-):
-    """Resolve either the sync-daemon machine caller or a regular verified user.
-
-    Machine path (bearer == ``SYNC_API_KEY``): gated on the
-    ``sync_daemon.enabled`` config flag (403 when off) and returns the acting
-    user resolved from ``X-Acting-User-Id``. The handler's
-    ``_verify_knowledge_write_access`` then applies to that user unchanged, so
-    the machine key grants no access the acting user does not already have.
-    Anything else falls through with :func:`get_verified_user` semantics.
-    """
-
-    principal = await maybe_sync_principal(auth_token, x_acting_user_id, x_acting_provider)
-    if principal is not None:
-        if not await Config.get('sync_daemon.enabled', False):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail='sync daemon is disabled (SYNC_DAEMON_ENABLED)',
-            )
-        return principal.user
-
-    user = await get_current_user(request, response, background_tasks, auth_token=auth_token)
-    if user.role not in {'user', 'admin'}:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-    return user
-
-
-class FileManifestEntry(BaseModel):
-    filename: str  # basename: "readme.md"
-    path: str  # relative dir: "docs/api" or "" for root
-    checksum: str  # SHA-256 of raw bytes
-    size: int
-
-
-class SyncDiffForm(BaseModel):
-    manifest: list[FileManifestEntry]
-
-
-class SyncDiffResponse(BaseModel):
-    added: list[dict]  # [{filename, path}] — new files
-    modified: list[dict]  # [{filename, path, stale_file_id}] — changed files
-    deleted: list[dict]  # [{file_id, filename}] — files to remove
-    mkdir: list[str]  # directory paths to create
-    rmdir: list[str]  # directory IDs to remove
-    unmodified_count: int
-    directory_map: dict[str, str]  # existing path → directory ID
-
-
-@router.post('/{id}/sync/diff', response_model=SyncDiffResponse)
-async def sync_knowledge_diff(
-    id: str,
-    form_data: SyncDiffForm,
-    user=Depends(get_sync_daemon_or_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """
-    Compare a local file manifest against the knowledge base to determine
-    which files need uploading, removing, and which directories to create/remove.
-    """
-    await _verify_knowledge_write_access(id, user, db)
-
-    # ── Index existing state ──
-    knowledge_files = await Knowledges.get_files_with_directory_ids(id, db=db)
-    existing_directories = await Knowledges.get_all_directories(id, db=db)
-
-    # Build directory path lookups
-    directory_path_by_id: dict[str, str] = {}
-    directory_id_by_path: dict[str, str] = {}
-    for directory in existing_directories:
-        segments = [directory.name]
-        parent_id = directory.parent_id
-        while parent_id:
-            parent = next((d for d in existing_directories if d.id == parent_id), None)
-            if not parent:
-                break
-            segments.insert(0, parent.name)
-            parent_id = parent.parent_id
-        full_path = '/'.join(segments)
-        directory_path_by_id[directory.id] = full_path
-        directory_id_by_path[full_path] = directory.id
-
-    # Index existing files by (path, filename) → {file_id, checksum}
-    indexed_files: dict[tuple[str, str], dict] = {}
-    for file_model, directory_id in knowledge_files:
-        file_path = directory_path_by_id.get(directory_id, '') if directory_id else ''
-        stored_checksum = (file_model.meta or {}).get('file_hash')
-        indexed_files[(file_path, file_model.filename)] = {
-            'file_id': file_model.id,
-            'checksum': stored_checksum,
-        }
-
-    # ── Diff files ──
-    added: list[dict] = []
-    modified: list[dict] = []
-    deleted: list[dict] = []
-    unmodified_count = 0
-    manifest_keys: set[tuple[str, str]] = set()
-
-    for entry in form_data.manifest:
-        key = (entry.path, entry.filename)
-        manifest_keys.add(key)
-
-        if key not in indexed_files:
-            added.append({'filename': entry.filename, 'path': entry.path})
-        elif indexed_files[key]['checksum'] != entry.checksum:
-            modified.append(
-                {
-                    'filename': entry.filename,
-                    'path': entry.path,
-                    'stale_file_id': indexed_files[key]['file_id'],
-                }
-            )
-        else:
-            unmodified_count += 1
-
-    for key, file_info in indexed_files.items():
-        if key not in manifest_keys:
-            deleted.append({'file_id': file_info['file_id'], 'filename': key[1]})
-
-    # ── Diff directories ──
-    required_directory_paths: set[str] = set()
-    for entry in form_data.manifest:
-        if entry.path:
-            segments = entry.path.split('/')
-            for depth in range(len(segments)):
-                required_directory_paths.add('/'.join(segments[: depth + 1]))
-
-    mkdir = sorted([p for p in required_directory_paths if p not in directory_id_by_path], key=lambda p: p.count('/'))
-
-    orphaned_directory_paths = set(directory_id_by_path) - required_directory_paths
-    rmdir = [directory_id_by_path[p] for p in orphaned_directory_paths]
-
-    return SyncDiffResponse(
-        added=added,
-        modified=modified,
-        deleted=deleted,
-        mkdir=mkdir,
-        rmdir=rmdir,
-        unmodified_count=unmodified_count,
-        directory_map=directory_id_by_path,
-    )
-
-
-############################
-# SyncKnowledgeCleanup
-############################
-
-
-class SyncCleanupForm(BaseModel):
-    file_ids: list[str]  # file IDs to delete
-    dir_ids: list[str] = []  # directory IDs to rmdir
-
-
-@router.post('/{id}/sync/cleanup')
-async def sync_knowledge_cleanup(
-    id: str,
-    form_data: SyncCleanupForm,
-    user=Depends(get_sync_daemon_or_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """
-    Remove stale files and orphaned directories from a knowledge base
-    after an incremental sync.
-    """
-    await _verify_knowledge_write_access(id, user, db)
-
-    # ── Remove deleted files ──
-    for file_id in form_data.file_ids:
-        file = await Files.get_file_by_id(file_id, db=db)
-        if not file:
-            continue
-
-        # Only clean up files that belong to this knowledge base.
-        if not await Knowledges.has_file(id, file_id, db=db):
-            continue
-
-        await Knowledges.remove_file_from_knowledge_by_id(id, file_id, db=db)
-
-        try:
-            await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=id, filter={'file_id': file_id})
-            await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=id, filter={'hash': file.hash})
-        except Exception:
-            pass
-
-        linked_knowledges = await Knowledges.get_knowledges_by_file_id(file_id, db=db)
-        if (
-            not ENABLE_KNOWLEDGE_FILE_RETENTION
-            and not linked_knowledges
-            and (file.user_id == user.id or user.role == 'admin')
-        ):
-            await delete_file_resource(file, db)
-
-    # ── Remove orphaned directories (children before parents) ──
-    for dir_id in reversed(form_data.dir_ids):
-        # KB-scope guard (design doc 4b): a caller with write access to THIS
-        # KB must not be able to delete directories of another KB by id.
-        directory = await Knowledges.get_directory_by_id(dir_id, db=db)
-        if not directory:
-            continue  # already gone (e.g. removed via a parent's FK cascade)
-        if directory.knowledge_id != id:
-            log.warning(f'sync/cleanup: skipping directory {dir_id} — belongs to {directory.knowledge_id}, not {id}')
-            continue
-        # Full fork cascade for any straggler files still in the subtree
-        # (P2-8 ledger #4); orphaned dirs are normally file-free by now.
-        report = await DeletionService.delete_directory(id, dir_id, move_files_to_parent=False)
-        if report.has_errors:
-            log.warning(f'Errors deleting directory {dir_id} during sync cleanup of {id}: {report.errors}')
-
-    return {'status': True}
-
-
-############################
 # AddFilesToKnowledge
 ############################
 
@@ -2506,38 +2279,6 @@ async def _verify_knowledge_write_access(id: str, user, db: AsyncSession):
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
     return knowledge
-
-
-@router.post('/{id}/dirs/create', response_model=KnowledgeDirectoryModel)
-async def create_knowledge_directory(
-    request: Request,
-    id: str,
-    form_data: KnowledgeDirectoryCreateForm,
-    user=Depends(get_sync_daemon_or_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    await _verify_knowledge_write_access(id, user, db)
-
-    directory = await Knowledges.create_directory(
-        knowledge_id=id,
-        name=form_data.name,
-        user_id=user.id,
-        parent_id=form_data.parent_id,
-        db=db,
-    )
-    if not directory:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Failed to create directory. A directory with this name may already exist at this level.',
-        )
-    await publish_event(
-        request,
-        EVENTS.KNOWLEDGE_DIRECTORY_CREATED,
-        actor=user,
-        subject_id=directory.id,
-        data={'knowledge_id': id, 'name': directory.name, 'parent_id': directory.parent_id},
-    )
-    return directory
 
 
 @router.post('/{id}/dirs/{dir_id}/update', response_model=KnowledgeDirectoryModel)
