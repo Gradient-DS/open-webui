@@ -115,6 +115,7 @@
 	let destroyed = false;
 	let closeAuthorization: (() => void) | undefined;
 	let syncStatusError = false;
+	let syncStatusRequest = 0;
 	$: activeProvider =
 		requestedProvider ?? (knowledge?.type ? CLOUD_PROVIDERS[knowledge.type] : null);
 	$: isSyncBusy =
@@ -961,8 +962,9 @@
 
 	const refreshCloudSync = async () => {
 		if (!knowledge || destroyed) return;
+		const request = ++syncStatusRequest;
 		const status = await cloudSync.getSyncStatus(localStorage.token, knowledge.id);
-		if (destroyed) return;
+		if (destroyed || request !== syncStatusRequest) return;
 		schedules = status.schedules;
 		syncStatusError = false;
 		await getItemsPage();
@@ -1010,6 +1012,9 @@
 					if (finished) return;
 					connecting = connection;
 					if (connection.lifecycle === 'enabled') {
+						schedules = schedules.map((schedule) =>
+							schedule.connection_id === connection.id ? { ...schedule, connection } : schedule
+						);
 						finish(connection);
 						await refreshCloudSync();
 					}
@@ -1068,6 +1073,10 @@
 
 	const cloudSyncHandler = async (provider: CloudSyncProvider) => {
 		if (!knowledge || cloudActionBusy) return;
+		if (syncStatusError) {
+			toast.error($i18n.t('Failed to check background sync status'));
+			return;
+		}
 		if (!Number.isInteger(cadenceMinutes) || cadenceMinutes < 1) {
 			toast.error($i18n.t('Enter a positive sync interval.'));
 			return;
@@ -1657,11 +1666,12 @@
 				Object.values(CLOUD_PROVIDERS).find(
 					(provider) => $page.url.searchParams.get(provider.startSyncParam) === 'true'
 				) ?? null;
-			if (requestedProvider || CLOUD_PROVIDERS[knowledge.type ?? '']) void pollCloudSyncStatus();
+			if (requestedProvider || CLOUD_PROVIDERS[knowledge.type ?? '']) await pollCloudSyncStatus();
 		} else {
 			goto('/workspace/knowledge');
 		}
 
+		if (destroyed) return;
 		loaded = true;
 
 		const dropZone = document.querySelector('body');
