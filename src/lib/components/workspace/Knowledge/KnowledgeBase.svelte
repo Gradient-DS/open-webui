@@ -56,7 +56,9 @@
 		oneDriveScope,
 		googleDriveScope,
 		connectResult,
-		reconnectConnections
+		connectionOutcome,
+		reconnectConnections,
+		runIsLive
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
 
@@ -991,6 +993,7 @@
 		return new Promise((resolve) => {
 			let expectedId = connectionId;
 			let checking = false;
+			let checksSincePopupClosed = 0;
 			let finished = false;
 			const finish = (connection: Connection | null) => {
 				if (finished) return;
@@ -1009,7 +1012,15 @@
 					const connection = await cloudSync.getConnection(localStorage.token, expectedId);
 					if (finished) return;
 					connecting = connection;
-					if (connection.lifecycle === 'enabled') {
+					checksSincePopupClosed = popup.closed ? checksSincePopupClosed + 1 : 0;
+					const outcome = connectionOutcome(connection, popup.closed, checksSincePopupClosed);
+					if (outcome.status === 'failed') {
+						toast.error($i18n.t('Authorization failed: {{reason}}', { reason: outcome.reason }));
+						finish(null);
+					} else if (outcome.status === 'gave_up') {
+						toast.error($i18n.t('Authorization was not completed.'));
+						finish(null);
+					} else if (outcome.status === 'done') {
 						schedules = schedules.map((schedule) =>
 							schedule.connection_id === connection.id ? { ...schedule, connection } : schedule
 						);
@@ -1032,9 +1043,7 @@
 				}
 			};
 			window.addEventListener('message', handleMessage);
-			const checkClosed = setInterval(() => {
-				if (popup.closed) void checkConnection();
-			}, 2000);
+			const checkClosed = setInterval(() => void checkConnection(), 3000);
 			const timeout = setTimeout(() => {
 				toast.error($i18n.t('Authorization timed out. Please try again.'));
 				finish(null);
@@ -1990,7 +1999,7 @@
 					{syncStatusError}
 					writeAccess={knowledge.write_access}
 					busy={cloudActionBusy}
-					isAdmin={$user.role === 'admin'}
+					isAdmin={$user?.role === 'admin'}
 					on:action={(event) => scheduleAction(event.detail.schedules, event.detail.action)}
 					on:reconnect={(event) => reconnect(event.detail)}
 				/>

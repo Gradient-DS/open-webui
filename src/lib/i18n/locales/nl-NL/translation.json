@@ -3841,5 +3841,7 @@
   "Not synced yet": "Nog niet gesynchroniseerd",
   "Sync was started recently. Try again in a moment.": "De synchronisatie is onlangs gestart. Probeer het zo opnieuw.",
   "A sync is already running.": "Er is al een synchronisatie bezig.",
-  "That folder is already being synced.": "Die map wordt al gesynchroniseerd."
+  "That folder is already being synced.": "Die map wordt al gesynchroniseerd.",
+  "Authorization failed: {{reason}}": "Autorisatie mislukt: {{reason}}",
+  "Authorization was not completed.": "De autorisatie is niet voltooid."
 }

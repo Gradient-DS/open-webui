@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import {
+	connectionOutcome,
 	pairSchedules,
 	sourceStatus,
 	connectResult,
@@ -202,3 +203,22 @@ it('uses content counters, either live run, ACL failures and one expiry per sour
 	});
 	expect(sourceStatus({ acl })).toMatchObject({ schedule: acl, live: true, liveSchedules: [acl] });
 });
+
+it.each([
+	['enabled', null, false, 0, { status: 'done' }],
+	['enabled', 'invalid_grant', false, 0, { status: 'failed', reason: 'invalid_grant' }],
+	['pending', 'consent_denied', false, 0, { status: 'failed', reason: 'consent_denied' }],
+	['suspended:reauth', null, false, 0, { status: 'failed', reason: 'suspended:reauth' }],
+	['revoked', null, true, 2, { status: 'failed', reason: 'revoked' }],
+	['pending', null, false, 0, { status: 'waiting' }],
+	['pending', null, true, 1, { status: 'waiting' }],
+	['pending', null, true, 2, { status: 'gave_up' }],
+	['enabled', null, true, 2, { status: 'done' }]
+] as const)(
+	'resolves connection %s with error %s, popup closed %s, check %i',
+	(lifecycle, last_error, closed, checks, expected) => {
+		expect(
+			connectionOutcome({ id: 'c', source_kind: 'onedrive', lifecycle, last_error }, closed, checks)
+		).toEqual(expected);
+	}
+);

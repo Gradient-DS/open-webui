@@ -153,3 +153,14 @@ export function sourceStatus(pair: SchedulePair) {
 		expiry: expiry.length ? Math.min(...expiry) : null
 	};
 }
+
+export function connectionOutcome(
+	connection: Connection,
+	popupClosed: boolean,
+	checksSincePopupClosed: number
+): { status: 'done' | 'waiting' | 'gave_up' } | { status: 'failed'; reason: string } {
+	if (connection.last_error || !['pending', 'enabled'].includes(connection.lifecycle))
+		return { status: 'failed', reason: connection.last_error ?? connection.lifecycle };
+	if (connection.lifecycle === 'enabled') return { status: 'done' };
+	return { status: popupClosed && checksSincePopupClosed >= 2 ? 'gave_up' : 'waiting' };
+}

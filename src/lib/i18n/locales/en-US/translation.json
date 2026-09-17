@@ -3841,5 +3841,7 @@
   "Not synced yet": "Not synced yet",
   "Sync was started recently. Try again in a moment.": "Sync was started recently. Try again in a moment.",
   "A sync is already running.": "A sync is already running.",
-  "That folder is already being synced.": "That folder is already being synced."
+  "That folder is already being synced.": "That folder is already being synced.",
+  "Authorization failed: {{reason}}": "Authorization failed: {{reason}}",
+  "Authorization was not completed.": "Authorization was not completed."
 }
