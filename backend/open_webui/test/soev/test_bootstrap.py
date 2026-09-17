@@ -39,7 +39,7 @@ async def test_bootstrap_prints_the_api_assigned_kid(
         'label': 'Open WebUI',
         'principal': 'owui:service:webui',
         'claimable_principals': ['owui:service:webui'],
-        'capabilities': ['read', 'ingest', 'delete', 'directory'],
+        'capabilities': ['read', 'ingest', 'delete', 'directory', 'connect'],
         'claimable_sources': ['owui'],
     }
     public_bytes = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)

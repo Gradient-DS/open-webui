@@ -47,7 +47,7 @@ async def bootstrap() -> None:
             'label': 'Open WebUI',
             'principal': config.SOEV_API_SERVICE_PRINCIPAL,
             'claimable_principals': [config.SOEV_API_SERVICE_PRINCIPAL],
-            'capabilities': ['read', 'ingest', 'delete', 'directory'],
+            'capabilities': ['read', 'ingest', 'delete', 'directory', 'connect'],
             'claimable_sources': ['owui'],
         },
         idempotency_key=f'owui-bootstrap:{operation}',
