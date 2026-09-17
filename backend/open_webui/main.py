@@ -3513,34 +3513,6 @@ async def oauth_login_callback(
     3. If no match and ``ENABLE_OAUTH_SIGNUP`` is enabled, create a new user
        (fails if the email is already registered).
     """
-    # [Gradient] Check if this OAuth callback belongs to a sync-provider auth
-    # flow rather than the user-login SSO flow. The shared store in
-    # services/sync/pending_flows is replica-aware (Redis when configured).
-    state = request.query_params.get('state')
-    if state:
-        from open_webui.services.sync.pending_flows import has_pending_flow
-
-        if provider == 'microsoft' and await has_pending_flow(request, 'onedrive', state):
-            from open_webui.routers.onedrive_sync import (
-                handle_onedrive_auth_callback,
-            )
-
-            return await handle_onedrive_auth_callback(request)
-
-        if provider == 'google' and await has_pending_flow(request, 'google_drive', state):
-            from open_webui.routers.google_drive_sync import (
-                handle_google_drive_auth_callback,
-            )
-
-            return await handle_google_drive_auth_callback(request)
-
-        if provider == 'atlassian' and await has_pending_flow(request, 'confluence', state):
-            from open_webui.routers.confluence_sync import (
-                handle_confluence_auth_callback,
-            )
-
-            return await handle_confluence_auth_callback(request)
-
     return await oauth_manager.handle_callback(request, provider, response, db=db)
 
 
