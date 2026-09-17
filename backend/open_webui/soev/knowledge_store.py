@@ -6,6 +6,7 @@ Configuration and model imports are deferred so either singleton import order is
 import datetime as dt
 import hashlib
 import json
+import re
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
@@ -19,6 +20,36 @@ def _sort_file_rows(rows, filters, *, default_order='filename', default_descendi
     field = order or default_order
     rows.sort(key=lambda row: row['id'])
     rows.sort(key=lambda row: (row[field] is not None, row[field]), reverse=descending)
+
+
+def _catalog_file_row(document: dict, owner_id: str) -> dict:
+    filename = document.get('filename') or document.get('title') or document['source_id']
+    timestamp = int(dt.datetime.fromisoformat(document['ingested_at']).timestamp())
+    return {
+        'id': document['source_id'],
+        'user_id': owner_id,
+        'hash': None,
+        'filename': filename,
+        'meta': {
+            'name': filename,
+            'content_type': document.get('content_type'),
+            'status': 'completed',
+            'source_url': document.get('source_url'),
+            'soev_catalog_only': True,
+        },
+        'created_at': timestamp,
+        'updated_at': timestamp,
+    }
+
+
+def _matches_catalog_file(row: dict, filters: dict, user_id: str | None) -> bool:
+    query = filters.get('query') or ''
+    pattern = ''.join('.*' if char == '%' else '.' if char == '_' else re.escape(char) for char in query)
+    if re.search(pattern, row['filename'], re.IGNORECASE | re.DOTALL) is None:
+        return False
+    view = filters.get('view_option')
+    owned = row['user_id'] == user_id
+    return (view != 'created' or owned) and (view != 'shared' or not owned)
 
 
 class NotOnSoev(NotImplementedError):
@@ -312,6 +343,7 @@ class SoevKnowledgeTable:
                         members.pop(item['source_id'], None)
         return members
 
+    # Catalog-only rows are listed but not downloadable yet; follow-up: catalog downloads.
     async def get_files_by_id(self, knowledge_id, db=None):
         from open_webui.models.files import Files
 
@@ -414,7 +446,9 @@ class SoevKnowledgeTable:
         except SoevApiError:
             return None
 
-    async def _file_rows(self, ids, *, filters=None, user_id=None):
+    async def _file_rows(
+        self, ids: list[str], *, filters: dict | None = None, user_id: str | None = None, catalog: dict | None = None
+    ) -> list[dict]:
         if not ids:
             return []
         from sqlalchemy import select
@@ -427,7 +461,15 @@ class SoevKnowledgeTable:
         stmt = self._file_filter(stmt, File, filters or {}, user_id)
         async with get_async_db_context() as session:
             result = await session.execute(stmt)
-            return [dict(row._mapping) for row in result]
+            rows = [dict(row._mapping) for row in result]
+            if catalog:
+                existing = set((await session.execute(select(File.id).where(File.id.in_(ids)))).scalars())
+                for source_id, (document, owner_id) in catalog.items():
+                    if document and source_id not in existing:
+                        row = _catalog_file_row(document, owner_id)
+                        if _matches_catalog_file(row, filters or {}, user_id):
+                            rows.append(row)
+            return rows
 
     @staticmethod
     def _file_filter(stmt, file_model, filters, user_id):
@@ -457,7 +499,14 @@ class SoevKnowledgeTable:
         if 'directory_id' in filters:
             members = {source: member for source, member in members.items() if (member[1] or '') == '/'.join(path)}
         by_id = {source: member[0] for source, member in members.items()}
-        rows = await self._file_rows(list(by_id), filters=filters, user_id=user_id)
+        collection = await self._collection(knowledge_id, user_id=user_id)
+        owner_id = self._knowledge(collection).user_id if collection else ''
+        rows = await self._file_rows(
+            list(by_id),
+            filters=filters,
+            user_id=user_id,
+            catalog={source: (document, owner_id) for source, document in by_id.items()},
+        )
         _sort_file_rows(rows, filters)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
@@ -481,7 +530,15 @@ class SoevKnowledgeTable:
         for collection in collections:
             for source_id, (document, _) in (await self._members(collection['key'], user_id=user_id)).items():
                 by_id.setdefault(source_id, (collection, document))
-        rows = await self._file_rows(list(by_id), filters=filter, user_id=user_id)
+        rows = await self._file_rows(
+            list(by_id),
+            filters=filter,
+            user_id=user_id,
+            catalog={
+                source: (document, self._knowledge(collection).user_id)
+                for source, (collection, document) in by_id.items()
+            },
+        )
         _sort_file_rows(rows, filter, default_order='updated_at', default_descending=True)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
@@ -601,7 +658,14 @@ class SoevKnowledgeTable:
         if not paths:
             return {}
         members = await self._members(knowledge_id, user_id=user_id)
-        files = {row['id']: row for row in await self._file_rows(list(members))}
+        collection = await self._collection(knowledge_id, user_id=user_id)
+        owner_id = self._knowledge(collection).user_id if collection else ''
+        files = {
+            row['id']: row
+            for row in await self._file_rows(
+                list(members), catalog={source: (member[0], owner_id) for source, member in members.items()}
+            )
+        }
         result = {}
         for identifier, path in paths.items():
             matches = [

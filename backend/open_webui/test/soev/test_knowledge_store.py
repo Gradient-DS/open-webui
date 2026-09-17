@@ -671,7 +671,14 @@ async def test_search_knowledge_files_spans_every_readable_collection(env, monke
         dt.datetime.fromisoformat(env.api.documents['kb', 'first']['ingested_at']).timestamp()
     )
     listing.assert_awaited_once_with(user_id='alice')
-    lookup.assert_awaited_once_with(['first', 'shared'], filters=filters, user_id='alice')
+    lookup.assert_awaited_once()
+    assert lookup.call_args.args == (['first', 'shared'],)
+    assert lookup.call_args.kwargs['filters'] == filters
+    assert lookup.call_args.kwargs['user_id'] == 'alice'
+    assert lookup.call_args.kwargs['catalog'] == {
+        'first': (env.api.documents['kb', 'first'], 'alice'),
+        'shared': (env.api.documents['second', 'shared'], 'bob'),
+    }
     requests = [request for request in env.api.requests if request.method == 'GET']
     assert requests
     for request in requests:
@@ -1129,3 +1136,62 @@ async def test_vacuous_path_fields_and_data_updates_make_no_request(env):
     assert await env.store.set_path_fields_by_file_id('file', {'relative_path': 'a'}) is True
     assert await env.store.update_knowledge_data_by_id('kb', {'file_ids': ['file']}) is None
     assert env.api.requests == []
+
+
+@pytest.mark.asyncio
+async def test_catalog_documents_without_file_rows_are_listed(env):
+    await file(env, 'local', status='processing')
+    env.api.add_document('kb', 'cloud', filename='Cloud.pdf', source_url='https://source.invalid/doc')
+    env.api.add_document('kb', 'title', filename=None, title='Title')
+    env.api.add_document('kb', 'fallback', filename=None)
+    result = await env.store.search_files_by_id('kb', 'alice', {})
+    assert result.total == 4
+    rows = {row.id: row for row in result.items}
+    cloud = rows['cloud']
+    assert cloud.filename == 'Cloud.pdf' and cloud.user_id == 'alice' and cloud.hash is None
+    assert cloud.meta.model_dump(exclude_unset=True) == {
+        'name': 'Cloud.pdf',
+        'content_type': 'text/plain',
+        'status': 'completed',
+        'source_url': 'https://source.invalid/doc',
+        'soev_catalog_only': True,
+    }
+    assert cloud.created_at == cloud.updated_at == int(dt.datetime.fromisoformat(env.api.now).timestamp())
+    assert rows['title'].filename == 'Title' and rows['fallback'].filename == 'fallback'
+    assert rows['local'].meta.model_dump(exclude_unset=True) == {'status': 'processing'}
+    assert [row.id for row in await env.store.get_files_by_id('kb')] == ['local']
+    assert [row.id for row in await env.store.get_file_metadatas_by_id('kb')] == ['local']
+
+
+@pytest.mark.asyncio
+async def test_search_filters_catalog_only_rows_by_filename(env):
+    await file(env, 'local')
+    env.api.add_document('kb', 'older', filename='Report A.pdf', ingested_at='2026-01-01T00:00:00Z')
+    env.api.add_document('kb', 'newer', filename='Report B.pdf')
+    for filters, expected in [
+        ({'query': 'REPORT'}, ['older', 'newer']),
+        ({'query': 'Report _.pdf', 'order_by': 'name', 'direction': 'desc'}, ['newer', 'older']),
+        ({'query': 'report', 'order_by': 'created_at', 'direction': 'desc'}, ['newer', 'older']),
+        ({'query': 'report', 'order_by': 'updated_at', 'direction': 'asc'}, ['older', 'newer']),
+        ({'view_option': 'shared'}, []),
+        ({'query': 'local', 'view_option': 'created'}, ['local']),
+    ]:
+        result = await env.store.search_files_by_id('kb', 'alice', filters)
+        assert [row.id for row in result.items] == expected
+    result = await env.store.search_knowledge_files({'user_id': 'alice', 'query': 'REPORT'}, limit=1)
+    assert result.total == 2 and result.items[0].id == 'newer'
+    row = env.module._catalog_file_row(env.api.documents['kb', 'older'], 'alice')
+    assert env.module._matches_catalog_file(row, {'query': 'report%', 'view_option': 'shared'}, 'bob')
+    assert not env.module._matches_catalog_file(row, {'view_option': 'created'}, 'bob')
+
+
+@pytest.mark.asyncio
+async def test_rollups_count_catalog_only_rows(env):
+    await file(env, 'local', path='folder', status='failed')
+    env.api.add_document('kb', 'cloud', path='folder/nested')
+    folder = env.projection.directory_id('kb', ('folder',))
+    rollups = await env.store.get_directory_rollups('kb', [folder])
+    assert rollups[folder] == {
+        'child_count': 2,
+        'status_counts': {'completed': 1, 'failed': 1, 'pending': 0, 'unknown': 0},
+    }
