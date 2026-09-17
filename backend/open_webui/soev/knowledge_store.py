@@ -343,7 +343,7 @@ class SoevKnowledgeTable:
                         members.pop(item['source_id'], None)
         return members
 
-    # Catalog-only rows are listed but not downloadable yet; follow-up: catalog downloads.
+    # Catalog-only rows are listed through search and downloaded through catalog_content.
     async def get_files_by_id(self, knowledge_id, db=None):
         from open_webui.models.files import Files
 
@@ -369,15 +369,15 @@ class SoevKnowledgeTable:
     async def has_file(self, knowledge_id, file_id, db=None):
         return file_id in await self._members(knowledge_id)
 
-    async def _references(self, ids):
+    async def _references(self, ids, *, user_id=None):
         result = []
         collections = {}
         for source_id in sorted(ids):
-            response = await self._get('/v1/documents', params={'source_id': source_id})
+            response = await self._get('/v1/documents', params={'source_id': source_id}, user_id=user_id)
             for document in response['data']:
                 key = document['collection_key']
                 if key not in collections:
-                    collections[key] = await self._collection(key)
+                    collections[key] = await self._collection(key, user_id=user_id)
                 if collections[key] is not None:
                     result.append((collections[key], document))
         return result

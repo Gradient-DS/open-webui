@@ -43,6 +43,7 @@ from open_webui.routers.audio import transcribe
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
 from open_webui.soev import ingest
+from open_webui.soev.catalog_content import stream_catalog_content  # [Gradient] Catalog originals.
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import strict_match_mime_type
@@ -959,6 +960,12 @@ async def get_file_content_by_id_inline(
 ):
     file = await Files.get_file_by_id(id, db=db)
 
+    # [Gradient] Cloud catalog documents have no local file row.
+    if file is None:
+        content = await stream_catalog_content(id, user, attachment=attachment)
+        if content is not None:
+            return content
+
     if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1126,9 +1133,18 @@ async def get_html_file_content_by_id(
 
 @router.get('/{id}/content/{file_name}')
 async def get_file_content_by_id(
-    id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+    id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+    file_name: str = '',  # [Gradient] Preserve the requested filename for catalog downloads.
 ):
     file = await Files.get_file_by_id(id, db=db)
+
+    # [Gradient] Cloud catalog documents have no local file row.
+    if file is None:
+        content = await stream_catalog_content(id, user, attachment=True, file_name=file_name)
+        if content is not None:
+            return content
 
     if not file:
         raise HTTPException(
