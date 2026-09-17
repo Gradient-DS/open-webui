@@ -1,15 +1,17 @@
 <script lang="ts">
 	import type { Model } from '$lib/stores';
-	import { toast } from 'svelte-sonner';
+	import type {
+		ChatAttachment,
+		ChatInputCallbacks,
+		AskUserPrompt
+	} from '$lib/types/chatAttachment';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
 
-	import { onMount, getContext, tick, createEventDispatcher } from 'svelte';
-	import { blur, fade } from 'svelte/transition';
+	import { getContext, createEventDispatcher } from 'svelte';
+	import { fade } from 'svelte/transition';
 
 	const dispatch = createEventDispatcher();
-
-	import { updateFolderById } from '$lib/apis/folders';
 
 	import {
 		config,
@@ -20,10 +22,10 @@
 		pendingAgentId
 	} from '$lib/stores';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
-	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
+	import { sanitizeResponseContent } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
 	import { isAgentRouted, isFeatureEnabled } from '$lib/utils/features';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import Suggestions from './Suggestions.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -35,8 +37,8 @@
 
 	const i18n = getContext('i18n');
 
-	export let createMessagePair: Function;
-	export let stopResponse: Function;
+	export let createMessagePair: ChatInputCallbacks['createMessagePair'];
+	export let stopResponse: ChatInputCallbacks['stopResponse'];
 
 	export let autoScroll = false;
 
@@ -61,24 +63,24 @@
 	export let documentWriterEnabled = false;
 	export let webSearchEnabled = false;
 	export let toolApprovalMode = 'full';
-	export let onToolApprovalModeChange: Function = () => {};
-	export let oauthRedirectHandler: Function = () => {};
+	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
+	export let oauthRedirectHandler: ChatInputCallbacks['oauthRedirectHandler'] = () => {};
 
-	export let onUpload: Function = (e) => {};
-	export let onUpdate: (data?: { file?: any }) => void = () => {};
-	export let onSelect = (e) => {};
-	export let onChange = (e) => {};
-	export let onWebSearchToggle: Function = () => {};
-	export let messageQueue: { id: string; prompt: string; files: any[] }[] = [];
+	export let onUpload: ChatInputCallbacks['onUpload'] = () => {};
+	export let onUpdate: (data?: { file?: ChatAttachment }) => void = () => {};
+	export let onSelect: (event?: unknown) => void = () => {};
+	export let onChange: ChatInputCallbacks['onChange'] = () => {};
+	export let onWebSearchToggle: ChatInputCallbacks['onWebSearchToggle'] = () => {};
+	export let messageQueue: { id: string; prompt: string; files: ChatAttachment[] }[] = [];
 	export let onQueueSendNow: (id: string) => void = () => {};
 	export let onQueueEdit: (id: string) => void = () => {};
 	export let onQueueDelete: (id: string) => void = () => {};
-	export let askUser = {
+	export let askUser: AskUserPrompt = {
 		show: false,
 		questions: [],
 		allowOther: true,
 		timeoutMs: null,
-		onConfirm: (_value: any) => {},
+		onConfirm: () => {},
 		onCancel: () => {}
 	};
 
@@ -166,6 +168,7 @@
 											}}
 										>
 											<img
+												alt=""
 												src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
 												class=" size-9 @sm:size-10 rounded-2xl"
 												aria-hidden="true"
@@ -226,6 +229,7 @@
 								<div
 									class="mt-0.5 px-2 text-sm font-normal text-gray-500 dark:text-gray-400 line-clamp-2 max-w-xl markdown"
 								>
+									<!-- eslint-disable-next-line svelte/no-at-html-tags -- Content is sanitized with DOMPurify. -->
 									{@html DOMPurify.sanitize(
 										marked.parse(
 											sanitizeResponseContent(

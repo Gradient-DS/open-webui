@@ -1,25 +1,18 @@
 <script lang="ts">
-	// [Gradient] Tenant gates and Confluence attachments share the upstream menu.
+	// [Gradient] Tenant gates apply to the upstream menu.
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import Confluence from '$lib/components/icons/Confluence.svelte';
-	import { toast } from 'svelte-sonner';
-	import { getContext, onMount, tick } from 'svelte';
+	import { getContext } from 'svelte';
+	import type { ChatInputCallbacks } from '$lib/types/chatAttachment';
 	import { fly } from 'svelte/transition';
 
-	import { config, user, tools as _tools, mobile, knowledge } from '$lib/stores';
-	import { getKnowledgeBases, getKnowledgeById } from '$lib/apis/knowledge';
-
-	import { createPicker } from '$lib/utils/google-drive-picker';
+	import { config, user } from '$lib/stores';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentArrowUp from '$lib/components/icons/DocumentArrowUp.svelte';
 	import Camera from '$lib/components/icons/Camera.svelte';
-	import Note from '$lib/components/icons/Note.svelte';
 	import Clip from '$lib/components/icons/Clip.svelte';
-	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
-	import Refresh from '$lib/components/icons/Refresh.svelte';
 	import ClockRotateRight from '$lib/components/icons/ClockRotateRight.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
@@ -39,13 +32,12 @@
 	export let selectedModels: string[] = [];
 	export let fileUploadCapableModels: string[] = [];
 
-	export let screenCaptureHandler: Function;
-	export let uploadFilesHandler: Function;
-	export let inputFilesHandler: Function;
+	export let screenCaptureHandler: () => void;
+	export let uploadFilesHandler: () => void;
+	export let inputFilesHandler: (files: File[]) => void;
 
-	export let uploadGoogleDriveHandler: Function;
-	export let uploadOneDriveHandler: Function;
-	export let uploadConfluenceHandler: Function;
+	export let uploadGoogleDriveHandler: () => void;
+	export let uploadOneDriveHandler: (authorityType: 'personal' | 'organizations') => void;
 	// [Gradient] Assistant-builder restrictions and strict data-separation state.
 	export let restrictTo: string[] | null = null;
 	$: itemAllowed = (key: string) => restrictTo === null || restrictTo.includes(key);
@@ -53,10 +45,10 @@
 	export let internalBlocked = false;
 	export let dataSeparationMessage = '';
 
-	export let onUpload: Function;
-	export let onClose: Function;
+	export let onUpload: ChatInputCallbacks['onUpload'];
+	export let onClose: () => void;
 	export let toolApprovalMode = 'full';
-	export let onToolApprovalModeChange: Function = () => {};
+	export let onToolApprovalModeChange: (mode: string) => void = () => {};
 
 	let show = false;
 	let tab = '';
@@ -95,35 +87,12 @@
 		return /android|iphone|ipad|ipod|windows phone/i.test(userAgent);
 	};
 
-	const handleFileChange = (event) => {
-		const inputFiles = Array.from(event.target?.files);
+	const handleFileChange = (event: Event) => {
+		const inputFiles = Array.from((event.currentTarget as HTMLInputElement).files ?? []);
 		if (inputFiles && inputFiles.length > 0) {
 			console.log(inputFiles);
 			inputFilesHandler(inputFiles);
 		}
-	};
-
-	// [Gradient] Company-wide Confluence attaches the existing read-only KB.
-	export const attachSharedConfluenceKb = async () => {
-		const kbId = $config?.features?.confluence_shared_kb_id;
-		if (!kbId) {
-			return;
-		}
-		show = false;
-
-		const kb = await getKnowledgeById(localStorage.token, kbId).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		if (!kb) {
-			return;
-		}
-
-		onSelect({
-			...kb,
-			knowledge_type: kb.type,
-			type: 'collection'
-		});
 	};
 
 	const onSelect = (item) => {
@@ -645,29 +614,6 @@
 								</button></Tooltip
 							>
 						{/if}
-					{/if}
-
-					<!-- [Gradient] Preserve personal and shared Confluence attachment flows. -->
-					{#if fileUploadEnabled && itemAllowed('confluence') && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && ($config?.features?.confluence_kb_mode === 'shared' ? $config?.features?.confluence_shared_kb_id : $config?.features?.confluence_oauth_configured)}
-						<Tooltip content={internalBlocked ? dataSeparationMessage : ''} className="w-full">
-							<button
-								type="button"
-								class="flex w-full gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal select-none cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
-								class:opacity-50={internalBlocked}
-								aria-disabled={internalBlocked}
-								on:click={() => {
-									if (internalBlocked) return;
-									if ($config?.features?.confluence_kb_mode === 'shared')
-										attachSharedConfluenceKb();
-									else {
-										show = false;
-										uploadConfluenceHandler();
-									}
-								}}
-								><Confluence className="size-3.5" />
-								<div class="line-clamp-1">{$i18n.t('Confluence')}</div></button
-							>
-						</Tooltip>
 					{/if}
 				</div>
 			{:else if tab === 'tool_permissions'}

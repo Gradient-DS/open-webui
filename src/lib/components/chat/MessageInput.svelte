@@ -19,9 +19,18 @@
 	dayjs.extend(relativeTime);
 
 	import { onMount, tick, getContext, createEventDispatcher } from 'svelte';
+	import type {
+		ChatAttachment,
+		ChatDraft,
+		ChatInputCallbacks,
+		AskUserPrompt
+	} from '$lib/types/chatAttachment';
 
-	import { createPicker, getAuthToken } from '$lib/utils/google-drive-picker';
-	import { pickAndDownloadFile, pickAndDownloadFilesModal } from '$lib/utils/onedrive-file-picker';
+	import {
+		createPicker,
+		initialize as initializeGooglePicker
+	} from '$lib/utils/google-drive-picker';
+	import { pickAndDownloadFilesModal } from '$lib/utils/onedrive-file-picker';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 	const dispatch = createEventDispatcher();
@@ -63,7 +72,7 @@
 		getWeekday
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { uploadFile, deleteFileById, getFileAttachments } from '$lib/apis/files';
+	import { uploadFile, getFileAttachments } from '$lib/apis/files';
 	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
 	import { generateAutoCompletion } from '$lib/apis';
 	import { getChatById } from '$lib/apis/chats';
@@ -71,15 +80,12 @@
 	import { getNoteById } from '$lib/apis/notes';
 	import { getSessionUser } from '$lib/apis/auths';
 
-	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
+	import { WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { matchKeybinding, Shortcut } from '$lib/shortcuts';
 
-	import { createNoteHandler } from '../notes/utils';
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
-	import ConfluencePickerModal from '../workspace/Knowledge/ConfluencePickerModal.svelte';
-	import { getConfluencePageContent, listPages as listConfluencePages } from '$lib/apis/confluence';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 	import ModelSelector from './ModelSelector.svelte';
 
@@ -103,26 +109,14 @@
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
 	import Voice from '../icons/Voice.svelte';
-	import Cloud from '../icons/Cloud.svelte';
 	import TerminalMenu from './MessageInput/TerminalMenu.svelte';
 	import PlusAlt from '../icons/PlusAlt.svelte';
 	import Terminal from '../icons/Terminal.svelte';
 	import Document from '../icons/Document.svelte';
-	import Link from '../icons/Link.svelte';
-	import Camera from '../icons/Camera.svelte';
-	import Clip from '../icons/Clip.svelte';
-	import FolderOpen from '../icons/FolderOpen.svelte';
-	import PageEdit from '../icons/PageEdit.svelte';
-	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
-	import GoogleDrive from '../icons/GoogleDrive.svelte';
-	import OneDrive from '../icons/OneDrive.svelte';
-	import Confluence from '../icons/Confluence.svelte';
-	import Dropdown from '../common/Dropdown.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import Knobs from '../icons/Knobs.svelte';
 	import ValvesModal from '../workspace/common/ValvesModal.svelte';
-	import Note from '../icons/Note.svelte';
 	import AskUserCard from './AskUserCard.svelte';
 	import { goto } from '$app/navigation';
 	import InputModal from '../common/InputModal.svelte';
@@ -133,28 +127,28 @@
 
 	const i18n = getContext('i18n');
 
-	type AskUserPrompt = {
-		show: boolean;
-		questions: any[];
-		allowOther: boolean;
-		timeoutMs: number | null;
-		onConfirm: (value: any) => void;
-		onCancel: () => void;
+	type UploadTerminal = {
+		id?: string;
+		url?: string;
+		key?: string;
+		enabled?: boolean;
+		config?: { chat_uploads?: string };
+		[key: string]: unknown;
 	};
 
-	export let onUpload: Function = (e) => {};
-	export let onChange: Function = () => {};
+	export let onUpload: ChatInputCallbacks['onUpload'] = () => {};
+	export let onChange: (draft: ChatDraft) => void = () => {};
 	// When non-null, restricts the InputMenu (the `+` button menu) to
 	// only the listed item keys. Forwarded to InputMenu unchanged.
 	// Default null preserves upstream behavior.
 	export let inputMenuRestrictTo: string[] | null = null;
-	export let onWebSearchToggle: Function = () => {};
+	export let onWebSearchToggle: ChatInputCallbacks['onWebSearchToggle'] = () => {};
 
-	export let createMessagePair: Function;
-	export let stopResponse: Function;
-	export let compactHandler: Function = () => {};
-	export let statusHandler: Function = () => {};
-	export let forkHandler: Function = () => {};
+	export let createMessagePair: ChatInputCallbacks['createMessagePair'];
+	export let stopResponse: ChatInputCallbacks['stopResponse'];
+	export let compactHandler: () => void = () => {};
+	export let statusHandler: () => void = () => {};
+	export let forkHandler: () => void = () => {};
 	export let chatId = '';
 	export let contextUsage = null;
 	export let contextCompactionEnabled = false;
@@ -182,7 +176,7 @@
 		questions: [],
 		allowOther: true,
 		timeoutMs: null,
-		onConfirm: (_value: any) => {},
+		onConfirm: () => {},
 		onCancel: () => {}
 	};
 
@@ -203,7 +197,6 @@
 		((taskIds && taskIds.length > 0) ||
 			(history.currentId && history.messages[history.currentId]?.done != true) ||
 			generating);
-	$: canCompact = !!history?.currentId;
 	$: canToggleTemporary =
 		!embedded &&
 		!chatId &&
@@ -213,7 +206,7 @@
 				!($_user?.permissions?.chat?.temporary_enforced ?? false)));
 
 	export let prompt = '';
-	export let files: any[] = [];
+	export let files: ChatAttachment[] = [];
 
 	export let selectedToolIds: string[] = [];
 	export let selectedSkillIds: string[] = [];
@@ -224,7 +217,7 @@
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = false;
 	export let toolApprovalMode = 'full';
-	export let onToolApprovalModeChange: Function = () => {};
+	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 
 	export let pendingOAuthTools: {
 		id: string;
@@ -232,21 +225,21 @@
 		serverId: string;
 		authType?: string | null;
 	}[] = [];
-	export let oauthRedirectHandler: Function = () => {};
+	export let oauthRedirectHandler: ChatInputCallbacks['oauthRedirectHandler'] = () => {};
 
 	let showTerminalMenu = false;
 
-	export let messageQueue: { id: string; prompt: string; files: any[] }[] = [];
+	export let messageQueue: { id: string; prompt: string; files: ChatAttachment[] }[] = [];
 	export let onQueueSendNow: (id: string) => void = () => {};
 	export let onQueueEdit: (id: string) => void = () => {};
 	export let onQueueDelete: (id: string) => void = () => {};
-	export let onUpdate: (data?: { file?: any }) => void = () => {};
+	export let onUpdate: (data?: { file?: ChatAttachment }) => void = () => {};
 	export let chatTasks = [];
 
 	let inputContent = null;
 
 	let showInputVariablesModal = false;
-	let inputVariablesModalCallback = (variableValues) => {};
+	let inputVariablesModalCallback: (variableValues: Record<string, unknown>) => void = () => {};
 	let inputVariables = {};
 	let inputVariableValues = {};
 
@@ -261,7 +254,7 @@
 		integrationsMenuCloseOnOutsideClick = true;
 	}
 
-	let chatInputDraft: any;
+	let chatInputDraft: ChatDraft;
 	$: chatInputDraft = {
 		prompt,
 		files: files
@@ -307,7 +300,7 @@
 
 	const textVariableHandler = async (text: string) => {
 		if (text.includes('{{CLIPBOARD}}')) {
-			const clipboardText = await navigator.clipboard.readText().catch((err) => {
+			const clipboardText = await navigator.clipboard.readText().catch(() => {
 				toast.error($i18n.t('Failed to read clipboard contents'));
 				return '{{CLIPBOARD}}';
 			});
@@ -337,7 +330,7 @@
 			let location;
 			try {
 				location = await getUserPosition();
-			} catch (error) {
+			} catch {
 				toast.error($i18n.t('Location access not allowed'));
 				location = 'LOCATION_UNKNOWN';
 			}
@@ -426,7 +419,7 @@
 		return text;
 	};
 
-	const replaceVariables = (variables: Record<string, any>) => {
+	const replaceVariables = (variables: Record<string, unknown>) => {
 		// [Gradient] GRA-219: prompt variables can contain user or document content.
 
 		const chatInput = document.getElementById('chat-input');
@@ -437,7 +430,7 @@
 		}
 	};
 
-	export const focus = (options: FocusOptions = {}) => {
+	export const focus = (options: { preventScroll?: boolean } = {}) => {
 		chatInputElement?.focus(options);
 	};
 
@@ -639,7 +632,6 @@
 			const words = extractCurlyBraceWords(prompt);
 
 			if (words.length > 0) {
-				const word = words.at(0);
 				await tick();
 			} else {
 				chatInput.scrollTop = chatInput.scrollHeight;
@@ -746,12 +738,10 @@
 		return false;
 	}
 
-	let chatInputContainerElement;
 	let chatInputElement;
 	let modelSelector;
 
 	let filesInputElement;
-	let commandsElement;
 
 	let inputFiles;
 
@@ -761,7 +751,6 @@
 	export let dropzoneId = 'chat-pane';
 	let shiftKey = false;
 
-	let user = null;
 	export let placeholder = '';
 
 	type ModelCapability =
@@ -793,12 +782,6 @@
 		'file_upload',
 		modelCapabilitiesById
 	);
-
-	let fileUploadEnabled = true;
-	$: fileUploadEnabled =
-		fileUploadCapableModels.length ===
-			(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length &&
-		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
 
 	let webSearchCapableModels = [];
 	$: webSearchCapableModels = getCapableModelIds(
@@ -1026,127 +1009,20 @@
 				// Clean up any placeholders for files that failed to download
 				const downloadedNames = new Set(filesData.map((f) => f.name));
 				files = files.filter((f) => {
-					if (tempItemIds.includes(f.itemId) && !downloadedNames.has(f.name)) {
+					if (tempItemIds.includes(f.itemId ?? '') && !downloadedNames.has(f.name ?? '')) {
 						return false;
 					}
 					return true;
 				});
 			} else if (tempItemIds.length > 0) {
 				// All downloads failed
-				files = files.filter((f) => !tempItemIds.includes(f.itemId));
+				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
 			}
 		} catch (error) {
 			if (tempItemIds.length > 0) {
-				files = files.filter((f) => !tempItemIds.includes(f.itemId));
+				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
 			}
 			console.error('OneDrive Error:', error);
-		}
-	};
-
-	// Confluence — pick pages from the + menu and attach their rendered
-	// Markdown as one-off chat files (per-user mode; uses the user's OAuth).
-	let showConfluencePicker = false;
-	const confluenceHandler = () => {
-		showConfluencePicker = true;
-	};
-
-	// Recursive descendant walk — selecting a page in the picker implies its
-	// whole subtree (the picker greys out descendant checkboxes once an
-	// ancestor is checked). Mirror that here so the user gets every page in
-	// the chosen subtree as its own attachment.
-	const walkConfluenceDescendants = async (
-		cloudId: string,
-		parentId: string
-	): Promise<Array<{ id: string; title: string }>> => {
-		const collected: Array<{ id: string; title: string }> = [];
-		let cursor: string | null = null;
-		let pageCount = 0;
-		do {
-			const res = await listConfluencePages(localStorage.token, cloudId, {
-				parentId,
-				cursor: cursor ?? undefined
-			});
-			for (const child of res.pages) {
-				collected.push({ id: child.id, title: child.title });
-				const grandchildren = await walkConfluenceDescendants(cloudId, child.id);
-				collected.push(...grandchildren);
-			}
-			cursor = res.next_cursor;
-			pageCount++;
-			if (pageCount > 20) break; // safety cap — matches picker pagination
-		} while (cursor);
-		return collected;
-	};
-
-	const confluencePagesSelected = async (e) => {
-		const items = (e?.detail?.items ?? []) as Array<{
-			type: string;
-			cloud_id: string;
-			item_id: string;
-			name: string;
-		}>;
-		const pages = items.filter((it) => it.type === 'page');
-		if (items.some((it) => it.type === 'space')) {
-			toast.error(
-				$i18n.t('Only individual pages can be attached to a chat — pick pages, not spaces.')
-			);
-		}
-
-		// Resolve the full attachment set (selected pages + their descendants)
-		// before queuing uploads so the user sees an accurate count up front.
-		const flat: Array<{ cloud_id: string; page_id: string; title: string }> = [];
-		const seen = new Set<string>();
-		for (const pg of pages) {
-			const key = `${pg.cloud_id}:${pg.item_id}`;
-			if (seen.has(key)) continue;
-			seen.add(key);
-			flat.push({ cloud_id: pg.cloud_id, page_id: pg.item_id, title: pg.name });
-			try {
-				const descendants = await walkConfluenceDescendants(pg.cloud_id, pg.item_id);
-				for (const d of descendants) {
-					const dKey = `${pg.cloud_id}:${d.id}`;
-					if (seen.has(dKey)) continue;
-					seen.add(dKey);
-					flat.push({ cloud_id: pg.cloud_id, page_id: d.id, title: d.title });
-				}
-			} catch (error) {
-				toast.error(
-					$i18n.t('Error fetching Confluence page: {{error}}', {
-						error: error instanceof Error ? error.message : String(error)
-					})
-				);
-			}
-		}
-
-		for (const pg of flat) {
-			const tempItemId = uuidv4();
-			files = [
-				...files,
-				{
-					type: 'file',
-					file: '',
-					id: null,
-					url: '',
-					name: pg.title,
-					collection_name: '',
-					status: 'uploading',
-					size: 0,
-					error: '',
-					itemId: tempItemId
-				}
-			];
-			try {
-				const res = await getConfluencePageContent(localStorage.token, pg.cloud_id, pg.page_id);
-				const file = new File([res.content], `${res.title}.md`, { type: 'text/markdown' });
-				await uploadFileHandler(file, true, {}, tempItemId);
-			} catch (error) {
-				files = files.filter((f) => f.itemId !== tempItemId);
-				toast.error(
-					$i18n.t('Error fetching Confluence page: {{error}}', {
-						error: error instanceof Error ? error.message : String(error)
-					})
-				);
-			}
 		}
 	};
 
@@ -1198,19 +1074,19 @@
 
 	const getFilesystemUploadTerminal = (
 		selectedId = $selectedTerminalId,
-		servers: any[] | null = $terminalServers,
-		settingsValue: any = $settings
+		servers: UploadTerminal[] | null = $terminalServers,
+		settingsValue = $settings as typeof $settings & { terminalServers?: UploadTerminal[] }
 	) => {
 		if (!selectedId) return null;
 
 		const systemTerminal = (servers ?? []).find(
-			(t: any) => t.id && t.id === selectedId && t.config?.chat_uploads === 'filesystem'
+			(t) => t.id && t.id === selectedId && t.config?.chat_uploads === 'filesystem'
 		);
 		if (systemTerminal) return systemTerminal;
 
 		return (
 			(settingsValue?.terminalServers ?? []).find(
-				(t: any) => t.url === selectedId && t.enabled && t.config?.chat_uploads === 'filesystem'
+				(t) => t.url === selectedId && t.enabled && t.config?.chat_uploads === 'filesystem'
 			) ?? null
 		);
 	};
@@ -1235,7 +1111,7 @@
 		}
 
 		let tempItemId;
-		let fileItem;
+		let fileItem: ChatAttachment | undefined;
 
 		if (existingItemId) {
 			// Reuse existing placeholder (created by cloud file picker)
@@ -1273,19 +1149,19 @@
 			files = [...files, fileItem];
 		}
 
-		if (filesystemUploadTerminal) {
+		if (filesystemUploadTerminal?.url) {
 			try {
 				const cwd =
 					(
 						await getCwd(
 							filesystemUploadTerminal.url,
-							filesystemUploadTerminal.key,
+							filesystemUploadTerminal.key ?? '',
 							chatId || undefined
 						)
 					)?.cwd || '/';
 				const uploadedFile = await uploadToTerminal(
 					filesystemUploadTerminal.url,
-					filesystemUploadTerminal.key,
+					filesystemUploadTerminal.key ?? '',
 					cwd,
 					file,
 					chatId || undefined
@@ -1304,7 +1180,7 @@
 				} else {
 					fileItem.status = 'error';
 					fileItem.error = $i18n.t('Failed to upload file.');
-					toast.error(fileItem.error);
+					toast.error(fileItem.error ?? $i18n.t('Failed to upload file.'));
 					files = files.filter((item) => item?.itemId !== tempItemId);
 				}
 			} catch (e) {
@@ -1376,7 +1252,7 @@
 					// image-builder in Chat.svelte can inline them as first-turn vision
 					// for the BIM agent. Non-blocking; on error the file silently has
 					// no attachments.
-					getFileAttachments(localStorage.token, fileItem.id)
+					getFileAttachments(localStorage.token, uploadedFile.id)
 						.then((manifest) => {
 							fileItem.attachments = manifest;
 							files = files; // trigger Svelte reactivity
@@ -1407,7 +1283,7 @@
 				return null;
 			});
 
-			if (content === null) {
+			if (typeof content !== 'string') {
 				fileItem.status = 'error';
 				fileItem.error = $i18n.t('Failed to extract content from the file.');
 				toast.error($i18n.t('Failed to extract content from the file.'));
@@ -1512,6 +1388,7 @@
 				let reader = new FileReader();
 
 				reader.onload = async (event) => {
+					if (typeof event.target?.result !== 'string') return;
 					let imageUrl = event.target.result;
 
 					// Compress the image if settings or config require it
@@ -1538,25 +1415,6 @@
 				uploadFileHandler(file);
 			}
 		});
-	};
-
-	const createNote = async () => {
-		if (inputContent?.md.trim() === '' && inputContent?.html.trim() === '') {
-			toast.error($i18n.t('Cannot create an empty note.'));
-			return;
-		}
-
-		const res = await createNoteHandler(
-			dayjs().format('YYYY-MM-DD'),
-			inputContent?.md,
-			inputContent?.html
-		);
-
-		if (res) {
-			// Clear the input content saved in session storage.
-			sessionStorage.removeItem('chat-input');
-			goto(`/notes/${res.id}`);
-		}
 	};
 
 	const onDragOver = (e: DragEvent) => {
@@ -1653,7 +1511,7 @@
 					e.stopPropagation();
 					return;
 				}
-			} catch (_) {
+			} catch {
 				// Not valid JSON — fall through to file handling
 			}
 		}
@@ -1708,6 +1566,8 @@
 	};
 
 	onMount(() => {
+		if ($config?.features?.enable_google_drive_integration)
+			void initializeGooglePicker().catch(() => {});
 		suggestions = [
 			{
 				char: '@',
@@ -1886,7 +1746,7 @@
 				char: '$',
 				render: getSuggestionRenderer(CommandSuggestionList, {
 					i18n,
-					onSelect: (e) => {
+					onSelect: () => {
 						focus({ preventScroll: true });
 					},
 
@@ -1905,7 +1765,7 @@
 				},
 				render: getSuggestionRenderer(CommandSuggestionList, {
 					i18n,
-					onSelect: (e) => {
+					onSelect: () => {
 						focus({ preventScroll: true });
 					},
 
@@ -1962,13 +1822,6 @@
 
 <ToolServersModal bind:show={showTools} {selectedToolIds} />
 <SkillsModal bind:show={showSkills} {selectedSkillIds} />
-
-<ConfluencePickerModal
-	bind:show={showConfluencePicker}
-	confirmLabel={$i18n.t('Add to chat')}
-	pagesOnly={true}
-	on:select={confluencePagesSelected}
-/>
 
 <InputVariablesModal
 	bind:show={showInputVariablesModal}
@@ -2078,7 +1931,7 @@
 								focus({ preventScroll: true });
 							}}
 							onConfirm={async (data) => {
-								const { text, filename } = data;
+								const { text } = data;
 
 								recording = false;
 
@@ -2104,7 +1957,7 @@
 							aria-label={$i18n.t('Generate message pair')}
 							class="hidden"
 							on:click={() => createMessagePair(prompt)}
-						/>
+						></button>
 
 						{#if askUser?.show}
 							<div class="mx-1">
@@ -2271,7 +2124,7 @@
 									{#each files as file, fileIdx}
 										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 											{@const fileUrl =
-												file.url.startsWith('data') || file.url.startsWith('http')
+												file.url?.startsWith('data') || file.url?.startsWith('http')
 													? file.url
 													: `${WEBUI_API_BASE_URL}/files/${file.url}${file?.content_type ? '/content' : ''}`}
 											<div class=" relative group">
@@ -2336,9 +2189,9 @@
 										{:else}
 											<FileItem
 												item={file}
-												name={file.name}
+												name={file.name ?? ''}
 												type={file.type}
-												size={file?.size}
+												size={file?.size ?? 0}
 												loading={file.status === 'uploading'}
 												dismissible={true}
 												edit={!agentRouted}
@@ -2561,7 +2414,6 @@
 											{openInternetBlocked}
 											{internalBlocked}
 											{dataSeparationMessage}
-											uploadConfluenceHandler={confluenceHandler}
 											bind:files
 											selectedModels={selectedModelIds}
 											fileUploadCapableModels={getFilesystemUploadTerminal(
@@ -2614,7 +2466,7 @@
 									{#if isFeatureEnabled('input_menu') && (showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
 										<div
 											class="flex self-center w-[0.0625rem] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
-										/>
+										></div>
 									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
@@ -3063,7 +2915,7 @@
 
 																showCallOverlay.set(true);
 																showControls.set(true);
-															} catch (err) {
+															} catch {
 																// If the user denies the permission or an error occurs, show an error message
 																toast.error(
 																	$i18n.t('Permission denied when accessing media devices')
@@ -3118,10 +2970,11 @@
 
 						{#if $config?.license_metadata?.input_footer}
 							<div class=" text-xs text-gray-500 text-center line-clamp-1 marked">
+								<!-- eslint-disable-next-line svelte/no-at-html-tags -- DOMPurify sanitizes the configured footer. -->
 								{@html DOMPurify.sanitize(marked($config?.license_metadata?.input_footer))}
 							</div>
 						{:else}
-							<div class="mb-0.5" />
+							<div class="mb-0.5"></div>
 						{/if}
 					</form>
 				</div>
