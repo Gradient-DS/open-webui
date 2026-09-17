@@ -204,6 +204,7 @@ from open_webui.routers import (
     channels,
     chats,
     configs,
+    cloud_sync,
     confluence_sync,
     data_warnings,
     discovery,
@@ -1127,6 +1128,7 @@ if ENABLE_SCIM:
 # Mounted unconditionally — endpoints are admin/user-gated and no-op without
 # config. The routers must always be available so these providers can be
 # enabled at runtime via the Cloud Sync admin tab without a pod restart.
+app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync', tags=['cloud-sync'])
 app.include_router(onedrive_sync.router, prefix='/api/v1/onedrive', tags=['onedrive'])
 app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags=['google-drive'])
 
