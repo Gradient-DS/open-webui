@@ -12,7 +12,6 @@ describe('isLocalKnowledgeType', () => {
 	it('false for cloud-sync and integration-provider types', () => {
 		expect(isLocalKnowledgeType('onedrive')).toBe(false);
 		expect(isLocalKnowledgeType('google_drive')).toBe(false);
-		expect(isLocalKnowledgeType('confluence')).toBe(false);
 		expect(isLocalKnowledgeType('some_push_provider')).toBe(false);
 	});
 });
@@ -31,7 +30,6 @@ describe('canEditStructure', () => {
 	it('denies cloud-sync KBs regardless of write access', () => {
 		expect(canEditStructure({ type: 'onedrive', write_access: true })).toBe(false);
 		expect(canEditStructure({ type: 'google_drive', write_access: true })).toBe(false);
-		expect(canEditStructure({ type: 'confluence', write_access: true })).toBe(false);
 	});
 
 	it('denies integration-provider (push) KBs', () => {

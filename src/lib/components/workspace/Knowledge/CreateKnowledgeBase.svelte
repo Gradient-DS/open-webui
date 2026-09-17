@@ -3,10 +3,10 @@
 
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getContext, onMount } from 'svelte';
+	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { user, config } from '$lib/stores';
+	import { user } from '$lib/stores';
 	import { createNewKnowledge } from '$lib/apis/knowledge';
 
 	import AccessControl from '../common/AccessControl.svelte';
@@ -27,8 +27,6 @@
 			params.set('start_onedrive_sync', 'true');
 		} else if (type === 'google_drive') {
 			params.set('start_google_drive_sync', 'true');
-		} else if (type === 'confluence') {
-			params.set('start_confluence_sync', 'true');
 		}
 		if (returnTo) {
 			params.set('returnTo', returnTo);
@@ -39,22 +37,14 @@
 
 	let loading = false;
 
-	let type = $page.url.searchParams.get('type') || 'local';
+	const requestedType = $page.url.searchParams.get('type');
+	let type =
+		requestedType && ['local', 'onedrive', 'google_drive'].includes(requestedType)
+			? requestedType
+			: 'local';
 	// When set (the "+ Add knowledge" builder flow), carry it through to
 	// the KB detail page so it can offer a "Back to assistant" return.
 	const returnTo = $page.url.searchParams.get('returnTo');
-
-	onMount(() => {
-		// The Confluence self-service create flow exists ONLY in per-user
-		// ("on request", OAuth) mode. In pre-synced/shared mode the single shared
-		// KB is admin-managed and there is no create path for anyone (including
-		// admins — they provision it from the Cloud Sync admin panel). Block the
-		// route for any non-per_user mode regardless of role.
-		if (type === 'confluence' && $config?.features?.confluence_kb_mode !== 'per_user') {
-			toast.error($i18n.t('Confluence knowledge bases are managed by administrators.'));
-			goto('/workspace/knowledge');
-		}
-	});
 
 	let name = '';
 	let description = '';
