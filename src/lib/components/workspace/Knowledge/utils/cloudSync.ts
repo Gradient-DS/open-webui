@@ -145,10 +145,7 @@ export function sourceStatus(pair: SchedulePair) {
 		live: liveSchedules.length > 0,
 		landed: run?.counts?.landed ?? 0,
 		failed: run?.counts?.failed ?? 0,
-		tooLarge:
-			run?.counts?.item_too_large ??
-			run?.items?.filter((item) => item.code === 'item_too_large').length ??
-			0,
+		tooLarge: run?.counts?.item_too_large ?? 0,
 		errorCode:
 			schedule.last_error ??
 			pair.acl?.last_error ??

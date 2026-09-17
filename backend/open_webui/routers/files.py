@@ -1134,9 +1134,9 @@ async def get_html_file_content_by_id(
 @router.get('/{id}/content/{file_name}')
 async def get_file_content_by_id(
     id: str,
+    file_name: str,  # [Gradient] Bound from the path; kept for catalog downloads.
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
-    file_name: str = '',  # [Gradient] Preserve the requested filename for catalog downloads.
 ):
     file = await Files.get_file_by_id(id, db=db)
 

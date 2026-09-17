@@ -281,17 +281,9 @@ it('counts oversized item failures without confusing them with the run error cod
 			id: 'run',
 			started_at: '2026-09-17T12:00:00Z',
 			outcome: 'partial',
-			counts: { failed: 3 },
-			items: [
-				{ code: 'item_too_large' },
-				{ code: 'item_too_large' },
-				{ code: 'fetch_failed' },
-				{ code: null }
-			]
+			counts: { failed: 3, item_too_large: 2 }
 		}
 	};
 	expect(sourceStatus({ content })).toMatchObject({ failed: 3, tooLarge: 2, errorCode: undefined });
-	content.last_run!.counts!.item_too_large = 1;
-	expect(sourceStatus({ content }).tooLarge).toBe(1);
 	expect(sourceStatus({ content: scheduleFixture('content', 'content') }).tooLarge).toBe(0);
 });

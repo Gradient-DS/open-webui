@@ -369,6 +369,15 @@ class SoevKnowledgeTable:
     async def has_file(self, knowledge_id, file_id, db=None):
         return file_id in await self._members(knowledge_id)
 
+    async def catalog_original(self, source_id, *, user_id):
+        """Return (file row, byte stream) for a catalog member the user may read, or None."""
+        members = await self._references({source_id}, user_id=user_id)
+        if not members:
+            return None
+        collection, document = members[0]
+        path = self._path(collection['key']) + '/documents/' + quote(source_id, safe='') + '/original'
+        return _catalog_file_row(document, user_id), self._client.stream(path, as_user=await self._as_user(user_id))
+
     async def _references(self, ids, *, user_id=None):
         result = []
         collections = {}
