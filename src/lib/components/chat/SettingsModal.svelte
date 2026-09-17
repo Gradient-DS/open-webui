@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { getContext, onMount, tick } from 'svelte';
 	import type { Writable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
 	import { toast } from 'svelte-sonner';
 	import { config, models, settings, user } from '$lib/stores';
 	import type { SettingsModalRequest } from '$lib/stores';
@@ -60,9 +61,6 @@
 	import AdminDatabase from '$lib/components/admin/Settings/Database.svelte';
 
 	// [Gradient] Fork admin tab migrated from the route host.
-	import AdminCloudSync from '$lib/components/admin/Settings/CloudSync.svelte';
-
-	// [Gradient] Fork admin tab migrated from the route host.
 	import AdminEmail from '$lib/components/admin/Settings/Email.svelte';
 
 	// [Gradient] Fork admin tab migrated from the route host.
@@ -77,15 +75,18 @@
 	// [Gradient] Fork admin tab migrated from the route host.
 	import AdminAgents from '$lib/components/admin/Settings/Agents.svelte';
 
-	const i18n: Writable<any> = getContext('i18n');
+	const i18n: Writable<I18n> = getContext('i18n');
 
 	export let show: boolean | string | SettingsModalRequest = false;
 	let modalShow = false;
 	let lastShow: boolean | string | SettingsModalRequest = false;
 	let tabState: Record<string, unknown> | null = null;
-	let personalUiSettings: Record<string, any> = {};
+	let personalUiSettings: Record<string, unknown> = {};
 
-	const mergeUiSettings = (defaults: Record<string, any>, userSettings: Record<string, any>) => {
+	const mergeUiSettings = (
+		defaults: Record<string, unknown>,
+		userSettings: Record<string, unknown>
+	) => {
 		const merged = { ...defaults };
 		for (const [key, value] of Object.entries(userSettings)) {
 			const defaultValue = merged[key];
@@ -96,7 +97,10 @@
 				typeof value === 'object' &&
 				!Array.isArray(defaultValue) &&
 				!Array.isArray(value)
-					? mergeUiSettings(defaultValue, value)
+					? mergeUiSettings(
+							defaultValue as Record<string, unknown>,
+							value as Record<string, unknown>
+						)
 					: value;
 		}
 		return merged;
@@ -187,7 +191,6 @@
 		'admin:analytics': 'Quality',
 		'admin:integrations': 'Tools',
 		'admin:documents': 'Tools',
-		'admin:cloud-sync': 'Tools',
 		'admin:web': 'Tools',
 		'admin:code-execution': 'Tools',
 		'admin:pipelines': 'Tools',
@@ -809,11 +812,6 @@
 			keywords: ['documents', 'files', 'rag', 'knowledge', 'upload', 'embedding', 'vector db']
 		},
 		{
-			id: 'admin:cloud-sync',
-			title: 'Cloud Sync',
-			keywords: ['cloud', 'sync', 'confluence', 'onedrive', 'google drive', 'integration']
-		},
-		{
 			id: 'admin:web',
 			title: 'Web Search',
 			keywords: ['web search', 'google', 'bing', 'duckduckgo', 'serp', 'searxng', 'tavily', 'exa']
@@ -916,7 +914,7 @@
 		scrollToSelectedTab();
 	};
 
-	const saveSettings = async (updated: Record<string, any>) => {
+	const saveSettings = async (updated: Record<string, unknown>) => {
 		console.log(updated);
 		await settings.set({ ...$settings, ...updated });
 		await models.set(await getModels());
@@ -988,7 +986,7 @@
 		availableSettings = getAvailableSettings();
 		setFilteredSettings();
 
-		config.subscribe((configData) => {
+		config.subscribe(() => {
 			availableSettings = getAvailableSettings();
 			setFilteredSettings();
 		});
@@ -1293,14 +1291,14 @@
 				<Shortcuts {saveSettings} />
 			{:else if selectedTab === 'connections'}
 				<Connections
-					saveSettings={async (updated: Record<string, any>) => {
+					saveSettings={async (updated: Record<string, unknown>) => {
 						await saveSettings(updated);
 						toast.success($i18n.t('Settings saved successfully!'));
 					}}
 				/>
 			{:else if selectedTab === 'tools'}
 				<Integrations
-					saveSettings={async (updated: Record<string, any>) => {
+					saveSettings={async (updated: Record<string, unknown>) => {
 						await saveSettings(updated);
 						toast.success($i18n.t('Settings saved successfully!'));
 					}}
@@ -1333,16 +1331,6 @@
 				/>
 			{:else if selectedTab === 'about'}
 				<About />
-			{:else if selectedTab === 'admin:cloud-sync'}
-				<AdminCloudSync
-					on:save={async () => {
-						// Cloud Sync autosaves and shows its own inline status, so no toast
-						// here — just refresh the backend config (integration-enabled flags
-						// feed the chat '+' menu).
-						await tick();
-						await config.set(await getBackendConfig());
-					}}
-				/>
 			{:else if selectedTab === 'admin:email'}
 				<AdminEmail
 					saveHandler={async () => {
@@ -1397,7 +1385,7 @@
 			{:else if selectedTab === 'admin:analytics'}
 				<AdminAnalytics />
 			{:else if selectedTab === 'admin:integrations'}
-				<AdminIntegrations {saveSettings} />
+				<AdminIntegrations />
 			{:else if selectedTab === 'admin:documents'}
 				<AdminDocuments on:save={adminConfigSaveHandler} />
 			{:else if selectedTab === 'admin:web'}
