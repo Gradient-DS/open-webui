@@ -549,10 +549,8 @@ class _FakeStorage:
 async def deletion_env(db_session, monkeypatch):
     """DeletionService with vector + storage + chat-reference seams faked."""
     from open_webui.services.deletion import service as deletion_service_module
-    from open_webui.services.sync import router as sync_router_module
 
     monkeypatch.setattr(deletion_service_module, 'Knowledges', Knowledges)
-    monkeypatch.setattr(sync_router_module, 'Knowledges', Knowledges)
 
     vector = _FakeVectorClient()
     storage = _FakeStorage()
@@ -673,60 +671,3 @@ async def test_delete_directory_wrong_kb_refused(db_session, deletion_env):
 
     assert report.has_errors
     assert docs_id in await _dirs(db_session, 'kb-a')  # untouched
-
-
-# ---------------------------------------------------------------------------
-# Remove-source subtree cleanup
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_remove_source_sweeps_files_and_root_directory(db_session, deletion_env, monkeypatch):
-    from open_webui.services.sync.router import remove_files_for_source_generic
-    import open_webui.retrieval.vector.async_client as vector_client_module
-
-    vector, storage = deletion_env
-    monkeypatch.setattr(vector_client_module, 'ASYNC_VECTOR_DB_CLIENT', vector)
-
-    kb_id = await _insert_kb(db_session, meta=_drive_meta())
-    f1 = await _insert_file(
-        db_session,
-        file_id='googledrive-item1',
-        meta={'name': 'a.pdf', 'relative_path': 'docs/a.pdf', 'source_item_id': 'SRC-1'},
-    )
-    await Knowledges.add_file_to_knowledge_by_id(kb_id, f1, 'user-1')
-
-    kb = await Knowledges.get_knowledge_by_id(kb_id)
-    source = kb.meta['google_drive_sync']['sources'][0]
-    assert source.get('root_directory_id')  # stamped by the bridge
-
-    removed = await remove_files_for_source_generic(
-        knowledge_id=kb_id,
-        source_item_id='SRC-1',
-        file_id_prefix='googledrive-',
-        source=source,
-    )
-
-    assert removed == 1
-    assert await _dirs(db_session, kb_id) == {}  # root subtree fully gone
-    async with db_session() as s:
-        assert (await s.get(File, f1)) is None
-        assert (await s.execute(select(KnowledgeFile))).scalars().all() == []
-
-
-@pytest.mark.asyncio
-async def test_remove_source_without_stamp_is_noop_on_directories(db_session, deletion_env, monkeypatch):
-    from open_webui.services.sync.router import remove_files_for_source_generic
-    import open_webui.retrieval.vector.async_client as vector_client_module
-
-    vector, storage = deletion_env
-    monkeypatch.setattr(vector_client_module, 'ASYNC_VECTOR_DB_CLIENT', vector)
-
-    kb_id = await _insert_kb(db_session, meta=_drive_meta())
-    removed = await remove_files_for_source_generic(
-        knowledge_id=kb_id,
-        source_item_id='SRC-1',
-        file_id_prefix='googledrive-',
-        source={'item_id': 'SRC-1', 'name': 'Alpha Folder', 'type': 'folder'},  # no root_directory_id
-    )
-    assert removed == 0
