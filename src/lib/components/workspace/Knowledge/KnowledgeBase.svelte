@@ -944,6 +944,7 @@
 	const SYNC_POLL_LIVE_MS = 2000;
 	const SYNC_POLL_IDLE_MS = 30000;
 
+	let liveSyncPolls = 0;
 	const refreshCloudSync = async () => {
 		if (!knowledge || destroyed) return false;
 		const request = ++syncStatusRequest;
@@ -952,7 +953,17 @@
 		const wasLive = schedules.some((schedule) => runIsLive(schedule.last_run));
 		schedules = status.schedules;
 		syncStatusError = false;
-		await getItemsPage();
+		const isLive = schedules.some((schedule) => runIsLive(schedule.last_run));
+		liveSyncPolls = isLive ? liveSyncPolls + 1 : 0;
+		if ((isLive && liveSyncPolls % 5 === 0) || (wasLive && !isLive)) await getItemsPage();
+		return isLive;
+	};
+
+	/** Re-arm the poll now rather than waiting out an idle tick. */
+	const repollCloudSyncSoon = () => {
+		if (destroyed) return;
+		clearTimeout(syncPoll);
+		syncPoll = setTimeout(pollCloudSyncStatus, 0);
 	};
 
 	const pollCloudSyncStatus = async () => {
