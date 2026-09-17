@@ -83,14 +83,16 @@ def test_the_done_page_posts_the_result_and_closes(api, result):
     assert not api.requests
 
 
-def test_a_schedule_is_registered_on_the_kbs_collection_key(api):
+@pytest.mark.parametrize('cadence', [None, 60])
+def test_a_schedule_is_registered_on_the_kbs_collection_key(api, cadence):
     """Registration derives the destination from the KB route and rejects a body override."""
     body = {
         'connection_id': 'connection-1',
         'kind': 'content',
         'scope': {'drive_id': 'drive', 'item_id': 'folder'},
-        'cadence_minutes': 60,
     }
+    if cadence is not None:
+        body['cadence_minutes'] = cadence
     api.responses.append(response({'id': 'schedule-1', **body, 'collection_key': 'kb-1'}, 201))
     result = api.browser.post('/api/v1/cloud-sync/knowledge/kb-1/schedules', json=body)
     assert result.status_code == 200

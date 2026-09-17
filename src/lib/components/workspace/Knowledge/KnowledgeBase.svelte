@@ -34,12 +34,7 @@
 	import { processUrl } from '$lib/apis/retrieval';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import * as cloudSync from '$lib/apis/cloudSync';
-	import type {
-		Connection,
-		Schedule,
-		ScheduleAction,
-		ScheduleForm
-	} from '$lib/apis/cloudSync';
+	import type { Connection, Schedule, ScheduleAction, ScheduleForm } from '$lib/apis/cloudSync';
 	import { openOneDriveItemPicker } from '$lib/utils/onedrive-file-picker';
 	import {
 		createKnowledgePicker,
@@ -94,7 +89,6 @@
 	let schedules: Schedule[] = [];
 	let connecting: Connection | null = null;
 	let cloudActionBusy = false;
-	let cadenceMinutes = 60;
 	let syncPoll: ReturnType<typeof setTimeout> | undefined;
 	let destroyed = false;
 	let closeAuthorization: (() => void) | undefined;
@@ -1070,10 +1064,6 @@
 			toast.error($i18n.t('Failed to check background sync status'));
 			return;
 		}
-		if (!Number.isInteger(cadenceMinutes) || cadenceMinutes < 1) {
-			toast.error($i18n.t('Enter a positive sync interval.'));
-			return;
-		}
 		cloudActionBusy = true;
 		try {
 			let connection =
@@ -1096,22 +1086,36 @@
 				if (!result?.items.length) return;
 				scopes = result.items.map(googleDriveScope);
 			}
+			let started = 0;
 			for (const scope of scopes) {
-				const form = { connection_id: connection.id, scope, cadence_minutes: cadenceMinutes };
-				const content = await cloudSync.createSchedule(localStorage.token, knowledge.id, {
-					...form,
-					kind: 'content'
-				});
 				try {
-					await cloudSync.createSchedule(localStorage.token, knowledge.id, {
+					const form = { connection_id: connection.id, scope };
+					const content = await cloudSync.createSchedule(localStorage.token, knowledge.id, {
 						...form,
-						kind: 'acl_refresh'
+						kind: 'content'
 					});
+					try {
+						await cloudSync.createSchedule(localStorage.token, knowledge.id, {
+							...form,
+							kind: 'acl_refresh'
+						});
+					} catch (error) {
+						await cloudSync.deleteSchedule(localStorage.token, knowledge.id, content.id);
+						throw error;
+					}
+					await cloudSync.runSchedule(localStorage.token, knowledge.id, content.id);
+					started++;
 				} catch (error) {
-					await cloudSync.deleteSchedule(localStorage.token, knowledge.id, content.id);
+					if (
+						error instanceof cloudSync.CloudSyncError &&
+						error.status === 409 &&
+						error.code === 'schedule_exists'
+					) {
+						toast.info($i18n.t('That folder is already being synced.'));
+						continue;
+					}
 					throw error;
 				}
-				await cloudSync.runSchedule(localStorage.token, knowledge.id, content.id);
 			}
 			await refreshCloudSync();
 			repollCloudSyncSoon();
@@ -1119,7 +1123,7 @@
 			const url = new URL(window.location.href);
 			url.searchParams.delete(provider.startSyncParam);
 			history.replaceState({}, '', url.toString());
-			toast.success($i18n.t('{{label}} sync started', { label: provider.label }));
+			if (started) toast.success($i18n.t('{{label}} sync started', { label: provider.label }));
 		} catch (error) {
 			reportCloudError(error);
 			await refreshCloudSync().catch(() => {
@@ -1143,9 +1147,24 @@
 			};
 			for (const schedule of targets)
 				await actions[action](localStorage.token, knowledge.id, schedule.id);
+			repollCloudSyncSoon();
 			await refreshCloudSync();
 		} catch (error) {
-			reportCloudError(error);
+			if (
+				action === 'run' &&
+				error instanceof cloudSync.CloudSyncError &&
+				error.status === 429 &&
+				error.code === 'run_too_soon'
+			)
+				toast.info($i18n.t('Sync was started recently. Try again in a moment.'));
+			else if (
+				action === 'run' &&
+				error instanceof cloudSync.CloudSyncError &&
+				error.status === 409 &&
+				error.code === 'run_active'
+			)
+				toast.info($i18n.t('A sync is already running.'));
+			else reportCloudError(error);
 		} finally {
 			cloudActionBusy = false;
 		}

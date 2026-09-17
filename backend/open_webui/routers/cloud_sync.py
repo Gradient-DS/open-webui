@@ -35,7 +35,7 @@ class ScheduleForm(BaseModel):
     connection_id: str = Field(min_length=1, max_length=256)
     kind: Literal['content', 'acl_refresh']
     scope: dict[str, JsonValue]
-    cadence_minutes: int = Field(gt=0)
+    cadence_minutes: int | None = Field(default=None, gt=0)
 
 
 @router.post('/connections')
@@ -81,7 +81,7 @@ async def connect_done(
 
 @router.post('/knowledge/{knowledge_id}/schedules')
 async def create_schedule(knowledge_id: str, body: ScheduleForm, sync=Depends(cloud_sync)):
-    return await sync.create_schedule(knowledge_id, body.model_dump())
+    return await sync.create_schedule(knowledge_id, body.model_dump(exclude_none=True))
 
 
 @router.delete('/knowledge/{knowledge_id}/schedules/{schedule_id}', status_code=204)

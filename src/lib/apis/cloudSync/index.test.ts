@@ -31,20 +31,23 @@ describe('cloud-sync thin router', () => {
 		);
 	});
 
-	it('registers scope and cadence on the knowledge route without a provider token', async () => {
-		const fetch = respond({ id: 's' });
-		const form: cloudSync.ScheduleForm = {
-			connection_id: 'c',
-			kind: 'content',
-			cadence_minutes: 60,
-			scope: { drive_id: 'd', item_id: 'folder', include_descendants: true, single_file: false }
-		};
-		await cloudSync.createSchedule(token, 'kb/one', form);
-		expect(fetch).toHaveBeenCalledWith(
-			'/api/v1/cloud-sync/knowledge/kb%2Fone/schedules',
-			expect.objectContaining({ method: 'POST', body: JSON.stringify(form) })
-		);
-	});
+	it.each([undefined, 60])(
+		'registers scope with optional cadence %s and no provider token',
+		async (cadence) => {
+			const fetch = respond({ id: 's' });
+			const form: cloudSync.ScheduleForm = {
+				connection_id: 'c',
+				kind: 'content',
+				...(cadence === undefined ? {} : { cadence_minutes: cadence }),
+				scope: { drive_id: 'd', item_id: 'folder', include_descendants: true, single_file: false }
+			};
+			await cloudSync.createSchedule(token, 'kb/one', form);
+			expect(fetch).toHaveBeenCalledWith(
+				'/api/v1/cloud-sync/knowledge/kb%2Fone/schedules',
+				expect.objectContaining({ method: 'POST', body: JSON.stringify(form) })
+			);
+		}
+	);
 
 	it('reads connection and schedule lifecycle including run state', async () => {
 		const result = {
@@ -95,6 +98,9 @@ describe('cloud-sync thin router', () => {
 		[403, 'policy_forbids'],
 		[404, 'connection_not_found'],
 		[409, 'connection_pending'],
+		[409, 'schedule_exists'],
+		[409, 'run_active'],
+		[429, 'run_too_soon'],
 		[422, 'invalid_field']
 	])('preserves a %i problem code and constraint', async (status, code) => {
 		respond({ detail: { code, detail: 'Refused', constraint: 'provider' } }, Number(status));
@@ -103,6 +109,15 @@ describe('cloud-sync thin router', () => {
 			code,
 			message: 'Refused',
 			constraint: 'provider'
+		});
+	});
+
+	it('preserves an unwrapped soev problem code', async () => {
+		respond({ code: 'run_too_soon', detail: 'Try later' }, 429);
+		await expect(cloudSync.runSchedule(token, 'kb', 's')).rejects.toMatchObject({
+			status: 429,
+			code: 'run_too_soon',
+			message: 'Try later'
 		});
 	});
 

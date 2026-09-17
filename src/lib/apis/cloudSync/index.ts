@@ -20,7 +20,7 @@ export interface ScheduleForm {
 	connection_id: string;
 	kind: ScheduleKind;
 	scope: Record<string, string | boolean | null>;
-	cadence_minutes: number;
+	cadence_minutes?: number;
 }
 
 export type RunOutcome = 'succeeded' | 'partial' | 'failed' | 'cancelled';
@@ -71,7 +71,7 @@ async function request<T>(token: string, path: string, method = 'GET', body?: un
 	});
 	if (!response.ok) {
 		const problem = await response.json().catch(() => null);
-		const detail = problem?.detail;
+		const detail = typeof problem?.detail === 'object' ? problem.detail : problem;
 		throw new CloudSyncError(
 			response.status,
 			typeof detail?.code === 'string' ? detail.code : 'request_failed',

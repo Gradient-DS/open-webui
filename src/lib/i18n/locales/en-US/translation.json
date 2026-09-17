@@ -3838,5 +3838,8 @@
   "Last synced {{time}} · {{landed}} documents": "Last synced {{time}} · {{landed}} documents",
   "{{failed}} failed": "{{failed}} failed",
   "Access sync: {{status}}": "Access sync: {{status}}",
-  "Not synced yet": "Not synced yet"
+  "Not synced yet": "Not synced yet",
+  "Sync was started recently. Try again in a moment.": "Sync was started recently. Try again in a moment.",
+  "A sync is already running.": "A sync is already running.",
+  "That folder is already being synced.": "That folder is already being synced."
 }
