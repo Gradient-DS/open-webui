@@ -356,12 +356,12 @@ class SoevKnowledgeTable:
         ids = list(await self._members(knowledge_id))
         return await Files.get_file_metadatas_by_ids(ids) if ids else []
 
-    async def get_file_counts_by_knowledge_ids(self, knowledge_ids, db=None):
+    async def get_file_counts_by_knowledge_ids(self, knowledge_ids, db=None, *, user_id: str | None = None):
         result = {}
         for key in knowledge_ids:
-            row = await self._collection(key)
+            row = await self._collection(key, user_id=user_id)
             if row:
-                count = row['document_count'] + len(await self._unlanded(key))
+                count = row['document_count'] + len(await self._unlanded(key, user_id=user_id))
                 if count:
                     result[key] = count
         return result

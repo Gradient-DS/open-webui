@@ -1195,3 +1195,13 @@ async def test_rollups_count_catalog_only_rows(env):
         'child_count': 2,
         'status_counts': {'completed': 1, 'failed': 1, 'pending': 0, 'unknown': 0},
     }
+
+
+@pytest.mark.asyncio
+async def test_file_counts_respect_mirrored_document_access(env):
+    for index in range(12):
+        env.api.add_document('kb', f'cloud-{index}', principals=['owui:user:alice'])
+    assert await env.store.get_file_counts_by_knowledge_ids(['kb'], user_id='alice') == {'kb': 12}
+    assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == {}
+    listing = await env.store.search_knowledge_bases('alice', {})
+    assert listing.items[0].file_count == 12

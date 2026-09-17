@@ -217,6 +217,8 @@ async def get_knowledge_bases(
 
     # Batch-fetch writable knowledge IDs in a single query instead of N has_access calls
     knowledge_base_ids = [knowledge_base.id for knowledge_base in result.items]
+    # [Gradient] Catalog counts must use the requesting user's document visibility.
+    file_counts = await Knowledges.get_file_counts_by_knowledge_ids(knowledge_base_ids, db=db, user_id=user.id)
     writable_knowledge_base_ids = await AccessGrants.get_accessible_resource_ids(
         user_id=user.id,
         resource_type='knowledge',
@@ -229,7 +231,8 @@ async def get_knowledge_bases(
     return KnowledgeAccessListResponse(
         items=[
             KnowledgeAccessResponse(
-                **knowledge_base.model_dump(),
+                **knowledge_base.model_dump(exclude={'file_count'}),
+                file_count=file_counts.get(knowledge_base.id, 0),  # [Gradient] Caller-scoped count.
                 write_access=(
                     user.id == knowledge_base.user_id
                     or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
@@ -285,6 +288,8 @@ async def search_knowledge_bases(
 
     # Batch-fetch writable knowledge IDs in a single query instead of N has_access calls
     knowledge_base_ids = [knowledge_base.id for knowledge_base in result.items]
+    # [Gradient] Catalog counts must use the requesting user's document visibility.
+    file_counts = await Knowledges.get_file_counts_by_knowledge_ids(knowledge_base_ids, db=db, user_id=user.id)
     writable_knowledge_base_ids = await AccessGrants.get_accessible_resource_ids(
         user_id=user.id,
         resource_type='knowledge',
@@ -297,7 +302,8 @@ async def search_knowledge_bases(
     return KnowledgeAccessListResponse(
         items=[
             KnowledgeAccessResponse(
-                **knowledge_base.model_dump(),
+                **knowledge_base.model_dump(exclude={'file_count'}),
+                file_count=file_counts.get(knowledge_base.id, 0),  # [Gradient] Caller-scoped count.
                 write_access=(
                     user.id == knowledge_base.user_id
                     or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)

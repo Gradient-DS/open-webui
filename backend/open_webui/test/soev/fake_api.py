@@ -159,7 +159,10 @@ class FakeSoevApi:
     def _view(self, row, subject):
         return {
             **copy.deepcopy(row),
-            'document_count': sum(key == row['key'] for key, _ in self.documents),
+            'document_count': sum(
+                key == row['key'] and self._readable(document, subject or self.credentials['test-runtime-key'])
+                for (key, _), document in self.documents.items()
+            ),
             'caller_may_write': bool(self._closure(subject).intersection(row['writers'])) if subject else None,
         }
 

@@ -890,7 +890,11 @@ class KnowledgeTable:
             return {row[0] for row in result.all()}
 
     async def get_file_counts_by_knowledge_ids(
-        self, knowledge_ids: list[str], db: Optional[AsyncSession] = None
+        self,
+        knowledge_ids: list[str],
+        db: Optional[AsyncSession] = None,
+        *,
+        user_id: str | None = None,  # [Gradient] Match the subject-scoped soev table.
     ) -> dict[str, int]:
         """Return ``{knowledge_id: file_count}`` for the given KBs in one grouped query.
 

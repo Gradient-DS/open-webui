@@ -244,7 +244,10 @@ async def migrate(*, dry_run=False, db=None):
     users = (await Users.get_users(db=db))['users']
     rows = await _knowledge_rows(table, db)
     keys = [kb.id for kb in rows]
-    counts = await table.get_file_counts_by_knowledge_ids(keys, db=db)
+    counts = {}
+    for owner_id in sorted({kb.user_id for kb in rows}):
+        owner_keys = [kb.id for kb in rows if kb.user_id == owner_id]
+        counts.update(await table.get_file_counts_by_knowledge_ids(owner_keys, db=db, user_id=owner_id))
     file_counts = {key: counts.get(key, 0) for key in keys}
     paths = await _folder_paths(table, keys, db)
     client = identity.build_client()
