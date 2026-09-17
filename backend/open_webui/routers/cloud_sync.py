@@ -39,8 +39,8 @@ class ScheduleForm(BaseModel):
 
 
 @router.post('/connections')
-async def create_connection(body: ConnectionForm, sync=Depends(cloud_sync)):
-    return await sync.create_connection(body.provider)
+async def create_connection(body: ConnectionForm, sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+    return await sync.create_connection(body.provider, owner_email=user.email)
 
 
 @router.get('/connections')
@@ -60,8 +60,10 @@ async def revoke_connection(connection_id: str, sync=Depends(cloud_sync)):
 
 
 @router.post('/connections/{connection_id}/authorize')
-async def authorize_connection(connection_id: str, sync=Depends(cloud_sync)):
-    return await sync.authorize(connection_id)
+async def authorize_connection(connection_id: str, sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+    connection = await sync.connection(connection_id)
+    owner_email = user.email if connection['source_kind'] == 'google_drive' else None
+    return await sync.authorize(connection_id, owner_email=owner_email)
 
 
 @router.get('/connect/done', response_class=HTMLResponse)

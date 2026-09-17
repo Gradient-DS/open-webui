@@ -23,14 +23,15 @@ class CloudSync:
     async def connection(self, connection_id: str) -> dict:
         return await self._get(f'/v1/connections/{quote(connection_id, safe="")}')
 
-    async def authorize(self, connection_id: str) -> dict:
-        return await self._send('POST', f'/v1/connections/{quote(connection_id, safe="")}/authorize')
+    async def authorize(self, connection_id: str, owner_email: str | None = None) -> dict:
+        body = {'owner_email': owner_email} if owner_email is not None else None
+        return await self._send('POST', f'/v1/connections/{quote(connection_id, safe="")}/authorize', body)
 
-    async def create_connection(self, provider: str) -> dict:
+    async def create_connection(self, provider: str, owner_email: str | None = None) -> dict:
         connection = await self._send(
             'POST', '/v1/connections', {'source_kind': provider, 'credential_kind': 'user_oauth'}
         )
-        authorization = await self.authorize(connection['id'])
+        authorization = await self.authorize(connection['id'], owner_email if provider == 'google_drive' else None)
         return {'connection_id': connection['id'], 'authorize_url': authorization['authorize_url']}
 
     async def revoke_connection(self, connection_id: str) -> None:

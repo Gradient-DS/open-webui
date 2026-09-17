@@ -37,7 +37,7 @@ def api(monkeypatch):
     monkeypatch.setattr(cloud_sync.identity, 'ensure_link', link)
     app = FastAPI()
     app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync')
-    user = SimpleNamespace(id='alice', role='user')
+    user = SimpleNamespace(id='alice', role='user', email='alice@example.com')
     app.dependency_overrides[cloud_sync.get_verified_user] = lambda: user
     with TestClient(app) as browser:
         yield SimpleNamespace(browser=browser, app=app, requests=requests, responses=responses, refs=refs, link=link)
@@ -48,7 +48,8 @@ def response(body, status=200):
     return httpx.Response(status, json=body)
 
 
-def test_create_connection_returns_the_authorize_url(api):
+@pytest.mark.parametrize('provider', ['onedrive', 'google_drive'])
+def test_create_connection_returns_the_authorize_url(api, provider):
     """Creating a subject connection starts consent through a separate asserted call."""
     api.responses.extend(
         [
@@ -56,10 +57,14 @@ def test_create_connection_returns_the_authorize_url(api):
             response({'authorize_url': 'https://provider.invalid/consent', 'expires_at': '2026-09-17T12:00:00Z'}),
         ]
     )
-    result = api.browser.post('/api/v1/cloud-sync/connections', json={'provider': 'onedrive'})
+    result = api.browser.post('/api/v1/cloud-sync/connections', json={'provider': provider})
     assert result.status_code == 200
     assert result.json() == {'connection_id': 'connection-1', 'authorize_url': 'https://provider.invalid/consent'}
-    assert json.loads(api.requests[0].content) == {'source_kind': 'onedrive', 'credential_kind': 'user_oauth'}
+    assert json.loads(api.requests[0].content) == {'source_kind': provider, 'credential_kind': 'user_oauth'}
+    if provider == 'google_drive':
+        assert json.loads(api.requests[1].content) == {'owner_email': 'alice@example.com'}
+    else:
+        assert not api.requests[1].content
     assert [(request.method, request.url.path) for request in api.requests] == [
         ('POST', '/v1/connections'),
         ('POST', '/v1/connections/connection-1/authorize'),
@@ -200,6 +205,7 @@ def test_every_call_carries_the_users_assertion(api, operation):
         result = api.browser.delete(prefix + '/connections/c')
         assert result.status_code == 204
     elif operation == 'authorize':
+        api.responses.append(response({'id': 'c', 'source_kind': 'onedrive'}))
         api.responses.append(response({'authorize_url': 'https://provider.invalid/fresh'}))
         result = api.browser.post(prefix + '/connections/c/authorize')
         assert result.json()['authorize_url'].endswith('/fresh')
@@ -232,6 +238,24 @@ def assert_assertions(requests):
         assert request.headers['X-Soev-Subject'] == f'invalid-test-assertion-{index}'
         if request.method != 'GET':
             assert request.headers['Idempotency-Key']
+
+
+@pytest.mark.parametrize('provider', ['google_drive', 'onedrive'])
+def test_reauthorize_sends_owner_email_only_for_google(api, provider):
+    api.responses.extend(
+        [
+            response({'id': 'c', 'source_kind': provider}),
+            response({'authorize_url': 'https://soev.invalid/oauth/start/attempt'}),
+        ]
+    )
+    result = api.browser.post('/api/v1/cloud-sync/connections/c/authorize')
+    assert result.status_code == 200
+    if provider == 'google_drive':
+        assert json.loads(api.requests[-1].content) == {'owner_email': 'alice@example.com'}
+    else:
+        assert not api.requests[-1].content
+    assert api.refs == ['owui:user:alice', 'owui:user:alice']
+    assert_assertions(api.requests)
 
 
 @pytest.mark.parametrize(
