@@ -20,12 +20,21 @@ from open_webui.models.knowledge import (
 )
 
 
-def knowledge_of(collection: dict, *, service_principal: str) -> KnowledgeModel:
+def types_from_schedules(schedules: list[dict]) -> dict[str, str]:
+    types = {}
+    # If providers conflict for a collection, the first eligible schedule by id wins.
+    for schedule in sorted(schedules, key=lambda row: row['id']):
+        if schedule['kind'] == 'content' and schedule['lifecycle'] != 'revoked':
+            types.setdefault(schedule['collection_key'], schedule['source_kind'])
+    return types
+
+
+def knowledge_of(collection: dict, *, service_principal: str, types: dict[str, str] | None = None) -> KnowledgeModel:
     creator = collection.get('created_by') or ''
     return KnowledgeModel(
         id=collection['key'],
         user_id=creator.removeprefix('owui:user:') if creator.startswith('owui:user:') else '',
-        type='local',
+        type=(types or {}).get(collection['key'], 'local'),
         name=collection['name'],
         description=collection['description'] or '',
         meta={},
@@ -132,9 +141,11 @@ def directory_model(key: str, path: tuple[str, ...], *, created_at: int, owner_i
     )
 
 
-def knowledge_user_of(collection: dict, *, service_principal: str, user: dict | None = None) -> KnowledgeUserModel:
+def knowledge_user_of(
+    collection: dict, *, service_principal: str, user: dict | None = None, types: dict[str, str] | None = None
+) -> KnowledgeUserModel:
     return KnowledgeUserModel(
-        **knowledge_of(collection, service_principal=service_principal).model_dump(),
+        **knowledge_of(collection, service_principal=service_principal, types=types).model_dump(),
         user=user,
         file_count=collection['document_count'],
     )

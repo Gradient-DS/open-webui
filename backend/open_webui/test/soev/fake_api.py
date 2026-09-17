@@ -31,6 +31,7 @@ class FakeSoevApi:
         self.collections, self.documents, self.folders = {}, {}, {}
         self.inherited_access = set()
         self.jobs, self.job_owners, self.job_effects = {}, {}, {}
+        self.schedules, self.schedule_owners = {}, {}
         self.uploads = {}
         self.links, self.groups, self.replays, self.creation_bodies = {}, {}, {}, {}
         self.seen_jtis = set()
@@ -183,17 +184,12 @@ class FakeSoevApi:
             return self._identity(request.method, parts, body)
         if parts[:2] == ['v1', 'jobs']:
             return self._jobs(request, parts, body, credential, subject)
+        if parts == ['v1', 'schedules'] and request.method == 'GET':
+            return self._schedules(request, credential, subject)
         if parts == ['v1', 'documents'] and request.method == 'GET':
             return self._lookup_documents(request, credential, subject)
         if parts == ['v1', 'collections']:
-            if request.method == 'POST':
-                return self._create(body, subject)
-            rows = [
-                self._view(row, subject)
-                for _, row in sorted(self.collections.items())
-                if self._readable(row, subject or self.credentials[credential])
-            ]
-            return self._page(rows, request)
+            return self._collections(request, body, credential, subject)
         if parts[:2] != ['v1', 'collections'] or len(parts) < 3:
             raise Problem(404, 'route_not_found')
         key = parts[2]
@@ -206,6 +202,25 @@ class FakeSoevApi:
         if parts[3] == 'folders':
             return self._folders(request, parts, body, credential, subject)
         raise Problem(404, 'route_not_found')
+
+    def _collections(self, request, body, credential, subject):
+        if request.method == 'POST':
+            return self._create(body, subject)
+        rows = [
+            self._view(row, subject)
+            for _, row in sorted(self.collections.items())
+            if self._readable(row, subject or self.credentials[credential])
+        ]
+        return self._page(rows, request)
+
+    def _schedules(self, request, credential, subject):
+        self._require(credential, 'connect' if subject else 'mint')
+        owner = subject or self.credentials[credential]
+        rows = [row for key, row in self.schedules.items() if self.schedule_owners[key] == owner]
+        for field in ('collection_key', 'kind'):
+            if field in request.url.params:
+                rows = [row for row in rows if row[field] == request.url.params[field]]
+        return self._page(rows, request)
 
     def _lookup_documents(self, request, credential, subject):
         source_id = request.url.params.get('source_id')

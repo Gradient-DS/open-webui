@@ -220,7 +220,7 @@ async def test_get_knowledge_by_id_inside_a_request_runs_as_the_acting_user(env)
     token = acting._acting_ref.set('owui:user:alice')
     try:
         assert (await env.store.get_knowledge_by_id('kb')).id == 'kb'
-        request = env.api.requests[-1]
+        request = env.api.requests[0]
         assert request.method == 'GET' and request.url.path == '/v1/collections/kb'
         encoded = request.headers['X-Soev-Subject'].split('.')[1]
         assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
@@ -249,6 +249,107 @@ async def test_search_knowledge_bases_reads_under_the_users_assertion(env):
     assert (await env.store.search_knowledge_bases('alice', {'query': 'research'})).total == 1
     assert (await env.store.search_knowledge_bases('alice', {'view_option': 'shared'})).total == 0
     assert (await env.store.search_knowledge_bases('alice', {'type': 'remote'})).total == 0
+
+
+def schedule(env, id, key, provider, *, kind='content', lifecycle='enabled', owner='alice'):
+    env.api.schedules[id] = {
+        'id': id,
+        'connection_id': 'connection-' + id,
+        'collection_key': key,
+        'source_kind': provider,
+        'kind': kind,
+        'scope': {},
+        'cadence_minutes': 60,
+        'lifecycle': lifecycle,
+        'last_run_at': None,
+    }
+    env.api.schedule_owners[id] = f'owui:user:{owner}'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
+@pytest.mark.parametrize('lifecycle', ['enabled', 'suspended', 'suspended:reauth', 'expired'])
+async def test_type_projects_the_schedules_provider(env, monkeypatch, provider, lifecycle):
+    """Content schedules determine types and filters, with conflicts resolved by id across pages."""
+    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:alice')
+    await seed(env, 'local')
+    schedule(env, 'z-conflict', 'kb', 'different-provider')
+    schedule(env, 'a-content', 'kb', provider, lifecycle=lifecycle)
+    schedule(env, '0-acl', 'kb', 'acl-provider', kind='acl_refresh')
+    schedule(env, '0-revoked', 'kb', 'revoked-provider', lifecycle='revoked')
+    assert (await env.store.get_knowledge_by_id('kb')).type == provider
+    assert (await env.store.get_knowledge_by_id_unfiltered('kb')).type == provider
+    assert (await env.store.get_knowledge_by_id_and_user_id('kb', 'alice')).type == provider
+    result = await env.store.search_knowledge_bases('alice', {'type': provider}, limit=1)
+    assert [(row.id, row.type) for row in result.items] == [('kb', provider)]
+    assert result.total == 1
+    assert [row.id for row in await env.store.get_knowledge_bases_by_type(provider)] == ['kb']
+    assert [row.id for row in await env.store.get_knowledge_bases_by_type('local')] == ['local']
+    assert [row.id for row in (await env.store.search_knowledge_bases('alice', {'type': 'local'})).items] == ['local']
+    form = env.models.KnowledgeForm(name='Renamed', description='Notes')
+    assert (await env.store.update_knowledge_by_id('kb', form)).type == provider
+    env.api.add_document('kb', 'cloud-document')
+    assert (await env.store.get_knowledge_by_file_id('cloud-document')).type == provider
+    assert await env.files.Files.get_file_by_id('cloud-document') is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('ineligible', ['absent', 'acl_refresh', 'revoked', 'other_collection', 'other_owner'])
+async def test_type_is_local_without_a_schedule(env, ineligible):
+    """Only the caller's non-revoked content schedule for this collection changes its local type."""
+    if ineligible != 'absent':
+        schedule(
+            env,
+            'ignored',
+            'other' if ineligible == 'other_collection' else 'kb',
+            'onedrive',
+            kind='acl_refresh' if ineligible == 'acl_refresh' else 'content',
+            lifecycle='revoked' if ineligible == 'revoked' else 'enabled',
+            owner='bob' if ineligible == 'other_owner' else 'alice',
+        )
+    result = await env.store.search_knowledge_bases('alice', {})
+    assert [(row.id, row.type) for row in result.items] == [('kb', 'local')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('page_size', [1, 200])
+@pytest.mark.parametrize(
+    ('method', 'args', 'explicit_user'),
+    [
+        ('get_knowledge_bases', (), False),
+        ('search_knowledge_bases', ('alice', {}), True),
+        ('get_knowledge_bases_by_type', ('onedrive',), False),
+        ('get_knowledge_bases_by_user_id', ('alice', 'read'), True),
+        ('get_knowledge_items_by_user_id', ('alice',), True),
+        ('get_knowledges_by_file_id', ('shared-document',), False),
+    ],
+)
+async def test_a_listing_reads_schedules_once(env, monkeypatch, method, args, explicit_user, page_size):
+    """Several knowledge bases share one caller-scoped schedules traversal and never read connections."""
+    for key in ('second', 'third'):
+        await seed(env, key)
+    for key in ('kb', 'second', 'third'):
+        schedule(env, key, key, 'onedrive')
+        env.api.add_document(key, 'shared-document')
+    await env.identity.ensure_link('owui:user:bob', env.client)
+    schedule(env, 'foreign', 'kb', 'confluence', owner='bob')
+    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:bob' if explicit_user else 'owui:user:alice')
+    env.api.capabilities['test-runtime-key'] = {'connect'}
+    env.api.page_size = page_size
+    env.api.requests.clear()
+    result = await getattr(env.store, method)(*args)
+    rows = result.items if method == 'search_knowledge_bases' else result
+    assert {(row.id, row.type) for row in rows} == {(key, 'onedrive') for key in ('kb', 'second', 'third')}
+    requests = [request for request in env.api.requests if request.url.path == '/v1/schedules']
+    assert len(requests) == (1 if page_size == 200 else 3)
+    assert dict(requests[0].url.params) == {}
+    if page_size == 1:
+        assert [dict(request.url.params) for request in requests[1:]] == [{'cursor': '1'}, {'cursor': '2'}]
+    for request in requests:
+        assert request.method == 'GET'
+        encoded = request.headers['X-Soev-Subject'].split('.')[1]
+        assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
+    assert not any(request.url.path.startswith('/v1/connections') for request in env.api.requests)
 
 
 @pytest.mark.asyncio
