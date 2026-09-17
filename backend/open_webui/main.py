@@ -205,7 +205,6 @@ from open_webui.routers import (
     chats,
     configs,
     cloud_sync,
-    confluence_sync,
     data_warnings,
     discovery,
     evaluations,
@@ -214,7 +213,6 @@ from open_webui.routers import (
     files,
     folders,
     functions,
-    google_drive_sync,
     groups,
     images,
     integrations,
@@ -226,7 +224,6 @@ from open_webui.routers import (
     notes,
     notifications,
     ollama,
-    onedrive_sync,
     openai,
     pipelines,
     prompts,
@@ -234,7 +231,6 @@ from open_webui.routers import (
     scim,
     skill_files,
     skills,
-    sync_daemon,
     tasks,
     terminals,
     tools,
@@ -1124,25 +1120,7 @@ app.include_router(calendar.router, prefix='/api/v1/calendars', tags=['calendars
 if ENABLE_SCIM:
     app.include_router(scim.router, prefix='/api/v1/scim/v2', tags=['scim'])
 
-# [Gradient] OneDrive / Google Drive Sync APIs for collection synchronization.
-# Mounted unconditionally — endpoints are admin/user-gated and no-op without
-# config. The routers must always be available so these providers can be
-# enabled at runtime via the Cloud Sync admin tab without a pod restart.
 app.include_router(cloud_sync.router, prefix='/api/v1/cloud-sync', tags=['cloud-sync'])
-app.include_router(onedrive_sync.router, prefix='/api/v1/onedrive', tags=['onedrive'])
-app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags=['google-drive'])
-
-# [Gradient] Confluence Sync API for collection synchronization.
-# Mounted unconditionally — endpoints are admin/user-gated and no-op without
-# config. The router must always be available so Confluence can be enabled at
-# runtime via the Cloud Sync admin tab without a pod restart.
-app.include_router(confluence_sync.router, prefix='/api/v1/confluence', tags=['confluence'])
-
-# [Gradient] Sync-daemon protocol API (token broker, config read, run summary).
-# Mounted unconditionally — endpoints self-gate on the sync_daemon.enabled
-# config flag (403 when off) so the daemon can be enabled per tenant at
-# runtime without a pod restart.
-app.include_router(sync_daemon.router, prefix='/api/v1/sync-daemon', tags=['sync-daemon'])
 
 # [Gradient] Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
@@ -2784,24 +2762,14 @@ async def get_app_config(request: Request):
         'evaluation.feedback.conversation.header',
         'evaluation.feedback.conversation.placeholder',
         'feedback_report.enable',
-        'google_drive.enable_sync',
         'google_drive.client_id',
         'google_drive.api_key',
-        'oauth.google.client_secret',
-        'oauth.microsoft.client_secret',
         'onedrive.enable_personal',
         'onedrive.enable_business',
-        'onedrive.enable_sync',
         'onedrive.client_id_personal',
         'onedrive.client_id_business',
         'onedrive.sharepoint_url',
         'onedrive.sharepoint_tenant_id',
-        'confluence.enable',
-        'confluence.enable_sync',
-        'confluence.auth_mode',
-        'confluence.kb_mode',
-        'confluence.client_id',
-        'confluence.client_secret',
         'agent_proxy.enable',
         'agent_api.picker_default_slug',
         'features.enable_data_warnings',
@@ -2815,27 +2783,6 @@ async def get_app_config(request: Request):
         'ui.soev_login_footer',
         'integrations.providers',
     )
-
-    # [Gradient] Coupling ``(basic|scoped) ⇒ shared``: the service-account auth
-    # modes have no per-user OAuth tokens, so they can only drive the pre-synced
-    # shared KB. Coerce a stored ``service-mode + per_user`` state to shared at
-    # read time so an already-inconsistent config is corrected without requiring
-    # a re-save.
-    from open_webui.services.confluence.basic_auth import is_service_mode
-
-    _confluence_kb_mode = (
-        'shared' if is_service_mode(config.get('confluence.auth_mode')) else config.get('confluence.kb_mode')
-    )
-
-    # [Gradient] Shared Confluence KB id — surfaced so the chat '+' menu can
-    # attach the shared, public-read KB in one click (shared mode only). Empty
-    # string when not in shared mode or the KB has not been provisioned yet.
-    confluence_shared_kb_id = ''
-    if _confluence_kb_mode == 'shared':
-        from open_webui.routers.confluence_sync import _find_shared_kb
-
-        _shared_kb = await _find_shared_kb()
-        confluence_shared_kb_id = _shared_kb.id if _shared_kb else ''
 
     return {
         **({'onboarding': True} if onboarding else {}),
@@ -2960,42 +2907,15 @@ async def get_app_config(request: Request):
                     'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,  # [Gradient]
                     'enable_docx_export': ENABLE_DOCX_EXPORT,  # [Gradient]
                     'enable_google_drive_integration': config.get('google_drive.enable'),
-                    **(
-                        {
-                            'enable_google_drive_sync': config.get('google_drive.enable_sync'),  # [Gradient]
-                        }
-                        if config.get('google_drive.enable')
-                        else {}
-                    ),
                     'enable_onedrive_integration': config.get('onedrive.enable'),
                     'enable_memories': config.get('memories.enable'),
                     **(
                         {
                             'enable_onedrive_personal': config.get('onedrive.enable_personal'),
                             'enable_onedrive_business': config.get('onedrive.enable_business'),
-                            'enable_onedrive_sync': config.get('onedrive.enable_sync'),  # [Gradient]
                         }
                         if config.get('onedrive.enable')
                         else {}
-                    ),
-                    # [Gradient] Confluence integration
-                    'enable_confluence_integration': config.get('confluence.enable'),
-                    **(
-                        {
-                            'enable_confluence_sync': config.get('confluence.enable_sync'),
-                        }
-                        if config.get('confluence.enable')
-                        else {}
-                    ),
-                    # [Gradient] KB sharing mode — drives whether non-admins see Confluence
-                    # self-service create entry points (hidden in 'shared' mode).
-                    # Coerced via the ``basic ⇒ shared`` coupling above.
-                    'confluence_kb_mode': _confluence_kb_mode,
-                    # [Gradient] Shared-KB id for the chat '+' menu one-click attach.
-                    'confluence_shared_kb_id': confluence_shared_kb_id,
-                    # [Gradient] Whether admin configured OAuth client creds — gates per-user (OAuth) entry points.
-                    'confluence_oauth_configured': bool(
-                        config.get('confluence.client_id') and config.get('confluence.client_secret')
                     ),
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
                     'enable_agent_proxy': config.get('agent_proxy.enable'),  # [Gradient]
@@ -3066,21 +2986,12 @@ async def get_app_config(request: Request):
                 'google_drive': {
                     'client_id': config.get('google_drive.client_id'),
                     'api_key': config.get('google_drive.api_key'),
-                    # [Gradient] Whether server-side OAuth is configured.
-                    'has_client_secret': bool(config.get('oauth.google.client_secret')),
                 },
                 'onedrive': {
                     'client_id_personal': config.get('onedrive.client_id_personal'),
                     'client_id_business': config.get('onedrive.client_id_business'),
                     'sharepoint_url': config.get('onedrive.sharepoint_url'),
                     'sharepoint_tenant_id': config.get('onedrive.sharepoint_tenant_id'),
-                    # [Gradient] Whether server-side OAuth is configured.
-                    'has_client_secret': bool(config.get('oauth.microsoft.client_secret')),
-                },
-                # [Gradient] Confluence OAuth client info for the sync flow.
-                'confluence': {
-                    'client_id': config.get('confluence.client_id'),
-                    'has_client_secret': bool(config.get('confluence.client_secret')),
                 },
                 'ui': {
                     'default_interface_settings': config.get('ui.default_interface_settings'),
