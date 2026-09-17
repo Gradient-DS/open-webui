@@ -60,7 +60,12 @@
 	import { createKbSelection } from './KnowledgeBase/selection';
 	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
 	import { buildSyncToast } from './utils/syncToast';
-	import { oneDriveScope, googleDriveScope, connectResult } from './utils/cloudSync';
+	import {
+		oneDriveScope,
+		googleDriveScope,
+		connectResult,
+		reconnectConnections
+	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
@@ -115,6 +120,7 @@
 	$: isSyncBusy =
 		cloudActionBusy ||
 		schedules.some((schedule) => ['queued', 'running'].includes(schedule.last_run?.status ?? ''));
+	$: reconnectNeeded = reconnectConnections(schedules, connecting);
 	// Single derived guard for all structure-write affordances (decision 5) —
 	// local/untyped KBs with write access only. Cloud KBs browse the
 	// sync-written directory structure read-only; push KBs are browse-only.
@@ -1050,6 +1056,16 @@
 		});
 	};
 
+	const reconnect = async (connection: Connection) => {
+		if (cloudActionBusy) return;
+		cloudActionBusy = true;
+		try {
+			await authorizeBackgroundSync(CLOUD_PROVIDERS[connection.source_kind], connection.id);
+		} finally {
+			cloudActionBusy = false;
+		}
+	};
+
 	const cloudSyncHandler = async (provider: CloudSyncProvider) => {
 		if (!knowledge || cloudActionBusy) return;
 		if (!Number.isInteger(cadenceMinutes) || cadenceMinutes < 1) {
@@ -1937,6 +1953,25 @@
 					class="mx-4 mb-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700"
 					aria-label={$i18n.t('Cloud Sync')}
 				>
+					{#each reconnectNeeded as connection (connection.id)}
+						<div
+							class="mb-2 flex items-center justify-between gap-3 rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950"
+							role="status"
+						>
+							<span
+								>{$i18n.t('Reconnect {{provider}} to resume syncing.', {
+									provider: CLOUD_PROVIDERS[connection.source_kind].label
+								})}</span
+							>
+							{#if knowledge.write_access}
+								<button
+									class="font-medium underline"
+									disabled={cloudActionBusy}
+									on:click={() => reconnect(connection)}>{$i18n.t('Reconnect')}</button
+								>
+							{/if}
+						</div>
+					{/each}
 					{#if syncStatusError}
 						<p role="alert" class="text-sm text-red-500">
 							{$i18n.t('Failed to check background sync status')}
