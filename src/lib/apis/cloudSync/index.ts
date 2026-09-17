@@ -35,10 +35,12 @@ export interface SyncRun {
 	error_code?: string | null;
 	cancel_requested_at?: string | null;
 	counts?: Record<string, number>;
+	items?: { code?: string | null }[];
 	[key: string]: unknown;
 }
 
 export interface Schedule extends ScheduleForm {
+	last_error?: string | null;
 	id: string;
 	source_kind: string;
 	lifecycle: string;

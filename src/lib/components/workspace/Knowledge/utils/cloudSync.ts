@@ -50,7 +50,8 @@ export function reconnectConnections(
 	return [...connections.values()].filter(
 		(connection) =>
 			['onedrive', 'google_drive'].includes(connection.source_kind) &&
-			['pending', 'suspended:reauth'].includes(connection.lifecycle)
+			(['pending', 'suspended:reauth'].includes(connection.lifecycle) ||
+				connection.last_error === 'owner_mismatch')
 	);
 }
 
@@ -144,7 +145,19 @@ export function sourceStatus(pair: SchedulePair) {
 		live: liveSchedules.length > 0,
 		landed: run?.counts?.landed ?? 0,
 		failed: run?.counts?.failed ?? 0,
-		errorCode: run?.error_code,
+		tooLarge:
+			run?.counts?.item_too_large ??
+			run?.items?.filter((item) => item.code === 'item_too_large').length ??
+			0,
+		errorCode:
+			schedule.last_error ??
+			pair.acl?.last_error ??
+			run?.error_code ??
+			pair.acl?.last_run?.error_code,
+		linkGrantsDropped: schedules.reduce(
+			(total, item) => total + (item.last_run?.counts?.link_grants_dropped ?? 0),
+			0
+		),
 		lastSynced: run?.finished_at ?? (run?.outcome ? run.started_at : null),
 		aclStatus:
 			pair.content && ['partial', 'failed'].includes(pair.acl?.last_run?.outcome ?? '')

@@ -7,6 +7,7 @@
 	import type { Connection, Schedule, ScheduleAction } from '$lib/apis/cloudSync';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { CLOUD_PROVIDERS, pairSchedules, sourceStatus } from '../utils/cloudSync';
+	import { syncErrorMessage } from './syncStatus';
 
 	dayjs.extend(relativeTime);
 	const i18n = getContext<Writable<I18n>>('i18n');
@@ -36,9 +37,15 @@
 			role="status"
 		>
 			<span
-				>{$i18n.t('Reconnect {{provider}} to resume syncing.', {
-					provider: CLOUD_PROVIDERS[connection.source_kind]?.label ?? connection.source_kind
-				})}</span
+				>{#if connection.last_error === 'owner_mismatch'}
+					{$i18n.t(
+						'The account you signed in with is not yours to connect; sign in with your own account.'
+					)}
+				{:else}
+					{$i18n.t('Reconnect {{provider}} to resume syncing.', {
+						provider: CLOUD_PROVIDERS[connection.source_kind]?.label ?? connection.source_kind
+					})}
+				{/if}</span
 			>
 			{#if writeAccess}
 				<button
@@ -78,9 +85,25 @@
 				{/if}
 				{#if !row.live && (row.failed > 0 || row.errorCode)}
 					<span class="text-amber-600">
-						{#if row.failed > 0}· {$i18n.t('{{failed}} failed', { failed: row.failed })}{/if}
-						{row.errorCode ?? ''}
+						{#if row.failed > 0}
+							· {#if row.tooLarge > 0}
+								{$i18n.t('{{failed}} failed ({{tooLarge}} too large)', {
+									failed: row.failed,
+									tooLarge: row.tooLarge
+								})}
+							{:else}
+								{$i18n.t('{{failed}} failed', { failed: row.failed })}
+							{/if}
+						{/if}
+						{$i18n.t(syncErrorMessage(row.errorCode), {
+							provider: CLOUD_PROVIDERS[row.schedule.source_kind]?.label ?? row.schedule.source_kind
+						})}
 					</span>
+				{/if}
+				{#if row.linkGrantsDropped > 0}
+					<p class="text-gray-500 dark:text-gray-400">
+						{$i18n.t('{{count}} link-only shares not mirrored', { count: row.linkGrantsDropped })}
+					</p>
 				{/if}
 				{#if row.aclStatus}
 					<p class="text-amber-600">

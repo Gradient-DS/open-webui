@@ -222,3 +222,76 @@ it.each([
 		).toEqual(expected);
 	}
 );
+
+it('keeps an owner mismatch visible even when the connection lifecycle is enabled', () => {
+	const connection: Connection = {
+		id: 'c',
+		source_kind: 'google_drive',
+		lifecycle: 'enabled',
+		last_error: 'owner_mismatch'
+	};
+	expect(reconnectConnections([{ connection } as Schedule], null)).toEqual([connection]);
+});
+
+it('surfaces schedule errors before stale run errors and includes ACL access failures', () => {
+	const content: Schedule = {
+		...scheduleFixture('content', 'content'),
+		last_error: 'writer_revoked',
+		last_run: {
+			id: 'run',
+			started_at: '2026-09-17T12:00:00Z',
+			outcome: 'failed',
+			error_code: 'old_error'
+		}
+	};
+	const acl: Schedule = {
+		...scheduleFixture('acl', 'acl_refresh'),
+		last_error: 'access_revoked'
+	};
+	expect(sourceStatus({ content, acl }).errorCode).toBe('writer_revoked');
+	expect(sourceStatus({ content: { ...content, last_error: null }, acl }).errorCode).toBe(
+		'access_revoked'
+	);
+	expect(sourceStatus({ acl }).errorCode).toBe('access_revoked');
+});
+
+it('collects link-only share counts from both schedules', () => {
+	const run = { id: 'run', started_at: '2026-09-17T12:00:00Z', outcome: 'succeeded' as const };
+	expect(
+		sourceStatus({
+			content: {
+				...scheduleFixture('content', 'content'),
+				last_run: { ...run, counts: { link_grants_dropped: 2 } }
+			},
+			acl: {
+				...scheduleFixture('acl', 'acl_refresh'),
+				last_run: { ...run, counts: { link_grants_dropped: 3 } }
+			}
+		}).linkGrantsDropped
+	).toBe(5);
+	expect(sourceStatus({ content: scheduleFixture('content', 'content') }).linkGrantsDropped).toBe(
+		0
+	);
+});
+
+it('counts oversized item failures without confusing them with the run error code', () => {
+	const content: Schedule = {
+		...scheduleFixture('content', 'content'),
+		last_run: {
+			id: 'run',
+			started_at: '2026-09-17T12:00:00Z',
+			outcome: 'partial',
+			counts: { failed: 3 },
+			items: [
+				{ code: 'item_too_large' },
+				{ code: 'item_too_large' },
+				{ code: 'fetch_failed' },
+				{ code: null }
+			]
+		}
+	};
+	expect(sourceStatus({ content })).toMatchObject({ failed: 3, tooLarge: 2, errorCode: undefined });
+	content.last_run!.counts!.item_too_large = 1;
+	expect(sourceStatus({ content }).tooLarge).toBe(1);
+	expect(sourceStatus({ content: scheduleFixture('content', 'content') }).tooLarge).toBe(0);
+});
