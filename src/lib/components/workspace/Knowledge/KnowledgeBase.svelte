@@ -2,10 +2,6 @@
 	/* global FileSystemDirectoryReader, FileSystemEntry, FileSystemFileEntry, FileSystemDirectoryEntry */
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
-	import dayjs from 'dayjs';
-	import relativeTime from 'dayjs/plugin/relativeTime';
-
-	dayjs.extend(relativeTime);
 
 	import { onMount, getContext, onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
@@ -39,7 +35,6 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import * as cloudSync from '$lib/apis/cloudSync';
 	import type {
-		CloudProvider,
 		Connection,
 		Schedule,
 		ScheduleAction,
@@ -58,9 +53,11 @@
 	import Files from './KnowledgeBase/Files.svelte';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
-	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
+	import CloudSyncPanel from './KnowledgeBase/CloudSyncPanel.svelte';
+	import type { CloudSyncProvider } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
 	import {
+		CLOUD_PROVIDERS,
 		oneDriveScope,
 		googleDriveScope,
 		connectResult,
@@ -93,19 +90,6 @@
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
 
-	interface CloudSyncProvider {
-		type: CloudProvider;
-		label: string;
-		startSyncParam: string;
-	}
-	const CLOUD_PROVIDERS: Record<string, CloudSyncProvider> = {
-		onedrive: { type: 'onedrive', label: 'OneDrive', startSyncParam: 'start_onedrive_sync' },
-		google_drive: {
-			type: 'google_drive',
-			label: 'Google Drive',
-			startSyncParam: 'start_google_drive_sync'
-		}
-	};
 	let requestedProvider: CloudSyncProvider | null = null;
 	let schedules: Schedule[] = [];
 	let connecting: Connection | null = null;
@@ -1146,7 +1130,7 @@
 		}
 	};
 
-	const scheduleAction = async (schedule: Schedule, action: ScheduleAction | 'delete') => {
+	const scheduleAction = async (targets: Schedule[], action: ScheduleAction | 'delete') => {
 		if (!knowledge || cloudActionBusy) return;
 		cloudActionBusy = true;
 		try {
@@ -1157,7 +1141,8 @@
 				resume: cloudSync.resumeSchedule,
 				delete: cloudSync.deleteSchedule
 			};
-			await actions[action](localStorage.token, knowledge.id, schedule.id);
+			for (const schedule of targets)
+				await actions[action](localStorage.token, knowledge.id, schedule.id);
 			await refreshCloudSync();
 		} catch (error) {
 			reportCloudError(error);
@@ -1969,112 +1954,16 @@
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
 			{#if activeProvider || schedules.length}
-				<section
-					class="mx-4 mb-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700"
-					aria-label={$i18n.t('Cloud Sync')}
-				>
-					{#each reconnectNeeded as connection (connection.id)}
-						<div
-							class="mb-2 flex items-center justify-between gap-3 rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950"
-							role="status"
-						>
-							<span
-								>{$i18n.t('Reconnect {{provider}} to resume syncing.', {
-									provider: CLOUD_PROVIDERS[connection.source_kind].label
-								})}</span
-							>
-							{#if knowledge.write_access}
-								<button
-									class="font-medium underline"
-									disabled={cloudActionBusy}
-									on:click={() => reconnect(connection)}>{$i18n.t('Reconnect')}</button
-								>
-							{/if}
-						</div>
-					{/each}
-					{#if syncStatusError}
-						<p role="alert" class="text-sm text-red-500">
-							{$i18n.t('Failed to check background sync status')}
-						</p>
-					{/if}
-					{#if knowledge.write_access && activeProvider}
-						<label class="flex items-center gap-2 text-xs">
-							{$i18n.t('Sync interval (minutes)')}
-							<input
-								class="w-20 rounded border p-1 dark:bg-gray-900"
-								type="number"
-								min="1"
-								step="1"
-								bind:value={cadenceMinutes}
-							/>
-						</label>
-					{/if}
-					{#each schedules as schedule (schedule.id)}
-						<div
-							class="flex flex-wrap items-center gap-3 border-b py-2 last:border-0 dark:border-gray-700"
-						>
-							<span class="text-xs"
-								>{schedule.kind === 'content'
-									? $i18n.t('Content sync')
-									: $i18n.t('Access sync')}</span
-							>
-							<span class="text-xs">{schedule.lifecycle}</span>
-							{#if schedule.last_run}<SyncProgress run={schedule.last_run} />{/if}
-							{#if schedule.next_due_at}
-								<span class="text-xs text-gray-500"
-									>{$i18n.t('Next sync: {{date}}', {
-										date: dayjs(schedule.next_due_at).format('L LT')
-									})}</span
-								>
-							{/if}
-							{#if schedule.provider_secret_days_to_expiry !== null && schedule.provider_secret_days_to_expiry !== undefined && schedule.provider_secret_days_to_expiry <= 30}
-								<span class="text-xs text-amber-600"
-									>{$i18n.t(
-										'Provider credentials expire in {{count}} days. Contact your administrator.',
-										{ count: schedule.provider_secret_days_to_expiry }
-									)}</span
-								>
-							{/if}
-							{#if knowledge.write_access}
-								<button
-									class="text-xs underline"
-									disabled={cloudActionBusy ||
-										schedule.connection.lifecycle !== 'enabled' ||
-										schedule.lifecycle !== 'enabled' ||
-										['queued', 'running'].includes(schedule.last_run?.status ?? '')}
-									on:click={() => scheduleAction(schedule, 'run')}>{$i18n.t('Sync now')}</button
-								>
-								{#if schedule.last_run?.status === 'running'}
-									<button
-										class="text-xs underline"
-										disabled={cloudActionBusy}
-										on:click={() => scheduleAction(schedule, 'cancel')}
-										>{$i18n.t('Cancel Sync')}</button
-									>
-								{/if}
-								{#if schedule.lifecycle === 'enabled'}
-									<button
-										class="text-xs underline"
-										disabled={cloudActionBusy}
-										on:click={() => scheduleAction(schedule, 'suspend')}>{$i18n.t('Pause')}</button
-									>
-								{:else if schedule.lifecycle === 'suspended'}
-									<button
-										class="text-xs underline"
-										disabled={cloudActionBusy || schedule.connection.lifecycle !== 'enabled'}
-										on:click={() => scheduleAction(schedule, 'resume')}>{$i18n.t('Resume')}</button
-									>
-								{/if}
-								<button
-									class="text-xs underline"
-									disabled={cloudActionBusy}
-									on:click={() => scheduleAction(schedule, 'delete')}
-									>{$i18n.t('Remove schedule')}</button
-								>
-							{/if}
-						</div>
-					{/each}
-				</section>
+				<CloudSyncPanel
+					{schedules}
+					{reconnectNeeded}
+					{syncStatusError}
+					writeAccess={knowledge.write_access}
+					busy={cloudActionBusy}
+					isAdmin={$user.role === 'admin'}
+					on:action={(event) => scheduleAction(event.detail.schedules, event.detail.action)}
+					on:reconnect={(event) => reconnect(event.detail)}
+				/>
 			{/if}
 
 			{#if isExternalKnowledge}

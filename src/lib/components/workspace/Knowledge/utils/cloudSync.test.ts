@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import {
+	pairSchedules,
+	sourceStatus,
 	connectResult,
 	googleDriveScope,
 	oneDriveScope,
@@ -121,4 +123,82 @@ it('derives a run status from outcome, because soev-api sends no status field', 
 	).toBe('cancelled');
 	expect(runIsLive({ ...started, outcome: 'succeeded' })).toBe(false);
 	expect(runIsLive(null)).toBe(false);
+});
+
+const scheduleFixture = (
+	id: string,
+	kind: Schedule['kind'],
+	scope = { item_id: 'folder' }
+): Schedule => ({
+	id,
+	kind,
+	scope,
+	connection_id: 'c',
+	cadence_minutes: 60,
+	source_kind: 'onedrive',
+	lifecycle: 'enabled',
+	connection: { id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' }
+});
+
+it('pairs schedules by connection and deep-equal scope regardless of key or schedule order', () => {
+	const content = {
+		...scheduleFixture('content', 'content'),
+		scope: { item_id: 'folder', single_file: false }
+	};
+	const acl = {
+		...scheduleFixture('acl', 'acl_refresh'),
+		scope: { single_file: false, item_id: 'folder' }
+	};
+	const otherConnection = { ...acl, id: 'other', connection_id: 'other' };
+	const loneContent = scheduleFixture('lone', 'content', { item_id: 'different' });
+	expect(pairSchedules([otherConnection, acl, content, loneContent])).toEqual([
+		{ content, acl },
+		{ content: loneContent, acl: undefined },
+		{ acl: otherConnection }
+	]);
+	expect(pairSchedules([])).toEqual([]);
+	expect(
+		pairSchedules([content, { ...content, id: 'duplicate' }, acl]).filter((pair) => pair.acl)
+	).toHaveLength(1);
+});
+
+it('uses content counters, either live run, ACL failures and one expiry per source', () => {
+	const run = { id: 'run', started_at: '2026-09-17T12:00:00Z' };
+	const content = {
+		...scheduleFixture('content', 'content'),
+		last_run: {
+			...run,
+			outcome: 'partial' as const,
+			finished_at: '2026-09-17T12:01:00Z',
+			counts: { landed: 12, failed: 2 },
+			error_code: 'fetch_failed'
+		},
+		provider_secret_days_to_expiry: 20
+	};
+	const acl = {
+		...scheduleFixture('acl', 'acl_refresh'),
+		last_run: run,
+		provider_secret_days_to_expiry: 10
+	};
+	expect(sourceStatus({ content, acl })).toMatchObject({
+		live: true,
+		liveSchedules: [acl],
+		landed: 12,
+		failed: 2,
+		errorCode: 'fetch_failed',
+		expiry: 10,
+		aclStatus: null,
+		lastSynced: '2026-09-17T12:01:00Z'
+	});
+	expect(
+		sourceStatus({ content, acl: { ...acl, last_run: { ...run, outcome: 'failed' } } })
+	).toMatchObject({ live: false, aclStatus: 'failed' });
+	expect(sourceStatus({ content: scheduleFixture('new', 'content') })).toMatchObject({
+		live: false,
+		landed: 0,
+		failed: 0,
+		lastSynced: null,
+		expiry: null
+	});
+	expect(sourceStatus({ acl })).toMatchObject({ schedule: acl, live: true, liveSchedules: [acl] });
 });

@@ -1,4 +1,5 @@
-import type { Connection, Schedule, ScheduleForm, SyncRun } from '$lib/apis/cloudSync';
+import equal from 'fast-deep-equal';
+import type { Connection, RunOutcome, Schedule, ScheduleForm, SyncRun } from '$lib/apis/cloudSync';
 
 export function oneDriveScope(item: {
 	id: string;
@@ -90,4 +91,65 @@ export function runCounts(run: SyncRun): { label: string; count: number }[] {
 		const count = counts[field];
 		return typeof count === 'number' && Number.isFinite(count) ? [{ label, count }] : [];
 	});
+}
+
+export interface CloudSyncProvider {
+	type: 'onedrive' | 'google_drive';
+	label: string;
+	startSyncParam: string;
+}
+
+export const CLOUD_PROVIDERS: Record<string, CloudSyncProvider> = {
+	onedrive: { type: 'onedrive', label: 'OneDrive', startSyncParam: 'start_onedrive_sync' },
+	google_drive: {
+		type: 'google_drive',
+		label: 'Google Drive',
+		startSyncParam: 'start_google_drive_sync'
+	}
+};
+
+export interface SchedulePair {
+	content?: Schedule;
+	acl?: Schedule;
+}
+
+export function pairSchedules(schedules: Schedule[]): SchedulePair[] {
+	const remaining = new Set(schedules.filter((schedule) => schedule.kind === 'acl_refresh'));
+	const pairs: SchedulePair[] = schedules
+		.filter((schedule) => schedule.kind === 'content')
+		.map((content) => {
+			const acl = [...remaining].find(
+				(schedule) =>
+					schedule.connection_id === content.connection_id && equal(schedule.scope, content.scope)
+			);
+			if (acl) remaining.delete(acl);
+			return { content, acl };
+		});
+	return [...pairs, ...[...remaining].map((acl) => ({ acl }))];
+}
+
+export function sourceStatus(pair: SchedulePair) {
+	const schedules = [pair.content, pair.acl].filter((schedule): schedule is Schedule => !!schedule);
+	const schedule = pair.content ?? pair.acl!;
+	const run = schedule.last_run;
+	const liveSchedules = schedules.filter((item) => runIsLive(item.last_run));
+	const expiry = schedules.flatMap((item) =>
+		typeof item.provider_secret_days_to_expiry === 'number'
+			? [item.provider_secret_days_to_expiry]
+			: []
+	);
+	return {
+		schedule,
+		liveSchedules,
+		live: liveSchedules.length > 0,
+		landed: run?.counts?.landed ?? 0,
+		failed: run?.counts?.failed ?? 0,
+		errorCode: run?.error_code,
+		lastSynced: run?.finished_at ?? (run?.outcome ? run.started_at : null),
+		aclStatus:
+			pair.content && ['partial', 'failed'].includes(pair.acl?.last_run?.outcome ?? '')
+				? pair.acl?.last_run?.outcome
+				: null,
+		expiry: expiry.length ? Math.min(...expiry) : null
+	};
 }

@@ -3833,5 +3833,10 @@
   "{{percentage}}% of the context window used.": "",
   "{{percentage}}% of the context window used. Start a new chat for unrelated topics.": "",
   "{{user}}'s Chats": "",
-  "{{webUIName}} Backend Required": ""
+  "{{webUIName}} Backend Required": "",
+  "Syncing… {{landed}} landed": "Syncing… {{landed}} landed",
+  "Last synced {{time}} · {{landed}} documents": "Last synced {{time}} · {{landed}} documents",
+  "{{failed}} failed": "{{failed}} failed",
+  "Access sync: {{status}}": "Access sync: {{status}}",
+  "Not synced yet": "Not synced yet"
 }

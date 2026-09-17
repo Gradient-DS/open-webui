@@ -3833,5 +3833,10 @@
   "{{percentage}}% of the context window used.": "{{percentage}}% van het contextvenster gebruikt.",
   "{{percentage}}% of the context window used. Start a new chat for unrelated topics.": "{{percentage}}% van het contextvenster gebruikt. Voor nieuwe onderwerpen kun je beter een nieuw gesprek starten.",
   "{{user}}'s Chats": "{{user}}'s chats",
-  "{{webUIName}} Backend Required": "{{webUIName}} Backend verplicht"
+  "{{webUIName}} Backend Required": "{{webUIName}} Backend verplicht",
+  "Syncing… {{landed}} landed": "Synchroniseren… {{landed}} verwerkt",
+  "Last synced {{time}} · {{landed}} documents": "Laatst gesynchroniseerd {{time}} · {{landed}} documenten",
+  "{{failed}} failed": "{{failed}} mislukt",
+  "Access sync: {{status}}": "Toegangssynchronisatie: {{status}}",
+  "Not synced yet": "Nog niet gesynchroniseerd"
 }
