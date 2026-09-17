@@ -95,21 +95,24 @@ async def sync_status(knowledge_id: str, sync=Depends(cloud_sync)):
     return await sync.sync_status(knowledge_id)
 
 
-@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/run')
+@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/run', status_code=201)
 async def run_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     return await sync.schedule_action(knowledge_id, schedule_id, 'run')
 
 
-@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/cancel')
+@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/cancel', status_code=204)
 async def cancel_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
-    return await sync.schedule_action(knowledge_id, schedule_id, 'cancel')
+    await sync.schedule_action(knowledge_id, schedule_id, 'cancel')
+    return Response(status_code=204)
 
 
-@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/suspend')
+@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/suspend', status_code=204)
 async def suspend_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
-    return await sync.schedule_action(knowledge_id, schedule_id, 'suspend')
+    await sync.schedule_action(knowledge_id, schedule_id, 'suspend')
+    return Response(status_code=204)
 
 
-@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/resume')
+@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/resume', status_code=204)
 async def resume_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
-    return await sync.schedule_action(knowledge_id, schedule_id, 'resume')
+    await sync.schedule_action(knowledge_id, schedule_id, 'resume')
+    return Response(status_code=204)

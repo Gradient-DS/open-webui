@@ -65,6 +65,7 @@ def test_create_connection_returns_the_authorize_url(api):
         ('POST', '/v1/connections/connection-1/authorize'),
     ]
     assert api.refs == ['owui:user:alice', 'owui:user:alice']
+    assert_assertions(api.requests)
 
 
 @pytest.mark.parametrize('result', ['pending', 'error', 'invalid'])
@@ -95,6 +96,7 @@ def test_a_schedule_is_registered_on_the_kbs_collection_key(api):
     assert result.status_code == 200
     assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb-1'}
     assert api.requests[0].url.path == '/v1/schedules'
+    assert_assertions(api.requests)
     assert (
         api.browser.post(
             '/api/v1/cloud-sync/knowledge/kb-1/schedules', json={**body, 'collection_key': 'foreign'}
@@ -132,6 +134,7 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
     assert dict(api.requests[1].url.params) == {'collection_key': 'kb-1'}
     assert dict(api.requests[4].url.params) == {'collection_key': 'kb-1', 'cursor': 'page-2'}
     assert len(api.refs) == 6
+    assert_assertions(api.requests)
 
 
 @pytest.mark.parametrize(
@@ -196,9 +199,10 @@ def test_every_call_carries_the_users_assertion(api, operation):
             result = api.browser.delete(path)
             assert result.status_code == 204
         else:
-            api.responses.append(response({'status': operation}))
+            api.responses.append(response({'job_id': 'job-1'}, 201) if operation == 'run' else httpx.Response(204))
             result = api.browser.post(path + '/' + operation)
-            assert result.json() == {'status': operation}
+            assert result.status_code == (201 if operation == 'run' else 204)
+            assert result.content == (b'{"job_id":"job-1"}' if operation == 'run' else b'')
             assert api.requests[-1].url.path == '/v1/schedules/s/' + operation
     assert result.status_code < 300 or operation == 'foreign'
     api.link.assert_awaited_once()
