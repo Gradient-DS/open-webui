@@ -1,4 +1,5 @@
 <script lang="ts">
+	/* global FileSystemDirectoryReader, FileSystemEntry, FileSystemFileEntry, FileSystemDirectoryEntry */
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 	import dayjs from 'dayjs';
@@ -6,7 +7,7 @@
 
 	dayjs.extend(relativeTime);
 
-	import { onMount, getContext, onDestroy, tick } from 'svelte';
+	import { onMount, getContext, onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
@@ -35,25 +36,20 @@
 		testExternalKnowledgeRetrieval
 	} from '$lib/apis/knowledge';
 	import { processUrl } from '$lib/apis/retrieval';
-	import {
-		createSyncApi,
-		type SyncStatusResponse,
-		type SyncErrorType,
-		type FailedFile
-	} from '$lib/apis/sync';
-	import { startOneDriveSyncItems, type SyncItem as OneDriveSyncItem } from '$lib/apis/onedrive';
-	import { openOneDriveItemPicker, getGraphApiToken } from '$lib/utils/onedrive-file-picker';
-	import {
-		startGoogleDriveSyncItems,
-		type SyncItem as GoogleDriveSyncItem
-	} from '$lib/apis/googledrive';
-	import { createKnowledgePicker } from '$lib/utils/google-drive-picker';
-	import {
-		startConfluenceSyncItems,
-		type SyncItem as ConfluenceSyncItem
-	} from '$lib/apis/confluence';
-	import ConfluencePickerModal from './ConfluencePickerModal.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import * as cloudSync from '$lib/apis/cloudSync';
+	import type {
+		CloudProvider,
+		Connection,
+		Schedule,
+		ScheduleAction,
+		ScheduleForm
+	} from '$lib/apis/cloudSync';
+	import { openOneDriveItemPicker } from '$lib/utils/onedrive-file-picker';
+	import {
+		createKnowledgePicker,
+		initialize as initializeGooglePicker
+	} from '$lib/utils/google-drive-picker';
 
 	import { blobToFile, copyToClipboard } from '$lib/utils';
 	import { computeFileHash } from '$lib/utils/hash';
@@ -64,6 +60,7 @@
 	import { createKbSelection } from './KnowledgeBase/selection';
 	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
 	import { buildSyncToast } from './utils/syncToast';
+	import { oneDriveScope, googleDriveScope, connectResult } from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
@@ -78,9 +75,6 @@
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
-	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessButton from '$lib/components/common/AccessButton.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
@@ -94,149 +88,54 @@
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
 
-	// ===== Cloud sync provider configuration =====
-
 	interface CloudSyncProvider {
-		type: string; // "onedrive" | "google_drive"
-		metaKey: string; // "onedrive_sync" | "google_drive_sync"
-		eventPrefix: string; // "onedrive" | "googledrive"
-		fileIdPrefix: string; // "onedrive-" | "googledrive-"
-		sourceMetaField: string; // "onedrive" | "google_drive" (for file.meta.source)
-		label: string; // "OneDrive" | "Google Drive"
-		api: ReturnType<typeof createSyncApi>;
-		startSyncParam: string; // "start_onedrive_sync" | "start_google_drive_sync"
-		authCallbackType: string; // "onedrive_auth_callback" | "google_drive_auth_callback"
-		authBasePath: string; // "onedrive" | "google-drive" (for auth URL)
-		authPopupName: string; // "onedrive_auth" | "google_drive_auth"
-		configKey: string; // "onedrive" | "google_drive" (for $config?.xxx?.has_client_secret)
+		type: CloudProvider;
+		label: string;
+		startSyncParam: string;
 	}
-
 	const CLOUD_PROVIDERS: Record<string, CloudSyncProvider> = {
-		onedrive: {
-			type: 'onedrive',
-			metaKey: 'onedrive_sync',
-			eventPrefix: 'onedrive',
-			fileIdPrefix: 'onedrive-',
-			sourceMetaField: 'onedrive',
-			label: 'OneDrive',
-			api: createSyncApi('onedrive'),
-			startSyncParam: 'start_onedrive_sync',
-			authCallbackType: 'onedrive_auth_callback',
-			authBasePath: 'onedrive',
-			authPopupName: 'onedrive_auth',
-			configKey: 'onedrive'
-		},
+		onedrive: { type: 'onedrive', label: 'OneDrive', startSyncParam: 'start_onedrive_sync' },
 		google_drive: {
 			type: 'google_drive',
-			metaKey: 'google_drive_sync',
-			eventPrefix: 'googledrive',
-			fileIdPrefix: 'googledrive-',
-			sourceMetaField: 'google_drive',
 			label: 'Google Drive',
-			api: createSyncApi('google-drive'),
-			startSyncParam: 'start_google_drive_sync',
-			authCallbackType: 'google_drive_auth_callback',
-			authBasePath: 'google-drive',
-			authPopupName: 'google_drive_auth',
-			configKey: 'google_drive'
-		},
-		confluence: {
-			type: 'confluence',
-			metaKey: 'confluence_sync',
-			eventPrefix: 'confluence',
-			fileIdPrefix: 'confluence-',
-			sourceMetaField: 'confluence',
-			label: 'Confluence',
-			api: createSyncApi('confluence'),
-			startSyncParam: 'start_confluence_sync',
-			authCallbackType: 'confluence_auth_callback',
-			authBasePath: 'confluence',
-			authPopupName: 'confluence_auth',
-			configKey: 'confluence'
+			startSyncParam: 'start_google_drive_sync'
 		}
 	};
-
-	// ===== Unified cloud sync state =====
-
-	let cloudSyncState: Record<
-		string,
-		{
-			isSyncing: boolean;
-			isCancelling: boolean;
-			syncStatus: SyncStatusResponse | null;
-			bgSyncAuthorized: boolean;
-			bgSyncNeedsReauth: boolean;
-			refreshDone: boolean;
-		}
-	> = {
-		onedrive: {
-			isSyncing: false,
-			isCancelling: false,
-			syncStatus: null,
-			bgSyncAuthorized: false,
-			bgSyncNeedsReauth: false,
-			refreshDone: false
-		},
-		google_drive: {
-			isSyncing: false,
-			isCancelling: false,
-			syncStatus: null,
-			bgSyncAuthorized: false,
-			bgSyncNeedsReauth: false,
-			refreshDone: false
-		},
-		confluence: {
-			isSyncing: false,
-			isCancelling: false,
-			syncStatus: null,
-			bgSyncAuthorized: false,
-			bgSyncNeedsReauth: false,
-			refreshDone: false
-		}
-	};
-
-	// Confluence picker modal state
-	let showConfluencePicker = false;
-	let pendingConfluenceResolve: ((items: ConfluenceSyncItem[] | null) => void) | null = null;
-
-	function openConfluencePicker(): Promise<ConfluenceSyncItem[] | null> {
-		showConfluencePicker = true;
-		return new Promise((resolve) => {
-			pendingConfluenceResolve = resolve;
-		});
-	}
-
-	function handleConfluenceSelect(event: CustomEvent<{ items: ConfluenceSyncItem[] }>) {
-		if (pendingConfluenceResolve) {
-			pendingConfluenceResolve(event.detail.items);
-			pendingConfluenceResolve = null;
-		}
-	}
-
-	$: if (!showConfluencePicker && pendingConfluenceResolve) {
-		pendingConfluenceResolve(null);
-		pendingConfluenceResolve = null;
-	}
-
-	$: isSyncBusy = Object.values(cloudSyncState).some((s) => s.isSyncing || s.isCancelling);
-	$: activeProvider = knowledge?.type ? (CLOUD_PROVIDERS[knowledge.type] ?? null) : null;
-	$: activeState = activeProvider ? cloudSyncState[activeProvider.type] : null;
-
+	let requestedProvider: CloudSyncProvider | null = null;
+	let schedules: Schedule[] = [];
+	let connecting: Connection | null = null;
+	let cloudActionBusy = false;
+	let cadenceMinutes = 60;
+	let syncPoll: ReturnType<typeof setTimeout> | undefined;
+	let destroyed = false;
+	let closeAuthorization: (() => void) | undefined;
+	let syncStatusError = false;
+	$: activeProvider =
+		requestedProvider ?? (knowledge?.type ? CLOUD_PROVIDERS[knowledge.type] : null);
+	$: isSyncBusy =
+		cloudActionBusy ||
+		schedules.some((schedule) => ['queued', 'running'].includes(schedule.last_run?.status ?? ''));
 	// Single derived guard for all structure-write affordances (decision 5) —
 	// local/untyped KBs with write access only. Cloud KBs browse the
 	// sync-written directory structure read-only; push KBs are browse-only.
-	$: structureEditable = canEditStructure(knowledge);
+	$: structureEditable = !activeProvider && canEditStructure(knowledge);
 
 	let showAddWebpageModal = false;
 	let showAddTextContentModal = false;
 	let showNewDirectoryModal = false;
 
 	let showSyncConfirmModal = false;
-	let showCancelSyncConfirmModal = false;
 	let showAccessControlModal = false;
 	let showResetConfirm = false;
 
 	// Local-directory upload/sync pipeline (upstream v0.10.2)
+	type DirectoryHandle = {
+		kind: 'directory';
+		name: string;
+		values(): AsyncIterable<
+			DirectoryHandle | { kind: 'file'; name: string; getFile(): Promise<File> }
+		>;
+	};
 	type DirectoryFileEntry = { path: string; filename: string; file: File };
 	type DirectoryManifestEntry = DirectoryFileEntry & { checksum: string; size: number };
 	let pendingSyncFiles: DirectoryFileEntry[] | null = null;
@@ -249,12 +148,20 @@
 		data: {
 			file_ids: string[];
 		};
-		files: any[];
-		access_grants?: any[];
+		files: unknown[];
+		access_grants?: {
+			id?: string;
+			principal_type: 'user' | 'group';
+			principal_id: string;
+			permission: 'read' | 'write';
+		}[];
 		write_access?: boolean;
 		type?: string;
 		user_id?: string;
-		meta?: Record<string, any>;
+		meta?: {
+			source?: string;
+			external?: { connection_id?: string; provider?: string; source?: { name?: string } };
+		};
 	};
 
 	let id = null;
@@ -286,7 +193,7 @@
 
 	// Directory state (upstream per-level browsing)
 	let currentDirectoryId: string | null = null;
-	let directoryItems: any[] = [];
+	let directoryItems: { id: string; name: string }[] = [];
 	let breadcrumbs: { id: string; name: string }[] = [];
 	// KB-wide file total for the cloud quota header (fileItemsTotal is
 	// level/search-scoped in per-level browsing).
@@ -300,7 +207,7 @@
 	let externalTestQuery = '';
 	let externalTestResult: {
 		documents?: string[];
-		metadatas?: Record<string, any>[];
+		metadatas?: Record<string, unknown>[];
 		distances?: number[];
 	} | null = null;
 	$: isExternalKnowledge = knowledge?.meta?.source === 'external';
@@ -321,20 +228,6 @@
 			getItemsPage();
 		}, 2000);
 	};
-
-	// While a cloud sync runs, poll the current level every 4s — socket
-	// events cover most flips; this catches drops and rollup-count drift.
-	const SYNC_LEVEL_POLL_MS = 4000;
-	let syncLevelPoll: ReturnType<typeof setInterval> | null = null;
-	$: {
-		const wantPoll = loaded && (activeState?.isSyncing ?? false);
-		if (wantPoll && !syncLevelPoll) {
-			syncLevelPoll = setInterval(() => getItemsPage(), SYNC_LEVEL_POLL_MS);
-		} else if (!wantPoll && syncLevelPoll) {
-			clearInterval(syncLevelPoll);
-			syncLevelPoll = null;
-		}
-	}
 
 	// Multiselect (bulk delete) model — shared across all three list views.
 	const selection = createKbSelection();
@@ -366,7 +259,7 @@
 	// Consolidated reactive block — mirrors Knowledge.svelte list view pattern
 	$: if (loaded && knowledgeId !== null) {
 		// Track all dependencies explicitly
-		(void query, viewOption, sortKey, direction, currentPage, includeContent);
+		void [query, viewOption, sortKey, direction, currentPage, includeContent];
 
 		if (queryDebounceActive) {
 			// User is typing — debounce
@@ -741,7 +634,7 @@
 				const dirHandle = await window.showDirectoryPicker();
 				const collected: DirectoryFileEntry[] = [];
 
-				const traverse = async (handle: FileSystemDirectoryHandle, dirPath = '') => {
+				const traverse = async (handle: DirectoryHandle, dirPath = '') => {
 					for await (const entry of handle.values()) {
 						if (entry.name.startsWith('.')) continue;
 						const entryPath = dirPath ? `${dirPath}/${entry.name}` : entry.name;
@@ -842,7 +735,10 @@
 		);
 	};
 
-	const createMissingDirectories = async (diff: any) => {
+	const createMissingDirectories = async (diff: {
+		directory_map?: Record<string, string>;
+		mkdir: string[];
+	}) => {
 		if (!knowledge) return {};
 
 		const directoryIdByPath: Record<string, string> = { ...(diff.directory_map || {}) };
@@ -996,8 +892,8 @@
 			// Cleanup — remove deleted + stale modified files first (routes
 			// through the fork's full deletion cascade server-side).
 			const staleFileIds = [
-				...diff.deleted.map((d: any) => d.file_id),
-				...diff.modified.map((m: any) => m.stale_file_id)
+				...diff.deleted.map((d: { file_id: string }) => d.file_id),
+				...diff.modified.map((m: { stale_file_id: string }) => m.stale_file_id)
 			];
 
 			if (staleFileIds.length > 0 || diff.rmdir.length > 0) {
@@ -1011,8 +907,14 @@
 			// Upload added + modified files only
 			const filesToUpload = manifest.filter(
 				(entry) =>
-					diff.added.some((a: any) => a.filename === entry.filename && a.path === entry.path) ||
-					diff.modified.some((m: any) => m.filename === entry.filename && m.path === entry.path)
+					diff.added.some(
+						(a: { filename: string; path: string }) =>
+							a.filename === entry.filename && a.path === entry.path
+					) ||
+					diff.modified.some(
+						(m: { filename: string; path: string }) =>
+							m.filename === entry.filename && m.path === entry.path
+					)
 			);
 
 			const failedCount = await uploadManifestEntries(filesToUpload, (entry) =>
@@ -1043,689 +945,189 @@
 		}
 	};
 
-	// ===== Generic cloud sync handlers =====
+	const reportCloudError = (error: unknown) => {
+		toast.error(
+			error instanceof cloudSync.CloudSyncError
+				? error.message
+				: $i18n.t('Cloud sync request failed.')
+		);
+	};
+
+	const refreshCloudSync = async () => {
+		if (!knowledge || destroyed) return;
+		const status = await cloudSync.getSyncStatus(localStorage.token, knowledge.id);
+		if (destroyed) return;
+		schedules = status.schedules;
+		syncStatusError = false;
+		await getItemsPage();
+	};
+
+	const pollCloudSyncStatus = async () => {
+		try {
+			await refreshCloudSync();
+		} catch {
+			syncStatusError = true;
+		} finally {
+			if (!destroyed) syncPoll = setTimeout(pollCloudSyncStatus, 2000);
+		}
+	};
+
+	const authorizeBackgroundSync = (
+		provider: CloudSyncProvider,
+		connectionId?: string
+	): Promise<Connection | null> => {
+		closeAuthorization?.();
+		const popup = window.open('about:blank', 'soev_connect', 'width=600,height=700,scrollbars=yes');
+		if (!popup) {
+			toast.error($i18n.t('Please allow popups to connect your account.'));
+			return Promise.resolve(null);
+		}
+		return new Promise((resolve) => {
+			let expectedId = connectionId;
+			let checking = false;
+			let finished = false;
+			const finish = (connection: Connection | null) => {
+				if (finished) return;
+				finished = true;
+				clearInterval(checkClosed);
+				clearTimeout(timeout);
+				window.removeEventListener('message', handleMessage);
+				popup.close();
+				closeAuthorization = undefined;
+				resolve(connection);
+			};
+			const checkConnection = async () => {
+				if (!expectedId || checking || finished) return;
+				checking = true;
+				try {
+					const connection = await cloudSync.getConnection(localStorage.token, expectedId);
+					if (finished) return;
+					connecting = connection;
+					if (connection.lifecycle === 'enabled') {
+						finish(connection);
+						await refreshCloudSync();
+					}
+				} catch (error) {
+					reportCloudError(error);
+					finish(null);
+				} finally {
+					checking = false;
+				}
+			};
+			const handleMessage = (event: MessageEvent) => {
+				const result = connectResult(event, window.location.origin, popup, expectedId);
+				if (result === 'pending') void checkConnection();
+				else if (result === 'error' || result === 'invalid') {
+					toast.error($i18n.t('Authorization failed'));
+					finish(null);
+				}
+			};
+			window.addEventListener('message', handleMessage);
+			const checkClosed = setInterval(() => {
+				if (popup.closed) void checkConnection();
+			}, 2000);
+			const timeout = setTimeout(() => {
+				toast.error($i18n.t('Authorization timed out. Please try again.'));
+				finish(null);
+			}, 120000);
+			closeAuthorization = () => finish(null);
+			void (async () => {
+				try {
+					const authorization = expectedId
+						? await cloudSync.authorizeConnection(localStorage.token, expectedId)
+						: await cloudSync.createConnection(localStorage.token, provider.type);
+					if (finished) return;
+					if ('connection_id' in authorization && typeof authorization.connection_id === 'string')
+						expectedId = authorization.connection_id;
+					if (!expectedId) return finish(null);
+					connecting = { id: expectedId, source_kind: provider.type, lifecycle: 'pending' };
+					popup.location.href = authorization.authorize_url;
+				} catch (error) {
+					reportCloudError(error);
+					finish(null);
+				}
+			})();
+		});
+	};
 
 	const cloudSyncHandler = async (provider: CloudSyncProvider) => {
-		const state = cloudSyncState[provider.type];
-		try {
-			state.isSyncing = true;
-			cloudSyncState = cloudSyncState;
-
-			let syncItems: any[];
-			let accessToken: string;
-
-			// Provider-specific picker logic
-			if (provider.type === 'onedrive') {
-				const items = await openOneDriveItemPicker('organizations');
-				if (!items || items.length === 0) {
-					state.isSyncing = false;
-					cloudSyncState = cloudSyncState;
-					return;
-				}
-
-				accessToken = await getGraphApiToken('organizations');
-
-				syncItems = items.map((item) => ({
-					type: item.type,
-					drive_id: item.driveId,
-					item_id: item.id,
-					item_path: item.path,
-					name: item.name
-				}));
-
-				state.refreshDone = false;
-				cloudSyncState = cloudSyncState;
-				await startOneDriveSyncItems(localStorage.token, {
-					knowledge_id: knowledge.id,
-					items: syncItems as OneDriveSyncItem[],
-					access_token: accessToken,
-					user_token: localStorage.token
-				});
-			} else if (provider.type === 'google_drive') {
-				const result = await createKnowledgePicker(knowledge.id);
-				if (!result) {
-					state.isSyncing = false;
-					cloudSyncState = cloudSyncState;
-					return;
-				}
-
-				syncItems = result.items.map((item) => ({
-					type: item.type,
-					item_id: item.id,
-					item_path: item.path,
-					name: item.name
-				}));
-
-				state.refreshDone = false;
-				cloudSyncState = cloudSyncState;
-				await startGoogleDriveSyncItems(localStorage.token, {
-					knowledge_id: knowledge.id,
-					items: syncItems as GoogleDriveSyncItem[]
-				});
-			} else if (provider.type === 'confluence') {
-				// Ensure we have a valid OAuth token before opening the picker.
-				const tokenStatus = await provider.api
-					.getTokenStatus(localStorage.token, knowledge.id)
-					.catch(() => null);
-				const tokenValid = !!(
-					tokenStatus &&
-					tokenStatus.has_token &&
-					!tokenStatus.is_expired &&
-					!tokenStatus.needs_reauth
-				);
-				if (!tokenValid) {
-					toast.info($i18n.t('Authorize Confluence to continue.'));
-					await authorizeBackgroundSync(provider);
-					const recheck = await provider.api
-						.getTokenStatus(localStorage.token, knowledge.id)
-						.catch(() => null);
-					const nowValid = !!(
-						recheck &&
-						recheck.has_token &&
-						!recheck.is_expired &&
-						!recheck.needs_reauth
-					);
-					if (!nowValid) {
-						state.isSyncing = false;
-						cloudSyncState = cloudSyncState;
-						return;
-					}
-				}
-
-				const items = await openConfluencePicker();
-				if (!items || items.length === 0) {
-					state.isSyncing = false;
-					cloudSyncState = cloudSyncState;
-					return;
-				}
-
-				syncItems = items;
-
-				state.refreshDone = false;
-				cloudSyncState = cloudSyncState;
-				await startConfluenceSyncItems(localStorage.token, {
-					knowledge_id: knowledge.id,
-					items: syncItems as ConfluenceSyncItem[]
-				});
-			}
-
-			// Refresh knowledge to get updated sources
-			const updatedKnowledge = await getKnowledgeById(localStorage.token, id);
-			if (updatedKnowledge) {
-				knowledge = updatedKnowledge;
-			}
-
-			toast.success($i18n.t('{{label}} sync started', { label: provider.label }));
-			pollCloudSyncStatus(provider);
-		} catch (error) {
-			console.error(`${provider.label} sync error:`, error);
-			const rawError = error instanceof Error ? error.message : String(error);
-			// Translate known OneDrive host-derivation errors via static keys (so they
-			// stay i18n-discoverable); fall back to the raw message for everything else.
-			const errorDetail =
-				rawError === 'No OneDrive found for your account.'
-					? $i18n.t('No OneDrive found for your account.')
-					: rawError === 'Could not connect to OneDrive to determine your location.'
-						? $i18n.t('Could not connect to OneDrive to determine your location.')
-						: rawError;
-			toast.error(
-				$i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) + errorDetail
-			);
-			state.isSyncing = false;
-			cloudSyncState = cloudSyncState;
-		}
-	};
-
-	const cloudResyncHandler = async (provider: CloudSyncProvider) => {
-		const state = cloudSyncState[provider.type];
-		const sources = knowledge?.meta?.[provider.metaKey]?.sources;
-		if (!sources?.length) return;
-
-		try {
-			state.isSyncing = true;
-			cloudSyncState = cloudSyncState;
-
-			if (provider.type === 'onedrive') {
-				const accessToken = await getGraphApiToken('organizations');
-				const syncItems: OneDriveSyncItem[] = sources.map((source: any) => ({
-					type: source.type,
-					drive_id: source.drive_id,
-					item_id: source.item_id,
-					item_path: source.item_path,
-					name: source.name
-				}));
-
-				state.refreshDone = false;
-				cloudSyncState = cloudSyncState;
-				await startOneDriveSyncItems(localStorage.token, {
-					knowledge_id: knowledge.id,
-					items: syncItems,
-					access_token: accessToken,
-					user_token: localStorage.token
-				});
-			} else if (provider.type === 'google_drive') {
-				const syncItems: GoogleDriveSyncItem[] = sources.map((source: any) => ({
-					type: source.type,
-					item_id: source.item_id,
-					item_path: source.item_path,
-					name: source.name
-				}));
-
-				state.refreshDone = false;
-				cloudSyncState = cloudSyncState;
-				await startGoogleDriveSyncItems(localStorage.token, {
-					knowledge_id: knowledge.id,
-					items: syncItems
-				});
-			} else if (provider.type === 'confluence') {
-				// Stored sources have type='folder'/'file' (translated by the backend
-				// on first sync) and the original under confluence_type. The API model
-				// requires 'space' | 'page', so prefer confluence_type.
-				const syncItems: ConfluenceSyncItem[] = sources.map((source: any) => ({
-					type: source.confluence_type ?? source.type,
-					cloud_id: source.cloud_id,
-					space_id: source.space_id,
-					space_key: source.space_key,
-					site_url: source.site_url,
-					item_id: source.item_id,
-					item_path: source.item_path,
-					name: source.name,
-					include_descendants: source.include_descendants ?? true
-				}));
-
-				state.refreshDone = false;
-				cloudSyncState = cloudSyncState;
-				await startConfluenceSyncItems(localStorage.token, {
-					knowledge_id: knowledge.id,
-					items: syncItems
-				});
-			}
-
-			toast.success($i18n.t('{{label}} sync started', { label: provider.label }));
-			pollCloudSyncStatus(provider);
-		} catch (error) {
-			console.error(`${provider.label} resync error:`, error);
-			toast.error(
-				$i18n.t('Failed to start sync: ') + (error instanceof Error ? error.message : String(error))
-			);
-			state.isSyncing = false;
-			cloudSyncState = cloudSyncState;
-		}
-	};
-
-	const pollCloudSyncStatus = async (provider: CloudSyncProvider) => {
-		const state = cloudSyncState[provider.type];
-		try {
-			const fetched = await provider.api.getSyncStatus(localStorage.token, knowledge.id);
-			// Merge instead of replace so the higher-frequency Socket.IO event
-			// stream (which carries stage_counts) doesn't get clobbered every
-			// 2s by this polling fallback.
-			state.syncStatus = {
-				...(state.syncStatus ?? {}),
-				...fetched,
-				stage_counts: fetched.stage_counts ?? state.syncStatus?.stage_counts
-			};
-			cloudSyncState = cloudSyncState;
-
-			if (state.syncStatus.status === 'syncing') {
-				setTimeout(() => pollCloudSyncStatus(provider), 2000);
-			} else if (state.syncStatus.status === 'file_limit_exceeded') {
-				toast.error(state.syncStatus.error || $i18n.t('File limit exceeded'));
-				state.isSyncing = false;
-				cloudSyncState = cloudSyncState;
-				if (!state.refreshDone) {
-					state.refreshDone = true;
-					cloudSyncState = cloudSyncState;
-					await init();
-				}
-			} else if (state.syncStatus.status === 'access_revoked') {
-				// access_revoked is a transient status during sync, keep polling
-				setTimeout(() => pollCloudSyncStatus(provider), 2000);
-			} else if (
-				state.syncStatus.status === 'completed' ||
-				state.syncStatus.status === 'completed_with_errors'
-			) {
-				// Toast is handled by Socket.IO handler, just refresh
-				state.isSyncing = false;
-				cloudSyncState = cloudSyncState;
-				if (!state.refreshDone) {
-					state.refreshDone = true;
-					cloudSyncState = cloudSyncState;
-					await init();
-				}
-			} else if (state.syncStatus.status === 'failed') {
-				// Only show error if Socket.IO didn't already handle it
-				if (state.isSyncing) {
-					toast.error(
-						$i18n.t('{{label}} sync failed: {{error}}', {
-							label: provider.label,
-							error: state.syncStatus.error
-						})
-					);
-					state.isSyncing = false;
-					cloudSyncState = cloudSyncState;
-				}
-				// Failed files carry status 'error' in meta — refresh so the
-				// tree shows error badges instead of eternal spinners.
-				if (!state.refreshDone) {
-					state.refreshDone = true;
-					cloudSyncState = cloudSyncState;
-					await init();
-				}
-			} else if (state.syncStatus.status === 'cancelled') {
-				state.isSyncing = false;
-				state.isCancelling = false;
-				cloudSyncState = cloudSyncState;
-				if (!state.refreshDone) {
-					state.refreshDone = true;
-					cloudSyncState = cloudSyncState;
-					await init();
-				}
-			}
-		} catch (error) {
-			console.error(`Failed to get ${provider.label} sync status:`, error);
-		}
-	};
-
-	const cancelCloudSyncHandler = async (provider: CloudSyncProvider) => {
-		const state = cloudSyncState[provider.type];
-		try {
-			state.isCancelling = true;
-			cloudSyncState = cloudSyncState;
-			await provider.api.cancelSync(localStorage.token, knowledge.id);
-			toast.info($i18n.t('Cancelling {{label}} sync...', { label: provider.label }));
-		} catch (error) {
-			console.error(`Failed to cancel ${provider.label} sync:`, error);
-			toast.error(
-				$i18n.t('Failed to cancel sync: ') +
-					(error instanceof Error ? error.message : String(error))
-			);
-			state.isCancelling = false;
-			cloudSyncState = cloudSyncState;
-		}
-	};
-
-	// Helper to get user-friendly error type message
-	const getErrorTypeMessage = (errorType: SyncErrorType): string => {
-		switch (errorType) {
-			case 'timeout':
-				return $i18n.t('Processing timeout');
-			case 'empty_content':
-				return $i18n.t('Empty file');
-			case 'processing_error':
-				return $i18n.t('Processing error');
-			case 'download_error':
-				return $i18n.t('Download failed');
-			case 'config_error':
-				return $i18n.t('Sync configuration error');
-			case 'schema_error':
-				return $i18n.t('Document processor error');
-			case 'needs_token_refresh':
-				return $i18n.t('Reauthorization required');
-			case 'unsupported_content_type':
-				return $i18n.t('Unsupported file type');
-			case 'source_access_revoked':
-				return $i18n.t('Access revoked');
-			default:
-				return $i18n.t('Error');
-		}
-	};
-
-	// Format failed files for display in toast
-	const formatFailedFilesMessage = (failedFiles: FailedFile[]): string => {
-		if (!failedFiles || failedFiles.length === 0) return '';
-
-		// Show up to 3 failed files
-		const maxToShow = 3;
-		const filesToShow = failedFiles.slice(0, maxToShow);
-		const remaining = failedFiles.length - maxToShow;
-
-		// Show only the filename + translated category label. The
-		// loader-worker's underlying ``error_message`` is English and
-		// frequently includes opaque IDs / URLs (e.g. Drive file IDs in
-		// 403 responses); user-facing strings should be consistent and
-		// translatable, so we omit it from the toast. The full text is
-		// preserved server-side in ``last_result.failed_files`` for
-		// operator debugging.
-		const lines = filesToShow.map((f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`);
-
-		if (remaining > 0) {
-			lines.push($i18n.t('and {{COUNT}} more', { COUNT: remaining }));
-		}
-
-		return '\n' + lines.join('\n');
-	};
-
-	// ===== Generic socket handlers =====
-
-	function handleCloudFileProcessing(
-		providerType: string,
-		data: {
-			knowledge_id: string;
-			file: {
-				item_id: string;
-				name: string;
-				size?: number;
-				source_item_id?: string;
-				relative_path?: string;
-			};
-		}
-	) {
-		const provider = CLOUD_PROVIDERS[providerType];
-		const state = cloudSyncState[providerType];
-
-		// Only process events for the current knowledge base
-		if (data.knowledge_id !== knowledge?.id) return;
-
-		// Lazy tree: the fileItems mutation below has no tree effect — nudge
-		// the tree itself so the new file's spinner appears without a reload.
-		scheduleTreeRefresh();
-
-		// Ignore new file events when cancellation is in progress
-		if (state.isCancelling) return;
-
-		// Use provider-specific prefix for file ID
-		const fileId = `${provider.fileIdPrefix}${data.file.item_id}`;
-
-		// Check if file is already in the list
-		if (fileItems?.some((f) => f.id === fileId || f.itemId === fileId)) return;
-
-		// Add the file to the list with 'uploading' status
-		const newFileItem = {
-			type: 'file',
-			file: null,
-			id: fileId,
-			url: '',
-			name: data.file.name,
-			size: data.file.size || 0,
-			status: 'uploading',
-			error: '',
-			itemId: fileId,
-			meta: {
-				source_item_id: data.file.source_item_id,
-				source: provider.sourceMetaField,
-				relative_path: data.file.relative_path
-			}
-		};
-
-		// Add to beginning of list
-		fileItems = [newFileItem, ...(fileItems ?? [])];
-		fileItemsTotal = (fileItemsTotal ?? 0) + 1;
-
-		console.log(`${provider.label} file processing started:`, data.file.name);
-	}
-
-	function handleCloudFileAdded(
-		providerType: string,
-		data: {
-			knowledge_id: string;
-			file: {
-				id: string;
-				filename: string;
-				meta?: {
-					name?: string;
-					content_type?: string;
-					size?: number;
-					source?: string;
-					source_item_id?: string;
-					relative_path?: string;
-				};
-				created_at?: number;
-				updated_at?: number;
-			};
-		}
-	) {
-		const state = cloudSyncState[providerType];
-		const provider = CLOUD_PROVIDERS[providerType];
-
-		// Only process events for the current knowledge base
-		if (data.knowledge_id !== knowledge?.id) return;
-
-		// Lazy tree: this file just reached 'ok' server-side — nudge the tree
-		// so its spinner flips to done within the throttle window.
-		scheduleTreeRefresh();
-
-		// Ignore new file events when cancellation is in progress
-		if (state.isCancelling) return;
-
-		// Find existing file item and update status
-		const idx = fileItems?.findIndex((f) => f.id === data.file.id);
-		if (idx !== undefined && idx >= 0 && fileItems) {
-			// Update existing item to 'uploaded' status
-			fileItems[idx].status = 'uploaded';
-			fileItems[idx].file = data.file;
-			fileItems[idx].name = data.file.filename;
-			fileItems[idx].size = data.file.meta?.size || fileItems[idx].size;
-			fileItems[idx].meta = data.file.meta;
-			fileItems = fileItems; // Trigger reactivity
-			console.log(`${provider.label} file completed:`, data.file.filename);
-		} else {
-			// File not in list yet (edge case), add it
-			const newFileItem = {
-				type: 'file',
-				file: data.file,
-				id: data.file.id,
-				url: '',
-				name: data.file.filename,
-				size: data.file.meta?.size || 0,
-				status: 'uploaded',
-				error: '',
-				itemId: data.file.id,
-				meta: data.file.meta
-			};
-			fileItems = [newFileItem, ...(fileItems ?? [])];
-			fileItemsTotal = (fileItemsTotal ?? 0) + 1;
-			console.log(`${provider.label} file added:`, data.file.filename);
-		}
-	}
-
-	async function handleCloudSyncProgress(
-		providerType: string,
-		data: {
-			knowledge_id: string;
-			status: string;
-			current: number;
-			total: number;
-			filename: string;
-			error?: string;
-			files_processed?: number;
-			files_failed?: number;
-			files_added?: number;
-			files_updated?: number;
-			files_unchanged?: number;
-			files_removed?: number;
-			deleted_count?: number;
-			failed_files?: FailedFile[];
-			stage_counts?: import('$lib/apis/sync').StageCounts;
-		}
-	) {
-		const state = cloudSyncState[providerType];
-		const provider = CLOUD_PROVIDERS[providerType];
-
-		// Only process events for the current knowledge base
-		if (data.knowledge_id !== knowledge?.id) return;
-
-		// Update sync status. Preserve any existing stage_counts when the
-		// incoming event doesn't carry one (e.g. completion/cancellation
-		// emits) — otherwise the SyncProgress component unmounts and the UI
-		// flickers between bar and legacy badge mid-sync.
-		state.syncStatus = {
-			...(state.syncStatus ?? {}),
-			knowledge_id: data.knowledge_id,
-			status: data.status as SyncStatusResponse['status'],
-			progress_current: data.current,
-			progress_total: data.total,
-			error: data.error,
-			failed_files: data.failed_files,
-			stage_counts: data.stage_counts ?? state.syncStatus?.stage_counts
-		};
-		cloudSyncState = cloudSyncState;
-
-		// A 'syncing' event while we're not tracking a sync means it was
-		// started elsewhere (scheduler, another tab). Adopt it — mirrors the
-		// resume-on-load path in onMount: flags the progress banner + the
-		// tree's 4s poll active, and arms the HTTP status fallback so the
-		// terminal is caught even if the terminal socket event is missed.
-		if (data.status === 'syncing' && !state.isSyncing) {
-			state.isSyncing = true;
-			state.refreshDone = false;
-			cloudSyncState = cloudSyncState;
-			pollCloudSyncStatus(provider);
-		}
-
-		// Handle access revoked
-		if (data.status === 'access_revoked') {
-			toast.warning(
-				data.error ||
-					$i18n.t('Access to a {{label}} source has been revoked', { label: provider.label })
-			);
-		}
-
-		// Handle file limit exceeded
-		if (data.status === 'file_limit_exceeded') {
-			toast.error(data.error || $i18n.t('File limit exceeded'));
-			state.isSyncing = false;
-			state.refreshDone = true;
-			cloudSyncState = cloudSyncState;
-			await init();
+		if (!knowledge || cloudActionBusy) return;
+		if (!Number.isInteger(cadenceMinutes) || cadenceMinutes < 1) {
+			toast.error($i18n.t('Enter a positive sync interval.'));
 			return;
 		}
-
-		// Handle completion states
-		if (data.status === 'completed' || data.status === 'completed_with_errors') {
-			const failed = data.files_failed ?? 0;
-			const { variant, message } = buildSyncToast($i18n, provider.label, {
-				added: data.files_added ?? 0,
-				updated: data.files_updated ?? 0,
-				unchanged: data.files_unchanged ?? 0,
-				failed,
-				removed: data.files_removed ?? data.deleted_count ?? 0
-			});
-			const failedDetails =
-				failed > 0 && data.failed_files ? formatFailedFilesMessage(data.failed_files) : '';
-			toast[variant](message + failedDetails);
-			state.isSyncing = false;
-			state.refreshDone = true;
-			cloudSyncState = cloudSyncState;
-			// Refresh knowledge metadata to update last_sync_at timestamp
-			const res = await getKnowledgeById(localStorage.token, id);
-			if (res) {
-				knowledge = res;
+		cloudActionBusy = true;
+		try {
+			let connection =
+				schedules.find((s) => s.source_kind === provider.type)?.connection ?? connecting;
+			if (connection?.source_kind !== provider.type) connection = null;
+			if (connection?.lifecycle !== 'enabled') {
+				connection = await authorizeBackgroundSync(provider, connection?.id);
+				if (connection)
+					toast.success($i18n.t('Account connected. Select files and folders to sync.'));
+				return;
 			}
-			await init(); // Refresh file list
-		} else if (data.status === 'failed') {
-			toast.error(
-				$i18n.t('{{label}} sync failed: {{error}}', {
-					label: provider.label,
-					error: data.error || 'Unknown error'
-				})
-			);
-			state.isSyncing = false;
-			cloudSyncState = cloudSyncState;
-			// Failed files carry status 'error' in meta — refresh so the tree
-			// shows error badges instead of eternal spinners.
-			if (!state.refreshDone) {
-				state.refreshDone = true;
-				cloudSyncState = cloudSyncState;
-				await init();
-			}
-		} else if (data.status === 'cancelled') {
-			toast.info($i18n.t('{{label}} sync cancelled', { label: provider.label }));
-			state.isSyncing = false;
-			state.isCancelling = false;
-			state.refreshDone = true;
-			cloudSyncState = cloudSyncState;
-			// Refresh knowledge metadata to update last_sync_at timestamp
-			const res = await getKnowledgeById(localStorage.token, id);
-			if (res) {
-				knowledge = res;
-			}
-			await init(); // Refresh file list
-		}
-	}
-
-	const authorizeBackgroundSync = async (provider: CloudSyncProvider) => {
-		const state = cloudSyncState[provider.type];
-		const authUrl = `${WEBUI_API_BASE_URL}/${provider.authBasePath}/auth/initiate?knowledge_id=${knowledge.id}`;
-
-		// Open popup
-		const popup = window.open(
-			authUrl,
-			provider.authPopupName,
-			'width=600,height=700,scrollbars=yes'
-		);
-
-		let messageReceived = false;
-
-		// Listen for postMessage from callback
-		const handleMessage = (event: MessageEvent) => {
-			if (event.data?.type !== provider.authCallbackType) return;
-
-			messageReceived = true;
-			window.removeEventListener('message', handleMessage);
-
-			if (event.data.success) {
-				state.bgSyncAuthorized = true;
-				state.bgSyncNeedsReauth = false;
-				cloudSyncState = cloudSyncState;
-				toast.success($i18n.t('Background sync authorized'));
+			if (!connection || destroyed) return;
+			let scopes: ScheduleForm['scope'][];
+			if (provider.type === 'onedrive') {
+				const items = await openOneDriveItemPicker('organizations');
+				if (!items?.length) return;
+				scopes = items.map(oneDriveScope);
 			} else {
-				toast.error($i18n.t('Authorization failed: {{error}}', { error: event.data.error }));
+				const result = await createKnowledgePicker();
+				if (!result?.items.length) return;
+				scopes = result.items.map(googleDriveScope);
 			}
-		};
-
-		window.addEventListener('message', handleMessage);
-
-		// When popup closes, check token status as fallback (postMessage may fail due to origin mismatch)
-		const checkClosed = setInterval(async () => {
-			if (popup?.closed) {
-				clearInterval(checkClosed);
-				window.removeEventListener('message', handleMessage);
-
-				if (!messageReceived) {
-					try {
-						const status = await provider.api.getTokenStatus(localStorage.token, knowledge.id);
-						if (status.has_token && !status.is_expired) {
-							state.bgSyncAuthorized = true;
-							state.bgSyncNeedsReauth = false;
-							cloudSyncState = cloudSyncState;
-							toast.success($i18n.t('Background sync authorized'));
-						}
-					} catch (e) {
-						console.warn(`Failed to check ${provider.label} background sync token status:`, e);
-						toast.error($i18n.t('Failed to check background sync status'));
-					}
+			for (const scope of scopes) {
+				const form = { connection_id: connection.id, scope, cadence_minutes: cadenceMinutes };
+				const content = await cloudSync.createSchedule(localStorage.token, knowledge.id, {
+					...form,
+					kind: 'content'
+				});
+				try {
+					await cloudSync.createSchedule(localStorage.token, knowledge.id, {
+						...form,
+						kind: 'acl_refresh'
+					});
+				} catch (error) {
+					await cloudSync.deleteSchedule(localStorage.token, knowledge.id, content.id);
+					throw error;
 				}
+				await cloudSync.runSchedule(localStorage.token, knowledge.id, content.id);
 			}
-		}, 500);
+			await refreshCloudSync();
+			knowledge = await getKnowledgeById(localStorage.token, knowledge.id);
+			const url = new URL(window.location.href);
+			url.searchParams.delete(provider.startSyncParam);
+			history.replaceState({}, '', url.toString());
+			toast.success($i18n.t('{{label}} sync started', { label: provider.label }));
+		} catch (error) {
+			reportCloudError(error);
+			await refreshCloudSync().catch(() => {
+				syncStatusError = true;
+			});
+		} finally {
+			cloudActionBusy = false;
+		}
 	};
 
-	const removeCloudSourceHandler = async (
-		provider: CloudSyncProvider,
-		itemId: string,
-		sourceName: string
-	) => {
+	const scheduleAction = async (schedule: Schedule, action: ScheduleAction | 'delete') => {
+		if (!knowledge || cloudActionBusy) return;
+		cloudActionBusy = true;
 		try {
-			const result = await provider.api.removeSource(localStorage.token, knowledge.id, itemId);
-			toast.success(
-				$i18n.t('Source "{{name}}" removed. {{count}} file(s) cleaned up.', {
-					name: result.source_name,
-					count: result.files_removed
-				})
-			);
-			// Refresh knowledge metadata and file list
-			const res = await getKnowledgeById(localStorage.token, id);
-			if (res) {
-				knowledge = res;
-			}
-			await init();
-		} catch (e) {
-			console.error(`Error removing ${provider.label} source:`, e);
-			toast.error(
-				$i18n.t('Failed to remove source: {{error}}', {
-					error: e instanceof Error ? e.message : String(e)
-				})
-			);
+			const actions = {
+				run: cloudSync.runSchedule,
+				cancel: cloudSync.cancelSchedule,
+				suspend: cloudSync.suspendSchedule,
+				resume: cloudSync.resumeSchedule,
+				delete: cloudSync.deleteSchedule
+			};
+			await actions[action](localStorage.token, knowledge.id, schedule.id);
+			await refreshCloudSync();
+		} catch (error) {
+			reportCloudError(error);
+		} finally {
+			cloudActionBusy = false;
 		}
 	};
 
@@ -1771,7 +1173,7 @@
 					clearInterval(interval);
 					pollers.delete(fileId);
 				}
-			} catch (_e) {
+			} catch {
 				// Network blip; let the next tick retry.
 			}
 		}, 5000);
@@ -2012,7 +1414,8 @@
 	const externalTestHandler = async () => {
 		if (!isExternalKnowledge || !externalTestQuery.trim()) return;
 
-		const external = knowledge?.meta?.external ?? {};
+		const external = knowledge?.meta?.external;
+		if (!external?.connection_id) return;
 		const res = await testExternalKnowledgeRetrieval(localStorage.token, external.connection_id, {
 			query: externalTestQuery,
 			source: external.source,
@@ -2035,7 +1438,6 @@
 		if (items.length === 0) return;
 
 		let ok = 0;
-		let removedSource = false;
 		for (const item of items) {
 			try {
 				if (item.kind === 'file') {
@@ -2044,10 +1446,6 @@
 				} else if (item.kind === 'directory') {
 					const res = await deleteKnowledgeDirectory(localStorage.token, id, item.dirId, false);
 					if (res) ok++;
-				} else if (activeProvider) {
-					await activeProvider.api.removeSource(localStorage.token, knowledge.id, item.itemId);
-					removedSource = true;
-					ok++;
 				}
 			} catch (e) {
 				console.error('Bulk remove failed for', item.key, e);
@@ -2060,12 +1458,6 @@
 
 		selection.clear();
 
-		if (removedSource) {
-			const res = await getKnowledgeById(localStorage.token, id);
-			if (res) {
-				knowledge = res;
-			}
-		}
 		await init();
 	};
 
@@ -2116,11 +1508,11 @@
 
 	// Path-preserving traversal of dropped directory entries (upstream) —
 	// feeds uploadDirectoryEntries so dropped folders keep their structure.
-	const readDirectoryEntries = async (reader: any) => {
-		const entries: any[] = [];
+	const readDirectoryEntries = async (reader: FileSystemDirectoryReader) => {
+		const entries: FileSystemEntry[] = [];
 
 		for (;;) {
-			const batch = await new Promise<any[]>((resolve, reject) => {
+			const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
 				reader.readEntries(resolve, reject);
 			});
 
@@ -2135,7 +1527,7 @@
 	};
 
 	const collectDroppedEntryFiles = async (
-		entry: any,
+		entry: FileSystemEntry,
 		entryPath = entry.name
 	): Promise<DirectoryFileEntry[]> => {
 		if (entry.name.startsWith('.') || hasHiddenFolder(entryPath)) {
@@ -2144,7 +1536,7 @@
 
 		if (entry.isFile) {
 			const file = await new Promise<File>((resolve, reject) => {
-				entry.file(resolve, reject);
+				(entry as FileSystemFileEntry).file(resolve, reject);
 			});
 			const parts = entryPath.split('/');
 			const filename = parts.pop() || file.name;
@@ -2152,7 +1544,7 @@
 		}
 
 		if (entry.isDirectory) {
-			const reader = entry.createReader();
+			const reader = (entry as FileSystemDirectoryEntry).createReader();
 			const entries = await readDirectoryEntries(reader);
 			const nested = await Promise.all(
 				entries.map((child) => collectDroppedEntryFiles(child, `${entryPath}/${child.name}`))
@@ -2194,7 +1586,7 @@
 				const looseFiles: File[] = [];
 
 				for (const rawItem of Array.from(inputItems)) {
-					const item = rawItem as DataTransferItem & { webkitGetAsEntry?: () => any };
+					const item = rawItem as DataTransferItem;
 					const entry = item.webkitGetAsEntry?.();
 
 					if (entry?.isDirectory) {
@@ -2227,15 +1619,17 @@
 	};
 
 	// ===== Socket event handler references (for cleanup) =====
-	const socketHandlers: Array<{ event: string; handler: Function }> = [];
 
 	onMount(async () => {
+		if ($config?.features?.enable_google_drive_integration)
+			void initializeGooglePicker().catch(() => {});
 		id = $page.params.id;
 		const res = await getKnowledgeById(localStorage.token, id).catch((e) => {
 			toast.error(`${e}`);
 			return null;
 		});
 
+		if (destroyed) return;
 		if (res) {
 			knowledge = res;
 			if (!Array.isArray(knowledge?.access_grants)) {
@@ -2243,46 +1637,11 @@
 			}
 			knowledgeId = knowledge?.id;
 
-			// Check background sync token status for cloud providers
-			for (const provider of Object.values(CLOUD_PROVIDERS)) {
-				if (knowledge?.type === provider.type) {
-					try {
-						const status = await provider.api.getTokenStatus(localStorage.token, knowledge.id);
-						const state = cloudSyncState[provider.type];
-						state.bgSyncAuthorized = status.has_token && !status.is_expired;
-						state.bgSyncNeedsReauth = status.needs_reauth ?? false;
-						cloudSyncState = cloudSyncState;
-					} catch (e) {
-						console.warn(`Failed to check ${provider.label} background sync token status:`, e);
-						if (provider.type === 'onedrive') {
-							toast.error($i18n.t('Failed to check background sync status'));
-						}
-					}
-				}
-			}
-
-			// Resume sync UI if a sync is already in progress
-			for (const provider of Object.values(CLOUD_PROVIDERS)) {
-				if (knowledge?.meta?.[provider.metaKey]?.status === 'syncing') {
-					const state = cloudSyncState[provider.type];
-					state.isSyncing = true;
-					state.refreshDone = false;
-					cloudSyncState = cloudSyncState;
-					pollCloudSyncStatus(provider);
-				}
-			}
-
-			// Auto-start sync if directed from creation flow
-			for (const provider of Object.values(CLOUD_PROVIDERS)) {
-				if ($page.url.searchParams.get(provider.startSyncParam) === 'true' && knowledge) {
-					const url = new URL(window.location.href);
-					url.searchParams.delete(provider.startSyncParam);
-					history.replaceState({}, '', url.toString());
-
-					await tick();
-					cloudSyncHandler(provider);
-				}
-			}
+			requestedProvider =
+				Object.values(CLOUD_PROVIDERS).find(
+					(provider) => $page.url.searchParams.get(provider.startSyncParam) === 'true'
+				) ?? null;
+			if (requestedProvider || CLOUD_PROVIDERS[knowledge.type ?? '']) void pollCloudSyncStatus();
 		} else {
 			goto('/workspace/knowledge');
 		}
@@ -2294,23 +1653,6 @@
 		dropZone?.addEventListener('drop', onDrop);
 		dropZone?.addEventListener('dragleave', onDragLeave);
 
-		// Register socket handlers for all cloud providers
-		for (const provider of Object.values(CLOUD_PROVIDERS)) {
-			const progressHandler = (data) => handleCloudSyncProgress(provider.type, data);
-			const processingHandler = (data) => handleCloudFileProcessing(provider.type, data);
-			const addedHandler = (data) => handleCloudFileAdded(provider.type, data);
-
-			$socket?.on(`${provider.eventPrefix}:sync:progress`, progressHandler);
-			$socket?.on(`${provider.eventPrefix}:file:processing`, processingHandler);
-			$socket?.on(`${provider.eventPrefix}:file:added`, addedHandler);
-
-			socketHandlers.push(
-				{ event: `${provider.eventPrefix}:sync:progress`, handler: progressHandler },
-				{ event: `${provider.eventPrefix}:file:processing`, handler: processingHandler },
-				{ event: `${provider.eventPrefix}:file:added`, handler: addedHandler }
-			);
-		}
-
 		// Listen for file processing status events via Socket.IO
 		$socket?.on('file:status', handleFileStatus);
 	});
@@ -2321,20 +1663,14 @@
 			clearTimeout(treeRefreshTimer);
 			treeRefreshTimer = null;
 		}
-		if (syncLevelPoll) {
-			clearInterval(syncLevelPoll);
-			syncLevelPoll = null;
-		}
 		const dropZone = document.querySelector('body');
 		dropZone?.removeEventListener('dragover', onDragOver);
 		dropZone?.removeEventListener('drop', onDrop);
 		dropZone?.removeEventListener('dragleave', onDragLeave);
 
-		// Clean up all cloud provider socket listeners
-		for (const { event, handler } of socketHandlers) {
-			$socket?.off(event, handler);
-		}
-
+		destroyed = true;
+		clearTimeout(syncPoll);
+		closeAuthorization?.();
 		// Clean up file status listener
 		$socket?.off('file:status', handleFileStatus);
 
@@ -2371,20 +1707,6 @@
 />
 
 <SyncConfirmDialog
-	bind:show={showCancelSyncConfirmModal}
-	title={$i18n.t(activeProvider ? `Cancel ${activeProvider.label} Sync` : 'Cancel Sync')}
-	message={$i18n.t(
-		'Are you sure you want to cancel the ongoing sync? Files already synced will be kept.'
-	)}
-	confirmLabel={$i18n.t('Cancel Sync')}
-	on:confirm={() => {
-		if (activeProvider) {
-			cancelCloudSyncHandler(activeProvider);
-		}
-	}}
-/>
-
-<SyncConfirmDialog
 	bind:show={showBulkRemoveConfirm}
 	title={$bulkBreakdown.sources > 0
 		? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
@@ -2414,8 +1736,6 @@
 		uploadWeb(e.data);
 	}}
 />
-
-<ConfluencePickerModal bind:show={showConfluencePicker} on:select={handleConfluenceSelect} />
 
 <AddTextContentModal
 	bind:show={showAddTextContentModal}
@@ -2531,120 +1851,7 @@
 								{:else}
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
-								{#if activeProvider && $config?.[activeProvider.configKey]?.has_client_secret && knowledge?.write_access}
-									{#if activeState?.bgSyncNeedsReauth}
-										<button
-											class="text-xs text-red-500 hover:text-red-600 flex items-center gap-1"
-											on:click={() => authorizeBackgroundSync(activeProvider)}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 16 16"
-												fill="currentColor"
-												class="size-3.5"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-											{$i18n.t('Re-authorize background sync')}
-										</button>
-									{:else if activeState?.bgSyncAuthorized}
-										<span class="text-xs text-green-600 flex items-center gap-1">
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 16 16"
-												fill="currentColor"
-												class="size-3.5"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-											{$i18n.t('Background sync enabled')}
-										</span>
-									{:else if knowledge?.meta?.[activeProvider.metaKey]?.sources?.length}
-										<button
-											class="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1"
-											on:click={() => authorizeBackgroundSync(activeProvider)}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 16 16"
-												fill="currentColor"
-												class="size-3.5"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-											{$i18n.t('Enable background sync')}
-										</button>
-									{/if}
-								{/if}
-								{#if activeState?.isCancelling}
-									<Tooltip content={$i18n.t('Click to cancel sync')}>
-										<button class="p-1 rounded-lg text-gray-400 cursor-not-allowed" disabled>
-											<Spinner className="size-3.5" />
-										</button>
-									</Tooltip>
-								{:else if activeState?.isSyncing}
-									<Tooltip content={$i18n.t('Click to cancel sync')}>
-										<button
-											class="p-1 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-blue-500 hover:text-red-500 transition"
-											on:click={() => {
-												showCancelSyncConfirmModal = true;
-											}}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 16 16"
-												fill="currentColor"
-												class="size-4"
-											>
-												<path
-													d="M4.5 2A2.5 2.5 0 0 0 2 4.5v7A2.5 2.5 0 0 0 4.5 14h7a2.5 2.5 0 0 0 2.5-2.5v-7A2.5 2.5 0 0 0 11.5 2h-7Z"
-												/>
-											</svg>
-										</button>
-									</Tooltip>
-								{:else if activeProvider && knowledge?.meta?.[activeProvider.metaKey]?.sources?.length && knowledge?.user_id === $user?.id}
-									<Tooltip
-										content={knowledge?.meta?.[activeProvider.metaKey]?.last_sync_at
-											? $i18n.t('Last synced: {{date}}', {
-													date: dayjs(
-														knowledge.meta[activeProvider.metaKey].last_sync_at * 1000
-													).fromNow()
-												})
-											: $i18n.t('Sync {{label}} files', { label: activeProvider.label })}
-									>
-										<button
-											class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-											on:click={() => cloudResyncHandler(activeProvider)}
-										>
-											{#if activeProvider.type === 'onedrive'}
-												<OneDrive className="size-4" />
-											{:else if activeProvider.type === 'google_drive'}
-												<GoogleDrive className="size-4" />
-											{:else if activeProvider.type === 'confluence'}
-												<Confluence className="size-4" />
-											{/if}
-										</button>
-									</Tooltip>
-								{/if}
-								{#if isSyncBusy}
-									<SyncProgress
-										current={activeState?.syncStatus?.progress_current ?? 0}
-										total={activeState?.syncStatus?.progress_total ?? 0}
-										stageCounts={activeState?.syncStatus?.stage_counts}
-									/>
-								{:else if fileItemsTotal || kbFileTotal}
+								{#if fileItemsTotal || kbFileTotal}
 									{#if knowledge?.type !== 'local' && knowledge?.type}
 										{@const maxFiles =
 											$config?.integration_providers?.[knowledge?.type]?.max_files_per_kb ||
@@ -2692,25 +1899,17 @@
 					</div>
 
 					<div class="flex w-full items-center">
-						{#if knowledge?.meta?.confluence_sync?.shared}
-							<!-- The shared Confluence KB is system-managed — its
-							     description is a fixed, localized string. -->
-							<div class="text-left text-xs w-full text-gray-500 flex-1">
-								{$i18n.t('Read-only Confluence knowledge base managed by administrators.')}
-							</div>
-						{:else}
-							<input
-								type="text"
-								class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden flex-1"
-								bind:value={knowledge.description}
-								aria-label={$i18n.t('Knowledge Description')}
-								placeholder={$i18n.t('Knowledge Description')}
-								disabled={!knowledge?.write_access}
-								on:input={() => {
-									changeDebounceHandler();
-								}}
-							/>
-						{/if}
+						<input
+							type="text"
+							class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden flex-1"
+							bind:value={knowledge.description}
+							aria-label={$i18n.t('Knowledge Description')}
+							placeholder={$i18n.t('Knowledge Description')}
+							disabled={!knowledge?.write_access}
+							on:input={() => {
+								changeDebounceHandler();
+							}}
+						/>
 
 						<div class="hidden md:block">
 							<Tooltip content={$i18n.t('Click to copy ID')}>
@@ -2733,6 +1932,96 @@
 		<div
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
+			{#if activeProvider || schedules.length}
+				<section
+					class="mx-4 mb-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700"
+					aria-label={$i18n.t('Cloud Sync')}
+				>
+					{#if syncStatusError}
+						<p role="alert" class="text-sm text-red-500">
+							{$i18n.t('Failed to check background sync status')}
+						</p>
+					{/if}
+					{#if knowledge.write_access && activeProvider}
+						<label class="flex items-center gap-2 text-xs">
+							{$i18n.t('Sync interval (minutes)')}
+							<input
+								class="w-20 rounded border p-1 dark:bg-gray-900"
+								type="number"
+								min="1"
+								step="1"
+								bind:value={cadenceMinutes}
+							/>
+						</label>
+					{/if}
+					{#each schedules as schedule (schedule.id)}
+						<div
+							class="flex flex-wrap items-center gap-3 border-b py-2 last:border-0 dark:border-gray-700"
+						>
+							<span class="text-xs"
+								>{schedule.kind === 'content'
+									? $i18n.t('Content sync')
+									: $i18n.t('Access sync')}</span
+							>
+							<span class="text-xs">{schedule.lifecycle}</span>
+							{#if schedule.last_run}<SyncProgress run={schedule.last_run} />{/if}
+							{#if schedule.next_due_at}
+								<span class="text-xs text-gray-500"
+									>{$i18n.t('Next sync: {{date}}', {
+										date: dayjs(schedule.next_due_at).format('L LT')
+									})}</span
+								>
+							{/if}
+							{#if schedule.provider_secret_days_to_expiry !== null && schedule.provider_secret_days_to_expiry !== undefined && schedule.provider_secret_days_to_expiry <= 30}
+								<span class="text-xs text-amber-600"
+									>{$i18n.t(
+										'Provider credentials expire in {{count}} days. Contact your administrator.',
+										{ count: schedule.provider_secret_days_to_expiry }
+									)}</span
+								>
+							{/if}
+							{#if knowledge.write_access}
+								<button
+									class="text-xs underline"
+									disabled={cloudActionBusy ||
+										schedule.connection.lifecycle !== 'enabled' ||
+										schedule.lifecycle !== 'enabled' ||
+										['queued', 'running'].includes(schedule.last_run?.status ?? '')}
+									on:click={() => scheduleAction(schedule, 'run')}>{$i18n.t('Sync now')}</button
+								>
+								{#if schedule.last_run?.status === 'running'}
+									<button
+										class="text-xs underline"
+										disabled={cloudActionBusy}
+										on:click={() => scheduleAction(schedule, 'cancel')}
+										>{$i18n.t('Cancel Sync')}</button
+									>
+								{/if}
+								{#if schedule.lifecycle === 'enabled'}
+									<button
+										class="text-xs underline"
+										disabled={cloudActionBusy}
+										on:click={() => scheduleAction(schedule, 'suspend')}>{$i18n.t('Pause')}</button
+									>
+								{:else if schedule.lifecycle === 'suspended'}
+									<button
+										class="text-xs underline"
+										disabled={cloudActionBusy || schedule.connection.lifecycle !== 'enabled'}
+										on:click={() => scheduleAction(schedule, 'resume')}>{$i18n.t('Resume')}</button
+									>
+								{/if}
+								<button
+									class="text-xs underline"
+									disabled={cloudActionBusy}
+									on:click={() => scheduleAction(schedule, 'delete')}
+									>{$i18n.t('Remove schedule')}</button
+								>
+							{/if}
+						</div>
+					{/each}
+				</section>
+			{/if}
+
 			{#if isExternalKnowledge}
 				<div class="p-5 flex flex-col gap-4">
 					<div class="flex flex-wrap gap-2 text-xs">
@@ -2864,6 +2153,7 @@
 										<button
 											class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
 											disabled={isSyncBusy}
+											aria-label={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}
 											on:click={() => {
 												cloudSyncHandler(activeProvider);
 											}}
@@ -3032,17 +2322,7 @@
 												directories={query ? [] : directoryItems}
 												searchMode={!!query}
 												{structureEditable}
-												sources={activeProvider
-													? (knowledge?.meta?.[activeProvider.metaKey]?.sources ?? [])
-													: []}
-												isSyncing={activeState?.isSyncing ?? false}
-												onRemoveSource={activeProvider && knowledge?.write_access
-													? (itemId, sourceName) => {
-															selectedFileId = null;
-															selectedFile = null;
-															removeCloudSourceHandler(activeProvider, itemId, sourceName);
-														}
-													: null}
+												isSyncing={isSyncBusy}
 												{knowledge}
 												{selectedFileId}
 												onClick={(fileId) => {
@@ -3088,7 +2368,7 @@
 										</div>
 									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null}
 										<EmptyStateCards
-											knowledgeType={knowledge?.type || 'local'}
+											knowledgeType={activeProvider?.type ?? knowledge?.type ?? 'local'}
 											integrationProviders={$config?.integration_providers}
 											onAction={(type) => {
 												if (type === 'integration') {
@@ -3097,8 +2377,6 @@
 													cloudSyncHandler(CLOUD_PROVIDERS.onedrive);
 												} else if (type === 'google_drive') {
 													cloudSyncHandler(CLOUD_PROVIDERS.google_drive);
-												} else if (type === 'confluence') {
-													cloudSyncHandler(CLOUD_PROVIDERS.confluence);
 												} else if (type === 'directory') {
 													uploadDirectoryHandler();
 												} else if (type === 'web') {
