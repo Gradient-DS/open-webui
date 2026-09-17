@@ -71,6 +71,7 @@ class KnowledgeModel(BaseModel):
 
     id: str
     user_id: str
+    # Cloud provider names are projections of soev-api content schedules.
     type: str = 'local'
 
     name: str
@@ -83,6 +84,12 @@ class KnowledgeModel(BaseModel):
     created_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
     deleted_at: Optional[int] = None
+
+
+def is_managed_shared_kb(kb: KnowledgeModel) -> bool:
+    """Preserve the deletion guard for legacy admin-managed shared knowledge bases."""
+    meta = getattr(kb, 'meta', None) or {}
+    return any(isinstance(meta.get(key), dict) and meta[key].get('shared') for key in ('confluence_sync',))
 
 
 class KnowledgeDirectory(Base):
@@ -253,12 +260,7 @@ class KnowledgeFileListResponse(BaseModel):
 ####################
 SUSPENSION_TTL_DAYS = 30
 
-# Knowledge ``meta`` keys written by every cloud-sync worker (one per provider —
-# see each worker's ``meta_key`` property). Used by the suspension lookups below
-# to answer "is this KB synced by ANY provider?". Keep this in sync with the
-# providers registered in the sync factory. NOTE: this is the FULL set including
-# per-user providers; it is intentionally broader than
-# ``services.sync.shared_kb.SHARED_SYNC_META_KEYS`` (shared providers only).
+# Legacy SQL metadata retained for migration-facing knowledge operations.
 SYNC_PROVIDER_META_KEYS = ('onedrive_sync', 'google_drive_sync', 'confluence_sync')
 
 
