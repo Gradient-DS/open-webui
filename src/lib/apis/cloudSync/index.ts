@@ -23,10 +23,18 @@ export interface ScheduleForm {
 	cadence_minutes: number;
 }
 
+export type RunOutcome = 'succeeded' | 'partial' | 'failed' | 'cancelled';
+
+// soev-api serialises StoredRun verbatim: a live run has `outcome: null` and no
+// `finished_at`. There is no `status` field — derive one with `runStatus()`.
 export interface SyncRun {
 	id: string;
-	status: string;
-	observed?: number;
+	started_at: string;
+	finished_at?: string | null;
+	outcome?: RunOutcome | null;
+	error_code?: string | null;
+	cancel_requested_at?: string | null;
+	counts?: Record<string, number>;
 	[key: string]: unknown;
 }
 

@@ -5,7 +5,9 @@ import {
 	googleDriveScope,
 	oneDriveScope,
 	reconnectConnections,
-	runCounts
+	runCounts,
+	runIsLive,
+	runStatus
 } from './cloudSync';
 
 it('registers OneDrive folders recursively and files as single-file scopes', () => {
@@ -75,21 +77,48 @@ it('deduplicates reconnect banners and trusts polled lifecycle over a stale popu
 	expect(reconnectConnections([], { ...connection, lifecycle: 'revoked' })).toEqual([]);
 });
 
-it('shows supplied run counters without inventing a total or daemon-stage progress', () => {
+// The payload below is a verbatim soev-api StoredRun, not an invented shape:
+// counts are nested, and `secret_days` rides in counts as an expiry warning.
+it('reads counters out of the nested counts map and leaves secret_days out', () => {
 	expect(
 		runCounts({
 			id: 'run',
-			status: 'running',
-			observed: 5,
-			landed: 3,
-			failed: 1,
-			started_at: 42,
-			stage_counts: { ok: 99 }
+			started_at: '2026-09-17T12:30:46Z',
+			finished_at: '2026-09-17T12:30:56Z',
+			outcome: 'succeeded',
+			counts: {
+				fetched: 1,
+				submitted: 1,
+				landed: 1,
+				unchanged: 0,
+				deleted: 0,
+				failed: 0,
+				timed_out: 0,
+				secret_days: 90
+			}
 		})
 	).toEqual([
-		{ label: 'Observed', count: 5 },
-		{ label: 'Synced', count: 3 },
-		{ label: 'Failed', count: 1 }
+		{ label: 'Synced', count: 1 },
+		{ label: 'Fetched', count: 1 },
+		{ label: 'Submitted', count: 1 },
+		{ label: 'Unchanged', count: 0 },
+		{ label: 'Deleted', count: 0 },
+		{ label: 'Failed', count: 0 },
+		{ label: 'Timed out', count: 0 }
 	]);
-	expect(runCounts({ id: 'run', status: 'queued' })).toEqual([]);
+	expect(runCounts({ id: 'run', started_at: '2026-09-17T12:30:46Z' })).toEqual([]);
+});
+
+it('derives a run status from outcome, because soev-api sends no status field', () => {
+	const started = { id: 'run', started_at: '2026-09-17T12:30:46Z' };
+	expect(runStatus(started)).toBe('running');
+	expect(runIsLive(started)).toBe(true);
+	expect(runStatus({ ...started, cancel_requested_at: '2026-09-17T12:30:50Z' })).toBe('cancelling');
+	expect(runStatus({ ...started, outcome: 'partial' })).toBe('partial');
+	// A cancel that landed is terminal: the outcome wins over the request stamp.
+	expect(
+		runStatus({ ...started, outcome: 'cancelled', cancel_requested_at: '2026-09-17T12:30:50Z' })
+	).toBe('cancelled');
+	expect(runIsLive({ ...started, outcome: 'succeeded' })).toBe(false);
+	expect(runIsLive(null)).toBe(false);
 });

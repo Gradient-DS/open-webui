@@ -118,9 +118,7 @@
 	let syncStatusRequest = 0;
 	$: activeProvider =
 		requestedProvider ?? (knowledge?.type ? CLOUD_PROVIDERS[knowledge.type] : null);
-	$: isSyncBusy =
-		cloudActionBusy ||
-		schedules.some((schedule) => ['queued', 'running'].includes(schedule.last_run?.status ?? ''));
+	$: isSyncBusy = cloudActionBusy || schedules.some((schedule) => runIsLive(schedule.last_run));
 	$: reconnectNeeded = reconnectConnections(schedules, connecting);
 	// Single derived guard for all structure-write affordances (decision 5) —
 	// local/untyped KBs with write access only. Cloud KBs browse the
@@ -960,23 +958,34 @@
 		);
 	};
 
+	// A KB page used to re-poll every 2s for as long as it was open, and each
+	// tick refetched the whole file list too — ~6.5 requests/second per open
+	// tab against soev-api, running all day whether or not anything was
+	// syncing. Poll fast only while a run is actually live; otherwise tick
+	// slowly, just often enough to notice a schedule someone else started.
+	const SYNC_POLL_LIVE_MS = 2000;
+	const SYNC_POLL_IDLE_MS = 30000;
+
 	const refreshCloudSync = async () => {
-		if (!knowledge || destroyed) return;
+		if (!knowledge || destroyed) return false;
 		const request = ++syncStatusRequest;
 		const status = await cloudSync.getSyncStatus(localStorage.token, knowledge.id);
-		if (destroyed || request !== syncStatusRequest) return;
+		if (destroyed || request !== syncStatusRequest) return false;
+		const wasLive = schedules.some((schedule) => runIsLive(schedule.last_run));
 		schedules = status.schedules;
 		syncStatusError = false;
 		await getItemsPage();
 	};
 
 	const pollCloudSyncStatus = async () => {
+		let live = false;
 		try {
-			await refreshCloudSync();
+			live = await refreshCloudSync();
 		} catch {
 			syncStatusError = true;
 		} finally {
-			if (!destroyed) syncPoll = setTimeout(pollCloudSyncStatus, 2000);
+			if (!destroyed)
+				syncPoll = setTimeout(pollCloudSyncStatus, live ? SYNC_POLL_LIVE_MS : SYNC_POLL_IDLE_MS);
 		}
 	};
 
@@ -1121,6 +1130,7 @@
 				await cloudSync.runSchedule(localStorage.token, knowledge.id, content.id);
 			}
 			await refreshCloudSync();
+			repollCloudSyncSoon();
 			knowledge = await getKnowledgeById(localStorage.token, knowledge.id);
 			const url = new URL(window.location.href);
 			url.searchParams.delete(provider.startSyncParam);

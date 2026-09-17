@@ -50,13 +50,18 @@ class CloudSync:
 
     async def sync_status(self, collection_key: str) -> dict:
         # W2 projects the collection key directly as the OWUI knowledge id.
+        # Kept: this is what makes an unreadable or absent KB a 404 rather
+        # than an empty schedule list.
         await self._get(f'/v1/collections/{quote(collection_key, safe="")}')
+        # The listing carries each schedule's own detail, so the rest is one
+        # page plus one call per DISTINCT connection (usually exactly one).
+        # It used to also fetch every schedule individually, which made a
+        # status poll cost a round trip per schedule.
         schedules = []
-        connections = {}
-        async for row in self.client.pages(
+        connections: dict[str, dict] = {}
+        async for schedule in self.client.pages(
             '/v1/schedules', as_user=self.user_ref, params={'collection_key': collection_key}
         ):
-            schedule = await self._get(f'/v1/schedules/{quote(row["id"], safe="")}')
             connection_id = schedule['connection_id']
             if connection_id not in connections:
                 connections[connection_id] = await self.connection(connection_id)

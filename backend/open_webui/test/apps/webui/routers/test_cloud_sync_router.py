@@ -106,13 +106,28 @@ def test_a_schedule_is_registered_on_the_kbs_collection_key(api):
 
 
 def test_sync_status_shapes_the_schedule_and_the_connection(api):
-    """Status includes run progress, due time, expiry and connection lifecycle across pages."""
+    """Status includes run progress, due time, expiry and connection lifecycle across pages.
+
+    The listing now carries each schedule's own detail, so a page costs one
+    request instead of one per schedule: four calls here, not six. The
+    `last_run` below is a verbatim soev-api StoredRun — there is no `status`
+    field; the fork derives one with `runStatus()`.
+    """
     detail = {
         'id': 'schedule-1',
         'connection_id': 'connection-1',
         'collection_key': 'kb-1',
         'source_kind': 'onedrive',
-        'last_run': {'status': 'running', 'observed': 3},
+        'last_run': {
+            'id': 'run-1',
+            'schedule_id': 'schedule-1',
+            'job_id': 'job-1',
+            'started_at': '2026-09-17T11:00:00Z',
+            'heartbeat_at': '2026-09-17T11:00:05Z',
+            'finished_at': None,
+            'outcome': None,
+            'counts': {'fetched': 3},
+        },
         'next_due_at': '2026-09-17T12:00:00Z',
         'provider_secret_days_to_expiry': 12,
     }
@@ -121,19 +136,18 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
     api.responses.extend(
         [
             response({'key': 'kb-1'}),
-            response({'data': [{'id': 'schedule-1'}], 'next_cursor': 'page-2'}),
-            response(detail),
+            response({'data': [detail], 'next_cursor': 'page-2'}),
             response(connection),
-            response({'data': [{'id': 'schedule-2'}], 'next_cursor': None}),
-            response(second),
+            response({'data': [second], 'next_cursor': None}),
         ]
     )
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-1/sync')
     assert result.status_code == 200
     assert result.json() == {'schedules': [{**detail, 'connection': connection}, {**second, 'connection': connection}]}
     assert dict(api.requests[1].url.params) == {'collection_key': 'kb-1'}
-    assert dict(api.requests[4].url.params) == {'collection_key': 'kb-1', 'cursor': 'page-2'}
-    assert len(api.refs) == 6
+    assert dict(api.requests[3].url.params) == {'collection_key': 'kb-1', 'cursor': 'page-2'}
+    # One connection fetch for two schedules sharing it, and no per-schedule call.
+    assert len(api.refs) == 4
     assert_assertions(api.requests)
 
 
