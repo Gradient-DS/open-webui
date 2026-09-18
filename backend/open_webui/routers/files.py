@@ -766,6 +766,11 @@ async def get_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncSess
         )
 
     if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+        # [Gradient] soev-api holds the extracted text; serve it on the row without persisting it.
+        if not (file.data or {}).get('content'):
+            rendition = await ingest.rendition_of(file, user.id)
+            if rendition:
+                return file.model_copy(update={'data': {**(file.data or {}), 'content': rendition}})
         return file
     else:
         raise HTTPException(
