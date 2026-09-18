@@ -55,6 +55,11 @@ async def get_connection(connection_id: str, sync=Depends(cloud_sync)):
     return await sync.connection(connection_id)
 
 
+@router.get('/connections/{connection_id}/usage')
+async def connection_usage(connection_id: str, sync=Depends(cloud_sync)):
+    return await sync.connection_usage(connection_id)
+
+
 @router.delete('/connections/{connection_id}', status_code=204)
 async def revoke_connection(connection_id: str, sync=Depends(cloud_sync)):
     await sync.revoke_connection(connection_id)

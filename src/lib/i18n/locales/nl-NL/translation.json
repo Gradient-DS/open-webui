@@ -3882,5 +3882,13 @@
   "Remove {{label}} from this knowledge base? Its files stay in the {{count}} other knowledge bases that use it. Nothing changes in {{provider}}.": "{{label}} uit deze kennisbank verwijderen? De bestanden blijven in de {{count}} andere kennisbanken die deze bron gebruiken. Er verandert niets in {{provider}}.",
   "Remove {{label}} from this knowledge base? They will be removed from search. Nothing changes in {{provider}}. You can add the folder again any time.": "{{label}} uit deze kennisbank verwijderen? De bestanden worden uit de zoekresultaten verwijderd. Er verandert niets in {{provider}}. Je kunt de map op elk moment opnieuw toevoegen.",
   "Disconnect {{provider}}?": "Verbinding met {{provider}} verbreken?",
-  "Disconnect {{provider}}? Your synced folders stop updating and their files are removed from search. You can reconnect any time.": "Verbinding met {{provider}} verbreken? Je gesynchroniseerde mappen worden niet meer bijgewerkt en hun bestanden worden uit de zoekresultaten verwijderd. Je kunt op elk moment opnieuw verbinden."
+  "Disconnect {{provider}}? Your synced folders stop updating and their files are removed from search. You can reconnect any time.": "Verbinding met {{provider}} verbreken? Je gesynchroniseerde mappen worden niet meer bijgewerkt en hun bestanden worden uit de zoekresultaten verwijderd. Je kunt op elk moment opnieuw verbinden.",
+  "Connected accounts": "Verbonden accounts",
+  "Knowledge bases that use this account: {{n}}": "Kennisbanken die dit account gebruiken: {{n}}",
+  "Could not check knowledge base usage.": "Kan niet controleren welke kennisbanken dit account gebruiken.",
+  "Failed to check connected accounts.": "Verbonden accounts controleren is mislukt.",
+  "No connected accounts yet. Add a source in a knowledge base to connect.": "Nog geen verbonden accounts. Voeg een bron toe aan een kennisbank om verbinding te maken.",
+  "Failed to disconnect account.": "Verbinding met het account verbreken is mislukt.",
+  "Disconnect": "Verbinding verbreken",
+  "Retry loading accounts": "Accounts opnieuw laden"
 }

@@ -97,6 +97,8 @@ export const createConnection = (token: string, provider: CloudProvider) =>
 export const listConnections = (token: string) => request<Connection[]>(token, '/connections');
 export const getConnection = (token: string, id: string) =>
 	request<Connection>(token, connectionPath(id));
+export const getConnectionUsage = (token: string, id: string) =>
+	request<{ knowledge_ids: string[] }>(token, `${connectionPath(id)}/usage`);
 export const authorizeConnection = (token: string, id: string) =>
 	request<Authorization>(token, `${connectionPath(id)}/authorize`, 'POST');
 export const revokeConnection = (token: string, id: string) =>

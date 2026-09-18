@@ -23,6 +23,15 @@ class CloudSync:
     async def connection(self, connection_id: str) -> dict:
         return await self._get(f'/v1/connections/{quote(connection_id, safe="")}')
 
+    async def connection_usage(self, connection_id: str) -> dict:
+        await self.connection(connection_id)
+        knowledge_ids: set[str] = set()
+        async for schedule in self.client.pages(
+            '/v1/schedules', as_user=self.user_ref, params={'connection_id': connection_id}
+        ):
+            knowledge_ids.update(schedule['subscribers'])
+        return {'knowledge_ids': sorted(knowledge_ids)}
+
     async def authorize(self, connection_id: str, owner_email: str | None = None) -> dict:
         body = {'owner_email': owner_email} if owner_email is not None else None
         return await self._send('POST', f'/v1/connections/{quote(connection_id, safe="")}/authorize', body)

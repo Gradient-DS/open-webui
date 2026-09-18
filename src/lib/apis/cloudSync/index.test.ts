@@ -74,6 +74,16 @@ describe('cloud-sync thin router', () => {
 		]);
 	});
 
+	it('reads distinct knowledge base usage from the encoded connection route', async () => {
+		const result = { knowledge_ids: ['kb-1', 'kb-2'] };
+		const fetch = respond(result);
+		expect(await cloudSync.getConnectionUsage(token, 'c/one')).toEqual(result);
+		expect(fetch).toHaveBeenCalledWith(
+			'/api/v1/cloud-sync/connections/c%2Fone/usage',
+			expect.objectContaining({ method: 'GET', headers: { Authorization: `Bearer ${token}` } })
+		);
+	});
+
 	it('handles run jobs and bodyless schedule and revoke responses', async () => {
 		respond({ job_id: 'job' }, 201);
 		expect(await cloudSync.runSchedule(token, 'kb', 's')).toEqual({ job_id: 'job' });

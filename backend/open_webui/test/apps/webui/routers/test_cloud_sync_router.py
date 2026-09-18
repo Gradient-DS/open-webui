@@ -362,3 +362,60 @@ def test_schedule_create_forwards_label_and_path(api):
     assert result.json()['label'] == 'Reports'
     assert result.json()['path'] == '/Team/Reports'
     assert_assertions(api.requests)
+
+
+def test_connection_usage_lists_subscribing_kbs(api):
+    """Usage unions subscribers across every page and both schedule kinds as the owner."""
+    api.responses.extend(
+        [
+            response({'id': 'c'}),
+            response(
+                {
+                    'data': [
+                        {'id': 's1', 'kind': 'content', 'subscribers': ['kb-1', 'kb-2']},
+                        {'id': 's2', 'kind': 'acl_refresh', 'subscribers': ['kb-1', 'kb-2']},
+                    ],
+                    'next_cursor': 'next',
+                }
+            ),
+            response({'data': [{'id': 's3', 'subscribers': ['kb-2', 'kb-3']}], 'next_cursor': None}),
+        ]
+    )
+    result = api.browser.get('/api/v1/cloud-sync/connections/c/usage')
+    assert result.status_code == 200
+    assert result.json() == {'knowledge_ids': ['kb-1', 'kb-2', 'kb-3']}
+    assert api.requests[0].url.path == '/v1/connections/c'
+    assert api.requests[1].url.path == api.requests[2].url.path == '/v1/schedules'
+    assert dict(api.requests[1].url.params) == {'connection_id': 'c'}
+    assert dict(api.requests[2].url.params) == {'connection_id': 'c', 'cursor': 'next'}
+    assert api.refs == ['owui:user:alice'] * 3
+    assert_assertions(api.requests)
+
+
+def test_connection_usage_without_schedules_is_empty(api):
+    """An unused account has no subscribing knowledge bases."""
+    api.responses.extend([response({'id': 'c'}), response({'data': [], 'next_cursor': None})])
+    result = api.browser.get('/api/v1/cloud-sync/connections/c/usage')
+    assert result.status_code == 200
+    assert result.json() == {'knowledge_ids': []}
+    assert_assertions(api.requests)
+
+
+def test_connection_usage_refuses_an_inaccessible_connection(api):
+    """A missing or foreign account is refused before schedules are listed."""
+    api.responses.append(response({'code': 'connection_not_found', 'detail': 'No such connection'}, 404))
+    result = api.browser.get('/api/v1/cloud-sync/connections/foreign/usage')
+    assert result.status_code == 404
+    assert len(api.requests) == 1
+    assert_assertions(api.requests)
+
+
+def test_connection_usage_requires_a_verified_user(api):
+    """Usage cannot expose subscribers without an authenticated subject."""
+
+    def reject():
+        raise HTTPException(401)
+
+    api.app.dependency_overrides[cloud_sync.get_verified_user] = reject
+    assert api.browser.get('/api/v1/cloud-sync/connections/c/usage').status_code == 401
+    assert not api.requests

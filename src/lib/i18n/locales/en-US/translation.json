@@ -3882,5 +3882,13 @@
   "Remove {{label}} from this knowledge base? Its files stay in the {{count}} other knowledge bases that use it. Nothing changes in {{provider}}.": "Remove {{label}} from this knowledge base? Its files stay in the {{count}} other knowledge bases that use it. Nothing changes in {{provider}}.",
   "Remove {{label}} from this knowledge base? They will be removed from search. Nothing changes in {{provider}}. You can add the folder again any time.": "Remove {{label}} from this knowledge base? They will be removed from search. Nothing changes in {{provider}}. You can add the folder again any time.",
   "Disconnect {{provider}}?": "Disconnect {{provider}}?",
-  "Disconnect {{provider}}? Your synced folders stop updating and their files are removed from search. You can reconnect any time.": "Disconnect {{provider}}? Your synced folders stop updating and their files are removed from search. You can reconnect any time."
+  "Disconnect {{provider}}? Your synced folders stop updating and their files are removed from search. You can reconnect any time.": "Disconnect {{provider}}? Your synced folders stop updating and their files are removed from search. You can reconnect any time.",
+  "Connected accounts": "Connected accounts",
+  "Knowledge bases that use this account: {{n}}": "Knowledge bases that use this account: {{n}}",
+  "Could not check knowledge base usage.": "Could not check knowledge base usage.",
+  "Failed to check connected accounts.": "Failed to check connected accounts.",
+  "No connected accounts yet. Add a source in a knowledge base to connect.": "No connected accounts yet. Add a source in a knowledge base to connect.",
+  "Failed to disconnect account.": "Failed to disconnect account.",
+  "Disconnect": "Disconnect",
+  "Retry loading accounts": "Retry loading accounts"
 }
