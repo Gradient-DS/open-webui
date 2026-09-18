@@ -6,6 +6,7 @@ Configuration and model imports are deferred so either singleton import order is
 import datetime as dt
 import hashlib
 import json
+import re
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
@@ -19,6 +20,36 @@ def _sort_file_rows(rows, filters, *, default_order='filename', default_descendi
     field = order or default_order
     rows.sort(key=lambda row: row['id'])
     rows.sort(key=lambda row: (row[field] is not None, row[field]), reverse=descending)
+
+
+def _catalog_file_row(document: dict, owner_id: str) -> dict:
+    filename = document.get('filename') or document.get('title') or document['source_id']
+    timestamp = int(dt.datetime.fromisoformat(document['ingested_at']).timestamp())
+    return {
+        'id': document['source_id'],
+        'user_id': owner_id,
+        'hash': None,
+        'filename': filename,
+        'meta': {
+            'name': filename,
+            'content_type': document.get('content_type'),
+            'status': 'completed',
+            'source_url': document.get('source_url'),
+            'soev_catalog_only': True,
+        },
+        'created_at': timestamp,
+        'updated_at': timestamp,
+    }
+
+
+def _matches_catalog_file(row: dict, filters: dict, user_id: str | None) -> bool:
+    query = filters.get('query') or ''
+    pattern = ''.join('.*' if char == '%' else '.' if char == '_' else re.escape(char) for char in query)
+    if re.search(pattern, row['filename'], re.IGNORECASE | re.DOTALL) is None:
+        return False
+    view = filters.get('view_option')
+    owned = row['user_id'] == user_id
+    return (view != 'created' or owned) and (view != 'shared' or not owned)
 
 
 class NotOnSoev(NotImplementedError):
@@ -102,12 +133,24 @@ class SoevKnowledgeTable:
             if row['key'] not in hidden and not ingest.is_attachments_collection(row['key'])
         ]
 
-    def _knowledge(self, row):
-        return self._projection.knowledge_of(row, service_principal=self._service_principal) if row else None
+    async def _types(self, *, user_id=None, collection_key=None):
+        params = {'collection_key': collection_key} if collection_key is not None else None
+        schedules = await self._pages('/v1/schedules', user_id=user_id, params=params)
+        return self._projection.types_from_schedules(schedules)
 
-    def _user_knowledge(self, row, owners):
+    def _knowledge(self, row, types=None):
+        return (
+            self._projection.knowledge_of(row, service_principal=self._service_principal, types=types) if row else None
+        )
+
+    async def _knowledge_with_type(self, row, *, user_id=None):
+        if row is None:
+            return None
+        return self._knowledge(row, await self._types(user_id=user_id, collection_key=row['key']))
+
+    def _user_knowledge(self, row, owners, types):
         return self._projection.knowledge_user_of(
-            row, service_principal=self._service_principal, user=owners.get(self._knowledge(row).user_id)
+            row, service_principal=self._service_principal, user=owners.get(self._knowledge(row).user_id), types=types
         )
 
     async def _owners(self, rows):
@@ -129,23 +172,27 @@ class SoevKnowledgeTable:
         )
 
     async def get_knowledge_by_id(self, id, db=None):
-        return self._knowledge(await self._collection(id))
+        return await self._knowledge_with_type(await self._collection(id))
 
     async def get_knowledge_by_id_unfiltered(self, id, db=None):
-        return self._knowledge(await self._collection(id))
+        return await self._knowledge_with_type(await self._collection(id))
 
     async def get_knowledge_bases(self, skip=0, limit=30, db=None):
         rows = sorted(await self._collections(), key=lambda row: self._collection_sort(row, 'updated_at'), reverse=True)
         owners = await self._owners(rows)
-        return [self._user_knowledge(row, owners) for row in rows]
+        types = await self._types()
+        return [self._user_knowledge(row, owners, types) for row in rows]
 
     async def search_knowledge_bases(self, user_id, filter, skip=0, limit=30, db=None):
         rows = await self._collections(user_id=user_id)
         owners = await self._owners(rows)
+        types = await self._types(user_id=user_id)
         rows = [
             row
             for row in rows
-            if self._matches_collection(row, user_id, filter or {}, owners.get(self._knowledge(row).user_id, {}))
+            if self._matches_collection(
+                row, user_id, filter or {}, owners.get(self._knowledge(row).user_id, {}), types.get(row['key'], 'local')
+            )
         ]
         order = (filter or {}).get('order_by')
         if order not in ('name', 'created_at', 'updated_at'):
@@ -155,12 +202,12 @@ class SoevKnowledgeTable:
         rows.sort(key=lambda row: self._collection_sort(row, order), reverse=not ascending)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
-        return self._projection.knowledge_list_of([self._user_knowledge(row, owners) for row in rows], total)
+        return self._projection.knowledge_list_of([self._user_knowledge(row, owners, types) for row in rows], total)
 
     @staticmethod
-    def _matches_collection(row, user_id, filters, owner):
+    def _matches_collection(row, user_id, filters, owner, knowledge_type):
         owned = row.get('created_by') == f'owui:user:{user_id}'
-        if filters.get('type') not in (None, '', 'local') or filters.get('source') == 'external':
+        if filters.get('type') not in (None, '', knowledge_type) or filters.get('source') == 'external':
             return False
         if filters.get('view_option') == 'created' and not owned:
             return False
@@ -171,9 +218,9 @@ class SoevKnowledgeTable:
         return any(query in (value or '').casefold() for value in values)
 
     async def get_knowledge_bases_by_type(self, type, db=None):
-        if type != 'local':
-            return []
-        return [self._knowledge(row) for row in await self._collections()]
+        rows = await self._collections()
+        types = await self._types()
+        return [self._knowledge(row, types) for row in rows if types.get(row['key'], 'local') == type]
 
     async def get_knowledge_bases_by_user_id(self, user_id, permission='write', db=None):
         rows = [
@@ -182,18 +229,17 @@ class SoevKnowledgeTable:
             if permission == 'read' or (permission == 'write' and row.get('caller_may_write'))
         ]
         owners = await self._owners(rows)
-        return [self._user_knowledge(row, owners) for row in rows]
+        types = await self._types(user_id=user_id)
+        return [self._user_knowledge(row, owners, types) for row in rows]
 
     async def get_knowledge_items_by_user_id(self, user_id, db=None):
-        return [
-            self._knowledge(row)
-            for row in await self._collections(user_id=user_id)
-            if row.get('created_by') == f'owui:user:{user_id}'
-        ]
+        rows = await self._collections(user_id=user_id)
+        types = await self._types(user_id=user_id)
+        return [self._knowledge(row, types) for row in rows if row.get('created_by') == f'owui:user:{user_id}']
 
     async def get_knowledge_by_id_and_user_id(self, id, user_id, db=None):
         row = await self._collection(id, user_id=user_id)
-        return self._knowledge(row) if row and row.get('caller_may_write') else None
+        return await self._knowledge_with_type(row, user_id=user_id) if row and row.get('caller_may_write') else None
 
     async def check_access_by_user_id(self, id, user_id, permission='write', db=None, user_group_ids=None):
         row = await self._collection(id, user_id=user_id)
@@ -241,7 +287,7 @@ class SoevKnowledgeTable:
             result = await self.set_collection_access(id, form_data.access_grants, fields=body)
         else:
             result = await self._send('PATCH', self._path(id), body)
-        return self._knowledge(result)
+        return await self._knowledge_with_type(result)
 
     async def delete_knowledge_by_id(self, id, db=None):
         await self._send('DELETE', self._path(id), idempotency_key='kb-delete:' + id)
@@ -297,6 +343,7 @@ class SoevKnowledgeTable:
                         members.pop(item['source_id'], None)
         return members
 
+    # Catalog-only rows are listed through search and downloaded through catalog_content.
     async def get_files_by_id(self, knowledge_id, db=None):
         from open_webui.models.files import Files
 
@@ -309,12 +356,12 @@ class SoevKnowledgeTable:
         ids = list(await self._members(knowledge_id))
         return await Files.get_file_metadatas_by_ids(ids) if ids else []
 
-    async def get_file_counts_by_knowledge_ids(self, knowledge_ids, db=None):
+    async def get_file_counts_by_knowledge_ids(self, knowledge_ids, db=None, *, user_id: str | None = None):
         result = {}
         for key in knowledge_ids:
-            row = await self._collection(key)
+            row = await self._collection(key, user_id=user_id)
             if row:
-                count = row['document_count'] + len(await self._unlanded(key))
+                count = row['document_count'] + len(await self._unlanded(key, user_id=user_id))
                 if count:
                     result[key] = count
         return result
@@ -322,21 +369,32 @@ class SoevKnowledgeTable:
     async def has_file(self, knowledge_id, file_id, db=None):
         return file_id in await self._members(knowledge_id)
 
-    async def _references(self, ids):
+    async def catalog_original(self, source_id, *, user_id):
+        """Return (file row, byte stream) for a catalog member the user may read, or None."""
+        members = await self._references({source_id}, user_id=user_id)
+        if not members:
+            return None
+        collection, document = members[0]
+        path = self._path(collection['key']) + '/documents/' + quote(source_id, safe='') + '/original'
+        return _catalog_file_row(document, user_id), self._client.stream(path, as_user=await self._as_user(user_id))
+
+    async def _references(self, ids, *, user_id=None):
         result = []
         collections = {}
         for source_id in sorted(ids):
-            response = await self._get('/v1/documents', params={'source_id': source_id})
+            response = await self._get('/v1/documents', params={'source_id': source_id}, user_id=user_id)
             for document in response['data']:
                 key = document['collection_key']
                 if key not in collections:
-                    collections[key] = await self._collection(key)
+                    collections[key] = await self._collection(key, user_id=user_id)
                 if collections[key] is not None:
                     result.append((collections[key], document))
         return result
 
     async def get_knowledges_by_file_id(self, file_id, db=None):
-        return [self._knowledge(row) for row, _ in await self._references({file_id})]
+        rows = await self._references({file_id})
+        types = await self._types()
+        return [self._knowledge(row, types) for row, _ in rows]
 
     async def get_knowledge_by_file_id(self, file_id, db=None):
         rows = await self.get_knowledges_by_file_id(file_id)
@@ -397,7 +455,9 @@ class SoevKnowledgeTable:
         except SoevApiError:
             return None
 
-    async def _file_rows(self, ids, *, filters=None, user_id=None):
+    async def _file_rows(
+        self, ids: list[str], *, filters: dict | None = None, user_id: str | None = None, catalog: dict | None = None
+    ) -> list[dict]:
         if not ids:
             return []
         from sqlalchemy import select
@@ -410,7 +470,15 @@ class SoevKnowledgeTable:
         stmt = self._file_filter(stmt, File, filters or {}, user_id)
         async with get_async_db_context() as session:
             result = await session.execute(stmt)
-            return [dict(row._mapping) for row in result]
+            rows = [dict(row._mapping) for row in result]
+            if catalog:
+                existing = set((await session.execute(select(File.id).where(File.id.in_(ids)))).scalars())
+                for source_id, (document, owner_id) in catalog.items():
+                    if document and source_id not in existing:
+                        row = _catalog_file_row(document, owner_id)
+                        if _matches_catalog_file(row, filters or {}, user_id):
+                            rows.append(row)
+            return rows
 
     @staticmethod
     def _file_filter(stmt, file_model, filters, user_id):
@@ -440,7 +508,14 @@ class SoevKnowledgeTable:
         if 'directory_id' in filters:
             members = {source: member for source, member in members.items() if (member[1] or '') == '/'.join(path)}
         by_id = {source: member[0] for source, member in members.items()}
-        rows = await self._file_rows(list(by_id), filters=filters, user_id=user_id)
+        collection = await self._collection(knowledge_id, user_id=user_id)
+        owner_id = self._knowledge(collection).user_id if collection else ''
+        rows = await self._file_rows(
+            list(by_id),
+            filters=filters,
+            user_id=user_id,
+            catalog={source: (document, owner_id) for source, document in by_id.items()},
+        )
         _sort_file_rows(rows, filters)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
@@ -464,7 +539,15 @@ class SoevKnowledgeTable:
         for collection in collections:
             for source_id, (document, _) in (await self._members(collection['key'], user_id=user_id)).items():
                 by_id.setdefault(source_id, (collection, document))
-        rows = await self._file_rows(list(by_id), filters=filter, user_id=user_id)
+        rows = await self._file_rows(
+            list(by_id),
+            filters=filter,
+            user_id=user_id,
+            catalog={
+                source: (document, self._knowledge(collection).user_id)
+                for source, (collection, document) in by_id.items()
+            },
+        )
         _sort_file_rows(rows, filter, default_order='updated_at', default_descending=True)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
@@ -584,7 +667,14 @@ class SoevKnowledgeTable:
         if not paths:
             return {}
         members = await self._members(knowledge_id, user_id=user_id)
-        files = {row['id']: row for row in await self._file_rows(list(members))}
+        collection = await self._collection(knowledge_id, user_id=user_id)
+        owner_id = self._knowledge(collection).user_id if collection else ''
+        files = {
+            row['id']: row
+            for row in await self._file_rows(
+                list(members), catalog={source: (member[0], owner_id) for source, member in members.items()}
+            )
+        }
         result = {}
         for identifier, path in paths.items():
             matches = [
@@ -665,21 +755,6 @@ class SoevKnowledgeTable:
             return True
         except (SoevApiError, ValueError):
             return False
-
-    async def get_pending_deletions(self, limit=50, db=None):
-        return []
-
-    async def get_stale_knowledge(self, stale_before, limit=50, exclude_user_ids=None, db=None):
-        return []
-
-    async def get_suspended_expired_knowledge(self, limit=50, db=None):
-        return []
-
-    async def is_suspended(self, id, db=None):
-        return False
-
-    async def get_suspension_info(self, id, db=None):
-        return None
 
     async def add_file_to_knowledge_by_id(self, knowledge_id, file_id, user_id, directory_id=None, db=None):
         from open_webui.models.files import Files

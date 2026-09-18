@@ -13,14 +13,11 @@ import hmac
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
 
-from fastapi import BackgroundTasks, Depends, Header, HTTPException, Request, Response, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
-
-from open_webui.constants import ERROR_MESSAGES
-from open_webui.models.users import Users, UserModel
-from open_webui.utils.auth import bearer_security, get_current_user
+from open_webui.models.users import UserModel, Users
+from open_webui.utils.auth import bearer_security
 
 log = logging.getLogger(__name__)
 
@@ -30,82 +27,6 @@ log = logging.getLogger(__name__)
 # as a typed field so a future per-agent rotation can re-introduce the
 # distinction without changing call sites or log shape.
 _AGENT_ID_DEFAULT = 'agent'
-
-
-@dataclass
-class LoaderPrincipal:
-    """Machine principal for the loader-worker → ``/ingest`` callback.
-
-    Wraps a real user resolved from ``X-Acting-User-Id``. The bearer
-    authenticates the loader-worker; ``provider_slug`` overrides the
-    provider that would otherwise come from ``user.info``.
-    """
-
-    user: UserModel
-    provider_slug: str
-
-    @property
-    def id(self) -> str:
-        return self.user.id
-
-
-def _loader_key_matches(token: str) -> bool:
-    configured = os.environ.get('LOADER_INGEST_API_KEY', '')
-    if not configured:
-        return False
-    return hmac.compare_digest(token, configured)
-
-
-async def get_integration_principal(
-    request: Request,
-    response: Response,
-    background_tasks: BackgroundTasks,
-    auth_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_security),
-    x_acting_user_id: Optional[str] = Header(default=None, alias='X-Acting-User-Id'),
-    x_acting_provider: Optional[str] = Header(default=None, alias='X-Acting-Provider'),
-):
-    """Resolve the caller as either a ``LoaderPrincipal`` or a regular user.
-
-    Bearer matching ``LOADER_INGEST_API_KEY`` — or the sync-daemon's
-    ``SYNC_API_KEY`` (D-10 co-existence: the daemon reuses the same
-    stage/submit/file-status/ingest edge) — takes the machine path and
-    requires both acting headers; anything else falls through to the existing
-    user-cookie / API-key path via :func:`get_current_user`. Acting headers are
-    ignored on the cookie path.
-    """
-
-    if (
-        auth_token is not None
-        and auth_token.credentials
-        and (_loader_key_matches(auth_token.credentials) or _sync_key_matches(auth_token.credentials))
-    ):
-        if not x_acting_user_id or not x_acting_provider:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    'X-Acting-User-Id and X-Acting-Provider are required when authenticating with a machine bearer key'
-                ),
-            )
-        user = await Users.get_user_by_id(x_acting_user_id)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"acting user '{x_acting_user_id}' not found",
-            )
-        return LoaderPrincipal(user=user, provider_slug=x_acting_provider)
-
-    user = await get_current_user(
-        request,
-        response,
-        background_tasks,
-        auth_token=auth_token,
-    )
-    if user.role not in {'user', 'admin'}:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-    return user
 
 
 @dataclass
@@ -137,13 +58,12 @@ def _agent_key_matches(token: str) -> bool:
 
 async def get_agent_principal(
     request: Request,
-    auth_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_security),
-    x_acting_user_id: Optional[str] = Header(default=None, alias='X-Acting-User-Id'),
+    auth_token: HTTPAuthorizationCredentials | None = Depends(bearer_security),
+    x_acting_user_id: str | None = Header(default=None, alias='X-Acting-User-Id'),
 ) -> AgentPrincipal:
     """Resolve the caller as an :class:`AgentPrincipal`.
 
-    Unlike :func:`get_integration_principal`, this dependency has no
-    user-cookie fall-through — the agent endpoint is machine-only. A missing
+    The agent endpoint is machine-only. A missing
     or invalid bearer is a hard 401; missing ``X-Acting-User-Id`` is a 400.
     """
 
@@ -169,111 +89,3 @@ async def get_agent_principal(
             detail=f"acting user '{x_acting_user_id}' not found",
         )
     return AgentPrincipal(agent_id=_AGENT_ID_DEFAULT, user=user)
-
-
-@dataclass
-class SyncPrincipal:
-    """Machine principal for the per-tenant sync-daemon → open-webui calls.
-
-    Wraps a real user resolved from ``X-Acting-User-Id`` (the daemon always
-    acts as the KB owner). The bearer authenticates the daemon against
-    ``SYNC_API_KEY``; ``provider_slug`` carries the cloud provider being
-    synced from ``X-Acting-Provider``.
-    """
-
-    user: UserModel
-    provider_slug: str
-
-    @property
-    def id(self) -> str:
-        return self.user.id
-
-
-def _sync_key_matches(token: str) -> bool:
-    """Constant-time check of the inbound bearer against ``SYNC_API_KEY``."""
-    configured = os.environ.get('SYNC_API_KEY', '')
-    if not configured:
-        return False
-    return hmac.compare_digest(token, configured)
-
-
-async def maybe_sync_principal(
-    auth_token: Optional[HTTPAuthorizationCredentials],
-    x_acting_user_id: Optional[str],
-    x_acting_provider: Optional[str],
-) -> Optional[SyncPrincipal]:
-    """Return a :class:`SyncPrincipal` when the bearer matches ``SYNC_API_KEY``.
-
-    Returns ``None`` for a missing or non-matching bearer so callers can fall
-    through to their session path. A matching bearer with missing acting
-    headers is a 400; an unknown acting user is a 404. Does NOT check the
-    ``sync_daemon.enabled`` config flag — callers gate on it.
-    """
-
-    if auth_token is None or not auth_token.credentials:
-        return None
-    if not _sync_key_matches(auth_token.credentials):
-        return None
-    if not x_acting_user_id or not x_acting_provider:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='X-Acting-User-Id and X-Acting-Provider are required when authenticating with the sync bearer key',
-        )
-    user = await Users.get_user_by_id(x_acting_user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"acting user '{x_acting_user_id}' not found",
-        )
-    return SyncPrincipal(user=user, provider_slug=x_acting_provider)
-
-
-async def get_sync_principal(
-    request: Request,
-    auth_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_security),
-    x_acting_user_id: Optional[str] = Header(default=None, alias='X-Acting-User-Id'),
-    x_acting_provider: Optional[str] = Header(default=None, alias='X-Acting-Provider'),
-) -> SyncPrincipal:
-    """Resolve the caller as a :class:`SyncPrincipal`.
-
-    Machine-only — no user-cookie fall-through (mirrors
-    :func:`get_agent_principal`). A missing or invalid bearer is a hard 401;
-    missing acting headers are a 400; an unknown acting user is a 404.
-    """
-
-    if auth_token is None or not auth_token.credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='missing bearer token',
-        )
-    principal = await maybe_sync_principal(auth_token, x_acting_user_id, x_acting_provider)
-    if principal is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='invalid sync bearer',
-        )
-    return principal
-
-
-async def get_sync_service_principal(
-    request: Request,
-    auth_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_security),
-) -> None:
-    """Authenticate the sync-daemon for tenant-scoped reads (no acting user).
-
-    The scheduler fetches provider config *before* it knows any KB owner, so
-    this dependency checks only the ``SYNC_API_KEY`` bearer. Endpoints that
-    act on a user's behalf (token broker, run summary, sync protocol) keep
-    the strict :func:`get_sync_principal` with its required acting headers.
-    """
-
-    if auth_token is None or not auth_token.credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='missing bearer token',
-        )
-    if not _sync_key_matches(auth_token.credentials):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='invalid sync bearer',
-        )

@@ -1,4 +1,4 @@
-import { WEBUI_BASE_URL, WEBUI_API_BASE_URL } from '$lib/constants';
+import { WEBUI_BASE_URL } from '$lib/constants';
 
 // Google Drive Picker API configuration
 let API_KEY = '';
@@ -23,120 +23,127 @@ const validateCredentials = () => {
 	}
 };
 
-let pickerApiLoaded = false;
-let initialized = false;
-
-// ── Picker API loading (unchanged) ──────────────────────────────────
-
-export const loadGoogleDriveApi = () => {
-	return new Promise((resolve, reject) => {
-		if (typeof gapi === 'undefined') {
-			const script = document.createElement('script');
-			script.src = 'https://apis.google.com/js/api.js';
-			script.onload = () => {
-				gapi.load('picker', () => {
-					pickerApiLoaded = true;
-					resolve(true);
-				});
-			};
-			script.onerror = reject;
-			document.body.appendChild(script);
-		} else {
-			gapi.load('picker', () => {
-				pickerApiLoaded = true;
-				resolve(true);
-			});
-		}
-	});
-};
-
-export const initialize = async () => {
-	if (!initialized) {
-		await getCredentials();
-		validateCredentials();
-		await loadGoogleDriveApi();
-		initialized = true;
-	}
-};
-
-// ── Backend-proxied token management ────────────────────────────────
-
-/**
- * Get a valid access token from the backend (auto-refreshed).
- * Returns null if no stored token exists (user must authorize).
- */
-async function fetchBackendAccessToken(): Promise<string | null> {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/google-drive/auth/access-token`, {
-		headers: { Authorization: `Bearer ${localStorage.token}` }
-	});
-	if (res.status === 401) return null;
-	if (!res.ok) throw new Error('Failed to get Google Drive access token');
-	const data = await res.json();
-	return data.access_token;
+interface PickerDocument {
+	id: string;
+	name: string;
+	url?: string;
+	mimeType: string;
 }
-
-/**
- * Open the backend OAuth popup and wait for it to complete.
- * Reuses the same popup/postMessage pattern as KnowledgeBase.svelte's authorizeBackgroundSync.
- */
-function triggerAuthPopup(knowledgeId?: string): Promise<void> {
-	const url = knowledgeId
-		? `${WEBUI_API_BASE_URL}/google-drive/auth/initiate?knowledge_id=${knowledgeId}`
-		: `${WEBUI_API_BASE_URL}/google-drive/auth/initiate`;
-
-	return new Promise<void>((resolve, reject) => {
-		const popup = window.open(url, 'google_drive_auth', 'width=600,height=700,scrollbars=yes');
-		let messageReceived = false;
-
-		const handleMessage = (event: MessageEvent) => {
-			if (event.data?.type !== 'google_drive_auth_callback') return;
-			messageReceived = true;
-			window.removeEventListener('message', handleMessage);
-			if (event.data.success) {
-				resolve();
-			} else {
-				reject(new Error(event.data.error || 'Google Drive authorization failed'));
-			}
+interface PickerData {
+	action: string;
+	docs?: PickerDocument[];
+}
+interface DocsView {
+	setIncludeFolders(value: boolean): DocsView;
+	setSelectFolderEnabled(value: boolean): DocsView;
+	setParent(value: string): DocsView;
+}
+interface PickerBuilder {
+	enableFeature(value: string): PickerBuilder;
+	addView(view: DocsView): PickerBuilder;
+	setOAuthToken(token: string): PickerBuilder;
+	setDeveloperKey(key: string): PickerBuilder;
+	setCallback(callback: (data: PickerData) => void): PickerBuilder;
+	build(): { setVisible(visible: boolean): void };
+}
+interface TokenResponse {
+	access_token?: string;
+	error?: string;
+	scope?: string;
+}
+declare const google: {
+	picker: {
+		DocsView: new () => DocsView;
+		PickerBuilder: new () => PickerBuilder;
+		Feature: { MULTISELECT_ENABLED: string };
+		Action: { PICKED: string; CANCEL: string };
+	};
+	accounts: {
+		oauth2: {
+			initTokenClient(options: {
+				client_id: string;
+				scope: string;
+				callback: (response: TokenResponse) => void;
+				error_callback: () => void;
+			}): { requestAccessToken(): void };
+			hasGrantedAllScopes(response: TokenResponse, scope: string): boolean;
 		};
+	};
+};
+declare const gapi: { load(name: string, callback: () => void): void };
 
-		window.addEventListener('message', handleMessage);
+let initialized = false;
+let initialization: Promise<void> | undefined;
 
-		// Fallback: check when popup closes without postMessage
-		const check = setInterval(() => {
-			if (popup?.closed) {
-				clearInterval(check);
-				if (!messageReceived) {
-					window.removeEventListener('message', handleMessage);
-					resolve(); // Will verify token after
-				}
-			}
-		}, 500);
+function loadScript(src: string): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const script = document.createElement('script');
+		script.src = src;
+		script.onload = () => resolve();
+		script.onerror = () => {
+			script.remove();
+			reject(new Error('Google Drive picker could not load'));
+		};
+		document.body.appendChild(script);
 	});
 }
 
-/**
- * Ensure the user has authorized Google Drive.
- * If no stored token, opens an OAuth popup for consent.
- * Returns a valid access token.
- */
-export const getAuthToken = async (knowledgeId?: string): Promise<string> => {
-	let token = await fetchBackendAccessToken();
-	if (token) return token;
-
-	// No stored token — trigger OAuth popup
-	await triggerAuthPopup(knowledgeId);
-
-	// After popup closes, fetch the now-stored token
-	token = await fetchBackendAccessToken();
-	if (!token) throw new Error('Google Drive authorization failed or was cancelled');
-	return token;
+export const loadGoogleDriveApi = async () => {
+	if (typeof gapi === 'undefined') await loadScript('https://apis.google.com/js/api.js');
+	await new Promise<void>((resolve) => gapi.load('picker', resolve));
 };
 
-export const clearGoogleDriveToken = () => {
-	// No-op: tokens are now managed server-side.
+export const initialize = (): Promise<void> => {
+	if (!initialization) {
+		initialization = (async () => {
+			await getCredentials();
+			validateCredentials();
+			await Promise.all([
+				loadGoogleDriveApi(),
+				typeof google !== 'undefined' && google.accounts?.oauth2
+					? Promise.resolve()
+					: loadScript('https://accounts.google.com/gsi/client')
+			]);
+			initialized = true;
+		})().catch((error) => {
+			initialization = undefined;
+			throw error;
+		});
+	}
+	return initialization;
 };
 
-// ── Picker functions (auth replaced, picker UI unchanged) ───────────
+// Picker consent is browser-only; sync credentials remain with soev-sync.
+export const getAuthToken = (): Promise<string> => {
+	if (!initialized) return initialize().then(() => getAuthToken());
+	return new Promise((resolve, reject) => {
+		const scope = 'https://www.googleapis.com/auth/drive.readonly';
+		const timeout = setTimeout(
+			() => reject(new Error('Google Drive authorization timed out')),
+			120000
+		);
+		const fail = () => {
+			clearTimeout(timeout);
+			reject(new Error('Google Drive authorization failed or was cancelled'));
+		};
+		const client = google.accounts.oauth2.initTokenClient({
+			client_id: CLIENT_ID,
+			scope,
+			callback: (response) => {
+				clearTimeout(timeout);
+				if (
+					response.error ||
+					!response.access_token ||
+					!google.accounts.oauth2.hasGrantedAllScopes(response, scope)
+				)
+					return fail();
+				resolve(response.access_token);
+			},
+			error_callback: fail
+		});
+		client.requestAccessToken();
+	});
+};
 
 export interface KnowledgePickerItem {
 	type: 'file' | 'folder';
@@ -148,17 +155,12 @@ export interface KnowledgePickerItem {
 
 export interface KnowledgePickerResult {
 	items: KnowledgePickerItem[];
-	accessToken: string;
 }
 
-export const createKnowledgePicker = (
-	knowledgeId?: string
-): Promise<KnowledgePickerResult | null> => {
-	return new Promise(async (resolve, reject) => {
+export const createKnowledgePicker = async (): Promise<KnowledgePickerResult | null> => {
+	const token = await getAuthToken();
+	return new Promise((resolve, reject) => {
 		try {
-			await initialize();
-			const token = await getAuthToken(knowledgeId);
-
 			const docsView = new google.picker.DocsView()
 				.setIncludeFolders(true)
 				.setSelectFolderEnabled(true)
@@ -169,28 +171,27 @@ export const createKnowledgePicker = (
 				.addView(docsView)
 				.setOAuthToken(token)
 				.setDeveloperKey(API_KEY)
-				.setCallback((data: any) => {
-					if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
-						const docs = data[google.picker.Response.DOCUMENTS];
-						const items: KnowledgePickerItem[] = docs.map((doc: any) => {
-							const mimeType = doc[google.picker.Document.MIME_TYPE];
+				.setCallback((data: PickerData) => {
+					if (data.action === google.picker.Action.PICKED) {
+						const docs = data.docs ?? [];
+						const items: KnowledgePickerItem[] = docs.map((doc: PickerDocument) => {
+							const mimeType = doc.mimeType;
 							return {
 								type: mimeType === 'application/vnd.google-apps.folder' ? 'folder' : 'file',
-								id: doc[google.picker.Document.ID],
-								name: doc[google.picker.Document.NAME],
-								path: doc[google.picker.Document.URL] || '',
+								id: doc.id,
+								name: doc.name,
+								path: doc.url || '',
 								mimeType
 							};
 						});
-						resolve({ items, accessToken: token });
-					} else if (data[google.picker.Response.ACTION] === google.picker.Action.CANCEL) {
+						resolve({ items });
+					} else if (data.action === google.picker.Action.CANCEL) {
 						resolve(null);
 					}
 				})
 				.build();
 			picker.setVisible(true);
 		} catch (error) {
-			console.error('Google Drive Knowledge Picker error:', error);
 			reject(error);
 		}
 	});
@@ -200,12 +201,12 @@ interface PickerOptions {
 	onFileSelected?: (metadata: { name: string }) => void;
 }
 
-export const createPicker = (options?: PickerOptions) => {
-	return new Promise(async (resolve, reject) => {
+export const createPicker = async (
+	options?: PickerOptions
+): Promise<{ id: string; name: string; url: string; blob: Blob } | null> => {
+	const token = await getAuthToken();
+	return new Promise((resolve, reject) => {
 		try {
-			await initialize();
-			const token = await getAuthToken();
-
 			const picker = new google.picker.PickerBuilder()
 				.enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
 				.addView(
@@ -216,13 +217,13 @@ export const createPicker = (options?: PickerOptions) => {
 				)
 				.setOAuthToken(token)
 				.setDeveloperKey(API_KEY)
-				.setCallback(async (data: any) => {
-					if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
+				.setCallback(async (data: PickerData) => {
+					if (data.action === google.picker.Action.PICKED) {
 						try {
-							const doc = data[google.picker.Response.DOCUMENTS][0];
-							const fileId = doc[google.picker.Document.ID];
-							const fileName = doc[google.picker.Document.NAME];
-							const mimeType = doc[google.picker.Document.MIME_TYPE];
+							const doc = (data.docs ?? [])[0];
+							const fileId = doc.id;
+							const fileName = doc.name;
+							const mimeType = doc.mimeType;
 
 							if (!fileId || !fileName) throw new Error('Required file details missing');
 
@@ -260,8 +261,7 @@ export const createPicker = (options?: PickerOptions) => {
 							});
 
 							if (!response.ok) {
-								const errorText = await response.text();
-								throw new Error(`Failed to download file (${response.status}): ${errorText}`);
+								throw new Error(`Failed to download file (${response.status})`);
 							}
 
 							const blob = await response.blob();
@@ -269,20 +269,18 @@ export const createPicker = (options?: PickerOptions) => {
 								id: fileId,
 								name: effectiveName,
 								url: downloadUrl,
-								blob: blob,
-								headers: { Authorization: `Bearer ${token}`, Accept: '*/*' }
+								blob: blob
 							});
 						} catch (error) {
 							reject(error);
 						}
-					} else if (data[google.picker.Response.ACTION] === google.picker.Action.CANCEL) {
+					} else if (data.action === google.picker.Action.CANCEL) {
 						resolve(null);
 					}
 				})
 				.build();
 			picker.setVisible(true);
 		} catch (error) {
-			console.error('Google Drive Picker error:', error);
 			reject(error);
 		}
 	});

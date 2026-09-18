@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	const i18n = getContext('i18n');
+	import type { ComponentType } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
+	const i18n = getContext<Writable<I18n>>('i18n');
 
 	import ArrowUpCircle from '$lib/components/icons/ArrowUpCircle.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
@@ -8,16 +11,15 @@
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
-	import Confluence from '$lib/components/icons/Confluence.svelte';
 
 	export let knowledgeType: string = 'local';
-	export let integrationProviders: Record<string, any> = {};
+	export let integrationProviders: Record<string, unknown> = {};
 	export let onAction: (type: string) => void = () => {};
 
 	type UploadOption = {
 		type: string;
 		label: string;
-		icon: any;
+		icon: ComponentType;
 		description: string;
 	};
 
@@ -41,16 +43,6 @@
 					label: 'Sync from Google Drive',
 					icon: GoogleDrive,
 					description: 'Select files and folders to sync'
-				}
-			];
-		}
-		if (type === 'confluence') {
-			return [
-				{
-					type: 'confluence',
-					label: 'Sync from Confluence',
-					icon: Confluence,
-					description: 'Select spaces or pages to sync'
 				}
 			];
 		}

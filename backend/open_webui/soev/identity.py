@@ -4,15 +4,19 @@ import asyncio
 import base64
 import datetime as dt
 import json
+import logging
 from uuid import UUID, uuid4, uuid5
 from weakref import WeakValueDictionary
 
+import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from open_webui import config
 from open_webui.models.users import UserModel, Users
-from open_webui.soev.client import SoevClient
+from open_webui.soev.client import SoevApiError, SoevClient
+
+log = logging.getLogger(__name__)
 
 # This namespace is permanent: changing it would give existing people different platform ids.
 OWUI_PLATFORM_NAMESPACE = UUID('ec855a67-541f-4b17-a7e2-0f8fbd09c47e')
@@ -92,6 +96,32 @@ async def acting_ref(user: UserModel, client: SoevClient) -> str:
     ref = external_ref(user)
     await ensure_link(ref, client)
     return ref
+
+
+async def link_proven(user: UserModel, *, source: str, id_token: str | None, client: SoevClient) -> None:
+    try:
+        if source != 'entra':
+            raise SoevApiError(400, 'unsupported_source', 'Unsupported proven identity source')
+        # Read only the candidate principal; soev-api verifies the token and its binding to this assertion.
+        try:
+            oid = jwt.decode(id_token, options={'verify_signature': False}).get('oid')
+        except jwt.PyJWTError:
+            oid = None
+        if not isinstance(oid, str) or not oid or ':' in oid:
+            raise SoevApiError(400, 'invalid_id_token', 'The Entra id token must carry an oid')
+        await client.send(
+            'POST',
+            '/v1/identity/links',
+            {
+                'platform_user_id': platform_user_id(external_ref(user)),
+                'assertion': mint_assertion(f'{source}:user:{oid}', now=dt.datetime.now(dt.UTC)),
+                'id_token': id_token,
+            },
+            idempotency_key=f'link-proven:{uuid4()}',
+        )
+    except Exception as error:
+        code = error.code if isinstance(error, SoevApiError) else 'link_failed'
+        log.warning('Proven identity link failed', extra={'user_id': user.id, 'code': code})
 
 
 def build_client() -> SoevClient:

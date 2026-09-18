@@ -427,6 +427,37 @@ async def test_data_content_serves_the_rendition_for_a_landed_file(env, data):
     assert dict(env.api.requests[0].url.params) == {'source_id': file.id}
 
 
+async def file_view(file):
+    from open_webui.routers.files import get_file_by_id
+
+    return await get_file_by_id(file.id, user=SimpleNamespace(id='alice', role='user'), db=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('data', [{}, {'content': ''}, {'content': None}])
+async def test_the_file_view_carries_the_rendition_for_a_landed_file(env, data):
+    """GET /files/{id} fills data.content from soev-api so the preview modal shows the text."""
+    file = await rendition_file(env, data)
+    env.api.add_document('kb', file.id, rendition='# Landed\n\nMarkdown content.')
+    assert (await file_view(file)).data['content'] == '# Landed\n\nMarkdown content.'
+    assert (await env.files.Files.get_file_by_id(file.id)).model_dump() == file.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_the_file_view_keeps_stored_text_without_a_request(env):
+    """Legacy rows with extracted text are returned as they are."""
+    file = await rendition_file(env, {'content': 'stored text'})
+    assert (await file_view(file)).data['content'] == 'stored text'
+    assert env.api.requests == []
+
+
+@pytest.mark.asyncio
+async def test_the_file_view_is_unchanged_while_in_flight(env):
+    """No rendition yet means the row is returned as stored."""
+    file = await rendition_file(env)
+    assert (await file_view(file)).model_dump() == file.model_dump()
+
+
 @pytest.mark.asyncio
 async def test_data_content_prefers_stored_text_for_a_legacy_file(env):
     """Legacy text wins over a remote rendition without issuing any API request."""

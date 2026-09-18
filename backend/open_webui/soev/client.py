@@ -5,6 +5,7 @@ No retries: subject assertions are single-use and mutations belong to the caller
 
 import logging
 from collections.abc import AsyncIterator, Callable
+from contextlib import AsyncExitStack
 
 import httpx
 
@@ -65,6 +66,40 @@ class SoevClient:
         """Read API text with the same authority and error handling as JSON reads."""
         response = await self._request('GET', path, as_user=as_user)
         return response.text
+
+    async def stream(self, path: str, *, as_user: str) -> AsyncIterator[bytes]:
+        """Stream original bytes, following one presigned redirect without API credentials."""
+        if not path.startswith('/') or path.startswith('//'):
+            raise ValueError('An API path must start with a single slash')
+        if self._subject_minter is None or not as_user:
+            raise ValueError('Acting as a user requires a subject minter and user')
+        headers = {'Authorization': f'Bearer {self._api_key}', 'X-Soev-Subject': self._subject_minter(as_user)}
+        try:
+            async with AsyncExitStack() as stack:
+                client = await stack.enter_async_context(
+                    httpx.AsyncClient(timeout=self._timeout, follow_redirects=False)
+                )
+                response = await stack.enter_async_context(
+                    client.stream('GET', f'{self._base_url}{path}', headers=headers)
+                )
+                if response.status_code == 303:
+                    location = response.headers.get('Location', '')
+                    if not location.startswith(('https://', 'http://')):
+                        raise SoevApiError(502, 'upstream_error', 'Invalid original download URL')
+                    download = await stack.enter_async_context(
+                        httpx.AsyncClient(timeout=self._timeout, follow_redirects=False)
+                    )
+                    response = await stack.enter_async_context(download.stream('GET', location))
+                    if not response.is_success:
+                        raise SoevApiError(502, 'upstream_error', 'Original download failed')
+                elif not response.is_success:
+                    await response.aread()
+                    raise _response_error(response)
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+        except httpx.TransportError as error:
+            status = 504 if isinstance(error, httpx.TimeoutException) else 502
+            raise SoevApiError(status, 'upstream_error', 'Original download failed') from None
 
     async def put_bytes(self, url: str, *, headers: dict[str, str], body: bytes) -> None:
         """Upload bytes using the presigned URL as the sole credential."""

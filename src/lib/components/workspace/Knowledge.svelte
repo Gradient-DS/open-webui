@@ -10,7 +10,7 @@
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
-	import { WEBUI_NAME, user, config, socket, workspaceActions, workspaceCounts } from '$lib/stores';
+	import { WEBUI_NAME, user, config, workspaceActions, workspaceCounts } from '$lib/stores';
 	import {
 		deleteKnowledgeById,
 		searchKnowledgeBases,
@@ -31,10 +31,8 @@
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
-	import Confluence from '../icons/Confluence.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
-	import SyncProgressBadge from './Knowledge/SyncProgressBadge.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
 	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
@@ -51,7 +49,12 @@
 		write_access?: boolean;
 		type?: string;
 		suspension_info?: { days_remaining: number };
-		meta?: any;
+		meta?: {
+			document?: unknown;
+			source?: string;
+			external?: { provider?: string; source?: { name?: string }; auth_mode?: string };
+			[key: string]: unknown;
+		};
 		user?: {
 			name?: string;
 			email?: string;
@@ -88,7 +91,7 @@
 
 	$: if (loaded) {
 		// [Gradient] One debounce and stale-response guard covers every list filter.
-		(void viewOption, typeFilter, sourceOption, sortKey, sortDirection, query);
+		void [viewOption, typeFilter, sourceOption, sortKey, sortDirection, query];
 
 		if (queryDebounceActive) {
 			// User is typing — debounce
@@ -127,22 +130,7 @@
 				label: $i18n.t('From Google Drive'),
 				icon: GoogleDrive,
 				onClick: () => goto('/workspace/knowledge/create?type=google_drive'),
-				visible: !!(
-					$config?.features?.enable_google_drive_integration &&
-					$config?.features?.enable_google_drive_sync
-				)
-			},
-			{
-				id: 'knowledge-new-confluence',
-				label: $i18n.t('From Confluence'),
-				icon: Confluence,
-				onClick: () => goto('/workspace/knowledge/create?type=confluence'),
-				visible: !!(
-					$config?.features?.enable_confluence_integration &&
-					$config?.features?.enable_confluence_sync &&
-					$config?.features?.confluence_kb_mode === 'per_user' &&
-					$config?.features?.confluence_oauth_configured
-				)
+				visible: !!$config?.features?.enable_google_drive_integration
 			}
 		]);
 	}
@@ -259,46 +247,6 @@
 		}
 	};
 
-	const mergeSyncProgress = (
-		metaKey: string,
-		data: {
-			knowledge_id: string;
-			status: string;
-			current?: number;
-			total?: number;
-			stage_counts?: Record<string, number>;
-			needs_reauth?: boolean;
-		}
-	) => {
-		const { knowledge_id, status, current, total, stage_counts, needs_reauth } = data;
-		if (!items) return;
-		items = items.map((item) => {
-			if (item.id !== knowledge_id) return item;
-			const prev = item.meta?.[metaKey] ?? {};
-			return {
-				...item,
-				meta: {
-					...item.meta,
-					[metaKey]: {
-						...prev,
-						status,
-						progress_current: current ?? prev.progress_current,
-						progress_total: total ?? prev.progress_total,
-						// Preserve previous stage_counts on completion/cancellation
-						// emits that don't carry them, mirroring KnowledgeBase.svelte.
-						stage_counts: stage_counts ?? prev.stage_counts,
-						// Only adopt needs_reauth=true from the event; never clear
-						// the persistent flag via a stale progress emit.
-						needs_reauth: needs_reauth === true ? true : prev.needs_reauth
-					}
-				}
-			};
-		});
-	};
-
-	const handleSyncProgress = (data) => mergeSyncProgress('onedrive_sync', data);
-	const handleGoogleDriveSyncProgress = (data) => mergeSyncProgress('google_drive_sync', data);
-	const handleConfluenceSyncProgress = (data) => mergeSyncProgress('confluence_sync', data);
 	const openKnowledge = (item: KnowledgeListItem) => {
 		// [Gradient] Suspended KBs stay visible but cannot be opened.
 		if (item.suspension_info) return;
@@ -358,10 +306,6 @@
 		viewOption = localStorage?.workspaceViewOption || '';
 		sourceOption = localStorage?.workspaceKnowledgeSourceOption || '';
 
-		$socket?.on('onedrive:sync:progress', handleSyncProgress);
-		$socket?.on('googledrive:sync:progress', handleGoogleDriveSyncProgress);
-		$socket?.on('confluence:sync:progress', handleConfluenceSyncProgress);
-
 		await tick();
 		loaded = true;
 		await tick();
@@ -377,9 +321,6 @@
 
 	onDestroy(() => {
 		clearTimeout(searchDebounceTimer);
-		$socket?.off('onedrive:sync:progress', handleSyncProgress);
-		$socket?.off('googledrive:sync:progress', handleGoogleDriveSyncProgress);
-		$socket?.off('confluence:sync:progress', handleConfluenceSyncProgress);
 	});
 </script>
 
@@ -554,7 +495,6 @@
 								<div class="flex w-5 shrink-0 items-center justify-center">
 									{#if item?.type === 'onedrive'}<OneDrive className="size-4" />
 									{:else if item?.type === 'google_drive'}<GoogleDrive className="size-4" />
-									{:else if item?.type === 'confluence'}<Confluence className="size-4" />
 									{:else}<FolderOpen className="size-4" />{/if}
 								</div>
 								<div class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
@@ -562,11 +502,7 @@
 										<div class="flex min-w-0 items-center gap-2 overflow-hidden">
 											<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
 												<Tooltip
-													content={item?.meta?.confluence_sync?.shared
-														? $i18n.t(
-																'Read-only Confluence knowledge base managed by administrators.'
-															)
-														: (item?.description ?? item.name)}
+													content={item?.description ?? item.name}
 													className="min-w-0"
 													placement="top-start"
 												>
@@ -580,64 +516,8 @@
 												<!-- [Gradient] Provider, sync and suspension chrome. -->
 												{#if item?.type === 'onedrive'}
 													<Badge type="info" content={$i18n.t('OneDrive')} />
-													{#if item.meta?.onedrive_sync?.needs_reauth}
-														<Tooltip content={$i18n.t('Re-authorize background sync')}>
-															<svg
-																xmlns="http://www.w3.org/2000/svg"
-																viewBox="0 0 16 16"
-																fill="currentColor"
-																class="size-3.5 text-red-500"
-															>
-																<path
-																	fill-rule="evenodd"
-																	d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-																	clip-rule="evenodd"
-																/>
-															</svg>
-														</Tooltip>
-													{:else if item.meta?.onedrive_sync?.status === 'syncing'}
-														<SyncProgressBadge sync={item.meta.onedrive_sync} />
-													{/if}
 												{:else if item?.type === 'google_drive'}
 													<Badge type="info" content={$i18n.t('Google Drive')} />
-													{#if item.meta?.google_drive_sync?.needs_reauth}
-														<Tooltip content={$i18n.t('Re-authorize background sync')}>
-															<svg
-																xmlns="http://www.w3.org/2000/svg"
-																viewBox="0 0 16 16"
-																fill="currentColor"
-																class="size-3.5 text-red-500"
-															>
-																<path
-																	fill-rule="evenodd"
-																	d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-																	clip-rule="evenodd"
-																/>
-															</svg>
-														</Tooltip>
-													{:else if item.meta?.google_drive_sync?.status === 'syncing'}
-														<SyncProgressBadge sync={item.meta.google_drive_sync} />
-													{/if}
-												{:else if item?.type === 'confluence'}
-													<Badge type="info" content={$i18n.t('Confluence')} />
-													{#if item.meta?.confluence_sync?.needs_reauth}
-														<Tooltip content={$i18n.t('Re-authorize background sync')}>
-															<svg
-																xmlns="http://www.w3.org/2000/svg"
-																viewBox="0 0 16 16"
-																fill="currentColor"
-																class="size-3.5 text-red-500"
-															>
-																<path
-																	fill-rule="evenodd"
-																	d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-																	clip-rule="evenodd"
-																/>
-															</svg>
-														</Tooltip>
-													{:else if item.meta?.confluence_sync?.status === 'syncing'}
-														<SyncProgressBadge sync={item.meta.confluence_sync} />
-													{/if}
 												{:else if $config?.integration_providers?.[item?.type]}
 													<Badge
 														type={$config.integration_providers[item.type].badge_type}
@@ -685,21 +565,17 @@
 								<div
 									class="hidden max-w-44 shrink-0 self-center truncate text-right text-[0.6875rem] leading-5 text-gray-500 dark:text-gray-500 md:block"
 								>
-									{#if item?.meta?.confluence_sync?.shared}
-										{$i18n.t('Managed by administrators')}
-									{:else}
-										<Tooltip
-											content={item?.user?.email ?? $i18n.t('Deleted User')}
-											className="min-w-0"
-											placement="top-start"
-										>
-											<div class="truncate">
-												{capitalizeFirstLetter(
-													item?.user?.name ?? item?.user?.email ?? $i18n.t('Deleted User')
-												)}
-											</div>
-										</Tooltip>
-									{/if}
+									<Tooltip
+										content={item?.user?.email ?? $i18n.t('Deleted User')}
+										className="min-w-0"
+										placement="top-start"
+									>
+										<div class="truncate">
+											{capitalizeFirstLetter(
+												item?.user?.name ?? item?.user?.email ?? $i18n.t('Deleted User')
+											)}
+										</div>
+									</Tooltip>
 								</div>
 
 								<div class="w-36 shrink-0 text-right">
@@ -711,14 +587,8 @@
 										</div>
 									</Tooltip>
 								</div>
-								<!-- [Gradient] Managed pre-synced shared KBs (Confluence) are read-only
-										     and admin-managed: their lifecycle (delete / re-provision) lives in
-										     the Cloud Sync admin panel, and the backend blocks delete/reset via
-										     _assert_not_managed_shared_kb. So suppress the per-KB Export/Delete
-										     menu here for EVERYONE, including admins — otherwise it offers
-										     actions that are either inappropriate (export of a synced mirror)
-										     or backend-blocked (delete). -->
-								{#if (item?.write_access || $user?.role === 'admin') && !item?.meta?.confluence_sync?.shared}
+
+								{#if item?.write_access || $user?.role === 'admin'}
 									<div class="ml-2 flex shrink-0 flex-row items-center self-center">
 										<ItemMenu
 											onExport={$user?.role === 'admin'
@@ -740,7 +610,7 @@
 
 				{#if !allItemsLoaded}
 					<Loader
-						on:visible={(e) => {
+						on:visible={() => {
 							if (!itemsLoading) {
 								loadMoreItems();
 							}

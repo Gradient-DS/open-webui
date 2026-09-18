@@ -129,7 +129,6 @@ export const ADMIN_SETTINGS_TABS = [
 	'evaluations',
 	'integrations',
 	'documents',
-	'cloud-sync',
 	'web',
 	'code-execution',
 	'interface',

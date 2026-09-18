@@ -47,7 +47,7 @@ async def _send(client, method, path, body, *, key, dry_run, as_user=None):
     if dry_run:
         print(json.dumps({'method': method, 'path': path, 'body': body, 'idempotency_key': key, 'as_user': as_user}))
         return
-    await client.send(method, path, body, idempotency_key=key, as_user=as_user)
+    return await client.send(method, path, body, idempotency_key=key, as_user=as_user)
 
 
 async def _push_directory(users, groups, client, *, dry_run, db):
@@ -127,24 +127,108 @@ async def _create_collections(rows, users, grants, client, *, dry_run, db):
     return conflicts
 
 
-async def reconcile(file_counts, client, *, conflicts, dry_run=False):
+def _cloud_scope(provider, source):
+    single_file = source['type'] == 'file'
+    if provider == 'onedrive':
+        return {
+            'drive_id': source['drive_id'],
+            'item_id': source['item_id'],
+            'include_descendants': not single_file,
+            'single_file': single_file,
+        }
+    return {
+        'file_id': source['item_id'],
+        'drive_id': source.get('drive_id'),
+        'include_descendants': not single_file,
+    }
+
+
+async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
+    cadence = None
+    for kb in rows:
+        if kb.id not in cloud_owners:
+            continue
+        if kb.type == 'confluence':
+            print(f'{kb.id}: Confluence cloud sync skipped (D10)')
+            continue
+        owner = cloud_owners[kb.id]
+        if owner is None or kb.id in conflicts:
+            reason = 'owner missing' if owner is None else 'collection conflict'
+            print(f'{kb.id}: {reason}, cloud sync skipped')
+            continue
+        sources = (kb.meta or {}).get(f'{kb.type}_sync', {}).get('sources', [])
+        scopes = [_cloud_scope(kb.type, source) for source in sources]
+        if cadence is None:
+            # W3 removed the old tenant interval settings; preview must not fetch policy.
+            cadence = (
+                '<sync-policy.min_cadence_minutes>'
+                if dry_run
+                else (await client.get('/v1/sync-policy'))['min_cadence_minutes']
+            )
+        connection = await _send(
+            client,
+            'POST',
+            '/v1/connections',
+            {'source_kind': kb.type, 'credential_kind': 'user_oauth'},
+            key=f'migrate:connection:{kb.id}',
+            dry_run=dry_run,
+            as_user=owner,
+        )
+        connection_id = f'<connection:{kb.id}>' if dry_run else connection['id']
+        if not scopes:
+            print(f'{kb.id}: no cloud sources, no schedules created')
+        for index, scope in enumerate(scopes):
+            for offset, kind in enumerate(('content', 'acl_refresh')):
+                await _send(
+                    client,
+                    'POST',
+                    '/v1/schedules',
+                    {
+                        'connection_id': connection_id,
+                        'kind': kind,
+                        'scope': scope,
+                        'cadence_minutes': cadence,
+                        'collection_key': kb.id,
+                    },
+                    key=f'migrate:schedule:{kb.id}:{2 * index + offset}',
+                    dry_run=dry_run,
+                    as_user=owner,
+                )
+
+
+async def _cloud_coverage(cloud_owners, client, *, dry_run):
+    scheduled = set()
+    if not dry_run:
+        for owner in sorted({owner for owner in cloud_owners.values() if owner is not None}):
+            async for schedule in client.pages('/v1/schedules', as_user=owner):
+                key = schedule['collection_key']
+                if key in cloud_owners and cloud_owners[key] == owner:
+                    scheduled.add(key)
+    count = 'not read (dry-run)' if dry_run else len(scheduled)
+    print(f'KBs with a schedule: {count} | KBs of a cloud type: {len(cloud_owners)}')
+    return {key: f'{"not read" if dry_run else int(key in scheduled)} / 1' for key in cloud_owners}
+
+
+async def reconcile(file_counts, client, *, conflicts, dry_run=False, cloud_owners=None):
+    coverage = await _cloud_coverage(cloud_owners or {}, client, dry_run=dry_run)
+    header = 'Collection | OWUI files | document_count | gap | KBs with a schedule / KBs of a cloud type'
     if dry_run:
         print(f'KB count: {len(file_counts)} | collection count: not read (dry-run)')
-        print('Collection | OWUI files | document_count | gap')
+        print(header)
         for key, count in sorted(file_counts.items()):
-            print(f'{key} | {count} | not read | not read')
+            print(f'{key} | {count} | not read | not read | {coverage.get(key, "0 / 0")}')
         return 0
     collections = {row['key']: row async for row in client.pages('/v1/collections')}
     print(f'KB count: {len(file_counts)} | collection count: {len(collections)}')
-    print('Collection | OWUI files | document_count | gap')
+    print(header)
     missing = set(file_counts) - collections.keys()
     for key in sorted(file_counts.keys() | collections.keys()):
         count = file_counts.get(key, 0)
         if key in missing:
-            print(f'{key} | {count} | MISSING | collection missing')
+            print(f'{key} | {count} | MISSING | collection missing | {coverage.get(key, "0 / 0")}')
         else:
             documents = collections[key]['document_count']
-            print(f'{key} | {count} | {documents} | {count - documents}')
+            print(f'{key} | {count} | {documents} | {count - documents} | {coverage.get(key, "0 / 0")}')
     print('Document gaps are informational until ingest lands.')
     return int(bool(missing or conflicts))
 
@@ -160,12 +244,22 @@ async def migrate(*, dry_run=False, db=None):
     users = (await Users.get_users(db=db))['users']
     rows = await _knowledge_rows(table, db)
     keys = [kb.id for kb in rows]
-    counts = await table.get_file_counts_by_knowledge_ids(keys, db=db)
+    counts = {}
+    for owner_id in sorted({kb.user_id for kb in rows}):
+        owner_keys = [kb.id for kb in rows if kb.user_id == owner_id]
+        counts.update(await table.get_file_counts_by_knowledge_ids(owner_keys, db=db, user_id=owner_id))
     file_counts = {key: counts.get(key, 0) for key in keys}
     paths = await _folder_paths(table, keys, db)
     client = identity.build_client()
     await _push_directory(users, await groups.get_all_groups(db=db), client, dry_run=dry_run, db=db)
     conflicts = await _create_collections(rows, users, grants, client, dry_run=dry_run, db=db)
+    user_ids = {user.id for user in users}
+    cloud_owners = {
+        kb.id: f'owui:user:{kb.user_id}' if kb.user_id in user_ids else None
+        for kb in rows
+        if kb.type in {'onedrive', 'google_drive', 'confluence'}
+    }
+    await _create_cloud_sync(rows, cloud_owners, client, conflicts=conflicts, dry_run=dry_run)
     for key in keys:
         if key in conflicts:
             continue
@@ -179,7 +273,7 @@ async def migrate(*, dry_run=False, db=None):
                 key=f'folder:{key}:{digest}',
                 dry_run=dry_run,
             )
-    return await reconcile(file_counts, client, conflicts=conflicts, dry_run=dry_run)
+    return await reconcile(file_counts, client, conflicts=conflicts, dry_run=dry_run, cloud_owners=cloud_owners)
 
 
 def main():

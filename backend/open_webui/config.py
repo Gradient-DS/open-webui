@@ -3061,50 +3061,6 @@ ENABLE_WEAVIATE_BQ_QUANTIZATION = os.environ.get('ENABLE_WEAVIATE_BQ_QUANTIZATIO
 # ENABLE_WEAVIATE_MULTITENANCY_MODE / WEAVIATE_MT_LEGACY_FALLBACK removed after
 # the fleet-wide MT migration (dev PR #223) — MT is the only Weaviate path.
 
-ENABLE_GOOGLE_DRIVE_SYNC = os.getenv('ENABLE_GOOGLE_DRIVE_SYNC', 'False').lower() == 'true'
-
-GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = int(os.environ.get('GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES', '60'))
-
-GOOGLE_DRIVE_MAX_FILES_PER_SYNC = int(os.environ.get('GOOGLE_DRIVE_MAX_FILES_PER_SYNC', '500'))
-
-GOOGLE_DRIVE_MAX_FILE_SIZE_MB = int(os.environ.get('GOOGLE_DRIVE_MAX_FILE_SIZE_MB', '100'))
-
-ENABLE_ONEDRIVE_SYNC = os.getenv('ENABLE_ONEDRIVE_SYNC', 'False').lower() == 'true'
-
-ONEDRIVE_SYNC_INTERVAL_MINUTES = int(os.getenv('ONEDRIVE_SYNC_INTERVAL_MINUTES', '60'))
-
-ONEDRIVE_MAX_FILES_PER_SYNC = int(os.getenv('ONEDRIVE_MAX_FILES_PER_SYNC', '500'))
-
-ONEDRIVE_MAX_FILE_SIZE_MB = int(os.getenv('ONEDRIVE_MAX_FILE_SIZE_MB', '100'))
-
-ENABLE_CONFLUENCE_INTEGRATION = os.getenv('ENABLE_CONFLUENCE_INTEGRATION', 'False').lower() == 'true'
-
-CONFLUENCE_OAUTH_CLIENT_ID = os.environ.get('CONFLUENCE_OAUTH_CLIENT_ID', '')
-
-CONFLUENCE_OAUTH_CLIENT_SECRET = os.environ.get('CONFLUENCE_OAUTH_CLIENT_SECRET', '')
-
-ENABLE_CONFLUENCE_SYNC = os.getenv('ENABLE_CONFLUENCE_SYNC', 'False').lower() == 'true'
-
-CONFLUENCE_SYNC_INTERVAL_MINUTES = int(os.environ.get('CONFLUENCE_SYNC_INTERVAL_MINUTES', '60'))
-
-CONFLUENCE_MAX_PAGES_PER_SYNC = int(os.getenv('CONFLUENCE_MAX_PAGES_PER_SYNC', '500'))
-
-CONFLUENCE_MAX_PAGE_SIZE_MB = int(os.getenv('CONFLUENCE_MAX_PAGE_SIZE_MB', '25'))
-
-CONFLUENCE_AUTH_MODE = os.environ.get('CONFLUENCE_AUTH_MODE', 'oauth')
-
-CONFLUENCE_SITE_URL = os.environ.get('CONFLUENCE_SITE_URL', '')
-
-CONFLUENCE_BASIC_AUTH_USERNAME = os.environ.get('CONFLUENCE_BASIC_AUTH_USERNAME', '')
-
-CONFLUENCE_BASIC_AUTH_API_TOKEN = os.environ.get('CONFLUENCE_BASIC_AUTH_API_TOKEN', '')
-
-CONFLUENCE_SCOPED_API_TOKEN = os.environ.get('CONFLUENCE_SCOPED_API_TOKEN', '')
-
-CONFLUENCE_CLOUD_ID = os.environ.get('CONFLUENCE_CLOUD_ID', '')
-
-CONFLUENCE_KB_MODE = os.environ.get('CONFLUENCE_KB_MODE', 'per_user')
-
 ENABLE_EMAIL_INVITES = os.environ.get('ENABLE_EMAIL_INVITES', 'False').lower() == 'true'
 
 EMAIL_GRAPH_TENANT_ID = os.environ.get('EMAIL_GRAPH_TENANT_ID', '')
@@ -3146,25 +3102,6 @@ SOEV_API_SERVICE_PRINCIPAL = os.environ.get('SOEV_API_SERVICE_PRINCIPAL', '')
 SOEV_API_JOB_POLL_SECONDS = int(os.environ.get('SOEV_API_JOB_POLL_SECONDS', '5'))
 SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS = int(os.environ.get('SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS', '21600'))
 SOEV_API_INLINE_DOCUMENT_BYTES = int(os.environ.get('SOEV_API_INLINE_DOCUMENT_BYTES', '262144'))
-
-DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = (
-    os.environ.get('DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED', 'False').lower() == 'true'
-)
-
-# Per-tenant switch for the external sync-daemon (soev-solutions
-# services/sync_daemon). Gates the daemon-facing endpoints
-# (/api/v1/sync-daemon/*) and the machine-auth acceptance on the knowledge
-# sync-protocol endpoints. The companion machine key is the plain env var
-# SYNC_API_KEY (read in utils/service_auth.py, never stored in config).
-SYNC_DAEMON_ENABLED = os.environ.get('SYNC_DAEMON_ENABLED', 'False').lower() == 'true'
-
-# Base URL of the tenant's external sync-daemon (e.g.
-# http://<tenant>-sync-daemon:8010). OWUI POSTs manual "Sync now" / cancel
-# triggers here; empty when no daemon is deployed.
-SYNC_DAEMON_URL = os.environ.get('SYNC_DAEMON_URL', '')
-
-# Bearer token OWUI presents to the sync-daemon on trigger/cancel calls.
-SYNC_DAEMON_API_KEY = os.environ.get('SYNC_DAEMON_API_KEY', '')
 
 ENABLE_AGENT_PROXY = os.environ.get('ENABLE_AGENT_PROXY', 'False').lower() == 'true'
 
@@ -3596,19 +3533,6 @@ DEFAULT_CONFIG = {
     'auth.2fa_grace_period_days': TWO_FA_GRACE_PERIOD_DAYS,
     'auth.enable_2fa': ENABLE_2FA,
     'auth.require_2fa': REQUIRE_2FA,
-    'confluence.auth_mode': CONFLUENCE_AUTH_MODE,
-    'confluence.basic_auth_api_token': CONFLUENCE_BASIC_AUTH_API_TOKEN,
-    'confluence.basic_auth_username': CONFLUENCE_BASIC_AUTH_USERNAME,
-    'confluence.client_id': CONFLUENCE_OAUTH_CLIENT_ID,
-    'confluence.client_secret': CONFLUENCE_OAUTH_CLIENT_SECRET,
-    'confluence.cloud_id': CONFLUENCE_CLOUD_ID,
-    'confluence.enable': ENABLE_CONFLUENCE_INTEGRATION,
-    'confluence.enable_sync': ENABLE_CONFLUENCE_SYNC,
-    'confluence.kb_mode': CONFLUENCE_KB_MODE,
-    'confluence.max_pages_per_sync': CONFLUENCE_MAX_PAGES_PER_SYNC,
-    'confluence.scoped_api_token': CONFLUENCE_SCOPED_API_TOKEN,
-    'confluence.site_url': CONFLUENCE_SITE_URL,
-    'confluence.sync_interval_minutes': CONFLUENCE_SYNC_INTERVAL_MINUTES,
     'document_writer.enable': ENABLE_DOCUMENT_WRITER,
     'document_writer.prompt_template': DOCUMENT_WRITER_PROMPT_TEMPLATE,
     'email.enable_forgot_password': ENABLE_FORGOT_PASSWORD,
@@ -3635,21 +3559,13 @@ DEFAULT_CONFIG = {
     'feedback_report.slack_webhook_url': FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
     'feedback_report.webhook_url': FEEDBACK_REPORT_WEBHOOK_URL,
     'feedback_report.trace_url_template': FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
-    'google_drive.enable_sync': ENABLE_GOOGLE_DRIVE_SYNC,
-    'google_drive.max_files_per_sync': GOOGLE_DRIVE_MAX_FILES_PER_SYNC,
-    'google_drive.sync_interval_minutes': GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
     'integrations.providers': INTEGRATION_PROVIDERS,
     'auth.invite_required': OAUTH_INVITE_REQUIRED,
     'onedrive.client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,
     'onedrive.client_id_personal': ONEDRIVE_CLIENT_ID_PERSONAL,
     'onedrive.enable_business': ENABLE_ONEDRIVE_BUSINESS,
     'onedrive.enable_personal': ENABLE_ONEDRIVE_PERSONAL,
-    'onedrive.enable_sync': ENABLE_ONEDRIVE_SYNC,
-    'onedrive.max_files_per_sync': ONEDRIVE_MAX_FILES_PER_SYNC,
-    'onedrive.sync_interval_minutes': ONEDRIVE_SYNC_INTERVAL_MINUTES,
-    'rag.distributed_doc_pipeline_sync_enabled': DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED,
     'rag.enable_filter_ui': ENABLE_RAG_FILTER_UI,
-    'sync_daemon.enabled': SYNC_DAEMON_ENABLED,
     'ui.acceptance_modal_button_text': ACCEPTANCE_MODAL_BUTTON_TEXT,
     'ui.acceptance_modal_content': ACCEPTANCE_MODAL_CONTENT,
     'ui.acceptance_modal_title': ACCEPTANCE_MODAL_TITLE,

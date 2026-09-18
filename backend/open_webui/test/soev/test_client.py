@@ -442,3 +442,53 @@ for name in ('SOEV_API_KEY', 'SOEV_API_SIGNING_KEY'):
         [sys.executable, '-c', code, json.dumps(expected)], env=environment, capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
+async def test_original_stream_is_incremental_and_closes_on_disconnect(recorded_http):
+    requests, responses = recorded_http
+
+    class Body(httpx.AsyncByteStream):
+        closed = False
+        delivered = 0
+
+        async def __aiter__(self):
+            for chunk in (b'first', b'second'):
+                self.delivered += 1
+                yield chunk
+
+        async def aclose(self):
+            self.closed = True
+
+    body = Body()
+    responses.extend(
+        [
+            httpx.Response(303, headers={'Location': 'https://storage.invalid/original'}),
+            httpx.Response(200, stream=body),
+        ]
+    )
+    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda ref: 'assertion')
+    stream = client.stream('/v1/collections/kb/documents/file/original', as_user='owui:user:alice')
+    assert await anext(stream) == b'first'
+    assert body.delivered == 1 and not body.closed
+    await stream.aclose()
+    assert body.closed and body.delivered == 1
+    assert requests[0].headers['X-Soev-Subject'] == 'assertion'
+    assert 'X-Soev-Subject' not in requests[1].headers
+    assert 'Authorization' not in requests[1].headers
+
+
+@pytest.mark.asyncio
+async def test_original_stream_follows_only_one_redirect(recorded_http):
+    requests, responses = recorded_http
+    responses.extend(
+        [
+            httpx.Response(303, headers={'Location': 'https://storage.invalid/original'}),
+            httpx.Response(303, headers={'Location': 'https://elsewhere.invalid/original'}),
+        ]
+    )
+    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda ref: 'assertion')
+    with pytest.raises(SoevApiError) as error:
+        await anext(client.stream('/original', as_user='owui:user:alice'))
+    assert error.value.status == 502
+    assert len(requests) == 2

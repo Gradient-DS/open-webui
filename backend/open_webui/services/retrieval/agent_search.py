@@ -53,7 +53,7 @@ async def _filter_to_accessible_kbs(
     *,
     kb_ids: Optional[list[str]] = None,
 ) -> list[KnowledgeUserModel]:
-    """Resolve KBs the user may read; drop suspended ones and apply optional subset.
+    """Resolve KBs the user may read and apply an optional subset.
 
     Includes both the access-grant pass and explicit ownership. Ownership
     is included defensively — the grant pass already covers it, but we
@@ -74,11 +74,7 @@ async def _filter_to_accessible_kbs(
         kb_id_set = set(kb_ids)
         accessible = [kb for kb in accessible if kb.id in kb_id_set]
 
-    filtered = []
-    for kb in accessible:
-        if not await Knowledges.is_suspended(kb.id):
-            filtered.append(kb)
-    return filtered
+    return accessible
 
 
 async def resolve_accessible_kb(
@@ -86,10 +82,10 @@ async def resolve_accessible_kb(
     *,
     kb_id: str,
 ) -> Optional[KnowledgeUserModel]:
-    """Resolve one KB under the same ACL and suspension filter as the search.
+    """Resolve one KB under the same ACL filter as the search.
 
-    Returns ``None`` if the KB does not exist, the user has no read access,
-    or the KB is suspended. Reusing ``_filter_to_accessible_kbs`` keeps the
+    Returns ``None`` if the KB does not exist or the user has no read access.
+    Reusing ``_filter_to_accessible_kbs`` keeps the
     file-listing endpoint's ACL from drifting away from the KB-listing one.
     """
 
