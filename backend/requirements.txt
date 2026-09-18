@@ -37,7 +37,7 @@ redis==8.0.1
 hiredis==3.4.0
 
 APScheduler==3.11.2
-RestrictedPython==8.3 # security: CVE-2026-55830 (guard hooks can be shadowed)
+RestrictedPython==8.4 # security: CVE-2026-55830, CVE-2026-76825 (sandbox escape via string.Formatter)
 pytz==2026.2
 
 loguru==0.7.3

@@ -46,7 +46,7 @@ dependencies = [
 
     "pytz==2026.2",
     "APScheduler==3.11.2",
-    "RestrictedPython==8.3", # security: CVE-2026-55830 (guard hooks can be shadowed)
+    "RestrictedPython==8.4", # security: CVE-2026-55830, CVE-2026-76825 (sandbox escape via string.Formatter)
 
     "loguru==0.7.3",
     "asgiref==3.11.1",
