@@ -3877,5 +3877,10 @@
   "Synced documents stay searchable.": "Gesynchroniseerde documenten blijven doorzoekbaar.",
   "Add source": "Bron toevoegen",
   "Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.": "Kies een map om te synchroniseren. De eerste synchronisatie duurt een paar minuten; grote mappen kunnen langer duren. Bestanden verschijnen zodra ze binnenkomen.",
-  "That folder is already in this knowledge base.": "Die map staat al in deze kennisbank."
+  "That folder is already in this knowledge base.": "Die map staat al in deze kennisbank.",
+  "Remove source?": "Bron verwijderen?",
+  "Remove {{label}} from this knowledge base? Its files stay in the {{count}} other knowledge bases that use it. Nothing changes in {{provider}}.": "{{label}} uit deze kennisbank verwijderen? De bestanden blijven in de {{count}} andere kennisbanken die deze bron gebruiken. Er verandert niets in {{provider}}.",
+  "Remove {{label}} from this knowledge base? They will be removed from search. Nothing changes in {{provider}}. You can add the folder again any time.": "{{label}} uit deze kennisbank verwijderen? De bestanden worden uit de zoekresultaten verwijderd. Er verandert niets in {{provider}}. Je kunt de map op elk moment opnieuw toevoegen.",
+  "Disconnect {{provider}}?": "Verbinding met {{provider}} verbreken?",
+  "Disconnect {{provider}}? Your synced folders stop updating and their files are removed from search. You can reconnect any time.": "Verbinding met {{provider}} verbreken? Je gesynchroniseerde mappen worden niet meer bijgewerkt en hun bestanden worden uit de zoekresultaten verwijderd. Je kunt op elk moment opnieuw verbinden."
 }

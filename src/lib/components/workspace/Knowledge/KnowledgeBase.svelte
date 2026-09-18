@@ -1158,6 +1158,19 @@
 		}
 	};
 
+	// [Gradient] Confirm unsubscribe against the selected source's shared usage.
+	let showRemoveSource = false;
+	let removeSourceTargets: Schedule[] = [];
+	$: removeSource =
+		removeSourceTargets.find((schedule) => schedule.kind === 'content') ?? removeSourceTargets[0];
+	$: removeSourceOtherKbs = Math.max(0, (removeSource?.subscriber_count ?? 1) - 1);
+	const sourceAction = (targets: Schedule[], action: ScheduleAction | 'delete') => {
+		if (action === 'delete') {
+			removeSourceTargets = targets;
+			showRemoveSource = true;
+		} else void scheduleAction(targets, action);
+	};
+
 	const scheduleAction = async (targets: Schedule[], action: ScheduleAction | 'delete') => {
 		if (!knowledge || cloudActionBusy) return;
 		cloudActionBusy = true;
@@ -2004,7 +2017,7 @@
 					writeAccess={knowledge.write_access}
 					busy={cloudActionBusy}
 					isAdmin={$user?.role === 'admin'}
-					on:action={(event) => scheduleAction(event.detail.schedules, event.detail.action)}
+					on:action={(event) => sourceAction(event.detail.schedules, event.detail.action)}
 					on:reconnect={(event) => reconnect(event.detail)}
 				/>
 			{/if}
@@ -2445,4 +2458,40 @@
 			'This will remove all files and directories from this knowledge base. This action cannot be undone.'
 		)}
 	</div>
+</ConfirmDialog>
+
+<!-- [Gradient] Unsubscribe removes this KB's source while preserving other subscribers. -->
+<ConfirmDialog
+	bind:show={showRemoveSource}
+	title={$i18n.t('Remove source?')}
+	confirmLabel={$i18n.t('Remove')}
+	on:confirm={() => {
+		const targets = removeSourceTargets;
+		removeSourceTargets = [];
+		void scheduleAction(targets, 'delete');
+	}}
+	on:cancel={() => {
+		removeSourceTargets = [];
+	}}
+>
+	<p class="text-sm text-gray-700 dark:text-gray-300">
+		{$i18n.t(
+			removeSourceOtherKbs > 0
+				? 'Remove {{label}} from this knowledge base? Its files stay in the {{count}} other knowledge bases that use it. Nothing changes in {{provider}}.'
+				: 'Remove {{label}} from this knowledge base? They will be removed from search. Nothing changes in {{provider}}. You can add the folder again any time.',
+			{
+				label:
+					removeSource?.label ||
+					$i18n.t(
+						removeSource?.scope.single_file || removeSource?.scope.include_descendants === false
+							? 'File'
+							: 'Folder'
+					),
+				count: removeSourceOtherKbs,
+				provider: $i18n.t(
+					CLOUD_PROVIDERS[removeSource?.source_kind]?.label ?? removeSource?.source_kind ?? ''
+				)
+			}
+		)}
+	</p>
 </ConfirmDialog>

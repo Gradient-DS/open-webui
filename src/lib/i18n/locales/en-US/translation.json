@@ -3877,5 +3877,10 @@
   "Synced documents stay searchable.": "Synced documents stay searchable.",
   "Add source": "Add source",
   "Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.": "Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.",
-  "That folder is already in this knowledge base.": "That folder is already in this knowledge base."
+  "That folder is already in this knowledge base.": "That folder is already in this knowledge base.",
+  "Remove source?": "Remove source?",
+  "Remove {{label}} from this knowledge base? Its files stay in the {{count}} other knowledge bases that use it. Nothing changes in {{provider}}.": "Remove {{label}} from this knowledge base? Its files stay in the {{count}} other knowledge bases that use it. Nothing changes in {{provider}}.",
+  "Remove {{label}} from this knowledge base? They will be removed from search. Nothing changes in {{provider}}. You can add the folder again any time.": "Remove {{label}} from this knowledge base? They will be removed from search. Nothing changes in {{provider}}. You can add the folder again any time.",
+  "Disconnect {{provider}}?": "Disconnect {{provider}}?",
+  "Disconnect {{provider}}? Your synced folders stop updating and their files are removed from search. You can reconnect any time.": "Disconnect {{provider}}? Your synced folders stop updating and their files are removed from search. You can reconnect any time."
 }
