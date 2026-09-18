@@ -129,42 +129,6 @@ export function pairSchedules(schedules: Schedule[]): SchedulePair[] {
 	return [...pairs, ...[...remaining].map((acl) => ({ acl }))];
 }
 
-export function sourceStatus(pair: SchedulePair) {
-	const schedules = [pair.content, pair.acl].filter((schedule): schedule is Schedule => !!schedule);
-	const schedule = pair.content ?? pair.acl!;
-	const run = schedule.last_run;
-	const liveSchedules = schedules.filter((item) => runIsLive(item.last_run));
-	const expiry = schedules.flatMap((item) =>
-		typeof item.provider_secret_days_to_expiry === 'number'
-			? [item.provider_secret_days_to_expiry]
-			: []
-	);
-	return {
-		schedule,
-		subscriberCount: schedule.subscriber_count ?? 1,
-		liveSchedules,
-		live: liveSchedules.length > 0,
-		landed: run?.counts?.landed ?? 0,
-		failed: run?.counts?.failed ?? 0,
-		tooLarge: run?.counts?.item_too_large ?? 0,
-		errorCode:
-			schedule.last_error ??
-			pair.acl?.last_error ??
-			run?.error_code ??
-			pair.acl?.last_run?.error_code,
-		linkGrantsDropped: schedules.reduce(
-			(total, item) => total + (item.last_run?.counts?.link_grants_dropped ?? 0),
-			0
-		),
-		lastSynced: run?.finished_at ?? (run?.outcome ? run.started_at : null),
-		aclStatus:
-			pair.content && ['partial', 'failed'].includes(pair.acl?.last_run?.outcome ?? '')
-				? pair.acl?.last_run?.outcome
-				: null,
-		expiry: expiry.length ? Math.min(...expiry) : null
-	};
-}
-
 export function connectionOutcome(
 	connection: Connection,
 	popupClosed: boolean,

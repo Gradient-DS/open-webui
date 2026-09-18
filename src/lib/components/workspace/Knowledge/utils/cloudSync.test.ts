@@ -3,7 +3,6 @@ import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import {
 	connectionOutcome,
 	pairSchedules,
-	sourceStatus,
 	connectResult,
 	googleDriveScope,
 	oneDriveScope,
@@ -165,47 +164,6 @@ it('pairs schedules by connection and deep-equal scope regardless of key or sche
 	).toHaveLength(1);
 });
 
-it('uses content counters, either live run, ACL failures and one expiry per source', () => {
-	const run = { id: 'run', started_at: '2026-09-17T12:00:00Z' };
-	const content = {
-		...scheduleFixture('content', 'content'),
-		last_run: {
-			...run,
-			outcome: 'partial' as const,
-			finished_at: '2026-09-17T12:01:00Z',
-			counts: { landed: 12, failed: 2 },
-			error_code: 'fetch_failed'
-		},
-		provider_secret_days_to_expiry: 20
-	};
-	const acl = {
-		...scheduleFixture('acl', 'acl_refresh'),
-		last_run: run,
-		provider_secret_days_to_expiry: 10
-	};
-	expect(sourceStatus({ content, acl })).toMatchObject({
-		live: true,
-		liveSchedules: [acl],
-		landed: 12,
-		failed: 2,
-		errorCode: 'fetch_failed',
-		expiry: 10,
-		aclStatus: null,
-		lastSynced: '2026-09-17T12:01:00Z'
-	});
-	expect(
-		sourceStatus({ content, acl: { ...acl, last_run: { ...run, outcome: 'failed' } } })
-	).toMatchObject({ live: false, aclStatus: 'failed' });
-	expect(sourceStatus({ content: scheduleFixture('new', 'content') })).toMatchObject({
-		live: false,
-		landed: 0,
-		failed: 0,
-		lastSynced: null,
-		expiry: null
-	});
-	expect(sourceStatus({ acl })).toMatchObject({ schedule: acl, live: true, liveSchedules: [acl] });
-});
-
 it.each([
 	['enabled', null, false, 0, { status: 'done' }],
 	['enabled', 'invalid_grant', false, 0, { status: 'failed', reason: 'invalid_grant' }],
@@ -233,70 +191,4 @@ it('keeps an owner mismatch visible even when the connection lifecycle is enable
 		last_error: 'owner_mismatch'
 	};
 	expect(reconnectConnections([{ connection } as Schedule], null)).toEqual([connection]);
-});
-
-it('surfaces schedule errors before stale run errors and includes ACL access failures', () => {
-	const content: Schedule = {
-		...scheduleFixture('content', 'content'),
-		last_error: 'writer_revoked',
-		last_run: {
-			id: 'run',
-			started_at: '2026-09-17T12:00:00Z',
-			outcome: 'failed',
-			error_code: 'old_error'
-		}
-	};
-	const acl: Schedule = {
-		...scheduleFixture('acl', 'acl_refresh'),
-		last_error: 'access_revoked'
-	};
-	expect(sourceStatus({ content, acl }).errorCode).toBe('writer_revoked');
-	expect(sourceStatus({ content: { ...content, last_error: null }, acl }).errorCode).toBe(
-		'access_revoked'
-	);
-	expect(sourceStatus({ acl }).errorCode).toBe('access_revoked');
-});
-
-it('collects link-only share counts from both schedules', () => {
-	const run = { id: 'run', started_at: '2026-09-17T12:00:00Z', outcome: 'succeeded' as const };
-	expect(
-		sourceStatus({
-			content: {
-				...scheduleFixture('content', 'content'),
-				last_run: { ...run, counts: { link_grants_dropped: 2 } }
-			},
-			acl: {
-				...scheduleFixture('acl', 'acl_refresh'),
-				last_run: { ...run, counts: { link_grants_dropped: 3 } }
-			}
-		}).linkGrantsDropped
-	).toBe(5);
-	expect(sourceStatus({ content: scheduleFixture('content', 'content') }).linkGrantsDropped).toBe(
-		0
-	);
-});
-
-it('counts oversized item failures without confusing them with the run error code', () => {
-	const content: Schedule = {
-		...scheduleFixture('content', 'content'),
-		last_run: {
-			id: 'run',
-			started_at: '2026-09-17T12:00:00Z',
-			outcome: 'partial',
-			counts: { failed: 3, item_too_large: 2 }
-		}
-	};
-	expect(sourceStatus({ content })).toMatchObject({ failed: 3, tooLarge: 2, errorCode: undefined });
-	expect(sourceStatus({ content: scheduleFixture('content', 'content') }).tooLarge).toBe(0);
-});
-
-it('passes the selected schedule subscriber count through without combining paired schedules', () => {
-	const content = { ...scheduleFixture('content', 'content'), subscriber_count: 3 };
-	const acl = { ...scheduleFixture('acl', 'acl_refresh'), subscriber_count: 2 };
-	expect(sourceStatus({ content, acl }).subscriberCount).toBe(3);
-	expect(sourceStatus({ acl }).subscriberCount).toBe(2);
-	expect(sourceStatus({ content: scheduleFixture('single', 'content') }).subscriberCount).toBe(1);
-	const { subscriber_count: omitted, ...legacy } = content;
-	expect(omitted).toBe(3);
-	expect(sourceStatus({ content: legacy as Schedule }).subscriberCount).toBe(1);
 });
