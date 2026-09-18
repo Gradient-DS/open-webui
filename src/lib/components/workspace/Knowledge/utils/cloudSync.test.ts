@@ -135,6 +135,8 @@ const scheduleFixture = (
 	kind,
 	scope,
 	connection_id: 'c',
+	subscribers: ['kb'],
+	subscriber_count: 1,
 	cadence_minutes: 60,
 	source_kind: 'onedrive',
 	lifecycle: 'enabled',
@@ -286,4 +288,15 @@ it('counts oversized item failures without confusing them with the run error cod
 	};
 	expect(sourceStatus({ content })).toMatchObject({ failed: 3, tooLarge: 2, errorCode: undefined });
 	expect(sourceStatus({ content: scheduleFixture('content', 'content') }).tooLarge).toBe(0);
+});
+
+it('passes the selected schedule subscriber count through without combining paired schedules', () => {
+	const content = { ...scheduleFixture('content', 'content'), subscriber_count: 3 };
+	const acl = { ...scheduleFixture('acl', 'acl_refresh'), subscriber_count: 2 };
+	expect(sourceStatus({ content, acl }).subscriberCount).toBe(3);
+	expect(sourceStatus({ acl }).subscriberCount).toBe(2);
+	expect(sourceStatus({ content: scheduleFixture('single', 'content') }).subscriberCount).toBe(1);
+	const { subscriber_count: omitted, ...legacy } = content;
+	expect(omitted).toBe(3);
+	expect(sourceStatus({ content: legacy as Schedule }).subscriberCount).toBe(1);
 });

@@ -255,7 +255,9 @@ def schedule(env, id, key, provider, *, kind='content', lifecycle='enabled', own
     env.api.schedules[id] = {
         'id': id,
         'connection_id': 'connection-' + id,
-        'collection_key': key,
+        'collection_key': 'corpus:' + id,
+        'subscribers': [key],
+        'subscriber_count': 1,
         'source_kind': provider,
         'kind': kind,
         'scope': {},

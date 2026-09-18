@@ -25,7 +25,8 @@ def types_from_schedules(schedules: list[dict]) -> dict[str, str]:
     # If providers conflict for a collection, the first eligible schedule by id wins.
     for schedule in sorted(schedules, key=lambda row: row['id']):
         if schedule['kind'] == 'content' and schedule['lifecycle'] != 'revoked':
-            types.setdefault(schedule['collection_key'], schedule['source_kind'])
+            for collection_key in schedule['subscribers']:
+                types.setdefault(collection_key, schedule['source_kind'])
     return types
 
 

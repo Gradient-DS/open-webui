@@ -98,7 +98,9 @@ def test_a_schedule_is_registered_on_the_kbs_collection_key(api, cadence):
     }
     if cadence is not None:
         body['cadence_minutes'] = cadence
-    api.responses.append(response({'id': 'schedule-1', **body, 'collection_key': 'kb-1'}, 201))
+    api.responses.append(
+        response({'id': 'schedule-1', **body, 'collection_key': 'corpus:drive', 'subscribers': ['kb-1']}, 201)
+    )
     result = api.browser.post('/api/v1/cloud-sync/knowledge/kb-1/schedules', json=body)
     assert result.status_code == 200
     assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb-1'}
@@ -123,7 +125,9 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
     detail = {
         'id': 'schedule-1',
         'connection_id': 'connection-1',
-        'collection_key': 'kb-1',
+        'collection_key': 'corpus:drive',
+        'subscribers': ['kb-1', 'kb-2'],
+        'subscriber_count': 2,
         'source_kind': 'onedrive',
         'last_run': {
             'id': 'run-1',
@@ -210,7 +214,15 @@ def test_every_call_carries_the_users_assertion(api, operation):
         result = api.browser.post(prefix + '/connections/c/authorize')
         assert result.json()['authorize_url'].endswith('/fresh')
     else:
-        api.responses.append(response({'id': 's', 'collection_key': 'foreign' if operation == 'foreign' else 'kb'}))
+        api.responses.append(
+            response(
+                {
+                    'id': 's',
+                    'collection_key': 'corpus:drive',
+                    'subscribers': ['foreign' if operation == 'foreign' else 'kb'],
+                }
+            )
+        )
         path = prefix + '/knowledge/kb/schedules/s'
         if operation == 'foreign':
             result = api.browser.post(path + '/run')
@@ -274,3 +286,61 @@ def test_a_soev_api_policy_refusal_maps_to_403_with_its_code(api, status, code):
     result = api.browser.post('/api/v1/cloud-sync/connections', json={'provider': 'onedrive'})
     assert result.status_code == status
     assert result.json() == {'detail': {'code': code, 'detail': 'Refused', 'constraint': 'provider'}}
+
+
+@pytest.mark.parametrize('key', ['kb-1', 'kb: space&plus+?=#é'])
+def test_delete_forwards_the_kb_as_collection_key(api, key):
+    """Unsubscribing encodes the KB query value without changing the corpus destination."""
+    from urllib.parse import quote
+
+    api.responses.extend(
+        [
+            response({'id': 's', 'collection_key': 'corpus:drive', 'subscribers': [key, 'other-kb']}),
+            httpx.Response(204),
+        ]
+    )
+    result = api.browser.delete(f'/api/v1/cloud-sync/knowledge/{quote(key, safe="")}/schedules/s')
+    assert result.status_code == 204
+    assert api.requests[-1].method == 'DELETE'
+    assert api.requests[-1].url.path == '/v1/schedules/s'
+    assert dict(api.requests[-1].url.params) == {'collection_key': key}
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('action', ['delete', 'run', 'cancel', 'suspend', 'resume'])
+@pytest.mark.parametrize('subscribed', [False, True])
+def test_actions_require_the_kb_to_subscribe(api, action, subscribed):
+    """Every mutation checks subscribers even when the schedule destination equals the KB."""
+    api.responses.append(
+        response(
+            {
+                'id': 's',
+                'collection_key': 'corpus:drive' if subscribed else 'kb',
+                'subscribers': ['other-kb', 'kb'] if subscribed else ['other-kb'],
+            }
+        )
+    )
+    if subscribed:
+        api.responses.append(response({'job_id': 'j'}, 201) if action == 'run' else httpx.Response(204))
+    path = '/api/v1/cloud-sync/knowledge/kb/schedules/s'
+    result = api.browser.delete(path) if action == 'delete' else api.browser.post(path + '/' + action)
+    assert result.status_code == ((201 if action == 'run' else 204) if subscribed else 404)
+    assert len(api.requests) == (2 if subscribed else 1)
+    if not subscribed:
+        assert result.json()['detail']['code'] == 'connection_not_found'
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('field', ['label', 'path'])
+@pytest.mark.parametrize('length', [512, 513])
+def test_schedule_display_fields_are_forwarded_with_limits(api, field, length):
+    """Display fields pass through at the limit and are rejected before I/O above it."""
+    body = {'connection_id': 'c', 'kind': 'content', 'scope': {}, field: 'a' * length}
+    if length == 512:
+        api.responses.append(response({'id': 's'}, 201))
+    result = api.browser.post('/api/v1/cloud-sync/knowledge/kb/schedules', json=body)
+    assert result.status_code == (200 if length == 512 else 422)
+    if length == 512:
+        assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb'}
+    else:
+        assert not api.requests

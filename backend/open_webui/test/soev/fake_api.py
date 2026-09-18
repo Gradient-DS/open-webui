@@ -220,9 +220,10 @@ class FakeSoevApi:
         self._require(credential, 'connect' if subject else 'mint')
         owner = subject or self.credentials[credential]
         rows = [row for key, row in self.schedules.items() if self.schedule_owners[key] == owner]
-        for field in ('collection_key', 'kind'):
-            if field in request.url.params:
-                rows = [row for row in rows if row[field] == request.url.params[field]]
+        if 'collection_key' in request.url.params:
+            rows = [row for row in rows if request.url.params['collection_key'] in row['subscribers']]
+        if 'kind' in request.url.params:
+            rows = [row for row in rows if row['kind'] == request.url.params['kind']]
         return self._page(rows, request)
 
     def _lookup_documents(self, request, credential, subject):
