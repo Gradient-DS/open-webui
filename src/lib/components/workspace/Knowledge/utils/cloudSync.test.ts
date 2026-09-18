@@ -13,27 +13,47 @@ import {
 } from './cloudSync';
 
 it('registers OneDrive folders recursively and files as single-file scopes', () => {
-	expect(oneDriveScope({ id: 'folder', driveId: 'drive', type: 'folder' })).toEqual({
-		drive_id: 'drive',
-		item_id: 'folder',
-		include_descendants: true,
-		single_file: false
+	const folder = {
+		id: 'folder',
+		driveId: 'drive',
+		type: 'folder' as const,
+		name: 'Reports',
+		path: '/Team/Reports'
+	};
+	expect(oneDriveScope(folder)).toEqual({
+		label: 'Reports',
+		path: '/Team/Reports',
+		scope: { drive_id: 'drive', item_id: 'folder', include_descendants: true, single_file: false }
 	});
-	expect(oneDriveScope({ id: 'file', driveId: 'drive', type: 'file' })).toEqual({
-		drive_id: 'drive',
-		item_id: 'file',
-		include_descendants: false,
-		single_file: true
+	expect(
+		oneDriveScope({
+			...folder,
+			id: 'file',
+			type: 'file',
+			name: 'Report.pdf',
+			path: '/Team/Report.pdf'
+		})
+	).toEqual({
+		label: 'Report.pdf',
+		path: '/Team/Report.pdf',
+		scope: { drive_id: 'drive', item_id: 'file', include_descendants: false, single_file: true }
 	});
 });
 
 it('registers Google folders and files without carrying picker credentials', () => {
-	expect(googleDriveScope({ id: 'folder', type: 'folder' })).toEqual({
-		file_id: 'folder',
-		drive_id: null,
-		include_descendants: true
+	const folder = {
+		id: 'folder',
+		type: 'folder' as const,
+		name: 'Reports',
+		path: '/Reports',
+		token: 'not-forwarded'
+	};
+	expect(googleDriveScope(folder)).toEqual({
+		label: 'Reports',
+		path: '/Reports',
+		scope: { file_id: 'folder', drive_id: null, include_descendants: true }
 	});
-	expect(googleDriveScope({ id: 'file', type: 'file' }).include_descendants).toBe(false);
+	expect(googleDriveScope({ ...folder, type: 'file' }).scope.include_descendants).toBe(false);
 });
 
 describe('connect popup messages', () => {

@@ -3874,5 +3874,8 @@
   "Request access": "Toegang aanvragen",
   "Source actions": "Bronacties",
   "You only see files you can open in {{provider}}.": "Je ziet alleen bestanden die je in {{provider}} kunt openen.",
-  "Synced documents stay searchable.": "Gesynchroniseerde documenten blijven doorzoekbaar."
+  "Synced documents stay searchable.": "Gesynchroniseerde documenten blijven doorzoekbaar.",
+  "Add source": "Bron toevoegen",
+  "Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.": "Kies een map om te synchroniseren. De eerste synchronisatie duurt een paar minuten; grote mappen kunnen langer duren. Bestanden verschijnen zodra ze binnenkomen.",
+  "That folder is already in this knowledge base.": "Die map staat al in deze kennisbank."
 }

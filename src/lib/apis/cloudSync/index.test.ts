@@ -38,6 +38,8 @@ describe('cloud-sync thin router', () => {
 			const form: cloudSync.ScheduleForm = {
 				connection_id: 'c',
 				kind: 'content',
+				label: 'Reports',
+				path: '/Team/Reports',
 				...(cadence === undefined ? {} : { cadence_minutes: cadence }),
 				scope: { drive_id: 'd', item_id: 'folder', include_descendants: true, single_file: false }
 			};

@@ -344,3 +344,21 @@ def test_schedule_display_fields_are_forwarded_with_limits(api, field, length):
         assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb'}
     else:
         assert not api.requests
+
+
+def test_schedule_create_forwards_label_and_path(api):
+    """Picker display fields remain outside the deduplicated scope."""
+    body = {
+        'connection_id': 'c',
+        'kind': 'content',
+        'scope': {'drive_id': 'd', 'item_id': 'folder'},
+        'label': 'Reports',
+        'path': '/Team/Reports',
+    }
+    api.responses.append(response({'id': 's', **body}, 201))
+    result = api.browser.post('/api/v1/cloud-sync/knowledge/kb/schedules', json=body)
+    assert result.status_code == 200
+    assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb'}
+    assert result.json()['label'] == 'Reports'
+    assert result.json()['path'] == '/Team/Reports'
+    assert_assertions(api.requests)

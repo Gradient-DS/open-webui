@@ -5,20 +5,32 @@ export function oneDriveScope(item: {
 	id: string;
 	driveId: string;
 	type: 'file' | 'folder';
-}): ScheduleForm['scope'] {
+	name: string;
+	path: string;
+}): Pick<ScheduleForm, 'scope' | 'label' | 'path'> {
 	return {
-		drive_id: item.driveId,
-		item_id: item.id,
-		include_descendants: item.type === 'folder',
-		single_file: item.type === 'file'
+		label: item.name,
+		path: item.path,
+		scope: {
+			drive_id: item.driveId,
+			item_id: item.id,
+			include_descendants: item.type === 'folder',
+			single_file: item.type === 'file'
+		}
 	};
 }
 
 export function googleDriveScope(item: {
 	id: string;
 	type: 'file' | 'folder';
-}): ScheduleForm['scope'] {
-	return { file_id: item.id, drive_id: null, include_descendants: item.type === 'folder' };
+	name: string;
+	path: string;
+}): Pick<ScheduleForm, 'scope' | 'label' | 'path'> {
+	return {
+		label: item.name,
+		path: item.path,
+		scope: { file_id: item.id, drive_id: null, include_descendants: item.type === 'folder' }
+	};
 }
 
 export function connectResult(

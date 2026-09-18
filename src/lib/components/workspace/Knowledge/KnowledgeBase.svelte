@@ -1089,14 +1089,18 @@
 			let connection =
 				schedules.find((s) => s.source_kind === provider.type)?.connection ?? connecting;
 			if (connection?.source_kind !== provider.type) connection = null;
+			// [Gradient] Reuse the account across knowledge bases before starting consent.
+			if (!connection) {
+				const accounts = (await cloudSync.listConnections(localStorage.token)).filter(
+					(item) => item.source_kind === provider.type && item.lifecycle !== 'revoked'
+				);
+				connection = accounts.find((item) => item.lifecycle === 'enabled') ?? accounts[0] ?? null;
+			}
 			if (connection?.lifecycle !== 'enabled') {
 				connection = await authorizeBackgroundSync(provider, connection?.id);
-				if (connection)
-					toast.success($i18n.t('Account connected. Select files and folders to sync.'));
-				return;
 			}
 			if (!connection || destroyed) return;
-			let scopes: ScheduleForm['scope'][];
+			let scopes: Pick<ScheduleForm, 'scope' | 'label' | 'path'>[];
 			if (provider.type === 'onedrive') {
 				const items = await openOneDriveItemPicker('organizations');
 				if (!items?.length) return;
@@ -1107,9 +1111,9 @@
 				scopes = result.items.map(googleDriveScope);
 			}
 			let started = 0;
-			for (const scope of scopes) {
+			for (const source of scopes) {
 				try {
-					const form = { connection_id: connection.id, scope };
+					const form = { connection_id: connection.id, ...source };
 					const content = await cloudSync.createSchedule(localStorage.token, knowledge.id, {
 						...form,
 						kind: 'content'
@@ -1131,7 +1135,7 @@
 						error.status === 409 &&
 						error.code === 'schedule_exists'
 					) {
-						toast.info($i18n.t('That folder is already being synced.'));
+						toast.info($i18n.t('That folder is already in this knowledge base.'));
 						continue;
 					}
 					throw error;
@@ -2136,7 +2140,7 @@
 										<button
 											class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
 											disabled={isSyncBusy}
-											aria-label={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}
+											aria-label={$i18n.t('Add source')}
 											on:click={() => {
 												cloudSyncHandler(activeProvider);
 											}}
@@ -2151,6 +2155,8 @@
 													d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
 												/>
 											</svg>
+											<!-- [Gradient] Keep adding sources discoverable after the first sync. -->
+											<span>{$i18n.t('Add source')}</span>
 										</button>
 									</Tooltip>
 								{:else if $config?.integration_providers?.[knowledge?.type]}

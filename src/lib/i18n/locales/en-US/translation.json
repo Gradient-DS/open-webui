@@ -3874,5 +3874,8 @@
   "Request access": "Request access",
   "Source actions": "Source actions",
   "You only see files you can open in {{provider}}.": "You only see files you can open in {{provider}}.",
-  "Synced documents stay searchable.": "Synced documents stay searchable."
+  "Synced documents stay searchable.": "Synced documents stay searchable.",
+  "Add source": "Add source",
+  "Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.": "Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.",
+  "That folder is already in this knowledge base.": "That folder is already in this knowledge base."
 }

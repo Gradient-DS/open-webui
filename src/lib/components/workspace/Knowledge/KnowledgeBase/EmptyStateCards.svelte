@@ -32,7 +32,8 @@
 					type: 'onedrive',
 					label: 'Sync from OneDrive',
 					icon: OneDrive,
-					description: 'Select files and folders to sync'
+					description:
+						'Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.'
 				}
 			];
 		}
@@ -42,7 +43,8 @@
 					type: 'google_drive',
 					label: 'Sync from Google Drive',
 					icon: GoogleDrive,
-					description: 'Select files and folders to sync'
+					description:
+						'Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.'
 				}
 			];
 		}
