@@ -35,6 +35,8 @@ class ScheduleForm(BaseModel):
     connection_id: str = Field(min_length=1, max_length=256)
     kind: Literal['content', 'acl_refresh']
     scope: dict[str, JsonValue]
+    label: str | None = Field(default=None, max_length=512)
+    path: str | None = Field(default=None, max_length=512)
     cadence_minutes: int | None = Field(default=None, gt=0)
 
 

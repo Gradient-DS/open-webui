@@ -43,10 +43,10 @@ class CloudSync:
     async def schedule_action(self, collection_key: str, schedule_id: str, action: str) -> dict | None:
         path = f'/v1/schedules/{quote(schedule_id, safe="")}'
         schedule = await self._get(path)
-        if schedule['collection_key'] != collection_key:
+        if collection_key not in schedule['subscribers']:
             raise SoevApiError(404, 'connection_not_found', 'No such schedule in this collection')
         if action == 'delete':
-            return await self._send('DELETE', path)
+            return await self._send('DELETE', f'{path}?collection_key={quote(collection_key, safe="")}')
         return await self._send('POST', f'{path}/{action}')
 
     async def sync_status(self, collection_key: str) -> dict:
