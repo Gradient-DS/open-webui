@@ -6,7 +6,7 @@
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import StatusHistory from '$lib/components/chat/Messages/ResponseMessage/StatusHistory.svelte';
-	import Citations from '$lib/components/chat/Messages/Citations.svelte';
+	import Citations from '$lib/components/chat/Messages/SoevCitations.svelte';
 
 	import type { SubAgentCardVM } from '$lib/types/subagent';
 
@@ -190,7 +190,9 @@
 					{/if}
 
 					{#if description}
-						<span class="truncate min-w-0 text-xs text-gray-500 dark:text-gray-400 @lg:max-w-[16rem]">
+						<span
+							class="truncate min-w-0 text-xs text-gray-500 dark:text-gray-400 @lg:max-w-[16rem]"
+						>
 							{description}
 						</span>
 					{/if}
@@ -210,7 +212,9 @@
 	{#if expanded}
 		<div transition:slide={{ duration: 150 }} class="mt-2">
 			{#if state === 'error'}
-				<div class="rounded-lg bg-red-50 dark:bg-red-950/40 px-2 py-1.5 text-xs text-red-700 dark:text-red-300">
+				<div
+					class="rounded-lg bg-red-50 dark:bg-red-950/40 px-2 py-1.5 text-xs text-red-700 dark:text-red-300"
+				>
 					{card.error ?? 'SubAgent failed'}
 				</div>
 			{/if}
