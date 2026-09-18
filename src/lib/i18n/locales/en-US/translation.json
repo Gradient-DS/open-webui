@@ -3848,5 +3848,7 @@
   "You can no longer edit this knowledge base; syncing is paused": "You can no longer edit this knowledge base; syncing is paused",
   "The account you signed in with is not yours to connect; sign in with your own account.": "The account you signed in with is not yours to connect; sign in with your own account.",
   "{{failed}} failed ({{tooLarge}} too large)": "{{failed}} failed ({{tooLarge}} too large)",
-  "{{count}} link-only shares not mirrored": "{{count}} link-only shares not mirrored"
+  "{{count}} link-only shares not mirrored": "{{count}} link-only shares not mirrored",
+  "Also in {{count}} other knowledge bases": "Also in {{count}} other knowledge bases",
+  "Cloud Sync": "Cloud Sync"
 }

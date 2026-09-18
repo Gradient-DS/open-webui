@@ -67,6 +67,13 @@
 				>{CLOUD_PROVIDERS[row.schedule.source_kind]?.label ?? row.schedule.source_kind}
 				· {row.schedule.scope.single_file ? $i18n.t('File') : $i18n.t('Folder')}</span
 			>
+			{#if row.subscriberCount > 1}
+				<span class="text-xs text-gray-500 dark:text-gray-400">
+					{$i18n.t('Also in {{count}} other knowledge bases', {
+						count: row.subscriberCount - 1
+					})}
+				</span>
+			{/if}
 			<div class="text-xs tabular-nums" role="status">
 				{#if row.live}
 					<span class="inline-flex items-center gap-1"

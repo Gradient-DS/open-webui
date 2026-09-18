@@ -141,6 +141,7 @@ export function sourceStatus(pair: SchedulePair) {
 	);
 	return {
 		schedule,
+		subscriberCount: schedule.subscriber_count ?? 1,
 		liveSchedules,
 		live: liveSchedules.length > 0,
 		landed: run?.counts?.landed ?? 0,

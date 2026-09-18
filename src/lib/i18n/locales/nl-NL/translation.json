@@ -3848,5 +3848,7 @@
   "You can no longer edit this knowledge base; syncing is paused": "Je kunt deze kennisbank niet meer bewerken; de synchronisatie is gepauzeerd",
   "The account you signed in with is not yours to connect; sign in with your own account.": "Het account waarmee je bent ingelogd is niet van jou; log in met je eigen account om verbinding te maken.",
   "{{failed}} failed ({{tooLarge}} too large)": "{{failed}} mislukt ({{tooLarge}} te groot)",
-  "{{count}} link-only shares not mirrored": "{{count}} bestanden die alleen via een link zijn gedeeld, zijn niet overgenomen"
+  "{{count}} link-only shares not mirrored": "{{count}} bestanden die alleen via een link zijn gedeeld, zijn niet overgenomen",
+  "Also in {{count}} other knowledge bases": "Ook in {{count}} andere kennisbanken",
+  "Cloud Sync": "Cloudsynchronisatie"
 }

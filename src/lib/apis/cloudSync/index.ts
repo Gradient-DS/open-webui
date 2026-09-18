@@ -21,6 +21,8 @@ export interface ScheduleForm {
 	kind: ScheduleKind;
 	scope: Record<string, string | boolean | null>;
 	cadence_minutes?: number;
+	label?: string | null;
+	path?: string | null;
 }
 
 export type RunOutcome = 'succeeded' | 'partial' | 'failed' | 'cancelled';
@@ -39,6 +41,8 @@ export interface SyncRun {
 }
 
 export interface Schedule extends ScheduleForm {
+	subscribers: string[];
+	subscriber_count: number;
 	last_error?: string | null;
 	id: string;
 	source_kind: string;
