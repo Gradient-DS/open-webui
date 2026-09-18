@@ -86,10 +86,9 @@ class KnowledgeModel(BaseModel):
     deleted_at: Optional[int] = None
 
 
-def is_managed_shared_kb(kb: KnowledgeModel) -> bool:
-    """Preserve the deletion guard for legacy admin-managed shared knowledge bases."""
-    meta = getattr(kb, 'meta', None) or {}
-    return any(isinstance(meta.get(key), dict) and meta[key].get('shared') for key in ('confluence_sync',))
+# [Gradient] Cloud types are projected from subscribed content schedules.
+def is_synced_kb(knowledge: KnowledgeModel) -> bool:
+    return knowledge.type in ('onedrive', 'google_drive')
 
 
 class KnowledgeDirectory(Base):
