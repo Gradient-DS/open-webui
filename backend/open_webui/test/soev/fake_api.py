@@ -159,6 +159,15 @@ class FakeSoevApi:
     def _view(self, row, subject):
         return {
             **copy.deepcopy(row),
+            'subscriptions': sorted(
+                {
+                    schedule['source_kind']
+                    for schedule in self.schedules.values()
+                    if schedule['kind'] == 'content'
+                    and schedule['lifecycle'] != 'revoked'
+                    and row['key'] in schedule['subscribers']
+                }
+            ),
             'document_count': sum(
                 key == row['key'] and self._readable(document, subject or self.credentials['test-runtime-key'])
                 for (key, _), document in self.documents.items()

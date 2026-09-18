@@ -138,6 +138,9 @@ class SoevKnowledgeTable:
         schedules = await self._pages('/v1/schedules', user_id=user_id, params=params)
         return self._projection.types_from_schedules(schedules)
 
+    async def _fallback_types(self, rows, *, user_id=None):
+        return await self._types(user_id=user_id) if any(not row.get('subscriptions') for row in rows) else {}
+
     def _knowledge(self, row, types=None):
         return (
             self._projection.knowledge_of(row, service_principal=self._service_principal, types=types) if row else None
@@ -146,6 +149,8 @@ class SoevKnowledgeTable:
     async def _knowledge_with_type(self, row, *, user_id=None):
         if row is None:
             return None
+        if row.get('subscriptions'):
+            return self._knowledge(row)
         return self._knowledge(row, await self._types(user_id=user_id, collection_key=row['key']))
 
     def _user_knowledge(self, row, owners, types):
@@ -180,18 +185,22 @@ class SoevKnowledgeTable:
     async def get_knowledge_bases(self, skip=0, limit=30, db=None):
         rows = sorted(await self._collections(), key=lambda row: self._collection_sort(row, 'updated_at'), reverse=True)
         owners = await self._owners(rows)
-        types = await self._types()
+        types = await self._fallback_types(rows)
         return [self._user_knowledge(row, owners, types) for row in rows]
 
     async def search_knowledge_bases(self, user_id, filter, skip=0, limit=30, db=None):
         rows = await self._collections(user_id=user_id)
         owners = await self._owners(rows)
-        types = await self._types(user_id=user_id)
+        types = await self._fallback_types(rows, user_id=user_id)
         rows = [
             row
             for row in rows
             if self._matches_collection(
-                row, user_id, filter or {}, owners.get(self._knowledge(row).user_id, {}), types.get(row['key'], 'local')
+                row,
+                user_id,
+                filter or {},
+                owners.get(self._knowledge(row).user_id, {}),
+                self._knowledge(row, types).type,
             )
         ]
         order = (filter or {}).get('order_by')
@@ -219,8 +228,8 @@ class SoevKnowledgeTable:
 
     async def get_knowledge_bases_by_type(self, type, db=None):
         rows = await self._collections()
-        types = await self._types()
-        return [self._knowledge(row, types) for row in rows if types.get(row['key'], 'local') == type]
+        types = await self._fallback_types(rows)
+        return [knowledge for row in rows if (knowledge := self._knowledge(row, types)).type == type]
 
     async def get_knowledge_bases_by_user_id(self, user_id, permission='write', db=None):
         rows = [
@@ -229,12 +238,12 @@ class SoevKnowledgeTable:
             if permission == 'read' or (permission == 'write' and row.get('caller_may_write'))
         ]
         owners = await self._owners(rows)
-        types = await self._types(user_id=user_id)
+        types = await self._fallback_types(rows, user_id=user_id)
         return [self._user_knowledge(row, owners, types) for row in rows]
 
     async def get_knowledge_items_by_user_id(self, user_id, db=None):
         rows = await self._collections(user_id=user_id)
-        types = await self._types(user_id=user_id)
+        types = await self._fallback_types(rows, user_id=user_id)
         return [self._knowledge(row, types) for row in rows if row.get('created_by') == f'owui:user:{user_id}']
 
     async def get_knowledge_by_id_and_user_id(self, id, user_id, db=None):
@@ -393,7 +402,7 @@ class SoevKnowledgeTable:
 
     async def get_knowledges_by_file_id(self, file_id, db=None):
         rows = await self._references({file_id})
-        types = await self._types()
+        types = await self._fallback_types([row for row, _ in rows])
         return [self._knowledge(row, types) for row, _ in rows]
 
     async def get_knowledge_by_file_id(self, file_id, db=None):

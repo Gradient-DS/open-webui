@@ -32,10 +32,11 @@ def types_from_schedules(schedules: list[dict]) -> dict[str, str]:
 
 def knowledge_of(collection: dict, *, service_principal: str, types: dict[str, str] | None = None) -> KnowledgeModel:
     creator = collection.get('created_by') or ''
+    subscriptions = collection.get('subscriptions') or []
     return KnowledgeModel(
         id=collection['key'],
         user_id=creator.removeprefix('owui:user:') if creator.startswith('owui:user:') else '',
-        type=(types or {}).get(collection['key'], 'local'),
+        type=subscriptions[0] if subscriptions else (types or {}).get(collection['key'], 'local'),
         name=collection['name'],
         description=collection['description'] or '',
         meta={},

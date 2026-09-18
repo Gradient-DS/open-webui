@@ -39,6 +39,7 @@ def collection():
         'retention_days': None,
         'tags': [],
         'document_count': 3,
+        'subscriptions': [],
         'created_at': '2026-01-01T00:00:00Z',
         'updated_at': '2026-01-02T01:00:00.999+01:00',
     }
@@ -66,6 +67,27 @@ def test_a_collection_becomes_a_knowledge_model(projection, collection, descript
     }
     assert result.access_grants == projection.grants_of(collection, service_principal=SERVICE)
     assert collection == original
+
+
+@pytest.mark.parametrize('project', ['knowledge_of', 'knowledge_user_of'])
+@pytest.mark.parametrize('types', [None, {}, {'kb-1': 'google_drive'}])
+@pytest.mark.parametrize('subscriptions', [['onedrive'], ['google_drive', 'onedrive'], ['confluence', 'onedrive']])
+def test_type_follows_subscriptions_regardless_of_viewer(projection, collection, project, types, subscriptions):
+    """The first authoritative provider wins even when the viewer owns no schedule or sees another provider."""
+    collection['subscriptions'] = subscriptions
+    result = getattr(projection, project)(collection, service_principal=SERVICE, types=types)
+    assert result.type == subscriptions[0]
+
+
+@pytest.mark.parametrize('project', ['knowledge_of', 'knowledge_user_of'])
+@pytest.mark.parametrize('missing', [False, True])
+@pytest.mark.parametrize('types', [None, {}, {'kb-1': 'google_drive'}])
+def test_type_falls_back_to_viewer_schedules_without_subscriptions(projection, collection, project, missing, types):
+    """Empty and older collection responses preserve viewer schedule projection and the local default."""
+    if missing:
+        collection.pop('subscriptions')
+    result = getattr(projection, project)(collection, service_principal=SERVICE, types=types)
+    assert result.type == ('google_drive' if types else 'local')
 
 
 @pytest.mark.parametrize(

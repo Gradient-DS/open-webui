@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from open_webui.models.access_grants import AccessGrantModel
 from open_webui.models.knowledge import KnowledgeModel, is_synced_kb
 from open_webui.routers import knowledge
+from open_webui.soev.knowledge_store import SoevKnowledgeTable
 from open_webui.utils.features import FEATURE_FLAGS
 
 GRANTS = [
@@ -159,3 +160,53 @@ def test_legacy_confluence_metadata_does_not_mark_a_kb_as_synced(api, provider):
     api.kb.type = provider
     api.kb.meta = {'confluence_sync': {'shared': True}}
     assert not is_synced_kb(api.kb)
+
+
+@pytest.mark.parametrize('action', ['update', 'access/update', 'external', 'delete', 'reset'])
+def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, monkeypatch, action):
+    """Collection subscriptions enforce every guard for a co-writer with no viewer-owned schedules."""
+    api.user.id = 'co-writer'
+    if action == 'external':
+        api.user.role = 'admin'
+    row = {
+        'key': 'kb',
+        'name': 'Research',
+        'description': 'Notes',
+        'created_by': 'owui:user:owner',
+        'visibility': 'restricted',
+        'principals': ['owui:user:owner', 'owui:user:co-writer'],
+        'writers': ['owui:user:owner', 'owui:user:co-writer'],
+        'subscriptions': ['onedrive'],
+        'created_at': '2026-01-01T00:00:00Z',
+        'updated_at': '2026-01-01T00:00:00Z',
+    }
+    store = SoevKnowledgeTable(service_principal='owui:service:webui')
+    monkeypatch.setattr(store, '_collection', AsyncMock(return_value=row))
+    schedules = AsyncMock(return_value=[])
+    monkeypatch.setattr(store, '_pages', schedules)
+    monkeypatch.setattr(knowledge.Knowledges, 'get_knowledge_by_id', store.get_knowledge_by_id)
+    if action == 'external':
+
+        async def external_knowledge(*args, **kwargs):
+            projected = await store.get_knowledge_by_id(*args, **kwargs)
+            projected.meta = api.kb.meta
+            return projected
+
+        monkeypatch.setattr(knowledge.Knowledges, 'get_knowledge_by_id', external_knowledge)
+    monkeypatch.setattr(knowledge.AccessGrants, 'has_access', AsyncMock(return_value=True))
+    if action == 'delete':
+        result = api.browser.delete('/knowledge/kb/delete')
+    elif action == 'reset':
+        result = api.browser.post('/knowledge/kb/reset')
+    else:
+        result = update(api, action, GRANTS)
+    assert result.status_code == 403
+    if action in ('delete', 'reset'):
+        assert result.json()['detail'] == 'This knowledge base is synced from a cloud source.'
+    else:
+        assert result.json()['detail']['code'] == 'synced_kb_not_shareable'
+    schedules.assert_not_awaited()
+    api.writes.update.assert_not_awaited()
+    api.writes.grants.assert_not_awaited()
+    api.writes.delete.assert_not_awaited()
+    api.writes.reset.assert_not_awaited()
