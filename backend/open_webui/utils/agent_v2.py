@@ -121,6 +121,8 @@ class AgentTurn:
         self.citations = Citations()
         self.turn_sources: set[int] = set()
         self.partial = ''
+        self.partial_reasoning = ''
+        self.active_tools: dict[str, str] = {}
         self.model: str | None = None
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -156,9 +158,13 @@ class AgentTurn:
             )
 
     async def cancel(self) -> None:
-        if self.terminal or self.input_position is None:
-            return
         with anyio.CancelScope(shield=True):
+            try:
+                await self.clear_tools()
+            except Exception:
+                log.warning('Could not clear v2 tool activity', extra={'thread_id': self.thread_id})
+            if self.terminal or self.input_position is None:
+                return
             try:
                 await self.client.chat_post(self.path('cancel'), {'input': self.input_position}, as_user=self.as_user)
                 await self.persist()
@@ -168,6 +174,26 @@ class AgentTurn:
     async def emit(self, kind: str, data: dict) -> None:
         if self.emitter:
             await self.emitter({'type': kind, 'data': data})
+
+    async def start_tools(self, calls: list[dict]) -> None:
+        await self.clear_tools()
+        for call in calls:
+            name = call['name']
+            description = 'Searching the knowledge base…' if name == 'search' else f'Running {name}…'
+            self.active_tools[call['id']] = description
+            await self.emit('status', {'description': description, 'done': False})
+
+    async def clear_tools(self, call_id: str | None = None) -> None:
+        completed = list(self.active_tools) if call_id is None else [call_id]
+        cleared = False
+        for key in completed:
+            description = self.active_tools.pop(key, None)
+            if description is not None:
+                cleared = True
+                await self.emit('status', {'description': description, 'done': True})
+        if cleared and self.active_tools:
+            description = next(reversed(self.active_tools.values()))
+            await self.emit('status', {'description': description, 'done': False})
 
     async def record_source(self, payload: dict) -> None:
         source = self.citations.add(payload)
@@ -228,23 +254,35 @@ class AgentTurn:
             if position <= self.position:
                 return []
             self.position = position
+        return await self.render_event(event)
+
+    async def render_event(self, event: ChatEvent) -> list[dict[str, Any]]:
         payload = event.data.get('payload') or {}
         if event.event == 'input' and event.data.get('stream') == 'root' and self.input_position is None:
             self.input_position = self.position
             await self.persist()
         if event.event == 'source':
             await self.record_source(payload)
+        if event.event == 'reasoning_delta':
+            await self.clear_tools()
+            self.partial_reasoning += event.data['text']
+            return [_chunk({'reasoning_content': event.data['text']})]
         if event.event == 'delta':
+            await self.clear_tools()
             self.partial += event.data['text']
             text = self.citations.rewrite(event.data['text'])
             return [_chunk({'content': text})] if text else []
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
+        if event.event in {'tool_output', 'effect_result', 'failure'} and event.data.get('stream') == 'root':
+            await self.clear_tools(payload.get('call_id') if event.event == 'tool_output' else None)
         if event.event in {'status', 'error'}:
             return await self.finish(event)
         return []
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
+        await self.start_tools(payload.get('tool_calls', []))
+        reasoning = self.remaining_reasoning(payload.get('reasoning') or '')
         content = payload['content']
         if not content.startswith(self.partial):
             log.warning('Durable model output disagrees with streamed text', extra={'thread_id': self.thread_id})
@@ -254,16 +292,24 @@ class AgentTurn:
         text = self.citations.rewrite(content[len(self.partial) :], final=True)
         self.partial = ''
         chunks = []
-        if payload.get('reasoning'):
-            chunks.append(_chunk({'reasoning_content': payload['reasoning']}))
+        if reasoning:
+            chunks.append(_chunk({'reasoning_content': reasoning}))
         if text:
             chunks.append(_chunk({'content': text}))
-        for call in payload.get('tool_calls', []):
-            await self.emit('status', {'description': f'Running {call["name"]}', 'done': False})
         return chunks
+
+    def remaining_reasoning(self, reasoning: str) -> str:
+        partial, self.partial_reasoning = self.partial_reasoning, ''
+        if not reasoning.startswith(partial):
+            log.warning(
+                'Durable model reasoning disagrees with streamed reasoning', extra={'thread_id': self.thread_id}
+            )
+            return ''
+        return reasoning[len(partial) :]
 
     async def finish(self, event: ChatEvent) -> list[dict[str, Any]]:
         self.terminal = True
+        await self.clear_tools()
         if event.event == 'status':
             self.position = event.data['position']
         await self.persist()

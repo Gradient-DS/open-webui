@@ -13,6 +13,7 @@ import pytest
 from open_webui import env
 from open_webui.models.agent_configs import AgentConfigs
 from open_webui.models.chats import Chats
+from open_webui.soev.client import ChatEvent
 from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
@@ -512,6 +513,160 @@ async def test_non_streaming_still_sends_one_input(chat: Chat) -> None:
 
 
 @pytest.mark.asyncio
+async def test_reasoning_deltas_arrive_before_answer_without_durable_duplication(chat: Chat) -> None:
+    chat.api.chat.turns = [
+        [
+            ('reasoning_delta', {'text': 'Think '}),
+            ('reasoning_delta', {'text': 'first.'}),
+            ('delta', {'text': 'Answer'}),
+            ('model_output', {'content': 'Answer', 'reasoning': 'Think first.'}),
+        ]
+    ]
+    response = await chat.response('question', 'a1')
+    assert isinstance(response, StreamingResponse)
+    async with asyncio.timeout(8):
+        for text in ('Think ', 'first.'):
+            raw = await anext(response.body_iterator)
+            chunk = json.loads(raw.removeprefix('data: '))
+            assert chunk['choices'][0]['delta'] == {'reasoning_content': text}
+            assert chat.bookmark('a1')['position'] == 2
+        remaining = ''.join([part async for part in response.body_iterator])
+    assert 'reasoning_content' not in remaining
+    assert 'Answer' in remaining
+    assert remaining.endswith('data: [DONE]\n\n')
+    assert [event['type'] for event in chat.api.chat.threads['thr-1']['events']] == ['opened', 'input', 'model_output']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('close_after', [None, 3])
+@pytest.mark.parametrize('partial', ['', 'Think '])
+async def test_durable_reasoning_emits_only_missing_suffix(chat: Chat, close_after: int | None, partial: str) -> None:
+    chat.api.chat.turns = [
+        [
+            *([('reasoning_delta', {'text': partial})] if partial else []),
+            ('model_output', {'content': 'Answer', 'reasoning': 'Think first.'}),
+        ]
+    ]
+    chat.api.chat.close_after = close_after
+    chunks = await chat.turn('question', 'a1')
+    assert content(chunks, 'reasoning_content') == 'Think first.'
+    assert content(chunks) == 'Answer'
+    assert len(chat.mutations()) == 1
+
+
+@pytest.mark.asyncio
+async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output(
+    chat: Chat, caplog: pytest.LogCaptureFixture
+) -> None:
+    chat.api.chat.turns = [
+        [
+            ('reasoning_delta', {'text': 'Streamed thought'}),
+            ('model_output', {'content': 'First ', 'reasoning': 'Revised thought'}),
+            ('reasoning_delta', {'text': 'Next '}),
+            ('model_output', {'content': 'answer', 'reasoning': 'Next thought'}),
+        ]
+    ]
+    chunks = await chat.turn('question', 'a1')
+    assert content(chunks, 'reasoning_content') == 'Streamed thoughtNext thought'
+    assert content(chunks) == 'First answer'
+    assert not any('error' in chunk for chunk in chunks)
+    assert len(chat.mutations()) == 1
+    warnings = [record for record in caplog.records if 'reasoning disagrees' in record.message]
+    assert len(warnings) == 1
+    assert warnings[0].thread_id == 'thr-1'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'name,description', [('search', 'Searching the knowledge base…'), ('calculate', 'Running calculate…')]
+)
+@pytest.mark.parametrize(
+    'kind,payload',
+    [
+        ('tool_output', {'call_id': 'c1', 'data': 'result'}),
+        ('tool_output', {'call_id': 'c1', 'error': 'failed'}),
+        ('effect_result', {'intent_seq': 4, 'data': 'result'}),
+        ('effect_result', {'intent_seq': 4, 'error': 'failed'}),
+        ('delta', {'text': 'Answer'}),
+        ('reasoning_delta', {'text': 'Think'}),
+        ('model_output', {'content': 'Answer'}),
+        ('failure', {'message': 'failed'}),
+    ],
+)
+async def test_tool_activity_clears_at_result_or_next_model_text(
+    name: str, description: str, kind: str, payload: dict
+) -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    async with asyncio.timeout(2):
+        await turn.render(
+            ChatEvent(
+                'model_output',
+                {'stream': 'root', 'payload': {'content': '', 'tool_calls': [{'id': 'c1', 'name': name}]}},
+            )
+        )
+        assert [call.args[0] for call in turn.emitter.call_args_list] == [
+            {'type': 'status', 'data': {'description': description, 'done': False}}
+        ]
+        data = payload if kind.endswith('delta') else {'stream': 'root', 'payload': payload}
+        await turn.render(ChatEvent(kind, data))
+    assert [call.args[0] for call in turn.emitter.call_args_list] == [
+        {'type': 'status', 'data': {'description': description, 'done': False}},
+        {'type': 'status', 'data': {'description': description, 'done': True}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parallel_tools_keep_remaining_activity_visible() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    async with asyncio.timeout(2):
+        await turn.render(
+            ChatEvent(
+                'model_output',
+                {
+                    'stream': 'root',
+                    'payload': {
+                        'content': '',
+                        'tool_calls': [{'id': 'c1', 'name': 'search'}, {'id': 'c2', 'name': 'calculate'}],
+                    },
+                },
+            )
+        )
+        for stream, call_id in [('child', 'c2'), ('root', 'unknown')]:
+            await turn.render(ChatEvent('tool_output', {'stream': stream, 'payload': {'call_id': call_id}}))
+        assert turn.emitter.call_count == 2
+        await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c2'}}))
+        assert turn.emitter.call_args.args[0]['data'] == {'description': 'Searching the knowledge base…', 'done': False}
+        await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
+    assert [call.args[0]['data'] for call in turn.emitter.call_args_list] == [
+        {'description': 'Searching the knowledge base…', 'done': False},
+        {'description': 'Running calculate…', 'done': False},
+        {'description': 'Running calculate…', 'done': True},
+        {'description': 'Searching the knowledge base…', 'done': False},
+        {'description': 'Searching the knowledge base…', 'done': True},
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [False, True])
+async def test_turn_end_clears_tool_activity_without_result(chat: Chat, failure: bool) -> None:
+    chat.api.chat.turns = [
+        [
+            ('model_output', {'content': '', 'tool_calls': [{'id': 'c1', 'name': 'search'}]}),
+            *([('error', {'code': 'service_unavailable'})] if failure else []),
+        ]
+    ]
+    chunks = await chat.turn('question', 'a1')
+    assert any('error' in chunk for chunk in chunks) == failure
+    assert [event['data'] for event in chat.socket if event['type'] == 'status'] == [
+        {'description': 'Searching the knowledge base…', 'done': False},
+        {'description': 'Searching the knowledge base…', 'done': True},
+        {'description': 'error' if failure else 'idle', 'done': True},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_explicit_invalid_new_input_never_falls_back_to_history(chat: Chat) -> None:
     with pytest.raises(ValueError, match='user_message'):
         await chat.response(None, 'a1')
@@ -586,7 +741,9 @@ class InterruptedStream(httpx.AsyncByteStream):
 async def test_explicit_stop_and_broken_transport_cancel_the_submitted_input(
     chat: Chat, monkeypatch: pytest.MonkeyPatch, fail: bool
 ) -> None:
-    chat.api.chat.turns = [[('delta', {'text': 'partial'})]]
+    chat.api.chat.turns = [
+        [('model_output', {'content': '', 'tool_calls': [{'id': 'c1', 'name': 'search', 'arguments': {}}]})]
+    ]
     chat.api.chat.terminal_state = 'running'
     original = chat.api.chat._response
     streams = []
@@ -613,6 +770,10 @@ async def test_explicit_stop_and_broken_transport_cancel_the_submitted_input(
     assert chat.mutations()[-1] == ('/v1/chat/threads/thr-1/cancel', {'input': 2})
     assert streams[0].closed
     assert chat.api.chat.threads['thr-1']['state'] == 'idle'
+    assert [event['data'] for event in chat.socket if event['type'] == 'status'] == [
+        {'description': 'Searching the knowledge base…', 'done': False},
+        {'description': 'Searching the knowledge base…', 'done': True},
+    ]
 
 
 @pytest.mark.asyncio
