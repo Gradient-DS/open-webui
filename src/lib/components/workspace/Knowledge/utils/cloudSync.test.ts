@@ -237,32 +237,34 @@ describe('sync file list refresh', () => {
 		}
 	};
 	it('refreshes when a run finishes between idle polls', () => {
-		expect(shouldRefetchSyncItems([schedule], [finished], 0)).toBe(true);
+		expect(shouldRefetchSyncItems([schedule], [finished])).toBe(true);
 		expect(
 			shouldRefetchSyncItems(
 				[finished],
-				[{ ...finished, last_run: { ...finished.last_run, id: 'r2' } }],
-				0
+				[{ ...finished, last_run: { ...finished.last_run, id: 'r2' } }]
 			)
 		).toBe(true);
 		expect(
 			shouldRefetchSyncItems(
 				[finished],
-				[{ ...finished, last_run: { ...finished.last_run, finished_at: '2026-09-19T10:02:00Z' } }],
-				0
+				[{ ...finished, last_run: { ...finished.last_run, finished_at: '2026-09-19T10:02:00Z' } }]
 			)
 		).toBe(true);
 	});
-	it('refreshes on live to idle and periodically while live', () => {
-		expect(shouldRefetchSyncItems([running], [finished], 0)).toBe(true);
-		expect(shouldRefetchSyncItems([running], [running], 5)).toBe(true);
-		expect(shouldRefetchSyncItems([running], [running], 4)).toBe(false);
+	it('refreshes on live to idle and on every live poll', () => {
+		expect(shouldRefetchSyncItems([running], [finished])).toBe(true);
+		for (let poll = 1; poll <= 6; poll++)
+			expect(shouldRefetchSyncItems([running], [running])).toBe(true);
+	});
+	it('refreshes when any document count changes even without a live run', () => {
+		expect(shouldRefetchSyncItems([schedule], [{ ...schedule, document_count: 1 }])).toBe(true);
+		expect(shouldRefetchSyncItems([{ ...finished, document_count: 2 }], [finished])).toBe(true);
 	});
 	it('ignores order and unchanged idle snapshots but catches subscriptions changing', () => {
 		const other = scheduleFixture('other', 'acl_refresh');
-		expect(shouldRefetchSyncItems([finished, other], [other, finished], 0)).toBe(false);
-		expect(shouldRefetchSyncItems([finished], [finished], 0)).toBe(false);
-		expect(shouldRefetchSyncItems([finished, other], [finished], 0)).toBe(true);
-		expect(shouldRefetchSyncItems([], [], 0)).toBe(false);
+		expect(shouldRefetchSyncItems([finished, other], [other, finished])).toBe(false);
+		expect(shouldRefetchSyncItems([finished], [finished])).toBe(false);
+		expect(shouldRefetchSyncItems([finished, other], [finished])).toBe(true);
+		expect(shouldRefetchSyncItems([], [])).toBe(false);
 	});
 });

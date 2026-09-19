@@ -155,25 +155,22 @@ export function connectionOutcome(
 	return { status: elapsedMs >= 120000 ? 'gave_up' : 'waiting' };
 }
 
-export function shouldRefetchSyncItems(
-	previous: Schedule[],
-	current: Schedule[],
-	livePolls: number
-): boolean {
+export function shouldRefetchSyncItems(previous: Schedule[], current: Schedule[]): boolean {
 	const isLive = current.some((schedule) => runIsLive(schedule.last_run));
-	const completedRuns = (schedules: Schedule[]) =>
+	const snapshot = (schedules: Schedule[]) =>
 		JSON.stringify(
-			schedules
+			[...schedules]
+				.sort((a, b) => a.id.localeCompare(b.id))
 				.map((schedule) => [
 					schedule.id,
 					schedule.last_run?.id ?? null,
-					schedule.last_run?.finished_at ?? null
+					schedule.last_run?.finished_at ?? null,
+					schedule.document_count
 				])
-				.sort((a, b) => a[0]!.localeCompare(b[0]!))
 		);
 	return (
-		(isLive && livePolls % 5 === 0) ||
+		isLive ||
 		(!isLive && previous.some((schedule) => runIsLive(schedule.last_run))) ||
-		completedRuns(previous) !== completedRuns(current)
+		snapshot(previous) !== snapshot(current)
 	);
 }

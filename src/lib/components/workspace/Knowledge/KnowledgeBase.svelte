@@ -948,7 +948,6 @@
 	const SYNC_POLL_IDLE_MS = 30000;
 
 	let finishingConnectionId: string | null = null;
-	let liveSyncPolls = 0;
 	let extraLivePoll = false;
 	const refreshCloudSync = async () => {
 		if (!knowledge || destroyed) return false;
@@ -959,8 +958,7 @@
 		schedules = status.schedules;
 		syncStatusError = false;
 		const isLive = schedules.some((schedule) => runIsLive(schedule.last_run));
-		liveSyncPolls = isLive ? liveSyncPolls + 1 : 0;
-		if (shouldRefetchSyncItems(previous, schedules, liveSyncPolls)) await getItemsPage();
+		if (shouldRefetchSyncItems(previous, schedules)) await getItemsPage();
 		return isLive;
 	};
 
