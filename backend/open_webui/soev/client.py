@@ -3,16 +3,55 @@
 No retries: subject assertions are single-use and mutations belong to the caller.
 """
 
+import asyncio
+import json
 import logging
 import time
 from collections.abc import AsyncIterator, Callable
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, aclosing
+from dataclasses import dataclass
+from urllib.parse import quote
 
 import httpx
 
 from open_webui.soev.request_cache import invalidate, memoized
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class ChatEvent:
+    event: str
+    data: dict
+    position: int | None = None
+
+
+async def _chat_frames(response: httpx.Response) -> AsyncIterator[ChatEvent]:
+    event, data, position = 'message', [], None
+    async for line in response.aiter_lines():
+        if not line:
+            if data:
+                payload = json.loads('\n'.join(data))
+                if not isinstance(payload, dict):
+                    raise ValueError('Invalid chat event')
+                yield ChatEvent(event, payload, position)
+            event, data, position = 'message', [], None
+            continue
+        field, _, value = line.partition(':')
+        value = value.removeprefix(' ')
+        if field == 'event':
+            event = value
+        elif field == 'data':
+            data.append(value)
+        elif field == 'id':
+            position = int(value)
+
+
+def _chat_thread_id(response: httpx.Response) -> str:
+    thread_id = response.headers.get('X-Soev-Thread-Id')
+    if not thread_id:
+        raise SoevApiError(502, 'service_unavailable', 'Missing chat thread id')
+    return thread_id
 
 
 class SoevApiError(Exception):
@@ -60,6 +99,90 @@ class SoevClient:
         self._api_key = api_key
         self._subject_minter = subject_minter
         self._timeout = timeout
+
+    async def chat_post(self, path: str, body: dict | None, *, as_user: str) -> dict:
+        """Send a thread operation once; the chat contract has no mutation replay key."""
+        if not as_user:
+            raise ValueError('Chat requires an acting user')
+        response = await self._request('POST', path, body=body, as_user=as_user)
+        result = self._json_object(response)
+        if path.endswith('/fork'):
+            result['thread_id'] = _chat_thread_id(response)
+        return result
+
+    async def chat_stream(
+        self,
+        path: str,
+        body: dict | None,
+        *,
+        as_user: str,
+        thread_id: str | None = None,
+        after: int = 0,
+    ) -> AsyncIterator[ChatEvent]:
+        """Reconnect capped streams through events, never by replaying the POST."""
+        if not path.startswith('/') or path.startswith('//'):
+            raise ValueError('An API path must start with a single slash')
+        if not as_user or self._subject_minter is None:
+            raise ValueError('Chat requires an acting user and subject minter')
+        method = 'POST'
+        try:
+            while True:
+                headers = {
+                    'Authorization': f'Bearer {self._api_key}',
+                    'X-Soev-Subject': self._subject_minter(as_user),
+                    'Accept': 'text/event-stream',
+                }
+                if method == 'GET':
+                    headers['Last-Event-ID'] = str(after)
+                timeout = httpx.Timeout(self._timeout, read=660.0)
+                async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+                    async with client.stream(method, f'{self._base_url}{path}', headers=headers, json=body) as response:
+                        if not response.is_success:
+                            await response.aread()
+                            raise _response_error(response)
+                        thread_id = thread_id or _chat_thread_id(response)
+                        yield ChatEvent('connection', {'thread_id': thread_id})
+                        frames = self._follow_chat(response, thread_id, as_user, after, method == 'GET')
+                        async with aclosing(frames):
+                            async for frame in frames:
+                                if frame.position is not None:
+                                    after = max(after, frame.position)
+                                yield frame
+                                if frame.event in {'status', 'error'}:
+                                    return
+                method, body = 'GET', None
+                path = f'/v1/chat/threads/{quote(thread_id, safe="")}/events'
+        except (httpx.TransportError, ValueError):
+            raise SoevApiError(502, 'service_unavailable', 'Chat stream disconnected') from None
+
+    async def _follow_chat(
+        self, response: httpx.Response, thread_id: str, as_user: str, after: int, following: bool
+    ) -> AsyncIterator[ChatEvent]:
+        frames = _chat_frames(response)
+        pending = asyncio.create_task(anext(frames))
+        try:
+            while True:
+                ready, _ = await asyncio.wait({pending}, timeout=1.0 if following else None)
+                if not ready:
+                    # The events route stays open after a turn ends and has no closing status frame.
+                    thread = await self.get(f'/v1/chat/threads/{quote(thread_id, safe="")}', as_user=as_user)
+                    status = thread['status']
+                    if status['state'] != 'running' and status['position'] <= after:
+                        yield ChatEvent('status', status)
+                        return
+                    continue
+                try:
+                    frame = pending.result()
+                except StopAsyncIteration:
+                    return
+                if frame.position is not None:
+                    after = max(after, frame.position)
+                yield frame
+                pending = asyncio.create_task(anext(frames))
+        finally:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+            await frames.aclose()
 
     async def get(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> dict:
         key = (self._base_url, self._api_key, as_user, path, tuple(sorted((params or {}).items())))
