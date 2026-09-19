@@ -105,17 +105,25 @@ export function skippedReason(code: string): string {
 }
 
 export function sourceTiming(
-	view: Pick<SourceView, 'lastSyncedAt' | 'nextDueAt' | 'documents'>,
+	view: Pick<SourceView, 'lastSyncedAt' | 'nextDueAt' | 'documents'> &
+		Partial<Pick<SourceView, 'state'>>,
 	relative: (time: string) => string,
 	now = Date.now()
 ) {
 	return {
-		lastSync: view.lastSyncedAt
-			? {
-					key: 'Last synced {{time}} · {{count}} documents',
-					values: { time: relative(view.lastSyncedAt), count: view.documents }
-				}
-			: { key: 'Not synced yet · {{count}} documents', values: { count: view.documents } },
+		lastSync:
+			view.state === 'syncing'
+				? { key: '{{count}} documents so far', values: { count: view.documents } }
+				: view.lastSyncedAt
+					? {
+							key: 'Last synced {{time}} · {{count}} documents',
+							values: { time: relative(view.lastSyncedAt), count: view.documents }
+						}
+					: {
+							key:
+								view.documents > 0 ? '{{count}} documents' : 'Not synced yet · {{count}} documents',
+							values: { count: view.documents }
+						},
 		nextCheck: !view.nextDueAt
 			? null
 			: Date.parse(view.nextDueAt) <= now

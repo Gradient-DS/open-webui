@@ -3900,5 +3900,7 @@
   "No access": "No access",
   "Failed to load skipped files. Reopen to try again.": "Failed to load skipped files. Reopen to try again.",
   "Not synced yet · {{count}} documents": "Not synced yet · {{count}} documents",
-  "Next check: as soon as possible": "Next check: as soon as possible"
+  "Next check: as soon as possible": "Next check: as soon as possible",
+  "{{count}} documents so far": "{{count}} documents so far",
+  "{{count}} documents": "{{count}} documents"
 }

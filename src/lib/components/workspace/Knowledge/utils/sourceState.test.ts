@@ -242,3 +242,21 @@ describe('source timing copy', () => {
 		});
 	});
 });
+
+it('shows documents so far while the first run lands and never calls landed documents unsynced', () => {
+	const timing = (
+		state: 'syncing' | 'scheduled',
+		documents: number,
+		lastSyncedAt: string | null = null
+	) => sourceTiming({ state, documents, lastSyncedAt, nextDueAt: null }, () => 'relative');
+	expect(timing('syncing', 61).lastSync).toEqual({
+		key: '{{count}} documents so far',
+		values: { count: 61 }
+	});
+	expect(timing('syncing', 0).lastSync.key).toBe('{{count}} documents so far');
+	expect(timing('syncing', 61, '2026-09-19T10:00:00Z').lastSync.key).toBe(
+		'{{count}} documents so far'
+	);
+	expect(timing('scheduled', 61).lastSync.key).toBe('{{count}} documents');
+	expect(timing('scheduled', 0).lastSync.key).toBe('Not synced yet · {{count}} documents');
+});

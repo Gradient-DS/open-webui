@@ -3900,5 +3900,7 @@
   "No access": "Geen toegang",
   "Failed to load skipped files. Reopen to try again.": "Overgeslagen bestanden konden niet worden geladen. Open opnieuw om het nogmaals te proberen.",
   "Not synced yet · {{count}} documents": "Nog niet gesynchroniseerd · {{count}} documenten",
-  "Next check: as soon as possible": "Volgende controle: zo snel mogelijk"
+  "Next check: as soon as possible": "Volgende controle: zo snel mogelijk",
+  "{{count}} documents so far": "{{count}} documenten binnen tot nu toe",
+  "{{count}} documents": "{{count}} documenten"
 }
