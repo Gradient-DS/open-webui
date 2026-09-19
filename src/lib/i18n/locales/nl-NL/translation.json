@@ -3902,5 +3902,8 @@
   "Not synced yet · {{count}} documents": "Nog niet gesynchroniseerd · {{count}} documenten",
   "Next check: as soon as possible": "Volgende controle: zo snel mogelijk",
   "{{count}} documents so far": "{{count}} documenten binnen tot nu toe",
-  "{{count}} documents": "{{count}} documenten"
+  "{{count}} documents": "{{count}} documenten",
+  "Empty document: no text found": "Leeg document: geen tekst gevonden",
+  "Processing failed": "Verwerking mislukt",
+  "Processing timed out": "Verwerking duurde te lang"
 }

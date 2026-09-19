@@ -85,6 +85,20 @@ describe('cloud-sync thin router', () => {
 		);
 	});
 
+	it('reads named skipped files and preserves content failure codes', async () => {
+		const result = [
+			{ source_id: 'empty', name: 'Empty.pdf', code: 'empty_content' },
+			{ source_id: 'broken', name: 'Broken.pdf', code: 'processing_failed' },
+			{ source_id: 'slow', name: 'Slow.pdf', code: 'timed_out' }
+		];
+		const fetch = respond(result);
+		expect(await cloudSync.getSkippedItems(token, 'kb', 'content/run')).toEqual(result);
+		expect(fetch).toHaveBeenCalledWith(
+			'/api/v1/cloud-sync/knowledge/kb/schedules/content%2Frun/skipped',
+			expect.objectContaining({ method: 'GET', headers: { Authorization: `Bearer ${token}` } })
+		);
+	});
+
 	it('handles run jobs and bodyless schedule and revoke responses', async () => {
 		respond({ job_id: 'job' }, 201);
 		expect(await cloudSync.runSchedule(token, 'kb', 's')).toEqual({ job_id: 'job' });

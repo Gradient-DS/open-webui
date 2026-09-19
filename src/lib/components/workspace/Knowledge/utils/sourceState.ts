@@ -73,7 +73,7 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 		lastSyncedAt: run?.finished_at ?? (run?.outcome ? run.started_at : null),
 		nextDueAt: schedule.next_due_at ?? null,
 		documents: schedule.document_count ?? run?.counts?.landed ?? 0,
-		skipped: schedules.reduce((total, item) => total + (item.last_run?.counts?.failed ?? 0), 0),
+		skipped: pair.content?.last_run?.counts?.failed ?? 0,
 		otherKbs: Math.max(0, (schedule.subscriber_count ?? 1) - 1),
 		primary:
 			state === 'syncing'
@@ -96,6 +96,9 @@ export function skippedReason(code: string): string {
 			{
 				unsupported_content_type: 'File type not supported',
 				item_too_large: 'Too large',
+				empty_content: 'Empty document: no text found',
+				processing_failed: 'Processing failed',
+				timed_out: 'Processing timed out',
 				acl_write_failed: 'Internal error',
 				internal_error: 'Internal error',
 				access_revoked: 'No access'

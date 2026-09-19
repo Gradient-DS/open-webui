@@ -118,7 +118,7 @@ it('uses current schedule errors before stale run errors', () => {
 	).toBe('needs_access');
 });
 
-it('keeps source metadata, timestamps and counts skipped files across both runs', () => {
+it('keeps source metadata, timestamps and counts skipped files from only the content run', () => {
 	const content = schedule({
 		label: 'Reports',
 		document_count: 12,
@@ -138,11 +138,13 @@ it('keeps source metadata, timestamps and counts skipped files across both runs'
 		path: '/Team/Reports',
 		provider: 'OneDrive',
 		documents: 12,
-		skipped: 5,
+		skipped: 3,
 		lastSyncedAt: run.finished_at,
 		nextDueAt: content.next_due_at
 	});
 	expect(view().skipped).toBe(0);
+	expect(sourceState({ acl }, connection).skipped).toBe(0);
+	expect(sourceState({ content: schedule(), acl }, connection).skipped).toBe(0);
 });
 
 it('counts other knowledge bases without adding paired subscriber counts', () => {
@@ -184,6 +186,9 @@ it('fails when no documents exist, using reach before the last run landed count'
 it.each([
 	['unsupported_content_type', 'File type not supported'],
 	['item_too_large', 'Too large'],
+	['empty_content', 'Empty document: no text found'],
+	['processing_failed', 'Processing failed'],
+	['timed_out', 'Processing timed out'],
 	['acl_write_failed', 'Internal error'],
 	['internal_error', 'Internal error'],
 	['access_revoked', 'No access'],

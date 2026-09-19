@@ -427,19 +427,51 @@ def test_skipped_items_list_failed_job_items(api):
     api.responses.extend(
         [
             response({'key': 'kb'}),
-            response({'id': 's', 'subscribers': ['kb'], 'last_run': {'id': 'job-1'}}),
+            response({'id': 's', 'kind': 'content', 'subscribers': ['kb'], 'last_run': {'id': 'job-1'}}),
             response(
                 {
                     'items': [
-                        {'source_id': 'ok', 'status': 'succeeded', 'code': None},
-                        {'source_id': 'large', 'status': 'failed', 'code': 'item_too_large'},
-                        {'source_id': 'unknown', 'status': 'skipped', 'code': 'unsupported_content_type'},
-                        {'source_id': 'waiting', 'status': 'pending', 'code': None},
+                        {'source_id': 'ok', 'title': 'Good.docx', 'status': 'succeeded', 'code': None},
+                        {'source_id': 'large', 'title': None, 'status': 'failed', 'code': 'item_too_large'},
+                        {
+                            'source_id': 'unknown',
+                            'title': None,
+                            'status': 'skipped',
+                            'code': 'unsupported_content_type',
+                        },
+                        {'source_id': 'waiting', 'title': None, 'status': 'pending', 'code': None},
+                        {
+                            'source_id': 'empty',
+                            'title': 'Empty.pdf',
+                            'status': 'skipped',
+                            'code': 'empty_content',
+                            'detail': 'empty_parsed_content',
+                        },
+                        {
+                            'source_id': 'empty',
+                            'title': 'Empty.pdf',
+                            'status': 'skipped',
+                            'code': 'empty_content',
+                        },
+                        {
+                            'source_id': 'broken',
+                            'title': 'Current.pdf',
+                            'status': 'failed',
+                            'code': 'processing_failed',
+                        },
                     ]
                 }
             ),
             response({'data': [{'source_id': 'ok', 'filename': 'Good.docx'}], 'next_cursor': 'next'}),
-            response({'data': [{'source_id': 'large', 'filename': 'Large.pdf'}], 'next_cursor': None}),
+            response(
+                {
+                    'data': [
+                        {'source_id': 'large', 'title': 'Large.pdf'},
+                        {'source_id': 'broken', 'title': 'Old.pdf'},
+                    ],
+                    'next_cursor': None,
+                }
+            ),
         ]
     )
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
@@ -448,6 +480,8 @@ def test_skipped_items_list_failed_job_items(api):
         {'source_id': 'large', 'name': 'Large.pdf', 'code': 'item_too_large'},
         {'source_id': 'unknown', 'name': 'unknown', 'code': 'unsupported_content_type'},
         {'source_id': 'waiting', 'name': 'waiting', 'code': 'pending'},
+        {'source_id': 'empty', 'name': 'Empty.pdf', 'code': 'empty_content'},
+        {'source_id': 'broken', 'name': 'Current.pdf', 'code': 'processing_failed'},
     ]
     assert api.requests[2].url.path == '/v1/jobs/job-1'
     assert dict(api.requests[2].url.params) == {'include_items': 'true'}
@@ -457,13 +491,30 @@ def test_skipped_items_list_failed_job_items(api):
     assert_assertions(api.requests)
 
 
+def test_skipped_items_ignore_acl_refresh_echoes(api):
+    """ACL refresh skips never trigger a job lookup or duplicate content failures."""
+    api.responses.extend(
+        [
+            response({'key': 'kb'}),
+            response({'id': 'acl', 'kind': 'acl_refresh', 'subscribers': ['kb'], 'last_run': {'id': 'acl-job'}}),
+        ]
+    )
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/acl/skipped')
+    assert result.status_code == 200
+    assert result.json() == []
+    assert len(api.requests) == 2
+    assert_assertions(api.requests)
+
+
 @pytest.mark.parametrize('subscribed', [False, True])
 def test_skipped_items_require_subscription_and_allow_no_run(api, subscribed):
     """A foreign schedule is refused and an unstarted schedule needs no job request."""
     api.responses.extend(
         [
             response({'key': 'kb'}),
-            response({'id': 's', 'subscribers': ['kb'] if subscribed else ['other'], 'last_run': None}),
+            response(
+                {'id': 's', 'kind': 'content', 'subscribers': ['kb'] if subscribed else ['other'], 'last_run': None}
+            ),
         ]
     )
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')

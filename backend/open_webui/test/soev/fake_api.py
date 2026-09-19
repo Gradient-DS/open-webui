@@ -384,7 +384,14 @@ class FakeSoevApi:
         job = self.jobs[response.json()['job_id']]
         job['documents'] = copy.deepcopy(documents)
         job['items'] = [
-            {'source_id': document['source_id'], 'status': 'pending', 'code': None, 'detail': None, 'chunk_count': None}
+            {
+                'source_id': document['source_id'],
+                'title': document.get('title'),
+                'status': 'pending',
+                'code': None,
+                'detail': None,
+                'chunk_count': None,
+            }
             for document in documents
         ]
         job['progress'].update(total=len(documents), pending=len(documents))
@@ -418,6 +425,7 @@ class FakeSoevApi:
                 view['items'] = [
                     {
                         'source_id': self.job_effects[job['job_id']],
+                        'title': None,
                         'status': 'pending',
                         'code': None,
                         'detail': None,

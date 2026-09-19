@@ -93,20 +93,20 @@
 	let skippedError = false;
 	let skippedLoading = false;
 	let loadedRunKey = '';
-	$: runKey = JSON.stringify(
-		targets.map((item) => [item.id, item.last_run?.id, item.last_run?.finished_at])
-	);
-	$: if (skippedOpen && runKey !== loadedRunKey) void loadSkipped(runKey, targets);
-	async function loadSkipped(key: string, rows: Schedule[]) {
+	$: runKey = JSON.stringify([
+		pair.content?.id,
+		pair.content?.last_run?.id,
+		pair.content?.last_run?.finished_at
+	]);
+	$: if (skippedOpen && runKey !== loadedRunKey) void loadSkipped(runKey, pair.content);
+	async function loadSkipped(key: string, content: Schedule | undefined) {
 		loadedRunKey = key;
 		skippedLoading = true;
 		skippedError = false;
 		try {
-			const items = (
-				await Promise.all(
-					rows.map((item) => getSkippedItems(localStorage.token, knowledgeId, item.id))
-				)
-			).flat();
+			const items = content
+				? await getSkippedItems(localStorage.token, knowledgeId, content.id)
+				: [];
 			if (key === loadedRunKey) skippedItems = items;
 		} catch {
 			if (key === loadedRunKey) skippedError = true;

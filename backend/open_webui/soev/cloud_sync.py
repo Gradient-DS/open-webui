@@ -65,24 +65,25 @@ class CloudSync:
         if collection_key not in schedule['subscribers']:
             raise SoevApiError(404, 'connection_not_found', 'No such schedule in this collection')
         run = schedule.get('last_run')
-        if not run:
+        if schedule['kind'] != 'content' or not run:
             return []
         job = await self._get(f'/v1/jobs/{quote(run["id"], safe="")}?include_items=true')
         names = {
-            row['source_id']: row.get('filename') or row.get('title')
+            row['source_id']: row.get('title') or row.get('filename')
             async for row in self.client.pages(
                 f'/v1/collections/{quote(collection_key, safe="")}/documents', as_user=self.user_ref
             )
         }
-        return [
-            {
+        skipped = {}
+        for item in job.get('items', []):
+            if item['status'] == 'succeeded' or item['source_id'] in skipped:
+                continue
+            skipped[item['source_id']] = {
                 'source_id': item['source_id'],
-                'name': names.get(item['source_id']) or item['source_id'],
+                'name': item.get('title') or names.get(item['source_id']) or item['source_id'],
                 'code': item.get('code') or item['status'],
             }
-            for item in job.get('items', [])
-            if item['status'] != 'succeeded'
-        ]
+        return list(skipped.values())
 
     async def sync_status(self, collection_key: str) -> dict:
         # W2 projects the collection key directly as the OWUI knowledge id.
