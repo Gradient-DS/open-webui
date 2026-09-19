@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule, SyncRun } from '$lib/apis/cloudSync';
-import { sourceState } from './sourceState';
+import { sourceState, skippedReason } from './sourceState';
 
 const connection: Connection = { id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' };
 const run: SyncRun = {
@@ -19,6 +19,7 @@ const schedule = (changes: Partial<Schedule> = {}): Schedule => ({
 	scope: { include_descendants: true },
 	subscribers: ['kb'],
 	subscriber_count: 1,
+	document_count: 1,
 	...changes
 });
 const view = (changes: Partial<Schedule> = {}, account = connection) =>
@@ -117,7 +118,7 @@ it('uses current schedule errors before stale run errors', () => {
 	).toBe('needs_access');
 });
 
-it('keeps source metadata, timestamps and content counters with skipped reasons from both runs', () => {
+it('keeps source metadata, timestamps and counts skipped files across both runs', () => {
 	const content = schedule({
 		label: 'Reports',
 		path: '/Team/Reports',
@@ -129,18 +130,18 @@ it('keeps source metadata, timestamps and content counters with skipped reasons 
 	});
 	const acl = schedule({
 		kind: 'acl_refresh',
-		last_run: { ...run, counts: { landed: 99, link_grants_dropped: 3 } }
+		last_run: { ...run, counts: { landed: 99, failed: 2, link_grants_dropped: 3 } }
 	});
 	expect(sourceState({ content, acl }, connection)).toMatchObject({
 		label: 'Reports',
 		path: '/Team/Reports',
 		provider: 'OneDrive',
 		documents: 12,
-		skipped: { failed: 3, tooLarge: 2, linkOnly: 5 },
+		skipped: 5,
 		lastSyncedAt: run.finished_at,
 		nextDueAt: content.next_due_at
 	});
-	expect(view().skipped).toEqual({ failed: 0, tooLarge: 0, linkOnly: 0 });
+	expect(view().skipped).toBe(0);
 });
 
 it('counts other knowledge bases without adding paired subscriber counts', () => {
@@ -162,3 +163,26 @@ it('falls back to file and folder labels for legacy and ACL-only sources', () =>
 		documents: 0
 	});
 });
+
+it('fails when no documents exist, using reach before the last run landed count', () => {
+	const last_run = { ...run, outcome: 'partial' as const, counts: { failed: 2, landed: 0 } };
+	expect(view({ document_count: 0, last_run }).state).toBe('error');
+	expect(view({ document_count: 3, last_run }).state).toBe('partly_synced');
+	expect(view({ document_count: undefined, last_run }).state).toBe('error');
+	expect(
+		view({ document_count: undefined, last_run: { ...last_run, counts: { failed: 2, landed: 1 } } })
+			.state
+	).toBe('partly_synced');
+	expect(
+		view({ document_count: 0, last_run: { ...last_run, counts: { failed: 2, landed: 1 } } }).state
+	).toBe('error');
+});
+
+it.each([
+	['unsupported_content_type', 'File type not supported'],
+	['item_too_large', 'Too large'],
+	['acl_write_failed', 'Internal error'],
+	['internal_error', 'Internal error'],
+	['access_revoked', 'No access'],
+	['new_code', 'new_code']
+])('names skipped reason %s', (code, reason) => expect(skippedReason(code)).toBe(reason));

@@ -3892,5 +3892,11 @@
   "Disconnect": "Verbinding verbreken",
   "Retry loading accounts": "Accounts opnieuw laden",
   "Finishing the connection…": "Verbinding wordt afgerond…",
-  "The connection is still pending. Please try again.": "De verbinding wordt nog afgerond. Probeer het opnieuw."
+  "The connection is still pending. Please try again.": "De verbinding wordt nog afgerond. Probeer het opnieuw.",
+  "Failed: no file could be synced; see details": "Mislukt: geen enkel bestand kon worden gesynchroniseerd; bekijk de details",
+  "File type not supported": "Bestandstype niet ondersteund",
+  "Too large": "Te groot",
+  "Internal error": "Interne fout",
+  "No access": "Geen toegang",
+  "Failed to load skipped files. Reopen to try again.": "Overgeslagen bestanden konden niet worden geladen. Open opnieuw om het nogmaals te proberen."
 }

@@ -125,3 +125,8 @@ async def suspend_schedule(knowledge_id: str, schedule_id: str, sync=Depends(clo
 async def resume_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     await sync.schedule_action(knowledge_id, schedule_id, 'resume')
     return Response(status_code=204)
+
+
+@router.get('/knowledge/{knowledge_id}/schedules/{schedule_id}/skipped')
+async def skipped_items(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    return await sync.skipped_items(knowledge_id, schedule_id)

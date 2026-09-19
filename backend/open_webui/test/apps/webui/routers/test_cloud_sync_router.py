@@ -419,3 +419,63 @@ def test_connection_usage_requires_a_verified_user(api):
     api.app.dependency_overrides[cloud_sync.get_verified_user] = reject
     assert api.browser.get('/api/v1/cloud-sync/connections/c/usage').status_code == 401
     assert not api.requests
+
+
+def test_skipped_items_list_failed_job_items(api):
+    """Skipped items use the run id, preserve codes and resolve names across document pages."""
+    api.responses.extend(
+        [
+            response({'key': 'kb'}),
+            response({'id': 's', 'subscribers': ['kb'], 'last_run': {'id': 'job-1'}}),
+            response(
+                {
+                    'items': [
+                        {'source_id': 'ok', 'status': 'succeeded', 'code': None},
+                        {'source_id': 'large', 'status': 'failed', 'code': 'item_too_large'},
+                        {'source_id': 'unknown', 'status': 'skipped', 'code': 'unsupported_content_type'},
+                        {'source_id': 'waiting', 'status': 'pending', 'code': None},
+                    ]
+                }
+            ),
+            response({'data': [{'source_id': 'ok', 'filename': 'Good.docx'}], 'next_cursor': 'next'}),
+            response({'data': [{'source_id': 'large', 'filename': 'Large.pdf'}], 'next_cursor': None}),
+        ]
+    )
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
+    assert result.status_code == 200
+    assert result.json() == [
+        {'source_id': 'large', 'name': 'Large.pdf', 'code': 'item_too_large'},
+        {'source_id': 'unknown', 'name': 'unknown', 'code': 'unsupported_content_type'},
+        {'source_id': 'waiting', 'name': 'waiting', 'code': 'pending'},
+    ]
+    assert api.requests[2].url.path == '/v1/jobs/job-1'
+    assert dict(api.requests[2].url.params) == {'include_items': 'true'}
+    assert api.requests[3].url.path == '/v1/collections/kb/documents'
+    assert dict(api.requests[4].url.params) == {'cursor': 'next'}
+    assert api.refs == ['owui:user:alice'] * 5
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('subscribed', [False, True])
+def test_skipped_items_require_subscription_and_allow_no_run(api, subscribed):
+    """A foreign schedule is refused and an unstarted schedule needs no job request."""
+    api.responses.extend(
+        [
+            response({'key': 'kb'}),
+            response({'id': 's', 'subscribers': ['kb'] if subscribed else ['other'], 'last_run': None}),
+        ]
+    )
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
+    assert result.status_code == (200 if subscribed else 404)
+    if subscribed:
+        assert result.json() == []
+    assert len(api.requests) == 2
+    assert_assertions(api.requests)
+
+
+def test_skipped_items_require_readable_knowledge(api):
+    """An unreadable KB is refused before fetching its schedule or job."""
+    api.responses.append(response({'code': 'collection_not_found', 'detail': 'No such collection'}, 404))
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
+    assert result.status_code == 404
+    assert len(api.requests) == 1

@@ -58,6 +58,31 @@ class CloudSync:
             return await self._send('DELETE', f'{path}?collection_key={quote(collection_key, safe="")}')
         return await self._send('POST', f'{path}/{action}')
 
+    async def skipped_items(self, collection_key: str, schedule_id: str) -> list[dict]:
+        await self._get(f'/v1/collections/{quote(collection_key, safe="")}')
+        schedule = await self._get(f'/v1/schedules/{quote(schedule_id, safe="")}')
+        if collection_key not in schedule['subscribers']:
+            raise SoevApiError(404, 'connection_not_found', 'No such schedule in this collection')
+        run = schedule.get('last_run')
+        if not run:
+            return []
+        job = await self._get(f'/v1/jobs/{quote(run["id"], safe="")}?include_items=true')
+        names = {
+            row['source_id']: row.get('filename') or row.get('title')
+            async for row in self.client.pages(
+                f'/v1/collections/{quote(collection_key, safe="")}/documents', as_user=self.user_ref
+            )
+        }
+        return [
+            {
+                'source_id': item['source_id'],
+                'name': names.get(item['source_id']) or item['source_id'],
+                'code': item.get('code') or item['status'],
+            }
+            for item in job.get('items', [])
+            if item['status'] != 'succeeded'
+        ]
+
     async def sync_status(self, collection_key: str) -> dict:
         # W2 projects the collection key directly as the OWUI knowledge id.
         # Kept: this is what makes an unreadable or absent KB a 404 rather

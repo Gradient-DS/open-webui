@@ -4,7 +4,13 @@
 	import type { i18n as I18n } from 'i18next';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
-	import type { Connection, Schedule, ScheduleAction } from '$lib/apis/cloudSync';
+	import {
+		getSkippedItems,
+		type SkippedItem,
+		type Connection,
+		type Schedule,
+		type ScheduleAction
+	} from '$lib/apis/cloudSync';
 	import Badge from '$lib/components/common/Badge.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -13,7 +19,7 @@
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import { runIsLive, type SchedulePair } from '../utils/cloudSync';
-	import { sourceState, type SourceState } from '../utils/sourceState';
+	import { sourceState, skippedReason, type SourceState } from '../utils/sourceState';
 
 	dayjs.extend(relativeTime);
 	const i18n = getContext<Writable<I18n>>('i18n');
@@ -21,6 +27,7 @@
 		action: { schedules: Schedule[]; action: ScheduleAction | 'delete' };
 		reconnect: Connection;
 	}>();
+	export let knowledgeId: string;
 	export let pair: SchedulePair;
 	export let writeAccess = false;
 	export let busy = false;
@@ -60,21 +67,52 @@
 			definition: 'Needs access: you can no longer edit this knowledge base'
 		},
 		error: {
-			label: 'Error',
-			type: 'warning',
+			label: 'Failed',
+			type: 'error',
 			definition: 'Error: the last sync failed; it will retry automatically'
 		}
 	};
 	$: schedule = pair.content ?? pair.acl!;
 	$: view = sourceState(pair, schedule.connection);
-	$: badge = badges[view.state];
+	$: badge =
+		view.state === 'error' &&
+		(schedule.document_count ?? schedule.last_run?.counts?.landed ?? 0) === 0 &&
+		(schedule.last_run?.counts?.failed ?? 0) > 0
+			? { ...badges.error, definition: 'Failed: no file could be synced; see details' }
+			: badges[view.state];
 	$: targets = [pair.content, pair.acl].filter((item): item is Schedule => !!item);
 	$: expiry = targets.flatMap((item) =>
 		typeof item.provider_secret_days_to_expiry === 'number'
 			? [item.provider_secret_days_to_expiry]
 			: []
 	);
-	$: skipped = Math.max(view.skipped.failed, view.skipped.tooLarge) + view.skipped.linkOnly;
+	$: skipped = view.skipped;
+	let skippedOpen = false;
+	let skippedItems: SkippedItem[] = [];
+	let skippedError = false;
+	let skippedLoading = false;
+	let loadedRunKey = '';
+	$: runKey = JSON.stringify(
+		targets.map((item) => [item.id, item.last_run?.id, item.last_run?.finished_at])
+	);
+	$: if (skippedOpen && runKey !== loadedRunKey) void loadSkipped(runKey, targets);
+	async function loadSkipped(key: string, rows: Schedule[]) {
+		loadedRunKey = key;
+		skippedLoading = true;
+		skippedError = false;
+		try {
+			const items = (
+				await Promise.all(
+					rows.map((item) => getSkippedItems(localStorage.token, knowledgeId, item.id))
+				)
+			).flat();
+			if (key === loadedRunKey) skippedItems = items;
+		} catch {
+			if (key === loadedRunKey) skippedError = true;
+		} finally {
+			if (key === loadedRunKey) skippedLoading = false;
+		}
+	}
 	$: primary = {
 		sync_now: 'Sync now',
 		reconnect: 'Reconnect',
@@ -135,17 +173,23 @@
 				{$i18n.t('Also in {{count}} other knowledge bases', { count: view.otherKbs })}
 			</p>{/if}
 		{#if skipped > 0}
-			<details class="text-xs text-amber-700 dark:text-amber-300">
+			<details
+				class="text-xs text-amber-700 dark:text-amber-300"
+				on:toggle={(event) => {
+					skippedOpen = event.currentTarget.open;
+					if (!skippedOpen && skippedError) loadedRunKey = '';
+				}}
+			>
 				<summary class="cursor-pointer">{$i18n.t('{{n}} files skipped', { n: skipped })}</summary>
-				<ul class="mt-1 list-inside list-disc">
-					<li>{$i18n.t('Too large: {{n}}', { n: view.skipped.tooLarge })}</li>
-					<li>{$i18n.t('Link-only shares: {{n}}', { n: view.skipped.linkOnly })}</li>
-					<li>
-						{$i18n.t('Other: {{n}}', {
-							n: Math.max(0, view.skipped.failed - view.skipped.tooLarge)
-						})}
-					</li>
-				</ul>
+				{#if skippedLoading}<p role="status">{$i18n.t('Loading...')}</p>
+				{:else if skippedError}<p role="alert">
+						{$i18n.t('Failed to load skipped files. Reopen to try again.')}
+					</p>
+				{:else}<ul class="mt-1 list-inside list-disc">
+						{#each skippedItems as item}<li>
+								{item.name || item.source_id} — {$i18n.t(skippedReason(item.code))}
+							</li>{/each}
+					</ul>{/if}
 			</details>
 		{/if}
 		{#if expiry.length && Math.min(...expiry) <= 30}<p class="text-xs text-amber-600">

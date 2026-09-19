@@ -19,7 +19,7 @@ export interface SourceView {
 	lastSyncedAt: string | null;
 	nextDueAt: string | null;
 	documents: number;
-	skipped: { failed: number; tooLarge: number; linkOnly: number };
+	skipped: number;
 	otherKbs: number;
 	primary: 'sync_now' | 'reconnect' | 'resume' | 'request_access' | null;
 }
@@ -45,7 +45,13 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 	else if (errors.includes('writer_revoked')) state = 'needs_access';
 	else if (schedules.some((item) => item.lifecycle === 'suspended' && !item.last_error))
 		state = 'paused';
-	else if (schedules.some((item) => item.last_run?.outcome === 'failed' || item.last_error))
+	else if (
+		schedules.some((item) => item.last_run?.outcome === 'failed' || item.last_error) ||
+		((schedule.document_count ?? run?.counts?.landed ?? 0) === 0 &&
+			schedules.some(
+				(item) => item.last_run?.outcome === 'partial' || (item.last_run?.counts?.failed ?? 0) > 0
+			))
+	)
 		state = 'error';
 	else if (
 		schedules.some(
@@ -67,14 +73,7 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 		lastSyncedAt: run?.finished_at ?? (run?.outcome ? run.started_at : null),
 		nextDueAt: schedule.next_due_at ?? null,
 		documents: run?.counts?.landed ?? 0,
-		skipped: {
-			failed: run?.counts?.failed ?? 0,
-			tooLarge: run?.counts?.item_too_large ?? 0,
-			linkOnly: schedules.reduce(
-				(total, item) => total + (item.last_run?.counts?.link_grants_dropped ?? 0),
-				0
-			)
-		},
+		skipped: schedules.reduce((total, item) => total + (item.last_run?.counts?.failed ?? 0), 0),
 		otherKbs: Math.max(0, (schedule.subscriber_count ?? 1) - 1),
 		primary:
 			state === 'syncing'
@@ -89,4 +88,18 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 								? 'sync_now'
 								: null
 	};
+}
+
+export function skippedReason(code: string): string {
+	return (
+		(
+			{
+				unsupported_content_type: 'File type not supported',
+				item_too_large: 'Too large',
+				acl_write_failed: 'Internal error',
+				internal_error: 'Internal error',
+				access_revoked: 'No access'
+			} as Record<string, string>
+		)[code] ?? code
+	);
 }

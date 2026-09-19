@@ -43,6 +43,7 @@ export interface SyncRun {
 export interface Schedule extends ScheduleForm {
 	subscribers: string[];
 	subscriber_count: number;
+	document_count?: number;
 	last_error?: string | null;
 	id: string;
 	source_kind: string;
@@ -117,3 +118,12 @@ export const suspendSchedule = (token: string, knowledgeId: string, id: string) 
 	request<void>(token, `${schedulePath(knowledgeId, id)}/suspend`, 'POST');
 export const resumeSchedule = (token: string, knowledgeId: string, id: string) =>
 	request<void>(token, `${schedulePath(knowledgeId, id)}/resume`, 'POST');
+
+export interface SkippedItem {
+	source_id: string;
+	name?: string;
+	code: string;
+}
+
+export const getSkippedItems = (token: string, knowledgeId: string, id: string) =>
+	request<SkippedItem[]>(token, `${schedulePath(knowledgeId, id)}/skipped`);

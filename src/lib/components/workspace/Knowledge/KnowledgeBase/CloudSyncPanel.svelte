@@ -11,6 +11,7 @@
 		action: { schedules: Schedule[]; action: ScheduleAction | 'delete' };
 		reconnect: Connection;
 	}>();
+	export let knowledgeId: string;
 	export let schedules: Schedule[] = [];
 	export let reconnectNeeded: Connection[] = [];
 	export let finishingConnectionId: string | null = null;
@@ -74,7 +75,15 @@
 	{/if}
 
 	{#each rows as row (row.id)}
-		<SourceRow pair={row.pair} {writeAccess} {busy} {isAdmin} on:action on:reconnect />
+		<SourceRow
+			{knowledgeId}
+			pair={row.pair}
+			{writeAccess}
+			{busy}
+			{isAdmin}
+			on:action
+			on:reconnect
+		/>
 	{/each}
 	<footer class="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
 		{#each providers as provider}<p>

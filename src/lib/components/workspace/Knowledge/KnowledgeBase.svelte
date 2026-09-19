@@ -2027,6 +2027,7 @@
 		>
 			{#if activeProvider || schedules.length || finishingConnectionId}
 				<CloudSyncPanel
+					knowledgeId={knowledge.id}
 					{schedules}
 					{reconnectNeeded}
 					{finishingConnectionId}

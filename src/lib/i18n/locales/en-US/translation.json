@@ -3892,5 +3892,11 @@
   "Disconnect": "Disconnect",
   "Retry loading accounts": "Retry loading accounts",
   "Finishing the connection…": "Finishing the connection…",
-  "The connection is still pending. Please try again.": "The connection is still pending. Please try again."
+  "The connection is still pending. Please try again.": "The connection is still pending. Please try again.",
+  "Failed: no file could be synced; see details": "Failed: no file could be synced; see details",
+  "File type not supported": "File type not supported",
+  "Too large": "Too large",
+  "Internal error": "Internal error",
+  "No access": "No access",
+  "Failed to load skipped files. Reopen to try again.": "Failed to load skipped files. Reopen to try again."
 }
