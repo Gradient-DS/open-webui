@@ -3,6 +3,7 @@
 Configuration and model imports are deferred so either singleton import order is safe.
 """
 
+import asyncio
 import datetime as dt
 import hashlib
 import json
@@ -14,6 +15,7 @@ from fastapi import HTTPException
 
 from open_webui.soev.acting import acting_ref
 from open_webui.soev.client import SoevApiError
+from open_webui.soev.request_cache import memoized
 
 
 def _sort_file_rows(rows, filters, *, default_order='filename', default_descending=False):
@@ -125,15 +127,13 @@ class SoevKnowledgeTable:
     async def _collections(self, *, user_id=None, as_service=False):
         from open_webui.soev import ingest
 
-        hidden = set()
-        for status in ('QUEUED', 'RUNNING'):
-            jobs = await self._pages('/v1/jobs', user_id=user_id, params={'status': status}, as_service=as_service)
-            hidden.update(job['collection_key'] for job in jobs if job['kind'] == 'delete_collection')
-        return [
-            row
-            for row in await self._pages('/v1/collections', user_id=user_id, as_service=as_service)
-            if row['key'] not in hidden and not ingest.is_attachments_collection(row['key'])
-        ]
+        rows, queued, running = await asyncio.gather(
+            self._pages('/v1/collections', user_id=user_id, as_service=as_service),
+            self._pages('/v1/jobs', user_id=user_id, params={'status': 'QUEUED'}, as_service=as_service),
+            self._pages('/v1/jobs', user_id=user_id, params={'status': 'RUNNING'}, as_service=as_service),
+        )
+        hidden = {job['collection_key'] for job in queued + running if job['kind'] == 'delete_collection'}
+        return [row for row in rows if row['key'] not in hidden and not ingest.is_attachments_collection(row['key'])]
 
     async def _types(self, *, user_id=None, collection_key=None):
         params = {'collection_key': collection_key} if collection_key is not None else None
@@ -326,33 +326,51 @@ class SoevKnowledgeTable:
                 return []
             raise
 
-    async def _unlanded(self, key, *, documents=None, user_id=None):
+    async def _unlanded(self, key, *, documents=None, collection=None, user_id=None):
         from open_webui.models.files import Files
 
         files = await Files.get_unlanded_files_for_collection(key)
-        if not files or await self._collection(key, user_id=user_id) is None:
+        if not files or (collection is None and await self._collection(key, user_id=user_id) is None):
             return []
         if documents is None:
             documents = await self._documents(key, user_id=user_id)
         landed = {doc['source_id'] for doc in documents}
         return [file for file in files if file.id not in landed]
 
+    async def _deleted_sources(self, key, *, user_id=None):
+        listings = await asyncio.gather(
+            *(
+                self._pages('/v1/jobs', user_id=user_id, params={'collection_key': key, 'status': status})
+                for status in ('QUEUED', 'RUNNING')
+            )
+        )
+        details = await asyncio.gather(
+            *(
+                self._get(
+                    '/v1/jobs/' + quote(job['job_id'], safe=''), user_id=user_id, params={'include_items': 'true'}
+                )
+                for jobs in listings
+                for job in jobs
+                if job['kind'] == 'delete_document'
+            )
+        )
+        return {item['source_id'] for detail in details for item in detail['items']}
+
     async def _members(self, key, *, user_id=None):
-        documents = await self._documents(key, user_id=user_id)
+        return await memoized(
+            ('members', self, f'owui:user:{user_id}' if user_id else acting_ref(), key),
+            lambda: self._load_members(key, user_id=user_id),
+        )
+
+    async def _load_members(self, key, *, user_id=None):
+        documents, deleted = await asyncio.gather(
+            self._documents(key, user_id=user_id), self._deleted_sources(key, user_id=user_id)
+        )
         members = {doc['source_id']: (doc, doc['path']) for doc in documents}
         for file in await self._unlanded(key, documents=documents, user_id=user_id):
             job = (file.meta or {}).get('soev_job') or {}
             members[file.id] = (None, job.get('path'))
-        for status in ('QUEUED', 'RUNNING'):
-            jobs = await self._pages('/v1/jobs', user_id=user_id, params={'collection_key': key, 'status': status})
-            for job in jobs:
-                if job['kind'] == 'delete_document':
-                    detail = await self._get(
-                        '/v1/jobs/' + quote(job['job_id'], safe=''), user_id=user_id, params={'include_items': 'true'}
-                    )
-                    for item in detail['items']:
-                        members.pop(item['source_id'], None)
-        return members
+        return {source: member for source, member in members.items() if source not in deleted}
 
     # Catalog-only rows are listed through search and downloaded through catalog_content.
     async def get_files_by_id(self, knowledge_id, db=None):
@@ -369,10 +387,13 @@ class SoevKnowledgeTable:
 
     async def get_file_counts_by_knowledge_ids(self, knowledge_ids, db=None, *, user_id: str | None = None):
         result = {}
-        for key in knowledge_ids:
-            row = await self._collection(key, user_id=user_id)
-            if row:
-                count = row['document_count'] + len(await self._unlanded(key, user_id=user_id))
+        requested = set(knowledge_ids)
+        if not requested:
+            return result
+        for row in await self._pages('/v1/collections', user_id=user_id):
+            key = row['key']
+            if key in requested:
+                count = row['document_count'] + len(await self._unlanded(key, collection=row, user_id=user_id))
                 if count:
                     result[key] = count
         return result
@@ -515,12 +536,16 @@ class SoevKnowledgeTable:
     async def search_files_by_id(self, knowledge_id, user_id, filter, skip=0, limit=30, metadata_only=False, db=None):
         filters = filter or {}
         path = self._directory_path(knowledge_id, filters.get('directory_id'))
-        members = await self._members(knowledge_id, user_id=user_id)
-        view = await self._directory_view(knowledge_id, members=members, user_id=user_id)
+        collection, members, schedules = await asyncio.gather(
+            self._collection(knowledge_id, user_id=user_id),
+            self._members(knowledge_id, user_id=user_id),
+            self._pages('/v1/schedules', user_id=user_id, params={'collection_key': knowledge_id}),
+        )
+        collection_total = len(members)
+        view = await self._directory_view(knowledge_id, members=members, schedules=schedules, user_id=user_id)
         if 'directory_id' in filters:
             members = {source: member for source, member in members.items() if path in view[1].get(source, [])}
         by_id = {source: member[0] for source, member in members.items()}
-        collection = await self._collection(knowledge_id, user_id=user_id)
         owner_id = self._knowledge(collection).user_id if collection else ''
         rows = await self._file_rows(
             list(by_id),
@@ -540,6 +565,7 @@ class SoevKnowledgeTable:
             directories=directories,
             breadcrumbs=breadcrumbs,
             rollups=rollups,
+            collection_total=collection_total,
         )
 
     async def search_knowledge_files(self, filter, skip=0, limit=30, db=None):
@@ -582,8 +608,12 @@ class SoevKnowledgeTable:
         if path and path[0].startswith('\0sync:'):
             raise HTTPException(status_code=403, detail={'code': 'synced_folder_read_only'})
 
-    async def _directory_view(self, key, *, members=None, user_id=None):
-        schedules = await self._pages('/v1/schedules', user_id=user_id, params={'collection_key': key})
+    async def _directory_view(self, key, *, members=None, schedules=None, user_id=None):
+        schedules = (
+            schedules
+            if schedules is not None
+            else await self._pages('/v1/schedules', user_id=user_id, params={'collection_key': key})
+        )
         folders = {
             schedule['id']: schedule
             for schedule in schedules

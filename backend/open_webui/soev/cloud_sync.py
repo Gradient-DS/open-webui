@@ -1,5 +1,6 @@
 """Subject-scoped connection and schedule calls through the existing soev-api client."""
 
+import asyncio
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -87,18 +88,23 @@ class CloudSync:
         # W2 projects the collection key directly as the OWUI knowledge id.
         # Kept: this is what makes an unreadable or absent KB a 404 rather
         # than an empty schedule list.
-        await self._get(f'/v1/collections/{quote(collection_key, safe="")}')
+        async def list_schedules():
+            return [
+                row
+                async for row in self.client.pages(
+                    '/v1/schedules', as_user=self.user_ref, params={'collection_key': collection_key}
+                )
+            ]
+
+        _, schedules = await asyncio.gather(
+            self._get(f'/v1/collections/{quote(collection_key, safe="")}'), list_schedules()
+        )
         # The listing carries each schedule's own detail, so the rest is one
         # page plus one call per DISTINCT connection (usually exactly one).
         # It used to also fetch every schedule individually, which made a
         # status poll cost a round trip per schedule.
-        schedules = []
-        connections: dict[str, dict] = {}
-        async for schedule in self.client.pages(
-            '/v1/schedules', as_user=self.user_ref, params={'collection_key': collection_key}
-        ):
-            connection_id = schedule['connection_id']
-            if connection_id not in connections:
-                connections[connection_id] = await self.connection(connection_id)
-            schedules.append({**schedule, 'connection': connections[connection_id]})
-        return {'schedules': schedules}
+        connection_ids = sorted({schedule['connection_id'] for schedule in schedules})
+        connections = dict(zip(connection_ids, await asyncio.gather(*(self.connection(key) for key in connection_ids))))
+        return {
+            'schedules': [{**schedule, 'connection': connections[schedule['connection_id']]} for schedule in schedules]
+        }

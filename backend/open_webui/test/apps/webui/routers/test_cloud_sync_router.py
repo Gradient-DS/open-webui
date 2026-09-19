@@ -149,15 +149,15 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
         [
             response({'key': 'kb-1'}),
             response({'data': [detail], 'next_cursor': 'page-2'}),
-            response(connection),
             response({'data': [second], 'next_cursor': None}),
+            response(connection),
         ]
     )
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-1/sync')
     assert result.status_code == 200
     assert result.json() == {'schedules': [{**detail, 'connection': connection}, {**second, 'connection': connection}]}
     assert dict(api.requests[1].url.params) == {'collection_key': 'kb-1'}
-    assert dict(api.requests[3].url.params) == {'collection_key': 'kb-1', 'cursor': 'page-2'}
+    assert dict(api.requests[2].url.params) == {'collection_key': 'kb-1', 'cursor': 'page-2'}
     # One connection fetch for two schedules sharing it, and no per-schedule call.
     assert len(api.refs) == 4
     assert_assertions(api.requests)

@@ -192,10 +192,12 @@ def knowledge_file_list_of(
     directories: list | None = None,
     breadcrumbs: list | None = None,
     rollups: dict | None = None,
+    collection_total: int | None = None,
 ) -> KnowledgeFileListResponse:
     return KnowledgeFileListResponse(
         items=items,
         total=total,
+        collection_total=collection_total,
         directories=[
             KnowledgeDirectoryEntry(
                 **directory.model_dump(),

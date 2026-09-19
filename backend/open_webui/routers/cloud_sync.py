@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import CloudSync
+from open_webui.soev.request_cache import request_cache
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -17,7 +18,8 @@ router = APIRouter()
 async def cloud_sync(user=Depends(get_verified_user)):
     try:
         client = identity.build_client()
-        yield CloudSync(client, await identity.acting_ref(user, client))
+        with request_cache():
+            yield CloudSync(client, await identity.acting_ref(user, client))
     except SoevApiError as error:
         detail = {'code': error.code, 'detail': error.detail}
         if error.constraint is not None:

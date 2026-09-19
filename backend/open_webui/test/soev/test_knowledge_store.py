@@ -680,7 +680,13 @@ async def test_search_files_preserves_directory_filter_and_slim_rows(env, metada
     assert (await env.store.search_files_by_id('kb', 'alice', {'query': 'needle'})).total == 0
     assert (await env.store.search_files_by_id('kb', 'alice', {'query': 'needle', 'include_content': True})).total == 3
     empty = await env.store.search_knowledge_files({'query': 'needle'})
-    assert empty.model_dump() == {'items': [], 'directories': [], 'breadcrumbs': [], 'total': 0}
+    assert empty.model_dump() == {
+        'items': [],
+        'directories': [],
+        'breadcrumbs': [],
+        'total': 0,
+        'collection_total': None,
+    }
 
 
 @pytest.mark.asyncio

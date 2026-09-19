@@ -250,6 +250,7 @@ class KnowledgeDirectoryEntry(KnowledgeDirectoryModel):
 
 
 class KnowledgeFileListResponse(BaseModel):
+    collection_total: Optional[int] = None  # [Gradient] KB-wide count in the same items request.
     items: list[Union[FileUserResponse, FileUserMetadataResponse]]
     directories: list[KnowledgeDirectoryEntry] = Field(default_factory=list)
     breadcrumbs: list[KnowledgeDirectoryModel] = Field(default_factory=list)

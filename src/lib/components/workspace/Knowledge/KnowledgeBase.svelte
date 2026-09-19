@@ -199,6 +199,7 @@
 	$: isExternalKnowledge = knowledge?.meta?.source === 'external';
 
 	let loaded = false;
+	let itemsInitialized = false;
 	let queryDebounceActive = false;
 	let fetchId = 0;
 
@@ -247,7 +248,9 @@
 		// Track all dependencies explicitly
 		void [query, viewOption, sortKey, direction, currentPage, includeContent];
 
-		if (queryDebounceActive) {
+		if (!itemsInitialized) {
+			itemsInitialized = true;
+		} else if (queryDebounceActive) {
 			// User is typing — debounce
 			clearTimeout(searchDebounceTimer);
 			searchDebounceTimer = setTimeout(() => {
@@ -255,7 +258,7 @@
 				getItemsPage();
 			}, 300);
 		} else {
-			// Filter/view/pagination change or initial load — fetch immediately
+			// Filter/view/pagination change — fetch immediately
 			getItemsPage();
 		}
 	}
@@ -270,44 +273,25 @@
 			direction = null;
 		}
 
-		const isCloudKb = knowledge?.type && knowledge.type !== 'local';
-
 		// Upstream per-level browsing: one call returns the level's files
 		// (30/page), child directories and breadcrumbs. With a query the
 		// search goes KB-wide and flat (decision 4) — directory rows are
 		// hidden and each hit renders its meta.relative_path breadcrumb.
-		// Cloud/push KBs additionally need a cheap KB-wide total (limit=1,
-		// metadata-only) to keep the quota header honest — fileItemsTotal
-		// is level-scoped here.
+		// [Gradient] The same response includes the KB-wide quota total.
 		const isSearching = !!query;
-		const [res, totalRes] = await Promise.all([
-			searchKnowledgeFilesById(
-				localStorage.token,
-				knowledge.id,
-				query,
-				viewOption,
-				sortKey,
-				direction,
-				currentPage,
-				null,
-				true,
-				isSearching ? undefined : (currentDirectoryId ?? null),
-				isSearching ? includeContent : false
-			).catch(() => null),
-			isCloudKb
-				? searchKnowledgeFilesById(
-						localStorage.token,
-						knowledge.id,
-						'',
-						null,
-						null,
-						null,
-						1,
-						1,
-						true
-					).catch(() => null)
-				: Promise.resolve(null)
-		]);
+		const res = await searchKnowledgeFilesById(
+			localStorage.token,
+			knowledgeId,
+			query,
+			viewOption,
+			sortKey,
+			direction,
+			currentPage,
+			null,
+			true,
+			isSearching ? undefined : (currentDirectoryId ?? null),
+			isSearching ? includeContent : false
+		).catch(() => null);
 
 		if (currentFetchId !== fetchId) return; // Stale response, discard
 
@@ -319,9 +303,7 @@
 				breadcrumbs = res.breadcrumbs ?? [];
 			}
 		}
-		if (totalRes) {
-			kbFileTotal = totalRes.total;
-		}
+		if (res?.collection_total != null) kbFileTotal = res.collection_total;
 		queryDebounceActive = false;
 		return res;
 	};
@@ -949,16 +931,16 @@
 
 	let finishingConnectionId: string | null = null;
 	let extraLivePoll = false;
-	const refreshCloudSync = async () => {
-		if (!knowledge || destroyed) return false;
+	const refreshCloudSync = async (refreshItems = true) => {
+		if (!knowledgeId || destroyed) return false;
 		const request = ++syncStatusRequest;
-		const status = await cloudSync.getSyncStatus(localStorage.token, knowledge.id);
+		const status = await cloudSync.getSyncStatus(localStorage.token, knowledgeId);
 		if (destroyed || request !== syncStatusRequest) return false;
 		const previous = schedules;
 		schedules = status.schedules;
 		syncStatusError = false;
 		const isLive = schedules.some((schedule) => runIsLive(schedule.last_run));
-		if (shouldRefetchSyncItems(previous, schedules)) await getItemsPage();
+		if (refreshItems && shouldRefetchSyncItems(previous, schedules)) await getItemsPage();
 		return isLive;
 	};
 
@@ -970,10 +952,10 @@
 		syncPoll = setTimeout(pollCloudSyncStatus, 0);
 	};
 
-	const pollCloudSyncStatus = async () => {
+	const pollCloudSyncStatus = async (refreshItems = true) => {
 		let live = false;
 		try {
-			live = await refreshCloudSync();
+			live = await refreshCloudSync(refreshItems);
 		} catch {
 			syncStatusError = true;
 		} finally {
@@ -1721,10 +1703,16 @@
 		if ($config?.features?.enable_google_drive_integration)
 			void initializeGooglePicker().catch(() => {});
 		id = $page.params.id;
-		const res = await getKnowledgeById(localStorage.token, id).catch((e) => {
-			toast.error(`${e}`);
-			return null;
-		});
+		knowledgeId = id;
+		// [Gradient] Start all three independent reads together; the first items page covers this poll.
+		const [res] = await Promise.all([
+			getKnowledgeById(localStorage.token, id).catch((e) => {
+				toast.error(`${e}`);
+				return null;
+			}),
+			getItemsPage(),
+			pollCloudSyncStatus(false)
+		]);
 
 		if (destroyed) return;
 		if (res) {
@@ -1738,7 +1726,7 @@
 				Object.values(CLOUD_PROVIDERS).find(
 					(provider) => $page.url.searchParams.get(provider.startSyncParam) === 'true'
 				) ?? null;
-			if (requestedProvider || CLOUD_PROVIDERS[knowledge.type ?? '']) await pollCloudSyncStatus();
+			if (!requestedProvider && !CLOUD_PROVIDERS[knowledge.type ?? '']) clearTimeout(syncPoll);
 		} else {
 			goto('/workspace/knowledge');
 		}

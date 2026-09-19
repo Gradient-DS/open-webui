@@ -4,10 +4,13 @@ No retries: subject assertions are single-use and mutations belong to the caller
 """
 
 import logging
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack
 
 import httpx
+
+from open_webui.soev.request_cache import invalidate, memoized
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +62,8 @@ class SoevClient:
         self._timeout = timeout
 
     async def get(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> dict:
-        response = await self._request('GET', path, as_user=as_user, params=params)
+        key = (self._base_url, self._api_key, as_user, path, tuple(sorted((params or {}).items())))
+        response = await memoized(key, lambda: self._request('GET', path, as_user=as_user, params=params))
         return self._json_object(response)
 
     async def get_text(self, path: str, *, as_user: str | None = None) -> str:
@@ -132,7 +136,10 @@ class SoevClient:
         method = method.upper()
         if method not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
             raise ValueError('send requires a mutation method')
-        response = await self._request(method, path, body=body, as_user=as_user, idempotency_key=idempotency_key)
+        try:
+            response = await self._request(method, path, body=body, as_user=as_user, idempotency_key=idempotency_key)
+        finally:
+            invalidate()
         if response.status_code == 204:
             return None
         return self._json_object(response)
@@ -156,15 +163,27 @@ class SoevClient:
             headers['X-Soev-Subject'] = self._subject_minter(as_user)
         if idempotency_key is not None:
             headers['Idempotency-Key'] = idempotency_key
+        started = time.perf_counter()
+        status = None
         try:
             async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=False) as client:
                 response = await client.request(
                     method, f'{self._base_url}{path}', headers=headers, params=params, json=body
                 )
+                status = response.status_code
         except httpx.TransportError as error:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502
             log.warning('soev-api transport failure', extra={'status': status, 'request_id': None})
             raise SoevApiError(status, 'upstream_error', 'soev-api request failed') from None
+        finally:
+            log.debug(
+                'soev-api request',
+                extra={
+                    'path': path.split('?', 1)[0],
+                    'status': status,
+                    'duration_ms': round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
         log.log(
             logging.INFO if response.is_success else logging.WARNING,
             'soev-api response',

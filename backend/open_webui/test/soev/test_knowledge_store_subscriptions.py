@@ -63,10 +63,12 @@ async def test_members_list_reached_documents_under_the_kb(subscribed_store):
 async def test_counts_include_reached_documents(subscribed_store):
     """The visible collection count includes both owned and subscribed corpus documents."""
     env = subscribed_store
-    env.responses.append(httpx.Response(200, json={'key': 'kb', 'document_count': len(env.documents)}))
+    env.responses.append(
+        httpx.Response(200, json={'data': [{'key': 'kb', 'document_count': len(env.documents)}], 'next_cursor': None})
+    )
     assert await env.store.get_file_counts_by_knowledge_ids(['kb'], user_id='alice') == {'kb': 3}
     assert len(env.requests) == 1
-    assert env.requests[0].url.path == '/v1/collections/kb'
+    assert env.requests[0].url.path == '/v1/collections'
     assert env.requests[0].headers['X-Soev-Subject'] == 'test-assertion'
     assert not env.responses
 
@@ -259,3 +261,54 @@ async def test_virtual_directories_are_read_only(folder_store):
         assert error.value.status_code == 403
         assert error.value.detail == {'code': 'synced_folder_read_only'}
     assert not folder_store.requests
+
+
+@pytest.mark.asyncio
+async def test_opening_a_kb_fetches_each_resource_once(folder_store):
+    """A metadata, items and sync request each fetch a resource at most once in its own scope."""
+    from collections import Counter
+
+    from open_webui.soev.cloud_sync import CloudSync
+    from open_webui.soev.request_cache import request_cache
+
+    env = folder_store
+    counts = []
+    operations = [
+        lambda: env.store.get_knowledge_by_id('kb'),
+        lambda: env.store.search_files_by_id('kb', 'alice', {'directory_id': None}),
+        lambda: CloudSync(env.client, 'owui:user:alice').sync_status('kb'),
+    ]
+    for operation in operations:
+        env.requests.clear()
+        with request_cache():
+            await operation()
+        resources = Counter(str(request.url) for request in env.requests)
+        assert all(count == 1 for count in resources.values()), resources
+        counts.append(len(env.requests))
+    assert counts == [1, 6, 3]
+
+
+@pytest.mark.asyncio
+async def test_counts_use_one_collection_listing(folder_store):
+    """Counts read the listing once even when multiple KB ids are requested."""
+    env = folder_store
+    assert await env.store.get_file_counts_by_knowledge_ids(['kb', 'absent'], user_id='alice') == {'kb': 4}
+    assert [request.url.path for request in env.requests] == ['/v1/collections']
+
+
+@pytest.mark.asyncio
+async def test_schedule_listing_is_shared_with_sync_status_in_one_request(folder_store):
+    """Folder projection and status share schedules if they run in the same request."""
+    import asyncio
+
+    from open_webui.soev.cloud_sync import CloudSync
+    from open_webui.soev.request_cache import request_cache
+
+    env = folder_store
+    with request_cache():
+        await asyncio.gather(
+            env.store.search_files_by_id('kb', 'alice', {'directory_id': None}),
+            CloudSync(env.client, 'owui:user:alice').sync_status('kb'),
+        )
+    assert sum(request.url.path == '/v1/schedules' for request in env.requests) == 1
+    assert sum(request.url.path == '/v1/collections/kb' for request in env.requests) == 1
