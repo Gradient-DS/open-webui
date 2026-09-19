@@ -19,7 +19,7 @@
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import { runIsLive, type SchedulePair } from '../utils/cloudSync';
-	import { sourceState, skippedReason, type SourceState } from '../utils/sourceState';
+	import { sourceState, sourceTiming, skippedReason, type SourceState } from '../utils/sourceState';
 
 	dayjs.extend(relativeTime);
 	const i18n = getContext<Writable<I18n>>('i18n');
@@ -74,6 +74,7 @@
 	};
 	$: schedule = pair.content ?? pair.acl!;
 	$: view = sourceState(pair, schedule.connection);
+	$: timing = sourceTiming(view, (time) => dayjs(time).locale($i18n.language).fromNow());
 	$: badge =
 		view.state === 'error' &&
 		(schedule.document_count ?? schedule.last_run?.counts?.landed ?? 0) === 0 &&
@@ -157,17 +158,10 @@
 				{view.path}
 			</p>{/if}
 		<p class="text-xs text-gray-500 dark:text-gray-400">
-			{$i18n.t('Last synced {{time}} · {{count}} documents', {
-				time: view.lastSyncedAt
-					? dayjs(view.lastSyncedAt).locale($i18n.language).fromNow()
-					: $i18n.t('Not synced yet'),
-				count: view.documents
-			})}
+			{$i18n.t(timing.lastSync.key, timing.lastSync.values)}
 		</p>
-		{#if view.nextDueAt}<p class="text-xs text-gray-500 dark:text-gray-400">
-				{$i18n.t('Next check {{time}}', {
-					time: dayjs(view.nextDueAt).locale($i18n.language).fromNow()
-				})}
+		{#if timing.nextCheck}<p class="text-xs text-gray-500 dark:text-gray-400">
+				{$i18n.t(timing.nextCheck.key, timing.nextCheck.values)}
 			</p>{/if}
 		{#if view.otherKbs > 0}<p class="text-xs text-gray-500 dark:text-gray-400">
 				{$i18n.t('Also in {{count}} other knowledge bases', { count: view.otherKbs })}

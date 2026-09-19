@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule, SyncRun } from '$lib/apis/cloudSync';
-import { sourceState, skippedReason } from './sourceState';
+import { sourceState, sourceTiming, skippedReason } from './sourceState';
 
 const connection: Connection = { id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' };
 const run: SyncRun = {
@@ -200,4 +200,45 @@ it('shows the current reach instead of the last run landed count', () => {
 		view({ document_count: undefined, last_run: { ...run, counts: { landed: 9 } } }).documents
 	).toBe(9);
 	expect(view({ document_count: undefined }).documents).toBe(0);
+});
+
+describe('source timing copy', () => {
+	const now = Date.parse('2026-09-19T10:00:00Z');
+	it('omits the last synced label before the first sync', () => {
+		expect(
+			sourceTiming({ lastSyncedAt: null, nextDueAt: null, documents: 0 }, () => 'relative', now)
+		).toEqual({
+			lastSync: { key: 'Not synced yet · {{count}} documents', values: { count: 0 } },
+			nextCheck: null
+		});
+	});
+	it.each(['2026-09-19T09:59:59Z', '2026-09-19T10:00:00Z'])(
+		'shows overdue checks as soon as possible: %s',
+		(nextDueAt) => {
+			expect(
+				sourceTiming(
+					{ lastSyncedAt: null, nextDueAt, documents: 3 },
+					() => 'a few seconds ago',
+					now
+				).nextCheck
+			).toEqual({ key: 'Next check: as soon as possible', values: {} });
+		}
+	);
+	it('keeps relative times for completed syncs and future checks', () => {
+		const lastSyncedAt = '2026-09-19T09:00:00Z';
+		const nextDueAt = '2026-09-19T11:00:00Z';
+		expect(
+			sourceTiming(
+				{ lastSyncedAt, nextDueAt, documents: 12 },
+				(time) => (time === lastSyncedAt ? 'an hour ago' : 'in an hour'),
+				now
+			)
+		).toEqual({
+			lastSync: {
+				key: 'Last synced {{time}} · {{count}} documents',
+				values: { time: 'an hour ago', count: 12 }
+			},
+			nextCheck: { key: 'Next check {{time}}', values: { time: 'in an hour' } }
+		});
+	});
 });

@@ -103,3 +103,23 @@ export function skippedReason(code: string): string {
 		)[code] ?? code
 	);
 }
+
+export function sourceTiming(
+	view: Pick<SourceView, 'lastSyncedAt' | 'nextDueAt' | 'documents'>,
+	relative: (time: string) => string,
+	now = Date.now()
+) {
+	return {
+		lastSync: view.lastSyncedAt
+			? {
+					key: 'Last synced {{time}} · {{count}} documents',
+					values: { time: relative(view.lastSyncedAt), count: view.documents }
+				}
+			: { key: 'Not synced yet · {{count}} documents', values: { count: view.documents } },
+		nextCheck: !view.nextDueAt
+			? null
+			: Date.parse(view.nextDueAt) <= now
+				? { key: 'Next check: as soon as possible', values: {} }
+				: { key: 'Next check {{time}}', values: { time: relative(view.nextDueAt) } }
+	};
+}
