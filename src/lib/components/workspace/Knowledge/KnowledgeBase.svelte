@@ -58,6 +58,7 @@
 		connectResult,
 		connectionOutcome,
 		reconnectConnections,
+		shouldRefetchSyncItems,
 		runIsLive
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
@@ -948,23 +949,25 @@
 
 	let finishingConnectionId: string | null = null;
 	let liveSyncPolls = 0;
+	let extraLivePoll = false;
 	const refreshCloudSync = async () => {
 		if (!knowledge || destroyed) return false;
 		const request = ++syncStatusRequest;
 		const status = await cloudSync.getSyncStatus(localStorage.token, knowledge.id);
 		if (destroyed || request !== syncStatusRequest) return false;
-		const wasLive = schedules.some((schedule) => runIsLive(schedule.last_run));
+		const previous = schedules;
 		schedules = status.schedules;
 		syncStatusError = false;
 		const isLive = schedules.some((schedule) => runIsLive(schedule.last_run));
 		liveSyncPolls = isLive ? liveSyncPolls + 1 : 0;
-		if ((isLive && liveSyncPolls % 5 === 0) || (wasLive && !isLive)) await getItemsPage();
+		if (shouldRefetchSyncItems(previous, schedules, liveSyncPolls)) await getItemsPage();
 		return isLive;
 	};
 
 	/** Re-arm the poll now rather than waiting out an idle tick. */
 	const repollCloudSyncSoon = () => {
 		if (destroyed) return;
+		extraLivePoll = true;
 		clearTimeout(syncPoll);
 		syncPoll = setTimeout(pollCloudSyncStatus, 0);
 	};
@@ -977,7 +980,11 @@
 			syncStatusError = true;
 		} finally {
 			if (!destroyed)
-				syncPoll = setTimeout(pollCloudSyncStatus, live ? SYNC_POLL_LIVE_MS : SYNC_POLL_IDLE_MS);
+				syncPoll = setTimeout(
+					pollCloudSyncStatus,
+					live || extraLivePoll ? SYNC_POLL_LIVE_MS : SYNC_POLL_IDLE_MS
+				);
+			extraLivePoll = false;
 		}
 	};
 
@@ -1200,8 +1207,8 @@
 			};
 			for (const schedule of targets)
 				await actions[action](localStorage.token, knowledge.id, schedule.id);
-			repollCloudSyncSoon();
 			await refreshCloudSync();
+			repollCloudSyncSoon();
 		} catch (error) {
 			if (
 				action === 'run' &&

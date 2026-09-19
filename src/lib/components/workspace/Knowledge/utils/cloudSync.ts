@@ -154,3 +154,26 @@ export function connectionOutcome(
 	if (connection.lifecycle === 'enabled') return { status: 'done' };
 	return { status: elapsedMs >= 120000 ? 'gave_up' : 'waiting' };
 }
+
+export function shouldRefetchSyncItems(
+	previous: Schedule[],
+	current: Schedule[],
+	livePolls: number
+): boolean {
+	const isLive = current.some((schedule) => runIsLive(schedule.last_run));
+	const completedRuns = (schedules: Schedule[]) =>
+		JSON.stringify(
+			schedules
+				.map((schedule) => [
+					schedule.id,
+					schedule.last_run?.id ?? null,
+					schedule.last_run?.finished_at ?? null
+				])
+				.sort((a, b) => a[0]!.localeCompare(b[0]!))
+		);
+	return (
+		(isLive && livePolls % 5 === 0) ||
+		(!isLive && previous.some((schedule) => runIsLive(schedule.last_run))) ||
+		completedRuns(previous) !== completedRuns(current)
+	);
+}

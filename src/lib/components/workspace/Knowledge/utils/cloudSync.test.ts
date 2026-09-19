@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import {
 	connectionOutcome,
+	shouldRefetchSyncItems,
 	pairSchedules,
 	connectResult,
 	googleDriveScope,
@@ -221,4 +222,46 @@ it('keeps an owner mismatch visible even when the connection lifecycle is enable
 		last_error: 'owner_mismatch'
 	};
 	expect(reconnectConnections([{ connection } as Schedule], null)).toEqual([connection]);
+});
+
+describe('sync file list refresh', () => {
+	const schedule = scheduleFixture('s', 'content');
+	const running = { ...schedule, last_run: { id: 'r', started_at: '2026-09-19T10:00:00Z' } };
+	const finished = {
+		...running,
+		last_run: {
+			...running.last_run,
+			outcome: 'succeeded' as const,
+			finished_at: '2026-09-19T10:01:00Z'
+		}
+	};
+	it('refreshes when a run finishes between idle polls', () => {
+		expect(shouldRefetchSyncItems([schedule], [finished], 0)).toBe(true);
+		expect(
+			shouldRefetchSyncItems(
+				[finished],
+				[{ ...finished, last_run: { ...finished.last_run, id: 'r2' } }],
+				0
+			)
+		).toBe(true);
+		expect(
+			shouldRefetchSyncItems(
+				[finished],
+				[{ ...finished, last_run: { ...finished.last_run, finished_at: '2026-09-19T10:02:00Z' } }],
+				0
+			)
+		).toBe(true);
+	});
+	it('refreshes on live to idle and periodically while live', () => {
+		expect(shouldRefetchSyncItems([running], [finished], 0)).toBe(true);
+		expect(shouldRefetchSyncItems([running], [running], 5)).toBe(true);
+		expect(shouldRefetchSyncItems([running], [running], 4)).toBe(false);
+	});
+	it('ignores order and unchanged idle snapshots but catches subscriptions changing', () => {
+		const other = scheduleFixture('other', 'acl_refresh');
+		expect(shouldRefetchSyncItems([finished, other], [other, finished], 0)).toBe(false);
+		expect(shouldRefetchSyncItems([finished], [finished], 0)).toBe(false);
+		expect(shouldRefetchSyncItems([finished, other], [finished], 0)).toBe(true);
+		expect(shouldRefetchSyncItems([], [], 0)).toBe(false);
+	});
 });
