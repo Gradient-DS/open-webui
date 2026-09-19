@@ -128,6 +128,7 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
         'collection_key': 'corpus:drive',
         'subscribers': ['kb-1', 'kb-2'],
         'subscriber_count': 2,
+        'document_count': 12,
         'source_kind': 'onedrive',
         'last_run': {
             'id': 'run-1',

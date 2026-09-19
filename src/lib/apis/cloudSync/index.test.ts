@@ -56,7 +56,8 @@ describe('cloud-sync thin router', () => {
 			schedules: [
 				{
 					id: 's',
-					last_run: { status: 'running', observed: 3 },
+					document_count: 12,
+					last_run: { id: 'run', outcome: null, counts: { fetched: 3 } },
 					connection: { lifecycle: 'suspended:reauth' }
 				}
 			]

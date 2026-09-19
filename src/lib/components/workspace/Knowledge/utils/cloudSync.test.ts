@@ -157,6 +157,7 @@ const scheduleFixture = (
 	connection_id: 'c',
 	subscribers: ['kb'],
 	subscriber_count: 1,
+	document_count: 0,
 	cadence_minutes: 60,
 	source_kind: 'onedrive',
 	lifecycle: 'enabled',

@@ -228,7 +228,9 @@ class FakeSoevApi:
     def _schedules(self, request, credential, subject):
         self._require(credential, 'connect' if subject else 'mint')
         owner = subject or self.credentials[credential]
-        rows = [row for key, row in self.schedules.items() if self.schedule_owners[key] == owner]
+        rows = [
+            {'document_count': 0, **row} for key, row in self.schedules.items() if self.schedule_owners[key] == owner
+        ]
         if 'collection_key' in request.url.params:
             rows = [row for row in rows if request.url.params['collection_key'] in row['subscribers']]
         if 'kind' in request.url.params:

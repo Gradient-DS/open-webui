@@ -72,7 +72,7 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 		provider: CLOUD_PROVIDERS[schedule.source_kind]?.label ?? schedule.source_kind,
 		lastSyncedAt: run?.finished_at ?? (run?.outcome ? run.started_at : null),
 		nextDueAt: schedule.next_due_at ?? null,
-		documents: run?.counts?.landed ?? 0,
+		documents: schedule.document_count ?? run?.counts?.landed ?? 0,
 		skipped: schedules.reduce((total, item) => total + (item.last_run?.counts?.failed ?? 0), 0),
 		otherKbs: Math.max(0, (schedule.subscriber_count ?? 1) - 1),
 		primary:

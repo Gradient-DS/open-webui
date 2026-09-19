@@ -121,6 +121,7 @@ it('uses current schedule errors before stale run errors', () => {
 it('keeps source metadata, timestamps and counts skipped files across both runs', () => {
 	const content = schedule({
 		label: 'Reports',
+		document_count: 12,
 		path: '/Team/Reports',
 		next_due_at: '2026-09-18T11:00:00Z',
 		last_run: {
@@ -157,7 +158,9 @@ it('falls back to file and folder labels for legacy and ACL-only sources', () =>
 	expect(view().label).toBe('Folder');
 	expect(view({ scope: { single_file: true } }).label).toBe('File');
 	expect(view({ scope: { include_descendants: false } }).label).toBe('File');
-	expect(sourceState({ acl: schedule({ kind: 'acl_refresh' }) }, connection)).toMatchObject({
+	expect(
+		sourceState({ acl: schedule({ kind: 'acl_refresh', document_count: 0 }) }, connection)
+	).toMatchObject({
 		label: 'Folder',
 		primary: null,
 		documents: 0
@@ -186,3 +189,15 @@ it.each([
 	['access_revoked', 'No access'],
 	['new_code', 'new_code']
 ])('names skipped reason %s', (code, reason) => expect(skippedReason(code)).toBe(reason));
+
+it('shows the current reach instead of the last run landed count', () => {
+	const last_run = { ...run, counts: { landed: 0, unchanged: 12 } };
+	expect(view({ document_count: 12, last_run }).documents).toBe(12);
+	expect(view({ document_count: 0, last_run: { ...run, counts: { landed: 9 } } }).documents).toBe(
+		0
+	);
+	expect(
+		view({ document_count: undefined, last_run: { ...run, counts: { landed: 9 } } }).documents
+	).toBe(9);
+	expect(view({ document_count: undefined }).documents).toBe(0);
+});
