@@ -185,23 +185,33 @@ it('pairs schedules by connection and deep-equal scope regardless of key or sche
 });
 
 it.each([
-	['enabled', null, false, 0, { status: 'done' }],
-	['enabled', 'invalid_grant', false, 0, { status: 'failed', reason: 'invalid_grant' }],
-	['pending', 'consent_denied', false, 0, { status: 'failed', reason: 'consent_denied' }],
-	['suspended:reauth', null, false, 0, { status: 'failed', reason: 'suspended:reauth' }],
-	['revoked', null, true, 2, { status: 'failed', reason: 'revoked' }],
-	['pending', null, false, 0, { status: 'waiting' }],
-	['pending', null, true, 1, { status: 'waiting' }],
-	['pending', null, true, 2, { status: 'gave_up' }],
-	['enabled', null, true, 2, { status: 'done' }]
+	['enabled', null, 0, { status: 'done' }],
+	['enabled', 'invalid_grant', 0, { status: 'failed', reason: 'invalid_grant' }],
+	['pending', 'consent_denied', 0, { status: 'failed', reason: 'consent_denied' }],
+	['suspended:reauth', null, 0, { status: 'failed', reason: 'suspended:reauth' }],
+	['revoked', null, 6000, { status: 'failed', reason: 'revoked' }],
+	['pending', null, 0, { status: 'waiting' }],
+	['pending', null, 119999, { status: 'waiting' }],
+	['pending', null, 120000, { status: 'gave_up' }],
+	['enabled', null, 120000, { status: 'done' }]
 ] as const)(
-	'resolves connection %s with error %s, popup closed %s, check %i',
-	(lifecycle, last_error, closed, checks, expected) => {
+	'resolves connection %s with error %s after %i ms',
+	(lifecycle, last_error, elapsed, expected) => {
 		expect(
-			connectionOutcome({ id: 'c', source_kind: 'onedrive', lifecycle, last_error }, closed, checks)
+			connectionOutcome({ id: 'c', source_kind: 'onedrive', lifecycle, last_error }, elapsed)
 		).toEqual(expected);
 	}
 );
+
+it('continues pending polls after the popup closes until the exchange enables the connection', () => {
+	const connection = { id: 'c', source_kind: 'onedrive', lifecycle: 'pending' };
+	for (const elapsed of [3000, 6000, 21000, 90000, 117000]) {
+		expect(connectionOutcome(connection, elapsed)).toEqual({ status: 'waiting' });
+	}
+	expect(connectionOutcome({ ...connection, lifecycle: 'enabled' }, 117000)).toEqual({
+		status: 'done'
+	});
+});
 
 it('keeps an owner mismatch visible even when the connection lifecycle is enabled', () => {
 	const connection: Connection = {

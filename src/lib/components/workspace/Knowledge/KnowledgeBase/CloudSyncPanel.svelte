@@ -13,6 +13,7 @@
 	}>();
 	export let schedules: Schedule[] = [];
 	export let reconnectNeeded: Connection[] = [];
+	export let finishingConnectionId: string | null = null;
 	export let syncStatusError = false;
 	export let writeAccess = false;
 	export let busy = false;
@@ -38,7 +39,10 @@
 	aria-label={$i18n.t('Sources')}
 >
 	<h3 class="mb-1 text-sm font-medium">{$i18n.t('Sources')}</h3>
-	{#each reconnectNeeded.filter((connection) => !schedules.some((schedule) => schedule.connection_id === connection.id)) as connection (connection.id)}
+	{#if finishingConnectionId}
+		<p role="status" class="mb-2 text-sm">{$i18n.t('Finishing the connection…')}</p>
+	{/if}
+	{#each reconnectNeeded.filter((connection) => connection.id !== finishingConnectionId && !schedules.some((schedule) => schedule.connection_id === connection.id)) as connection (connection.id)}
 		<div
 			class="mb-2 flex items-center justify-between gap-3 rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950"
 			role="status"

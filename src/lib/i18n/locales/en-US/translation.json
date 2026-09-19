@@ -3890,5 +3890,7 @@
   "No connected accounts yet. Add a source in a knowledge base to connect.": "No connected accounts yet. Add a source in a knowledge base to connect.",
   "Failed to disconnect account.": "Failed to disconnect account.",
   "Disconnect": "Disconnect",
-  "Retry loading accounts": "Retry loading accounts"
+  "Retry loading accounts": "Retry loading accounts",
+  "Finishing the connection…": "Finishing the connection…",
+  "The connection is still pending. Please try again.": "The connection is still pending. Please try again."
 }

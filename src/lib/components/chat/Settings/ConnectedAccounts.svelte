@@ -72,7 +72,7 @@
 		let finished = false;
 		let checking = false;
 		let ready = false;
-		let checksSincePopupClosed = 0;
+		const authorizationStartedAt = Date.now();
 		const finish = () => {
 			if (finished) return;
 			finished = true;
@@ -91,8 +91,7 @@
 				const connection = await cloudSync.getConnection(localStorage.token, account.id);
 				if (finished) return;
 				accounts = accounts.map((item) => (item.id === connection.id ? connection : item));
-				checksSincePopupClosed = popup.closed ? checksSincePopupClosed + 1 : 0;
-				const outcome = connectionOutcome(connection, popup.closed, checksSincePopupClosed);
+				const outcome = connectionOutcome(connection, Date.now() - authorizationStartedAt);
 				if (outcome.status === 'done') finish();
 				else if (outcome.status === 'failed' || outcome.status === 'gave_up') {
 					toast.error($i18n.t('Authorization was not completed.'));

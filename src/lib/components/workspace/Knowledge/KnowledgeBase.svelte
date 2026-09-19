@@ -946,6 +946,7 @@
 	const SYNC_POLL_LIVE_MS = 2000;
 	const SYNC_POLL_IDLE_MS = 30000;
 
+	let finishingConnectionId: string | null = null;
 	let liveSyncPolls = 0;
 	const refreshCloudSync = async () => {
 		if (!knowledge || destroyed) return false;
@@ -993,11 +994,12 @@
 		return new Promise((resolve) => {
 			let expectedId = connectionId;
 			let checking = false;
-			let checksSincePopupClosed = 0;
+			let exchangeStartedAt: number | null = null;
 			let finished = false;
 			const finish = (connection: Connection | null) => {
 				if (finished) return;
 				finished = true;
+				finishingConnectionId = null;
 				clearInterval(checkClosed);
 				clearTimeout(timeout);
 				window.removeEventListener('message', handleMessage);
@@ -1005,21 +1007,34 @@
 				closeAuthorization = undefined;
 				resolve(connection);
 			};
+			const pendingTimeout = () => {
+				toast.info($i18n.t('The connection is still pending. Please try again.'));
+				finish(null);
+			};
+			const beginExchangeWait = () => {
+				if (exchangeStartedAt !== null) return;
+				exchangeStartedAt = Date.now();
+				finishingConnectionId = expectedId ?? null;
+				clearTimeout(timeout);
+				timeout = setTimeout(pendingTimeout, 120000);
+			};
 			const checkConnection = async () => {
 				if (!expectedId || checking || finished) return;
+				if (popup.closed) beginExchangeWait();
 				checking = true;
 				try {
 					const connection = await cloudSync.getConnection(localStorage.token, expectedId);
 					if (finished) return;
 					connecting = connection;
-					checksSincePopupClosed = popup.closed ? checksSincePopupClosed + 1 : 0;
-					const outcome = connectionOutcome(connection, popup.closed, checksSincePopupClosed);
+					const outcome = connectionOutcome(
+						connection,
+						exchangeStartedAt === null ? 0 : Date.now() - exchangeStartedAt
+					);
 					if (outcome.status === 'failed') {
 						toast.error($i18n.t('Authorization failed: {{reason}}', { reason: outcome.reason }));
 						finish(null);
 					} else if (outcome.status === 'gave_up') {
-						toast.error($i18n.t('Authorization was not completed.'));
-						finish(null);
+						pendingTimeout();
 					} else if (outcome.status === 'done') {
 						schedules = schedules.map((schedule) =>
 							schedule.connection_id === connection.id ? { ...schedule, connection } : schedule
@@ -1027,24 +1042,25 @@
 						finish(connection);
 						await refreshCloudSync();
 					}
-				} catch (error) {
-					reportCloudError(error);
-					finish(null);
+				} catch {
+					// Keep polling through transient read failures until the exchange deadline.
 				} finally {
 					checking = false;
 				}
 			};
 			const handleMessage = (event: MessageEvent) => {
 				const result = connectResult(event, window.location.origin, popup, expectedId);
-				if (result === 'pending') void checkConnection();
-				else if (result === 'error' || result === 'invalid') {
+				if (result === 'pending') {
+					beginExchangeWait();
+					void checkConnection();
+				} else if (result === 'error' || result === 'invalid') {
 					toast.error($i18n.t('Authorization failed'));
 					finish(null);
 				}
 			};
 			window.addEventListener('message', handleMessage);
 			const checkClosed = setInterval(() => void checkConnection(), 3000);
-			const timeout = setTimeout(() => {
+			let timeout = setTimeout(() => {
 				toast.error($i18n.t('Authorization timed out. Please try again.'));
 				finish(null);
 			}, 120000);
@@ -2009,10 +2025,11 @@
 		<div
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
-			{#if activeProvider || schedules.length}
+			{#if activeProvider || schedules.length || finishingConnectionId}
 				<CloudSyncPanel
 					{schedules}
 					{reconnectNeeded}
+					{finishingConnectionId}
 					{syncStatusError}
 					writeAccess={knowledge.write_access}
 					busy={cloudActionBusy}

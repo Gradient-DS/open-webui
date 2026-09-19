@@ -3890,5 +3890,7 @@
   "No connected accounts yet. Add a source in a knowledge base to connect.": "Nog geen verbonden accounts. Voeg een bron toe aan een kennisbank om verbinding te maken.",
   "Failed to disconnect account.": "Verbinding met het account verbreken is mislukt.",
   "Disconnect": "Verbinding verbreken",
-  "Retry loading accounts": "Accounts opnieuw laden"
+  "Retry loading accounts": "Accounts opnieuw laden",
+  "Finishing the connection…": "Verbinding wordt afgerond…",
+  "The connection is still pending. Please try again.": "De verbinding wordt nog afgerond. Probeer het opnieuw."
 }

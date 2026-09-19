@@ -143,11 +143,14 @@ export function pairSchedules(schedules: Schedule[]): SchedulePair[] {
 
 export function connectionOutcome(
 	connection: Connection,
-	popupClosed: boolean,
-	checksSincePopupClosed: number
+	elapsedMs: number
 ): { status: 'done' | 'waiting' | 'gave_up' } | { status: 'failed'; reason: string } {
-	if (connection.last_error || !['pending', 'enabled'].includes(connection.lifecycle))
+	if (
+		connection.last_error ||
+		connection.lifecycle.startsWith('suspended:') ||
+		connection.lifecycle === 'revoked'
+	)
 		return { status: 'failed', reason: connection.last_error ?? connection.lifecycle };
 	if (connection.lifecycle === 'enabled') return { status: 'done' };
-	return { status: popupClosed && checksSincePopupClosed >= 2 ? 'gave_up' : 'waiting' };
+	return { status: elapsedMs >= 120000 ? 'gave_up' : 'waiting' };
 }
