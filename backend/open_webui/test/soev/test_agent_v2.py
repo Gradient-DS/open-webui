@@ -33,34 +33,36 @@ class Chat:
         stream: bool = True,
         **metadata: Any,
     ) -> StreamingResponse | dict:
-        return await agent.call_agent_api(
-            None,
-            {
-                'model': 'custom',
-                'stream': stream,
-                'messages': [
-                    {'role': 'system', 'content': 'HISTORY MUST NOT LEAVE'},
-                    {'role': 'user', 'content': 'wrong input'},
-                ],
-            },
-            {
-                'chat_id': chat_id,
-                'message_id': message_id,
-                'user_message_id': 'user-' + message_id,
-                'user_message': {'id': 'user-' + message_id, 'content': text},
-                'parent_message_id': parent,
-                'user_id': 'alice',
-                'model': {'info': {'base_model_id': 'llm'}},
-                **metadata,
-            },
-            {},
-            override_agent='test',
-        )
+        async with asyncio.timeout(8):
+            return await agent.call_agent_api(
+                None,
+                {
+                    'model': 'custom',
+                    'stream': stream,
+                    'messages': [
+                        {'role': 'system', 'content': 'HISTORY MUST NOT LEAVE'},
+                        {'role': 'user', 'content': 'wrong input'},
+                    ],
+                },
+                {
+                    'chat_id': chat_id,
+                    'message_id': message_id,
+                    'user_message_id': 'user-' + message_id,
+                    'user_message': {'id': 'user-' + message_id, 'content': text},
+                    'parent_message_id': parent,
+                    'user_id': 'alice',
+                    'model': {'info': {'base_model_id': 'llm'}},
+                    **metadata,
+                },
+                {},
+                override_agent='test',
+            )
 
     async def turn(self, text: Any, message_id: str, parent: str | None = None, **kwargs: Any) -> list[dict]:
         response = await self.response(text, message_id, parent, **kwargs)
         assert isinstance(response, StreamingResponse)
-        raw = ''.join([part async for part in response.body_iterator])
+        async with asyncio.timeout(8):
+            raw = ''.join([part async for part in response.body_iterator])
         assert raw.endswith('data: [DONE]\n\n')
         return [
             json.loads(line[6:]) for line in raw.splitlines() if line.startswith('data: ') and line != 'data: [DONE]'
@@ -415,8 +417,8 @@ async def test_generator_close_cancels_only_its_own_input(chat: Chat) -> None:
     chat.api.chat.terminal_state = 'running'
     response = await chat.response('question', 'a1')
     assert isinstance(response, StreamingResponse)
-    assert 'partial' in await anext(response.body_iterator)
-    await response.body_iterator.aclose()
+    assert 'partial' in await asyncio.wait_for(anext(response.body_iterator), timeout=2)
+    await asyncio.wait_for(response.body_iterator.aclose(), timeout=2)
     assert chat.mutations()[-1] == ('/v1/chat/threads/thr-1/cancel', {'input': 2})
     assert chat.api.chat.threads['thr-1']['state'] == 'idle'
 
@@ -426,10 +428,10 @@ async def test_late_disconnect_guard_does_not_cancel_a_newer_turn(chat: Chat) ->
     chat.api.chat.turns = [[('delta', {'text': 'partial'})]]
     response = await chat.response('first', 'a1')
     assert isinstance(response, StreamingResponse)
-    await anext(response.body_iterator)
+    await asyncio.wait_for(anext(response.body_iterator), timeout=2)
     await chat.turn('second', 'a2', 'a1')
     chat.api.chat.threads['thr-1']['state'] = 'running'
-    await response.body_iterator.aclose()
+    await asyncio.wait_for(response.body_iterator.aclose(), timeout=2)
     assert chat.mutations()[-1] == ('/v1/chat/threads/thr-1/cancel', {'input': 2})
     assert chat.api.chat.threads['thr-1']['state'] == 'running'
 
@@ -500,12 +502,13 @@ async def test_explicit_stop_and_broken_transport_cancel_the_submitted_input(
         assert chunks[-1] == agent_v2._error('service_unavailable')
     else:
         task = asyncio.create_task(chat.turn('question', 'a1'))
-        while not streams:
-            await asyncio.sleep(0)
+        async with asyncio.timeout(2):
+            while not streams:
+                await asyncio.sleep(0)
         await asyncio.wait_for(streams[0].waiting.wait(), timeout=2)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=2)
     assert chat.mutations()[-1] == ('/v1/chat/threads/thr-1/cancel', {'input': 2})
     assert streams[0].closed
     assert chat.api.chat.threads['thr-1']['state'] == 'idle'
@@ -533,7 +536,8 @@ async def test_legacy_stream_preserves_socket_events_and_message_extras(
     monkeypatch.setattr(agent, 'stream_agent_response', stream)
     monkeypatch.setattr(agent, 'get_event_emitter', AsyncMock(return_value=emit))
     response = agent._build_streaming_response(None, {}, {'chat_id': 'chat', 'message_id': 'a1'})
-    raw = ''.join([part async for part in response.body_iterator])
+    async with asyncio.timeout(8):
+        raw = ''.join([part async for part in response.body_iterator])
     assert raw == 'data: {"choices": [{"delta": {"content": "legacy answer"}}]}\n\ndata: [DONE]\n\n'
     assert emitted == [{'type': event.event_type, 'data': event.data} for event in events]
     assert chat.messages['chat', 'a1'] == {

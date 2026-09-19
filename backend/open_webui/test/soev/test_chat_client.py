@@ -2,13 +2,19 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 import httpx
 import pytest
 from open_webui.soev import identity
-from open_webui.soev.client import SoevApiError
+from open_webui.soev.client import ChatEvent, SoevApiError
 from open_webui.test.soev.fake_api import FakeSoevApi
+
+
+async def _collect(stream: AsyncIterator[ChatEvent], *, timeout: float = 8) -> list[ChatEvent]:
+    async with asyncio.timeout(timeout), aclosing(stream):
+        return [event async for event in stream]
 
 
 @pytest.mark.asyncio
@@ -21,15 +27,12 @@ async def test_reconnected_tail_close_reads_terminality_without_a_status_frame(
     chat_http.chat.close_after = close_after
     chat_http.chat.tail_closes = True
 
-    async def collect() -> list:
-        return [
-            event
-            async for event in client.chat_stream(
-                '/v1/chat/threads', {'agent': 'test', 'input': 'hello', 'collections': []}, as_user='owui:user:alice'
-            )
-        ]
-
-    frames = await asyncio.wait_for(collect(), timeout=2)
+    frames = await _collect(
+        client.chat_stream(
+            '/v1/chat/threads', {'agent': 'test', 'input': 'hello', 'collections': []}, as_user='owui:user:alice'
+        ),
+        timeout=2,
+    )
     assert frames[-1].event == 'status'
     assert frames[-1].data['state'] == 'idle'
     assert all(b'event: status' not in tail.content for tail in chat_http.chat.tails)
@@ -49,12 +52,11 @@ async def test_reconnected_tail_checks_root_outputs_without_reading_every_frame(
             ('model_output', {'content': 'Answer'}),
         ]
     ]
-    frames = [
-        event
-        async for event in client.chat_stream(
+    frames = await _collect(
+        client.chat_stream(
             '/v1/chat/threads', {'agent': 'test', 'input': 'hello', 'collections': []}, as_user='owui:user:alice'
         )
-    ]
+    )
     assert [event.event for event in frames][-5:] == ['model_output', 'tool_output', 'source', 'model_output', 'status']
     assert sum(request.url.path == '/v1/chat/threads/thr-1' for request in chat_http.chat.requests) == 2
 
@@ -78,15 +80,12 @@ async def test_reconnected_tail_waits_for_lease_release_after_last_output(
 
     monkeypatch.setattr(chat_http.chat, '_view', view)
 
-    async def collect() -> list:
-        return [
-            event
-            async for event in client.chat_stream(
-                '/v1/chat/threads', {'agent': 'test', 'input': 'hello', 'collections': []}, as_user='owui:user:alice'
-            )
-        ]
-
-    frames = await asyncio.wait_for(collect(), timeout=7)
+    frames = await _collect(
+        client.chat_stream(
+            '/v1/chat/threads', {'agent': 'test', 'input': 'hello', 'collections': []}, as_user='owui:user:alice'
+        ),
+        timeout=7,
+    )
     assert frames[-1].event == 'status'
     assert frames[-1].data['state'] == 'idle'
     assert len(reads) == 2
@@ -100,8 +99,7 @@ async def test_stream_reconnects_without_reposting_input(chat_http: FakeSoevApi)
     stream = client.chat_stream(
         '/v1/chat/threads', {'agent': 'test', 'input': 'hello', 'collections': []}, as_user='owui:user:alice'
     )
-    async with aclosing(stream):
-        frames = [frame async for frame in stream]
+    frames = await _collect(stream)
     assert [frame.event for frame in frames] == [
         'connection',
         'opened',
@@ -127,10 +125,11 @@ async def test_stream_reconnects_without_reposting_input(chat_http: FakeSoevApi)
 async def test_fork_delivers_thread_id_and_preserves_owner(chat_http: FakeSoevApi) -> None:
     client = identity.build_client()
     await identity.ensure_link('owui:user:alice', client)
-    async for _ in client.chat_stream(
-        '/v1/chat/threads', {'agent': 'test', 'input': 'hello', 'collections': []}, as_user='owui:user:alice'
-    ):
-        pass
+    await _collect(
+        client.chat_stream(
+            '/v1/chat/threads', {'agent': 'test', 'input': 'hello', 'collections': []}, as_user='owui:user:alice'
+        )
+    )
     branch = await client.chat_post('/v1/chat/threads/thr-1/fork', {'at': 1}, as_user='owui:user:alice')
     assert branch['thread_id'] == 'thr-2'
     assert branch['status']['position'] == 1
@@ -154,8 +153,7 @@ async def test_stream_keeps_relay_error_codes(
         )
     )
     with pytest.raises(SoevApiError) as caught:
-        async for _ in identity.build_client().chat_stream('/v1/chat/threads', {}, as_user='owui:user:alice'):
-            pass
+        await _collect(identity.build_client().chat_stream('/v1/chat/threads', {}, as_user='owui:user:alice'))
     assert (caught.value.status, caught.value.code) == (status, code)
     assert len(requests) == 1
 
@@ -165,12 +163,11 @@ async def test_terminal_error_is_not_retried(chat_http: FakeSoevApi) -> None:
     client = identity.build_client()
     await identity.ensure_link('owui:user:alice', client)
     chat_http.chat.turns = [[('error', {'code': 'service_unavailable', 'detail': 'failed'})]]
-    frames = [
-        event
-        async for event in client.chat_stream(
+    frames = await _collect(
+        client.chat_stream(
             '/v1/chat/threads', {'agent': 'test', 'input': 'hello', 'collections': []}, as_user='owui:user:alice'
         )
-    ]
+    )
     assert frames[-1].event == 'error'
     assert len(chat_http.chat.requests) == 1
     assert json.loads(chat_http.chat.requests[0].content)['input'] == 'hello'

@@ -259,7 +259,6 @@ class AgentTurn:
         chunks = [_chunk({'content': text})] if text else []
         state = event.data.get('state')
         await self.emit('status', {'description': state or 'error', 'done': True})
-        await self.emit('panel_filter', {'ns': sorted(self.turn_sources)})
         if event.event == 'error':
             chunks.append(_error(event.data.get('code', 'service_unavailable')))
         elif state not in {'idle', 'waiting'}:
