@@ -10,6 +10,8 @@ import re
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
+from fastapi import HTTPException
+
 from open_webui.soev.acting import acting_ref
 from open_webui.soev.client import SoevApiError
 
@@ -514,8 +516,9 @@ class SoevKnowledgeTable:
         filters = filter or {}
         path = self._directory_path(knowledge_id, filters.get('directory_id'))
         members = await self._members(knowledge_id, user_id=user_id)
+        view = await self._directory_view(knowledge_id, members=members, user_id=user_id)
         if 'directory_id' in filters:
-            members = {source: member for source, member in members.items() if (member[1] or '') == '/'.join(path)}
+            members = {source: member for source, member in members.items() if path in view[1].get(source, [])}
         by_id = {source: member[0] for source, member in members.items()}
         collection = await self._collection(knowledge_id, user_id=user_id)
         owner_id = self._knowledge(collection).user_id if collection else ''
@@ -528,9 +531,9 @@ class SoevKnowledgeTable:
         _sort_file_rows(rows, filters)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
-        directories = await self._directory_models(knowledge_id, path, user_id=user_id)
-        rollups = await self._rollups(knowledge_id, [row.id for row in directories], user_id=user_id)
-        breadcrumbs = await self._breadcrumbs(filters.get('directory_id'), user_id=user_id)
+        directories = await self._directory_models(knowledge_id, path, user_id=user_id, view=view)
+        rollups = await self._rollups(knowledge_id, [row.id for row in directories], user_id=user_id, view=view)
+        breadcrumbs = await self._breadcrumbs(filters.get('directory_id'), user_id=user_id, view=view)
         return self._projection.knowledge_file_list_of(
             [self._projection.file_response_of(row, by_id[row['id']], metadata_only=metadata_only) for row in rows],
             total=total,
@@ -574,6 +577,53 @@ class SoevKnowledgeTable:
             raise ValueError('Directory belongs to a different collection')
         return path
 
+    @staticmethod
+    def _assert_writable_path(path):
+        if path and path[0].startswith('\0sync:'):
+            raise HTTPException(status_code=403, detail={'code': 'synced_folder_read_only'})
+
+    async def _directory_view(self, key, *, members=None, user_id=None):
+        schedules = await self._pages('/v1/schedules', user_id=user_id, params={'collection_key': key})
+        folders = {
+            schedule['id']: schedule
+            for schedule in schedules
+            if schedule['kind'] == 'content'
+            and schedule.get('lifecycle') != 'revoked'
+            and not schedule.get('scope', {}).get('single_file', False)
+            and schedule.get('scope', {}).get('include_descendants', True)
+        }
+        singles = {
+            schedule['id'] for schedule in schedules if schedule['kind'] == 'content' and schedule['id'] not in folders
+        }
+        members = await self._members(key, user_id=user_id) if members is None else members
+        collection = await self._collection(key, user_id=user_id)
+        directories, paths = {}, {}
+        if collection is None:
+            return directories, paths
+        for schedule_id, schedule in folders.items():
+            root = ('\0sync:' + schedule_id,)
+            model = self._folder_model(collection, {'path': root[0], 'created_at': collection['created_at']})
+            model.name = schedule.get('label') or 'Folder'
+            directories[root] = model
+        for source_id, (document, path) in members.items():
+            reach = set((document or {}).get('schedule_ids', []))
+            relative = tuple(path.split('/')) if path else ()
+            locations = []
+            for schedule_id in sorted(reach & folders.keys()):
+                location = ('\0sync:' + schedule_id,) + relative
+                locations.append(location)
+                for end in range(2, len(location) + 1):
+                    prefix = location[:end]
+                    directories[prefix] = self._folder_model(
+                        collection, {'path': '/'.join(prefix), 'created_at': collection['created_at']}
+                    )
+            if not reach:
+                locations.append(relative)
+            elif reach & singles or not locations:
+                locations.append(())
+            paths[source_id] = locations
+        return directories, paths
+
     async def _folder_entries(self, key, path=(), *, user_id=None):
         params = {'under': '/'.join(path)}
         folders, documents = [], []
@@ -602,15 +652,21 @@ class SoevKnowledgeTable:
             owner_id=owner,
         )
 
-    async def _directory_models(self, key, path=(), *, user_id=None):
+    async def _directory_models(self, key, path=(), *, user_id=None, view=None):
         collection = await self._collection(key, user_id=user_id)
         if collection is None:
             return []
+        view = await self._directory_view(key, user_id=user_id) if view is None else view
+        virtual = [model for location, model in view[0].items() if location[:-1] == path]
+        if path and path[0].startswith('\0sync:'):
+            return sorted(virtual, key=lambda row: (row.name, row.id))
         folders, _ = await self._folder_entries(key, path, user_id=user_id)
-        return [self._folder_model(collection, folder) for folder in sorted(folders, key=lambda row: row['path'])]
+        real = [self._folder_model(collection, folder) for folder in sorted(folders, key=lambda row: row['path'])]
+        return sorted(real + virtual, key=lambda row: (row.name, row.id))
 
     async def create_directory(self, knowledge_id, name, user_id, parent_id=None, db=None):
         path = self._directory_path(knowledge_id, parent_id) + (name,)
+        self._assert_writable_path(path)
         self._projection.directory_id(knowledge_id, path)
         await self._send('POST', self._path(knowledge_id) + '/folders', {'path': '/'.join(path)}, user_id=user_id)
         rows = await self._directory_models(knowledge_id, path[:-1], user_id=user_id)
@@ -627,28 +683,32 @@ class SoevKnowledgeTable:
         collection = await self._collection(knowledge_id)
         if collection is None:
             return []
+        virtual, _ = await self._directory_view(knowledge_id)
         return [
             self._folder_model(collection, folder)
             for folder in sorted(await self._folder_tree(knowledge_id), key=lambda row: row['path'])
-        ]
+        ] + list(virtual.values())
 
-    async def _directory(self, directory_id, *, user_id=None):
+    async def _directory(self, directory_id, *, user_id=None, view=None):
         key, path = self._projection.directory_of(directory_id)
         if not path:
             return None
-        rows = await self._directory_models(key, path[:-1], user_id=user_id)
+        rows = await self._directory_models(key, path[:-1], user_id=user_id, view=view)
         return next((row for row in rows if row.id == directory_id), None)
 
     async def get_directory_by_id(self, directory_id, db=None):
         return await self._directory(directory_id)
 
-    async def _breadcrumbs(self, directory_id, *, user_id=None):
+    async def _breadcrumbs(self, directory_id, *, user_id=None, view=None):
         if not directory_id:
             return []
         key, path = self._projection.directory_of(directory_id)
+        view = await self._directory_view(key, user_id=user_id) if view is None else view
         rows = []
         for end in range(1, len(path) + 1):
-            directory = await self._directory(self._projection.directory_id(key, path[:end]), user_id=user_id)
+            directory = await self._directory(
+                self._projection.directory_id(key, path[:end]), user_id=user_id, view=view
+            )
             if directory is not None:
                 rows.append(directory)
         return rows
@@ -671,8 +731,8 @@ class SoevKnowledgeTable:
             for file in files
         ]
 
-    async def _rollups(self, knowledge_id, directory_ids, *, user_id=None):
-        paths = {identifier: '/'.join(self._directory_path(knowledge_id, identifier)) for identifier in directory_ids}
+    async def _rollups(self, knowledge_id, directory_ids, *, user_id=None, view=None):
+        paths = {identifier: self._directory_path(knowledge_id, identifier) for identifier in directory_ids}
         if not paths:
             return {}
         members = await self._members(knowledge_id, user_id=user_id)
@@ -684,12 +744,13 @@ class SoevKnowledgeTable:
                 list(members), catalog={source: (member[0], owner_id) for source, member in members.items()}
             )
         }
+        view = await self._directory_view(knowledge_id, members=members, user_id=user_id) if view is None else view
         result = {}
         for identifier, path in paths.items():
             matches = [
                 source_id
                 for source_id, (_, member_path) in members.items()
-                if source_id in files and ((member_path or '') == path or (member_path or '').startswith(path + '/'))
+                if source_id in files and any(location[: len(path)] == path for location in view[1].get(source_id, []))
             ]
             if not matches:
                 continue
@@ -719,7 +780,9 @@ class SoevKnowledgeTable:
     async def update_directory(self, directory_id, name=None, parent_id='__unset__', db=None):
         try:
             key, old = self._projection.directory_of(directory_id)
+            self._assert_writable_path(old)
             parent = old[:-1] if parent_id == '__unset__' else self._directory_path(key, parent_id)
+            self._assert_writable_path(parent)
             new = parent + ((name if name is not None else old[-1]),)
             identifier = self._projection.directory_id(key, new)
             if new[: len(old)] == old and new != old:
@@ -738,6 +801,7 @@ class SoevKnowledgeTable:
     async def delete_directory(self, directory_id, move_files_to_parent=True, db=None):
         try:
             key, path = self._projection.directory_of(directory_id)
+            self._assert_writable_path(path)
             if move_files_to_parent:
                 _, documents = await self._folder_entries(key, path)
                 for document in documents:
@@ -751,6 +815,7 @@ class SoevKnowledgeTable:
             return False
 
     async def _move_document(self, key, source_id, path, *, user_id=None):
+        self._assert_writable_path(path)
         await self._send(
             'POST',
             self._path(key) + '/documents/' + quote(source_id, safe='') + '/move',
@@ -768,6 +833,7 @@ class SoevKnowledgeTable:
     async def add_file_to_knowledge_by_id(self, knowledge_id, file_id, user_id, directory_id=None, db=None):
         from open_webui.models.files import Files
 
+        self._assert_writable_path(self._directory_path(knowledge_id, directory_id))
         collection = await self._collection(knowledge_id, user_id=user_id)
         if collection is None:
             return None

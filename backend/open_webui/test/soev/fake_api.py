@@ -533,6 +533,7 @@ class FakeSoevApi:
             self.inherited_access.add((key, source_id))
         row = {
             'source_id': source_id,
+            'schedule_ids': [],
             'collection_key': key,
             'filename': source_id + '.txt',
             'visibility': collection['visibility'],
