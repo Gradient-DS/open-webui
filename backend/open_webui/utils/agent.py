@@ -1,53 +1,17 @@
-"""
-Agent API client for OpenWebUI integration.
+"""Route agent turns and adapt legacy SSE to Open WebUI chat and socket events."""
 
-[Gradient] This module connects OpenWebUI to an external agent service that
-replaces built-in web search, RAG, and LLM orchestration.
-
-Architecture (two layers, designed for later extraction):
-
-  Layer 1 — Transport client (no OpenWebUI dependency):
-    - AgentPayload: dataclass defining the agent API request schema
-    - build_agent_payload(): constructs the payload from raw inputs
-    - stream_agent_response(): async generator yielding parsed SSE events
-    These can be extracted into the agent API's own Python package.
-
-  Layer 2 — OpenWebUI integration glue:
-    - call_agent_api(): extracts OpenWebUI metadata, calls transport layer,
-      routes custom SSE events to Socket.IO, returns StreamingResponse
-
-SSE protocol from agent:
-    Custom events (routed to Socket.IO, not passed to process_chat_response):
-        event: status
-        data: {"description": "Searching...", "done": false}
-
-        event: source
-        data: {"name": "doc.pdf", "url": "..."}
-
-        event: present_ui
-        data: {"name": "choice", "props": {...}}
-
-        event: context_usage
-        data: {"tokens_used": int, "tokens_budget": int, "fraction": float}
-
-    Standard OpenAI chunks (passed through to process_chat_response):
-        data: {"choices": [{"delta": {"content": "..."}}]}
-
-    End of stream:
-        data: [DONE]
-"""
-
+import datetime as dt
 import json
 import logging
 import os
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, field
-from datetime import timedelta
 from typing import Any
 
 import aiohttp
 from open_webui.config import ENABLE_SKILL_EXECUTION, FEATURE_SKILL_FILES
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
+from open_webui.models.agent_configs import AgentConfigs
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
 from open_webui.socket.main import get_event_emitter
@@ -166,7 +130,7 @@ def _maybe_attach_fetch_token(skill_entry: dict[str, Any], user_id: str) -> dict
         return skill_entry
     token = create_token(
         data={'id': user_id, 'skill_id': skill_id, 'purpose': 'skill_file_read'},
-        expires_delta=timedelta(seconds=120),
+        expires_delta=dt.timedelta(seconds=120),
     )
     return {**skill_entry, 'fetch_token': token}
 
@@ -423,6 +387,11 @@ async def call_agent_api(
     # ``agent`` from the payload and the agents service uses its own
     # ``default_agent``.
     selected_agent = override_agent or await Config.get('agent_api.selected_agent') or None
+    agent_config = await AgentConfigs.get_agent_config_by_id(selected_agent) if selected_agent else None
+    if agent_config and agent_config.meta.get('runtime') == 'v2':
+        from open_webui.utils.agent_v2 import call_agent_v2
+
+        return await call_agent_v2(form_data, metadata, agent=selected_agent, model=llm_model)
 
     # [Gradient] Forward the turn anchor so the agent service can rewind its
     # persisted thread state on retry/regenerate. The agents side forks its
@@ -513,194 +482,52 @@ async def _call_agent_api_non_streaming(
         await session.close()
 
 
+async def _persist_agent_updates(metadata: dict[str, Any], updates: dict[str, Any]) -> None:
+    chat_id, message_id = metadata.get('chat_id'), metadata.get('message_id')
+    updates = {key: value for key, value in updates.items() if value is not None}
+    if updates and chat_id and message_id:
+        try:
+            await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, updates)
+        except Exception as error:
+            log.warning('Error persisting message updates: %s', error)
+
+
+async def _emit_agent_event(emitter: Any, event: SSEEvent) -> None:
+    if emitter:
+        try:
+            await emitter({'type': event.event_type, 'data': event.data})
+        except Exception as error:
+            log.warning('Error emitting %s event: %s', event.event_type, error)
+
+
 def _build_streaming_response(
-    request,
+    request: Any,
     payload: dict[str, Any],
     metadata: dict[str, Any],
 ) -> StreamingResponse:
-    """Build a StreamingResponse that streams from the agent API.
-
-    Custom SSE events (status, source) are routed to Socket.IO via
-    get_event_emitter. Standard OpenAI data lines are passed through
-    to the response body for process_chat_response to consume.
-    """
-
-    async def body_generator():
-        # [Gradient] Source events are emitted individually via Socket.IO
-        # as they arrive, so citation chips render while the answer streams.
-        # get_event_emitter is async (Phase 1.5 upstream); await inside the
-        # generator since the enclosing _build_streaming_response is sync.
+    async def body_generator() -> AsyncIterator[str]:
         event_emitter = await get_event_emitter(metadata)
-        # [Gradient] Accumulate every ``event: subagent`` payload so the
-        # message's persisted ``subagents`` field carries the full lifecycle
-        # for rehydration on reload. The frontend's ``reduceSubAgents``
-        # consumes this same flat list, so persisting verbatim avoids any
-        # FE/BE shape divergence. Empty for non-bezwaar agents.
         subagent_events: list[dict] = []
-        # [Gradient] Latest post-turn context-budget estimate. Persisted onto
-        # the message on `done` so the banner rehydrates on reload (mirrors
-        # subagents). Latest wins across multi-iteration turns.
-        last_context_usage: dict | None = None
+        updates: dict[str, Any] = {}
+        socket_events = {'status', 'source', 'present_ui', 'subagent', 'context_usage', 'panel_filter'}
         try:
             async for sse_event in stream_agent_response(AGENT_API_BASE_URL, payload):
                 if sse_event.event_type == 'done':
-                    # [Gradient] Persist accumulated per-turn message state in a
-                    # single upsert: the subagent lifecycle and the latest
-                    # context-budget estimate. Both rehydrate the message on
-                    # reload. Upsert merges into the existing message, so writing
-                    # them together never clobbers either field.
-                    updates: dict[str, Any] = {}
-                    if subagent_events:
-                        updates['subagents'] = subagent_events
-                    if last_context_usage is not None:
-                        updates['contextUsage'] = last_context_usage
-                    if updates:
-                        chat_id = metadata.get('chat_id')
-                        message_id = metadata.get('message_id')
-                        if chat_id and message_id:
-                            try:
-                                await Chats.upsert_message_to_chat_by_id_and_message_id(
-                                    chat_id,
-                                    message_id,
-                                    updates,
-                                )
-                            except Exception as e:
-                                log.warning(f'Error persisting message updates: {e}')
+                    await _persist_agent_updates(metadata, updates)
                     break
-
-                if sse_event.event_type == 'status':
-                    # [Gradient] Route status events to Socket.IO so the UI
-                    # shows status spinners in real time.
-                    if event_emitter:
-                        try:
-                            await event_emitter(
-                                {
-                                    'type': 'status',
-                                    'data': sse_event.data,
-                                }
-                            )
-                        except Exception as e:
-                            log.warning(f'Error emitting status event: {e}')
-                    continue
-
-                if sse_event.event_type == 'source':
-                    # [Gradient] Emit each source immediately so citation
-                    # chips render while the answer is still streaming.
-                    if event_emitter:
-                        try:
-                            await event_emitter(
-                                {
-                                    'type': 'source',
-                                    'data': sse_event.data,
-                                }
-                            )
-                        except Exception as e:
-                            log.warning(f'Error emitting source event: {e}')
-                    continue
-
-                if sse_event.event_type == 'present_ui':
-                    # [Gradient] Generative-UI directive — route to the
-                    # frontend over Socket.IO so the message-level
-                    # component dispatcher can render it. Payload shape:
-                    # {"name": "<component>", "props": {...}}.
-                    if event_emitter:
-                        try:
-                            await event_emitter(
-                                {
-                                    'type': 'present_ui',
-                                    'data': sse_event.data,
-                                }
-                            )
-                        except Exception as e:
-                            log.warning(f'Error emitting present_ui event: {e}')
-                    continue
-
                 if sse_event.event_type == 'subagent':
-                    # [Gradient] SubAgent lifecycle / streaming events for the
-                    # Leiden bezwaar agent (and any future multi-SubAgent flow).
-                    # Payload is the typed event from the agent backend with a
-                    # ``phase`` discriminator: start / token / reasoning /
-                    # status / source / step / done.
-                    # The frontend's <SubAgentGroup> reducer keys cards by
-                    # parallel_group_id and agent_id; per-token streams append
-                    # to the matching card's text_buffer.
                     subagent_events.append(sse_event.data)
-                    if event_emitter:
-                        try:
-                            await event_emitter(
-                                {
-                                    'type': 'subagent',
-                                    'data': sse_event.data,
-                                }
-                            )
-                        except Exception as e:
-                            log.warning(f'Error emitting subagent event: {e}')
-                    continue
-
+                    updates['subagents'] = subagent_events
                 if sse_event.event_type == 'context_usage':
-                    # [Gradient] Post-turn context-budget estimate from the
-                    # agent service. Payload shape:
-                    # {"tokens_used": int, "tokens_budget": int, "fraction": float}.
-                    # The frontend renders a banner above the chat input when
-                    # fraction crosses a threshold. Retain the latest payload so
-                    # it persists onto the message on `done` (banner rehydration).
-                    last_context_usage = sse_event.data
-                    if event_emitter:
-                        try:
-                            await event_emitter(
-                                {
-                                    'type': 'context_usage',
-                                    'data': sse_event.data,
-                                }
-                            )
-                        except Exception as e:
-                            log.warning(f'Error emitting context_usage event: {e}')
+                    updates['contextUsage'] = sse_event.data
+                if sse_event.event_type in socket_events:
+                    await _emit_agent_event(event_emitter, sse_event)
                     continue
-
-                if sse_event.event_type == 'panel_filter':
-                    # [Gradient] Per-message citation-panel scope. Payload
-                    # shape: {"ns": [int, ...]} naming the cumulative source
-                    # ids that should appear in the chip list for THIS
-                    # message. The backend keeps dispatching `source` events
-                    # cumulatively so inline `[N]` tokens resolve via the
-                    # dense-array lookup across cross-turn cites; this event
-                    # prevents the rendered chip list from accumulating.
-                    if event_emitter:
-                        try:
-                            await event_emitter(
-                                {
-                                    'type': 'panel_filter',
-                                    'data': sse_event.data,
-                                }
-                            )
-                        except Exception as e:
-                            log.warning(f'Error emitting panel_filter event: {e}')
-                    continue
-
-                # Standard OpenAI chunk — pass through as SSE data line
-                if isinstance(sse_event.data, dict):
-                    yield f'data: {json.dumps(sse_event.data)}\n\n'
-                else:
-                    yield f'data: {sse_event.data}\n\n'
-
-        except Exception as e:
-            # describe_exception, not f'{e}': aiohttp raises a bare
-            # asyncio.TimeoutError on total-timeout expiry, and str() of it is
-            # ''. Interpolating it produced 'Agent API streaming error: ' in
-            # the log and 'Agent API error: ' in the user's banner — the
-            # defect that made GRA-174 unattributable.
-            described = describe_exception(e)
-            log.error(
-                'Agent API streaming error',
-                extra={'timeout_s': AGENT_API_TIMEOUT, **error_fields(e)},
-            )
-            # Emit an OpenAI-shape error object (no `choices`) so the UI
-            # renders a proper error banner instead of inline text.
-            yield _error_sse_chunk(f'Agent API error: {described}')
-
+                data = json.dumps(sse_event.data) if isinstance(sse_event.data, dict) else sse_event.data
+                yield f'data: {data}\n\n'
+        except Exception as error:
+            log.error('Agent API streaming error', extra={'timeout_s': AGENT_API_TIMEOUT, **error_fields(error)})
+            yield _error_sse_chunk(f'Agent API error: {describe_exception(error)}')
         yield 'data: [DONE]\n\n'
 
-    return StreamingResponse(
-        body_generator(),
-        media_type='text/event-stream',
-    )
+    return StreamingResponse(body_generator(), media_type='text/event-stream')
