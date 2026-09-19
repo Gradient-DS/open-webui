@@ -1920,9 +1920,9 @@ def _assert_synced_grants_unchanged(knowledge, requested: list[dict] | None) -> 
         )
 
 
-# [Gradient] Destructive workspace actions are blocked while a cloud source is subscribed.
+# [Gradient] Reset is blocked while a cloud source is subscribed.
 def _assert_not_synced_kb(knowledge) -> None:
-    """Block deletion and reset of cloud-synced KBs, including requests by admins."""
+    """Block reset of cloud-synced KBs, including requests by admins."""
     if is_synced_kb(knowledge):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1944,8 +1944,6 @@ async def delete_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-
-    _assert_not_synced_kb(knowledge)  # [Gradient]
 
     if (
         knowledge.user_id != user.id

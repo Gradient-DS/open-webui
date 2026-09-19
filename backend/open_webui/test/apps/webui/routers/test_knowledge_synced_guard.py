@@ -1,4 +1,4 @@
-"""Synced knowledge bases reject grant changes and destructive workspace actions."""
+"""Synced knowledge bases allow deletion but reject grant changes and reset."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -117,16 +117,16 @@ def test_same_grants_is_allowed(api, provider, route, grants):
 
 @pytest.mark.parametrize('provider', ['onedrive', 'google_drive'])
 @pytest.mark.parametrize('role', ['user', 'admin'])
-@pytest.mark.parametrize('action', ['delete', 'reset'])
-def test_delete_and_reset_keep_their_guard(api, provider, role, action):
-    """Owners and admins cannot delete or reset a KB projected from a cloud subscription."""
+def test_delete_is_allowed_and_reset_keeps_its_guard(api, provider, role):
+    """Owners and admins can delete a subscribed KB but cannot reset it."""
     api.kb.type = provider
     api.user.role = role
-    path = '/knowledge/kb/' + action
-    result = api.browser.delete(path) if action == 'delete' else api.browser.post(path)
+    result = api.browser.delete('/knowledge/kb/delete')
+    assert result.status_code == 200
+    api.writes.delete.assert_awaited_once()
+    result = api.browser.post('/knowledge/kb/reset')
     assert result.status_code == 403
     assert result.json()['detail'] == 'This knowledge base is synced from a cloud source.'
-    api.writes.delete.assert_not_awaited()
     api.writes.reset.assert_not_awaited()
 
 
@@ -162,7 +162,7 @@ def test_legacy_confluence_metadata_does_not_mark_a_kb_as_synced(api, provider):
     assert not is_synced_kb(api.kb)
 
 
-@pytest.mark.parametrize('action', ['update', 'access/update', 'external', 'delete', 'reset'])
+@pytest.mark.parametrize('action', ['update', 'access/update', 'external', 'reset'])
 def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, monkeypatch, action):
     """Collection subscriptions enforce every guard for a co-writer with no viewer-owned schedules."""
     api.user.id = 'co-writer'
@@ -194,14 +194,12 @@ def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, m
 
         monkeypatch.setattr(knowledge.Knowledges, 'get_knowledge_by_id', external_knowledge)
     monkeypatch.setattr(knowledge.AccessGrants, 'has_access', AsyncMock(return_value=True))
-    if action == 'delete':
-        result = api.browser.delete('/knowledge/kb/delete')
-    elif action == 'reset':
+    if action == 'reset':
         result = api.browser.post('/knowledge/kb/reset')
     else:
         result = update(api, action, GRANTS)
     assert result.status_code == 403
-    if action in ('delete', 'reset'):
+    if action == 'reset':
         assert result.json()['detail'] == 'This knowledge base is synced from a cloud source.'
     else:
         assert result.json()['detail']['code'] == 'synced_kb_not_shareable'
