@@ -426,9 +426,14 @@ async def call_agent_api(
     # ``default_agent``.
     selected_agent = override_agent or await Config.get('agent_api.selected_agent') or None
     # [Gradient] Route v2 agents through server-owned threads.
+    from open_webui.env import AGENT_API_RUNTIME
+
     agent_config = await AgentConfigs.get_agent_config_by_id(selected_agent) if selected_agent else None
-    if agent_config and agent_config.meta.get('runtime') == 'v2':
-        return await call_agent_v2(form_data, metadata, agent=selected_agent, model=agent_config.meta.get('model'))
+    agent_meta = agent_config.meta if agent_config else {}
+    if AGENT_API_RUNTIME == 'v2' or agent_meta.get('runtime') == 'v2':
+        agent_model = agent_meta.get('model')
+        model = agent_model if isinstance(agent_model, str) and agent_model else llm_model
+        return await call_agent_v2(form_data, metadata, agent=selected_agent, model=model)
 
     # [Gradient] Forward the turn anchor so the agent service can rewind its
     # persisted thread state on retry/regenerate. The agents side forks its

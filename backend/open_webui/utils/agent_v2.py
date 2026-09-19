@@ -1,4 +1,6 @@
-"""Adapt one OWUI turn to a server-owned thread and the existing chat renderer."""
+"""Adapt one OWUI turn to a server-owned thread and the existing chat renderer.
+Feed the model picker with an OpenAI-type connection whose base URL is
+<SOEV_API_URL>/v1/chat and whose API key is the soev-api key."""
 
 import asyncio
 import json
@@ -21,8 +23,14 @@ _MARKER = re.compile(r'\[([^\[\]]+)\]')
 _ROOT = '/v1/chat/threads'
 
 
-def _input_text(metadata: dict[str, Any]) -> str:
-    content = (metadata.get('user_message') or {}).get('content')
+def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
+    message = metadata.get('user_message')
+    if message is None:
+        message = next(
+            (message for message in reversed(form_data.get('messages') or []) if message.get('role') == 'user'),
+            {},
+        )
+    content = message.get('content')
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -47,7 +55,7 @@ def _chunk(delta: dict[str, Any]) -> dict[str, Any]:
     return {'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]}
 
 
-def _error(code: str) -> dict[str, Any]:
+def _error(code: str, *, constraint: str | None = None, model: str | None = None) -> dict[str, Any]:
     messages = {
         'not_found': 'The agent thread is unavailable.',
         'thread_active': 'The agent thread is already running or needs recovery.',
@@ -56,7 +64,10 @@ def _error(code: str) -> dict[str, Any]:
         'halted': 'The agent stopped because a step failed.',
         'orphaned': 'The agent turn was interrupted and needs recovery.',
     }
-    return {'error': {'code': code, 'message': messages.get(code, 'The agent request failed.')}}
+    message = messages.get(code, 'The agent request failed.')
+    if code == 'invalid_field' and constraint == 'chat:model':
+        message = f'The agent could not accept model "{model}". Select another model.'
+    return {'error': {'code': code, 'message': message}}
 
 
 class Citations:
@@ -110,6 +121,7 @@ class AgentTurn:
         self.citations = Citations()
         self.turn_sources: set[int] = set()
         self.partial = ''
+        self.model: str | None = None
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
     def path(self, operation: str = '') -> str:
@@ -260,12 +272,19 @@ class AgentTurn:
         state = event.data.get('state')
         await self.emit('status', {'description': state or 'error', 'done': True})
         if event.event == 'error':
-            chunks.append(_error(event.data.get('code', 'service_unavailable')))
+            chunks.append(
+                _error(
+                    event.data.get('code', 'service_unavailable'),
+                    constraint=event.data.get('constraint'),
+                    model=self.model,
+                )
+            )
         elif state not in {'idle', 'waiting'}:
             chunks.append(_error(state or 'service_unavailable'))
         return chunks
 
-    async def run(self, body: dict, agent: str) -> AsyncIterator[dict[str, Any]]:
+    async def run(self, body: dict, agent: str | None) -> AsyncIterator[dict[str, Any]]:
+        self.model = body.get('model')
         try:
             await identity.ensure_link(self.as_user, self.client)
             await self.prepare()
@@ -285,16 +304,19 @@ class AgentTurn:
             raise
         except Exception as error:
             await self.cancel()
-            yield _error(error.code if isinstance(error, SoevApiError) else 'service_unavailable')
+            if isinstance(error, SoevApiError):
+                yield _error(error.code, constraint=error.constraint, model=self.model)
+            else:
+                yield _error('service_unavailable')
 
 
 async def call_agent_v2(
-    form_data: dict[str, Any], metadata: dict[str, Any], *, agent: str, model: str | None = None
+    form_data: dict[str, Any], metadata: dict[str, Any], *, agent: str | None, model: str | None = None
 ) -> StreamingResponse | dict:
-    """Submit only the new user text, using an optional host model configured on the agent."""
+    """Submit one user message; the thread owns the conversation history."""
     user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
     turn = AgentTurn(identity.build_client(), metadata, user_ref)
-    body = {'input': _input_text(metadata), 'collections': _collections(metadata)}
+    body = {'input': _input_text(metadata, form_data), 'collections': _collections(metadata)}
     if isinstance(model, str) and model:
         body['model'] = model
     chunks = turn.run(body, agent)

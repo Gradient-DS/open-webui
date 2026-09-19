@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from open_webui import env
 from open_webui.models.agent_configs import AgentConfigs
 from open_webui.models.chats import Chats
 from open_webui.test.soev.fake_api import FakeSoevApi
@@ -31,6 +32,8 @@ class Chat:
         *,
         chat_id: str = 'chat',
         stream: bool = True,
+        form_data: dict[str, Any] | None = None,
+        override_agent: str | None = 'test',
         **metadata: Any,
     ) -> StreamingResponse | dict:
         async with asyncio.timeout(8):
@@ -43,6 +46,7 @@ class Chat:
                         {'role': 'system', 'content': 'HISTORY MUST NOT LEAVE'},
                         {'role': 'user', 'content': 'wrong input'},
                     ],
+                    **(form_data or {}),
                 },
                 {
                     'chat_id': chat_id,
@@ -55,7 +59,7 @@ class Chat:
                     **metadata,
                 },
                 {},
-                override_agent='test',
+                override_agent=override_agent,
             )
 
     async def turn(self, text: Any, message_id: str, parent: str | None = None, **kwargs: Any) -> list[dict]:
@@ -82,6 +86,7 @@ class Chat:
 @pytest.fixture
 def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> Chat:
     result = Chat(chat_http)
+    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v1')
 
     async def get(chat_id: str, message_id: str) -> dict | None:
         return copy.deepcopy(result.messages.get((chat_id, message_id)))
@@ -110,9 +115,9 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
     for index in range(1, 4):
         await chat.turn(f'turn {index}', f'a{index}', f'a{index - 1}' if index > 1 else None)
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': 'turn 1', 'collections': [], 'agent': 'test'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 2', 'collections': []}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 3', 'collections': []}),
+        ('/v1/chat/threads', {'input': 'turn 1', 'collections': [], 'agent': 'test', 'model': 'llm'}),
+        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 2', 'collections': [], 'model': 'llm'}),
+        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 3', 'collections': [], 'model': 'llm'}),
     ]
     assert [chat.bookmark(f'a{i}') for i in range(1, 4)] == [
         {'thread_id': 'thr-1', 'position': position} for position in (3, 5, 7)
@@ -142,7 +147,7 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
     await chat.turn(text, 'new-answer', parent, chat_id=chat_id)
     assert chat.mutations()[-2:] == [
         ('/v1/chat/threads/thr-1/fork', {'at': at}),
-        ('/v1/chat/threads/thr-2/inputs', {'input': text, 'collections': []}),
+        ('/v1/chat/threads/thr-2/inputs', {'input': text, 'collections': [], 'model': 'llm'}),
     ]
     assert chat.api.chat.threads['thr-1']['events'] == original
     assert chat.bookmark('new-answer', chat_id) == {'thread_id': 'thr-2', 'position': at + 2}
@@ -186,6 +191,7 @@ async def test_one_text_input_and_selected_collection_keys(chat: Chat) -> None:
         'input': 'one\ntwo',
         'collections': ['kb-a', 'kb-b'],
         'agent': 'test',
+        'model': 'llm',
     }
     await chat.turn('next', 'a2', 'a1', files=[{'type': 'collection', 'id': 'kb-c'}])
     assert chat.mutations()[-1][1]['collections'] == ['kb-c']
@@ -313,24 +319,84 @@ async def test_panel_filter_scopes_chips_to_this_turn_with_cumulative_numbers(ch
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('model', [None, '', 123, 'host-inference-endpoint'])
-async def test_only_an_explicit_agent_model_is_forwarded(
-    chat: Chat, monkeypatch: pytest.MonkeyPatch, model: Any
+@pytest.mark.parametrize('picked', [{}, {'info': {'base_model_id': 'llm'}}])
+async def test_agent_model_overrides_the_resolved_picker_model(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, model: Any, picked: dict
 ) -> None:
     monkeypatch.setattr(
         AgentConfigs,
         'get_agent_config_by_id',
         AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2', 'model': model})),
     )
-    await chat.turn('first', 'a1')
-    await chat.turn('second', 'a2', 'a1')
-    await chat.turn('regenerated', 'retry', 'a1')
+    await chat.turn('first', 'a1', model=picked)
+    await chat.turn('second', 'a2', 'a1', model=picked)
+    await chat.turn('regenerated', 'retry', 'a1', model=picked)
     for path, body in chat.mutations():
         if path.endswith('/fork'):
             continue
         if model == 'host-inference-endpoint':
             assert body['model'] == model
         else:
-            assert 'model' not in body
+            assert body['model'] == ('llm' if picked else 'custom')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('meta', [None, {}, {'runtime': 'v1'}, {'runtime': 'v2', 'model': 'agent-model'}])
+@pytest.mark.parametrize('selected_agent', [None, 'test'])
+async def test_environment_routes_every_turn_to_v2(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, meta: dict | None, selected_agent: str | None
+) -> None:
+    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v2')
+    monkeypatch.setattr(agent.Config, 'get', AsyncMock(return_value=selected_agent))
+    monkeypatch.setattr(
+        AgentConfigs,
+        'get_agent_config_by_id',
+        AsyncMock(return_value=SimpleNamespace(meta=meta) if meta is not None else None),
+    )
+    for index in range(1, 3):
+        chunks = await chat.turn(f'turn {index}', f'a{index}', 'a1' if index == 2 else None, override_agent=None)
+        assert content(chunks) == f'Answer: turn {index}'
+    assert [path for path, _ in chat.mutations()] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
+    for _, body in chat.mutations():
+        assert body['model'] == ('agent-model' if selected_agent and meta and 'model' in meta else 'llm')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('continuation', [False, True])
+@pytest.mark.parametrize('sse', [False, True])
+async def test_refused_model_is_named_without_retry_or_default(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, stream: bool, continuation: bool, sse: bool
+) -> None:
+    if continuation:
+        await chat.turn('first', 'a1')
+    problem = {
+        'code': 'invalid_field',
+        'constraint': 'chat:model',
+        'detail': 'private upstream detail',
+    }
+    if sse:
+        chat.api.chat.turns = [[('error', problem)]]
+    else:
+        original = chat.api.chat.handle
+
+        def refuse(request: httpx.Request, body: dict | None, owner: tuple[str, str | None]) -> httpx.Response:
+            if request.method == 'POST':
+                chat.api.chat.requests.append(request)
+                return httpx.Response(422, json=problem, headers={'Content-Type': 'application/problem+json'})
+            return original(request, body, owner)
+
+        monkeypatch.setattr(chat.api.chat, 'handle', refuse)
+    kwargs = {'model': {'info': {'base_model_id': 'refused-model'}}}
+    if stream:
+        result = (await chat.turn('question', 'a2', 'a1' if continuation else None, **kwargs))[-1]
+    else:
+        result = await chat.response('question', 'a2', 'a1' if continuation else None, stream=False, **kwargs)
+    assert result['error']['code'] == 'invalid_field'
+    assert 'refused-model' in result['error']['message']
+    assert 'private upstream detail' not in str(result)
+    assert len(chat.mutations()) == (2 if continuation else 1)
+    assert chat.mutations()[-1][1]['model'] == 'refused-model'
 
 
 @pytest.mark.asyncio
@@ -446,10 +512,45 @@ async def test_non_streaming_still_sends_one_input(chat: Chat) -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_new_input_never_falls_back_to_history(chat: Chat) -> None:
+async def test_explicit_invalid_new_input_never_falls_back_to_history(chat: Chat) -> None:
     with pytest.raises(ValueError, match='user_message'):
         await chat.response(None, 'a1')
     assert not chat.api.chat.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('text', ['last question', [{'type': 'text', 'text': 'last question'}]])
+async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat, stream: bool, text: Any) -> None:
+    messages = [
+        {'role': 'system', 'content': 'private system history'},
+        {'role': 'user', 'content': 'old question'},
+        {'role': 'assistant', 'content': 'old answer'},
+        {'role': 'user', 'content': text},
+        {'role': 'assistant', 'content': 'partial answer'},
+    ]
+    kwargs = {'user_message': None, 'form_data': {'messages': messages}}
+    if stream:
+        assert content(await chat.turn(None, 'a1', **kwargs)) == 'Answer: last question'
+    else:
+        result = await chat.response(None, 'a1', stream=False, **kwargs)
+        assert result['choices'][0]['message']['content'] == 'Answer: last question'
+    assert chat.mutations() == [
+        ('/v1/chat/threads', {'input': 'last question', 'collections': [], 'agent': 'test', 'model': 'llm'})
+    ]
+
+
+@pytest.mark.parametrize(
+    'messages',
+    [
+        [],
+        [{'role': 'assistant', 'content': 'not user text'}],
+        [{'role': 'user', 'content': 'old text'}, {'role': 'user', 'content': None}],
+    ],
+)
+def test_missing_or_invalid_last_user_message_is_rejected(messages: list[dict]) -> None:
+    with pytest.raises(ValueError, match='A v2 agent turn requires user_message text'):
+        agent_v2._input_text({}, {'messages': messages})
 
 
 @pytest.mark.asyncio
