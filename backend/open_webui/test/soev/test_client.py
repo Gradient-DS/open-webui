@@ -541,9 +541,9 @@ async def test_request_debug_log_has_timing_without_credentials_or_query(recorde
     client = SoevClient('https://soev.invalid', 'private-api-key')
     with caplog.at_level(logging.DEBUG, logger='open_webui.soev.client'):
         await client.get('/v1/collections/kb?cursor=private-cursor')
-    record = next(record for record in caplog.records if record.message == 'soev-api request')
-    assert record.path == '/v1/collections/kb'
-    assert record.status == 200
-    assert record.duration_ms >= 0
+    record = next(record for record in caplog.records if record.getMessage().startswith('soev-api request'))
+    message = record.getMessage()
+    assert message.startswith('soev-api request GET /v1/collections/kb 200 ')
+    assert message.endswith('ms')
     assert 'private-api-key' not in str(record.__dict__)
     assert 'private-cursor' not in str(record.__dict__)

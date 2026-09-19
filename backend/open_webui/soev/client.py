@@ -176,13 +176,13 @@ class SoevClient:
             log.warning('soev-api transport failure', extra={'status': status, 'request_id': None})
             raise SoevApiError(status, 'upstream_error', 'soev-api request failed') from None
         finally:
+            # [Gradient] The deployed formatter renders the message only, so the timing rides in it.
             log.debug(
-                'soev-api request',
-                extra={
-                    'path': path.split('?', 1)[0],
-                    'status': status,
-                    'duration_ms': round((time.perf_counter() - started) * 1000, 2),
-                },
+                'soev-api request %s %s %s %.1fms',
+                method,
+                path.split('?', 1)[0],
+                status,
+                (time.perf_counter() - started) * 1000,
             )
         log.log(
             logging.INFO if response.is_success else logging.WARNING,
