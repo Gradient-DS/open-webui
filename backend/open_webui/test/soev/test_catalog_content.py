@@ -72,3 +72,51 @@ async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F
         assert response.headers['content-disposition'] == f"{disposition}; filename*=UTF-8''Caf%C3%A9.pdf"
         assert 'location' not in response.headers
         assert requests[-2].url.path == '/v1/collections/kb/documents/cloud/original'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('rendition', ['# Parsed cloud document', '', None])
+async def test_get_file_by_id_serves_a_catalog_only_document(env, monkeypatch, rendition):  # noqa: F811
+    """The file view returns authorized cloud metadata and parsed text without creating an upload."""
+    from open_webui.models import knowledge
+    from open_webui.routers import files
+
+    monkeypatch.setattr(knowledge, 'Knowledges', env.store)
+    env.api.add_document(
+        'kb',
+        'cloud',
+        filename='CV.docx',
+        content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        rendition=rendition,
+    )
+    env.api.requests.clear()
+    result = await files.get_file_by_id('cloud', user=SimpleNamespace(id='alice', role='user'), db=None)
+    assert result.id == 'cloud'
+    assert result.user_id == 'alice'
+    assert result.filename == 'CV.docx'
+    assert result.meta['content_type'] == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    assert result.meta['soev_catalog_only'] is True
+    assert result.data == {'content': rendition or ''}
+    assert await files.Files.get_file_by_id('cloud') is None
+    assert any(request.url.path == '/v1/collections/kb/documents/cloud/content' for request in env.api.requests)
+    assert not any(request.url.path.endswith('/original') for request in env.api.requests)
+    assert all(request.headers.get('X-Soev-Subject') for request in env.api.requests if request.method == 'GET')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case', ['missing', 'unreadable', 'document_hidden'])
+async def test_get_file_by_id_hides_inaccessible_catalog_documents(env, monkeypatch, case):  # noqa: F811
+    """Even an administrator's file view only resolves catalog members visible to that subject."""
+    from open_webui.models import knowledge
+    from open_webui.routers import files
+
+    monkeypatch.setattr(knowledge, 'Knowledges', env.store)
+    if case == 'unreadable':
+        await seed(env, 'private', owner='bob')
+    if case != 'missing':
+        env.api.add_document(
+            'private' if case == 'unreadable' else 'kb', 'cloud', principals=['owui:user:bob'], rendition='Hidden'
+        )
+    with pytest.raises(HTTPException) as error:
+        await files.get_file_by_id('cloud', user=SimpleNamespace(id='alice', role='admin'), db=None)
+    assert error.value.status_code == 404
