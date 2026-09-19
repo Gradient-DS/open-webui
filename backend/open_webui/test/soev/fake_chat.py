@@ -29,13 +29,15 @@ def sse(kind: str, data: dict[str, Any]) -> bytes:
 
 
 class Tail(httpx.AsyncByteStream):
-    def __init__(self, content: bytes) -> None:
+    def __init__(self, content: bytes, *, close: bool = False) -> None:
         self.content = content
+        self.close = close
         self.closed = False
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
         yield self.content
-        await asyncio.Event().wait()
+        if not self.close:
+            await asyncio.Event().wait()
 
     async def aclose(self) -> None:
         self.closed = True
@@ -48,6 +50,7 @@ class FakeChatApi:
         self.requests: list[httpx.Request] = []
         self.close_after: int | None = None
         self.tails: list[Tail] = []
+        self.tail_closes = False
         self.terminal_state = 'idle'
 
     def handle(self, request: httpx.Request, body: dict | None, owner: tuple[str, str | None]) -> httpx.Response:
@@ -86,7 +89,10 @@ class FakeChatApi:
             return httpx.Response(200, json=self._view(thread))
         if operation == 'events':
             after = int(request.headers.get('Last-Event-ID', '0'))
-            tail = Tail(b''.join(sse(event['type'], event) for event in thread['events'] if event['position'] > after))
+            tail = Tail(
+                b''.join(sse(event['type'], event) for event in thread['events'] if event['position'] > after),
+                close=self.tail_closes,
+            )
             self.tails.append(tail)
             return httpx.Response(200, stream=tail, headers={'Content-Type': 'text/event-stream'})
         if operation == 'fork':

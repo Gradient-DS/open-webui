@@ -47,6 +47,34 @@ async def _chat_frames(response: httpx.Response) -> AsyncIterator[ChatEvent]:
             position = int(value)
 
 
+async def _chat_activity(response: httpx.Response, *, following: bool) -> AsyncIterator[ChatEvent | None]:
+    frames = _chat_frames(response)
+    pending = asyncio.create_task(anext(frames))
+    try:
+        while True:
+            ready, _ = await asyncio.wait({pending}, timeout=5.0 if following else None)
+            if not ready:
+                yield None
+                continue
+            try:
+                frame = pending.result()
+            except StopAsyncIteration:
+                yield None
+                return
+            yield frame
+            pending = asyncio.create_task(anext(frames))
+    finally:
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        await frames.aclose()
+
+
+def _chat_checkpoint(frame: ChatEvent | None) -> bool:
+    return frame is None or (
+        frame.data.get('stream') == 'root' and frame.event in {'model_output', 'request', 'failure', 'cancelled'}
+    )
+
+
 def _chat_thread_id(response: httpx.Response) -> str:
     thread_id = response.headers.get('X-Soev-Thread-Id')
     if not thread_id:
@@ -158,31 +186,19 @@ class SoevClient:
     async def _follow_chat(
         self, response: httpx.Response, thread_id: str, as_user: str, after: int, following: bool
     ) -> AsyncIterator[ChatEvent]:
-        frames = _chat_frames(response)
-        pending = asyncio.create_task(anext(frames))
-        try:
-            while True:
-                ready, _ = await asyncio.wait({pending}, timeout=1.0 if following else None)
-                if not ready:
-                    # The events route stays open after a turn ends and has no closing status frame.
+        async with aclosing(_chat_activity(response, following=following)) as frames:
+            async for frame in frames:
+                if frame is not None:
+                    if frame.position is not None:
+                        after = max(after, frame.position)
+                    yield frame
+                if following and _chat_checkpoint(frame):
+                    # Events tails never send status; the idle check also covers lease release after the last event.
                     thread = await self.get(f'/v1/chat/threads/{quote(thread_id, safe="")}', as_user=as_user)
                     status = thread['status']
                     if status['state'] != 'running' and status['position'] <= after:
                         yield ChatEvent('status', status)
                         return
-                    continue
-                try:
-                    frame = pending.result()
-                except StopAsyncIteration:
-                    return
-                if frame.position is not None:
-                    after = max(after, frame.position)
-                yield frame
-                pending = asyncio.create_task(anext(frames))
-        finally:
-            pending.cancel()
-            await asyncio.gather(pending, return_exceptions=True)
-            await frames.aclose()
 
     async def get(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> dict:
         key = (self._base_url, self._api_key, as_user, path, tuple(sorted((params or {}).items())))

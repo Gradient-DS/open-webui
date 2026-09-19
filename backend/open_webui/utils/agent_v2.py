@@ -60,6 +60,8 @@ def _error(code: str) -> dict[str, Any]:
 
 
 class Citations:
+    """Keep source numbers stable while buffering incomplete citation markers."""
+
     def __init__(self) -> None:
         self.sources: dict[str, dict[str, Any]] = {}
         self.pending = ''
@@ -85,7 +87,7 @@ class Citations:
         text = self.pending + text
         self.pending = ''
         start = text.rfind('[')
-        if not final and start >= 0 and ']' not in text[start:]:
+        if not final and start >= 0 and ']' not in text[start:] and len(text) - start <= 64:
             text, self.pending = text[:start], text[start:]
 
         def replace(match: re.Match[str]) -> str:
@@ -97,6 +99,8 @@ class Citations:
 
 
 class AgentTurn:
+    """Bind one submitted input and its cancellation guard to an assistant message."""
+
     def __init__(self, client: SoevClient, metadata: dict[str, Any], as_user: str) -> None:
         self.client, self.metadata, self.as_user = client, metadata, as_user
         self.thread_id: str | None = None
@@ -104,6 +108,7 @@ class AgentTurn:
         self.input_position: int | None = None
         self.terminal = False
         self.citations = Citations()
+        self.turn_sources: set[int] = set()
         self.partial = ''
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -151,6 +156,13 @@ class AgentTurn:
     async def emit(self, kind: str, data: dict) -> None:
         if self.emitter:
             await self.emitter({'type': kind, 'data': data})
+
+    async def record_source(self, payload: dict) -> None:
+        source = self.citations.add(payload)
+        if source:
+            await self.emit('source', source)
+        self.turn_sources.add(self.citations.sources[payload['id']]['n'])
+        await self.emit('panel_filter', {'ns': sorted(self.turn_sources)})
 
     async def resume(self) -> None:
         events = self.client.chat_stream(
@@ -209,9 +221,7 @@ class AgentTurn:
             self.input_position = self.position
             await self.persist()
         if event.event == 'source':
-            source = self.citations.add(payload)
-            if source:
-                await self.emit('source', source)
+            await self.record_source(payload)
         if event.event == 'delta':
             self.partial += event.data['text']
             text = self.citations.rewrite(event.data['text'])
@@ -225,7 +235,10 @@ class AgentTurn:
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
         content = payload['content']
         if not content.startswith(self.partial):
-            raise ValueError('Durable model output disagrees with streamed text')
+            log.warning('Durable model output disagrees with streamed text', extra={'thread_id': self.thread_id})
+            self.partial = ''
+            self.citations.pending = ''
+            return []
         text = self.citations.rewrite(content[len(self.partial) :], final=True)
         self.partial = ''
         chunks = []
@@ -246,6 +259,7 @@ class AgentTurn:
         chunks = [_chunk({'content': text})] if text else []
         state = event.data.get('state')
         await self.emit('status', {'description': state or 'error', 'done': True})
+        await self.emit('panel_filter', {'ns': sorted(self.turn_sources)})
         if event.event == 'error':
             chunks.append(_error(event.data.get('code', 'service_unavailable')))
         elif state not in {'idle', 'waiting'}:
@@ -257,6 +271,7 @@ class AgentTurn:
             await identity.ensure_link(self.as_user, self.client)
             await self.prepare()
             self.emitter = await get_event_emitter(self.metadata)
+            await self.emit('panel_filter', {'ns': []})
             for source in self.citations.sources.values():
                 await self.emit('source', source)
             if not self.thread_id:
@@ -275,11 +290,14 @@ class AgentTurn:
 
 
 async def call_agent_v2(
-    form_data: dict[str, Any], metadata: dict[str, Any], *, agent: str, model: str
+    form_data: dict[str, Any], metadata: dict[str, Any], *, agent: str, model: str | None = None
 ) -> StreamingResponse | dict:
+    """Submit only the new user text, using an optional host model configured on the agent."""
     user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
     turn = AgentTurn(identity.build_client(), metadata, user_ref)
-    body = {'input': _input_text(metadata), 'collections': _collections(metadata), 'model': model}
+    body = {'input': _input_text(metadata), 'collections': _collections(metadata)}
+    if isinstance(model, str) and model:
+        body['model'] = model
     chunks = turn.run(body, agent)
     if not form_data.get('stream', True):
         message = {'role': 'assistant', 'content': '', 'reasoning_content': ''}

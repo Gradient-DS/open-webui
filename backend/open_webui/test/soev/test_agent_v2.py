@@ -108,9 +108,9 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
     for index in range(1, 4):
         await chat.turn(f'turn {index}', f'a{index}', f'a{index - 1}' if index > 1 else None)
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': 'turn 1', 'collections': [], 'model': 'llm', 'agent': 'test'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 2', 'collections': [], 'model': 'llm'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 3', 'collections': [], 'model': 'llm'}),
+        ('/v1/chat/threads', {'input': 'turn 1', 'collections': [], 'agent': 'test'}),
+        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 2', 'collections': []}),
+        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 3', 'collections': []}),
     ]
     assert [chat.bookmark(f'a{i}') for i in range(1, 4)] == [
         {'thread_id': 'thr-1', 'position': position} for position in (3, 5, 7)
@@ -140,7 +140,7 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
     await chat.turn(text, 'new-answer', parent, chat_id=chat_id)
     assert chat.mutations()[-2:] == [
         ('/v1/chat/threads/thr-1/fork', {'at': at}),
-        ('/v1/chat/threads/thr-2/inputs', {'input': text, 'collections': [], 'model': 'llm'}),
+        ('/v1/chat/threads/thr-2/inputs', {'input': text, 'collections': []}),
     ]
     assert chat.api.chat.threads['thr-1']['events'] == original
     assert chat.bookmark('new-answer', chat_id) == {'thread_id': 'thr-2', 'position': at + 2}
@@ -183,7 +183,6 @@ async def test_one_text_input_and_selected_collection_keys(chat: Chat) -> None:
     assert chat.mutations()[0][1] == {
         'input': 'one\ntwo',
         'collections': ['kb-a', 'kb-b'],
-        'model': 'llm',
         'agent': 'test',
     }
     await chat.turn('next', 'a2', 'a1', files=[{'type': 'collection', 'id': 'kb-c'}])
@@ -226,6 +225,110 @@ def test_every_citation_split_is_rewritten(marker: str) -> None:
         citations.add(SOURCE)
         text = citations.rewrite('Text ' + marker[:split]) + citations.rewrite(marker[split:] + ' tail', final=True)
         assert text == 'Text [1] tail'
+
+
+def test_unclosed_citation_buffer_flushes_after_64_characters() -> None:
+    citations = agent_v2.Citations()
+    assert citations.rewrite('Text [' + 'x' * 63) == 'Text '
+    assert len(citations.pending) == 64
+    assert citations.rewrite('y') == '[' + 'x' * 63 + 'y'
+    assert citations.pending == ''
+    assert citations.rewrite(' rest') == ' rest'
+
+
+@pytest.mark.asyncio
+async def test_citation_marker_survives_three_deltas(chat: Chat) -> None:
+    chat.api.chat.turns = [
+        [
+            ('source', SOURCE),
+            ('delta', {'text': 'Text ['}),
+            ('delta', {'text': 'source-'}),
+            ('delta', {'text': 'a] tail'}),
+            ('model_output', {'content': 'Text [source-a] tail'}),
+        ]
+    ]
+    assert content(await chat.turn('question', 'a1')) == 'Text [1] tail'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('close_after', [None, 4])
+@pytest.mark.parametrize(
+    'durable,expected', [('Draft [source-a].', 'Draft [1]. Next.'), ('Revised answer.', 'Draft  Next.')]
+)
+async def test_durable_output_prefix_and_mismatch_do_not_cancel(
+    chat: Chat, caplog: pytest.LogCaptureFixture, close_after: int | None, durable: str, expected: str
+) -> None:
+    chat.api.chat.close_after = close_after
+    chat.api.chat.turns = [
+        [
+            ('source', SOURCE),
+            ('delta', {'text': 'Draft [source-'}),
+            ('model_output', {'content': durable, 'reasoning': 'reason'}),
+            ('model_output', {'content': ' Next.'}),
+        ]
+    ]
+    chunks = await chat.turn('question', 'a1')
+    assert content(chunks) == expected
+    assert not any('error' in chunk for chunk in chunks)
+    assert len(chat.mutations()) == 1
+    assert chat.bookmark('a1')['position'] == 5
+    mismatch = durable == 'Revised answer.'
+    warnings = [record for record in caplog.records if 'disagrees' in record.message]
+    assert len(warnings) == int(mismatch)
+    if mismatch:
+        assert warnings[0].thread_id == 'thr-1'
+        assert 'Draft' not in warnings[0].message
+        assert durable not in warnings[0].message
+        assert content(chunks, 'reasoning_content') == ''
+
+
+@pytest.mark.asyncio
+async def test_panel_filter_scopes_chips_to_this_turn_with_cumulative_numbers(chat: Chat) -> None:
+    second = {**SOURCE, 'id': 'source-b'}
+    third = {**SOURCE, 'id': 'source-c'}
+    chat.api.chat.turns = [[('source', SOURCE), ('source', second), ('model_output', {'content': 'First [source-a]'})]]
+    await chat.turn('first', 'a1')
+    assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2]}
+    chat.socket.clear()
+    chat.api.chat.turns = [
+        [
+            ('source', second),
+            ('source', third),
+            ('source', third),
+            ('model_output', {'content': 'Second [source-b] and [source-c]; earlier [source-a]'}),
+        ]
+    ]
+    assert content(await chat.turn('second', 'a2', 'a1')) == 'Second [2] and [3]; earlier [1]'
+    sources = [event['data'] for event in chat.socket if event['type'] == 'source']
+    assert [source['n'] for source in sources] == [1, 2, 3]
+    filters = [event['data'] for event in chat.socket if event['type'] == 'panel_filter']
+    assert filters[0] == {'ns': []}
+    assert filters[-1] == {'ns': [2, 3]}
+    chat.socket.clear()
+    await chat.turn('third', 'a3', 'a2')
+    assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('model', [None, '', 123, 'host-inference-endpoint'])
+async def test_only_an_explicit_agent_model_is_forwarded(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, model: Any
+) -> None:
+    monkeypatch.setattr(
+        AgentConfigs,
+        'get_agent_config_by_id',
+        AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2', 'model': model})),
+    )
+    await chat.turn('first', 'a1')
+    await chat.turn('second', 'a2', 'a1')
+    await chat.turn('regenerated', 'retry', 'a1')
+    for path, body in chat.mutations():
+        if path.endswith('/fork'):
+            continue
+        if model == 'host-inference-endpoint':
+            assert body['model'] == model
+        else:
+            assert 'model' not in body
 
 
 @pytest.mark.asyncio
