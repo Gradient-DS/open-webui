@@ -1,5 +1,6 @@
 """Subject-scoped connection and schedule calls through the existing soev-api client."""
 
+import asyncio
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -23,6 +24,15 @@ class CloudSync:
     async def connection(self, connection_id: str) -> dict:
         return await self._get(f'/v1/connections/{quote(connection_id, safe="")}')
 
+    async def connection_usage(self, connection_id: str) -> dict:
+        await self.connection(connection_id)
+        knowledge_ids: set[str] = set()
+        async for schedule in self.client.pages(
+            '/v1/schedules', as_user=self.user_ref, params={'connection_id': connection_id}
+        ):
+            knowledge_ids.update(schedule['subscribers'])
+        return {'knowledge_ids': sorted(knowledge_ids)}
+
     async def authorize(self, connection_id: str, owner_email: str | None = None) -> dict:
         body = {'owner_email': owner_email} if owner_email is not None else None
         return await self._send('POST', f'/v1/connections/{quote(connection_id, safe="")}/authorize', body)
@@ -43,28 +53,59 @@ class CloudSync:
     async def schedule_action(self, collection_key: str, schedule_id: str, action: str) -> dict | None:
         path = f'/v1/schedules/{quote(schedule_id, safe="")}'
         schedule = await self._get(path)
-        if schedule['collection_key'] != collection_key:
+        if collection_key not in schedule['subscribers']:
             raise SoevApiError(404, 'connection_not_found', 'No such schedule in this collection')
         if action == 'delete':
-            return await self._send('DELETE', path)
+            return await self._send('DELETE', f'{path}?collection_key={quote(collection_key, safe="")}')
         return await self._send('POST', f'{path}/{action}')
+
+    async def skipped_items(self, collection_key: str, schedule_id: str) -> list[dict]:
+        await self._get(f'/v1/collections/{quote(collection_key, safe="")}')
+        schedule = await self._get(f'/v1/schedules/{quote(schedule_id, safe="")}')
+        if collection_key not in schedule['subscribers']:
+            raise SoevApiError(404, 'connection_not_found', 'No such schedule in this collection')
+        run = schedule.get('last_run')
+        if schedule['kind'] != 'content' or not run:
+            return []
+        job = await self._get(f'/v1/jobs/{quote(run["id"], safe="")}?include_items=true')
+        names = {
+            row['source_id']: row.get('title') or row.get('filename')
+            async for row in self.client.pages(
+                f'/v1/collections/{quote(collection_key, safe="")}/documents', as_user=self.user_ref
+            )
+        }
+        skipped = {}
+        for item in job.get('items', []):
+            if item['status'] == 'succeeded' or item['source_id'] in skipped:
+                continue
+            skipped[item['source_id']] = {
+                'source_id': item['source_id'],
+                'name': item.get('title') or names.get(item['source_id']) or item['source_id'],
+                'code': item.get('code') or item['status'],
+            }
+        return list(skipped.values())
 
     async def sync_status(self, collection_key: str) -> dict:
         # W2 projects the collection key directly as the OWUI knowledge id.
         # Kept: this is what makes an unreadable or absent KB a 404 rather
         # than an empty schedule list.
-        await self._get(f'/v1/collections/{quote(collection_key, safe="")}')
+        async def list_schedules():
+            return [
+                row
+                async for row in self.client.pages(
+                    '/v1/schedules', as_user=self.user_ref, params={'collection_key': collection_key}
+                )
+            ]
+
+        _, schedules = await asyncio.gather(
+            self._get(f'/v1/collections/{quote(collection_key, safe="")}'), list_schedules()
+        )
         # The listing carries each schedule's own detail, so the rest is one
         # page plus one call per DISTINCT connection (usually exactly one).
         # It used to also fetch every schedule individually, which made a
         # status poll cost a round trip per schedule.
-        schedules = []
-        connections: dict[str, dict] = {}
-        async for schedule in self.client.pages(
-            '/v1/schedules', as_user=self.user_ref, params={'collection_key': collection_key}
-        ):
-            connection_id = schedule['connection_id']
-            if connection_id not in connections:
-                connections[connection_id] = await self.connection(connection_id)
-            schedules.append({**schedule, 'connection': connections[connection_id]})
-        return {'schedules': schedules}
+        connection_ids = sorted({schedule['connection_id'] for schedule in schedules})
+        connections = dict(zip(connection_ids, await asyncio.gather(*(self.connection(key) for key in connection_ids))))
+        return {
+            'schedules': [{**schedule, 'connection': connections[schedule['connection_id']]} for schedule in schedules]
+        }

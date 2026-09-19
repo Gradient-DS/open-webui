@@ -561,14 +561,21 @@ def test_get_job_with_items_lists_each_document(api):
     fake, client = api
     seed(client)
     seed(client, 'other', 'owui:user:bob')
-    job = ingest(client, inline_document(), file_document()).json()
+    job = ingest(client, inline_document(title='Notes'), file_document()).json()
     path = f'/v1/jobs/{job["job_id"]}'
     assert 'items' not in send(client, 'GET', path, user='owui:user:bob').json()
     assert 'items' not in send(client, 'GET', path + '?include_items=false').json()
     response = send(client, 'GET', path + '?include_items=true', user='owui:user:bob')
     assert response.status_code == 200
     assert response.json()['items'] == [
-        {'source_id': source_id, 'status': 'pending', 'code': None, 'detail': None, 'chunk_count': None}
+        {
+            'source_id': source_id,
+            'title': 'Notes' if source_id == 'inline' else None,
+            'status': 'pending',
+            'code': None,
+            'detail': None,
+            'chunk_count': None,
+        }
         for source_id in ('inline', 'file')
     ]
     listed = send(client, 'GET', '/v1/jobs?collection_key=kb&status=AWAITING_UPLOAD').json()['data']
@@ -586,7 +593,7 @@ def test_get_delete_document_job_with_items_names_its_document(api):
     response = send(client, 'GET', path + '?include_items=true')
     assert response.status_code == 200
     assert response.json()['items'] == [
-        {'source_id': 'file', 'status': 'pending', 'code': None, 'detail': None, 'chunk_count': None}
+        {'source_id': 'file', 'title': None, 'status': 'pending', 'code': None, 'detail': None, 'chunk_count': None}
     ]
     listed = send(client, 'GET', '/v1/jobs?collection_key=kb&status=QUEUED&include_items=true').json()['data']
     assert listed == [send(client, 'GET', path).json()]
@@ -617,20 +624,24 @@ def test_advance_to_succeeded_materialises_the_documents(api):
     assert fake.documents['kb', 'file'] is landed
 
 
-def test_advance_with_errors_marks_the_item_and_creates_nothing(api):
+@pytest.mark.parametrize(
+    'code,detail', [('content_type_rejected', 'Not supported'), ('empty_content', 'empty_parsed_content')]
+)
+def test_advance_with_errors_marks_the_item_and_creates_nothing(api, code, detail):
     """An explicitly failed batch publishes each refusal without landing documents."""
     fake, client = api
     seed(client)
     job = ingest(client, inline_document(), file_document()).json()
-    fake.advance(job['job_id'], 'COMPLETED_WITH_ERRORS', item_code='content_type_rejected', item_detail='Not supported')
+    fake.advance(job['job_id'], 'COMPLETED_WITH_ERRORS', item_code=code, item_detail=detail)
     result = send(client, 'GET', f'/v1/jobs/{job["job_id"]}?include_items=true').json()
     assert result['progress'] == {'total': 2, 'succeeded': 0, 'failed': 2, 'pending': 0, 'skipped': 0}
     assert result['items'] == [
         {
             'source_id': source_id,
+            'title': None,
             'status': 'failed',
-            'code': 'content_type_rejected',
-            'detail': 'Not supported',
+            'code': code,
+            'detail': detail,
             'chunk_count': None,
         }
         for source_id in ('inline', 'file')

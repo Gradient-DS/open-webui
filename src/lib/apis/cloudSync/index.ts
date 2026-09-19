@@ -21,6 +21,8 @@ export interface ScheduleForm {
 	kind: ScheduleKind;
 	scope: Record<string, string | boolean | null>;
 	cadence_minutes?: number;
+	label?: string | null;
+	path?: string | null;
 }
 
 export type RunOutcome = 'succeeded' | 'partial' | 'failed' | 'cancelled';
@@ -39,6 +41,9 @@ export interface SyncRun {
 }
 
 export interface Schedule extends ScheduleForm {
+	subscribers: string[];
+	subscriber_count: number;
+	document_count?: number;
 	last_error?: string | null;
 	id: string;
 	source_kind: string;
@@ -93,6 +98,8 @@ export const createConnection = (token: string, provider: CloudProvider) =>
 export const listConnections = (token: string) => request<Connection[]>(token, '/connections');
 export const getConnection = (token: string, id: string) =>
 	request<Connection>(token, connectionPath(id));
+export const getConnectionUsage = (token: string, id: string) =>
+	request<{ knowledge_ids: string[] }>(token, `${connectionPath(id)}/usage`);
 export const authorizeConnection = (token: string, id: string) =>
 	request<Authorization>(token, `${connectionPath(id)}/authorize`, 'POST');
 export const revokeConnection = (token: string, id: string) =>
@@ -111,3 +118,12 @@ export const suspendSchedule = (token: string, knowledgeId: string, id: string) 
 	request<void>(token, `${schedulePath(knowledgeId, id)}/suspend`, 'POST');
 export const resumeSchedule = (token: string, knowledgeId: string, id: string) =>
 	request<void>(token, `${schedulePath(knowledgeId, id)}/resume`, 'POST');
+
+export interface SkippedItem {
+	source_id: string;
+	name?: string;
+	code: string;
+}
+
+export const getSkippedItems = (token: string, knowledgeId: string, id: string) =>
+	request<SkippedItem[]>(token, `${schedulePath(knowledgeId, id)}/skipped`);

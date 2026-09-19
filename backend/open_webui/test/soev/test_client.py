@@ -492,3 +492,58 @@ async def test_original_stream_follows_only_one_redirect(recorded_http):
         await anext(client.stream('/original', as_user='owui:user:alice'))
     assert error.value.status == 502
     assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_memo_is_scoped_to_request_subject_and_parameters(recorded_http):
+    """Concurrent identical reads share one call while subjects, parameters and requests stay isolated."""
+    import asyncio
+
+    from open_webui.soev.request_cache import request_cache
+
+    requests, responses = recorded_http
+    responses.extend(httpx.Response(200, json={'value': index}) for index in range(5))
+    client = SoevClient('https://soev.invalid', 'test-key', subject_minter=lambda ref: 'assertion')
+    with request_cache():
+        first, second = await asyncio.gather(
+            client.get('/v1/collections', as_user='alice'), client.get('/v1/collections', as_user='alice')
+        )
+        assert first == second == {'value': 0}
+        assert await client.get('/v1/collections', as_user='bob') == {'value': 1}
+        assert await client.get('/v1/collections', as_user='alice', params={'cursor': 'next'}) == {'value': 2}
+    with request_cache():
+        assert await client.get('/v1/collections', as_user='alice') == {'value': 3}
+    assert await client.get('/v1/collections', as_user='alice') == {'value': 4}
+    assert len(requests) == 5
+
+
+@pytest.mark.asyncio
+async def test_mutation_invalidates_request_memo(recorded_http):
+    """A read after a mutation observes the new upstream state within the same request."""
+    from open_webui.soev.request_cache import request_cache
+
+    _, responses = recorded_http
+    responses.extend(
+        [httpx.Response(200, json={'name': 'old'}), httpx.Response(204), httpx.Response(200, json={'name': 'new'})]
+    )
+    client = SoevClient('https://soev.invalid', 'test-key')
+    with request_cache():
+        assert await client.get('/v1/collections/kb') == {'name': 'old'}
+        await client.send('PATCH', '/v1/collections/kb', {'name': 'new'}, idempotency_key='rename')
+        assert await client.get('/v1/collections/kb') == {'name': 'new'}
+
+
+@pytest.mark.asyncio
+async def test_request_debug_log_has_timing_without_credentials_or_query(recorded_http, caplog):
+    """Debug timing identifies the path and status without logging request credentials or query values."""
+    _, responses = recorded_http
+    responses.append(httpx.Response(200, json={}))
+    client = SoevClient('https://soev.invalid', 'private-api-key')
+    with caplog.at_level(logging.DEBUG, logger='open_webui.soev.client'):
+        await client.get('/v1/collections/kb?cursor=private-cursor')
+    record = next(record for record in caplog.records if record.getMessage().startswith('soev-api request'))
+    message = record.getMessage()
+    assert message.startswith('soev-api request GET /v1/collections/kb 200 ')
+    assert message.endswith('ms')
+    assert 'private-api-key' not in str(record.__dict__)
+    assert 'private-cursor' not in str(record.__dict__)

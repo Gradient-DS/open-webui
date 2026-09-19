@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import CloudSync
+from open_webui.soev.request_cache import request_cache
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -17,7 +18,8 @@ router = APIRouter()
 async def cloud_sync(user=Depends(get_verified_user)):
     try:
         client = identity.build_client()
-        yield CloudSync(client, await identity.acting_ref(user, client))
+        with request_cache():
+            yield CloudSync(client, await identity.acting_ref(user, client))
     except SoevApiError as error:
         detail = {'code': error.code, 'detail': error.detail}
         if error.constraint is not None:
@@ -35,6 +37,8 @@ class ScheduleForm(BaseModel):
     connection_id: str = Field(min_length=1, max_length=256)
     kind: Literal['content', 'acl_refresh']
     scope: dict[str, JsonValue]
+    label: str | None = Field(default=None, max_length=512)
+    path: str | None = Field(default=None, max_length=512)
     cadence_minutes: int | None = Field(default=None, gt=0)
 
 
@@ -51,6 +55,11 @@ async def list_connections(sync=Depends(cloud_sync)):
 @router.get('/connections/{connection_id}')
 async def get_connection(connection_id: str, sync=Depends(cloud_sync)):
     return await sync.connection(connection_id)
+
+
+@router.get('/connections/{connection_id}/usage')
+async def connection_usage(connection_id: str, sync=Depends(cloud_sync)):
+    return await sync.connection_usage(connection_id)
 
 
 @router.delete('/connections/{connection_id}', status_code=204)
@@ -118,3 +127,8 @@ async def suspend_schedule(knowledge_id: str, schedule_id: str, sync=Depends(clo
 async def resume_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     await sync.schedule_action(knowledge_id, schedule_id, 'resume')
     return Response(status_code=204)
+
+
+@router.get('/knowledge/{knowledge_id}/schedules/{schedule_id}/skipped')
+async def skipped_items(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    return await sync.skipped_items(knowledge_id, schedule_id)

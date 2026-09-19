@@ -46,7 +46,7 @@ from open_webui.routers.retrieval import (
 )
 from open_webui.storage.provider import Storage
 from open_webui.services.deletion import DeletionService
-from open_webui.models.knowledge import is_managed_shared_kb
+from open_webui.models.knowledge import is_synced_kb  # [Gradient]
 from open_webui.utils.features import require_feature
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
@@ -1079,6 +1079,8 @@ async def update_external_knowledge_source(
     knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
     if not knowledge or not is_external_knowledge(knowledge):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+    # [Gradient] External metadata does not exempt a subscribed KB from the share guard.
+    _assert_synced_grants_unchanged(knowledge, form_data.access_grants)
     if not form_data.name.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Knowledge name is required.')
 
@@ -1102,13 +1104,15 @@ async def update_external_knowledge_source(
     if not test_result.get('documents'):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Test query returned no results.')
 
-    form_data.access_grants = await filter_allowed_access_grants(
-        await Config.get('user.permissions'),
-        user.id,
-        user.role,
-        form_data.access_grants,
-        'sharing.public_knowledge',
-    )
+    # [Gradient] Keep equal synced grants unchanged.
+    if not is_synced_kb(knowledge):
+        form_data.access_grants = await filter_allowed_access_grants(
+            await Config.get('user.permissions'),
+            user.id,
+            user.role,
+            form_data.access_grants,
+            'sharing.public_knowledge',
+        )
 
     connections[idx] = connection
     await _set_external_connections(connections)
@@ -1242,17 +1246,20 @@ async def update_knowledge_by_id(
     # Prevent changing type after creation
     form_data.type = None  # Strip type from update form
 
-    # Prevent access_grants changes on non-local KBs
-    if knowledge.type != 'local':
-        form_data.access_grants = knowledge.access_grants if hasattr(knowledge, 'access_grants') else []
+    # [Gradient] Reject changed synced grants before filtering can silently discard them.
+    _assert_synced_grants_unchanged(knowledge, form_data.access_grants)
+    if not is_synced_kb(knowledge):
+        # Prevent access_grants changes on non-local KBs
+        if knowledge.type != 'local':
+            form_data.access_grants = knowledge.access_grants if hasattr(knowledge, 'access_grants') else []
 
-    form_data.access_grants = await filter_allowed_access_grants(
-        await Config.get('user.permissions'),
-        user.id,
-        user.role,
-        form_data.access_grants,
-        'sharing.public_knowledge',
-    )
+        form_data.access_grants = await filter_allowed_access_grants(
+            await Config.get('user.permissions'),
+            user.id,
+            user.role,
+            form_data.access_grants,
+            'sharing.public_knowledge',
+        )
 
     knowledge = await Knowledges.update_knowledge_by_id(id=id, form_data=form_data)
     if knowledge:
@@ -1317,20 +1324,23 @@ async def update_knowledge_access_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    # Non-local knowledge bases (e.g. OneDrive) are always private
-    if knowledge.type != 'local':
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Access grants cannot be modified for non-local knowledge bases.',
-        )
+    # [Gradient] Equal synced grants pass through without permission filtering.
+    _assert_synced_grants_unchanged(knowledge, form_data.access_grants)
+    if not is_synced_kb(knowledge):
+        # Non-local knowledge bases (e.g. Confluence) are always private
+        if knowledge.type != 'local':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='Access grants cannot be modified for non-local knowledge bases.',
+            )
 
-    form_data.access_grants = await filter_allowed_access_grants(
-        await Config.get('user.permissions'),
-        user.id,
-        user.role,
-        form_data.access_grants,
-        'sharing.public_knowledge',
-    )
+        form_data.access_grants = await filter_allowed_access_grants(
+            await Config.get('user.permissions'),
+            user.id,
+            user.role,
+            form_data.access_grants,
+            'sharing.public_knowledge',
+        )
 
     knowledge.access_grants = await AccessGrants.set_access_grants('knowledge', id, form_data.access_grants, db=db)
 
@@ -1897,18 +1907,26 @@ async def remove_file_from_knowledge_by_id(
 ############################
 
 
-def _assert_not_managed_shared_kb(knowledge) -> None:
-    """Block destructive mutation of a managed shared KB via this router.
-
-    A managed shared knowledge base (Confluence, …) is provisioned,
-    synced and removed entirely from the Cloud Sync admin panel. It must not be
-    deleted or reset through the workspace UI — even by an admin, who would
-    otherwise bypass the ownership checks in these endpoints.
-    """
-    if is_managed_shared_kb(knowledge):
+# [Gradient] Compare grant meaning, ignoring row metadata and ordering.
+def _assert_synced_grants_unchanged(knowledge, requested: list[dict] | None) -> None:
+    if not is_synced_kb(knowledge) or requested is None:
+        return
+    fields = ('principal_type', 'principal_id', 'permission')
+    stored = {tuple(getattr(grant, field) for field in fields) for grant in knowledge.access_grants}
+    if {tuple(grant.get(field) for field in fields) for grant in requested} != stored:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail='This knowledge base is managed in the Cloud Sync admin panel.',
+            detail={'code': 'synced_kb_not_shareable'},
+        )
+
+
+# [Gradient] Reset is blocked while a cloud source is subscribed.
+def _assert_not_synced_kb(knowledge) -> None:
+    """Block reset of cloud-synced KBs, including requests by admins."""
+    if is_synced_kb(knowledge):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='This knowledge base is synced from a cloud source.',
         )
 
 
@@ -1926,8 +1944,6 @@ async def delete_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-
-    _assert_not_managed_shared_kb(knowledge)
 
     if (
         knowledge.user_id != user.id
@@ -2011,7 +2027,7 @@ async def reset_knowledge_by_id(
     if is_external_knowledge(knowledge):
         external_knowledge_error()
 
-    _assert_not_managed_shared_kb(knowledge)
+    _assert_not_synced_kb(knowledge)  # [Gradient]
 
     if (
         knowledge.user_id != user.id

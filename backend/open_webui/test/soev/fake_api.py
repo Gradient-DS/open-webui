@@ -159,6 +159,15 @@ class FakeSoevApi:
     def _view(self, row, subject):
         return {
             **copy.deepcopy(row),
+            'subscriptions': sorted(
+                {
+                    schedule['source_kind']
+                    for schedule in self.schedules.values()
+                    if schedule['kind'] == 'content'
+                    and schedule['lifecycle'] != 'revoked'
+                    and row['key'] in schedule['subscribers']
+                }
+            ),
             'document_count': sum(
                 key == row['key'] and self._readable(document, subject or self.credentials['test-runtime-key'])
                 for (key, _), document in self.documents.items()
@@ -219,10 +228,13 @@ class FakeSoevApi:
     def _schedules(self, request, credential, subject):
         self._require(credential, 'connect' if subject else 'mint')
         owner = subject or self.credentials[credential]
-        rows = [row for key, row in self.schedules.items() if self.schedule_owners[key] == owner]
-        for field in ('collection_key', 'kind'):
-            if field in request.url.params:
-                rows = [row for row in rows if row[field] == request.url.params[field]]
+        rows = [
+            {'document_count': 0, **row} for key, row in self.schedules.items() if self.schedule_owners[key] == owner
+        ]
+        if 'collection_key' in request.url.params:
+            rows = [row for row in rows if request.url.params['collection_key'] in row['subscribers']]
+        if 'kind' in request.url.params:
+            rows = [row for row in rows if row['kind'] == request.url.params['kind']]
         return self._page(rows, request)
 
     def _lookup_documents(self, request, credential, subject):
@@ -372,7 +384,14 @@ class FakeSoevApi:
         job = self.jobs[response.json()['job_id']]
         job['documents'] = copy.deepcopy(documents)
         job['items'] = [
-            {'source_id': document['source_id'], 'status': 'pending', 'code': None, 'detail': None, 'chunk_count': None}
+            {
+                'source_id': document['source_id'],
+                'title': document.get('title'),
+                'status': 'pending',
+                'code': None,
+                'detail': None,
+                'chunk_count': None,
+            }
             for document in documents
         ]
         job['progress'].update(total=len(documents), pending=len(documents))
@@ -406,6 +425,7 @@ class FakeSoevApi:
                 view['items'] = [
                     {
                         'source_id': self.job_effects[job['job_id']],
+                        'title': None,
                         'status': 'pending',
                         'code': None,
                         'detail': None,
@@ -521,6 +541,7 @@ class FakeSoevApi:
             self.inherited_access.add((key, source_id))
         row = {
             'source_id': source_id,
+            'schedule_ids': [],
             'collection_key': key,
             'filename': source_id + '.txt',
             'visibility': collection['visibility'],

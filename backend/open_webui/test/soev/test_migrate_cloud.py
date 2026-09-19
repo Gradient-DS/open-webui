@@ -44,7 +44,13 @@ class CloudApi(FakeSoevApi):
             self._collection(body['collection_key'], credential, subject, write=True)
             assert body['cadence_minutes'] >= self.min_cadence_minutes
             schedule_id = f'schedule-{len(self.schedules)}'
-            row = {'id': schedule_id, **body, 'source_kind': self.connections[connection_id]['source_kind']}
+            row = {
+                'id': schedule_id,
+                **body,
+                'source_kind': self.connections[connection_id]['source_kind'],
+                'lifecycle': 'enabled',
+                'subscribers': [body['collection_key']],
+            }
             self.schedules[schedule_id] = row
             self.schedule_owners[schedule_id] = subject
         return httpx.Response(201, json=row)

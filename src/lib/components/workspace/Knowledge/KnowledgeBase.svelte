@@ -58,6 +58,7 @@
 		connectResult,
 		connectionOutcome,
 		reconnectConnections,
+		shouldRefetchSyncItems,
 		runIsLive
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
@@ -198,6 +199,7 @@
 	$: isExternalKnowledge = knowledge?.meta?.source === 'external';
 
 	let loaded = false;
+	let itemsInitialized = false;
 	let queryDebounceActive = false;
 	let fetchId = 0;
 
@@ -246,7 +248,9 @@
 		// Track all dependencies explicitly
 		void [query, viewOption, sortKey, direction, currentPage, includeContent];
 
-		if (queryDebounceActive) {
+		if (!itemsInitialized) {
+			itemsInitialized = true;
+		} else if (queryDebounceActive) {
 			// User is typing — debounce
 			clearTimeout(searchDebounceTimer);
 			searchDebounceTimer = setTimeout(() => {
@@ -254,7 +258,7 @@
 				getItemsPage();
 			}, 300);
 		} else {
-			// Filter/view/pagination change or initial load — fetch immediately
+			// Filter/view/pagination change — fetch immediately
 			getItemsPage();
 		}
 	}
@@ -269,44 +273,25 @@
 			direction = null;
 		}
 
-		const isCloudKb = knowledge?.type && knowledge.type !== 'local';
-
 		// Upstream per-level browsing: one call returns the level's files
 		// (30/page), child directories and breadcrumbs. With a query the
 		// search goes KB-wide and flat (decision 4) — directory rows are
 		// hidden and each hit renders its meta.relative_path breadcrumb.
-		// Cloud/push KBs additionally need a cheap KB-wide total (limit=1,
-		// metadata-only) to keep the quota header honest — fileItemsTotal
-		// is level-scoped here.
+		// [Gradient] The same response includes the KB-wide quota total.
 		const isSearching = !!query;
-		const [res, totalRes] = await Promise.all([
-			searchKnowledgeFilesById(
-				localStorage.token,
-				knowledge.id,
-				query,
-				viewOption,
-				sortKey,
-				direction,
-				currentPage,
-				null,
-				true,
-				isSearching ? undefined : (currentDirectoryId ?? null),
-				isSearching ? includeContent : false
-			).catch(() => null),
-			isCloudKb
-				? searchKnowledgeFilesById(
-						localStorage.token,
-						knowledge.id,
-						'',
-						null,
-						null,
-						null,
-						1,
-						1,
-						true
-					).catch(() => null)
-				: Promise.resolve(null)
-		]);
+		const res = await searchKnowledgeFilesById(
+			localStorage.token,
+			knowledgeId,
+			query,
+			viewOption,
+			sortKey,
+			direction,
+			currentPage,
+			null,
+			true,
+			isSearching ? undefined : (currentDirectoryId ?? null),
+			isSearching ? includeContent : false
+		).catch(() => null);
 
 		if (currentFetchId !== fetchId) return; // Stale response, discard
 
@@ -318,9 +303,7 @@
 				breadcrumbs = res.breadcrumbs ?? [];
 			}
 		}
-		if (totalRes) {
-			kbFileTotal = totalRes.total;
-		}
+		if (res?.collection_total != null) kbFileTotal = res.collection_total;
 		queryDebounceActive = false;
 		return res;
 	};
@@ -946,37 +929,42 @@
 	const SYNC_POLL_LIVE_MS = 2000;
 	const SYNC_POLL_IDLE_MS = 30000;
 
-	let liveSyncPolls = 0;
-	const refreshCloudSync = async () => {
-		if (!knowledge || destroyed) return false;
+	let finishingConnectionId: string | null = null;
+	let extraLivePoll = false;
+	const refreshCloudSync = async (refreshItems = true) => {
+		if (!knowledgeId || destroyed) return false;
 		const request = ++syncStatusRequest;
-		const status = await cloudSync.getSyncStatus(localStorage.token, knowledge.id);
+		const status = await cloudSync.getSyncStatus(localStorage.token, knowledgeId);
 		if (destroyed || request !== syncStatusRequest) return false;
-		const wasLive = schedules.some((schedule) => runIsLive(schedule.last_run));
+		const previous = schedules;
 		schedules = status.schedules;
 		syncStatusError = false;
 		const isLive = schedules.some((schedule) => runIsLive(schedule.last_run));
-		liveSyncPolls = isLive ? liveSyncPolls + 1 : 0;
-		if ((isLive && liveSyncPolls % 5 === 0) || (wasLive && !isLive)) await getItemsPage();
+		if (refreshItems && shouldRefetchSyncItems(previous, schedules)) await getItemsPage();
 		return isLive;
 	};
 
 	/** Re-arm the poll now rather than waiting out an idle tick. */
 	const repollCloudSyncSoon = () => {
 		if (destroyed) return;
+		extraLivePoll = true;
 		clearTimeout(syncPoll);
 		syncPoll = setTimeout(pollCloudSyncStatus, 0);
 	};
 
-	const pollCloudSyncStatus = async () => {
+	const pollCloudSyncStatus = async (refreshItems = true) => {
 		let live = false;
 		try {
-			live = await refreshCloudSync();
+			live = await refreshCloudSync(refreshItems);
 		} catch {
 			syncStatusError = true;
 		} finally {
 			if (!destroyed)
-				syncPoll = setTimeout(pollCloudSyncStatus, live ? SYNC_POLL_LIVE_MS : SYNC_POLL_IDLE_MS);
+				syncPoll = setTimeout(
+					pollCloudSyncStatus,
+					live || extraLivePoll ? SYNC_POLL_LIVE_MS : SYNC_POLL_IDLE_MS
+				);
+			extraLivePoll = false;
 		}
 	};
 
@@ -993,11 +981,12 @@
 		return new Promise((resolve) => {
 			let expectedId = connectionId;
 			let checking = false;
-			let checksSincePopupClosed = 0;
+			let exchangeStartedAt: number | null = null;
 			let finished = false;
 			const finish = (connection: Connection | null) => {
 				if (finished) return;
 				finished = true;
+				finishingConnectionId = null;
 				clearInterval(checkClosed);
 				clearTimeout(timeout);
 				window.removeEventListener('message', handleMessage);
@@ -1005,21 +994,34 @@
 				closeAuthorization = undefined;
 				resolve(connection);
 			};
+			const pendingTimeout = () => {
+				toast.info($i18n.t('The connection is still pending. Please try again.'));
+				finish(null);
+			};
+			const beginExchangeWait = () => {
+				if (exchangeStartedAt !== null) return;
+				exchangeStartedAt = Date.now();
+				finishingConnectionId = expectedId ?? null;
+				clearTimeout(timeout);
+				timeout = setTimeout(pendingTimeout, 120000);
+			};
 			const checkConnection = async () => {
 				if (!expectedId || checking || finished) return;
+				if (popup.closed) beginExchangeWait();
 				checking = true;
 				try {
 					const connection = await cloudSync.getConnection(localStorage.token, expectedId);
 					if (finished) return;
 					connecting = connection;
-					checksSincePopupClosed = popup.closed ? checksSincePopupClosed + 1 : 0;
-					const outcome = connectionOutcome(connection, popup.closed, checksSincePopupClosed);
+					const outcome = connectionOutcome(
+						connection,
+						exchangeStartedAt === null ? 0 : Date.now() - exchangeStartedAt
+					);
 					if (outcome.status === 'failed') {
 						toast.error($i18n.t('Authorization failed: {{reason}}', { reason: outcome.reason }));
 						finish(null);
 					} else if (outcome.status === 'gave_up') {
-						toast.error($i18n.t('Authorization was not completed.'));
-						finish(null);
+						pendingTimeout();
 					} else if (outcome.status === 'done') {
 						schedules = schedules.map((schedule) =>
 							schedule.connection_id === connection.id ? { ...schedule, connection } : schedule
@@ -1027,24 +1029,25 @@
 						finish(connection);
 						await refreshCloudSync();
 					}
-				} catch (error) {
-					reportCloudError(error);
-					finish(null);
+				} catch {
+					// Keep polling through transient read failures until the exchange deadline.
 				} finally {
 					checking = false;
 				}
 			};
 			const handleMessage = (event: MessageEvent) => {
 				const result = connectResult(event, window.location.origin, popup, expectedId);
-				if (result === 'pending') void checkConnection();
-				else if (result === 'error' || result === 'invalid') {
+				if (result === 'pending') {
+					beginExchangeWait();
+					void checkConnection();
+				} else if (result === 'error' || result === 'invalid') {
 					toast.error($i18n.t('Authorization failed'));
 					finish(null);
 				}
 			};
 			window.addEventListener('message', handleMessage);
 			const checkClosed = setInterval(() => void checkConnection(), 3000);
-			const timeout = setTimeout(() => {
+			let timeout = setTimeout(() => {
 				toast.error($i18n.t('Authorization timed out. Please try again.'));
 				finish(null);
 			}, 120000);
@@ -1089,14 +1092,18 @@
 			let connection =
 				schedules.find((s) => s.source_kind === provider.type)?.connection ?? connecting;
 			if (connection?.source_kind !== provider.type) connection = null;
+			// [Gradient] Reuse the account across knowledge bases before starting consent.
+			if (!connection) {
+				const accounts = (await cloudSync.listConnections(localStorage.token)).filter(
+					(item) => item.source_kind === provider.type && item.lifecycle !== 'revoked'
+				);
+				connection = accounts.find((item) => item.lifecycle === 'enabled') ?? accounts[0] ?? null;
+			}
 			if (connection?.lifecycle !== 'enabled') {
 				connection = await authorizeBackgroundSync(provider, connection?.id);
-				if (connection)
-					toast.success($i18n.t('Account connected. Select files and folders to sync.'));
-				return;
 			}
 			if (!connection || destroyed) return;
-			let scopes: ScheduleForm['scope'][];
+			let scopes: Pick<ScheduleForm, 'scope' | 'label' | 'path'>[];
 			if (provider.type === 'onedrive') {
 				const items = await openOneDriveItemPicker('organizations');
 				if (!items?.length) return;
@@ -1107,9 +1114,9 @@
 				scopes = result.items.map(googleDriveScope);
 			}
 			let started = 0;
-			for (const scope of scopes) {
+			for (const source of scopes) {
 				try {
-					const form = { connection_id: connection.id, scope };
+					const form = { connection_id: connection.id, ...source };
 					const content = await cloudSync.createSchedule(localStorage.token, knowledge.id, {
 						...form,
 						kind: 'content'
@@ -1131,7 +1138,7 @@
 						error.status === 409 &&
 						error.code === 'schedule_exists'
 					) {
-						toast.info($i18n.t('That folder is already being synced.'));
+						toast.info($i18n.t('That folder is already in this knowledge base.'));
 						continue;
 					}
 					throw error;
@@ -1154,6 +1161,19 @@
 		}
 	};
 
+	// [Gradient] Confirm unsubscribe against the selected source's shared usage.
+	let showRemoveSource = false;
+	let removeSourceTargets: Schedule[] = [];
+	$: removeSource =
+		removeSourceTargets.find((schedule) => schedule.kind === 'content') ?? removeSourceTargets[0];
+	$: removeSourceOtherKbs = Math.max(0, (removeSource?.subscriber_count ?? 1) - 1);
+	const sourceAction = (targets: Schedule[], action: ScheduleAction | 'delete') => {
+		if (action === 'delete') {
+			removeSourceTargets = targets;
+			showRemoveSource = true;
+		} else void scheduleAction(targets, action);
+	};
+
 	const scheduleAction = async (targets: Schedule[], action: ScheduleAction | 'delete') => {
 		if (!knowledge || cloudActionBusy) return;
 		cloudActionBusy = true;
@@ -1167,8 +1187,8 @@
 			};
 			for (const schedule of targets)
 				await actions[action](localStorage.token, knowledge.id, schedule.id);
-			repollCloudSyncSoon();
 			await refreshCloudSync();
+			repollCloudSyncSoon();
 		} catch (error) {
 			if (
 				action === 'run' &&
@@ -1683,10 +1703,16 @@
 		if ($config?.features?.enable_google_drive_integration)
 			void initializeGooglePicker().catch(() => {});
 		id = $page.params.id;
-		const res = await getKnowledgeById(localStorage.token, id).catch((e) => {
-			toast.error(`${e}`);
-			return null;
-		});
+		knowledgeId = id;
+		// [Gradient] Start all three independent reads together; the first items page covers this poll.
+		const [res] = await Promise.all([
+			getKnowledgeById(localStorage.token, id).catch((e) => {
+				toast.error(`${e}`);
+				return null;
+			}),
+			getItemsPage(),
+			pollCloudSyncStatus(false)
+		]);
 
 		if (destroyed) return;
 		if (res) {
@@ -1700,7 +1726,7 @@
 				Object.values(CLOUD_PROVIDERS).find(
 					(provider) => $page.url.searchParams.get(provider.startSyncParam) === 'true'
 				) ?? null;
-			if (requestedProvider || CLOUD_PROVIDERS[knowledge.type ?? '']) await pollCloudSyncStatus();
+			if (!requestedProvider && !CLOUD_PROVIDERS[knowledge.type ?? '']) clearTimeout(syncPoll);
 		} else {
 			goto('/workspace/knowledge');
 		}
@@ -1992,15 +2018,17 @@
 		<div
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
-			{#if activeProvider || schedules.length}
+			{#if activeProvider || schedules.length || finishingConnectionId}
 				<CloudSyncPanel
+					knowledgeId={knowledge.id}
 					{schedules}
 					{reconnectNeeded}
+					{finishingConnectionId}
 					{syncStatusError}
 					writeAccess={knowledge.write_access}
 					busy={cloudActionBusy}
 					isAdmin={$user?.role === 'admin'}
-					on:action={(event) => scheduleAction(event.detail.schedules, event.detail.action)}
+					on:action={(event) => sourceAction(event.detail.schedules, event.detail.action)}
 					on:reconnect={(event) => reconnect(event.detail)}
 				/>
 			{/if}
@@ -2136,7 +2164,7 @@
 										<button
 											class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
 											disabled={isSyncBusy}
-											aria-label={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}
+											aria-label={$i18n.t('Add source')}
 											on:click={() => {
 												cloudSyncHandler(activeProvider);
 											}}
@@ -2151,6 +2179,8 @@
 													d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
 												/>
 											</svg>
+											<!-- [Gradient] Keep adding sources discoverable after the first sync. -->
+											<span>{$i18n.t('Add source')}</span>
 										</button>
 									</Tooltip>
 								{:else if $config?.integration_providers?.[knowledge?.type]}
@@ -2439,4 +2469,40 @@
 			'This will remove all files and directories from this knowledge base. This action cannot be undone.'
 		)}
 	</div>
+</ConfirmDialog>
+
+<!-- [Gradient] Unsubscribe removes this KB's source while preserving other subscribers. -->
+<ConfirmDialog
+	bind:show={showRemoveSource}
+	title={$i18n.t('Remove source?')}
+	confirmLabel={$i18n.t('Remove')}
+	on:confirm={() => {
+		const targets = removeSourceTargets;
+		removeSourceTargets = [];
+		void scheduleAction(targets, 'delete');
+	}}
+	on:cancel={() => {
+		removeSourceTargets = [];
+	}}
+>
+	<p class="text-sm text-gray-700 dark:text-gray-300">
+		{$i18n.t(
+			removeSourceOtherKbs > 0
+				? 'Remove {{label}} from this knowledge base? Its files stay in the {{count}} other knowledge bases that use it. Nothing changes in {{provider}}.'
+				: 'Remove {{label}} from this knowledge base? They will be removed from search. Nothing changes in {{provider}}. You can add the folder again any time.',
+			{
+				label:
+					removeSource?.label ||
+					$i18n.t(
+						removeSource?.scope.single_file || removeSource?.scope.include_descendants === false
+							? 'File'
+							: 'Folder'
+					),
+				count: removeSourceOtherKbs,
+				provider: $i18n.t(
+					CLOUD_PROVIDERS[removeSource?.source_kind]?.label ?? removeSource?.source_kind ?? ''
+				)
+			}
+		)}
+	</p>
 </ConfirmDialog>

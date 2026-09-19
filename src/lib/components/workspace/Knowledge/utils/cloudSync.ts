@@ -5,20 +5,32 @@ export function oneDriveScope(item: {
 	id: string;
 	driveId: string;
 	type: 'file' | 'folder';
-}): ScheduleForm['scope'] {
+	name: string;
+	path: string;
+}): Pick<ScheduleForm, 'scope' | 'label' | 'path'> {
 	return {
-		drive_id: item.driveId,
-		item_id: item.id,
-		include_descendants: item.type === 'folder',
-		single_file: item.type === 'file'
+		label: item.name,
+		path: item.path,
+		scope: {
+			drive_id: item.driveId,
+			item_id: item.id,
+			include_descendants: item.type === 'folder',
+			single_file: item.type === 'file'
+		}
 	};
 }
 
 export function googleDriveScope(item: {
 	id: string;
 	type: 'file' | 'folder';
-}): ScheduleForm['scope'] {
-	return { file_id: item.id, drive_id: null, include_descendants: item.type === 'folder' };
+	name: string;
+	path: string;
+}): Pick<ScheduleForm, 'scope' | 'label' | 'path'> {
+	return {
+		label: item.name,
+		path: item.path,
+		scope: { file_id: item.id, drive_id: null, include_descendants: item.type === 'folder' }
+	};
 }
 
 export function connectResult(
@@ -129,48 +141,36 @@ export function pairSchedules(schedules: Schedule[]): SchedulePair[] {
 	return [...pairs, ...[...remaining].map((acl) => ({ acl }))];
 }
 
-export function sourceStatus(pair: SchedulePair) {
-	const schedules = [pair.content, pair.acl].filter((schedule): schedule is Schedule => !!schedule);
-	const schedule = pair.content ?? pair.acl!;
-	const run = schedule.last_run;
-	const liveSchedules = schedules.filter((item) => runIsLive(item.last_run));
-	const expiry = schedules.flatMap((item) =>
-		typeof item.provider_secret_days_to_expiry === 'number'
-			? [item.provider_secret_days_to_expiry]
-			: []
-	);
-	return {
-		schedule,
-		liveSchedules,
-		live: liveSchedules.length > 0,
-		landed: run?.counts?.landed ?? 0,
-		failed: run?.counts?.failed ?? 0,
-		tooLarge: run?.counts?.item_too_large ?? 0,
-		errorCode:
-			schedule.last_error ??
-			pair.acl?.last_error ??
-			run?.error_code ??
-			pair.acl?.last_run?.error_code,
-		linkGrantsDropped: schedules.reduce(
-			(total, item) => total + (item.last_run?.counts?.link_grants_dropped ?? 0),
-			0
-		),
-		lastSynced: run?.finished_at ?? (run?.outcome ? run.started_at : null),
-		aclStatus:
-			pair.content && ['partial', 'failed'].includes(pair.acl?.last_run?.outcome ?? '')
-				? pair.acl?.last_run?.outcome
-				: null,
-		expiry: expiry.length ? Math.min(...expiry) : null
-	};
-}
-
 export function connectionOutcome(
 	connection: Connection,
-	popupClosed: boolean,
-	checksSincePopupClosed: number
+	elapsedMs: number
 ): { status: 'done' | 'waiting' | 'gave_up' } | { status: 'failed'; reason: string } {
-	if (connection.last_error || !['pending', 'enabled'].includes(connection.lifecycle))
+	if (
+		connection.last_error ||
+		connection.lifecycle.startsWith('suspended:') ||
+		connection.lifecycle === 'revoked'
+	)
 		return { status: 'failed', reason: connection.last_error ?? connection.lifecycle };
 	if (connection.lifecycle === 'enabled') return { status: 'done' };
-	return { status: popupClosed && checksSincePopupClosed >= 2 ? 'gave_up' : 'waiting' };
+	return { status: elapsedMs >= 120000 ? 'gave_up' : 'waiting' };
+}
+
+export function shouldRefetchSyncItems(previous: Schedule[], current: Schedule[]): boolean {
+	const isLive = current.some((schedule) => runIsLive(schedule.last_run));
+	const snapshot = (schedules: Schedule[]) =>
+		JSON.stringify(
+			[...schedules]
+				.sort((a, b) => a.id.localeCompare(b.id))
+				.map((schedule) => [
+					schedule.id,
+					schedule.last_run?.id ?? null,
+					schedule.last_run?.finished_at ?? null,
+					schedule.document_count
+				])
+		);
+	return (
+		isLive ||
+		(!isLive && previous.some((schedule) => runIsLive(schedule.last_run))) ||
+		snapshot(previous) !== snapshot(current)
+	);
 }

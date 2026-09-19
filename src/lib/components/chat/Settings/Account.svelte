@@ -12,6 +12,8 @@
 	} from '$lib/apis/auths';
 	import { getUserVariables, updateUserVariables } from '$lib/apis/users';
 
+	// [Gradient] Subject-owned cloud accounts and their knowledge base usage.
+	import ConnectedAccounts from './ConnectedAccounts.svelte';
 	import UpdatePassword from './Account/UpdatePassword.svelte';
 	import { generateInitialsImage } from '$lib/utils';
 
@@ -371,6 +373,9 @@
 				})}
 			</div>
 		</section>
+
+		<!-- [Gradient] Cloud sync connections belong to the signed-in account. -->
+		<ConnectedAccounts />
 
 		{#if $config?.features.enable_login_form && $config?.features.enable_password_change_form}
 			<UserSettingSection title={$i18n.t('Password')}>

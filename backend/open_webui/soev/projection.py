@@ -25,16 +25,18 @@ def types_from_schedules(schedules: list[dict]) -> dict[str, str]:
     # If providers conflict for a collection, the first eligible schedule by id wins.
     for schedule in sorted(schedules, key=lambda row: row['id']):
         if schedule['kind'] == 'content' and schedule['lifecycle'] != 'revoked':
-            types.setdefault(schedule['collection_key'], schedule['source_kind'])
+            for collection_key in schedule['subscribers']:
+                types.setdefault(collection_key, schedule['source_kind'])
     return types
 
 
 def knowledge_of(collection: dict, *, service_principal: str, types: dict[str, str] | None = None) -> KnowledgeModel:
     creator = collection.get('created_by') or ''
+    subscriptions = collection.get('subscriptions') or []
     return KnowledgeModel(
         id=collection['key'],
         user_id=creator.removeprefix('owui:user:') if creator.startswith('owui:user:') else '',
-        type=(types or {}).get(collection['key'], 'local'),
+        type=subscriptions[0] if subscriptions else (types or {}).get(collection['key'], 'local'),
         name=collection['name'],
         description=collection['description'] or '',
         meta={},
@@ -190,10 +192,12 @@ def knowledge_file_list_of(
     directories: list | None = None,
     breadcrumbs: list | None = None,
     rollups: dict | None = None,
+    collection_total: int | None = None,
 ) -> KnowledgeFileListResponse:
     return KnowledgeFileListResponse(
         items=items,
         total=total,
+        collection_total=collection_total,
         directories=[
             KnowledgeDirectoryEntry(
                 **directory.model_dump(),

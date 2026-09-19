@@ -43,7 +43,7 @@ from open_webui.routers.audio import transcribe
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
 from open_webui.soev import ingest
-from open_webui.soev.catalog_content import stream_catalog_content  # [Gradient] Catalog originals.
+from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import strict_match_mime_type
@@ -758,6 +758,12 @@ async def delete_all_files(
 @router.get('/{id}', response_model=Optional[FileModel])
 async def get_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     file = await Files.get_file_by_id(id, db=db)
+
+    # [Gradient] Cloud documents have catalog membership without a local upload row.
+    if not file:
+        file = await catalog_file(id, user)
+        if file:
+            return file
 
     if not file:
         raise HTTPException(

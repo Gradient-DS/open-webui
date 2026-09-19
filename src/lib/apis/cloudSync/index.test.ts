@@ -38,6 +38,8 @@ describe('cloud-sync thin router', () => {
 			const form: cloudSync.ScheduleForm = {
 				connection_id: 'c',
 				kind: 'content',
+				label: 'Reports',
+				path: '/Team/Reports',
 				...(cadence === undefined ? {} : { cadence_minutes: cadence }),
 				scope: { drive_id: 'd', item_id: 'folder', include_descendants: true, single_file: false }
 			};
@@ -54,7 +56,8 @@ describe('cloud-sync thin router', () => {
 			schedules: [
 				{
 					id: 's',
-					last_run: { status: 'running', observed: 3 },
+					document_count: 12,
+					last_run: { id: 'run', outcome: null, counts: { fetched: 3 } },
 					connection: { lifecycle: 'suspended:reauth' }
 				}
 			]
@@ -70,6 +73,30 @@ describe('cloud-sync thin router', () => {
 			['/api/v1/cloud-sync/connections/c%2Fone', 'GET'],
 			['/api/v1/cloud-sync/connections/c%2Fone/authorize', 'POST']
 		]);
+	});
+
+	it('reads distinct knowledge base usage from the encoded connection route', async () => {
+		const result = { knowledge_ids: ['kb-1', 'kb-2'] };
+		const fetch = respond(result);
+		expect(await cloudSync.getConnectionUsage(token, 'c/one')).toEqual(result);
+		expect(fetch).toHaveBeenCalledWith(
+			'/api/v1/cloud-sync/connections/c%2Fone/usage',
+			expect.objectContaining({ method: 'GET', headers: { Authorization: `Bearer ${token}` } })
+		);
+	});
+
+	it('reads named skipped files and preserves content failure codes', async () => {
+		const result = [
+			{ source_id: 'empty', name: 'Empty.pdf', code: 'empty_content' },
+			{ source_id: 'broken', name: 'Broken.pdf', code: 'processing_failed' },
+			{ source_id: 'slow', name: 'Slow.pdf', code: 'timed_out' }
+		];
+		const fetch = respond(result);
+		expect(await cloudSync.getSkippedItems(token, 'kb', 'content/run')).toEqual(result);
+		expect(fetch).toHaveBeenCalledWith(
+			'/api/v1/cloud-sync/knowledge/kb/schedules/content%2Frun/skipped',
+			expect.objectContaining({ method: 'GET', headers: { Authorization: `Bearer ${token}` } })
+		);
 	});
 
 	it('handles run jobs and bodyless schedule and revoke responses', async () => {

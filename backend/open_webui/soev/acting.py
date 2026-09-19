@@ -5,6 +5,8 @@ from functools import wraps
 
 from fastapi import Depends, FastAPI
 
+from open_webui.soev.request_cache import request_cache
+
 _acting_ref: ContextVar[str | None] = ContextVar('soev_acting_ref', default=None)
 
 
@@ -23,7 +25,8 @@ def install(app: FastAPI) -> None:
     async def with_acting_user(user=Depends(upstream_user)):
         token = _acting_ref.set(identity.external_ref(user))
         try:
-            yield user
+            with request_cache():
+                yield user
         finally:
             _acting_ref.reset(token)
 

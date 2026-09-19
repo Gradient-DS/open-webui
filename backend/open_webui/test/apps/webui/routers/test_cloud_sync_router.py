@@ -98,7 +98,9 @@ def test_a_schedule_is_registered_on_the_kbs_collection_key(api, cadence):
     }
     if cadence is not None:
         body['cadence_minutes'] = cadence
-    api.responses.append(response({'id': 'schedule-1', **body, 'collection_key': 'kb-1'}, 201))
+    api.responses.append(
+        response({'id': 'schedule-1', **body, 'collection_key': 'corpus:drive', 'subscribers': ['kb-1']}, 201)
+    )
     result = api.browser.post('/api/v1/cloud-sync/knowledge/kb-1/schedules', json=body)
     assert result.status_code == 200
     assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb-1'}
@@ -123,7 +125,10 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
     detail = {
         'id': 'schedule-1',
         'connection_id': 'connection-1',
-        'collection_key': 'kb-1',
+        'collection_key': 'corpus:drive',
+        'subscribers': ['kb-1', 'kb-2'],
+        'subscriber_count': 2,
+        'document_count': 12,
         'source_kind': 'onedrive',
         'last_run': {
             'id': 'run-1',
@@ -144,15 +149,15 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
         [
             response({'key': 'kb-1'}),
             response({'data': [detail], 'next_cursor': 'page-2'}),
-            response(connection),
             response({'data': [second], 'next_cursor': None}),
+            response(connection),
         ]
     )
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-1/sync')
     assert result.status_code == 200
     assert result.json() == {'schedules': [{**detail, 'connection': connection}, {**second, 'connection': connection}]}
     assert dict(api.requests[1].url.params) == {'collection_key': 'kb-1'}
-    assert dict(api.requests[3].url.params) == {'collection_key': 'kb-1', 'cursor': 'page-2'}
+    assert dict(api.requests[2].url.params) == {'collection_key': 'kb-1', 'cursor': 'page-2'}
     # One connection fetch for two schedules sharing it, and no per-schedule call.
     assert len(api.refs) == 4
     assert_assertions(api.requests)
@@ -210,7 +215,15 @@ def test_every_call_carries_the_users_assertion(api, operation):
         result = api.browser.post(prefix + '/connections/c/authorize')
         assert result.json()['authorize_url'].endswith('/fresh')
     else:
-        api.responses.append(response({'id': 's', 'collection_key': 'foreign' if operation == 'foreign' else 'kb'}))
+        api.responses.append(
+            response(
+                {
+                    'id': 's',
+                    'collection_key': 'corpus:drive',
+                    'subscribers': ['foreign' if operation == 'foreign' else 'kb'],
+                }
+            )
+        )
         path = prefix + '/knowledge/kb/schedules/s'
         if operation == 'foreign':
             result = api.browser.post(path + '/run')
@@ -274,3 +287,247 @@ def test_a_soev_api_policy_refusal_maps_to_403_with_its_code(api, status, code):
     result = api.browser.post('/api/v1/cloud-sync/connections', json={'provider': 'onedrive'})
     assert result.status_code == status
     assert result.json() == {'detail': {'code': code, 'detail': 'Refused', 'constraint': 'provider'}}
+
+
+@pytest.mark.parametrize('key', ['kb-1', 'kb: space&plus+?=#é'])
+def test_delete_forwards_the_kb_as_collection_key(api, key):
+    """Unsubscribing encodes the KB query value without changing the corpus destination."""
+    from urllib.parse import quote
+
+    api.responses.extend(
+        [
+            response({'id': 's', 'collection_key': 'corpus:drive', 'subscribers': [key, 'other-kb']}),
+            httpx.Response(204),
+        ]
+    )
+    result = api.browser.delete(f'/api/v1/cloud-sync/knowledge/{quote(key, safe="")}/schedules/s')
+    assert result.status_code == 204
+    assert api.requests[-1].method == 'DELETE'
+    assert api.requests[-1].url.path == '/v1/schedules/s'
+    assert dict(api.requests[-1].url.params) == {'collection_key': key}
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('action', ['delete', 'run', 'cancel', 'suspend', 'resume'])
+@pytest.mark.parametrize('subscribed', [False, True])
+def test_actions_require_the_kb_to_subscribe(api, action, subscribed):
+    """Every mutation checks subscribers even when the schedule destination equals the KB."""
+    api.responses.append(
+        response(
+            {
+                'id': 's',
+                'collection_key': 'corpus:drive' if subscribed else 'kb',
+                'subscribers': ['other-kb', 'kb'] if subscribed else ['other-kb'],
+            }
+        )
+    )
+    if subscribed:
+        api.responses.append(response({'job_id': 'j'}, 201) if action == 'run' else httpx.Response(204))
+    path = '/api/v1/cloud-sync/knowledge/kb/schedules/s'
+    result = api.browser.delete(path) if action == 'delete' else api.browser.post(path + '/' + action)
+    assert result.status_code == ((201 if action == 'run' else 204) if subscribed else 404)
+    assert len(api.requests) == (2 if subscribed else 1)
+    if not subscribed:
+        assert result.json()['detail']['code'] == 'connection_not_found'
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('field', ['label', 'path'])
+@pytest.mark.parametrize('length', [512, 513])
+def test_schedule_display_fields_are_forwarded_with_limits(api, field, length):
+    """Display fields pass through at the limit and are rejected before I/O above it."""
+    body = {'connection_id': 'c', 'kind': 'content', 'scope': {}, field: 'a' * length}
+    if length == 512:
+        api.responses.append(response({'id': 's'}, 201))
+    result = api.browser.post('/api/v1/cloud-sync/knowledge/kb/schedules', json=body)
+    assert result.status_code == (200 if length == 512 else 422)
+    if length == 512:
+        assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb'}
+    else:
+        assert not api.requests
+
+
+def test_schedule_create_forwards_label_and_path(api):
+    """Picker display fields remain outside the deduplicated scope."""
+    body = {
+        'connection_id': 'c',
+        'kind': 'content',
+        'scope': {'drive_id': 'd', 'item_id': 'folder'},
+        'label': 'Reports',
+        'path': '/Team/Reports',
+    }
+    api.responses.append(response({'id': 's', **body}, 201))
+    result = api.browser.post('/api/v1/cloud-sync/knowledge/kb/schedules', json=body)
+    assert result.status_code == 200
+    assert json.loads(api.requests[0].content) == {**body, 'collection_key': 'kb'}
+    assert result.json()['label'] == 'Reports'
+    assert result.json()['path'] == '/Team/Reports'
+    assert_assertions(api.requests)
+
+
+def test_connection_usage_lists_subscribing_kbs(api):
+    """Usage unions subscribers across every page and both schedule kinds as the owner."""
+    api.responses.extend(
+        [
+            response({'id': 'c'}),
+            response(
+                {
+                    'data': [
+                        {'id': 's1', 'kind': 'content', 'subscribers': ['kb-1', 'kb-2']},
+                        {'id': 's2', 'kind': 'acl_refresh', 'subscribers': ['kb-1', 'kb-2']},
+                    ],
+                    'next_cursor': 'next',
+                }
+            ),
+            response({'data': [{'id': 's3', 'subscribers': ['kb-2', 'kb-3']}], 'next_cursor': None}),
+        ]
+    )
+    result = api.browser.get('/api/v1/cloud-sync/connections/c/usage')
+    assert result.status_code == 200
+    assert result.json() == {'knowledge_ids': ['kb-1', 'kb-2', 'kb-3']}
+    assert api.requests[0].url.path == '/v1/connections/c'
+    assert api.requests[1].url.path == api.requests[2].url.path == '/v1/schedules'
+    assert dict(api.requests[1].url.params) == {'connection_id': 'c'}
+    assert dict(api.requests[2].url.params) == {'connection_id': 'c', 'cursor': 'next'}
+    assert api.refs == ['owui:user:alice'] * 3
+    assert_assertions(api.requests)
+
+
+def test_connection_usage_without_schedules_is_empty(api):
+    """An unused account has no subscribing knowledge bases."""
+    api.responses.extend([response({'id': 'c'}), response({'data': [], 'next_cursor': None})])
+    result = api.browser.get('/api/v1/cloud-sync/connections/c/usage')
+    assert result.status_code == 200
+    assert result.json() == {'knowledge_ids': []}
+    assert_assertions(api.requests)
+
+
+def test_connection_usage_refuses_an_inaccessible_connection(api):
+    """A missing or foreign account is refused before schedules are listed."""
+    api.responses.append(response({'code': 'connection_not_found', 'detail': 'No such connection'}, 404))
+    result = api.browser.get('/api/v1/cloud-sync/connections/foreign/usage')
+    assert result.status_code == 404
+    assert len(api.requests) == 1
+    assert_assertions(api.requests)
+
+
+def test_connection_usage_requires_a_verified_user(api):
+    """Usage cannot expose subscribers without an authenticated subject."""
+
+    def reject():
+        raise HTTPException(401)
+
+    api.app.dependency_overrides[cloud_sync.get_verified_user] = reject
+    assert api.browser.get('/api/v1/cloud-sync/connections/c/usage').status_code == 401
+    assert not api.requests
+
+
+def test_skipped_items_list_failed_job_items(api):
+    """Skipped items use the run id, preserve codes and resolve names across document pages."""
+    api.responses.extend(
+        [
+            response({'key': 'kb'}),
+            response({'id': 's', 'kind': 'content', 'subscribers': ['kb'], 'last_run': {'id': 'job-1'}}),
+            response(
+                {
+                    'items': [
+                        {'source_id': 'ok', 'title': 'Good.docx', 'status': 'succeeded', 'code': None},
+                        {'source_id': 'large', 'title': None, 'status': 'failed', 'code': 'item_too_large'},
+                        {
+                            'source_id': 'unknown',
+                            'title': None,
+                            'status': 'skipped',
+                            'code': 'unsupported_content_type',
+                        },
+                        {'source_id': 'waiting', 'title': None, 'status': 'pending', 'code': None},
+                        {
+                            'source_id': 'empty',
+                            'title': 'Empty.pdf',
+                            'status': 'skipped',
+                            'code': 'empty_content',
+                            'detail': 'empty_parsed_content',
+                        },
+                        {
+                            'source_id': 'empty',
+                            'title': 'Empty.pdf',
+                            'status': 'skipped',
+                            'code': 'empty_content',
+                        },
+                        {
+                            'source_id': 'broken',
+                            'title': 'Current.pdf',
+                            'status': 'failed',
+                            'code': 'processing_failed',
+                        },
+                    ]
+                }
+            ),
+            response({'data': [{'source_id': 'ok', 'filename': 'Good.docx'}], 'next_cursor': 'next'}),
+            response(
+                {
+                    'data': [
+                        {'source_id': 'large', 'title': 'Large.pdf'},
+                        {'source_id': 'broken', 'title': 'Old.pdf'},
+                    ],
+                    'next_cursor': None,
+                }
+            ),
+        ]
+    )
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
+    assert result.status_code == 200
+    assert result.json() == [
+        {'source_id': 'large', 'name': 'Large.pdf', 'code': 'item_too_large'},
+        {'source_id': 'unknown', 'name': 'unknown', 'code': 'unsupported_content_type'},
+        {'source_id': 'waiting', 'name': 'waiting', 'code': 'pending'},
+        {'source_id': 'empty', 'name': 'Empty.pdf', 'code': 'empty_content'},
+        {'source_id': 'broken', 'name': 'Current.pdf', 'code': 'processing_failed'},
+    ]
+    assert api.requests[2].url.path == '/v1/jobs/job-1'
+    assert dict(api.requests[2].url.params) == {'include_items': 'true'}
+    assert api.requests[3].url.path == '/v1/collections/kb/documents'
+    assert dict(api.requests[4].url.params) == {'cursor': 'next'}
+    assert api.refs == ['owui:user:alice'] * 5
+    assert_assertions(api.requests)
+
+
+def test_skipped_items_ignore_acl_refresh_echoes(api):
+    """ACL refresh skips never trigger a job lookup or duplicate content failures."""
+    api.responses.extend(
+        [
+            response({'key': 'kb'}),
+            response({'id': 'acl', 'kind': 'acl_refresh', 'subscribers': ['kb'], 'last_run': {'id': 'acl-job'}}),
+        ]
+    )
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/acl/skipped')
+    assert result.status_code == 200
+    assert result.json() == []
+    assert len(api.requests) == 2
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize('subscribed', [False, True])
+def test_skipped_items_require_subscription_and_allow_no_run(api, subscribed):
+    """A foreign schedule is refused and an unstarted schedule needs no job request."""
+    api.responses.extend(
+        [
+            response({'key': 'kb'}),
+            response(
+                {'id': 's', 'kind': 'content', 'subscribers': ['kb'] if subscribed else ['other'], 'last_run': None}
+            ),
+        ]
+    )
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
+    assert result.status_code == (200 if subscribed else 404)
+    if subscribed:
+        assert result.json() == []
+    assert len(api.requests) == 2
+    assert_assertions(api.requests)
+
+
+def test_skipped_items_require_readable_knowledge(api):
+    """An unreadable KB is refused before fetching its schedule or job."""
+    api.responses.append(response({'code': 'collection_not_found', 'detail': 'No such collection'}, 404))
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
+    assert result.status_code == 404
+    assert len(api.requests) == 1

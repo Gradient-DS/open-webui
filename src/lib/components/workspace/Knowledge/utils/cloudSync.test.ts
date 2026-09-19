@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import {
 	connectionOutcome,
+	shouldRefetchSyncItems,
 	pairSchedules,
-	sourceStatus,
 	connectResult,
 	googleDriveScope,
 	oneDriveScope,
@@ -14,27 +14,47 @@ import {
 } from './cloudSync';
 
 it('registers OneDrive folders recursively and files as single-file scopes', () => {
-	expect(oneDriveScope({ id: 'folder', driveId: 'drive', type: 'folder' })).toEqual({
-		drive_id: 'drive',
-		item_id: 'folder',
-		include_descendants: true,
-		single_file: false
+	const folder = {
+		id: 'folder',
+		driveId: 'drive',
+		type: 'folder' as const,
+		name: 'Reports',
+		path: '/Team/Reports'
+	};
+	expect(oneDriveScope(folder)).toEqual({
+		label: 'Reports',
+		path: '/Team/Reports',
+		scope: { drive_id: 'drive', item_id: 'folder', include_descendants: true, single_file: false }
 	});
-	expect(oneDriveScope({ id: 'file', driveId: 'drive', type: 'file' })).toEqual({
-		drive_id: 'drive',
-		item_id: 'file',
-		include_descendants: false,
-		single_file: true
+	expect(
+		oneDriveScope({
+			...folder,
+			id: 'file',
+			type: 'file',
+			name: 'Report.pdf',
+			path: '/Team/Report.pdf'
+		})
+	).toEqual({
+		label: 'Report.pdf',
+		path: '/Team/Report.pdf',
+		scope: { drive_id: 'drive', item_id: 'file', include_descendants: false, single_file: true }
 	});
 });
 
 it('registers Google folders and files without carrying picker credentials', () => {
-	expect(googleDriveScope({ id: 'folder', type: 'folder' })).toEqual({
-		file_id: 'folder',
-		drive_id: null,
-		include_descendants: true
+	const folder = {
+		id: 'folder',
+		type: 'folder' as const,
+		name: 'Reports',
+		path: '/Reports',
+		token: 'not-forwarded'
+	};
+	expect(googleDriveScope(folder)).toEqual({
+		label: 'Reports',
+		path: '/Reports',
+		scope: { file_id: 'folder', drive_id: null, include_descendants: true }
 	});
-	expect(googleDriveScope({ id: 'file', type: 'file' }).include_descendants).toBe(false);
+	expect(googleDriveScope({ ...folder, type: 'file' }).scope.include_descendants).toBe(false);
 });
 
 describe('connect popup messages', () => {
@@ -135,6 +155,9 @@ const scheduleFixture = (
 	kind,
 	scope,
 	connection_id: 'c',
+	subscribers: ['kb'],
+	subscriber_count: 1,
+	document_count: 0,
 	cadence_minutes: 60,
 	source_kind: 'onedrive',
 	lifecycle: 'enabled',
@@ -163,65 +186,34 @@ it('pairs schedules by connection and deep-equal scope regardless of key or sche
 	).toHaveLength(1);
 });
 
-it('uses content counters, either live run, ACL failures and one expiry per source', () => {
-	const run = { id: 'run', started_at: '2026-09-17T12:00:00Z' };
-	const content = {
-		...scheduleFixture('content', 'content'),
-		last_run: {
-			...run,
-			outcome: 'partial' as const,
-			finished_at: '2026-09-17T12:01:00Z',
-			counts: { landed: 12, failed: 2 },
-			error_code: 'fetch_failed'
-		},
-		provider_secret_days_to_expiry: 20
-	};
-	const acl = {
-		...scheduleFixture('acl', 'acl_refresh'),
-		last_run: run,
-		provider_secret_days_to_expiry: 10
-	};
-	expect(sourceStatus({ content, acl })).toMatchObject({
-		live: true,
-		liveSchedules: [acl],
-		landed: 12,
-		failed: 2,
-		errorCode: 'fetch_failed',
-		expiry: 10,
-		aclStatus: null,
-		lastSynced: '2026-09-17T12:01:00Z'
-	});
-	expect(
-		sourceStatus({ content, acl: { ...acl, last_run: { ...run, outcome: 'failed' } } })
-	).toMatchObject({ live: false, aclStatus: 'failed' });
-	expect(sourceStatus({ content: scheduleFixture('new', 'content') })).toMatchObject({
-		live: false,
-		landed: 0,
-		failed: 0,
-		lastSynced: null,
-		expiry: null
-	});
-	expect(sourceStatus({ acl })).toMatchObject({ schedule: acl, live: true, liveSchedules: [acl] });
-});
-
 it.each([
-	['enabled', null, false, 0, { status: 'done' }],
-	['enabled', 'invalid_grant', false, 0, { status: 'failed', reason: 'invalid_grant' }],
-	['pending', 'consent_denied', false, 0, { status: 'failed', reason: 'consent_denied' }],
-	['suspended:reauth', null, false, 0, { status: 'failed', reason: 'suspended:reauth' }],
-	['revoked', null, true, 2, { status: 'failed', reason: 'revoked' }],
-	['pending', null, false, 0, { status: 'waiting' }],
-	['pending', null, true, 1, { status: 'waiting' }],
-	['pending', null, true, 2, { status: 'gave_up' }],
-	['enabled', null, true, 2, { status: 'done' }]
+	['enabled', null, 0, { status: 'done' }],
+	['enabled', 'invalid_grant', 0, { status: 'failed', reason: 'invalid_grant' }],
+	['pending', 'consent_denied', 0, { status: 'failed', reason: 'consent_denied' }],
+	['suspended:reauth', null, 0, { status: 'failed', reason: 'suspended:reauth' }],
+	['revoked', null, 6000, { status: 'failed', reason: 'revoked' }],
+	['pending', null, 0, { status: 'waiting' }],
+	['pending', null, 119999, { status: 'waiting' }],
+	['pending', null, 120000, { status: 'gave_up' }],
+	['enabled', null, 120000, { status: 'done' }]
 ] as const)(
-	'resolves connection %s with error %s, popup closed %s, check %i',
-	(lifecycle, last_error, closed, checks, expected) => {
+	'resolves connection %s with error %s after %i ms',
+	(lifecycle, last_error, elapsed, expected) => {
 		expect(
-			connectionOutcome({ id: 'c', source_kind: 'onedrive', lifecycle, last_error }, closed, checks)
+			connectionOutcome({ id: 'c', source_kind: 'onedrive', lifecycle, last_error }, elapsed)
 		).toEqual(expected);
 	}
 );
+
+it('continues pending polls after the popup closes until the exchange enables the connection', () => {
+	const connection = { id: 'c', source_kind: 'onedrive', lifecycle: 'pending' };
+	for (const elapsed of [3000, 6000, 21000, 90000, 117000]) {
+		expect(connectionOutcome(connection, elapsed)).toEqual({ status: 'waiting' });
+	}
+	expect(connectionOutcome({ ...connection, lifecycle: 'enabled' }, 117000)).toEqual({
+		status: 'done'
+	});
+});
 
 it('keeps an owner mismatch visible even when the connection lifecycle is enabled', () => {
 	const connection: Connection = {
@@ -233,57 +225,46 @@ it('keeps an owner mismatch visible even when the connection lifecycle is enable
 	expect(reconnectConnections([{ connection } as Schedule], null)).toEqual([connection]);
 });
 
-it('surfaces schedule errors before stale run errors and includes ACL access failures', () => {
-	const content: Schedule = {
-		...scheduleFixture('content', 'content'),
-		last_error: 'writer_revoked',
+describe('sync file list refresh', () => {
+	const schedule = scheduleFixture('s', 'content');
+	const running = { ...schedule, last_run: { id: 'r', started_at: '2026-09-19T10:00:00Z' } };
+	const finished = {
+		...running,
 		last_run: {
-			id: 'run',
-			started_at: '2026-09-17T12:00:00Z',
-			outcome: 'failed',
-			error_code: 'old_error'
+			...running.last_run,
+			outcome: 'succeeded' as const,
+			finished_at: '2026-09-19T10:01:00Z'
 		}
 	};
-	const acl: Schedule = {
-		...scheduleFixture('acl', 'acl_refresh'),
-		last_error: 'access_revoked'
-	};
-	expect(sourceStatus({ content, acl }).errorCode).toBe('writer_revoked');
-	expect(sourceStatus({ content: { ...content, last_error: null }, acl }).errorCode).toBe(
-		'access_revoked'
-	);
-	expect(sourceStatus({ acl }).errorCode).toBe('access_revoked');
-});
-
-it('collects link-only share counts from both schedules', () => {
-	const run = { id: 'run', started_at: '2026-09-17T12:00:00Z', outcome: 'succeeded' as const };
-	expect(
-		sourceStatus({
-			content: {
-				...scheduleFixture('content', 'content'),
-				last_run: { ...run, counts: { link_grants_dropped: 2 } }
-			},
-			acl: {
-				...scheduleFixture('acl', 'acl_refresh'),
-				last_run: { ...run, counts: { link_grants_dropped: 3 } }
-			}
-		}).linkGrantsDropped
-	).toBe(5);
-	expect(sourceStatus({ content: scheduleFixture('content', 'content') }).linkGrantsDropped).toBe(
-		0
-	);
-});
-
-it('counts oversized item failures without confusing them with the run error code', () => {
-	const content: Schedule = {
-		...scheduleFixture('content', 'content'),
-		last_run: {
-			id: 'run',
-			started_at: '2026-09-17T12:00:00Z',
-			outcome: 'partial',
-			counts: { failed: 3, item_too_large: 2 }
-		}
-	};
-	expect(sourceStatus({ content })).toMatchObject({ failed: 3, tooLarge: 2, errorCode: undefined });
-	expect(sourceStatus({ content: scheduleFixture('content', 'content') }).tooLarge).toBe(0);
+	it('refreshes when a run finishes between idle polls', () => {
+		expect(shouldRefetchSyncItems([schedule], [finished])).toBe(true);
+		expect(
+			shouldRefetchSyncItems(
+				[finished],
+				[{ ...finished, last_run: { ...finished.last_run, id: 'r2' } }]
+			)
+		).toBe(true);
+		expect(
+			shouldRefetchSyncItems(
+				[finished],
+				[{ ...finished, last_run: { ...finished.last_run, finished_at: '2026-09-19T10:02:00Z' } }]
+			)
+		).toBe(true);
+	});
+	it('refreshes on live to idle and on every live poll', () => {
+		expect(shouldRefetchSyncItems([running], [finished])).toBe(true);
+		for (let poll = 1; poll <= 6; poll++)
+			expect(shouldRefetchSyncItems([running], [running])).toBe(true);
+	});
+	it('refreshes when any document count changes even without a live run', () => {
+		expect(shouldRefetchSyncItems([schedule], [{ ...schedule, document_count: 1 }])).toBe(true);
+		expect(shouldRefetchSyncItems([{ ...finished, document_count: 2 }], [finished])).toBe(true);
+	});
+	it('ignores order and unchanged idle snapshots but catches subscriptions changing', () => {
+		const other = scheduleFixture('other', 'acl_refresh');
+		expect(shouldRefetchSyncItems([finished, other], [other, finished])).toBe(false);
+		expect(shouldRefetchSyncItems([finished], [finished])).toBe(false);
+		expect(shouldRefetchSyncItems([finished, other], [finished])).toBe(true);
+		expect(shouldRefetchSyncItems([], [])).toBe(false);
+	});
 });
