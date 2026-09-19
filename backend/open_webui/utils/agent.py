@@ -48,9 +48,11 @@ from typing import Any
 import aiohttp
 from open_webui.config import ENABLE_SKILL_EXECUTION, FEATURE_SKILL_FILES
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
+from open_webui.models.agent_configs import AgentConfigs
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
 from open_webui.socket.main import get_event_emitter
+from open_webui.utils.agent_v2 import call_agent_v2
 from open_webui.utils.auth import create_token
 from open_webui.utils.log_context import describe_exception, error_fields
 from open_webui.utils.upstream_errors import safe_error_text
@@ -423,6 +425,15 @@ async def call_agent_api(
     # ``agent`` from the payload and the agents service uses its own
     # ``default_agent``.
     selected_agent = override_agent or await Config.get('agent_api.selected_agent') or None
+    # [Gradient] Route v2 agents through server-owned threads.
+    from open_webui.env import AGENT_API_RUNTIME
+
+    agent_config = await AgentConfigs.get_agent_config_by_id(selected_agent) if selected_agent else None
+    agent_meta = agent_config.meta if agent_config else {}
+    if AGENT_API_RUNTIME == 'v2' or agent_meta.get('runtime') == 'v2':
+        agent_model = agent_meta.get('model')
+        model = agent_model if isinstance(agent_model, str) and agent_model else llm_model
+        return await call_agent_v2(form_data, metadata, agent=selected_agent, model=model)
 
     # [Gradient] Forward the turn anchor so the agent service can rewind its
     # persisted thread state on retry/regenerate. The agents side forks its

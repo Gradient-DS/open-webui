@@ -9,6 +9,17 @@ import httpx
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from open_webui.test.soev.fake_api import FakeSoevApi
+
+
+@pytest.fixture
+def chat_http(fake_api: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> FakeSoevApi:
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        'open_webui.soev.client.httpx.AsyncClient',
+        lambda **kwargs: original_client(transport=httpx.MockTransport(fake_api.handle), **kwargs),
+    )
+    return fake_api
 
 
 @pytest.fixture
