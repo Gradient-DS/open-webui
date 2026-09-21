@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import httpx
@@ -398,7 +399,9 @@ async def test_only_api_paths_are_accepted(recorded_http, path):
 
 
 @pytest.mark.parametrize('configured', [False, True])
-def test_settings_are_environment_only_and_secrets_are_not_registered_or_logged(tmp_path, configured):
+def test_settings_are_environment_only_and_secrets_are_not_registered_or_logged(
+    tmp_path: Path, configured: bool
+) -> None:
     """Deployment settings preserve PEM bytes and never enter database defaults or logs."""
     settings = {
         'SOEV_API_URL': 'https://soev.invalid',
@@ -409,14 +412,17 @@ def test_settings_are_environment_only_and_secrets_are_not_registered_or_logged(
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
     }
     environment = {key: value for key, value in os.environ.items() if key not in settings}
+    environment.pop('AGENT_API_RUNTIME', None)
     environment.update(
         DATA_DIR=str(tmp_path),
         DATABASE_URL=f'sqlite:///{tmp_path / "config.db"}',
         ENABLE_DB_MIGRATIONS='False',
         STATIC_DIR=str(tmp_path / 'static'),
+        PYTHON_DOTENV_DISABLED='1',
     )
     if configured:
         environment.update(settings)
+        environment['AGENT_API_RUNTIME'] = 'v2'
     code = """
 import json
 import logging
@@ -425,9 +431,10 @@ from io import StringIO
 
 output = StringIO()
 logging.basicConfig(stream=output, level=logging.DEBUG, force=True)
-from open_webui import config
+from open_webui import config, env
 
 expected = json.loads(sys.argv[1])
+assert env.AGENT_API_RUNTIME == sys.argv[2]
 for name, value in expected.items():
     assert getattr(config, name) == value, name
 assert not any(key.startswith('soev_api.') for key in config.DEFAULT_CONFIG)
@@ -439,7 +446,11 @@ for name in ('SOEV_API_KEY', 'SOEV_API_SIGNING_KEY'):
 """
     expected = settings if configured else dict.fromkeys(settings, '')
     result = subprocess.run(
-        [sys.executable, '-c', code, json.dumps(expected)], env=environment, capture_output=True, text=True, check=False
+        [sys.executable, '-c', code, json.dumps(expected), 'v2' if configured else 'v1'],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
 

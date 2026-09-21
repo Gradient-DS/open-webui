@@ -1107,6 +1107,7 @@ else:
 ####################################
 
 AGENT_API_ENABLED = os.environ.get('AGENT_API_ENABLED', 'False').lower() == 'true'
+AGENT_API_RUNTIME = os.environ.get('AGENT_API_RUNTIME', 'v1').strip()
 AGENT_API_BASE_URL = os.environ.get('AGENT_API_BASE_URL', '').strip().rstrip('/')
 AGENT_API_KEY = os.environ.get('AGENT_API_KEY', '').strip()
 # Optional list of agent identifiers the admin can pick from in the

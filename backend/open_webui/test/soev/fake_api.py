@@ -12,6 +12,7 @@ from uuid import uuid4
 import httpx
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from open_webui.test.soev.fake_chat import FakeChatApi
 
 
 class Problem(Exception):
@@ -36,6 +37,7 @@ class FakeSoevApi:
         self.links, self.groups, self.replays, self.creation_bodies = {}, {}, {}, {}
         self.seen_jtis = set()
         self.requests, self.failures = [], []
+        self.chat = FakeChatApi()
 
     def handle(self, request):
         self.requests.append(request)
@@ -59,7 +61,7 @@ class FakeSoevApi:
         if subject and subject not in self.links:
             raise Problem(401, 'identity_not_linked')
         body = json.loads(request.content) if request.content else None
-        if request.method == 'GET':
+        if request.method == 'GET' or request.url.path.startswith('/v1/chat/threads'):
             return self._route(request, body, credential, subject)
         operation = request.headers.get('Idempotency-Key', '')
         if not 8 <= len(operation) <= 255:
@@ -190,7 +192,12 @@ class FakeSoevApi:
         data, cursor = self._slice(rows, request)
         return httpx.Response(200, json={'data': data, 'next_cursor': cursor})
 
-    def _route(self, request, body, credential, subject):
+    def _route(self, request: httpx.Request, body: dict | None, credential: str, subject: str | None) -> httpx.Response:
+        if request.url.path.startswith('/v1/chat/threads'):
+            return self.chat.handle(request, body, (credential, subject))
+        return self._catalog_route(request, body, credential, subject)
+
+    def _catalog_route(self, request, body, credential, subject):
         parts = [unquote(part) for part in request.url.raw_path.decode().split('?')[0].strip('/').split('/')]
         if parts[:2] == ['v1', 'identity'] or parts[:2] == ['v1', 'directory']:
             return self._identity(request.method, parts, body)
