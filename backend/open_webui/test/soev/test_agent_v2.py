@@ -321,7 +321,7 @@ async def test_panel_filter_scopes_chips_to_this_turn_with_cumulative_numbers(ch
 @pytest.mark.asyncio
 @pytest.mark.parametrize('model', [None, '', 123, 'host-inference-endpoint'])
 @pytest.mark.parametrize('picked', [{}, {'info': {'base_model_id': 'llm'}}])
-async def test_agent_model_overrides_the_resolved_picker_model(
+async def test_resolved_picker_model_wins_over_agent_model(
     chat: Chat, monkeypatch: pytest.MonkeyPatch, model: Any, picked: dict
 ) -> None:
     monkeypatch.setattr(
@@ -335,10 +335,7 @@ async def test_agent_model_overrides_the_resolved_picker_model(
     for path, body in chat.mutations():
         if path.endswith('/fork'):
             continue
-        if model == 'host-inference-endpoint':
-            assert body['model'] == model
-        else:
-            assert body['model'] == ('llm' if picked else 'custom')
+        assert body['model'] == ('llm' if picked else 'custom')
 
 
 @pytest.mark.asyncio
@@ -359,7 +356,7 @@ async def test_environment_routes_every_turn_to_v2(
         assert content(chunks) == f'Answer: turn {index}'
     assert [path for path, _ in chat.mutations()] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
     for _, body in chat.mutations():
-        assert body['model'] == ('agent-model' if selected_agent and meta and 'model' in meta else 'llm')
+        assert body['model'] == 'llm'
 
 
 @pytest.mark.asyncio
@@ -806,3 +803,29 @@ async def test_legacy_stream_preserves_socket_events_and_message_extras(
         'subagents': [{'value': 'subagent'}],
         'contextUsage': {'value': 'context_usage'},
     }
+
+
+@pytest.mark.asyncio
+async def test_split_body_sends_picked_llm(chat: Chat) -> None:
+    """Split metadata leaves LLM resolution to the explicit body model."""
+    await chat.turn(
+        'split turn',
+        'a1',
+        form_data={'model': 'picked-llm'},
+        model={'id': 'picked-llm', 'assistant_id': 'assistant', 'info': {'id': 'assistant', 'base_model_id': None}},
+    )
+    body = chat.mutations()[0][1]
+    assert body['model'] == 'picked-llm'
+    assert 'assistant_id' not in body
+
+
+@pytest.mark.asyncio
+async def test_agent_model_is_default_without_resolved_llm(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agent configuration supplies a model only when the request resolves none."""
+    monkeypatch.setattr(
+        AgentConfigs,
+        'get_agent_config_by_id',
+        AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2', 'model': 'agent-default'})),
+    )
+    await chat.turn('default turn', 'a1', form_data={'model': ''}, model={})
+    assert chat.mutations()[0][1]['model'] == 'agent-default'
