@@ -1028,8 +1028,12 @@
 		await oauthRedirectHandler(nextTool);
 	};
 
-	// [Gradient] Dropping or clearing an assistant must refresh defaults even if LLM ids stay the same.
-	$: if ($activeAssistantId !== undefined && !history?.currentId) resetInput();
+	// [Gradient] Refresh defaults only when assistant identity changes, never on history updates.
+	let oldActiveAssistantId = $activeAssistantId;
+	$: if ($activeAssistantId !== oldActiveAssistantId) {
+		oldActiveAssistantId = $activeAssistantId;
+		if (!history?.currentId) resetInput();
+	}
 	const resetInput = async () => {
 		selectedToolIds = [];
 		selectedSkillIds = [];
