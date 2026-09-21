@@ -128,7 +128,7 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     monkeypatch.setattr(application, 'BYPASS_MODEL_ACCESS_CONTROL', False)
     monkeypatch.setattr(application, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
     monkeypatch.setattr(application, 'check_model_access', models.check_model_access)
-    monkeypatch.setattr(application, 'resolve_agent_route', lambda **kwargs: AgentRoute(True))
+    monkeypatch.setattr(application, 'resolve_agent_route', lambda **kwargs: AgentRoute(to_agent=True))
     monkeypatch.setattr(application, 'FEATURE_AGENT_PICKER', False)
     monkeypatch.setattr(application, 'process_chat_payload', payload)
     monkeypatch.setattr(application, 'call_agent_api', capture)
@@ -328,7 +328,7 @@ def test_openai_router_does_not_replace_picked_llm(split_harness, monkeypatch):
     from open_webui.utils.agent_routing import AgentRoute
 
     h = split_harness
-    monkeypatch.setattr(main, 'resolve_agent_route', lambda **kwargs: AgentRoute(False))
+    monkeypatch.setattr(main, 'resolve_agent_route', lambda **kwargs: AgentRoute(to_agent=False))
 
     async def connection(*args, **kwargs):
         return 'http://provider.invalid/v1', '', {}
@@ -364,13 +364,14 @@ def test_openai_router_does_not_replace_picked_llm(split_harness, monkeypatch):
     assert 'metadata' not in h.provider[-1]
 
 
-def test_saved_chat_fanout_keeps_composition_and_message_identity(split_harness):
+def test_saved_chat_fanout_keeps_composition_and_message_identity(split_harness, caplog):
     """Saved-chat registry lookup cannot discard assistant settings or persistence."""
     h = split_harness
     h.chats['chat'] = SimpleNamespace(meta={}, chat={}, variables={})
     response = send(h, chat_id='chat', session_id='session', id='reply')
     assert response.status_code == 200, response.text
     assert response.json()['results'] == [{'choices': []}]
+    assert not any('Error processing chat payload' in record.getMessage() for record in caplog.records)
     assert h.processed[-1]['assistant_id'] == 'assistant'
     assert h.processed[-1]['info']['base_model_id'] is None
     assert h.bindings == [('chat', 'assistant')]
