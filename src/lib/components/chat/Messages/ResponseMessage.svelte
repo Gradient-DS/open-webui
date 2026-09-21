@@ -1,4 +1,6 @@
 <script lang="ts">
+	// [Gradient] Message identity is durable and independent of the current chat selection.
+	import { effectiveModel } from '$lib/utils/assistants';
 	import { toast } from 'svelte-sonner';
 
 	import { createEventDispatcher, onDestroy } from 'svelte';
@@ -92,6 +94,7 @@
 	interface MessageType {
 		id: string;
 		model: string;
+		assistant_id?: string; // [Gradient]
 		content: string;
 		output?: OutputItem[];
 		files?: { type: string; url: string }[];
@@ -207,7 +210,10 @@
 	let showDeleteConfirm = false;
 
 	let model = null;
-	$: model = $models.find((m) => m.id === message.model);
+	// [Gradient] Legacy messages still resolve their assistant directly via message.model.
+	$: assistant = $models.find((m) => m.id === message.assistant_id);
+	$: model = effectiveModel($models.find((m) => m.id === message.model), assistant);
+	$: headerModel = assistant ?? model;
 
 	$: statusEntries = (() => {
 		const raw = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
@@ -852,6 +858,7 @@
 			meta: {
 				arena: message ? message.arena : false,
 				model_id: message.model,
+				assistant_id: message.assistant_id, // [Gradient]
 				message_id: message.id,
 				message_index: messages.length,
 				chat_id: chatId
@@ -1027,7 +1034,7 @@
 	>
 		<div class={`shrink-0 ltr:mr-2 rtl:ml-2 hidden @lg:flex mt-0.5 `}>
 			<ProfileImage
-				src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
+				src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${headerModel?.id}&lang=${$i18n.language}`}
 				className={'size-7 assistant-message-profile-image'}
 			/>
 		</div>
@@ -1035,9 +1042,9 @@
 		<div class="flex-auto w-0 pl-1 relative">
 			{#if !compactPreview}
 				<Name>
-					<Tooltip content={model?.name ?? message.model} placement="top-start">
+					<Tooltip content={headerModel?.name ?? message.model} placement="top-start">
 						<span id="response-message-model-name" class="line-clamp-1 text-black dark:text-white">
-							{model?.name ?? message.model}
+							{headerModel?.name ?? message.model}
 						</span>
 					</Tooltip>
 				</Name>
