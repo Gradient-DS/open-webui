@@ -370,6 +370,20 @@ async def test_source_preview_metadata_reaches_the_panel(chat: Chat, as_json: bo
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('as_json', [False, True])
+async def test_mixed_bboxes_preserve_valid_rectangles(chat: Chat, as_json: bool) -> None:
+    """Keep both valid rectangles when a malformed rectangle appears between them."""
+    rects = [RECT, {}, {**RECT, 'page': 1}]
+    properties = {'bboxes': json.dumps(rects) if as_json else rects}
+    chat.api.chat.turns = [
+        [('source', {**SOURCE, 'properties': properties}), ('model_output', {'content': 'Answer [source-a]'})]
+    ]
+    assert content(await chat.turn('question', 'a1')) == 'Answer [1]'
+    metadata = next(event['data']['metadata'][0] for event in chat.socket if event['type'] == 'source')
+    assert metadata['bboxes'] == [{**RECT, 'page': 1}, {**RECT, 'page': 0}]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     'bboxes',
     [
@@ -392,7 +406,8 @@ async def test_source_preview_metadata_reaches_the_panel(chat: Chat, as_json: bo
         [{**RECT, 'x0': False}],
         [{**RECT, 'x1': 10}],
         [{**RECT, 'y1': 20}],
-        [RECT, {}],
+        [None, {}, {**RECT, 'x1': 10}],
+        json.dumps([None, {}, {**RECT, 'x1': 10}]),
         '[{"x0": 0, "y0": 0, "x1": 1e999, "y1": 10}]',
     ],
 )

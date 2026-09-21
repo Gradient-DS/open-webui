@@ -104,10 +104,8 @@ def _source_bboxes(value: Any) -> list[dict[str, int | float]] | None:
             return None
     if not isinstance(value, list) or not value:
         return None
-    rects = [_source_rect(rect) for rect in value]
-    if any(rect is None for rect in rects):
-        return None
-    return [rect for rect in rects if rect is not None]
+    rects = [rect for item in value if (rect := _source_rect(item)) is not None]
+    return rects or None
 
 
 def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
