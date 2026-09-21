@@ -47,7 +47,7 @@ async def resolve_assistant_request(
 
     bind = True
     if chat_id and not chat_id.startswith('local:'):
-        row = await Chats.get_chat_by_id(chat_id)
+        row = await Chats.get_chat_by_id_and_user_id(chat_id, user.id)
         if row:
             messages = await ChatMessages.get_messages_by_chat_id(chat_id)
             has_message = any(message.role == 'assistant' for message in messages)

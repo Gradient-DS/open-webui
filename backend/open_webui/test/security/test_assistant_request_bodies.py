@@ -57,6 +57,7 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     allowed = {'llm', 'other-llm', 'assistant', 'inactive', 'override'}
     seen, processed, provider = [], [], []
     chats, messages, bindings, writes = {}, {}, [], []
+    message_lookups = []
 
     async def get_row(id, **kwargs):
         return rows.get(id)
@@ -87,7 +88,15 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     async def get_chat(id):
         return chats.get(id)
 
+    async def get_owned_chat(id, user_id):
+        chat = chats.get(id)
+        return chat if chat and getattr(chat, 'user_id', 'user') == user_id else None
+
+    async def is_owner(id, user_id):
+        return await get_owned_chat(id, user_id) is not None
+
     async def get_messages(id):
+        message_lookups.append(id)
         return messages.get(id, [])
 
     async def bind(id, assistant_id):
@@ -124,13 +133,14 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     monkeypatch.setattr(application, 'build_chat_response_context', context)
     monkeypatch.setattr(application, 'process_chat_response', response)
     monkeypatch.setattr(application.Chats, 'get_chat_by_id', get_chat)
+    monkeypatch.setattr(application.Chats, 'get_chat_by_id_and_user_id', get_owned_chat)
     monkeypatch.setattr(application.Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
     monkeypatch.setattr(application.Chats, 'insert_new_chat', insert)
     monkeypatch.setattr(application, 'emit_chat_list_event', noop)
     monkeypatch.setattr(application, 'publish_event', noop)
     monkeypatch.setattr(application, 'cleanup_task', noop)
     monkeypatch.setattr(application, 'has_active_tasks', owned)
-    monkeypatch.setattr(application.Chats, 'is_chat_owner', owned)
+    monkeypatch.setattr(application.Chats, 'is_chat_owner', is_owner)
     monkeypatch.setattr(application.Chats, 'update_chat_by_id', noop)
     monkeypatch.setattr(application.Chats, 'update_chat_variables_by_id', noop)
     monkeypatch.setattr(application.Chats, 'bind_chat_assistant_by_id', bind)
@@ -172,6 +182,7 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
             provider=provider,
             chats=chats,
             messages=messages,
+            message_lookups=message_lookups,
             bindings=bindings,
             writes=writes,
             user=user,
@@ -400,3 +411,49 @@ def test_split_fanout_cannot_override_authorized_body_model(split_harness, messa
     assert response.status_code == 400
     assert response.json() == {'detail': 'Split requests must use the selected LLM for every message.'}
     assert h.seen == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('chat_id', ['foreign', 'missing'])
+async def test_binding_preflight_does_not_reveal_other_users_chat(split_harness, chat_id):
+    """Foreign chats are indistinguishable from missing chats during binding preflight."""
+    from open_webui.utils.assistant_requests import resolve_assistant_request
+
+    h = split_harness
+    h.chats['foreign'] = SimpleNamespace(
+        user_id='other-user',
+        meta={'assistant_id': 'other'},
+        chat={},
+        variables={},
+    )
+    h.messages['foreign'] = [SimpleNamespace(role='assistant')]
+    model, info, bind = await resolve_assistant_request(
+        'assistant',
+        h.app.state.MODELS['llm'],
+        h.rows['llm'],
+        h.user,
+        check_access=True,
+        chat_id=chat_id,
+    )
+    assert model['assistant_id'] == info.id == 'assistant'
+    assert bind is True
+    assert h.message_lookups == []
+    assert h.bindings == []
+
+
+def test_foreign_chat_reaches_upstream_ownership_refusal(split_harness):
+    """The upstream ownership check returns the same refusal for foreign and missing chats."""
+    h = split_harness
+    h.chats['foreign'] = SimpleNamespace(
+        user_id='other-user',
+        meta={'assistant_id': 'other'},
+        chat={},
+        variables={},
+    )
+    h.messages['foreign'] = [SimpleNamespace(role='assistant')]
+    foreign = send(h, chat_id='foreign')
+    missing = send(h, chat_id='missing')
+    assert foreign.status_code == missing.status_code == 404
+    assert foreign.json() == missing.json()
+    assert h.message_lookups == []
+    assert not h.seen and not h.bindings
