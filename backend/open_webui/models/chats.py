@@ -907,6 +907,17 @@ class ChatTable:
             await session.commit()
             return True
 
+    # [Gradient] Assistant bindings live only in chat metadata.
+    async def bind_chat_assistant_by_id(self, id: str, assistant_id: str) -> bool:
+        """Record the assistant without rewriting chat history."""
+        async with get_async_db_context() as session:
+            row = await session.get(Chat, id, populate_existing=True, with_for_update=True)
+            if row is None:
+                return False
+            row.meta = {**(row.meta or {}), 'assistant_id': assistant_id}
+            await session.commit()
+            return True
+
     async def update_chat_tags_by_id(self, id: str, tags: list[str], user) -> None:
         """Replace a chat's tags. Runs after every completion with tag
         generation enabled, so only the meta column is read and written,
