@@ -1,4 +1,6 @@
 <script lang="ts">
+	// [Gradient] @ offers the same raw LLM identities as the model picker.
+	import { isLLM } from '$lib/utils/assistants';
 	import Fuse from 'fuse.js';
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 
@@ -43,7 +45,7 @@
 	let knowledgeResults: any[] = [];
 
 	$: modelItems = (($models ?? []) as any[])
-		.filter((model) => !model?.info?.meta?.hidden)
+		.filter((model) => isLLM(model) && !model?.info?.meta?.hidden)
 		.map((model) => ({
 			...model,
 			modelName: model?.name,

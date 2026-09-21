@@ -2,6 +2,10 @@
 	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
 	import Component from '../icons/Component.svelte';
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
+	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
+	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
+	import { isAssistant, isLLM } from '$lib/utils/assistants';
+	import AssistantChip from './AssistantChip.svelte';
 	import AgentSelector from './AgentSelector.svelte';
 	import { pendingAgentId } from '$lib/stores';
 	import DOMPurify from 'dompurify';
@@ -39,7 +43,7 @@
 		type Model,
 		mobile,
 		settings,
-		models,
+		models as rawModels, // [Gradient] Pickers use the unmodified LLM registry.
 		config,
 		showCallOverlay,
 		tools,
@@ -189,9 +193,7 @@
 	// [Gradient] The picker shows whenever there is anything to pick, including
 	// single-model tenants — it also hosts model info, set-as-default and the pin
 	// toggle. Assistants are excluded here exactly as they are in ModelSelector.
-	$: pickerModels = ($models ?? []).filter(
-		(model) => !model?.info?.base_model_id || selectedModels.includes(model.id)
-	);
+	$: pickerModels = ($rawModels ?? []).filter(isLLM);
 	$: isActive =
 		!askUser?.show &&
 		((taskIds && taskIds.length > 0) ||
@@ -1504,7 +1506,10 @@
 				} else if (data.type === 'model' && data.id) {
 					// Find the model from the store and set as @-selected model
 					const model = $models.find((m) => m.id === data.id);
-					if (model) {
+					// [Gradient] Assistant drops only bind empty chats.
+					if (isAssistant(model)) {
+						if (!history?.currentId) activeAssistantId.set(data.id);
+					} else if (isLLM(model)) {
 						atSelectedModel = model;
 					}
 					dragged = false;
@@ -2764,6 +2769,8 @@
 								</div>
 
 								<div class="self-end flex space-x-1 mr-1 min-w-0 gap-[0.03125rem]">
+									<!-- [Gradient] Assistant identity sits beside the independent LLM picker. -->
+									<AssistantChip editable={!history?.currentId} />
 									<div class="flex min-w-0 max-w-[10rem] items-center sm:max-w-[13rem]">
 										<!-- [Gradient] Agent-only picker tenants; model selector for other multi-model tenants. -->
 										{#if agentPickerActive}
