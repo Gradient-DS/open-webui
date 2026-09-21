@@ -49,16 +49,16 @@ async def resolve_assistant_request(
     if chat_id and not chat_id.startswith('local:'):
         row = await Chats.get_chat_by_id_and_user_id(chat_id, user.id)
         if row:
-            messages = await ChatMessages.get_messages_by_chat_id(chat_id)
-            has_message = any(message.role == 'assistant' for message in messages)
-            has_message = has_message or any(
-                message.get('role') == 'assistant'
-                for message in ((row.chat or {}).get('history') or {}).get('messages', {}).values()
-            )
-            try:
-                bind = (
-                    resolve_assistant_binding((row.meta or {}).get('assistant_id'), assistant_id, has_message) == 'bind'
+            bound_assistant = (row.meta or {}).get('assistant_id')
+            has_message = False
+            if bound_assistant and bound_assistant != assistant_id:
+                has_message = await ChatMessages.has_assistant_message(chat_id)
+                has_message = has_message or any(
+                    message.get('role') == 'assistant'
+                    for message in ((row.chat or {}).get('history') or {}).get('messages', {}).values()
                 )
+            try:
+                bind = resolve_assistant_binding(bound_assistant, assistant_id, has_message) == 'bind'
             except AssistantBindingConflict as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
     return build_assistant_model(assistant, model), merged_model_info(model_info, assistant), bind

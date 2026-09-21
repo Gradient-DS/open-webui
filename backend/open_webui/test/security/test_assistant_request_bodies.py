@@ -95,9 +95,12 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     async def is_owner(id, user_id):
         return await get_owned_chat(id, user_id) is not None
 
-    async def get_messages(id):
+    async def has_assistant_message(id):
         message_lookups.append(id)
-        return messages.get(id, [])
+        return any(message.role == 'assistant' for message in messages.get(id, []))
+
+    async def get_messages(id):
+        raise AssertionError('Binding preflight must not load all messages')
 
     async def bind(id, assistant_id):
         bindings.append((id, assistant_id))
@@ -145,6 +148,7 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     monkeypatch.setattr(application.Chats, 'update_chat_variables_by_id', noop)
     monkeypatch.setattr(application.Chats, 'bind_chat_assistant_by_id', bind)
     monkeypatch.setattr(assistant_requests.ChatMessages, 'get_messages_by_chat_id', get_messages)
+    monkeypatch.setattr(assistant_requests.ChatMessages, 'has_assistant_message', has_assistant_message)
     app = FastAPI()
     app.add_api_route('/api/chat/completions', application.chat_completion, methods=['POST'])
     user = SimpleNamespace(id='user', role='user', name='User', email='user@example.test')
@@ -457,3 +461,39 @@ def test_foreign_chat_reaches_upstream_ownership_refusal(split_harness):
     assert foreign.json() == missing.json()
     assert h.message_lookups == []
     assert not h.seen and not h.bindings
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bound_assistant,expected_bind', [(None, True), ('assistant', False)])
+async def test_binding_cheap_paths_skip_messages_and_history(split_harness, bound_assistant, expected_bind):
+    """Unbound and unchanged assistants need neither a message query nor a JSON walk."""
+    from open_webui.utils.assistant_requests import resolve_assistant_request
+
+    h = split_harness
+    h.chats['chat'] = SimpleNamespace(meta={'assistant_id': bound_assistant}, chat=object())
+    h.messages['chat'] = [SimpleNamespace(role='assistant')]
+    _, _, bind = await resolve_assistant_request(
+        'assistant',
+        h.app.state.MODELS['llm'],
+        h.rows['llm'],
+        h.user,
+        check_access=True,
+        chat_id='chat',
+    )
+    assert bind is expected_bind
+    assert h.message_lookups == []
+
+
+def test_existing_unbound_chat_binds_without_reading_messages(split_harness):
+    """A pre-split chat may bind lazily despite already containing assistant messages."""
+    h = split_harness
+    h.chats['chat'] = SimpleNamespace(
+        meta={},
+        variables={},
+        chat={'history': {'messages': {'old': {'role': 'assistant'}}}},
+    )
+    h.messages['chat'] = [SimpleNamespace(role='assistant')]
+    response = send(h, chat_id='chat')
+    assert response.status_code == 200, response.text
+    assert h.bindings == [('chat', 'assistant')]
+    assert h.message_lookups == []

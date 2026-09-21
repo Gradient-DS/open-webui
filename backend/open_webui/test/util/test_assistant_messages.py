@@ -38,3 +38,17 @@ async def test_chat_binding_updates_only_meta():
     assert updated.meta['assistant_id'] == 'assistant'
     assert updated.meta['agent_id'] == 'agent'
     assert await Chats.bind_chat_assistant_by_id(str(uuid4()), 'assistant') is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('done', [False, True])
+async def test_assistant_message_probe_scopes_chat_and_role(done):
+    """The existence probe includes unfinished assistants and excludes unrelated rows."""
+    chat_id, other_chat_id = str(uuid4()), str(uuid4())
+    assert await ChatMessages.has_assistant_message(chat_id) is False
+    await ChatMessages.upsert_message('user', chat_id, 'user', {'role': 'user'})
+    await ChatMessages.upsert_message('system', chat_id, 'user', {'role': 'system'})
+    await ChatMessages.upsert_message('reply', other_chat_id, 'user', {'role': 'assistant', 'done': done})
+    assert await ChatMessages.has_assistant_message(chat_id) is False
+    await ChatMessages.upsert_message('reply', chat_id, 'user', {'role': 'assistant', 'done': done})
+    assert await ChatMessages.has_assistant_message(chat_id) is True
