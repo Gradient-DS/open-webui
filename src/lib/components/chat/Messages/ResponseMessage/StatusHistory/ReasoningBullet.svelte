@@ -106,7 +106,7 @@
 		{#if open}
 			<div
 				transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
-				class="mb-1.5 text-sm text-gray-600 dark:text-gray-300"
+				class="mb-1.5 text-sm text-gray-600 dark:text-gray-400 border-s-2 border-gray-200 dark:border-gray-800 ps-3"
 			>
 				<Markdown id={`${id}-reasoning`} content={decodedBody} />
 			</div>
