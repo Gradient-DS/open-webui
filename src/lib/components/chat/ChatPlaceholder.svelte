@@ -53,9 +53,10 @@
 						<Tooltip
 							content={DOMPurify.sanitize(
 								marked.parse(
-									sanitizeResponseContent(
-										greetingModel?.info?.meta?.description ?? ''
-									).replaceAll('\n', '<br>')
+									sanitizeResponseContent(greetingModel?.info?.meta?.description ?? '').replaceAll(
+										'\n',
+										'<br>'
+									)
 								)
 							)}
 							placement="right"
@@ -114,9 +115,10 @@
 						>
 							{@html DOMPurify.sanitize(
 								marked.parse(
-									sanitizeResponseContent(
-										greetingModel?.info?.meta?.description ?? ''
-									).replaceAll('\n', '<br>')
+									sanitizeResponseContent(greetingModel?.info?.meta?.description ?? '').replaceAll(
+										'\n',
+										'<br>'
+									)
 								)
 							)}
 						</div>

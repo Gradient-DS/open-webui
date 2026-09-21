@@ -112,7 +112,10 @@
 
 	// The legacy marker distinguishes an assistant from an admin override row.
 	const computeDefaultBaseModelId = (): string =>
-		defaultLLMId($models, ($config?.default_models || '').split(',').map((id) => id.trim()));
+		defaultLLMId(
+			$models,
+			($config?.default_models || '').split(',').map((id) => id.trim())
+		);
 
 	onMount(async () => {
 		if (model) {

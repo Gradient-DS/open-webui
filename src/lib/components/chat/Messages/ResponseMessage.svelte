@@ -212,7 +212,10 @@
 	let model = null;
 	// [Gradient] Legacy messages still resolve their assistant directly via message.model.
 	$: assistant = $models.find((m) => m.id === message.assistant_id);
-	$: model = effectiveModel($models.find((m) => m.id === message.model), assistant);
+	$: model = effectiveModel(
+		$models.find((m) => m.id === message.model),
+		assistant
+	);
 	$: headerModel = assistant ?? model;
 
 	$: statusEntries = (() => {

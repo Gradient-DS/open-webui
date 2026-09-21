@@ -15,13 +15,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	import {
-		config,
-		user,
-		temporaryChatEnabled,
-		selectedFolder,
-		pendingAgentId
-	} from '$lib/stores';
+	import { config, user, temporaryChatEnabled, selectedFolder, pendingAgentId } from '$lib/stores';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { sanitizeResponseContent } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
@@ -90,7 +84,8 @@
 	let models = [];
 	let selectedModelIdx = 0;
 	// [Gradient] Keep the LLM id out of assistant avatar URLs and greetings.
-	$: greetingModel = $activeAssistant ?? $_models.find((m) => m.id === selectedModels[selectedModelIdx]);
+	$: greetingModel =
+		$activeAssistant ?? $_models.find((m) => m.id === selectedModels[selectedModelIdx]);
 
 	$: if (selectedModels.length > 0) {
 		selectedModelIdx = models.length - 1;

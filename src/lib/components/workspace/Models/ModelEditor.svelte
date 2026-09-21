@@ -254,7 +254,11 @@
 		}
 
 		// [Gradient] Never create an override row when saving an assistant.
-		if (preset) info.base_model_id ||= defaultLLMId($models, ($config?.default_models ?? '').split(',').map((id) => id.trim()));
+		if (preset)
+			info.base_model_id ||= defaultLLMId(
+				$models,
+				($config?.default_models ?? '').split(',').map((id) => id.trim())
+			);
 		if (preset && !info.base_model_id) {
 			toast.error($i18n.t('Base Model is required.'));
 			loading = false;

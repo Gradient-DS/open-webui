@@ -77,13 +77,11 @@
 					bind:this={selector}
 					id="model"
 					placeholder={$i18n.t('Select a model')}
-					items={$models
-						.filter(isLLM)
-						.map((model) => ({
-							value: model.id,
-							label: model.name,
-							model: model
-						}))}
+					items={$models.filter(isLLM).map((model) => ({
+						value: model.id,
+						label: model.name,
+						model: model
+					}))}
 					{pinModelHandler}
 					{className}
 					{triggerClassName}
@@ -91,8 +89,8 @@
 					{align}
 					{showSetDefault}
 					onSetDefault={saveDefaultModel}
-					multipleEnabled={!$activeAssistantId && ($user?.role === 'admin' ||
-						($user?.permissions?.chat?.multiple_models ?? true))}
+					multipleEnabled={!$activeAssistantId &&
+						($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))}
 					{disabled}
 					bind:compareEnabled={compareModels}
 					bind:values={selectedModels}

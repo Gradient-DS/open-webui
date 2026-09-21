@@ -53,7 +53,13 @@
 		desktopEvent
 	} from '$lib/stores';
 	// [Gradient] Keep assistant composition and selection migration outside the chat lifecycle.
-	import { effectiveModels as models, activeAssistantId, reconcileAssistantSelection, reconcileFolderSelection, llmSelection } from '$lib/stores/assistant';
+	import {
+		effectiveModels as models,
+		activeAssistantId,
+		reconcileAssistantSelection,
+		reconcileFolderSelection,
+		llmSelection
+	} from '$lib/stores/assistant';
 	import { isLLM } from '$lib/utils/assistants';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 
@@ -1730,7 +1736,11 @@
 			await tick();
 			if (folder?.data?.model_ids && !equal(selectedModels, folder.data.model_ids)) {
 				// [Gradient] Folder updates cannot replace a saved chat's assistant.
-				selectedModels = reconcileFolderSelection(folder.data.model_ids, !history?.currentId, $page.url.searchParams.get('assistant'));
+				selectedModels = reconcileFolderSelection(
+					folder.data.model_ids,
+					!history?.currentId,
+					$page.url.searchParams.get('assistant')
+				);
 			}
 		});
 
@@ -2342,7 +2352,8 @@
 					(selectedModels.length === 1 && selectedModels[0] === '')
 				) {
 					// Only fall back to first available model if default models didn't resolve
-					selectedModels = [getAvailableModelIds().at(0) ?? '']; // [Gradient] First available LLM only.
+					// [Gradient] First available LLM only.
+					selectedModels = [getAvailableModelIds().at(0) ?? ''];
 				}
 			} else {
 				selectedModels = [''];
@@ -2350,7 +2361,10 @@
 		}
 
 		// [Gradient] Split URL, folder, session, user and admin defaults before any await/reconciler.
-		selectedModels = reconcileAssistantSelection(selectedModels, $page.url.searchParams.get('assistant'));
+		selectedModels = reconcileAssistantSelection(
+			selectedModels,
+			$page.url.searchParams.get('assistant')
+		);
 
 		await showControls.set(false);
 		await showCallOverlay.set(false);
@@ -2530,7 +2544,11 @@
 						: [chatContent.models ?? ''];
 
 				// [Gradient] Saved binding wins over URL and pre-split saved model ids.
-				selectedModels = reconcileAssistantSelection(selectedModels, $page.url.searchParams.get('assistant'), chat?.meta?.assistant_id);
+				selectedModels = reconcileAssistantSelection(
+					selectedModels,
+					$page.url.searchParams.get('assistant'),
+					chat?.meta?.assistant_id
+				);
 
 				if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
 					selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
@@ -2829,7 +2847,8 @@
 		const messages = createMessagesList(history, responseMessageId);
 
 		const res = await chatAction(localStorage.token, actionId, {
-			model: llmSelection([modelId])[0], // [Gradient] Actions on legacy messages still dispatch an LLM.
+			// [Gradient] Actions on legacy messages still dispatch an LLM.
+			model: llmSelection([modelId])[0],
 			...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}),
 			messages: messages.map((m) => ({
 				id: m.id,
@@ -3329,7 +3348,8 @@
 		}
 
 		const model = $models.find((model) => model.id === modelId);
-		if (!model || !isLLM(model)) { // [Gradient] Commands select LLMs only.
+		// [Gradient] Commands select LLMs only.
+		if (!model || !isLLM(model)) {
 			toast.error(`Model not found: ${modelId}`);
 			messageInput?.setText('');
 			prompt = '';
@@ -3864,7 +3884,10 @@
 	) => {
 		// [Gradient] Continue on a legacy response also dispatches the independently selected LLM.
 		if (!isLLM(model)) model = $models.find((m) => m.id === llmSelection(selectedModels)[0]);
-		if (!model) { toast.error($i18n.t('Model not found')); return; }
+		if (!model) {
+			toast.error($i18n.t('Model not found'));
+			return;
+		}
 		const responseMessage = _history.messages[responseMessageId];
 		const userMessage = _history.messages[responseMessage.parentId];
 
@@ -4408,7 +4431,8 @@
 				},
 				$selectedFolder?.id,
 				chatVariables ?? null,
-				{ ...agentBinding, ...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}) } // [Gradient]
+				// [Gradient]
+				{ ...agentBinding, ...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}) }
 			);
 
 			_chatId = chat.id;
@@ -4865,7 +4889,11 @@
 										},
 										null,
 										chatVariables ?? null,
-										{ ...agentBinding, ...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}) } // [Gradient]
+										// [Gradient] Persist the independent assistant binding.
+										{
+											...agentBinding,
+											...($activeAssistantId ? { assistant_id: $activeAssistantId } : {})
+										}
 									);
 
 									if (savedChat) {
