@@ -19,7 +19,7 @@
 		chatId,
 		config,
 		type Model,
-		models,
+		models as rawModels, // [Gradient] Registry for selection, before assistant overlays.
 		tags as allTags,
 		settings,
 		showSidebar,
@@ -52,6 +52,9 @@
 		submitPromptSignal,
 		desktopEvent
 	} from '$lib/stores';
+	// [Gradient] Keep assistant composition and selection migration outside the chat lifecycle.
+	import { effectiveModels as models, activeAssistantId, reconcileAssistantSelection, reconcileFolderSelection, llmSelection } from '$lib/stores/assistant';
+	import { isLLM } from '$lib/utils/assistants';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -199,6 +202,8 @@
 
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
+	// [Gradient] Refresh @ selections when the active assistant changes.
+	$: if (atSelectedModel) atSelectedModel = $models.find((m) => m.id === atSelectedModel?.id);
 	let selectedModelIds = [];
 	$: if (atSelectedModel !== undefined) {
 		selectedModelIds = [atSelectedModel.id];
@@ -209,8 +214,9 @@
 	// [Gradient] Upstream compaction metrics are separate from the agent's usage banner.
 	let composerContextUsage = null;
 
+	// [Gradient] Automatic LLM fallbacks must not inherit assistant visibility metadata.
 	const getAvailableModelIds = () =>
-		$models.filter((m) => !(m?.info?.meta?.hidden ?? false)).map((m) => m.id);
+		$rawModels.filter((m) => isLLM(m) && !(m?.info?.meta?.hidden ?? false)).map((m) => m.id);
 	const getDefaultModelIds = () =>
 		$config?.default_models ? $config.default_models.split(',') : [];
 	const normalizeSelectedModels = (modelIds: string[] = []) => {
@@ -912,6 +918,8 @@
 	};
 
 	const initEmbeddedDraft = async () => {
+		// [Gradient] An embedded draft is a new chat too, without a sticky assistant.
+		selectedModels = reconcileAssistantSelection(llmSelection(selectedModels));
 		clearTimeout(saveControlsTimer);
 		await saveControls();
 
@@ -1014,6 +1022,8 @@
 		await oauthRedirectHandler(nextTool);
 	};
 
+	// [Gradient] Dropping or clearing an assistant must refresh defaults even if LLM ids stay the same.
+	$: if ($activeAssistantId !== undefined && !history?.currentId) resetInput();
 	const resetInput = async () => {
 		selectedToolIds = [];
 		selectedSkillIds = [];
@@ -1719,7 +1729,8 @@
 		const selectedFolderSubscribe = selectedFolder.subscribe(async (folder) => {
 			await tick();
 			if (folder?.data?.model_ids && !equal(selectedModels, folder.data.model_ids)) {
-				selectedModels = folder.data.model_ids;
+				// [Gradient] Folder updates cannot replace a saved chat's assistant.
+				selectedModels = reconcileFolderSelection(folder.data.model_ids, !history?.currentId, $page.url.searchParams.get('assistant'));
 			}
 		});
 
@@ -2250,7 +2261,8 @@
 			await temporaryChatEnabled.set(false);
 		}
 
-		const availableModels = $models
+		// [Gradient] Retain legacy assistant candidates until the split normalizer below.
+		const availableModels = $rawModels
 			.filter((m) => !(m?.info?.meta?.hidden ?? false))
 			.map((m) => m.id);
 
@@ -2330,12 +2342,15 @@
 					(selectedModels.length === 1 && selectedModels[0] === '')
 				) {
 					// Only fall back to first available model if default models didn't resolve
-					selectedModels = [availableModels?.at(0) ?? ''];
+					selectedModels = [getAvailableModelIds().at(0) ?? '']; // [Gradient] First available LLM only.
 				}
 			} else {
 				selectedModels = [''];
 			}
 		}
+
+		// [Gradient] Split URL, folder, session, user and admin defaults before any await/reconciler.
+		selectedModels = reconcileAssistantSelection(selectedModels, $page.url.searchParams.get('assistant'));
 
 		await showControls.set(false);
 		await showCallOverlay.set(false);
@@ -2513,6 +2528,9 @@
 					(chatContent?.models ?? undefined) !== undefined
 						? chatContent.models
 						: [chatContent.models ?? ''];
+
+				// [Gradient] Saved binding wins over URL and pre-split saved model ids.
+				selectedModels = reconcileAssistantSelection(selectedModels, $page.url.searchParams.get('assistant'), chat?.meta?.assistant_id);
 
 				if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
 					selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
@@ -2811,7 +2829,8 @@
 		const messages = createMessagesList(history, responseMessageId);
 
 		const res = await chatAction(localStorage.token, actionId, {
-			model: modelId,
+			model: llmSelection([modelId])[0], // [Gradient] Actions on legacy messages still dispatch an LLM.
+			...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}),
 			messages: messages.map((m) => ({
 				id: m.id,
 				role: m.role,
@@ -2821,7 +2840,7 @@
 				...(m.sources ? { sources: m.sources } : {})
 			})),
 			...(event ? { event: event } : {}),
-			model_item: $models.find((m) => m.id === modelId),
+			model_item: $models.find((m) => m.id === llmSelection([modelId])[0]), // [Gradient]
 			chat_id: _chatId,
 			session_id: $socket?.id,
 			id: responseMessageId
@@ -2902,6 +2921,7 @@
 				parentId: userMessageId,
 				childrenIds: [],
 				role: 'assistant',
+				...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}), // [Gradient]
 				content: `[RESPONSE] ${responseMessageId}`,
 				done: true,
 
@@ -3309,7 +3329,7 @@
 		}
 
 		const model = $models.find((model) => model.id === modelId);
-		if (!model) {
+		if (!model || !isLLM(model)) { // [Gradient] Commands select LLMs only.
 			toast.error(`Model not found: ${modelId}`);
 			messageInput?.setText('');
 			prompt = '';
@@ -3643,6 +3663,8 @@
 			: atSelectedModel !== undefined
 				? [atSelectedModel.id]
 				: selectedModels;
+		// [Gradient] Legacy regeneration and compare must obey split request dispatch.
+		selectedModelIds = llmSelection(selectedModelIds);
 		if (!modelId && history.messages[parentId]) {
 			history.messages[parentId].models = [...selectedModelIds];
 		}
@@ -3663,6 +3685,7 @@
 					id: responseMessageId,
 					childrenIds: [],
 					role: 'assistant',
+					...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}), // [Gradient]
 					content: '',
 					done: false,
 					model: model.id,
@@ -3839,6 +3862,9 @@
 			continueResponse?: boolean;
 		} = {}
 	) => {
+		// [Gradient] Continue on a legacy response also dispatches the independently selected LLM.
+		if (!isLLM(model)) model = $models.find((m) => m.id === llmSelection(selectedModels)[0]);
+		if (!model) { toast.error($i18n.t('Model not found')); return; }
 		const responseMessage = _history.messages[responseMessageId];
 		const userMessage = _history.messages[responseMessage.parentId];
 
@@ -4016,6 +4042,7 @@
 				},
 				...(useChatVariablesFallback ? { chat_variables: chatVariables } : {}),
 				model_item: $models.find((m) => m.id === model.id),
+				...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}), // [Gradient]
 
 				session_id: $socket?.id,
 				chat_id: _chatId || undefined,
@@ -4381,7 +4408,7 @@
 				},
 				$selectedFolder?.id,
 				chatVariables ?? null,
-				agentBinding
+				{ ...agentBinding, ...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}) } // [Gradient]
 			);
 
 			_chatId = chat.id;
@@ -4838,7 +4865,7 @@
 										},
 										null,
 										chatVariables ?? null,
-										agentBinding
+										{ ...agentBinding, ...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}) } // [Gradient]
 									);
 
 									if (savedChat) {
