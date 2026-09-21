@@ -98,3 +98,30 @@ def test_resolve_agent_route_standard_by_default():
         feature_agent_picker=False,
     )
     assert route == AgentRoute(to_agent=False, agent_id=None)
+
+
+@pytest.mark.parametrize(
+    'row,body,has_message,expected',
+    [
+        (None, None, False, 'keep'),
+        ('a', None, True, 'keep'),
+        (None, 'a', False, 'bind'),
+        (None, 'a', True, 'bind'),
+        ('a', 'a', True, 'keep'),
+        ('a', 'a', False, 'keep'),
+        ('a', 'b', False, 'bind'),
+    ],
+)
+def test_assistant_binding_decision(row, body, has_message, expected):
+    """Omitted legacy identities preserve bindings and empty chats can switch."""
+    from open_webui.utils.agent_routing import resolve_assistant_binding
+
+    assert resolve_assistant_binding(row, body, has_message) == expected
+
+
+def test_assistant_binding_refuses_switch_after_message():
+    """A persisted assistant message fixes the assistant identity."""
+    from open_webui.utils.agent_routing import AssistantBindingConflict, resolve_assistant_binding
+
+    with pytest.raises(AssistantBindingConflict, match='assistant is fixed'):
+        resolve_assistant_binding('a', 'b', True)

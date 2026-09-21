@@ -1411,6 +1411,20 @@ async def chat_completion(
             model = model_item
             await _set_direct_model(request, model, user)
 
+        # [Gradient] Opt-in assistant/LLM split; keep the selected LLM request-local.
+        from open_webui.utils.assistant_requests import resolve_assistant_request
+
+        split_assistant_id = form_data.pop('assistant_id', None)
+        bind_assistant = False
+        if split_assistant_id and not model_item.get('direct', False):
+            model, model_info, bind_assistant = await resolve_assistant_request(
+                split_assistant_id, model, model_info, user,
+                check_access=not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL),
+                chat_id=form_data.get('chat_id'), message_ids=form_data.get('message_ids'),
+            )
+        else:
+            split_assistant_id = None
+
         # Read before the fallback below can rebind model to a different one.
         model_capabilities = ((model.get('info') or {}).get('meta') or {}).get('capabilities') or {}
 
@@ -1649,6 +1663,7 @@ async def chat_completion(
                                 'content': '',
                                 'done': False,
                                 'model': target_model_id,
+                                **({'assistant_id': split_assistant_id} if split_assistant_id else {}),  # [Gradient]
                                 'timestamp': int(time.time()),
                             }
                             # Preserve the side-by-side column index so duplicate
@@ -1876,6 +1891,7 @@ async def chat_completion(
                                 'content': '',
                                 'done': False,
                                 'model': target_model_id,
+                                **({'assistant_id': split_assistant_id} if split_assistant_id else {}),  # [Gradient]
                                 'timestamp': int(time.time()),
                             }
                             # Preserve the side-by-side column index so duplicate
@@ -2010,6 +2026,13 @@ async def chat_completion(
                         log.warning('Could not bind chat %s to default agent %s: %s', chat_id_meta, route.agent_id, e)
                 chat_agent_id = route.agent_id
 
+            # [Gradient] Keep the request-local model when saved-chat dispatch reloads the registry.
+            if split_assistant_id:
+                model = metadata['model']
+            # Bind only opt-in requests, after the pre-placeholder conflict check.
+            if bind_assistant and chat_id_meta and not chat_id_meta.startswith('local:'):
+                await Chats.bind_chat_assistant_by_id(chat_id_meta, split_assistant_id)
+
             metadata['route_to_agent'] = route_to_agent
             metadata['chat_agent_id'] = chat_agent_id
 
@@ -2039,6 +2062,7 @@ async def chat_completion(
                             {
                                 'parentId': metadata.get('user_message_id', None),
                                 'model': model_id,
+                                **({'assistant_id': split_assistant_id} if split_assistant_id else {}),  # [Gradient]
                             },
                         )
                 except Exception:
