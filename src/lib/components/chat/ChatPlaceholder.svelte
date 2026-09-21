@@ -1,9 +1,11 @@
 <script lang="ts">
+	// [Gradient] Suggestions use effective LLMs; presentation uses assistant identity.
+	import { effectiveModels as _models, activeAssistant } from '$lib/stores/assistant';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
 
-	import { config, user, models as _models, temporaryChatEnabled } from '$lib/stores';
+	import { config, user, temporaryChatEnabled } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
 
 	import { blur, fade } from 'svelte/transition';
@@ -16,7 +18,7 @@
 
 	const i18n = getContext('i18n');
 
-	export let modelIds = [];
+	export let modelIds: string[] = []; // [Gradient] Shared with assistant greeting lookup.
 	export let models = [];
 	export let atSelectedModel;
 
@@ -24,6 +26,8 @@
 
 	let mounted = false;
 	let selectedModelIdx = 0;
+	// [Gradient] Keep the LLM id out of assistant avatar URLs and greetings.
+	$: greetingModel = $activeAssistant ?? $_models.find((m) => m.id === modelIds[selectedModelIdx]);
 
 	$: if (modelIds.length > 0) {
 		selectedModelIdx = models.length - 1;
@@ -50,14 +54,14 @@
 							content={DOMPurify.sanitize(
 								marked.parse(
 									sanitizeResponseContent(
-										models[selectedModelIdx]?.info?.meta?.description ?? ''
+										greetingModel?.info?.meta?.description ?? ''
 									).replaceAll('\n', '<br>')
 								)
 							)}
 							placement="right"
 						>
 							<img
-								src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
+								src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${($activeAssistant ?? model)?.id}&lang=${$i18n.language}`}
 								class=" size-[2.7rem] rounded-full"
 								alt="logo"
 								draggable="false"
@@ -91,27 +95,27 @@
 		>
 			<div>
 				<div class=" capitalize line-clamp-1" in:fade={{ duration: 200 }}>
-					{#if $config?.ui?.greeting_template}
+					{#if $config?.ui?.greeting_template && !$activeAssistant}
 						{resolveLocalized($config.ui.greeting_template, $i18n?.language).replace(
 							'{{name}}',
 							$user?.name ?? ''
 						)}
-					{:else if models[selectedModelIdx]?.name}
-						{models[selectedModelIdx]?.name}
+					{:else if greetingModel?.name}
+						{greetingModel?.name}
 					{:else}
 						{$i18n.t('Hello, {{name}}', { name: $user?.name })}
 					{/if}
 				</div>
 
 				<div in:fade={{ duration: 200, delay: 200 }}>
-					{#if models[selectedModelIdx]?.info?.meta?.description ?? null}
+					{#if greetingModel?.info?.meta?.description ?? null}
 						<div
 							class="mt-0.5 text-base font-normal text-gray-500 dark:text-gray-400 line-clamp-3 markdown"
 						>
 							{@html DOMPurify.sanitize(
 								marked.parse(
 									sanitizeResponseContent(
-										models[selectedModelIdx]?.info?.meta?.description
+										greetingModel?.info?.meta?.description ?? ''
 									).replaceAll('\n', '<br>')
 								)
 							)}
