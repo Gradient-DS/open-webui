@@ -19,7 +19,17 @@ const readAssistantId = (): string | null => {
 	}
 };
 
+const isAvailableAssistant = (id: string | null | undefined, rawModels = get(models)): boolean =>
+	rawModels.some((model) => model.id === id && isAssistant(model));
+
 export const activeAssistantId = writable<string | null>(readAssistantId());
+// An empty registry can mean loading; validate restored selections once models arrive.
+models.subscribe((rawModels) => {
+	const id = get(activeAssistantId);
+	if (rawModels.length > 0 && id && !isAvailableAssistant(id, rawModels)) {
+		activeAssistantId.set(null);
+	}
+});
 if (typeof window !== 'undefined') {
 	activeAssistantId.subscribe((id) => {
 		try {
@@ -57,7 +67,10 @@ export const reconcileAssistantSelection = (
 	savedAssistantId?: string | null
 ): string[] => {
 	const selection = split(ids);
-	const id = savedAssistantId ?? urlAssistantId ?? selection.assistantId;
+	const id =
+		[savedAssistantId, urlAssistantId, selection.assistantId].find((candidate) =>
+			isAvailableAssistant(candidate)
+		) ?? null;
 	activeAssistantId.set(id);
 	return id ? selection.llmIds.slice(0, 1) : selection.llmIds;
 };
