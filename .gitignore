@@ -335,14 +335,10 @@ cypress/screenshots
 .worktrees/
 .cptr
 
-# Claude scratch space + personal tooling — never committed (doc strategy: soev-docs/claude-code.md)
+# Claude Code scratch + personal tooling — never committed (see soev-docs/claude-code.md)
 thoughts/
-plans/
-.superpowers/
-docs/superpowers/
+.reviews/
 CLAUDE.local.md
-collab/
-.collab-config
 .claude/commands/*
 !.claude/commands/validate-owui.md
 .claude/agents/*
