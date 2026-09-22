@@ -95,3 +95,16 @@ def resolve_agent_route(
     if default_agent_id:
         return AgentRoute(to_agent=True, agent_id=default_agent_id)
     raise AgentSelectionRequired()
+
+
+class AssistantBindingConflict(ValueError):
+    """An existing conversation cannot switch assistants after an assistant message."""
+
+
+def resolve_assistant_binding(row_value: str | None, body_value: str | None, has_assistant_message: bool) -> str:
+    """Return bind or keep, or refuse a switch in an established conversation."""
+    if not body_value or body_value == row_value:
+        return 'keep'
+    if row_value and has_assistant_message:
+        raise AssistantBindingConflict('The assistant is fixed once a chat has an assistant message.')
+    return 'bind'

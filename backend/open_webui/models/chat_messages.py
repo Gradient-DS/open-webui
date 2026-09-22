@@ -141,6 +141,7 @@ class ChatMessage(Base):
 
     # Model (for assistant messages)
     model_id = Column(Text, nullable=True, index=True)
+    assistant_id = Column(Text, nullable=True, index=True)  # [Gradient] Split assistant identity.
 
     # Attachments
     files = Column(JSON, nullable=True)
@@ -188,6 +189,7 @@ class ChatMessageModel(BaseModel):
     content: Optional[Any] = None  # str or list of blocks
     output: Optional[list] = None
     model_id: Optional[str] = None
+    assistant_id: Optional[str] = None  # [Gradient] Split assistant identity.
     files: Optional[list] = None
     sources: Optional[list] = None
     embeds: Optional[list] = None
@@ -221,6 +223,9 @@ class ChatMessageTable:
             message.output = data.get('output')
         if 'model_id' in data or 'model' in data:
             message.model_id = data.get('model_id') or data.get('model')
+        # [Gradient] Preserve assistant identity across partial message updates.
+        if 'assistant_id' in data:
+            message.assistant_id = data.get('assistant_id')
         if 'files' in data:
             message.files = data.get('files')
         if 'sources' in data:
@@ -258,6 +263,7 @@ class ChatMessageTable:
             content=data.get('content'),
             output=data.get('output'),
             model_id=data.get('model_id') or data.get('model'),
+            assistant_id=data.get('assistant_id'),  # [Gradient] Split assistant identity.
             files=data.get('files'),
             sources=data.get('sources'),
             embeds=data.get('embeds'),
@@ -340,6 +346,17 @@ class ChatMessageTable:
                 .where(ChatMessage.chat_id == chat_id)
                 .where(ChatMessage.role == 'assistant')
                 .where(ChatMessage.done.is_(False))
+                .limit(1)
+            )
+            return result.scalar_one_or_none() is not None
+
+    # [Gradient] Probe assistant binding conflicts without loading message content.
+    async def has_assistant_message(self, chat_id: str, db: Optional[AsyncSession] = None) -> bool:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(ChatMessage.id)
+                .where(ChatMessage.chat_id == chat_id)
+                .where(ChatMessage.role == 'assistant')
                 .limit(1)
             )
             return result.scalar_one_or_none() is not None

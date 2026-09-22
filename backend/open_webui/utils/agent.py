@@ -432,7 +432,7 @@ async def call_agent_api(
     agent_meta = agent_config.meta if agent_config else {}
     if AGENT_API_RUNTIME == 'v2' or agent_meta.get('runtime') == 'v2':
         agent_model = agent_meta.get('model')
-        model = agent_model if isinstance(agent_model, str) and agent_model else llm_model
+        model = llm_model or agent_model
         return await call_agent_v2(form_data, metadata, agent=selected_agent, model=model)
 
     # [Gradient] Forward the turn anchor so the agent service can rewind its
