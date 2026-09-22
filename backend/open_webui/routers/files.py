@@ -962,7 +962,9 @@ async def update_file_data_content_by_id(
 
 
 # [Gradient] Preserve reverse-route names and the later images.py export without redefining this handler.
-@router.get('/{id}/content', name='get_file_content_by_id')
+# HEAD is what the sources panel probes before offering the document viewer (Starlette answers it
+# from the GET handler with an empty body).
+@router.api_route('/{id}/content', methods=['GET', 'HEAD'], name='get_file_content_by_id')
 async def get_file_content_by_id_inline(
     id: str,
     user=Depends(get_verified_user),

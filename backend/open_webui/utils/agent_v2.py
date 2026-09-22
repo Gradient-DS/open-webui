@@ -5,6 +5,7 @@ Feed the model picker with an OpenAI-type connection whose base URL is
 import asyncio
 import json
 import logging
+import math
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
@@ -70,11 +71,67 @@ def _error(code: str, *, constraint: str | None = None, model: str | None = None
     return {'error': {'code': code, 'message': message}}
 
 
+def _source_page(pages: Any) -> int | None:
+    if isinstance(pages, list) and pages and all(type(page) is int and page >= 1 for page in pages):
+        return pages[0] - 1
+    return None
+
+
+def _source_rect(rect: Any) -> dict[str, int | float] | None:
+    if not isinstance(rect, dict):
+        return None
+    coordinates = {key: rect.get(key) for key in ('x0', 'y0', 'x1', 'y1')}
+    if any(
+        type(value) not in (int, float) or (type(value) is float and not math.isfinite(value))
+        for value in coordinates.values()
+    ):
+        return None
+    if coordinates['x1'] <= coordinates['x0'] or coordinates['y1'] <= coordinates['y0']:
+        return None
+    if 'page' in rect:
+        page = _source_page([rect['page']])
+        if page is None:
+            return None
+        coordinates['page'] = page
+    return coordinates
+
+
+def _source_bboxes(value: Any) -> list[dict[str, int | float]] | None:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, RecursionError):
+            return None
+    if not isinstance(value, list) or not value:
+        return None
+    rects = [rect for item in value if (rect := _source_rect(item)) is not None]
+    return rects or None
+
+
+def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
+    metadata = {
+        key: value
+        for key, value in properties.items()
+        if key not in {'chunk_content', 'embedding_text', 'bboxes', 'page_numbers', 'file_id', 'page'}
+    }
+    file_id = properties.get('source_id')
+    if isinstance(file_id, str) and file_id:
+        metadata['file_id'] = file_id
+    page = _source_page(properties.get('page_numbers'))
+    if page is not None:
+        metadata['page'] = page
+    bboxes = _source_bboxes(properties.get('bboxes'))
+    if bboxes is not None:
+        metadata['bboxes'] = bboxes
+    return metadata
+
+
 class Citations:
     """Keep source numbers stable while buffering incomplete citation markers."""
 
     def __init__(self) -> None:
         self.sources: dict[str, dict[str, Any]] = {}
+        self.document_numbers: dict[str, int] = {}
         self.pending = ''
 
     def add(self, source: dict[str, Any]) -> dict[str, Any] | None:
@@ -82,14 +139,16 @@ class Citations:
         if source_id in self.sources:
             return None
         properties = source.get('properties') or {}
+        ref = source['ref']
+        number = self.document_numbers.setdefault(ref, len(self.document_numbers) + 1)
         name = properties.get('title') or properties.get('name') or source['ref']
         result = {
-            'source': {'id': source_id, 'name': name, 'url': properties.get('source_url') or source['ref']},
+            'source': {'id': ref, 'name': name, 'url': properties.get('source_url') or ref},
             'document': [source['text']],
             'metadata': [
-                {**properties, 'source': source_id, 'name': name, 'chunk_id': source_id, 'ref': source['ref']}
+                {**_source_metadata(properties), 'source': ref, 'name': name, 'chunk_id': source_id, 'ref': ref}
             ],
-            'n': len(self.sources) + 1,
+            'n': number,
         }
         self.sources[source_id] = result
         return result

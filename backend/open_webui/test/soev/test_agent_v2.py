@@ -224,7 +224,214 @@ async def test_running_input_is_reported_without_resume_or_cancel(chat: Chat) ->
     assert len(chat.mutations()) == 2
 
 
-SOURCE = {'id': 'source-a', 'ref': 'document', 'text': 'quoted passage', 'properties': {'title': 'Document', 'page': 2}}
+SOURCE = {
+    'id': 'source-a',
+    'ref': 'document',
+    'text': 'quoted passage',
+    'properties': {'title': 'Document', 'page_numbers': [2]},
+}
+RECT = {'page': 2, 'x0': 10, 'y0': 20.5, 'x1': 100, 'y1': 50}
+
+
+def test_chunks_share_a_document_number_without_losing_text() -> None:
+    """Keep chunk identity and text while sharing the document's citation number."""
+    citations = agent_v2.Citations()
+    first = citations.add(SOURCE)
+    second = citations.add({**SOURCE, 'id': 'source-b', 'text': 'another passage'})
+    assert first is not None and second is not None
+    assert first['source']['id'] == second['source']['id'] == 'document'
+    assert first['metadata'][0]['source'] == second['metadata'][0]['source'] == 'document'
+    assert [item['metadata'][0]['chunk_id'] for item in (first, second)] == ['source-a', 'source-b']
+    assert [item['document'] for item in (first, second)] == [['quoted passage'], ['another passage']]
+    assert first['n'] == second['n'] == 1
+    assert citations.add(SOURCE) is None
+    assert citations.rewrite('[source-a] [<source-b>]', final=True) == '[1] [1]'
+
+
+@pytest.mark.asyncio
+async def test_document_numbers_survive_seeded_turns(chat: Chat) -> None:
+    """Number documents by first appearance across chunks and seeded turns."""
+    chunks = [{**SOURCE, 'id': f'chunk-{index}'} for index in range(3)]
+    second = {**SOURCE, 'id': 'second-1', 'ref': 'second', 'properties': {'title': 'Second'}}
+    chat.api.chat.turns = [
+        [
+            *(('source', chunk) for chunk in chunks),
+            ('source', second),
+            ('model_output', {'content': '[chunk-0] [chunk-1] [chunk-2] [second-1]'}),
+        ]
+    ]
+    assert content(await chat.turn('first', 'a1')) == '[1] [1] [1] [2]'
+    sources = [event['data'] for event in chat.socket if event['type'] == 'source']
+    assert [source['n'] for source in sources] == [1, 1, 1, 2]
+    assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2]}
+    chat.socket.clear()
+    chat.api.chat.turns = [
+        [
+            ('source', {**SOURCE, 'id': 'chunk-3'}),
+            ('source', {**second, 'id': 'second-2'}),
+            ('source', {**SOURCE, 'id': 'third-1', 'ref': 'third', 'properties': {'title': 'Third'}}),
+            ('model_output', {'content': '[chunk-0] [chunk-3] [second-1] [second-2] [third-1]'}),
+        ]
+    ]
+    assert content(await chat.turn('next', 'a2', 'a1')) == '[1] [1] [2] [2] [3]'
+    sources = [event['data'] for event in chat.socket if event['type'] == 'source']
+    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 2, 3]
+    assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2, 3]}
+
+
+def test_different_documents_with_the_same_title_keep_distinct_numbers() -> None:
+    """Preserve document identity even though the inline renderer deduplicates titles."""
+    citations = agent_v2.Citations()
+    first = citations.add(SOURCE)
+    second = citations.add({**SOURCE, 'id': 'source-b', 'ref': 'other-document'})
+    assert first is not None and second is not None
+    assert first['source']['name'] == second['source']['name']
+    assert first['source']['id'] != second['source']['id']
+    assert [first['n'], second['n']] == [1, 2]
+
+
+@pytest.mark.parametrize('source_id', [None, '', 123, False, [], 'owui-file-id'])
+def test_file_id_requires_a_nonempty_source_id(source_id: Any) -> None:
+    """Only the consumer's nonempty string source ID enables a file preview."""
+    properties = {'source_id': source_id, 'file_id': 'untrusted', 'title': 'owui-file-id.pdf'}
+    result = agent_v2.Citations().add({**SOURCE, 'properties': properties})
+    metadata = result['metadata'][0]
+    if source_id == 'owui-file-id':
+        assert metadata['file_id'] == source_id
+    else:
+        assert 'file_id' not in metadata
+
+
+@pytest.mark.parametrize(
+    'pages,expected',
+    [
+        (None, None),
+        ([], None),
+        ('2', None),
+        ([1], 0),
+        ([3, 1], 2),
+        ([0], None),
+        ([-1], None),
+        ([1, 0], None),
+        ([1, '2'], None),
+        ([1.0], None),
+        ([True], None),
+    ],
+)
+def test_source_pages_require_positive_integers(pages: Any, expected: int | None) -> None:
+    """Convert only a nonempty list of positive integer pages to zero-based metadata."""
+    result = agent_v2.Citations().add({**SOURCE, 'properties': {'page_numbers': pages, 'page': 99}})
+    metadata = result['metadata'][0]
+    if expected is None:
+        assert 'page' not in metadata
+    else:
+        assert metadata['page'] == expected
+    assert 'page_numbers' not in metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('as_json', [False, True])
+async def test_source_preview_metadata_reaches_the_panel(chat: Chat, as_json: bool) -> None:
+    """Emit viewer metadata without mutating input or retaining duplicated chunk data."""
+    rects = [RECT, {**RECT, 'page': 1}, {key: value for key, value in RECT.items() if key != 'page'}]
+    properties = {
+        'title': 'report.pdf',
+        'source_id': 'owui-file-id',
+        'page_numbers': [2],
+        'bboxes': json.dumps(rects) if as_json else rects,
+        'chunk_content': 'duplicate',
+        'embedding_text': 'duplicate embedding',
+        'author': 'Author',
+        'derived_raw': '{}',
+        'source_url': None,
+    }
+    original = copy.deepcopy(properties)
+    chat.api.chat.turns = [
+        [('source', {**SOURCE, 'properties': properties}), ('model_output', {'content': 'Answer [source-a]'})]
+    ]
+    assert content(await chat.turn('question', 'a1')) == 'Answer [1]'
+    source = next(event['data'] for event in chat.socket if event['type'] == 'source')
+    assert source['document'] == [SOURCE['text']]
+    assert source['metadata'][0] == {
+        'title': 'report.pdf',
+        'source_id': 'owui-file-id',
+        'file_id': 'owui-file-id',
+        'page': 1,
+        'bboxes': [{**RECT, 'page': 1}, {**RECT, 'page': 0}, rects[2]],
+        'author': 'Author',
+        'derived_raw': '{}',
+        'source_url': None,
+        'source': 'document',
+        'name': 'report.pdf',
+        'chunk_id': 'source-a',
+        'ref': 'document',
+    }
+    assert properties == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('as_json', [False, True])
+async def test_mixed_bboxes_preserve_valid_rectangles(chat: Chat, as_json: bool) -> None:
+    """Keep both valid rectangles when a malformed rectangle appears between them."""
+    rects = [RECT, {}, {**RECT, 'page': 1}]
+    properties = {'bboxes': json.dumps(rects) if as_json else rects}
+    chat.api.chat.turns = [
+        [('source', {**SOURCE, 'properties': properties}), ('model_output', {'content': 'Answer [source-a]'})]
+    ]
+    assert content(await chat.turn('question', 'a1')) == 'Answer [1]'
+    metadata = next(event['data']['metadata'][0] for event in chat.socket if event['type'] == 'source')
+    assert metadata['bboxes'] == [{**RECT, 'page': 1}, {**RECT, 'page': 0}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'bboxes',
+    [
+        None,
+        '',
+        'broken json',
+        'null',
+        '{}',
+        '[]',
+        [],
+        {},
+        [None],
+        [1],
+        [{}],
+        [{**RECT, 'page': 0}],
+        [{**RECT, 'page': '2'}],
+        [{**RECT, 'page': True}],
+        [{**RECT, 'page': 1.5}],
+        [{**RECT, 'x0': '10'}],
+        [{**RECT, 'x0': False}],
+        [{**RECT, 'x1': 10}],
+        [{**RECT, 'y1': 20}],
+        [None, {}, {**RECT, 'x1': 10}],
+        json.dumps([None, {}, {**RECT, 'x1': 10}]),
+        '[{"x0": 0, "y0": 0, "x1": 1e999, "y1": 10}]',
+    ],
+)
+async def test_malformed_bboxes_never_fail_a_turn(chat: Chat, bboxes: Any) -> None:
+    """Ignore malformed rectangle data while delivering the source and answer."""
+    chat.api.chat.turns = [
+        [('source', {**SOURCE, 'properties': {'bboxes': bboxes}}), ('model_output', {'content': 'Answer [source-a]'})]
+    ]
+    assert content(await chat.turn('question', 'a1')) == 'Answer [1]'
+    metadata = next(event['data']['metadata'][0] for event in chat.socket if event['type'] == 'source')
+    assert 'bboxes' not in metadata
+    assert 'file_id' not in metadata
+    assert 'page' not in metadata
+
+
+def test_absent_optional_source_properties_are_omitted() -> None:
+    """Accept sources from servers that do not yet provide preview properties."""
+    result = agent_v2.Citations().add({key: value for key, value in SOURCE.items() if key != 'properties'})
+    assert result['metadata'][0] == {
+        'source': 'document',
+        'name': 'document',
+        'chunk_id': 'source-a',
+        'ref': 'document',
+    }
 
 
 @pytest.mark.parametrize('marker', ['[source-a]', '[<source-a>]'])
@@ -293,8 +500,9 @@ async def test_durable_output_prefix_and_mismatch_do_not_cancel(
 
 @pytest.mark.asyncio
 async def test_panel_filter_scopes_chips_to_this_turn_with_cumulative_numbers(chat: Chat) -> None:
-    second = {**SOURCE, 'id': 'source-b'}
-    third = {**SOURCE, 'id': 'source-c'}
+    """Filter retrieved documents using their cumulative numbers across turns."""
+    second = {**SOURCE, 'id': 'source-b', 'ref': 'document-b', 'properties': {'title': 'Second'}}
+    third = {**SOURCE, 'id': 'source-c', 'ref': 'document-c', 'properties': {'title': 'Third'}}
     chat.api.chat.turns = [[('source', SOURCE), ('source', second), ('model_output', {'content': 'First [source-a]'})]]
     await chat.turn('first', 'a1')
     assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2]}
@@ -402,6 +610,7 @@ async def test_refused_model_is_named_without_retry_or_default(
 
 @pytest.mark.asyncio
 async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text(chat: Chat) -> None:
+    """Stream each chunk once and render same-document markers with one number."""
     chat.api.chat.turns = [
         [
             (
@@ -419,14 +628,14 @@ async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text
         ]
     ]
     chunks = await chat.turn('question', 'a1')
-    assert content(chunks) == 'Answer [2] and [1].'
+    assert content(chunks) == 'Answer [1] and [1].'
     assert content(chunks, 'reasoning_content') == 'PlanExplain'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [source['n'] for source in sources] == [1, 2]
-    assert sources[0]['source'] == {'id': 'source-a', 'name': 'Document', 'url': 'document'}
+    assert [source['n'] for source in sources] == [1, 1]
+    assert sources[0]['source'] == {'id': 'document', 'name': 'Document', 'url': 'document'}
     assert sources[0]['document'] == ['quoted passage']
-    assert sources[0]['metadata'][0]['source'] == 'source-a'
-    assert sources[1]['metadata'][0]['source'] == 'source-b'
+    assert sources[0]['metadata'][0]['source'] == 'document'
+    assert sources[1]['metadata'][0]['source'] == 'document'
     assert chat.bookmark('a1')['position'] == 9
 
 
