@@ -20,6 +20,15 @@ export const isAssistant = (model?: AssistantModel | null): boolean =>
 export const isLLM = (model?: AssistantModel | null): boolean =>
 	!!model && !isAssistant(model) && !model.preset && !model.arena && model.owned_by !== 'arena';
 
+export const resolveAssistant = <T extends AssistantModel>(
+	query: string,
+	models: T[]
+): T | undefined => {
+	const byId = models.find((model) => model.id === query);
+	if (byId) return isAssistant(byId) ? byId : undefined;
+	return models.find((model) => isAssistant(model) && model.name === query);
+};
+
 export const effectiveCapabilities = (
 	llmCaps?: object | null,
 	assistantCaps?: object | null

@@ -5,6 +5,7 @@ import {
 	effectiveModel,
 	isAssistant,
 	isLLM,
+	resolveAssistant,
 	splitSelection
 } from './assistants';
 
@@ -154,4 +155,29 @@ describe('splitSelection', () => {
 	});
 	it('chooses only LLM defaults', () =>
 		expect(defaultLLMId(models, ['helper', 'other'])).toBe('other'));
+});
+
+describe('resolveAssistant', () => {
+	it('resolves an assistant id', () => {
+		expect(resolveAssistant('helper', models)).toBe(assistant);
+	});
+	it('resolves an exact assistant name', () => {
+		expect(resolveAssistant('Helper', models)).toBe(assistant);
+	});
+	it('prefers an id over another assistant with that exact name', () => {
+		expect(
+			resolveAssistant('helper', [{ ...assistant, id: 'other-helper', name: 'helper' }, ...models])
+		).toBe(assistant);
+	});
+	it.each(['unknown', 'Hel', 'helper name', 'HELPER'])('refuses unmatched names: %s', (query) => {
+		expect(resolveAssistant(query, models)).toBeUndefined();
+	});
+	it('refuses an LLM id even if an assistant shares that name', () => {
+		expect(
+			resolveAssistant('gpu', [...models, { ...assistant, id: 'other-helper', name: 'gpu' }])
+		).toBeUndefined();
+	});
+	it('refuses an LLM name', () => {
+		expect(resolveAssistant('GPU', models)).toBeUndefined();
+	});
 });
