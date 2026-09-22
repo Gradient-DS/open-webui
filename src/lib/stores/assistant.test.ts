@@ -1,11 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { get, writable } from 'svelte/store';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createInstance } from 'i18next';
+import { toast } from 'svelte-sonner';
+import { selectAssistant } from '$lib/utils/assistantSelection';
+import { get } from 'svelte/store';
 
-vi.mock('$lib/stores', () => ({
-	models: writable([]),
-	config: writable({}),
-	settings: writable({})
-}));
+vi.mock('svelte-sonner', () => ({ toast: { message: vi.fn(), error: vi.fn() } }));
+
+vi.mock('$lib/stores', async () => {
+	const { writable } = await import('svelte/store');
+	return { models: writable([]), config: writable({}), settings: writable({}) };
+});
 
 import { models } from '$lib/stores';
 import {
@@ -25,7 +29,13 @@ const assistant = {
 	info: { base_model_id: 'gpu', meta: { description: 'Hello' } }
 };
 
+const i18n = createInstance();
+beforeAll(async () => {
+	await i18n.init({ lng: 'en', resources: { en: { translation: {} } } });
+});
+
 beforeEach(() => {
+	vi.clearAllMocks();
 	activeAssistantId.set(null);
 	models.set([
 		llm,
@@ -97,6 +107,42 @@ describe('assistant stores', () => {
 	it('prevents compare and legacy regeneration from changing assistant identity', () => {
 		reconcileAssistantSelection(['gpu', 'helper', 'gpu']);
 		expect(llmSelection(['helper', 'gpu'])).toEqual(['gpu']);
+		expect(get(activeAssistantId)).toBe('helper');
+	});
+});
+
+describe('assistant command selection', () => {
+	it('updates the same identity and effective metadata used by the chip and placeholder', () => {
+		selectAssistant('helper', true, i18n);
+		expect(get(activeAssistantId)).toBe('helper');
+		expect(get(activeAssistant)).toBe(assistant);
+		expect(get(effectiveModels)[0]).toMatchObject({
+			id: 'gpu',
+			info: { meta: { description: 'Hello' } }
+		});
+		expect(get(models)[0]).toBe(llm);
+	});
+	it('refuses to switch assistants once the chat has a message', () => {
+		activeAssistantId.set('saved');
+		selectAssistant('helper', false, i18n);
+		expect(get(activeAssistantId)).toBe('saved');
+		expect(toast.error).toHaveBeenCalledWith('Start a new chat to switch assistants.');
+	});
+	it.each(['unknown', 'gpu'])(
+		'keeps the selection when the requested assistant is unavailable: %s',
+		(query) => {
+			activeAssistantId.set('helper');
+			selectAssistant(query, true, i18n);
+			expect(get(activeAssistantId)).toBe('helper');
+			expect(toast.error).toHaveBeenCalledWith(`Assistant not found: ${query}`);
+		}
+	);
+	it('reports no selection or the current name without changing the selection', () => {
+		selectAssistant('', true, i18n);
+		expect(toast.message).toHaveBeenLastCalledWith('No assistant selected');
+		activeAssistantId.set('helper');
+		selectAssistant('', false, i18n);
+		expect(toast.message).toHaveBeenLastCalledWith('Current assistant: Helper');
 		expect(get(activeAssistantId)).toBe('helper');
 	});
 });

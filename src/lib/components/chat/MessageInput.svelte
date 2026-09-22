@@ -4,6 +4,7 @@
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
 	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
+	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isAssistant, isLLM } from '$lib/utils/assistants';
 	import AssistantChip from './AssistantChip.svelte';
 	import AgentSelector from './AgentSelector.svelte';
@@ -129,7 +130,7 @@
 	import Filter from '../icons/Filter.svelte';
 	import { showRagFilter } from '$lib/stores/rag-filter';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
 	type UploadTerminal = {
 		id?: string;
@@ -1582,7 +1583,8 @@
 						const { type, data } = e;
 
 						if (type === 'model') {
-							atSelectedModel = data;
+							// [Gradient] Mentions bind assistants only before the first message.
+							selectAssistant(data.id, !history?.currentId, $i18n);
 						}
 
 						focus({ preventScroll: true });
@@ -1679,7 +1681,8 @@
 						const { type, data } = e;
 
 						if (type === 'model') {
-							atSelectedModel = data;
+							// [Gradient] Mentions bind assistants only before the first message.
+							selectAssistant(data.id, !history?.currentId, $i18n);
 						}
 
 						focus({ preventScroll: true });
@@ -1717,7 +1720,8 @@
 						const { type, data } = e;
 
 						if (type === 'model') {
-							atSelectedModel = data;
+							// [Gradient] Mentions bind assistants only before the first message.
+							selectAssistant(data.id, !history?.currentId, $i18n);
 						}
 
 						focus({ preventScroll: true });
