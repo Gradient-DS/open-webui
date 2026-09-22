@@ -1505,13 +1505,11 @@
 					e.stopPropagation();
 					return;
 				} else if (data.type === 'model' && data.id) {
-					// Find the model from the store and set as @-selected model
+					// [Gradient] Drops can bind assistants; only the picker selects an LLM.
 					const model = $models.find((m) => m.id === data.id);
 					// [Gradient] Assistant drops only bind empty chats.
 					if (isAssistant(model)) {
 						if (!history?.currentId) activeAssistantId.set(data.id);
-					} else if (isLLM(model)) {
-						atSelectedModel = model;
 					}
 					dragged = false;
 					e.stopPropagation();
