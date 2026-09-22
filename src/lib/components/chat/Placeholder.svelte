@@ -1,4 +1,6 @@
 <script lang="ts">
+	// [Gradient] Suggestions use effective LLMs; presentation uses assistant identity.
+	import { effectiveModels as _models, activeAssistant } from '$lib/stores/assistant';
 	import type { Model } from '$lib/stores';
 	import type {
 		ChatAttachment,
@@ -13,14 +15,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	import {
-		config,
-		user,
-		models as _models,
-		temporaryChatEnabled,
-		selectedFolder,
-		pendingAgentId
-	} from '$lib/stores';
+	import { config, user, temporaryChatEnabled, selectedFolder, pendingAgentId } from '$lib/stores';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { sanitizeResponseContent } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
@@ -88,6 +83,9 @@
 
 	let models = [];
 	let selectedModelIdx = 0;
+	// [Gradient] Keep the LLM id out of assistant avatar URLs and greetings.
+	$: greetingModel =
+		$activeAssistant ?? $_models.find((m) => m.id === selectedModels[selectedModelIdx]);
 
 	$: if (selectedModels.length > 0) {
 		selectedModelIdx = models.length - 1;
@@ -161,7 +159,7 @@
 										<button
 											aria-hidden={models.length <= 1}
 											aria-label={$i18n.t('Get information on {{name}} in the UI', {
-												name: models[modelIdx]?.name
+												name: ($activeAssistant ?? models[modelIdx])?.name
 											})}
 											on:click={() => {
 												selectedModelIdx = modelIdx;
@@ -169,7 +167,7 @@
 										>
 											<img
 												alt=""
-												src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
+												src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${($activeAssistant ?? model)?.id}&lang=${$i18n.language}`}
 												class=" size-9 @sm:size-10 rounded-2xl"
 												aria-hidden="true"
 												draggable="false"
@@ -191,19 +189,19 @@
 						class=" text-2xl @sm:text-2xl line-clamp-1 flex items-center"
 						in:fade={{ duration: 100 }}
 					>
-						{#if $config?.ui?.greeting_template}
+						{#if $config?.ui?.greeting_template && !$activeAssistant}
 							{resolveLocalized($config.ui.greeting_template, $i18n?.language).replace(
 								'{{name}}',
 								$user?.name ?? ''
 							)}
-						{:else if !agentPickerEnabled && models[selectedModelIdx]?.name}
+						{:else if !agentPickerEnabled && greetingModel?.name}
 							<Tooltip
-								content={models[selectedModelIdx]?.name}
+								content={greetingModel?.name}
 								placement="top"
 								className=" flex items-center "
 							>
 								<span class="line-clamp-1">
-									{models[selectedModelIdx]?.name}
+									{greetingModel?.name}
 								</span>
 							</Tooltip>
 						{:else}
@@ -214,13 +212,13 @@
 
 				<div class="flex mt-1 mb-2">
 					<div in:fade={{ duration: 100, delay: 50 }}>
-						{#if models[selectedModelIdx]?.info?.meta?.description ?? null}
+						{#if greetingModel?.info?.meta?.description ?? null}
 							<Tooltip
 								className=" w-fit"
 								content={DOMPurify.sanitize(
 									marked.parse(
 										sanitizeResponseContent(
-											models[selectedModelIdx]?.info?.meta?.description ?? ''
+											greetingModel?.info?.meta?.description ?? ''
 										).replaceAll('\n', '<br>')
 									)
 								)}
@@ -233,7 +231,7 @@
 									{@html DOMPurify.sanitize(
 										marked.parse(
 											sanitizeResponseContent(
-												models[selectedModelIdx]?.info?.meta?.description ?? ''
+												greetingModel?.info?.meta?.description ?? ''
 											).replaceAll('\n', '<br>')
 										)
 									)}

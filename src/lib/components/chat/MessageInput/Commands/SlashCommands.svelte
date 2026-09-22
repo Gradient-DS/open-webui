@@ -9,7 +9,7 @@
 	import Knobs from '$lib/components/icons/Knobs.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
 	export let query = '';
 	export let onSelect = (e) => {};
@@ -48,8 +48,9 @@
 		...(canStatus && 'status'.startsWith(query.toLowerCase())
 			? [{ type: 'command', data: { id: 'status' } }]
 			: []),
-		...('model'.startsWith(query.toLowerCase())
-			? [{ type: 'command', data: { id: 'model' } }]
+		// [Gradient] The command surface chooses assistants, not LLMs.
+		...('assistant'.startsWith(query.toLowerCase())
+			? [{ type: 'command', data: { id: 'assistant' } }]
 			: []),
 		...('settings'.startsWith(query.toLowerCase())
 			? [{ type: 'command', data: { id: 'settings' } }]
@@ -313,11 +314,12 @@
 					</span>
 				</button>
 			</Tooltip>
-		{:else if item.data.id === 'model'}
-			<Tooltip content="Show or switch the current model." placement="top">
+		{:else if item.data.id === 'assistant'}
+			<!-- [Gradient] Open the assistant mention list. -->
+			<Tooltip content={$i18n.t('/assistant')} placement="top">
 				<button
 					type="button"
-					aria-label="Model: show or switch the current model."
+					aria-label={$i18n.t('Assistant')}
 					class="slash-command-row flex items-center gap-2 w-full h-6 px-2 rounded-xl text-xs text-left transition-colors duration-75
 						{commandIdx === selectedIdx ? 'app-interactive-active' : ''}"
 					on:mousedown={(e) => e.preventDefault()}
@@ -334,8 +336,8 @@
 						<Sparkles className="size-3.5" />
 					</span>
 					<span class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
-						<span class="truncate">Model</span>
-						<span class="app-muted text-[0.625rem] truncate shrink-0">/model</span>
+						<span class="truncate">{$i18n.t('Assistant')}</span>
+						<span class="app-muted text-[0.625rem] truncate shrink-0">{$i18n.t('/assistant')}</span>
 					</span>
 				</button>
 			</Tooltip>

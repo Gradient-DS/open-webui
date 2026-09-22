@@ -1,4 +1,6 @@
 <script lang="ts">
+	// [Gradient] @ chooses assistants; LLM selection belongs to the composer picker.
+	import { isAssistant } from '$lib/utils/assistants';
 	import Fuse from 'fuse.js';
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 
@@ -43,7 +45,7 @@
 	let knowledgeResults: any[] = [];
 
 	$: modelItems = (($models ?? []) as any[])
-		.filter((model) => !model?.info?.meta?.hidden)
+		.filter((model) => isAssistant(model) && !model?.info?.meta?.hidden)
 		.map((model) => ({
 			...model,
 			modelName: model?.name,

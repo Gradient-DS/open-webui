@@ -13,14 +13,14 @@
 
 	import Knowledge from './Knowledge.svelte';
 	import CapabilityToggles from './Simple/CapabilityToggles.svelte';
-	import Selector from '$lib/components/chat/ModelSelector/Selector.svelte';
+	import { defaultLLMId } from '$lib/utils/assistants';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
 	import Pin from '$lib/components/icons/Pin.svelte';
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
 	// model = existing model when editing; null when creating fresh.
 	export let model: any = null;
@@ -110,20 +110,12 @@
 		return `${slug}-${crypto.randomUUID().slice(0, 6)}`;
 	};
 
-	/**
-	 * The base model a fresh assistant starts on: the admin-configured
-	 * default (first DEFAULT_MODELS id that resolves to a visible model),
-	 * else the first non-preset, non-arena model. Returns '' if none.
-	 */
-	const computeDefaultBaseModelId = (): string => {
-		const configuredDefault = ($config?.default_models || '')
-			.split(',')
-			.map((s: string) => s.trim())
-			.find((mid: string) => mid && $models.some((m: any) => m?.id === mid));
-		if (configuredDefault) return configuredDefault;
-		const base = $models.find((m: any) => !m?.preset && !(m?.arena ?? false));
-		return base?.id ?? '';
-	};
+	// The legacy marker distinguishes an assistant from an admin override row.
+	const computeDefaultBaseModelId = (): string =>
+		defaultLLMId(
+			$models,
+			($config?.default_models || '').split(',').map((id) => id.trim())
+		);
 
 	onMount(async () => {
 		if (model) {
@@ -235,11 +227,12 @@
 		info.meta = info.meta ?? {};
 		info.params = info.params ?? {};
 
-		// The Model picker is the source of truth for the base model
-		// (seeded at mount from DEFAULT_MODELS on create, or the saved base
-		// on edit). Advanced can still override other base fields via the
-		// carried-through mergeBase.
-		info.base_model_id = baseModelId || null;
+		info.base_model_id = baseModelId || computeDefaultBaseModelId();
+		if (!info.base_model_id) {
+			toast.error($i18n.t('Base Model is required.'));
+			loading = false;
+			return false;
+		}
 
 		info.meta.profile_image_url = profileImageUrl;
 		info.meta.description = description.trim() === '' ? null : description;
@@ -370,18 +363,6 @@
 				bind:value={system}
 				placeholder={$i18n.t('Tell the assistant how it should behave')}
 			></textarea>
-		</div>
-
-		<div>
-			<div class="text-xs font-medium text-gray-500 mb-1">{$i18n.t('Model')}</div>
-			<Selector
-				id="assistant-base-model"
-				placeholder={$i18n.t('Select a model')}
-				className="w-full"
-				triggerClassName="text-sm"
-				items={$models.map((m) => ({ value: m.id, label: m.name, model: m }))}
-				bind:value={baseModelId}
-			/>
 		</div>
 
 		<div>

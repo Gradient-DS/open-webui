@@ -22,7 +22,8 @@
 	export let onCompact: () => void = () => {};
 	export let onStatus: () => void = () => {};
 	export let onFork: () => void = () => {};
-	export let onModel: () => void = () => {};
+	// [Gradient] The assistant command opens @, leaving LLM selection in the picker.
+	export let onAssistant: () => void = () => {};
 	export let onSettings: () => void = () => {};
 	export let onTemporary: () => void = () => {};
 	export let insertTextHandler: (text: string) => void = () => {};
@@ -125,9 +126,9 @@
 						} else if (type === 'command' && data.id === 'fork') {
 							command({ id: data.id, label: data.id });
 							onFork();
-						} else if (type === 'command' && data.id === 'model') {
+						} else if (type === 'command' && data.id === 'assistant') {
 							command({ id: data.id, label: data.id });
-							onModel();
+							onAssistant();
 						} else if (type === 'command' && data.id === 'settings') {
 							command({ id: data.id, label: data.id });
 							onSettings();

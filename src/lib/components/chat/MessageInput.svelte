@@ -2,6 +2,11 @@
 	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
 	import Component from '../icons/Component.svelte';
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
+	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
+	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
+	import { selectAssistant } from '$lib/utils/assistantSelection';
+	import { isAssistant, isLLM } from '$lib/utils/assistants';
+	import AssistantChip from './AssistantChip.svelte';
 	import AgentSelector from './AgentSelector.svelte';
 	import { pendingAgentId } from '$lib/stores';
 	import DOMPurify from 'dompurify';
@@ -39,7 +44,7 @@
 		type Model,
 		mobile,
 		settings,
-		models,
+		models as rawModels, // [Gradient] Pickers use the unmodified LLM registry.
 		config,
 		showCallOverlay,
 		tools,
@@ -125,7 +130,7 @@
 	import Filter from '../icons/Filter.svelte';
 	import { showRagFilter } from '$lib/stores/rag-filter';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
 	type UploadTerminal = {
 		id?: string;
@@ -189,9 +194,7 @@
 	// [Gradient] The picker shows whenever there is anything to pick, including
 	// single-model tenants — it also hosts model info, set-as-default and the pin
 	// toggle. Assistants are excluded here exactly as they are in ModelSelector.
-	$: pickerModels = ($models ?? []).filter(
-		(model) => !model?.info?.base_model_id || selectedModels.includes(model.id)
-	);
+	$: pickerModels = ($rawModels ?? []).filter(isLLM);
 	$: isActive =
 		!askUser?.show &&
 		((taskIds && taskIds.length > 0) ||
@@ -1502,10 +1505,11 @@
 					e.stopPropagation();
 					return;
 				} else if (data.type === 'model' && data.id) {
-					// Find the model from the store and set as @-selected model
+					// [Gradient] Drops can bind assistants; only the picker selects an LLM.
 					const model = $models.find((m) => m.id === data.id);
-					if (model) {
-						atSelectedModel = model;
+					// [Gradient] Assistant drops only bind empty chats.
+					if (isAssistant(model)) {
+						if (!history?.currentId) activeAssistantId.set(data.id);
 					}
 					dragged = false;
 					e.stopPropagation();
@@ -1577,7 +1581,8 @@
 						const { type, data } = e;
 
 						if (type === 'model') {
-							atSelectedModel = data;
+							// [Gradient] Mentions bind assistants only before the first message.
+							selectAssistant(data.id, !history?.currentId, $i18n);
 						}
 
 						focus({ preventScroll: true });
@@ -1635,7 +1640,9 @@
 						return;
 					}
 
-					if (['compact', 'fork', 'status', 'model', 'settings', 'temporary'].includes(props?.id)) {
+					if (
+						['compact', 'fork', 'status', 'assistant', 'settings', 'temporary'].includes(props?.id)
+					) {
 						editor.chain().focus().deleteRange(range).run();
 						return;
 					}
@@ -1667,14 +1674,16 @@
 					onCompact: compactHandler,
 					onStatus: statusHandler,
 					onFork: forkHandler,
-					onModel: () => modelSelector?.open(),
+					// [Gradient] Choosing /assistant opens the assistant mention list.
+					onAssistant: () => insertTextAtCursor('@'),
 					onSettings: () => showSettings.set(true),
 					onTemporary: temporaryHandler,
 					onSelect: (e) => {
 						const { type, data } = e;
 
 						if (type === 'model') {
-							atSelectedModel = data;
+							// [Gradient] Mentions bind assistants only before the first message.
+							selectAssistant(data.id, !history?.currentId, $i18n);
 						}
 
 						focus({ preventScroll: true });
@@ -1712,7 +1721,8 @@
 						const { type, data } = e;
 
 						if (type === 'model') {
-							atSelectedModel = data;
+							// [Gradient] Mentions bind assistants only before the first message.
+							selectAssistant(data.id, !history?.currentId, $i18n);
 						}
 
 						focus({ preventScroll: true });
@@ -2764,6 +2774,8 @@
 								</div>
 
 								<div class="self-end flex space-x-1 mr-1 min-w-0 gap-[0.03125rem]">
+									<!-- [Gradient] Assistant identity sits beside the independent LLM picker. -->
+									<AssistantChip editable={!history?.currentId} />
 									<div class="flex min-w-0 max-w-[10rem] items-center sm:max-w-[13rem]">
 										<!-- [Gradient] Agent-only picker tenants; model selector for other multi-model tenants. -->
 										{#if agentPickerActive}

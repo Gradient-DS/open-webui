@@ -14,6 +14,8 @@
 	import { getVoices } from '$lib/apis/audio';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
+	// [Gradient] Assistants retain only a hidden legacy LLM default.
+	import { defaultLLMId } from '$lib/utils/assistants';
 	import ModelSelector from '$lib/components/chat/ModelSelector/Selector.svelte';
 	import Tags from '$lib/components/common/Tags.svelte';
 	import Knowledge from '$lib/components/workspace/Models/Knowledge.svelte';
@@ -80,7 +82,7 @@
 	let system = '';
 	let info = {
 		id: '',
-		base_model_id: null,
+		base_model_id: null as string | null, // [Gradient] Hidden legacy assistant default.
 		name: '',
 		meta: {
 			// LICENSE covers this Open WebUI fallback logo.
@@ -251,6 +253,12 @@
 			return;
 		}
 
+		// [Gradient] Never create an override row when saving an assistant.
+		if (preset)
+			info.base_model_id ||= defaultLLMId(
+				$models,
+				($config?.default_models ?? '').split(',').map((id) => id.trim())
+			);
 		if (preset && !info.base_model_id) {
 			toast.error($i18n.t('Base Model is required.'));
 			loading = false;
@@ -722,7 +730,8 @@
 							</div>
 
 							{#if preset}
-								<div>
+								<!-- [Gradient] Assistants no longer choose the chat LLM. -->
+								<div hidden>
 									<div class="mb-1 text-xs text-gray-400 dark:text-gray-600">
 										{$i18n.t('Base Model (From)')}
 									</div>

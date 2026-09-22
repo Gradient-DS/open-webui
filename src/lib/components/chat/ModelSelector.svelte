@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { models, pinnedModels, settings, user } from '$lib/stores';
+	// [Gradient] The picker contains LLMs only and disables compare for assistant chats.
+	import { activeAssistantId, llmSelection } from '$lib/stores/assistant';
+	import { isLLM } from '$lib/utils/assistants';
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Selector from './ModelSelector/Selector.svelte';
@@ -45,7 +48,7 @@
 	};
 
 	$: if (selectedModels.length > 0 && $models.length > 0) {
-		const _selectedModels = selectedModels.map((model) =>
+		const _selectedModels = llmSelection(selectedModels).map((model) =>
 			$models.map((m) => m.id).includes(model) ? model : ''
 		);
 
@@ -54,7 +57,13 @@
 		}
 	}
 
-	$: if (selectedModels.length > 1 && !compareModels) {
+	// [Gradient] Explicit dependency also collapses compare when an assistant is dropped.
+	$: if ($activeAssistantId) {
+		compareModels = false;
+		if (selectedModels.length > 1) selectedModels = selectedModels.slice(0, 1);
+	}
+
+	$: if (!$activeAssistantId && selectedModels.length > 1 && !compareModels) {
 		compareModels = true;
 	}
 </script>
@@ -63,20 +72,16 @@
 	<div class="flex min-w-0 max-w-full">
 		<div class="min-w-0 max-w-full overflow-hidden">
 			<div class="min-w-0 max-w-full">
-				<!-- [Gradient] Assistants (custom models) are pinned in the sidebar and listed
-				     in the AI-assistants workspace; they are not offered in the model picker.
-				     A selected assistant stays in `items` so the trigger can still name it. -->
+				<!-- [Gradient] Assistant identity is shown by AssistantChip. -->
 				<Selector
 					bind:this={selector}
 					id="model"
 					placeholder={$i18n.t('Select a model')}
-					items={$models
-						.filter((model) => !model?.info?.base_model_id || selectedModels.includes(model.id))
-						.map((model) => ({
-							value: model.id,
-							label: model.name,
-							model: model
-						}))}
+					items={$models.filter(isLLM).map((model) => ({
+						value: model.id,
+						label: model.name,
+						model: model
+					}))}
 					{pinModelHandler}
 					{className}
 					{triggerClassName}
@@ -84,8 +89,8 @@
 					{align}
 					{showSetDefault}
 					onSetDefault={saveDefaultModel}
-					multipleEnabled={$user?.role === 'admin' ||
-						($user?.permissions?.chat?.multiple_models ?? true)}
+					multipleEnabled={!$activeAssistantId &&
+						($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))}
 					{disabled}
 					bind:compareEnabled={compareModels}
 					bind:values={selectedModels}
