@@ -1418,9 +1418,14 @@ async def chat_completion(
         bind_assistant = False
         if split_assistant_id and not model_item.get('direct', False):
             model, model_info, bind_assistant = await resolve_assistant_request(
-                split_assistant_id, model, model_info, user,
-                check_access=not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL),
-                chat_id=form_data.get('chat_id'), message_ids=form_data.get('message_ids'),
+                split_assistant_id,
+                model,
+                model_info,
+                user,
+                check_access=not BYPASS_MODEL_ACCESS_CONTROL
+                and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL),
+                chat_id=form_data.get('chat_id'),
+                message_ids=form_data.get('message_ids'),
             )
         else:
             split_assistant_id = None
