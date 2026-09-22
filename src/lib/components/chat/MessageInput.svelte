@@ -1640,7 +1640,9 @@
 						return;
 					}
 
-					if (['compact', 'fork', 'status', 'model', 'settings', 'temporary'].includes(props?.id)) {
+					if (
+						['compact', 'fork', 'status', 'assistant', 'settings', 'temporary'].includes(props?.id)
+					) {
 						editor.chain().focus().deleteRange(range).run();
 						return;
 					}
@@ -1672,7 +1674,8 @@
 					onCompact: compactHandler,
 					onStatus: statusHandler,
 					onFork: forkHandler,
-					onModel: () => modelSelector?.open(),
+					// [Gradient] Choosing /assistant opens the assistant mention list.
+					onAssistant: () => insertTextAtCursor('@'),
 					onSettings: () => showSettings.set(true),
 					onTemporary: temporaryHandler,
 					onSelect: (e) => {

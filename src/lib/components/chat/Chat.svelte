@@ -60,6 +60,7 @@
 		reconcileFolderSelection,
 		llmSelection
 	} from '$lib/stores/assistant';
+	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isLLM } from '$lib/utils/assistants';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 
@@ -3335,36 +3336,9 @@
 		messageInput?.focus({ preventScroll: true });
 	};
 
-	const handleModelCommand = (modelId = '') => {
-		if (!modelId) {
-			const currentModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-				Boolean
-			);
-			toast.message(
-				currentModels.length
-					? `Current model: ${currentModels.join(', ')}`
-					: $i18n.t('Model not selected')
-			);
-			messageInput?.setText('');
-			prompt = '';
-			messageInput?.focus({ preventScroll: true });
-			return;
-		}
-
-		const model = $models.find((model) => model.id === modelId);
-		// [Gradient] Commands select LLMs only.
-		if (!model || !isLLM(model)) {
-			toast.error(`Model not found: ${modelId}`);
-			messageInput?.setText('');
-			prompt = '';
-			messageInput?.focus({ preventScroll: true });
-			return;
-		}
-
-		atSelectedModel = undefined;
-		selectedModels = [model.id];
-		saveSessionSelectedModels();
-		toast.success(`Model switched to: ${model.id}`);
+	// [Gradient] Commands select assistants without changing the independently picked LLM.
+	const handleAssistantCommand = (query = '') => {
+		selectAssistant(query, !history?.currentId, $i18n);
 		messageInput?.setText('');
 		prompt = '';
 		messageInput?.focus({ preventScroll: true });
@@ -3454,11 +3428,12 @@
 			await handleForkChat();
 			return;
 		}
-		const modelCommandMatch = String(userPrompt)
+		// [Gradient] /assistant replaces the fork-only /model command.
+		const assistantCommandMatch = String(userPrompt)
 			.trim()
-			.match(/^\/model(?:\s+([\s\S]+))?$/);
-		if (modelCommandMatch) {
-			handleModelCommand(modelCommandMatch[1]?.trim() ?? '');
+			.match(/^\/assistant(?:\s+([\s\S]+))?$/);
+		if (assistantCommandMatch) {
+			handleAssistantCommand(assistantCommandMatch[1]?.trim() ?? '');
 			return;
 		}
 
