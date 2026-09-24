@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	providers,
+	DEFAULT_RECONNECT_CODES,
+	reconnectCodes,
 	providerFor,
 	providerIcon,
 	localSource,
@@ -60,10 +62,12 @@ describe('provider registry', () => {
 		expect(provider.startParam).toBe(`start_${kind}_sync`);
 		expect(provider.pick).toBeTypeOf('function');
 		expect(provider.needsReconnectOn.length).toBeGreaterThan(0);
+		expect(reconnectCodes(kind)).toBe(provider.needsReconnectOn);
 		expect(providerFor(kind)).toBe(provider);
 		expect(providerIcon(kind)).toBe(provider.icon);
 	});
 	it.each([null, undefined, 'local', 'unknown', 'toString'])('falls back for %s', (kind) => {
+		expect(reconnectCodes(kind)).toBe(DEFAULT_RECONNECT_CODES);
 		expect(providerFor(kind)).toBeNull();
 		expect(providerIcon(kind)).toBe(localSource.icon);
 	});

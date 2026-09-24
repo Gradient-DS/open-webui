@@ -90,6 +90,16 @@ it('deduplicates reconnect banners and trusts polled lifecycle over a stale popu
 	expect(reconnectConnections([], { ...connection, lifecycle: 'revoked' })).toEqual([]);
 });
 
+it('offers reconnect for a provider without a frontend adapter', () => {
+	const connection: Connection = {
+		id: 'c',
+		source_kind: 'confluence',
+		lifecycle: 'enabled',
+		last_error: 'owner_mismatch'
+	};
+	expect(reconnectConnections([{ connection } as Schedule], null)).toEqual([connection]);
+});
+
 // The payload below is a verbatim soev-api StoredRun, not an invented shape:
 // counts are nested, and `secret_days` rides in counts as an expiry warning.
 it('reads counters out of the nested counts map and leaves secret_days out', () => {

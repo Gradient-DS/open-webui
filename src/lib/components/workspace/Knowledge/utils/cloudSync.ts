@@ -1,4 +1,4 @@
-import { providerFor } from '$lib/sources/registry';
+import { reconnectCodes } from '$lib/sources/registry';
 import equal from 'fast-deep-equal';
 import type { Connection, RunOutcome, Schedule, SyncRun } from '$lib/apis/cloudSync';
 
@@ -45,7 +45,7 @@ export function reconnectConnections(
 		[
 			...(['pending', 'revoked'].includes(connection.lifecycle) ? [] : [connection.lifecycle]),
 			connection.last_error
-		].some((code) => providerFor(connection.source_kind)?.needsReconnectOn.includes(code ?? ''))
+		].some((code) => reconnectCodes(connection.source_kind).includes(code ?? ''))
 	);
 }
 

@@ -68,6 +68,14 @@ describe('source states', () => {
 		for (const last_error of ['access_revoked', 'credential_unusable', 'owner_mismatch'])
 			expect(view({ last_error }).state).toBe('needs_reconnect');
 	});
+	it('needs reconnect for a provider without a frontend adapter', () => {
+		const account = { ...connection, source_kind: 'confluence', last_error: 'owner_mismatch' };
+		expect(view({ source_kind: 'confluence', connection: account }, account)).toMatchObject({
+			state: 'needs_reconnect',
+			primary: 'reconnect',
+			provider: 'confluence'
+		});
+	});
 	it('needs_access', () => {
 		expect(view({ last_error: 'writer_revoked' })).toMatchObject({
 			state: 'needs_access',

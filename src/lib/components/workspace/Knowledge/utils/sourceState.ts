@@ -1,4 +1,4 @@
-import { providerFor } from '$lib/sources/registry';
+import { providerFor, reconnectCodes } from '$lib/sources/registry';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import { runIsLive, type SchedulePair } from './cloudSync';
 
@@ -47,7 +47,7 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 	if (schedules.some((item) => runIsLive(item.last_run))) state = 'syncing';
 	else if (
 		[connection.lifecycle, ...errors].some((code) =>
-			providerFor(connection.source_kind)?.needsReconnectOn.includes(code ?? '')
+			reconnectCodes(connection.source_kind).includes(code ?? '')
 		)
 	)
 		state = 'needs_reconnect';

@@ -18,7 +18,7 @@ export interface SourceProvider {
 // Vendor adapters keep browser consent inside their existing pickers. A future
 // soevBrowser adapter can implement the same pick() contract using a soev-api
 // listing endpoint, returning scopes without changing any knowledge components.
-const needsReconnectOn = [
+export const DEFAULT_RECONNECT_CODES = [
 	'suspended:reauth',
 	'pending',
 	'revoked',
@@ -33,7 +33,7 @@ export const providers: Record<string, SourceProvider> = {
 		label: 'OneDrive',
 		icon: OneDrive,
 		startParam: 'start_onedrive_sync',
-		needsReconnectOn,
+		needsReconnectOn: DEFAULT_RECONNECT_CODES,
 		async pick() {
 			const { openOneDriveItemPicker } = await import('$lib/utils/onedrive-file-picker');
 			const items = await openOneDriveItemPicker('organizations');
@@ -45,7 +45,7 @@ export const providers: Record<string, SourceProvider> = {
 		label: 'Google Drive',
 		icon: GoogleDrive,
 		startParam: 'start_google_drive_sync',
-		needsReconnectOn,
+		needsReconnectOn: DEFAULT_RECONNECT_CODES,
 		async pick() {
 			const { createKnowledgePicker } = await import('$lib/utils/google-drive-picker');
 			const result = await createKnowledgePicker();
@@ -62,6 +62,10 @@ export const localSource: { kind: 'local'; label: string; icon: ComponentType } 
 
 export function providerFor(kind: string | null | undefined): SourceProvider | null {
 	return kind && Object.hasOwn(providers, kind) ? providers[kind] : null;
+}
+
+export function reconnectCodes(kind: string | null | undefined): string[] {
+	return providerFor(kind)?.needsReconnectOn ?? DEFAULT_RECONNECT_CODES;
 }
 
 export function providerIcon(kind: string | null | undefined): ComponentType {
