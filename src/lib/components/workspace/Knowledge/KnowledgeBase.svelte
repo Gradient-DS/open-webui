@@ -1895,10 +1895,12 @@
 	}}
 />
 
+<!-- [Gradient] -->
 <input
 	id="files-input"
 	bind:files={inputFiles}
 	type="file"
+	accept={($config?.file?.allowed_extensions ?? []).filter(Boolean).map((ext) => `.${ext}`).join(',')}
 	multiple
 	hidden
 	on:change={async () => {

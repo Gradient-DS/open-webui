@@ -13,6 +13,7 @@ from open_webui.models.files import FileModel, Files
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError, SoevClient
 from open_webui.storage.provider import Storage
+from open_webui.utils.content_types import content_type_for
 
 ATTACHMENTS_PREFIX = 'owui-attachments-'
 
@@ -111,7 +112,7 @@ async def submit(
         'source_id': file.id,
         'filename': name,
         'title': name,
-        'content_type': meta.get('content_type') or 'application/octet-stream',
+        'content_type': 'text/plain' if text is not None else content_type_for(name, meta.get('content_type')),
     }
     if path:
         document['path'] = path
