@@ -908,9 +908,8 @@
 				}
 			);
 
-			if (failedCount === 0) {
-				toast.success($i18n.t('File uploaded successfully'));
-			}
+			// No success toast here: the row showed the upload, and the
+			// processing results toast once as a batch when they settle.
 
 			// Awaited: `finally` clears the progress on return, and that state
 			// change re-triggers the reactive getItemsPage() above. Racing it
@@ -1348,6 +1347,18 @@
 	// 5-minute hard cap kicks in.
 	const pollers = new Map<string, ReturnType<typeof setInterval>>();
 
+	// Processing results arrive one socket event per file; a folder upload
+	// would otherwise toast "1 added" once per file. Wait for the burst to
+	// settle and report the total once.
+	let uploadToastTimer: ReturnType<typeof setTimeout> | null = null;
+	const showBatchedUploadToastSoon = () => {
+		if (uploadToastTimer) clearTimeout(uploadToastTimer);
+		uploadToastTimer = setTimeout(() => {
+			uploadToastTimer = null;
+			showBatchedUploadToast();
+		}, 2000);
+	};
+
 	const showBatchedUploadToast = () => {
 		if (uploadBatch.added === 0 && uploadBatch.failed === 0) return;
 		const { variant, message } = buildSyncToast($i18n, null, {
@@ -1456,7 +1467,7 @@
 
 		const stillUploading = fileItems.some((f) => f.status === 'uploading');
 		if (!stillUploading) {
-			showBatchedUploadToast();
+			showBatchedUploadToastSoon();
 		}
 	};
 
