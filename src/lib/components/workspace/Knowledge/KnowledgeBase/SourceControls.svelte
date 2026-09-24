@@ -22,6 +22,7 @@
 		sourceState,
 		sourceTiming,
 		skippedReason,
+		skippedRunKey,
 		type SourceState
 	} from '../utils/sourceState';
 
@@ -122,25 +123,26 @@
 	let skippedError = false;
 	let skippedLoading = false;
 	let loadedRunKey = '';
-	$: runKey = JSON.stringify([
-		pair.content?.id,
-		pair.content?.last_run?.id,
-		pair.content?.last_run?.finished_at
-	]);
-	$: if (skippedOpen && runKey !== loadedRunKey) void loadSkipped(runKey, pair.content);
+	$: runKey = skippedRunKey(pair.content);
+	$: if (runKey !== loadedRunKey) {
+		skippedItems = [];
+		skippedError = false;
+		skippedLoading = false;
+		if (skippedOpen || !runKey) void loadSkipped(runKey, pair.content);
+		else loadedRunKey = '';
+	}
 	async function loadSkipped(key: string, content: Schedule | undefined) {
 		loadedRunKey = key;
+		if (!key || !content) return;
 		skippedLoading = true;
 		skippedError = false;
 		try {
-			const items = content
-				? await getSkippedItems(localStorage.token, knowledgeId, content.id)
-				: [];
-			if (key === loadedRunKey) skippedItems = items;
+			const items = await getSkippedItems(localStorage.token, knowledgeId, content.id);
+			if (key === runKey && key === loadedRunKey) skippedItems = items;
 		} catch {
-			if (key === loadedRunKey) skippedError = true;
+			if (key === runKey && key === loadedRunKey) skippedError = true;
 		} finally {
-			if (key === loadedRunKey) skippedLoading = false;
+			if (key === runKey && key === loadedRunKey) skippedLoading = false;
 		}
 	}
 	const action = (schedules: Schedule[], action: ScheduleAction | 'delete') => {

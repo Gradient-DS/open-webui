@@ -74,7 +74,7 @@
 		runIsLive
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
-	import { runProgress } from './utils/sourceState';
+	import { runProgress, skippedRunKey } from './utils/sourceState';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
 	import AddTextContentModal from './KnowledgeBase/AddTextContentModal.svelte';
@@ -142,27 +142,19 @@
 			)
 		: '';
 	let skippedItems: SkippedItem[] = [];
-	let skippedRunKey = '';
-	$: skippedKey = currentSourcePair?.content
-		? JSON.stringify([
-				currentSourcePair.content.id,
-				currentSourcePair.content.last_run?.id ?? null,
-				currentSourcePair.content.last_run?.finished_at ?? null
-			])
-		: '';
-	$: if (skippedKey !== skippedRunKey)
+	let loadedSkippedRunKey = '';
+	$: skippedKey = skippedRunKey(currentSourcePair?.content);
+	$: if (skippedKey !== loadedSkippedRunKey)
 		void loadSkippedItems(skippedKey, currentSourcePair?.content);
 	const loadSkippedItems = async (key: string, content: Schedule | undefined) => {
-		skippedRunKey = key;
-		if (!content) {
-			skippedItems = [];
-			return;
-		}
+		loadedSkippedRunKey = key;
+		skippedItems = [];
+		if (!key || !content) return;
 		try {
 			const items = await cloudSync.getSkippedItems(localStorage.token, knowledgeId, content.id);
-			if (key === skippedRunKey) skippedItems = items;
+			if (key === loadedSkippedRunKey) skippedItems = items;
 		} catch {
-			if (key === skippedRunKey) skippedItems = [];
+			if (key === loadedSkippedRunKey) skippedItems = [];
 		}
 	};
 	// Single derived guard for all structure-write affordances (decision 5) —

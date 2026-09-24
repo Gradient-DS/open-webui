@@ -1,6 +1,15 @@
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import { CLOUD_PROVIDERS, runIsLive, type SchedulePair } from './cloudSync';
 
+export function skippedRunKey(schedule: Schedule | undefined): string {
+	if (!schedule || runIsLive(schedule.last_run)) return '';
+	return JSON.stringify([
+		schedule.id,
+		schedule.last_run?.id ?? null,
+		schedule.last_run?.finished_at ?? null
+	]);
+}
+
 export type SourceState =
 	| 'syncing'
 	| 'up_to_date'

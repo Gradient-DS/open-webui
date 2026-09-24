@@ -4,6 +4,7 @@ import {
 	sourceState,
 	sourceTiming,
 	skippedReason,
+	skippedRunKey,
 	skippedExplainer,
 	runProgress
 } from './sourceState';
@@ -30,6 +31,26 @@ const schedule = (changes: Partial<Schedule> = {}): Schedule => ({
 });
 const view = (changes: Partial<Schedule> = {}, account = connection) =>
 	sourceState({ content: schedule(changes) }, account);
+
+describe('skipped run keys', () => {
+	it('does not request skipped items during a live or cancelling run', () => {
+		for (const cancel_requested_at of [null, '2026-09-18T10:00:30Z']) {
+			expect(
+				skippedRunKey(schedule({ last_run: { ...run, outcome: null, cancel_requested_at } }))
+			).toBe('');
+		}
+		expect(skippedRunKey(undefined)).toBe('');
+	});
+	it('keeps a finished run key stable across polls and distinguishes sources and runs', () => {
+		const key = skippedRunKey(schedule({ last_run: run }));
+		expect(key).toBe(JSON.stringify(['s', run.id, run.finished_at]));
+		expect(
+			skippedRunKey(schedule({ last_run: { ...run, counts: { failed: 2 } }, document_count: 5 }))
+		).toBe(key);
+		expect(skippedRunKey(schedule({ id: 'other', last_run: run }))).not.toBe(key);
+		expect(skippedRunKey(schedule({ last_run: { ...run, id: 'next' } }))).not.toBe(key);
+	});
+});
 
 describe('source states', () => {
 	it('syncing', () => {
