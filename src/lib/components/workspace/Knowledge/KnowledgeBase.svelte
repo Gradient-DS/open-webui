@@ -2359,7 +2359,7 @@
 											/>
 										</div>
 									{/if}
-									{#if fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentSourcePair && skippedItems.length > 0)))}
+									{#if fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentDirectoryId === null && looseSources.length > 0) || (currentSourcePair && skippedItems.length > 0)))}
 										<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
 											<Files
 												files={fileItems}
