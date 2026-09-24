@@ -55,7 +55,12 @@
 	import { createKbSelection } from './KnowledgeBase/selection';
 	import type { CloudSyncProvider, SchedulePair } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
-	import { ancestorPaths, FolderUploadSession, mergeUploadRows } from './utils/folderUpload';
+	import {
+		ancestorPaths,
+		FolderUploadSession,
+		mergeUploadRows,
+		routeFileStatus
+	} from './utils/folderUpload';
 	import {
 		CLOUD_PROVIDERS,
 		oneDriveScope,
@@ -581,6 +586,7 @@
 					// Don't call addFileHandler here — Socket.IO 'file:status' event
 					// will trigger it when background processing completes. Arm a
 					// 30s polling fallback in case that emit drops (see pollers).
+					singleUploads.add(uploadedFile.id);
 					armUploadStatusFallback(uploadedFile.id);
 				}
 			} else {
@@ -1251,6 +1257,13 @@
 		}
 	};
 
+	const singleUploads = new Set<string>();
+	$: {
+		const listedIds = new Set((fileItems ?? []).map((file: { id?: string }) => file.id));
+		for (const fileId of singleUploads) {
+			if (!listedIds.has(fileId)) singleUploads.delete(fileId);
+		}
+	}
 	let uploadBatch = { added: 0, failed: 0 };
 	let fileStatusQueue: Promise<void> = Promise.resolve();
 	// Polling fallback: when a 'file:status' Socket.IO emit drops on the
@@ -1346,11 +1359,9 @@
 		// Offer terminal events to every session before the batch toast, including
 		// events for files already visible in the listing.
 		if (data.status === 'completed' || data.status === 'failed') {
-			let consumed = false;
-			for (const session of uploads) {
-				if (session.onFileStatus(data.file_id, data.status)) consumed = true;
-			}
-			if (consumed || uploads.some((session) => session.inFlight)) return;
+			const route = routeFileStatus(uploads, singleUploads, data.file_id, data.status);
+			singleUploads.delete(data.file_id);
+			if (route !== 'batch') return;
 		}
 
 		if (!fileItems) return;
@@ -1830,6 +1841,7 @@
 			clearInterval(interval);
 		}
 		pollers.clear();
+		singleUploads.clear();
 	});
 </script>
 

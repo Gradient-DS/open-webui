@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildSyncToast } from './syncToast';
-import { ancestorPaths, FolderUploadSession, mergeUploadRows } from './folderUpload';
+import {
+	ancestorPaths,
+	FolderUploadSession,
+	mergeUploadRows,
+	routeFileStatus
+} from './folderUpload';
 
 const makeSession = (key = 'pick', paths = ['folder', 'folder/nested']) => {
 	const callbacks = { onChange: vi.fn(), onRefresh: vi.fn(), onFinish: vi.fn() };
@@ -119,5 +124,45 @@ describe('FolderUploadSession', () => {
 		expect(onChange).not.toHaveBeenCalled();
 		expect(onRefresh).not.toHaveBeenCalled();
 		expect(onFinish).not.toHaveBeenCalled();
+	});
+});
+
+describe('routeFileStatus', () => {
+	it('offers folder results to every session and keeps them out of the batch path', () => {
+		vi.useFakeTimers();
+		const first = makeSession('first', ['folder']);
+		const second = makeSession('second', ['folder']);
+		first.session.onUploaded(['root'], { id: 'folder-file' });
+		expect(
+			routeFileStatus([first.session, second.session], new Set(), 'folder-file', 'completed')
+		).toBe('session');
+		expect(first.session.summary().added).toBe(1);
+		expect(second.session.early.get('folder-file')).toBe('completed');
+		first.session.dispose();
+		second.session.dispose();
+	});
+
+	it('routes plain upload completion and failure to the batch while a folder is in flight', () => {
+		const { session } = makeSession();
+		const singles = new Set(['plain-file']);
+		for (const status of ['completed', 'failed']) {
+			expect(routeFileStatus([session], singles, 'plain-file', status)).toBe('batch');
+			expect(session.early.get('plain-file')).toBe(status);
+		}
+		expect(session.summary().added).toBe(0);
+		session.dispose();
+	});
+
+	it('parks unknown terminal results only while a folder is in flight', () => {
+		const first = makeSession('first');
+		const second = makeSession('second');
+		const sessions = [first.session, second.session];
+		expect(routeFileStatus(sessions, new Set(), 'unknown', 'processing')).toBe('batch');
+		expect(routeFileStatus(sessions, new Set(), 'unknown', 'failed')).toBe('parked');
+		for (const session of sessions) {
+			expect(session.early.get('unknown')).toBe('failed');
+			session.dispose();
+		}
+		expect(routeFileStatus(sessions, new Set(), 'unknown', 'failed')).toBe('batch');
 	});
 });

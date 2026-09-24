@@ -49,6 +49,22 @@ export function mergeUploadRows(sessions: FolderUploadSession[]): Map<string, Fo
 	return rows;
 }
 
+export function routeFileStatus(
+	sessions: FolderUploadSession[],
+	singleUploads: ReadonlySet<string>,
+	fileId: string,
+	status: string
+): 'session' | 'batch' | 'parked' {
+	if (status !== 'completed' && status !== 'failed') return 'batch';
+	let consumed = false;
+	for (const session of sessions) {
+		if (session.onFileStatus(fileId, status)) consumed = true;
+	}
+	if (consumed) return 'session';
+	if (singleUploads.has(fileId)) return 'batch';
+	return sessions.some((session) => session.inFlight) ? 'parked' : 'batch';
+}
+
 export class FolderUploadSession {
 	rows = new Map<string, FolderUpload>();
 	topLevelIds: string[] = [];
