@@ -782,8 +782,23 @@
 	};
 
 	// [Gradient] Per top-level folder upload progress, shown on that folder's
-	// row (like a cloud source's live count) while its files go up.
-	let uploadProgress: Map<string, { done: number; total: number }> = new Map();
+	// row (like a cloud source's live count) from the moment the folder
+	// appears until every file has been uploaded and processed.
+	type FolderUpload = {
+		name: string;
+		total: number;
+		uploaded: number;
+		processed: number;
+		failed: number;
+	};
+	let uploadProgress: Map<string, FolderUpload> = new Map();
+	let folderUploadInFlight = false;
+	let folderUploadCap: ReturnType<typeof setTimeout> | null = null;
+	// Processing results come back per file over the socket; map each file
+	// to its folder, and keep the result of a file whose event beat the
+	// upload response.
+	const uploadFolderByFileId = new Map<string, string>();
+	const earlyFileStatus = new Map<string, string>();
 	let uploadListRefresh: ReturnType<typeof setTimeout> | null = null;
 	const refreshListingSoon = () => {
 		if (uploadListRefresh) return;
@@ -799,7 +814,10 @@
 	const uploadManifestEntries = async (
 		entries: DirectoryFileEntry[],
 		resolveDirectoryId: (entry: DirectoryFileEntry) => string | null,
-		onLanded: (entry: DirectoryFileEntry) => void = () => {}
+		onLanded: (
+			entry: DirectoryFileEntry,
+			uploadedFile: { id?: string; error?: string } | null
+		) => void = () => {}
 	) => {
 		const total = entries.length;
 		let failedCount = 0;
@@ -821,7 +839,7 @@
 				})
 				.then((uploadedFile) => {
 					if (!uploadedFile || uploadedFile.error) failedCount++;
-					onLanded(entry);
+					onLanded(entry, uploadedFile);
 					executing.delete(task);
 				});
 			executing.add(task);
@@ -885,45 +903,103 @@
 
 			const topLevelId = (entry: DirectoryFileEntry) =>
 				entry.path ? (directoryIdByPath[entry.path.split('/')[0]] ?? null) : null;
-			const progress = new Map<string, { done: number; total: number }>();
+			const progress = new Map<string, FolderUpload>();
 			for (const entry of entries) {
 				const key = topLevelId(entry);
 				if (!key) continue;
-				const row = progress.get(key) ?? { done: 0, total: 0 };
+				const row = progress.get(key) ?? {
+					name: entry.path.split('/')[0],
+					total: 0,
+					uploaded: 0,
+					processed: 0,
+					failed: 0
+				};
 				row.total++;
 				progress.set(key, row);
 			}
 			uploadProgress = progress;
+			folderUploadInFlight = true;
 			await getItemsPage();
 
-			const failedCount = await uploadManifestEntries(
+			await uploadManifestEntries(
 				entries,
 				(entry) => (entry.path ? (directoryIdByPath[entry.path] ?? null) : currentDirectoryId),
-				(entry) => {
+				(entry, uploadedFile) => {
 					const key = topLevelId(entry);
 					const row = key ? uploadProgress.get(key) : null;
-					if (row) row.done++;
+					if (row) {
+						row.uploaded++;
+						if (!uploadedFile || uploadedFile.error || !uploadedFile.id) {
+							row.processed++;
+							row.failed++;
+						} else {
+							uploadFolderByFileId.set(uploadedFile.id, key!);
+							const early = earlyFileStatus.get(uploadedFile.id);
+							if (early) {
+								earlyFileStatus.delete(uploadedFile.id);
+								applyFolderFileStatus(uploadedFile.id, early);
+							}
+						}
+					}
 					uploadProgress = new Map(uploadProgress);
 					refreshListingSoon();
 				}
 			);
-
-			// No success toast here: the row showed the upload, and the
-			// processing results toast once as a batch when they settle.
-
-			// Awaited: `finally` clears the progress on return, and that state
-			// change re-triggers the reactive getItemsPage() above. Racing it
-			// against this refresh let the fetchId guard discard the post-upload
-			// response, so a freshly uploaded folder rendered with child_count 0
-			// until you navigated into it and back.
-			await init();
 		} catch (e) {
 			toast.error(`${e}`);
 		} finally {
-			if (uploadListRefresh) clearTimeout(uploadListRefresh);
-			uploadListRefresh = null;
-			uploadProgress = new Map();
+			folderUploadInFlight = false;
+			// Processing may still be running; the rows keep their counters
+			// until every file reported back, with a hard cap in case an event
+			// never arrives.
+			if (folderUploadCap) clearTimeout(folderUploadCap);
+			folderUploadCap = setTimeout(finishFolderUploads, 10 * 60 * 1000);
+			finishFolderUploadsIfDone();
 		}
+	};
+
+	// One processed file of a folder upload; returns false when the file is
+	// not part of one.
+	const applyFolderFileStatus = (fileId: string, status: string): boolean => {
+		const key = uploadFolderByFileId.get(fileId);
+		if (!key) return false;
+		uploadFolderByFileId.delete(fileId);
+		const row = uploadProgress.get(key);
+		if (row) {
+			row.processed++;
+			if (status === 'failed') row.failed++;
+			uploadProgress = new Map(uploadProgress);
+		}
+		refreshListingSoon();
+		finishFolderUploadsIfDone();
+		return true;
+	};
+
+	const finishFolderUploadsIfDone = () => {
+		if (folderUploadInFlight || uploadProgress.size === 0) return;
+		if ([...uploadProgress.values()].every((row) => row.processed >= row.total))
+			finishFolderUploads();
+	};
+
+	// The one toast for the whole folder upload, once processing settled.
+	const finishFolderUploads = () => {
+		if (folderUploadCap) clearTimeout(folderUploadCap);
+		folderUploadCap = null;
+		if (uploadListRefresh) clearTimeout(uploadListRefresh);
+		uploadListRefresh = null;
+		const rows = [...uploadProgress.values()];
+		uploadProgress = new Map();
+		uploadFolderByFileId.clear();
+		earlyFileStatus.clear();
+		if (rows.length === 0) return;
+		const failed = rows.reduce((sum, row) => sum + row.failed, 0);
+		const added = rows.reduce((sum, row) => sum + row.processed - row.failed, 0);
+		const { variant, message } = buildSyncToast($i18n, rows.length === 1 ? rows[0].name : null, {
+			added,
+			failed
+		});
+		toast[variant](message);
+		void init();
 	};
 
 	// Incremental sync: hash locally → diff on server → upload only what
@@ -1428,6 +1504,15 @@
 		// fileItems lookup below misses (the array is kept empty in lazy
 		// mode) — nudge the tree so a direct upload's spinner resolves.
 		scheduleTreeRefresh();
+
+		// A folder upload's files report to their folder row, not the batch toast.
+		if (data.status === 'completed' || data.status === 'failed') {
+			if (applyFolderFileStatus(data.file_id, data.status)) return;
+			if (folderUploadInFlight && !fileItems?.some((f) => f.id === data.file_id)) {
+				earlyFileStatus.set(data.file_id, data.status);
+				return;
+			}
+		}
 
 		if (!fileItems) return;
 

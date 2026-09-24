@@ -72,7 +72,10 @@
 	export let skippedItems: SkippedItem[] = [];
 	export let skippedProvider = '';
 	// [Gradient] Local folder upload in flight, keyed by top-level directory id.
-	export let uploadProgress: Map<string, { done: number; total: number }> = new Map();
+	export let uploadProgress: Map<
+		string,
+		{ total: number; uploaded: number; processed: number; failed: number }
+	> = new Map();
 
 	// Search mode: flat KB-wide hits — directory rows hidden, each file row
 	// shows its folder path (derived from meta.relative_path) instead.

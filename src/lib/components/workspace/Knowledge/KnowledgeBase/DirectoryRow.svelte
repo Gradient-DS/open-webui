@@ -41,7 +41,12 @@
 	export let syncBusy = false;
 	export let isAdmin = false;
 	// [Gradient] Set while a local folder upload is filling this directory.
-	export let uploading: { done: number; total: number } | null = null;
+	export let uploading: {
+		total: number;
+		uploaded: number;
+		processed: number;
+		failed: number;
+	} | null = null;
 
 	// Optional multiselect checkbox (dirs and source roots participate in bulk
 	// delete). selectionActive renders the checkbox column (spacer when the row
@@ -179,7 +184,8 @@
 					<input
 						bind:this={editInput}
 						bind:value={editName}
-						class="text-xs w-full bg-transparent border-none outline-hidden"
+						class="text-xs bg-transparent border-none outline-hidden"
+						style:width={`${Math.max(editName.length, 4) + 1}ch`}
 						on:keydown={(e) => {
 							if (e.key === 'Enter') submitRename();
 							if (e.key === 'Escape') cancelRename();
@@ -198,16 +204,25 @@
 					</div>
 				{/if}
 
-				{#if (directory.child_count ?? null) !== null}
+				{#if uploading}
+					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
+						&middot; {$i18n.t('Uploaded {{done}}/{{total}}', {
+							done: uploading.uploaded,
+							total: uploading.total
+						})}
+						&middot; {$i18n.t('Processed {{done}}/{{total}}', {
+							done: uploading.processed,
+							total: uploading.total
+						})}
+						<Spinner className="size-3" />
+					</span>
+				{:else if (directory.child_count ?? null) !== null}
 					<span class="text-xs text-gray-400 shrink-0">
 						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
 					</span>
 				{/if}
 				{#if uploading}
-					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
-						&middot; {$i18n.t('Uploading {{done}} of {{total}}', uploading)}
-						<Spinner className="size-3" />
-					</span>
+					<!-- counters above carry the state -->
 				{:else if updatedAt}
 					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="shrink-0">
 						<span class="text-xs text-gray-400">
