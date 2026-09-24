@@ -7,9 +7,7 @@
 	dayjs.extend(relativeTime);
 
 	import { getContext } from 'svelte';
-	import type { Writable } from 'svelte/store';
-	import type { i18n as I18nType } from 'i18next';
-	const i18n = getContext<Writable<I18nType>>('i18n');
+	const i18n = getContext('i18n');
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
@@ -95,213 +93,191 @@
 	};
 </script>
 
-{#if directory.placeholder}
-	<div class="flex w-full items-center gap-2 px-2 py-2 text-xs" role="listitem">
-		<span class="line-clamp-1">{directory.name}</span>
-		{#if uploading}
-			<span class="text-gray-400 shrink-0" role="status">
-				&middot; {$i18n.t('Uploaded {{done}}/{{total}}', {
-					done: uploading.uploaded,
-					total: uploading.total
-				})}
-				&middot; {$i18n.t('Processed {{done}}/{{total}}', {
-					done: uploading.processed,
-					total: uploading.total
-				})}
-			</span>
-		{/if}
-	</div>
-{:else}
-	<!-- svelte-ignore a11y-no-static-element-interactions -->
-	<div
-		class="group flex cursor-pointer w-full px-2 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition
+<!-- svelte-ignore a11y-no-static-element-interactions -->
+<div
+	class="group flex cursor-pointer w-full px-2 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition
 		{dragOver
-			? 'bg-gray-100 dark:bg-gray-800 ring-1 ring-gray-300 dark:ring-gray-600'
-			: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
-		draggable={writeAccess}
-		on:dragstart={(e) => {
-			if (!writeAccess) return;
-			e.dataTransfer?.setData('application/x-kb-dir-move', JSON.stringify({ dirId: directory.id }));
-		}}
-		on:dblclick={() => {
-			if (writeAccess) startRename();
-		}}
-		on:dragover={(e) => {
-			const hasFile = e.dataTransfer?.types.includes('application/x-kb-file-move');
-			const hasDir = e.dataTransfer?.types.includes('application/x-kb-dir-move');
-			if (!hasFile && !hasDir) return;
-			e.preventDefault();
-			e.stopPropagation();
-			dragOver = true;
-		}}
-		on:dragleave={() => {
-			dragOver = false;
-		}}
-		on:drop={(e) => {
-			e.preventDefault();
-			e.stopPropagation();
-			dragOver = false;
-			const fileRaw = e.dataTransfer?.getData('application/x-kb-file-move');
-			if (fileRaw) {
-				try {
-					const data = JSON.parse(fileRaw);
-					const fileIds = data.fileIds ?? (data.fileId ? [data.fileId] : []);
-					if (fileIds.length) {
-						onFileDrop(fileIds, directory.id);
-					}
-				} catch {
-					// Ignore drag payloads that are not valid JSON.
+		? 'bg-gray-100 dark:bg-gray-800 ring-1 ring-gray-300 dark:ring-gray-600'
+		: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+	draggable={writeAccess}
+	on:dragstart={(e) => {
+		if (!writeAccess) return;
+		e.dataTransfer?.setData('application/x-kb-dir-move', JSON.stringify({ dirId: directory.id }));
+	}}
+	on:dblclick={() => {
+		if (writeAccess) startRename();
+	}}
+	on:dragover={(e) => {
+		const hasFile = e.dataTransfer?.types.includes('application/x-kb-file-move');
+		const hasDir = e.dataTransfer?.types.includes('application/x-kb-dir-move');
+		if (!hasFile && !hasDir) return;
+		e.preventDefault();
+		e.stopPropagation();
+		dragOver = true;
+	}}
+	on:dragleave={() => {
+		dragOver = false;
+	}}
+	on:drop={(e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		dragOver = false;
+		const fileRaw = e.dataTransfer?.getData('application/x-kb-file-move');
+		if (fileRaw) {
+			try {
+				const data = JSON.parse(fileRaw);
+				const fileIds = data.fileIds ?? (data.fileId ? [data.fileId] : []);
+				if (fileIds.length) {
+					onFileDrop(fileIds, directory.id);
 				}
-				return;
-			}
-			const dirRaw = e.dataTransfer?.getData('application/x-kb-dir-move');
-			if (dirRaw) {
-				try {
-					const data = JSON.parse(dirRaw);
-					if (data.dirId !== directory.id) {
-						onDirDrop(data.dirId, directory.id);
-					}
-				} catch {
-					// Ignore drag payloads that are not valid JSON.
+			} catch {}
+			return;
+		}
+		const dirRaw = e.dataTransfer?.getData('application/x-kb-dir-move');
+		if (dirRaw) {
+			try {
+				const data = JSON.parse(dirRaw);
+				if (data.dirId !== directory.id) {
+					onDirDrop(data.dirId, directory.id);
 				}
-			}
+			} catch {}
+		}
+	}}
+>
+	{#if selectionActive}
+		<SelectCheckbox {selectable} {selected} visible={checkboxVisible} onToggle={onToggleSelect} />
+	{/if}
+	<div class="flex items-center">
+		<button
+			class="p-1 rounded-full transition"
+			type="button"
+			on:click={() => onNavigate(directory.id)}
+		>
+			<svelte:component
+				this={pair?.content?.source_kind === 'onedrive' || pair?.acl?.source_kind === 'onedrive'
+					? OneDrive
+					: pair?.content?.source_kind === 'google_drive' ||
+						  pair?.acl?.source_kind === 'google_drive'
+						? GoogleDrive
+						: Folder}
+				className="size-3.5"
+			/>
+		</button>
+	</div>
+
+	<button
+		class="relative flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
+		type="button"
+		on:click={() => {
+			if (editing) return;
+			onNavigate(directory.id);
 		}}
 	>
-		{#if selectionActive}
-			<SelectCheckbox {selectable} {selected} visible={checkboxVisible} onToggle={onToggleSelect} />
-		{/if}
-		<div class="flex items-center">
-			<button
-				class="p-1 rounded-full transition"
-				type="button"
-				on:click={() => onNavigate(directory.id)}
-			>
-				<svelte:component
-					this={pair?.content?.source_kind === 'onedrive' || pair?.acl?.source_kind === 'onedrive'
-						? OneDrive
-						: pair?.content?.source_kind === 'google_drive' ||
-							  pair?.acl?.source_kind === 'google_drive'
-							? GoogleDrive
-							: Folder}
-					className="size-3.5"
-				/>
-			</button>
-		</div>
+		<div>
+			<div class="flex gap-2 items-center line-clamp-1">
+				{#if editing}
+					<!-- svelte-ignore a11y-autofocus -->
+					<input
+						bind:this={editInput}
+						bind:value={editName}
+						class="text-xs bg-transparent border-none outline-hidden"
+						style:width={`${Math.max(editName.length, 4) + 1}ch`}
+						on:keydown={(e) => {
+							if (e.key === 'Enter') submitRename();
+							if (e.key === 'Escape') cancelRename();
+							if (e.key === ' ') e.stopPropagation();
+						}}
+						on:keyup={(e) => {
+							if (e.key === ' ') e.stopPropagation();
+						}}
+						on:blur={submitRename}
+						on:click={(e) => e.stopPropagation()}
+						autofocus
+					/>
+				{:else}
+					<div class="line-clamp-1 text-xs">
+						{directory.name}
+					</div>
+				{/if}
 
-		<button
-			class="relative flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
-			type="button"
-			on:click={() => {
-				if (editing) return;
-				onNavigate(directory.id);
-			}}
-		>
-			<div>
-				<div class="flex gap-2 items-center line-clamp-1">
-					{#if editing}
-						<!-- svelte-ignore a11y-autofocus -->
-						<input
-							bind:this={editInput}
-							bind:value={editName}
-							class="text-xs bg-transparent border-none outline-hidden"
-							style:width={`${Math.max(editName.length, 4) + 1}ch`}
-							on:keydown={(e) => {
-								if (e.key === 'Enter') submitRename();
-								if (e.key === 'Escape') cancelRename();
-								if (e.key === ' ') e.stopPropagation();
-							}}
-							on:keyup={(e) => {
-								if (e.key === ' ') e.stopPropagation();
-							}}
-							on:blur={submitRename}
-							on:click={(e) => e.stopPropagation()}
-							autofocus
-						/>
-					{:else}
-						<div class="line-clamp-1 text-xs">
-							{directory.name}
-						</div>
-					{/if}
-
-					{#if uploading}
-						<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
-							&middot; {$i18n.t('Uploaded {{done}}/{{total}}', {
-								done: uploading.uploaded,
-								total: uploading.total
-							})}
-							&middot; {$i18n.t('Processed {{done}}/{{total}}', {
-								done: uploading.processed,
-								total: uploading.total
-							})}
-							<Spinner className="size-3" />
-						</span>
-					{:else if syncProgress}
-						<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
-							&middot; {$i18n.t('Fetched {{done}}/{{total}}', {
-								done: syncProgress.fetched,
-								total: syncProgress.total
-							})}
-							&middot; {$i18n.t('Processed {{done}}/{{total}}', {
-								done: syncProgress.landed,
-								total: syncProgress.total
-							})}
-						</span>
-					{:else if (directory.child_count ?? null) !== null}
-						<span class="text-xs text-gray-400 shrink-0">
-							&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
-						</span>
-					{/if}
-					{#if uploading || syncProgress}
-						<!-- counters above carry the state -->
-					{:else if updatedAt}
-						<Tooltip content={dayjs(updatedAt).format('LLLL')} className="shrink-0">
-							<span class="text-xs text-gray-400">
-								&middot; {$i18n.t('Updated {{time}}', { time: dayjs(updatedAt).fromNow() })}
-							</span>
-						</Tooltip>
-					{:else if source && source.state !== 'syncing'}
-						<span class="text-xs text-gray-400 shrink-0">&middot; {$i18n.t('Not synced yet')}</span>
-					{/if}
-
-					{#if uploading}
-						<!-- the upload spinner above stands in for the processing one -->
-					{:else if badge === 'failed'}
-						<Tooltip
-							content={$i18n.t('{{count}} failed', { count: directory.status_counts?.failed ?? 0 })}
-						>
-							<ExclamationTriangle className="size-3 text-red-500 shrink-0" />
-						</Tooltip>
-					{:else if badge === 'pending'}
+				{#if uploading}
+					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
+						&middot; {$i18n.t('Uploaded {{done}}/{{total}}', {
+							done: uploading.uploaded,
+							total: uploading.total
+						})}
+						&middot; {$i18n.t('Processed {{done}}/{{total}}', {
+							done: uploading.processed,
+							total: uploading.total
+						})}
 						<Spinner className="size-3" />
-					{/if}
-				</div>
-			</div>
-		</button>
+					</span>
+				{:else if syncProgress}
+					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
+						&middot; {$i18n.t('Fetched {{done}}/{{total}}', {
+							done: syncProgress.fetched,
+							total: syncProgress.total
+						})}
+						&middot; {$i18n.t('Processed {{done}}/{{total}}', {
+							done: syncProgress.landed,
+							total: syncProgress.total
+						})}
+					</span>
+				{:else if (directory.child_count ?? null) !== null}
+					<span class="text-xs text-gray-400 shrink-0">
+						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
+					</span>
+				{/if}
+				{#if uploading || syncProgress}
+					<!-- counters above carry the state -->
+				{:else if updatedAt}
+					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="shrink-0">
+						<span class="text-xs text-gray-400">
+							&middot; {$i18n.t('Updated {{time}}', { time: dayjs(updatedAt).fromNow() })}
+						</span>
+					</Tooltip>
+				{:else if source && source.state !== 'syncing'}
+					<span class="text-xs text-gray-400 shrink-0">&middot; {$i18n.t('Not synced yet')}</span>
+				{/if}
 
-		{#if pair}
-			<SourceControls
-				{knowledgeId}
-				{pair}
-				writeAccess={syncAccess}
-				busy={syncBusy}
-				{isAdmin}
-				on:action
-				on:reconnect
-			/>
-		{/if}
-
-		{#if writeAccess}
-			<div class="flex items-center">
-				<Tooltip content={$i18n.t('Delete')}>
-					<button
-						class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
-						type="button"
-						on:click={() => onDelete(directory.id)}
+				{#if uploading}
+					<!-- the upload spinner above stands in for the processing one -->
+				{:else if badge === 'failed'}
+					<Tooltip
+						content={$i18n.t('{{count}} failed', { count: directory.status_counts?.failed ?? 0 })}
 					>
-						<GarbageBin className="size-3.5" />
-					</button>
-				</Tooltip>
+						<ExclamationTriangle className="size-3 text-red-500 shrink-0" />
+					</Tooltip>
+				{:else if badge === 'pending'}
+					<Spinner className="size-3" />
+				{/if}
 			</div>
-		{/if}
-	</div>
-{/if}
+		</div>
+	</button>
+
+	{#if pair}
+		<SourceControls
+			{knowledgeId}
+			{pair}
+			writeAccess={syncAccess}
+			busy={syncBusy}
+			{isAdmin}
+			on:action
+			on:reconnect
+		/>
+	{/if}
+
+	{#if writeAccess}
+		<div class="flex items-center">
+			<Tooltip content={$i18n.t('Delete')}>
+				<button
+					class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+					type="button"
+					on:click={() => onDelete(directory.id)}
+				>
+					<GarbageBin className="size-3.5" />
+				</button>
+			</Tooltip>
+		</div>
+	{/if}
+</div>

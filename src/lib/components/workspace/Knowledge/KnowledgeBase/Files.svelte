@@ -19,6 +19,7 @@
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import DirectoryRow from './DirectoryRow.svelte';
+	import PlaceholderRow from './PlaceholderRow.svelte';
 	import type { DirectoryItem } from './directory';
 	import SourceRow from './SourceRow.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
@@ -174,31 +175,39 @@
 			/>
 		{/each}
 		{#each directories as dir (dir.id)}
-			{@const dirSel = (selection && $selectedStore?.has(buildDirItem(dir).key)) ?? false}
-			<DirectoryRow
-				directory={dir}
-				writeAccess={structureEditable}
-				pair={dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null}
-				uploading={uploadProgress.get(dir.id) ?? null}
-				knowledgeId={knowledge?.id ?? ''}
-				{syncAccess}
-				{syncBusy}
-				{isAdmin}
-				on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
-				on:reconnect={(event) => onReconnect(event.detail)}
-				selectionActive={!!selection}
-				selectable={!!(selection && isDirSelectable(dir))}
-				selected={dirSel}
-				checkboxVisible={!!$selectionModeStore}
-				onToggleSelect={() => {
-					if (selection && isDirSelectable(dir)) selection.toggle(buildDirItem(dir));
-				}}
-				onNavigate={(id) => onNavigateDirectory(id)}
-				onRename={(id, name) => onRenameDirectory(id, name)}
-				onDelete={(id) => onDeleteDirectory(id)}
-				onFileDrop={(fileIds, directoryId) => onMoveFilesToDirectory(fileIds, directoryId)}
-				onDirDrop={(dirId, targetId) => onMoveDirectoryToDirectory(dirId, targetId)}
-			/>
+			{#if dir.placeholder}
+				<PlaceholderRow
+					name={dir.name}
+					uploading={uploadProgress.get(dir.id) ?? null}
+					selectionActive={!!selection}
+				/>
+			{:else}
+				{@const dirSel = (selection && $selectedStore?.has(buildDirItem(dir).key)) ?? false}
+				<DirectoryRow
+					directory={dir}
+					writeAccess={structureEditable}
+					pair={dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null}
+					uploading={uploadProgress.get(dir.id) ?? null}
+					knowledgeId={knowledge?.id ?? ''}
+					{syncAccess}
+					{syncBusy}
+					{isAdmin}
+					on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
+					on:reconnect={(event) => onReconnect(event.detail)}
+					selectionActive={!!selection}
+					selectable={!!(selection && isDirSelectable(dir))}
+					selected={dirSel}
+					checkboxVisible={!!$selectionModeStore}
+					onToggleSelect={() => {
+						if (selection && isDirSelectable(dir)) selection.toggle(buildDirItem(dir));
+					}}
+					onNavigate={(id) => onNavigateDirectory(id)}
+					onRename={(id, name) => onRenameDirectory(id, name)}
+					onDelete={(id) => onDeleteDirectory(id)}
+					onFileDrop={(fileIds, directoryId) => onMoveFilesToDirectory(fileIds, directoryId)}
+					onDirDrop={(dirId, targetId) => onMoveDirectoryToDirectory(dirId, targetId)}
+				/>
+			{/if}
 		{/each}
 	{/if}
 
