@@ -875,7 +875,6 @@
 		if (!knowledge) return;
 
 		try {
-			syncing = $i18n.t('Creating folders...');
 			const paths = [...new Set(entries.map((entry) => entry.path).filter(Boolean))];
 			const directoryIdByPath = await createDirectoriesForPaths(paths);
 			const missing = paths.filter((path) => !directoryIdByPath[path]);
@@ -883,7 +882,6 @@
 				toast.error($i18n.t('Could not create {{count}} folders.', { count: missing.length }));
 				return;
 			}
-			syncing = null;
 
 			const topLevelId = (entry: DirectoryFileEntry) =>
 				entry.path ? (directoryIdByPath[entry.path.split('/')[0]] ?? null) : null;
@@ -923,7 +921,6 @@
 		} catch (e) {
 			toast.error(`${e}`);
 		} finally {
-			syncing = null;
 			if (uploadListRefresh) clearTimeout(uploadListRefresh);
 			uploadListRefresh = null;
 			uploadProgress = new Map();
