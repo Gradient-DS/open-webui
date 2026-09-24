@@ -3912,7 +3912,6 @@
   "Empty document: no text found": "Empty document: no text found",
   "Processing failed": "Processing failed",
   "Processing timed out": "Processing timed out",
-  "{{done}} of {{total}} · {{percent}}%": "{{done}} of {{total}} · {{percent}}%",
   "Open the folder to see why each file was skipped.": "Open the folder to see why each file was skipped.",
   "{{count}} files in this folder could not be synced": "{{count}} files in this folder could not be synced",
   "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.": "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.",
@@ -3932,5 +3931,8 @@
   "Updated {{time}}": "Updated {{time}}",
   "Could not create {{count}} folders.": "Could not create {{count}} folders.",
   "Uploaded {{done}}/{{total}}": "Uploaded {{done}}/{{total}}",
-  "Processed {{done}}/{{total}}": "Processed {{done}}/{{total}}"
+  "Processed {{done}}/{{total}}": "Processed {{done}}/{{total}}",
+  "Fetched {{done}}/{{total}}": "Fetched {{done}}/{{total}}",
+  "Syncing · files show up as they land": "Syncing · files show up as they land",
+  "Syncing · {{done}}/{{total}} processed · files show up as they land": "Syncing · {{done}}/{{total}} processed · files show up as they land"
 }

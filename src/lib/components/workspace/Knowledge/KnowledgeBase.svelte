@@ -69,6 +69,7 @@
 		runIsLive
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
+	import { runProgress } from './utils/sourceState';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
 	import AddTextContentModal from './KnowledgeBase/AddTextContentModal.svelte';
@@ -123,6 +124,13 @@
 	// last sync could not bring in, fetched once per finished run.
 	$: currentSourcePair =
 		(breadcrumbs.at(-1)?.schedule_id && sourcePairs.get(breadcrumbs.at(-1)!.schedule_id!)) || null;
+	// Any level inside a cloud source: the breadcrumb root names its schedule.
+	$: enclosingSourcePair =
+		(breadcrumbs[0]?.schedule_id && sourcePairs.get(breadcrumbs[0].schedule_id!)) || null;
+	$: enclosingSyncing =
+		enclosingSourcePair?.content && runIsLive(enclosingSourcePair.content.last_run)
+			? (runProgress(enclosingSourcePair.content) ?? true)
+			: null;
 	$: currentSourceProvider = currentSourcePair
 		? $i18n.t(
 				CLOUD_PROVIDERS[(currentSourcePair.content ?? currentSourcePair.acl)!.source_kind]?.label ??
@@ -2587,6 +2595,7 @@
 												{sourcePairs}
 												looseSources={currentDirectoryId === null ? looseSources : []}
 												skippedItems={currentSourcePair ? skippedItems : []}
+												syncing={enclosingSyncing}
 												{uploadProgress}
 												skippedProvider={currentSourceProvider}
 												syncAccess={!!knowledge?.write_access}

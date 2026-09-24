@@ -3912,7 +3912,6 @@
   "Empty document: no text found": "Leeg document: geen tekst gevonden",
   "Processing failed": "Verwerking mislukt",
   "Processing timed out": "Verwerking duurde te lang",
-  "{{done}} of {{total}} · {{percent}}%": "{{done}} van {{total}} · {{percent}}%",
   "Open the folder to see why each file was skipped.": "Open de map om te zien waarom elk bestand is overgeslagen.",
   "{{count}} files in this folder could not be synced": "{{count}} bestanden in deze map konden niet worden gesynchroniseerd",
   "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.": "Deze bestanden staan in {{provider}} maar zijn hier niet doorzoekbaar. Beweeg over een reden om te zien wat je eraan kunt doen. De volgende synchronisatie probeert alles opnieuw wat niet definitief is overgeslagen.",
@@ -3932,5 +3931,8 @@
   "Updated {{time}}": "Bijgewerkt {{time}}",
   "Could not create {{count}} folders.": "{{count}} mappen konden niet worden aangemaakt.",
   "Uploaded {{done}}/{{total}}": "{{done}}/{{total}} geüpload",
-  "Processed {{done}}/{{total}}": "{{done}}/{{total}} verwerkt"
+  "Processed {{done}}/{{total}}": "{{done}}/{{total}} verwerkt",
+  "Fetched {{done}}/{{total}}": "{{done}}/{{total}} opgehaald",
+  "Syncing · files show up as they land": "Bezig met synchroniseren · bestanden verschijnen zodra ze binnenkomen",
+  "Syncing · {{done}}/{{total}} processed · files show up as they land": "Bezig met synchroniseren · {{done}}/{{total}} verwerkt · bestanden verschijnen zodra ze binnenkomen"
 }

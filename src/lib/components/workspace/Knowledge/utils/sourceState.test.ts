@@ -277,17 +277,19 @@ describe('run progress', () => {
 		expect(runProgress(schedule({ last_run: run }))).toBeNull();
 		expect(runProgress(schedule({ last_run: null }))).toBeNull();
 	});
-	it('counts documents so far when the worker publishes no total', () => {
+	it('is absent while the worker publishes no planned work', () => {
 		expect(
 			runProgress(schedule({ document_count: 7, last_run: { ...run, outcome: null } }))
-		).toEqual({ done: 7, total: null });
+		).toBeNull();
 	});
-	it('reads landed of submitted once a live run carries counts', () => {
+	it('reads fetched and landed of planned once a live run carries counts', () => {
 		expect(
 			runProgress(
-				schedule({ last_run: { ...run, outcome: null, counts: { submitted: 40, landed: 12 } } })
+				schedule({
+					last_run: { ...run, outcome: null, counts: { planned: 40, fetched: 12, landed: 3 } }
+				})
 			)
-		).toEqual({ done: 12, total: 40 });
+		).toEqual({ total: 40, fetched: 12, landed: 3 });
 	});
 });
 

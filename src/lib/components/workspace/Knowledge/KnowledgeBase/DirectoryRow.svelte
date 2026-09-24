@@ -20,7 +20,7 @@
 	import SourceControls from './SourceControls.svelte';
 	import { folderBadge, type TreeStatusCounts } from '../utils/treeStatus';
 	import type { SchedulePair } from '../utils/cloudSync';
-	import { sourceState } from '../utils/sourceState';
+	import { runProgress, sourceState } from '../utils/sourceState';
 
 	export let directory: {
 		id: string;
@@ -67,6 +67,9 @@
 	// When the row was last updated: the last finished sync for a source root,
 	// the directory's own timestamp otherwise. Shown next to the file count.
 	$: source = pair ? sourceState(pair, (pair.content ?? pair.acl)!.connection) : null;
+	// A live cloud run reports the same shape as a local upload, so the row
+	// reads the same: fetched of planned, then processed of planned.
+	$: syncProgress = pair?.content ? runProgress(pair.content) : null;
 	$: updatedAt = source
 		? source.lastSyncedAt
 		: directory.updated_at
@@ -216,12 +219,23 @@
 						})}
 						<Spinner className="size-3" />
 					</span>
+				{:else if syncProgress}
+					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
+						&middot; {$i18n.t('Fetched {{done}}/{{total}}', {
+							done: syncProgress.fetched,
+							total: syncProgress.total
+						})}
+						&middot; {$i18n.t('Processed {{done}}/{{total}}', {
+							done: syncProgress.landed,
+							total: syncProgress.total
+						})}
+					</span>
 				{:else if (directory.child_count ?? null) !== null}
 					<span class="text-xs text-gray-400 shrink-0">
 						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
 					</span>
 				{/if}
-				{#if uploading}
+				{#if uploading || syncProgress}
 					<!-- counters above carry the state -->
 				{:else if updatedAt}
 					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="shrink-0">

@@ -167,14 +167,8 @@
 				aria-live="polite"
 			>
 				<Spinner className="size-3" />
-				{#if progress?.total}
-					{$i18n.t('{{done}} of {{total}} · {{percent}}%', {
-						done: progress.done,
-						total: progress.total,
-						percent: Math.floor((100 * progress.done) / progress.total)
-					})}
-				{:else}
-					{$i18n.t('{{count}} documents', { count: progress?.done ?? view.documents })}
+				{#if !progress}
+					{$i18n.t('{{count}} documents', { count: view.documents })}
 				{/if}
 			</span>
 		{:else if view.primary && (writeAccess || view.primary === 'request_access') && (view.primary !== 'resume' || isAdmin)}

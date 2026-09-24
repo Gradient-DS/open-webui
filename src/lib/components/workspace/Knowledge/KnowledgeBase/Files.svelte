@@ -71,6 +71,9 @@
 	// bring in, listed greyed out under the synced ones with the reason.
 	export let skippedItems: SkippedItem[] = [];
 	export let skippedProvider = '';
+	// [Gradient] Set inside a cloud source whose run is live: files show up
+	// as they land, so the listing says more is coming.
+	export let syncing: { fetched: number; landed: number; total: number } | true | null = null;
 	// [Gradient] Local folder upload in flight, keyed by top-level directory id.
 	export let uploadProgress: Map<
 		string,
@@ -321,6 +324,24 @@
 			{/if}
 		</div>
 	{/each}
+
+	{#if !searchMode && syncing}
+		<div
+			class="mx-2 mt-3 mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+			role="status"
+			aria-live="polite"
+		>
+			<Spinner className="size-3.5 shrink-0" />
+			<span
+				>{syncing === true
+					? $i18n.t('Syncing · files show up as they land')
+					: $i18n.t('Syncing · {{done}}/{{total}} processed · files show up as they land', {
+							done: syncing.landed,
+							total: syncing.total
+						})}</span
+			>
+		</div>
+	{/if}
 
 	<!-- Skipped files: in the source, not in the knowledge base -->
 	{#if !searchMode && skippedItems.length > 0}

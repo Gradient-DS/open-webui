@@ -90,19 +90,25 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 	};
 }
 
-// What a live run can report. `total` is only known when the worker publishes
-// `submitted` alongside `landed` while it lands; today sync_execution.py writes
-// counts at finish only, so the total stays null and `done` is the number of
-// documents in the folder so far.
-export function runProgress(schedule: Schedule): { done: number; total: number | null } | null {
+// What a live run reports while it runs: the items its plan chose to fetch
+// (`planned`), how many are fetched from the provider and how many have
+// landed, as sync_execution.py publishes them. Null outside a live run or
+// under a worker that publishes counts only at finish.
+export interface RunProgress {
+	total: number;
+	fetched: number;
+	landed: number;
+}
+
+export function runProgress(schedule: Schedule): RunProgress | null {
 	const run = schedule.last_run;
 	if (!runIsLive(run)) return null;
 	const counts = run?.counts ?? {};
-	const total =
-		typeof counts.submitted === 'number' && counts.submitted > 0 ? counts.submitted : null;
+	if (typeof counts.planned !== 'number' || counts.planned <= 0) return null;
 	return {
-		done: total === null ? (schedule.document_count ?? 0) : Math.min(counts.landed ?? 0, total),
-		total
+		total: counts.planned,
+		fetched: Math.min(counts.fetched ?? 0, counts.planned),
+		landed: Math.min(counts.landed ?? 0, counts.planned)
 	};
 }
 
