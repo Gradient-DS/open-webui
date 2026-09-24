@@ -16,6 +16,8 @@ import requests
 from authlib.integrations.starlette_client import OAuth
 from pydantic import BaseModel
 
+from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS  # [Gradient]
+
 from open_webui.env import (
     AGENT_API_AGENTS,
     DATA_DIR,
@@ -998,9 +1000,10 @@ FILE_IMAGE_COMPRESSION_HEIGHT = (
 )
 
 
+# [Gradient]
 RAG_ALLOWED_FILE_EXTENSIONS = [
     ext.strip() for ext in os.getenv('RAG_ALLOWED_FILE_EXTENSIONS', '').split(',') if ext.strip()
-]
+] or DEFAULT_ALLOWED_EXTENSIONS.copy()
 
 RAG_EMBEDDING_ENGINE = os.getenv('RAG_EMBEDDING_ENGINE', '')
 
