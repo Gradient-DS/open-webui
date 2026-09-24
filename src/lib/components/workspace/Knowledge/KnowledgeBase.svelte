@@ -781,9 +781,9 @@
 		return directoryIdByPath;
 	};
 
-	// [Gradient] Per top-level folder upload progress, shown on that folder's
-	// row (like a cloud source's live count) from the moment the folder
-	// appears until every file has been uploaded and processed.
+	// [Gradient] Local folder upload progress per directory row, at every
+	// level of the picked folder: a row's counts cover its whole subtree,
+	// like its file count does, and stay until every file reported back.
 	type FolderUpload = {
 		name: string;
 		total: number;
@@ -792,12 +792,13 @@
 		failed: number;
 	};
 	let uploadProgress: Map<string, FolderUpload> = new Map();
+	let uploadTopLevelIds: string[] = [];
 	let folderUploadInFlight = false;
 	let folderUploadCap: ReturnType<typeof setTimeout> | null = null;
 	// Processing results come back per file over the socket; map each file
-	// to its folder, and keep the result of a file whose event beat the
-	// upload response.
-	const uploadFolderByFileId = new Map<string, string>();
+	// to the rows it counts for, and keep the result of a file whose event
+	// beat the upload response.
+	const uploadFolderByFileId = new Map<string, string[]>();
 	const earlyFileStatus = new Map<string, string>();
 	let uploadListRefresh: ReturnType<typeof setTimeout> | null = null;
 	const refreshListingSoon = () => {
@@ -859,86 +860,126 @@
 		return failedCount;
 	};
 
-	// [Gradient] Mirror the picked folder under the current directory: every
-	// folder path in the manifest is created parents-first (an existing one
-	// is returned as is), then each file uploads into its folder's id.
+	// Every prefix of a relative folder path, shallowest first.
+	const ancestorPaths = (path: string) => {
+		const segments = path.split('/').filter(Boolean);
+		return segments.map((_, index) => segments.slice(0, index + 1).join('/'));
+	};
+
+	// [Gradient] Mirror the picked folder under the current directory: the
+	// folders are created level by level, siblings in parallel; an existing
+	// one is returned as is.
 	const createDirectoriesForPaths = async (paths: string[]) => {
-		const directoryIdByPath: Record<string, string | null> = {};
-		const pending = new Set<string>();
+		const directoryIdByPath: Record<string, string> = {};
+		const levels = new Map<number, Set<string>>();
 		for (const path of paths) {
-			const segments = path.split('/').filter(Boolean);
-			for (let end = 1; end <= segments.length; end++)
-				pending.add(segments.slice(0, end).join('/'));
+			for (const prefix of ancestorPaths(path)) {
+				const depth = prefix.split('/').length;
+				levels.set(depth, (levels.get(depth) ?? new Set()).add(prefix));
+			}
 		}
-		for (const dirPath of [...pending].sort((a, b) => a.split('/').length - b.split('/').length)) {
-			const segments = dirPath.split('/');
-			const parentPath = segments.slice(0, -1).join('/');
-			const parentId = parentPath ? directoryIdByPath[parentPath] : currentDirectoryId;
-			if (parentPath && !parentId) continue;
-			const directory = await createKnowledgeDirectory(
-				localStorage.token,
-				knowledge.id,
-				segments.at(-1)!,
-				parentId ?? null
+		for (const depth of [...levels.keys()].sort((a, b) => a - b)) {
+			await Promise.all(
+				[...levels.get(depth)!].map(async (dirPath) => {
+					const segments = dirPath.split('/');
+					const parentPath = segments.slice(0, -1).join('/');
+					const parentId = parentPath ? directoryIdByPath[parentPath] : currentDirectoryId;
+					if (parentPath && !parentId) return;
+					const directory = await createKnowledgeDirectory(
+						localStorage.token,
+						knowledge.id,
+						segments.at(-1)!,
+						parentId ?? null
+					);
+					if (directory) directoryIdByPath[dirPath] = directory.id;
+				})
 			);
-			if (directory) directoryIdByPath[dirPath] = directory.id;
 		}
 		return directoryIdByPath;
 	};
 
-	// The folders are created first and the listing refreshed, so the rows
-	// are on screen within a moment; the files then go up behind them with
-	// the progress on each top-level folder's row.
+	// The picked folder shows at once as a placeholder row, its real rows
+	// replace it as soon as the folders exist, and the files then go up
+	// behind them with the counters on every row they belong to.
 	const uploadDirectoryEntries = async (entries: DirectoryFileEntry[]) => {
 		if (!knowledge) return;
 
+		const count = (map: Map<string, FolderUpload>, key: string, name: string) => {
+			const row = map.get(key) ?? { name, total: 0, uploaded: 0, processed: 0, failed: 0 };
+			row.total++;
+			map.set(key, row);
+		};
 		try {
 			const paths = [...new Set(entries.map((entry) => entry.path).filter(Boolean))];
+			const topNames = [...new Set(paths.map((path) => path.split('/')[0]))];
+			const placeholderId = (name: string) => `placeholder:${name}`;
+			const placeholders = new Map<string, FolderUpload>();
+			for (const entry of entries) {
+				if (!entry.path) continue;
+				const top = entry.path.split('/')[0];
+				count(placeholders, placeholderId(top), top);
+			}
+			uploadProgress = placeholders;
+			uploadTopLevelIds = [...placeholders.keys()];
+			folderUploadInFlight = true;
+			const now = Math.floor(Date.now() / 1000);
+			directoryItems = [
+				...topNames
+					.filter((name) => !directoryItems.some((dir) => dir.name === name))
+					.map((name) => ({ id: placeholderId(name), name, created_at: now, updated_at: now })),
+				...directoryItems
+			];
+
 			const directoryIdByPath = await createDirectoriesForPaths(paths);
 			const missing = paths.filter((path) => !directoryIdByPath[path]);
 			if (missing.length) {
 				toast.error($i18n.t('Could not create {{count}} folders.', { count: missing.length }));
+				uploadProgress = new Map();
+				await getItemsPage();
 				return;
 			}
 
-			const topLevelId = (entry: DirectoryFileEntry) =>
-				entry.path ? (directoryIdByPath[entry.path.split('/')[0]] ?? null) : null;
 			const progress = new Map<string, FolderUpload>();
 			for (const entry of entries) {
-				const key = topLevelId(entry);
-				if (!key) continue;
-				const row = progress.get(key) ?? {
-					name: entry.path.split('/')[0],
-					total: 0,
-					uploaded: 0,
-					processed: 0,
-					failed: 0
-				};
-				row.total++;
-				progress.set(key, row);
+				for (const prefix of ancestorPaths(entry.path)) {
+					count(progress, directoryIdByPath[prefix], prefix.split('/').at(-1)!);
+				}
+			}
+			// The placeholder rows stay on screen until the listing answers;
+			// they share their top-level folder's row so the counters never blink.
+			for (const name of topNames) {
+				const row = progress.get(directoryIdByPath[name]);
+				if (row) progress.set(placeholderId(name), row);
 			}
 			uploadProgress = progress;
-			folderUploadInFlight = true;
+			uploadTopLevelIds = topNames.map((name) => directoryIdByPath[name]);
 			await getItemsPage();
 
+			const rowIds = (entry: DirectoryFileEntry) =>
+				ancestorPaths(entry.path)
+					.map((prefix) => directoryIdByPath[prefix])
+					.filter(Boolean);
 			await uploadManifestEntries(
 				entries,
 				(entry) => (entry.path ? (directoryIdByPath[entry.path] ?? null) : currentDirectoryId),
 				(entry, uploadedFile) => {
-					const key = topLevelId(entry);
-					const row = key ? uploadProgress.get(key) : null;
-					if (row) {
+					const ids = rowIds(entry);
+					const failed = !uploadedFile || !!uploadedFile.error || !uploadedFile.id;
+					for (const id of ids) {
+						const row = uploadProgress.get(id);
+						if (!row) continue;
 						row.uploaded++;
-						if (!uploadedFile || uploadedFile.error || !uploadedFile.id) {
+						if (failed) {
 							row.processed++;
 							row.failed++;
-						} else {
-							uploadFolderByFileId.set(uploadedFile.id, key!);
-							const early = earlyFileStatus.get(uploadedFile.id);
-							if (early) {
-								earlyFileStatus.delete(uploadedFile.id);
-								applyFolderFileStatus(uploadedFile.id, early);
-							}
+						}
+					}
+					if (!failed) {
+						uploadFolderByFileId.set(uploadedFile.id!, ids);
+						const early = earlyFileStatus.get(uploadedFile.id!);
+						if (early) {
+							earlyFileStatus.delete(uploadedFile.id!);
+							applyFolderFileStatus(uploadedFile.id!, early);
 						}
 					}
 					uploadProgress = new Map(uploadProgress);
@@ -961,15 +1002,16 @@
 	// One processed file of a folder upload; returns false when the file is
 	// not part of one.
 	const applyFolderFileStatus = (fileId: string, status: string): boolean => {
-		const key = uploadFolderByFileId.get(fileId);
-		if (!key) return false;
+		const ids = uploadFolderByFileId.get(fileId);
+		if (!ids) return false;
 		uploadFolderByFileId.delete(fileId);
-		const row = uploadProgress.get(key);
-		if (row) {
+		for (const id of ids) {
+			const row = uploadProgress.get(id);
+			if (!row) continue;
 			row.processed++;
 			if (status === 'failed') row.failed++;
-			uploadProgress = new Map(uploadProgress);
 		}
+		uploadProgress = new Map(uploadProgress);
 		refreshListingSoon();
 		finishFolderUploadsIfDone();
 		return true;
@@ -987,8 +1029,9 @@
 		folderUploadCap = null;
 		if (uploadListRefresh) clearTimeout(uploadListRefresh);
 		uploadListRefresh = null;
-		const rows = [...uploadProgress.values()];
+		const rows = uploadTopLevelIds.flatMap((id) => uploadProgress.get(id) ?? []);
 		uploadProgress = new Map();
+		uploadTopLevelIds = [];
 		uploadFolderByFileId.clear();
 		earlyFileStatus.clear();
 		if (rows.length === 0) return;

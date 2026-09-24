@@ -698,9 +698,15 @@ class SoevKnowledgeTable:
         path = self._directory_path(knowledge_id, parent_id) + (name,)
         self._assert_writable_path(path)
         self._projection.directory_id(knowledge_id, path)
+        collection = await self._collection(knowledge_id, user_id=user_id)
+        if collection is None:
+            return None
         await self._send('POST', self._path(knowledge_id) + '/folders', {'path': '/'.join(path)}, user_id=user_id)
-        rows = await self._directory_models(knowledge_id, path[:-1], user_id=user_id)
-        return next((row for row in rows if row.name == name), None)
+        # The folder is what was just asked for; re-listing the level would
+        # walk the whole collection for nothing (a folder upload creates many).
+        return self._folder_model(
+            collection, {'path': '/'.join(path), 'created_at': dt.datetime.now(dt.UTC).isoformat()}
+        )
 
     async def _find_or_create_directory(self, db, knowledge_id, parent_id, name, user_id):
         result = await self.create_directory(knowledge_id, name, user_id, parent_id)
