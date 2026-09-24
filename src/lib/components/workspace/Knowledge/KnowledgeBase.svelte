@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { enabledProviders } from '$lib/sources/policy';
+	import { enabledProviders, loadSourcePolicy } from '$lib/sources/policy';
 	import { providers, providerFor, type SourceProvider } from '$lib/sources/registry';
 	/* global FileSystemDirectoryReader, FileSystemEntry, FileSystemFileEntry, FileSystemDirectoryEntry */
 	import { toast } from 'svelte-sonner';
@@ -1751,6 +1751,10 @@
 	// ===== Socket event handler references (for cleanup) =====
 
 	onMount(async () => {
+		void loadSourcePolicy(localStorage.token).then(() => {
+			if (destroyed) return;
+			for (const provider of $enabledProviders) void provider.warmUp?.();
+		});
 		id = $page.params.id;
 		knowledgeId = id;
 		// [Gradient] Start all three independent reads together; the first items page covers this poll.

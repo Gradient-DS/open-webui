@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	providers,
 	DEFAULT_RECONNECT_CODES,
@@ -9,6 +9,18 @@ import {
 	oneDriveScope,
 	googleDriveScope
 } from './registry';
+import { openOneDriveItemPicker } from '$lib/utils/onedrive-file-picker';
+import {
+	createKnowledgePicker,
+	initialize as initializeGooglePicker
+} from '$lib/utils/google-drive-picker';
+
+vi.mock('$lib/utils/onedrive-file-picker', () => ({ openOneDriveItemPicker: vi.fn() }));
+vi.mock('$lib/utils/google-drive-picker', () => ({
+	createKnowledgePicker: vi.fn(),
+	initialize: vi.fn()
+}));
+beforeEach(() => vi.resetAllMocks());
 
 it('registers OneDrive folders recursively and files as single-file scopes', () => {
 	const folder = {
@@ -61,6 +73,7 @@ describe('provider registry', () => {
 		expect(provider.icon).toBeTruthy();
 		expect(provider.startParam).toBe(`start_${kind}_sync`);
 		expect(provider.pick).toBeTypeOf('function');
+		expect(provider.warmUp === undefined || typeof provider.warmUp === 'function').toBe(true);
 		expect(provider.needsReconnectOn.length).toBeGreaterThan(0);
 		expect(reconnectCodes(kind)).toBe(provider.needsReconnectOn);
 		expect(providerFor(kind)).toBe(provider);
@@ -70,5 +83,30 @@ describe('provider registry', () => {
 		expect(reconnectCodes(kind)).toBe(DEFAULT_RECONNECT_CODES);
 		expect(providerFor(kind)).toBeNull();
 		expect(providerIcon(kind)).toBe(localSource.icon);
+	});
+});
+
+describe('vendor adapters', () => {
+	it('invokes the OneDrive picker without an import delay', async () => {
+		vi.mocked(openOneDriveItemPicker).mockResolvedValue([]);
+		const picked = providers.onedrive.pick();
+		expect(openOneDriveItemPicker).toHaveBeenCalledExactlyOnceWith('organizations');
+		await expect(picked).resolves.toEqual([]);
+	});
+	it('invokes the Google picker without an import delay', async () => {
+		vi.mocked(createKnowledgePicker).mockResolvedValue(null);
+		const picked = providers.google_drive.pick();
+		expect(createKnowledgePicker).toHaveBeenCalledExactlyOnceWith();
+		await expect(picked).resolves.toBeNull();
+	});
+	it('preloads Google without opening a picker', async () => {
+		vi.mocked(initializeGooglePicker).mockResolvedValue(undefined);
+		await expect(providers.google_drive.warmUp!()).resolves.toBeUndefined();
+		expect(initializeGooglePicker).toHaveBeenCalledExactlyOnceWith();
+		expect(createKnowledgePicker).not.toHaveBeenCalled();
+	});
+	it('ignores Google preload failures', async () => {
+		vi.mocked(initializeGooglePicker).mockRejectedValue(new Error('offline'));
+		await expect(providers.google_drive.warmUp!()).resolves.toBeUndefined();
 	});
 });

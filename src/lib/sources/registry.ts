@@ -3,6 +3,11 @@ import type { ScheduleForm } from '$lib/apis/cloudSync';
 import OneDrive from '$lib/components/icons/OneDrive.svelte';
 import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 import Folder from '$lib/components/icons/Folder.svelte';
+import { openOneDriveItemPicker } from '$lib/utils/onedrive-file-picker';
+import {
+	createKnowledgePicker,
+	initialize as initializeGooglePicker
+} from '$lib/utils/google-drive-picker';
 
 export type PickedScope = Pick<ScheduleForm, 'scope' | 'label' | 'path'>;
 
@@ -12,6 +17,7 @@ export interface SourceProvider {
 	icon: ComponentType;
 	startParam: string;
 	pick(): Promise<PickedScope[] | null>;
+	warmUp?(): Promise<void>;
 	needsReconnectOn: string[];
 }
 
@@ -35,7 +41,6 @@ export const providers: Record<string, SourceProvider> = {
 		startParam: 'start_onedrive_sync',
 		needsReconnectOn: DEFAULT_RECONNECT_CODES,
 		async pick() {
-			const { openOneDriveItemPicker } = await import('$lib/utils/onedrive-file-picker');
 			const items = await openOneDriveItemPicker('organizations');
 			return items?.map(oneDriveScope) ?? null;
 		}
@@ -45,9 +50,9 @@ export const providers: Record<string, SourceProvider> = {
 		label: 'Google Drive',
 		icon: GoogleDrive,
 		startParam: 'start_google_drive_sync',
+		warmUp: () => initializeGooglePicker().catch(() => {}),
 		needsReconnectOn: DEFAULT_RECONNECT_CODES,
 		async pick() {
-			const { createKnowledgePicker } = await import('$lib/utils/google-drive-picker');
 			const result = await createKnowledgePicker();
 			return result?.items.map(googleDriveScope) ?? null;
 		}
