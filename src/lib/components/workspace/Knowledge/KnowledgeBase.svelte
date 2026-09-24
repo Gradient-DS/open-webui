@@ -56,6 +56,7 @@
 	import { createKbSelection } from './KnowledgeBase/selection';
 	import type { CloudSyncProvider, SchedulePair } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
+	import { ancestorPaths, FolderUploadSession, mergeUploadRows } from './utils/folderUpload';
 	import {
 		CLOUD_PROVIDERS,
 		oneDriveScope,
@@ -789,33 +790,8 @@
 		return directoryIdByPath;
 	};
 
-	// [Gradient] Local folder upload progress per directory row, at every
-	// level of the picked folder: a row's counts cover its whole subtree,
-	// like its file count does, and stay until every file reported back.
-	type FolderUpload = {
-		name: string;
-		total: number;
-		uploaded: number;
-		processed: number;
-		failed: number;
-	};
-	let uploadProgress: Map<string, FolderUpload> = new Map();
-	let uploadTopLevelIds: string[] = [];
-	let folderUploadInFlight = false;
-	let folderUploadCap: ReturnType<typeof setTimeout> | null = null;
-	// Processing results come back per file over the socket; map each file
-	// to the rows it counts for, and keep the result of a file whose event
-	// beat the upload response.
-	const uploadFolderByFileId = new Map<string, string[]>();
-	const earlyFileStatus = new Map<string, string>();
-	let uploadListRefresh: ReturnType<typeof setTimeout> | null = null;
-	const refreshListingSoon = () => {
-		if (uploadListRefresh) return;
-		uploadListRefresh = setTimeout(() => {
-			uploadListRefresh = null;
-			void getItemsPage();
-		}, 1500);
-	};
+	let uploads: FolderUploadSession[] = [];
+	$: uploadProgress = mergeUploadRows(uploads);
 
 	// [Gradient] Upload a set of entries with bounded concurrency (the fork's
 	// upload hardening), hashing each file right before it goes up and
@@ -868,12 +844,6 @@
 		return failedCount;
 	};
 
-	// Every prefix of a relative folder path, shallowest first.
-	const ancestorPaths = (path: string) => {
-		const segments = path.split('/').filter(Boolean);
-		return segments.map((_, index) => segments.slice(0, index + 1).join('/'));
-	};
-
 	// [Gradient] Mirror the picked folder under the current directory: the
 	// folders are created level by level, siblings in parallel; an existing
 	// one is returned as is.
@@ -912,145 +882,70 @@
 	const uploadDirectoryEntries = async (entries: DirectoryFileEntry[]) => {
 		if (!knowledge) return;
 
-		const count = (map: Map<string, FolderUpload>, key: string, name: string) => {
-			const row = map.get(key) ?? { name, total: 0, uploaded: 0, processed: 0, failed: 0 };
-			row.total++;
-			map.set(key, row);
-		};
+		const session = new FolderUploadSession(
+			uuidv4(),
+			entries.map((entry) => entry.path),
+			{
+				onChange: () => {
+					uploads = [...uploads];
+				},
+				onRefresh: () => {
+					void getItemsPage();
+				},
+				onFinish: (summary) => {
+					uploads = uploads.filter((upload) => upload !== session);
+					const { variant, message } = buildSyncToast($i18n, summary.label, summary);
+					toast[variant](message);
+					void init();
+				}
+			}
+		);
+		uploads = [...uploads, session];
 		try {
 			const paths = [...new Set(entries.map((entry) => entry.path).filter(Boolean))];
-			const topNames = [...new Set(paths.map((path) => path.split('/')[0]))];
-			const placeholderId = (name: string) => `placeholder:${name}`;
-			const placeholders = new Map<string, FolderUpload>();
-			for (const entry of entries) {
-				if (!entry.path) continue;
-				const top = entry.path.split('/')[0];
-				count(placeholders, placeholderId(top), top);
-			}
-			uploadProgress = placeholders;
-			uploadTopLevelIds = [...placeholders.keys()];
-			folderUploadInFlight = true;
 			const now = Math.floor(Date.now() / 1000);
 			directoryItems = [
-				...topNames
+				...session.topNames
 					.filter((name) => !directoryItems.some((dir) => dir.name === name))
-					.map((name) => ({ id: placeholderId(name), name, created_at: now, updated_at: now })),
+					.map((name) => ({
+						id: session.placeholderId(name),
+						name,
+						created_at: now,
+						updated_at: now
+					})),
 				...directoryItems
 			];
 
 			const directoryIdByPath = await createDirectoriesForPaths(paths);
+			if (session.disposed) return;
 			const missing = paths.filter((path) => !directoryIdByPath[path]);
 			if (missing.length) {
 				toast.error($i18n.t('Could not create {{count}} folders.', { count: missing.length }));
-				uploadProgress = new Map();
+				session.dispose();
+				uploads = uploads.filter((upload) => upload !== session);
 				await getItemsPage();
 				return;
 			}
 
-			const progress = new Map<string, FolderUpload>();
-			for (const entry of entries) {
-				for (const prefix of ancestorPaths(entry.path)) {
-					count(progress, directoryIdByPath[prefix], prefix.split('/').at(-1)!);
-				}
-			}
-			// The placeholder rows stay on screen until the listing answers;
-			// they share their top-level folder's row so the counters never blink.
-			for (const name of topNames) {
-				const row = progress.get(directoryIdByPath[name]);
-				if (row) progress.set(placeholderId(name), row);
-			}
-			uploadProgress = progress;
-			uploadTopLevelIds = topNames.map((name) => directoryIdByPath[name]);
+			session.setDirectories(directoryIdByPath);
 			await getItemsPage();
-
-			const rowIds = (entry: DirectoryFileEntry) =>
-				ancestorPaths(entry.path)
-					.map((prefix) => directoryIdByPath[prefix])
-					.filter(Boolean);
+			if (session.disposed) return;
 			await uploadManifestEntries(
 				entries,
 				(entry) => (entry.path ? (directoryIdByPath[entry.path] ?? null) : currentDirectoryId),
-				(entry, uploadedFile) => {
-					const ids = rowIds(entry);
-					const failed = !uploadedFile || !!uploadedFile.error || !uploadedFile.id;
-					for (const id of ids) {
-						const row = uploadProgress.get(id);
-						if (!row) continue;
-						row.uploaded++;
-						if (failed) {
-							row.processed++;
-							row.failed++;
-						}
-					}
-					if (!failed) {
-						uploadFolderByFileId.set(uploadedFile.id!, ids);
-						const early = earlyFileStatus.get(uploadedFile.id!);
-						if (early) {
-							earlyFileStatus.delete(uploadedFile.id!);
-							applyFolderFileStatus(uploadedFile.id!, early);
-						}
-					}
-					uploadProgress = new Map(uploadProgress);
-					refreshListingSoon();
-				}
+				(entry, uploadedFile) =>
+					session.onUploaded(
+						ancestorPaths(entry.path)
+							.map((prefix) => directoryIdByPath[prefix])
+							.filter(Boolean),
+						uploadedFile
+					)
 			);
 		} catch (e) {
-			toast.error(`${e}`);
+			if (!session.disposed) toast.error(`${e}`);
 		} finally {
-			folderUploadInFlight = false;
-			// Processing may still be running; the rows keep their counters
-			// until every file reported back, with a hard cap in case an event
-			// never arrives.
-			if (folderUploadCap) clearTimeout(folderUploadCap);
-			folderUploadCap = setTimeout(finishFolderUploads, 10 * 60 * 1000);
-			finishFolderUploadsIfDone();
+			session.completeUploads();
 		}
-	};
-
-	// One processed file of a folder upload; returns false when the file is
-	// not part of one.
-	const applyFolderFileStatus = (fileId: string, status: string): boolean => {
-		const ids = uploadFolderByFileId.get(fileId);
-		if (!ids) return false;
-		uploadFolderByFileId.delete(fileId);
-		for (const id of ids) {
-			const row = uploadProgress.get(id);
-			if (!row) continue;
-			row.processed++;
-			if (status === 'failed') row.failed++;
-		}
-		uploadProgress = new Map(uploadProgress);
-		refreshListingSoon();
-		finishFolderUploadsIfDone();
-		return true;
-	};
-
-	const finishFolderUploadsIfDone = () => {
-		if (folderUploadInFlight || uploadProgress.size === 0) return;
-		if ([...uploadProgress.values()].every((row) => row.processed >= row.total))
-			finishFolderUploads();
-	};
-
-	// The one toast for the whole folder upload, once processing settled.
-	const finishFolderUploads = () => {
-		if (folderUploadCap) clearTimeout(folderUploadCap);
-		folderUploadCap = null;
-		if (uploadListRefresh) clearTimeout(uploadListRefresh);
-		uploadListRefresh = null;
-		const rows = uploadTopLevelIds.flatMap((id) => uploadProgress.get(id) ?? []);
-		uploadProgress = new Map();
-		uploadTopLevelIds = [];
-		uploadFolderByFileId.clear();
-		earlyFileStatus.clear();
-		if (rows.length === 0) return;
-		const failed = rows.reduce((sum, row) => sum + row.failed, 0);
-		const added = rows.reduce((sum, row) => sum + row.processed - row.failed, 0);
-		const { variant, message } = buildSyncToast($i18n, rows.length === 1 ? rows[0].name : null, {
-			added,
-			failed
-		});
-		toast[variant](message);
-		void init();
 	};
 
 	// Incremental sync: hash locally → diff on server → upload only what
@@ -1556,13 +1451,14 @@
 		// mode) — nudge the tree so a direct upload's spinner resolves.
 		scheduleTreeRefresh();
 
-		// A folder upload's files report to their folder row, not the batch toast.
+		// Offer terminal events to every session before the batch toast, including
+		// events for files already visible in the listing.
 		if (data.status === 'completed' || data.status === 'failed') {
-			if (applyFolderFileStatus(data.file_id, data.status)) return;
-			if (folderUploadInFlight && !fileItems?.some((f) => f.id === data.file_id)) {
-				earlyFileStatus.set(data.file_id, data.status);
-				return;
+			let consumed = false;
+			for (const session of uploads) {
+				if (session.onFileStatus(data.file_id, data.status)) consumed = true;
 			}
+			if (consumed || uploads.some((session) => session.inFlight)) return;
 		}
 
 		if (!fileItems) return;
@@ -2030,6 +1926,8 @@
 		dropZone?.removeEventListener('dragleave', onDragLeave);
 
 		destroyed = true;
+		for (const session of uploads) session.dispose();
+		uploads = [];
 		clearTimeout(syncPoll);
 		closeAuthorization?.();
 		// Clean up file status listener
