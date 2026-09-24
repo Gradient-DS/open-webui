@@ -3928,5 +3928,6 @@
   "The file was skipped in the last sync. It is retried on the next sync.": "The file was skipped in the last sync. It is retried on the next sync.",
   "{{label}}: sync cancelled": "{{label}}: sync cancelled",
   "{{label}}: sync failed ({{reason}})": "{{label}}: sync failed ({{reason}})",
-  "Open the folder to see which files were skipped.": "Open the folder to see which files were skipped."
+  "Open the folder to see which files were skipped.": "Open the folder to see which files were skipped.",
+  "Updated {{time}}": "Updated {{time}}"
 }

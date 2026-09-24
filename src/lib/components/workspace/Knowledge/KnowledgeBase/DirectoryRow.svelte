@@ -20,6 +20,7 @@
 	import SourceControls from './SourceControls.svelte';
 	import { folderBadge, type TreeStatusCounts } from '../utils/treeStatus';
 	import type { SchedulePair } from '../utils/cloudSync';
+	import { sourceState } from '../utils/sourceState';
 
 	export let directory: {
 		id: string;
@@ -56,6 +57,14 @@
 	export let onDirDrop: (dirId: string, targetDirectoryId: string) => void = () => {};
 
 	$: badge = folderBadge(directory.status_counts);
+	// When the row was last updated: the last finished sync for a source root,
+	// the directory's own timestamp otherwise. Shown next to the file count.
+	$: source = pair ? sourceState(pair, (pair.content ?? pair.acl)!.connection) : null;
+	$: updatedAt = source
+		? source.lastSyncedAt
+		: directory.updated_at
+			? new Date(directory.updated_at * 1000).toISOString()
+			: null;
 	let editing = false;
 	let editName = '';
 	let editInput: HTMLInputElement;
@@ -192,6 +201,15 @@
 						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
 					</span>
 				{/if}
+				{#if updatedAt}
+					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="shrink-0">
+						<span class="text-xs text-gray-400">
+							&middot; {$i18n.t('Updated {{time}}', { time: dayjs(updatedAt).fromNow() })}
+						</span>
+					</Tooltip>
+				{:else if source && source.state !== 'syncing'}
+					<span class="text-xs text-gray-400 shrink-0">&middot; {$i18n.t('Not synced yet')}</span>
+				{/if}
 
 				{#if badge === 'failed'}
 					<Tooltip
@@ -203,16 +221,6 @@
 					<Spinner className="size-3" />
 				{/if}
 			</div>
-		</div>
-
-		<div class="flex items-center gap-2 shrink-0">
-			{#if !pair && directory.updated_at}
-				<Tooltip content={dayjs(directory.updated_at * 1000).format('LLLL')}>
-					<div class="text-xs text-gray-400">
-						{dayjs(directory.updated_at * 1000).fromNow()}
-					</div>
-				</Tooltip>
-			{/if}
 		</div>
 	</button>
 

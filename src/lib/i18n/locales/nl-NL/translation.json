@@ -3928,5 +3928,6 @@
   "The file was skipped in the last sync. It is retried on the next sync.": "Het bestand is bij de laatste synchronisatie overgeslagen. Bij de volgende synchronisatie wordt het opnieuw geprobeerd.",
   "{{label}}: sync cancelled": "{{label}}: synchronisatie geannuleerd",
   "{{label}}: sync failed ({{reason}})": "{{label}}: synchronisatie mislukt ({{reason}})",
-  "Open the folder to see which files were skipped.": "Open de map om te zien welke bestanden zijn overgeslagen."
+  "Open the folder to see which files were skipped.": "Open de map om te zien welke bestanden zijn overgeslagen.",
+  "Updated {{time}}": "Bijgewerkt {{time}}"
 }

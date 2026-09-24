@@ -33,8 +33,9 @@
 	}>();
 	// [Gradient] The inline sync chrome of one cloud source. The slots keep a
 	// fixed order (action or live progress, skipped files, status badge, menu)
-	// so the badge stays put when a sync starts: the primary button gives way
-	// to the progress readout in the same place instead of vanishing.
+	// and a minimum width, so nothing moves when a sync starts: the primary
+	// button gives way to the progress readout in the same place, and the
+	// badge column is wide enough for its common labels in every language.
 	export let knowledgeId: string;
 	export let pair: SchedulePair;
 	export let writeAccess = false;
@@ -158,31 +159,33 @@
 	{#if showAccessHelp}<span class="text-xs text-gray-500" role="status">
 			{$i18n.t('Ask the knowledge base owner to restore your edit access, then resume syncing.')}
 		</span>{/if}
-	{#if view.state === 'syncing'}
-		<span
-			class="flex items-center gap-1 px-2 py-0.5 text-xs text-gray-500 dark:text-gray-400"
-			role="status"
-			aria-live="polite"
-		>
-			<Spinner className="size-3" />
-			{#if progress?.total}
-				{$i18n.t('{{done}} of {{total}} · {{percent}}%', {
-					done: progress.done,
-					total: progress.total,
-					percent: Math.floor((100 * progress.done) / progress.total)
-				})}
-			{:else}
-				{$i18n.t('{{count}} documents so far', { count: progress?.done ?? view.documents })}
-			{/if}
-		</span>
-	{:else if view.primary && (writeAccess || view.primary === 'request_access') && (view.primary !== 'resume' || isAdmin)}
-		<button
-			type="button"
-			class="rounded-lg border px-2 py-0.5 text-xs disabled:opacity-50 dark:border-gray-700"
-			disabled={busy}
-			on:click={primaryAction}>{$i18n.t(primary[view.primary])}</button
-		>
-	{/if}
+	<div class="flex min-w-[9.5rem] items-center justify-end">
+		{#if view.state === 'syncing'}
+			<span
+				class="flex items-center gap-1 px-2 py-0.5 text-xs text-gray-500 dark:text-gray-400"
+				role="status"
+				aria-live="polite"
+			>
+				<Spinner className="size-3" />
+				{#if progress?.total}
+					{$i18n.t('{{done}} of {{total}} · {{percent}}%', {
+						done: progress.done,
+						total: progress.total,
+						percent: Math.floor((100 * progress.done) / progress.total)
+					})}
+				{:else}
+					{$i18n.t('{{count}} documents', { count: progress?.done ?? view.documents })}
+				{/if}
+			</span>
+		{:else if view.primary && (writeAccess || view.primary === 'request_access') && (view.primary !== 'resume' || isAdmin)}
+			<button
+				type="button"
+				class="rounded-lg border px-2 py-0.5 text-xs disabled:opacity-50 dark:border-gray-700"
+				disabled={busy}
+				on:click={primaryAction}>{$i18n.t(primary[view.primary])}</button
+			>
+		{/if}
+	</div>
 	{#if skipped > 0}
 		<Dropdown
 			bind:show={skippedOpen}
@@ -212,7 +215,7 @@
 			</div>
 		</Dropdown>
 	{/if}
-	<Tooltip content={details.join('<br>')} className="flex">
+	<Tooltip content={details.join('<br>')} className="flex min-w-[8.5rem] justify-end">
 		<button type="button" aria-label={details[0]}
 			><Badge type={badge.type} content={$i18n.t(badge.label)} /></button
 		>

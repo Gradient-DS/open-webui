@@ -2235,7 +2235,7 @@
 										content={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}
 									>
 										<button
-											class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+											class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
 											disabled={isSyncBusy}
 											aria-label={$i18n.t('Add source')}
 											on:click={() => {
