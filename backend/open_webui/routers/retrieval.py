@@ -119,6 +119,7 @@ from open_webui.soev.client import SoevApiError
 from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.content_types import content_type_for  # [Gradient]
 from open_webui.utils.loop_bridge import run_on_main_loop
 from open_webui.utils.misc import (
     calculate_sha256_string,
@@ -2307,9 +2308,8 @@ async def _fetch_url(url: str, max_size_mb: int | str | None) -> dict:
                 filename = os.path.basename(urlparse(url).path)
             filename = os.path.basename(filename or 'download')
 
-            resolved_content_type = (
-                image_mime or base_content_type or mimetypes.guess_type(filename)[0] or 'application/octet-stream'
-            )
+            # [Gradient]
+            resolved_content_type = image_mime or content_type_for(filename, base_content_type)
             if not os.path.splitext(filename)[1]:
                 filename = f'{filename}{mimetypes.guess_extension(resolved_content_type) or ".bin"}'
 
