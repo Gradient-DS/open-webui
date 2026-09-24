@@ -247,6 +247,9 @@ class KnowledgeDirectoryEntry(KnowledgeDirectoryModel):
 
     child_count: int = 0
     status_counts: dict[str, int] = Field(default_factory=dict)
+    # [Gradient] Set on the root row of a cloud-synced folder: the content
+    # schedule that writes it, so the row can carry the source's sync controls.
+    schedule_id: str | None = None
 
 
 class KnowledgeFileListResponse(BaseModel):

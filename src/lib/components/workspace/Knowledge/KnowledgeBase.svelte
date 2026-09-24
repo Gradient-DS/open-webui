@@ -48,8 +48,7 @@
 	import Files from './KnowledgeBase/Files.svelte';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
-	import CloudSyncPanel from './KnowledgeBase/CloudSyncPanel.svelte';
-	import type { CloudSyncProvider } from './utils/cloudSync';
+	import type { CloudSyncProvider, SchedulePair } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
 	import {
 		CLOUD_PROVIDERS,
@@ -58,6 +57,7 @@
 		connectResult,
 		connectionOutcome,
 		reconnectConnections,
+		pairSchedules,
 		shouldRefetchSyncItems,
 		runIsLive
 	} from './utils/cloudSync';
@@ -81,10 +81,6 @@
 	import Search from '$lib/components/icons/Search.svelte';
 	import FilesOverlay from '$lib/components/chat/MessageInput/FilesOverlay.svelte';
 	import DropdownOptions from '$lib/components/common/DropdownOptions.svelte';
-	import Dropdown from '$lib/components/common/Dropdown.svelte';
-	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
-	import Checkbox from '$lib/components/common/Checkbox.svelte';
-	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
 
@@ -101,6 +97,21 @@
 		requestedProvider ?? (knowledge?.type ? CLOUD_PROVIDERS[knowledge.type] : null);
 	$: isSyncBusy = cloudActionBusy || schedules.some((schedule) => runIsLive(schedule.last_run));
 	$: reconnectNeeded = reconnectConnections(schedules, connecting);
+	// [Gradient] Sources render inside the listing: folder sources on the
+	// directory row their schedule writes, single-file sources as loose rows.
+	$: sourcePairs = new Map(
+		pairSchedules(schedules).flatMap((pair) =>
+			[pair.content, pair.acl].flatMap((schedule) =>
+				schedule ? [[schedule.id, pair] as [string, SchedulePair]] : []
+			)
+		)
+	);
+	$: looseSources = pairSchedules(schedules).filter(
+		(pair) =>
+			!pair.content ||
+			pair.content.scope.single_file === true ||
+			pair.content.scope.include_descendants === false
+	);
 	// Single derived guard for all structure-write affordances (decision 5) —
 	// local/untyped KBs with write access only. Cloud KBs browse the
 	// sync-written directory structure read-only; push KBs are browse-only.
@@ -166,7 +177,6 @@
 	let inputFiles = null;
 
 	let query = '';
-	let includeContent = false;
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 
 	let viewOption = null;
@@ -246,7 +256,7 @@
 	// Consolidated reactive block — mirrors Knowledge.svelte list view pattern
 	$: if (loaded && knowledgeId !== null) {
 		// Track all dependencies explicitly
-		void [query, viewOption, sortKey, direction, currentPage, includeContent];
+		void [query, viewOption, sortKey, direction, currentPage];
 
 		if (!itemsInitialized) {
 			itemsInitialized = true;
@@ -289,8 +299,7 @@
 			currentPage,
 			null,
 			true,
-			isSearching ? undefined : (currentDirectoryId ?? null),
-			isSearching ? includeContent : false
+			isSearching ? undefined : (currentDirectoryId ?? null)
 		).catch(() => null);
 
 		if (currentFetchId !== fetchId) return; // Stale response, discard
@@ -2018,19 +2027,41 @@
 		<div
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
-			{#if schedules.length || reconnectNeeded.length || finishingConnectionId || syncStatusError}
-				<CloudSyncPanel
-					knowledgeId={knowledge.id}
-					{schedules}
-					{reconnectNeeded}
-					{finishingConnectionId}
-					{syncStatusError}
-					writeAccess={knowledge.write_access}
-					busy={cloudActionBusy}
-					isAdmin={$user?.role === 'admin'}
-					on:action={(event) => sourceAction(event.detail.schedules, event.detail.action)}
-					on:reconnect={(event) => reconnect(event.detail)}
-				/>
+			<!-- [Gradient] Cloud-sync notices; the sources themselves sit in the listing. -->
+			{#if finishingConnectionId}
+				<p role="status" class="mx-4 mb-1 text-xs text-gray-500 dark:text-gray-400">
+					{$i18n.t('Finishing the connection…')}
+				</p>
+			{/if}
+			{#each reconnectNeeded.filter((connection) => connection.id !== finishingConnectionId && !schedules.some((schedule) => schedule.connection_id === connection.id)) as connection (connection.id)}
+				<div
+					class="mx-4 mb-1 flex items-center justify-between gap-3 text-xs text-amber-700 dark:text-amber-300"
+					role="status"
+				>
+					<span
+						>{#if connection.last_error === 'owner_mismatch'}
+							{$i18n.t(
+								'The account you signed in with is not yours to connect; sign in with your own account.'
+							)}
+						{:else}
+							{$i18n.t('Reconnect {{provider}} to resume syncing.', {
+								provider: CLOUD_PROVIDERS[connection.source_kind]?.label ?? connection.source_kind
+							})}
+						{/if}</span
+					>
+					{#if knowledge.write_access}
+						<button
+							class="font-medium underline"
+							disabled={cloudActionBusy}
+							on:click={() => reconnect(connection)}>{$i18n.t('Reconnect')}</button
+						>
+					{/if}
+				</div>
+			{/each}
+			{#if syncStatusError}
+				<p role="alert" class="mx-4 mb-1 text-xs text-red-500">
+					{$i18n.t('Failed to check background sync status')}
+				</p>
 			{/if}
 
 			{#if isExternalKnowledge}
@@ -2124,37 +2155,6 @@
 							}}
 						/>
 
-						<Dropdown align="end">
-							<button
-								class="p-1.5 mr-1 rounded-xl text-gray-500 bg-transparent hover:text-gray-900 dark:hover:text-gray-100 transition"
-								type="button"
-							>
-								<AdjustmentsHorizontal className="size-3.5" strokeWidth="2" />
-							</button>
-
-							<div slot="content">
-								<DropdownMenu className="min-w-[11.25rem]">
-									<button
-										class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
-										type="button"
-										on:click={() => {
-											includeContent = !includeContent;
-											currentPage = 1;
-										}}
-									>
-										<Checkbox
-											state={includeContent ? 'checked' : 'unchecked'}
-											on:change={(e) => {
-												includeContent = e.detail === 'checked';
-												currentPage = 1;
-											}}
-										/>
-										{$i18n.t('File content')}
-									</button>
-								</DropdownMenu>
-							</div>
-						</Dropdown>
-
 						{#if knowledge?.write_access}
 							<div>
 								{#if activeProvider}
@@ -2162,7 +2162,7 @@
 										content={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}
 									>
 										<button
-											class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
+											class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
 											disabled={isSyncBusy}
 											aria-label={$i18n.t('Add source')}
 											on:click={() => {
@@ -2335,7 +2335,13 @@
 												directories={query ? [] : directoryItems}
 												searchMode={!!query}
 												{structureEditable}
-												isSyncing={isSyncBusy}
+												{sourcePairs}
+												looseSources={currentDirectoryId === null ? looseSources : []}
+												syncAccess={!!knowledge?.write_access}
+												syncBusy={cloudActionBusy}
+												isAdmin={$user?.role === 'admin'}
+												onSourceAction={(targets, action) => sourceAction(targets, action)}
+												onReconnect={(connection) => reconnect(connection)}
 												{knowledge}
 												{selectedFileId}
 												onClick={(fileId) => {

@@ -247,3 +247,15 @@ def test_the_projection_is_total(projection, collection):
     result = projection.knowledge_of(collection, service_principal=SERVICE)
     assert set(KnowledgeModel.model_fields) == set(result.model_dump())
     assert set(KnowledgeModel.model_fields) == result.model_fields_set
+
+
+def test_only_a_synced_folder_root_carries_its_schedule_id(projection):
+    """A cloud-synced folder's root row names its content schedule; every other row does not."""
+    root = projection.directory_id('kb-1', ('\0sync:sched-1',))
+    assert projection.sync_root_schedule_id(root) == 'sched-1'
+    assert projection.sync_root_schedule_id(projection.directory_id('kb-1', ('\0sync:sched-1', 'sub'))) is None
+    assert projection.sync_root_schedule_id(projection.directory_id('kb-1', ('Research',))) is None
+    model = projection.directory_model('kb-1', ('\0sync:sched-1',), created_at=1, owner_id='owner')
+    plain = projection.directory_model('kb-1', ('Research',), created_at=1, owner_id='owner')
+    listed = projection.knowledge_file_list_of([], total=0, directories=[model, plain]).directories
+    assert [row.schedule_id for row in listed] == ['sched-1', None]

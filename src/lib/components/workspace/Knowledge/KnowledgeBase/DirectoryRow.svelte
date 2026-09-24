@@ -12,10 +12,14 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
+	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
+	import SourceControls from './SourceControls.svelte';
 	import { folderBadge, type TreeStatusCounts } from '../utils/treeStatus';
+	import type { SchedulePair } from '../utils/cloudSync';
 
 	export let directory: {
 		id: string;
@@ -24,15 +28,17 @@
 		updated_at: number;
 		child_count?: number;
 		status_counts?: TreeStatusCounts;
+		schedule_id?: string | null;
 	};
 	export let writeAccess = false;
 
-	// Cloud chrome (Phase 3): set when this directory is a provider source's
-	// materialized root (sources[].root_directory_id) — adds the sync spinner
-	// and the remove-source affordance.
-	export let source: { itemId: string; name: string } | null = null;
-	export let isSyncing = false;
-	export let onRemoveSource: ((itemId: string, name: string) => void) | null = null;
+	// [Gradient] Set when this directory is the root a cloud source writes: the
+	// row shows the provider's logo and carries the source's sync controls.
+	export let pair: SchedulePair | null = null;
+	export let knowledgeId = '';
+	export let syncAccess = false;
+	export let syncBusy = false;
+	export let isAdmin = false;
 
 	// Optional multiselect checkbox (dirs and source roots participate in bulk
 	// delete). selectionActive renders the checkbox column (spacer when the row
@@ -135,7 +141,15 @@
 			type="button"
 			on:click={() => onNavigate(directory.id)}
 		>
-			<Folder className="size-3.5" />
+			<svelte:component
+				this={pair?.content?.source_kind === 'onedrive' || pair?.acl?.source_kind === 'onedrive'
+					? OneDrive
+					: pair?.content?.source_kind === 'google_drive' ||
+						  pair?.acl?.source_kind === 'google_drive'
+						? GoogleDrive
+						: Folder}
+				className="size-3.5"
+			/>
 		</button>
 	</div>
 
@@ -173,11 +187,6 @@
 					</div>
 				{/if}
 
-				{#if source && isSyncing}
-					<span class="text-xs text-gray-400 shrink-0">&middot;</span>
-					<Spinner className="size-3" />
-				{/if}
-
 				{#if (directory.child_count ?? null) !== null}
 					<span class="text-xs text-gray-400 shrink-0">
 						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
@@ -197,7 +206,7 @@
 		</div>
 
 		<div class="flex items-center gap-2 shrink-0">
-			{#if directory.updated_at}
+			{#if !pair && directory.updated_at}
 				<Tooltip content={dayjs(directory.updated_at * 1000).format('LLLL')}>
 					<div class="text-xs text-gray-400">
 						{dayjs(directory.updated_at * 1000).fromNow()}
@@ -207,18 +216,16 @@
 		</div>
 	</button>
 
-	{#if source && onRemoveSource}
-		<div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-			<Tooltip content={$i18n.t('Remove Source')}>
-				<button
-					class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
-					type="button"
-					on:click={() => onRemoveSource(source.itemId, source.name)}
-				>
-					<GarbageBin className="size-3.5" />
-				</button>
-			</Tooltip>
-		</div>
+	{#if pair}
+		<SourceControls
+			{knowledgeId}
+			{pair}
+			writeAccess={syncAccess}
+			busy={syncBusy}
+			{isAdmin}
+			on:action
+			on:reconnect
+		/>
 	{/if}
 
 	{#if writeAccess}

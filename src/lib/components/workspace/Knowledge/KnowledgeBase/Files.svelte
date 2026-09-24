@@ -19,16 +19,12 @@
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import DirectoryRow from './DirectoryRow.svelte';
+	import SourceRow from './SourceRow.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
-	import {
-		directoryItem,
-		fileItem,
-		sourceItem,
-		type KbSelection,
-		type SelectableItem
-	} from './selection';
+	import { directoryItem, fileItem, type KbSelection, type SelectableItem } from './selection';
 	import { breadcrumbSegments, fileBadge } from '../utils/treeStatus';
-	import { sourceByRootDirectoryId } from '../utils/sourceMap';
+	import type { Connection, Schedule, ScheduleAction } from '$lib/apis/cloudSync';
+	import type { SchedulePair } from '../utils/cloudSync';
 
 	type KnowledgeFile = {
 		id?: string;
@@ -57,12 +53,19 @@
 	export let files: KnowledgeFile[] = [];
 	export let directories = [];
 
-	// Cloud chrome (Phase 3): the provider's sources — directory rows whose id
-	// matches a source's root_directory_id become source roots (remove
-	// affordance + sync spinner + bulk-selectable as 'source' items).
-	export let sources = [];
-	export let isSyncing = false;
-	export let onRemoveSource: ((itemId: string, name: string) => void) | null = null;
+	// [Gradient] Cloud sources live in the listing: a folder source is the
+	// directory row its schedule writes (keyed by the row's schedule_id), a
+	// single-file source gets its own row above the directories.
+	export let sourcePairs: Map<string, SchedulePair> = new Map();
+	export let looseSources: SchedulePair[] = [];
+	export let syncAccess = false;
+	export let syncBusy = false;
+	export let isAdmin = false;
+	export let onSourceAction: (
+		schedules: Schedule[],
+		action: ScheduleAction | 'delete'
+	) => void = () => {};
+	export let onReconnect: (connection: Connection) => void = () => {};
 
 	// Search mode: flat KB-wide hits — directory rows hidden, each file row
 	// shows its folder path (derived from meta.relative_path) instead.
@@ -89,18 +92,10 @@
 	const buildItem = (file: any): SelectableItem =>
 		fileItem(file.id, file?.name ?? file?.meta?.name ?? '');
 
-	$: sourceRoots = sourceByRootDirectoryId(sources);
-	// Source roots must bulk-delete via removeSource; plain local directories
-	// via the directory-delete endpoint — hence two selectable kinds.
-	const buildDirItem = (dir: any): SelectableItem => {
-		const src = sourceRoots.get(dir.id);
-		return src
-			? sourceItem(src.item_id, src.name ?? dir.name, dir.child_count ?? 0)
-			: directoryItem(dir.id, dir.name, dir.child_count ?? 0);
-	};
-	// Source roots are selectable whenever selection exists (cloud KBs);
-	// plain local dirs additionally need structure-write access.
-	const isDirSelectable = (dir: any) => sourceRoots.has(dir.id) || structureEditable;
+	const buildDirItem = (dir: any): SelectableItem =>
+		directoryItem(dir.id, dir.name, dir.child_count ?? 0);
+	// Synced folders are removed through their own controls, never in bulk.
+	const isDirSelectable = (dir: any) => !dir.schedule_id && structureEditable;
 
 	// Selection order mirrors render order (dirs first, then files) so
 	// Shift-range and drag-paint spans behave predictably.
@@ -147,17 +142,31 @@
 </script>
 
 <div class=" max-h-full flex flex-col w-full gap-[0.03125rem]" role="list">
-	<!-- Directories first -->
+	<!-- Sources and directories first -->
 	{#if !searchMode}
+		{#each looseSources as pair ((pair.content ?? pair.acl)?.id)}
+			<SourceRow
+				knowledgeId={knowledge?.id ?? ''}
+				{pair}
+				writeAccess={syncAccess}
+				busy={syncBusy}
+				{isAdmin}
+				on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
+				on:reconnect={(event) => onReconnect(event.detail)}
+			/>
+		{/each}
 		{#each directories as dir (dir.id)}
-			{@const srcEntry = sourceRoots.get(dir.id)}
 			{@const dirSel = (selection && $selectedStore?.has(buildDirItem(dir).key)) ?? false}
 			<DirectoryRow
 				directory={dir}
 				writeAccess={structureEditable}
-				source={srcEntry ? { itemId: srcEntry.item_id, name: srcEntry.name ?? dir.name } : null}
-				{isSyncing}
-				onRemoveSource={srcEntry ? onRemoveSource : null}
+				pair={dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null}
+				knowledgeId={knowledge?.id ?? ''}
+				{syncAccess}
+				{syncBusy}
+				{isAdmin}
+				on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
+				on:reconnect={(event) => onReconnect(event.detail)}
 				selectionActive={!!selection}
 				selectable={!!(selection && isDirSelectable(dir))}
 				selected={dirSel}

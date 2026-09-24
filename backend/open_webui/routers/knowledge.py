@@ -319,7 +319,6 @@ async def search_knowledge_bases(
 @router.get('/search/files', response_model=KnowledgeFileListResponse)
 async def search_knowledge_files(
     query: str | None = None,
-    include_content: bool = Query(False, description='Include file content in search (expensive).'),
     page: int | None = 1,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
@@ -331,8 +330,6 @@ async def search_knowledge_files(
     filter = {}
     if query:
         filter['query'] = query
-    if include_content:
-        filter['include_content'] = True
 
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     if groups:
@@ -1440,7 +1437,6 @@ async def get_knowledge_files_by_id(
     page: Optional[int] = 1,
     limit: Optional[int] = 30,
     metadata_only: Optional[bool] = False,
-    include_content: bool = Query(False, description='Include file content in search (expensive).'),
     directory_id: str | None = Query(None, description='Filter by directory ID. Pass empty string for root.'),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
@@ -1477,8 +1473,6 @@ async def get_knowledge_files_by_id(
     filter = {}
     if query:
         filter['query'] = query
-    if include_content:
-        filter['include_content'] = True
     if view_option:
         filter['view_option'] = view_option
     if order_by:

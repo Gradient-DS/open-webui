@@ -427,8 +427,7 @@ export const searchKnowledgeFiles = async (
 	viewOption?: string | null,
 	orderBy?: string | null,
 	direction?: string | null,
-	page: number = 1,
-	includeContent: boolean = false
+	page: number = 1
 ) => {
 	let error = null;
 
@@ -438,7 +437,6 @@ export const searchKnowledgeFiles = async (
 	if (orderBy) searchParams.append('order_by', orderBy);
 	if (direction) searchParams.append('direction', direction);
 	searchParams.append('page', page.toString());
-	if (includeContent) searchParams.append('include_content', 'true');
 
 	const res = await fetch(
 		`${WEBUI_API_BASE_URL}/knowledge/search/files?${searchParams.toString()}`,
@@ -514,8 +512,7 @@ export const searchKnowledgeFilesById = async (
 	page: number = 1,
 	limit?: number | null,
 	metadataOnly: boolean = false,
-	directoryId?: string | null,
-	includeContent: boolean = false
+	directoryId?: string | null
 ) => {
 	let error = null;
 
@@ -531,7 +528,6 @@ export const searchKnowledgeFilesById = async (
 	if (directoryId !== undefined) {
 		searchParams.append('directory_id', directoryId ?? '');
 	}
-	if (includeContent) searchParams.append('include_content', 'true');
 
 	const res = await fetch(
 		`${WEBUI_API_BASE_URL}/knowledge/${id}/files?${searchParams.toString()}`,
