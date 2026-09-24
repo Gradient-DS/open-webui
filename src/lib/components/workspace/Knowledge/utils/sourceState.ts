@@ -90,22 +90,87 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 	};
 }
 
-export function skippedReason(code: string): string {
-	return (
-		(
-			{
-				unsupported_content_type: 'File type not supported',
-				item_too_large: 'Too large',
-				empty_content: 'Empty document: no text found',
-				processing_failed: 'Processing failed',
-				timed_out: 'Processing timed out',
-				acl_write_failed: 'Internal error',
-				internal_error: 'Internal error',
-				access_revoked: 'No access'
-			} as Record<string, string>
-		)[code] ?? code
-	);
+// What a live run can report. `total` is only known when the worker publishes
+// `submitted` alongside `landed` while it lands; today sync_execution.py writes
+// counts at finish only, so the total stays null and `done` is the number of
+// documents in the folder so far.
+export function runProgress(schedule: Schedule): { done: number; total: number | null } | null {
+	const run = schedule.last_run;
+	if (!runIsLive(run)) return null;
+	const counts = run?.counts ?? {};
+	const total =
+		typeof counts.submitted === 'number' && counts.submitted > 0 ? counts.submitted : null;
+	return {
+		done: total === null ? (schedule.document_count ?? 0) : Math.min(counts.landed ?? 0, total),
+		total
+	};
 }
+
+const SKIP_REASONS: Record<string, { label: string; explainer: string }> = {
+	unsupported_content_type: {
+		label: 'File type not supported',
+		explainer:
+			'Only PDF, Word, PowerPoint, Excel, CSV, HTML, Markdown, XML and plain-text files are synced. Save the file in one of these formats to include it.'
+	},
+	item_too_large: {
+		label: 'Too large',
+		explainer: 'The file is larger than the sync limit allows.'
+	},
+	empty_content: {
+		label: 'Empty document: no text found',
+		explainer: 'No text could be extracted, for example a scanned image without OCR.'
+	},
+	empty_parsed_content: {
+		label: 'Empty document: no text found',
+		explainer: 'No text could be extracted, for example a scanned image without OCR.'
+	},
+	processing_failed: {
+		label: 'Processing failed',
+		explainer: 'The file could not be processed. It is retried on the next sync.'
+	},
+	timed_out: {
+		label: 'Processing timed out',
+		explainer: 'Processing did not finish in time. It is retried on the next sync.'
+	},
+	restricted_item: {
+		label: 'Protected file',
+		explainer: 'The file is protected in {{provider}} and cannot be read.'
+	},
+	access_revoked: {
+		label: 'No access',
+		explainer: 'You no longer have access to this file in {{provider}}.'
+	},
+	not_landed: {
+		label: 'Not synced yet',
+		explainer: 'The file has not been synced yet, so its permissions could not be updated.'
+	}
+};
+const SKIP_FALLBACK = {
+	label: 'Internal error',
+	explainer: 'The file was skipped in the last sync. It is retried on the next sync.'
+};
+
+export function skippedReason(code: string): string {
+	return SKIP_REASONS[code]?.label ?? (code in KNOWN_INTERNAL ? SKIP_FALLBACK.label : code);
+}
+
+// Why a file was skipped, in one sentence the user can act on; `{{provider}}`
+// is left for the caller to fill.
+export function skippedExplainer(code: string): string {
+	return (SKIP_REASONS[code] ?? SKIP_FALLBACK).explainer;
+}
+
+// Worker-internal reasons (sync_execution.py) that mean nothing to the user.
+const KNOWN_INTERNAL: Record<string, true> = {
+	internal_error: true,
+	acl_write_failed: true,
+	acl_read_failed: true,
+	source_failed: true,
+	reach_failed: true,
+	delete_failed: true,
+	blank_failed: true,
+	unresolvable_principal: true
+};
 
 export function sourceTiming(
 	view: Pick<SourceView, 'lastSyncedAt' | 'nextDueAt' | 'documents'> &

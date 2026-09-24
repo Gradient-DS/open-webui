@@ -3911,5 +3911,22 @@
   "{{count}} documents": "{{count}} documents",
   "Empty document: no text found": "Empty document: no text found",
   "Processing failed": "Processing failed",
-  "Processing timed out": "Processing timed out"
+  "Processing timed out": "Processing timed out",
+  "{{done}} of {{total}} · {{percent}}%": "{{done}} of {{total}} · {{percent}}%",
+  "Open the folder to see why each file was skipped.": "Open the folder to see why each file was skipped.",
+  "{{count}} files in this folder could not be synced": "{{count}} files in this folder could not be synced",
+  "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.": "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.",
+  "Only PDF, Word, PowerPoint, Excel, CSV, HTML, Markdown, XML and plain-text files are synced. Save the file in one of these formats to include it.": "Only PDF, Word, PowerPoint, Excel, CSV, HTML, Markdown, XML and plain-text files are synced. Save the file in one of these formats to include it.",
+  "The file is larger than the sync limit allows.": "The file is larger than the sync limit allows.",
+  "No text could be extracted, for example a scanned image without OCR.": "No text could be extracted, for example a scanned image without OCR.",
+  "The file could not be processed. It is retried on the next sync.": "The file could not be processed. It is retried on the next sync.",
+  "Processing did not finish in time. It is retried on the next sync.": "Processing did not finish in time. It is retried on the next sync.",
+  "Protected file": "Protected file",
+  "The file is protected in {{provider}} and cannot be read.": "The file is protected in {{provider}} and cannot be read.",
+  "You no longer have access to this file in {{provider}}.": "You no longer have access to this file in {{provider}}.",
+  "The file has not been synced yet, so its permissions could not be updated.": "The file has not been synced yet, so its permissions could not be updated.",
+  "The file was skipped in the last sync. It is retried on the next sync.": "The file was skipped in the last sync. It is retried on the next sync.",
+  "{{label}}: sync cancelled": "{{label}}: sync cancelled",
+  "{{label}}: sync failed ({{reason}})": "{{label}}: sync failed ({{reason}})",
+  "Open the folder to see which files were skipped.": "Open the folder to see which files were skipped."
 }

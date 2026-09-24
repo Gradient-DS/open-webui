@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import {
+	finishedRuns,
 	connectionOutcome,
 	shouldRefetchSyncItems,
 	pairSchedules,
@@ -269,5 +270,29 @@ describe('sync file list refresh', () => {
 		expect(shouldRefetchSyncItems([finished], [finished])).toBe(false);
 		expect(shouldRefetchSyncItems([finished, other], [finished])).toBe(true);
 		expect(shouldRefetchSyncItems([], [])).toBe(false);
+	});
+});
+
+describe('finished runs', () => {
+	const live = { id: 'r1', started_at: '2026-09-18T10:00:00Z', outcome: null };
+	const done = { ...live, finished_at: '2026-09-18T10:01:00Z', outcome: 'succeeded' as const };
+	it('are the content runs that were live before and have an outcome now', () => {
+		const before = [
+			{ ...scheduleFixture('folder', 'content'), last_run: live },
+			{ ...scheduleFixture('acl', 'acl_refresh'), last_run: live },
+			{ ...scheduleFixture('idle', 'content'), last_run: done }
+		];
+		const after = [
+			{ ...scheduleFixture('folder', 'content'), last_run: done },
+			{ ...scheduleFixture('acl', 'acl_refresh'), last_run: done },
+			{ ...scheduleFixture('idle', 'content'), last_run: done }
+		];
+		expect(finishedRuns(before, after).map((schedule) => schedule.id)).toEqual(['folder']);
+	});
+	it('ignore a newer run that replaced the live one', () => {
+		const before = [{ ...scheduleFixture('folder', 'content'), last_run: live }];
+		const after = [{ ...scheduleFixture('folder', 'content'), last_run: { ...done, id: 'r2' } }];
+		expect(finishedRuns(before, after)).toEqual([]);
+		expect(finishedRuns([], after)).toEqual([]);
 	});
 });

@@ -151,6 +151,7 @@ def directory_model(key: str, path: tuple[str, ...], *, created_at: int, owner_i
         user_id=owner_id,
         created_at=created_at,
         updated_at=created_at,
+        schedule_id=sync_root_schedule_id(directory_id(key, path)),
     )
 
 
@@ -213,7 +214,6 @@ def knowledge_file_list_of(
             KnowledgeDirectoryEntry(
                 **directory.model_dump(),
                 **(rollups or {}).get(directory.id, {'child_count': 0, 'status_counts': status_counts()}),
-                schedule_id=sync_root_schedule_id(directory.id),
             )
             for directory in directories or []
         ],

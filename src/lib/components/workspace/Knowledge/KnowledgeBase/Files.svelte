@@ -23,8 +23,9 @@
 	import SelectCheckbox from './SelectCheckbox.svelte';
 	import { directoryItem, fileItem, type KbSelection, type SelectableItem } from './selection';
 	import { breadcrumbSegments, fileBadge } from '../utils/treeStatus';
-	import type { Connection, Schedule, ScheduleAction } from '$lib/apis/cloudSync';
+	import type { Connection, Schedule, ScheduleAction, SkippedItem } from '$lib/apis/cloudSync';
 	import type { SchedulePair } from '../utils/cloudSync';
+	import { skippedExplainer, skippedReason } from '../utils/sourceState';
 
 	type KnowledgeFile = {
 		id?: string;
@@ -66,6 +67,10 @@
 		action: ScheduleAction | 'delete'
 	) => void = () => {};
 	export let onReconnect: (connection: Connection) => void = () => {};
+	// [Gradient] Inside a synced folder: the files the last sync could not
+	// bring in, listed greyed out under the synced ones with the reason.
+	export let skippedItems: SkippedItem[] = [];
+	export let skippedProvider = '';
 
 	// Search mode: flat KB-wide hits — directory rows hidden, each file row
 	// shows its folder path (derived from meta.relative_path) instead.
@@ -310,4 +315,52 @@
 			{/if}
 		</div>
 	{/each}
+
+	<!-- Skipped files: in the source, not in the knowledge base -->
+	{#if !searchMode && skippedItems.length > 0}
+		<div
+			class="mx-2 mt-3 mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+			role="status"
+		>
+			<ExclamationTriangle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+			<span
+				>{$i18n.t('{{count}} files in this folder could not be synced', {
+					count: skippedItems.length
+				})}</span
+			>
+			<Tooltip
+				content={$i18n.t(
+					'These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.',
+					{ provider: skippedProvider }
+				)}
+			>
+				<span class="cursor-help underline decoration-dotted">{$i18n.t('Why?')}</span>
+			</Tooltip>
+		</div>
+		{#each skippedItems as item (item.source_id)}
+			<div
+				class="flex w-full items-center rounded-xl px-1.5 py-0.5 opacity-60"
+				role="listitem"
+			>
+				{#if selection}<SelectCheckbox selectable={false} />{/if}
+				<div class="flex items-center p-1">
+					<DocumentPage className="size-3.5 text-gray-400" />
+				</div>
+				<div class="flex min-w-0 flex-1 items-center gap-2 p-2 text-left">
+					<div class="line-clamp-1 text-sm text-gray-500 dark:text-gray-400">
+						{item.name || item.source_id}
+					</div>
+					<Tooltip
+						content={$i18n.t(skippedExplainer(item.code), { provider: skippedProvider })}
+						className="shrink-0"
+					>
+						<span
+							class="cursor-help rounded-lg bg-amber-500/15 px-1.5 text-xs text-amber-700 dark:text-amber-300"
+							>{$i18n.t(skippedReason(item.code))}</span
+						>
+					</Tooltip>
+				</div>
+			</div>
+		{/each}
+	{/if}
 </div>

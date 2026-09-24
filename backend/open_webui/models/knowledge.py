@@ -174,6 +174,10 @@ class KnowledgeDirectoryModel(BaseModel):
 
     created_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
+    # [Gradient] Set on the root row of a cloud-synced folder, in listings and
+    # breadcrumbs alike: the content schedule that writes it, so the row can
+    # carry the source's sync controls and the folder its skipped files.
+    schedule_id: str | None = None
 
 
 class KnowledgeDirectoryForm(BaseModel):
@@ -247,9 +251,6 @@ class KnowledgeDirectoryEntry(KnowledgeDirectoryModel):
 
     child_count: int = 0
     status_counts: dict[str, int] = Field(default_factory=dict)
-    # [Gradient] Set on the root row of a cloud-synced folder: the content
-    # schedule that writes it, so the row can carry the source's sync controls.
-    schedule_id: str | None = None
 
 
 class KnowledgeFileListResponse(BaseModel):

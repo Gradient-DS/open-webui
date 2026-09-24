@@ -237,6 +237,7 @@ def test_directory_ids_round_trip(projection, key, path):
         'parent_id': projection.directory_id(key, path[:-1]) if len(path) > 1 else None,
         'created_at': 123,
         'updated_at': 123,
+        'schedule_id': None,
     }
 
 
@@ -257,5 +258,6 @@ def test_only_a_synced_folder_root_carries_its_schedule_id(projection):
     assert projection.sync_root_schedule_id(projection.directory_id('kb-1', ('Research',))) is None
     model = projection.directory_model('kb-1', ('\0sync:sched-1',), created_at=1, owner_id='owner')
     plain = projection.directory_model('kb-1', ('Research',), created_at=1, owner_id='owner')
+    assert [model.schedule_id, plain.schedule_id] == ['sched-1', None]
     listed = projection.knowledge_file_list_of([], total=0, directories=[model, plain]).directories
     assert [row.schedule_id for row in listed] == ['sched-1', None]

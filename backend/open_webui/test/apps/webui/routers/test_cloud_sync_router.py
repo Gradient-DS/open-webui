@@ -423,7 +423,7 @@ def test_connection_usage_requires_a_verified_user(api):
 
 
 def test_skipped_items_list_failed_job_items(api):
-    """Skipped items use the run id, preserve codes and resolve names across document pages."""
+    """Skipped items use the run id, keep the specific reason and resolve names across document pages."""
     api.responses.extend(
         [
             response({'key': 'kb'}),
@@ -459,6 +459,13 @@ def test_skipped_items_list_failed_job_items(api):
                             'status': 'failed',
                             'code': 'processing_failed',
                         },
+                        {
+                            'source_id': 'slow',
+                            'title': 'Slow.pdf',
+                            'status': 'failed',
+                            'code': 'internal_error',
+                            'detail': 'timed_out',
+                        },
                     ]
                 }
             ),
@@ -482,6 +489,7 @@ def test_skipped_items_list_failed_job_items(api):
         {'source_id': 'waiting', 'name': 'waiting', 'code': 'pending'},
         {'source_id': 'empty', 'name': 'Empty.pdf', 'code': 'empty_content'},
         {'source_id': 'broken', 'name': 'Current.pdf', 'code': 'processing_failed'},
+        {'source_id': 'slow', 'name': 'Slow.pdf', 'code': 'timed_out'},
     ]
     assert api.requests[2].url.path == '/v1/jobs/job-1'
     assert dict(api.requests[2].url.params) == {'include_items': 'true'}

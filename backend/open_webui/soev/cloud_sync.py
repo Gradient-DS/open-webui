@@ -78,10 +78,14 @@ class CloudSync:
         for item in job.get('items', []):
             if item['status'] == 'succeeded' or item['source_id'] in skipped:
                 continue
+            # soev-sync files most skips under the generic internal_error code
+            # and keeps the specific reason (item_too_large, timed_out, ...) in
+            # the detail, which is the one worth showing.
+            code = item.get('code')
             skipped[item['source_id']] = {
                 'source_id': item['source_id'],
                 'name': item.get('title') or names.get(item['source_id']) or item['source_id'],
-                'code': item.get('code') or item['status'],
+                'code': (item.get('detail') if code in (None, 'internal_error') else code) or code or item['status'],
             }
         return list(skipped.values())
 

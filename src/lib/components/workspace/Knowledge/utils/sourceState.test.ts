@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule, SyncRun } from '$lib/apis/cloudSync';
-import { sourceState, sourceTiming, skippedReason } from './sourceState';
+import {
+	sourceState,
+	sourceTiming,
+	skippedReason,
+	skippedExplainer,
+	runProgress
+} from './sourceState';
 
 const connection: Connection = { id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' };
 const run: SyncRun = {
@@ -264,4 +270,37 @@ it('shows documents so far while the first run lands and never calls landed docu
 	);
 	expect(timing('scheduled', 61).lastSync.key).toBe('{{count}} documents');
 	expect(timing('scheduled', 0).lastSync.key).toBe('Not synced yet · {{count}} documents');
+});
+
+describe('run progress', () => {
+	it('is absent outside a live run', () => {
+		expect(runProgress(schedule({ last_run: run }))).toBeNull();
+		expect(runProgress(schedule({ last_run: null }))).toBeNull();
+	});
+	it('counts documents so far when the worker publishes no total', () => {
+		expect(
+			runProgress(schedule({ document_count: 7, last_run: { ...run, outcome: null } }))
+		).toEqual({ done: 7, total: null });
+	});
+	it('reads landed of submitted once a live run carries counts', () => {
+		expect(
+			runProgress(
+				schedule({ last_run: { ...run, outcome: null, counts: { submitted: 40, landed: 12 } } })
+			)
+		).toEqual({ done: 12, total: 40 });
+	});
+});
+
+describe('skip explainers', () => {
+	it('name the specific reason and keep worker-internal codes generic', () => {
+		expect(skippedReason('timed_out')).toBe('Processing timed out');
+		expect(skippedReason('empty_parsed_content')).toBe('Empty document: no text found');
+		expect(skippedReason('reach_failed')).toBe('Internal error');
+		expect(skippedReason('something_new')).toBe('something_new');
+	});
+	it('explain what the user can do about it', () => {
+		expect(skippedExplainer('unsupported_content_type')).toMatch(/PDF, Word/);
+		expect(skippedExplainer('restricted_item')).toContain('{{provider}}');
+		expect(skippedExplainer('reach_failed')).toMatch(/retried/);
+	});
 });

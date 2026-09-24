@@ -3911,5 +3911,22 @@
   "{{count}} documents": "{{count}} documenten",
   "Empty document: no text found": "Leeg document: geen tekst gevonden",
   "Processing failed": "Verwerking mislukt",
-  "Processing timed out": "Verwerking duurde te lang"
+  "Processing timed out": "Verwerking duurde te lang",
+  "{{done}} of {{total}} · {{percent}}%": "{{done}} van {{total}} · {{percent}}%",
+  "Open the folder to see why each file was skipped.": "Open de map om te zien waarom elk bestand is overgeslagen.",
+  "{{count}} files in this folder could not be synced": "{{count}} bestanden in deze map konden niet worden gesynchroniseerd",
+  "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.": "Deze bestanden staan in {{provider}} maar zijn hier niet doorzoekbaar. Beweeg over een reden om te zien wat je eraan kunt doen. De volgende synchronisatie probeert alles opnieuw wat niet definitief is overgeslagen.",
+  "Only PDF, Word, PowerPoint, Excel, CSV, HTML, Markdown, XML and plain-text files are synced. Save the file in one of these formats to include it.": "Alleen PDF-, Word-, PowerPoint-, Excel-, CSV-, HTML-, Markdown-, XML- en tekstbestanden worden gesynchroniseerd. Sla het bestand op in een van deze formaten om het mee te nemen.",
+  "The file is larger than the sync limit allows.": "Het bestand is groter dan de synchronisatielimiet toestaat.",
+  "No text could be extracted, for example a scanned image without OCR.": "Er kon geen tekst worden uitgelezen, bijvoorbeeld een gescande afbeelding zonder OCR.",
+  "The file could not be processed. It is retried on the next sync.": "Het bestand kon niet worden verwerkt. Bij de volgende synchronisatie wordt het opnieuw geprobeerd.",
+  "Processing did not finish in time. It is retried on the next sync.": "De verwerking was niet op tijd klaar. Bij de volgende synchronisatie wordt het opnieuw geprobeerd.",
+  "Protected file": "Beveiligd bestand",
+  "The file is protected in {{provider}} and cannot be read.": "Het bestand is beveiligd in {{provider}} en kan niet worden gelezen.",
+  "You no longer have access to this file in {{provider}}.": "Je hebt geen toegang meer tot dit bestand in {{provider}}.",
+  "The file has not been synced yet, so its permissions could not be updated.": "Het bestand is nog niet gesynchroniseerd, dus de rechten konden niet worden bijgewerkt.",
+  "The file was skipped in the last sync. It is retried on the next sync.": "Het bestand is bij de laatste synchronisatie overgeslagen. Bij de volgende synchronisatie wordt het opnieuw geprobeerd.",
+  "{{label}}: sync cancelled": "{{label}}: synchronisatie geannuleerd",
+  "{{label}}: sync failed ({{reason}})": "{{label}}: synchronisatie mislukt ({{reason}})",
+  "Open the folder to see which files were skipped.": "Open de map om te zien welke bestanden zijn overgeslagen."
 }

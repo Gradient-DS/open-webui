@@ -12,11 +12,18 @@
 		type ScheduleAction
 	} from '$lib/apis/cloudSync';
 	import Badge from '$lib/components/common/Badge.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import { runIsLive, type SchedulePair } from '../utils/cloudSync';
-	import { sourceState, sourceTiming, skippedReason, type SourceState } from '../utils/sourceState';
+	import {
+		runProgress,
+		sourceState,
+		sourceTiming,
+		skippedReason,
+		type SourceState
+	} from '../utils/sourceState';
 
 	dayjs.extend(relativeTime);
 	const i18n = getContext<Writable<I18n>>('i18n');
@@ -24,8 +31,10 @@
 		action: { schedules: Schedule[]; action: ScheduleAction | 'delete' };
 		reconnect: Connection;
 	}>();
-	// [Gradient] The inline sync chrome of one cloud source: a status badge whose
-	// tooltip carries the timing, the primary action and the admin menu.
+	// [Gradient] The inline sync chrome of one cloud source. The slots keep a
+	// fixed order (action or live progress, skipped files, status badge, menu)
+	// so the badge stays put when a sync starts: the primary button gives way
+	// to the progress readout in the same place instead of vanishing.
 	export let knowledgeId: string;
 	export let pair: SchedulePair;
 	export let writeAccess = false;
@@ -79,6 +88,7 @@
 	};
 	$: schedule = pair.content ?? pair.acl!;
 	$: view = sourceState(pair, schedule.connection);
+	$: progress = pair.content ? runProgress(pair.content) : null;
 	$: timing = sourceTiming(view, (time) => dayjs(time).locale($i18n.language).fromNow());
 	$: badge =
 		view.state === 'error' &&
@@ -148,11 +158,31 @@
 	{#if showAccessHelp}<span class="text-xs text-gray-500" role="status">
 			{$i18n.t('Ask the knowledge base owner to restore your edit access, then resume syncing.')}
 		</span>{/if}
-	<Tooltip content={details.join('<br>')} className="flex">
-		<button type="button" aria-label={details[0]}
-			><Badge type={badge.type} content={$i18n.t(badge.label)} /></button
+	{#if view.state === 'syncing'}
+		<span
+			class="flex items-center gap-1 px-2 py-0.5 text-xs text-gray-500 dark:text-gray-400"
+			role="status"
+			aria-live="polite"
 		>
-	</Tooltip>
+			<Spinner className="size-3" />
+			{#if progress?.total}
+				{$i18n.t('{{done}} of {{total}} · {{percent}}%', {
+					done: progress.done,
+					total: progress.total,
+					percent: Math.floor((100 * progress.done) / progress.total)
+				})}
+			{:else}
+				{$i18n.t('{{count}} documents so far', { count: progress?.done ?? view.documents })}
+			{/if}
+		</span>
+	{:else if view.primary && (writeAccess || view.primary === 'request_access') && (view.primary !== 'resume' || isAdmin)}
+		<button
+			type="button"
+			class="rounded-lg border px-2 py-0.5 text-xs disabled:opacity-50 dark:border-gray-700"
+			disabled={busy}
+			on:click={primaryAction}>{$i18n.t(primary[view.primary])}</button
+		>
+	{/if}
 	{#if skipped > 0}
 		<Dropdown
 			bind:show={skippedOpen}
@@ -174,19 +204,19 @@
 							{#each skippedItems as item}<li>
 									{item.name || item.source_id} — {$i18n.t(skippedReason(item.code))}
 								</li>{/each}
-						</ul>{/if}
+						</ul>
+						<p class="mt-1 text-gray-500">
+							{$i18n.t('Open the folder to see why each file was skipped.')}
+						</p>{/if}
 				</DropdownMenu>
 			</div>
 		</Dropdown>
 	{/if}
-	{#if view.primary && (writeAccess || view.primary === 'request_access') && (view.primary !== 'resume' || isAdmin)}
-		<button
-			type="button"
-			class="rounded-lg border px-2 py-0.5 text-xs disabled:opacity-50 dark:border-gray-700"
-			disabled={busy}
-			on:click={primaryAction}>{$i18n.t(primary[view.primary])}</button
+	<Tooltip content={details.join('<br>')} className="flex">
+		<button type="button" aria-label={details[0]}
+			><Badge type={badge.type} content={$i18n.t(badge.label)} /></button
 		>
-	{/if}
+	</Tooltip>
 	{#if isAdmin || (writeAccess && view.state === 'syncing')}
 		<Dropdown bind:show={showMenu} align="end">
 			<button

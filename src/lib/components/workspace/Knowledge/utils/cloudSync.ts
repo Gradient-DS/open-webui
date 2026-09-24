@@ -156,6 +156,23 @@ export function connectionOutcome(
 	return { status: elapsedMs >= 120000 ? 'gave_up' : 'waiting' };
 }
 
+// Content schedules whose run was live in `previous` and has an outcome in
+// `current`: the moment to tell the user how the sync went.
+export function finishedRuns(previous: Schedule[], current: Schedule[]): Schedule[] {
+	const live = new Set(
+		previous
+			.filter((schedule) => runIsLive(schedule.last_run))
+			.map((schedule) => `${schedule.id}\n${schedule.last_run!.id}`)
+	);
+	return current.filter(
+		(schedule) =>
+			schedule.kind === 'content' &&
+			!!schedule.last_run &&
+			!runIsLive(schedule.last_run) &&
+			live.has(`${schedule.id}\n${schedule.last_run.id}`)
+	);
+}
+
 export function shouldRefetchSyncItems(previous: Schedule[], current: Schedule[]): boolean {
 	const isLive = current.some((schedule) => runIsLive(schedule.last_run));
 	const snapshot = (schedules: Schedule[]) =>

@@ -34,7 +34,13 @@
 	import { processUrl } from '$lib/apis/retrieval';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import * as cloudSync from '$lib/apis/cloudSync';
-	import type { Connection, Schedule, ScheduleAction, ScheduleForm } from '$lib/apis/cloudSync';
+	import type {
+		Connection,
+		Schedule,
+		ScheduleAction,
+		ScheduleForm,
+		SkippedItem
+	} from '$lib/apis/cloudSync';
 	import { openOneDriveItemPicker } from '$lib/utils/onedrive-file-picker';
 	import {
 		createKnowledgePicker,
@@ -59,6 +65,7 @@
 		reconnectConnections,
 		pairSchedules,
 		shouldRefetchSyncItems,
+		finishedRuns,
 		runIsLive
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
@@ -112,6 +119,40 @@
 			pair.content.scope.single_file === true ||
 			pair.content.scope.include_descendants === false
 	);
+	// [Gradient] Inside a synced folder's root the listing also shows what the
+	// last sync could not bring in, fetched once per finished run.
+	$: currentSourcePair =
+		(breadcrumbs.at(-1)?.schedule_id && sourcePairs.get(breadcrumbs.at(-1)!.schedule_id!)) || null;
+	$: currentSourceProvider = currentSourcePair
+		? $i18n.t(
+				CLOUD_PROVIDERS[(currentSourcePair.content ?? currentSourcePair.acl)!.source_kind]?.label ??
+					''
+			)
+		: '';
+	let skippedItems: SkippedItem[] = [];
+	let skippedRunKey = '';
+	$: skippedKey = currentSourcePair?.content
+		? JSON.stringify([
+				currentSourcePair.content.id,
+				currentSourcePair.content.last_run?.id ?? null,
+				currentSourcePair.content.last_run?.finished_at ?? null
+			])
+		: '';
+	$: if (skippedKey !== skippedRunKey)
+		void loadSkippedItems(skippedKey, currentSourcePair?.content);
+	const loadSkippedItems = async (key: string, content: Schedule | undefined) => {
+		skippedRunKey = key;
+		if (!content) {
+			skippedItems = [];
+			return;
+		}
+		try {
+			const items = await cloudSync.getSkippedItems(localStorage.token, knowledgeId, content.id);
+			if (key === skippedRunKey) skippedItems = items;
+		} catch {
+			if (key === skippedRunKey) skippedItems = [];
+		}
+	};
 	// Single derived guard for all structure-write affordances (decision 5) —
 	// local/untyped KBs with write access only. Cloud KBs browse the
 	// sync-written directory structure read-only; push KBs are browse-only.
@@ -190,7 +231,7 @@
 	// Directory state (upstream per-level browsing)
 	let currentDirectoryId: string | null = null;
 	let directoryItems: { id: string; name: string }[] = [];
-	let breadcrumbs: { id: string; name: string }[] = [];
+	let breadcrumbs: { id: string; name: string; schedule_id?: string | null }[] = [];
 	// KB-wide file total for the cloud quota header (fileItemsTotal is
 	// level/search-scoped in per-level browsing).
 	let kbFileTotal: number | null = null;
@@ -948,9 +989,41 @@
 		const previous = schedules;
 		schedules = status.schedules;
 		syncStatusError = false;
+		for (const schedule of finishedRuns(previous, schedules)) announceFinishedRun(schedule);
 		const isLive = schedules.some((schedule) => runIsLive(schedule.last_run));
 		if (refreshItems && shouldRefetchSyncItems(previous, schedules)) await getItemsPage();
 		return isLive;
+	};
+
+	// A run the user watched finish gets one toast with what it did; skipped
+	// files point at the folder, where each one is listed with its reason.
+	const announceFinishedRun = (schedule: Schedule) => {
+		const run = schedule.last_run;
+		if (!run) return;
+		const label =
+			schedule.label || CLOUD_PROVIDERS[schedule.source_kind]?.label || schedule.source_kind;
+		if (run.outcome === 'cancelled') {
+			toast.info($i18n.t('{{label}}: sync cancelled', { label }));
+			return;
+		}
+		if (run.outcome === 'failed' && run.error_code && !(run.counts?.failed ?? 0)) {
+			toast.error(
+				$i18n.t('{{label}}: sync failed ({{reason}})', { label, reason: run.error_code })
+			);
+			return;
+		}
+		const counts = run.counts ?? {};
+		const { variant, message } = buildSyncToast($i18n, label, {
+			added: counts.landed,
+			failed: counts.failed,
+			removed: counts.deleted,
+			unchanged: counts.unchanged
+		});
+		toast[variant](
+			(counts.failed ?? 0) > 0
+				? `${message}. ${$i18n.t('Open the folder to see which files were skipped.')}`
+				: message
+		);
 	};
 
 	/** Re-arm the poll now rather than waiting out an idle tick. */
@@ -2328,7 +2401,7 @@
 											/>
 										</div>
 									{/if}
-									{#if fileItems.length > 0 || (!query && directoryItems.length > 0)}
+									{#if fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentSourcePair && skippedItems.length > 0)))}
 										<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
 											<Files
 												files={fileItems}
@@ -2337,6 +2410,8 @@
 												{structureEditable}
 												{sourcePairs}
 												looseSources={currentDirectoryId === null ? looseSources : []}
+												skippedItems={currentSourcePair ? skippedItems : []}
+												skippedProvider={currentSourceProvider}
 												syncAccess={!!knowledge?.write_access}
 												syncBusy={cloudActionBusy}
 												isAdmin={$user?.role === 'admin'}
