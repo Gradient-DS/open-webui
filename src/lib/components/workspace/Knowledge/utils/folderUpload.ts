@@ -173,6 +173,7 @@ export class FolderUploadSession {
 		if (this.disposed) return;
 		const summary = this.summary();
 		this.dispose();
+		if (timedOut) this.callbacks.onRefresh();
 		this.callbacks.onFinish(summary, timedOut);
 	}
 

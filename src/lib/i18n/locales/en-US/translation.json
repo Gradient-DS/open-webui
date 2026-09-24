@@ -3934,5 +3934,6 @@
   "Processed {{done}}/{{total}}": "Processed {{done}}/{{total}}",
   "Fetched {{done}}/{{total}}": "Fetched {{done}}/{{total}}",
   "Syncing · files show up as they land": "Syncing · files show up as they land",
-  "Syncing · {{done}}/{{total}} processed · files show up as they land": "Syncing · {{done}}/{{total}} processed · files show up as they land"
+  "Syncing · {{done}}/{{total}} processed · files show up as they land": "Syncing · {{done}}/{{total}} processed · files show up as they land",
+  "{{added}} added, {{failed}} failed, {{unresolved}} still processing": ""
 }

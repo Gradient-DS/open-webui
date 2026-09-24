@@ -892,11 +892,11 @@
 				onRefresh: () => {
 					void getItemsPage();
 				},
-				onFinish: (summary) => {
+				onFinish: (summary, timedOut) => {
 					uploads = uploads.filter((upload) => upload !== session);
 					const { variant, message } = buildSyncToast($i18n, summary.label, summary);
 					toast[variant](message);
-					void init();
+					if (!timedOut) void init();
 				}
 			}
 		);

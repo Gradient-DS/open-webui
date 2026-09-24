@@ -3934,5 +3934,6 @@
   "Processed {{done}}/{{total}}": "{{done}}/{{total}} verwerkt",
   "Fetched {{done}}/{{total}}": "{{done}}/{{total}} opgehaald",
   "Syncing · files show up as they land": "Bezig met synchroniseren · bestanden verschijnen zodra ze binnenkomen",
-  "Syncing · {{done}}/{{total}} processed · files show up as they land": "Bezig met synchroniseren · {{done}}/{{total}} verwerkt · bestanden verschijnen zodra ze binnenkomen"
+  "Syncing · {{done}}/{{total}} processed · files show up as they land": "Bezig met synchroniseren · {{done}}/{{total}} verwerkt · bestanden verschijnen zodra ze binnenkomen",
+  "{{added}} added, {{failed}} failed, {{unresolved}} still processing": "{{added}} toegevoegd, {{failed}} mislukt, {{unresolved}} nog in verwerking"
 }

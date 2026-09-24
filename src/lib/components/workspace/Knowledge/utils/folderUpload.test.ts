@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildSyncToast } from './syncToast';
 import { ancestorPaths, FolderUploadSession, mergeUploadRows } from './folderUpload';
 
 const makeSession = (key = 'pick', paths = ['folder', 'folder/nested']) => {
@@ -61,7 +62,7 @@ describe('FolderUploadSession', () => {
 		second.session.dispose();
 	});
 
-	it('caps a session with an unresolved summary and finishes once', () => {
+	it('caps an unresolved session with a warning and one final listing refresh', () => {
 		vi.useFakeTimers();
 		const { session, onFinish, onRefresh } = makeSession();
 		session.onUploaded(['root'], { id: 'one' });
@@ -75,6 +76,16 @@ describe('FolderUploadSession', () => {
 			{ label: 'folder', added: 1, failed: 0, unresolved: 1 },
 			true
 		);
+		expect(onRefresh).toHaveBeenCalledTimes(2);
+		const summary = onFinish.mock.calls[0][0];
+		const i18n = {
+			t: (key: string, values: Record<string, number>) =>
+				key.replace(/{{(\w+)}}/g, (_, name: string) => String(values[name]))
+		} as unknown as Parameters<typeof buildSyncToast>[0];
+		expect(buildSyncToast(i18n, summary.label, summary)).toEqual({
+			variant: 'warning',
+			message: 'folder: 1 added, 0 failed, 1 still processing'
+		});
 		expect(session.onFileStatus('two', 'completed')).toBe(false);
 	});
 
