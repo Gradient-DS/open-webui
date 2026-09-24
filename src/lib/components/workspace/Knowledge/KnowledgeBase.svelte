@@ -95,6 +95,8 @@
 	let syncStatusError = false;
 	let syncStatusRequest = 0;
 	$: activeProvider = requestedProvider ?? (knowledge?.type ? providers[knowledge.type] : null);
+	$: activeProviderEnabled =
+		!!activeProvider && $enabledProviders.some((item) => item.kind === activeProvider.kind);
 	$: isSyncBusy = cloudActionBusy || schedules.some((schedule) => runIsLive(schedule.last_run));
 	$: reconnectNeeded = reconnectConnections(schedules, connecting);
 	// [Gradient] Sources render inside the listing: folder sources on the
@@ -2195,34 +2197,34 @@
 
 						{#if knowledge?.write_access}
 							<div>
-								{#if activeProvider}
-									{#each $enabledProviders.filter((provider) => provider.kind === activeProvider?.kind) as provider}
-										<Tooltip content={$i18n.t('Sync from {{label}}', { label: provider.label })}>
-											<button
-												class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
-												disabled={isSyncBusy}
-												aria-label={$i18n.t('Add source')}
-												on:click={() => {
-													cloudSyncHandler(provider);
-												}}
+								{#if activeProviderEnabled}
+									<Tooltip
+										content={$i18n.t('Sync from {{label}}', { label: activeProvider!.label })}
+									>
+										<button
+											class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+											disabled={isSyncBusy}
+											aria-label={$i18n.t('Add source')}
+											on:click={() => {
+												cloudSyncHandler(activeProvider);
+											}}
+										>
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												viewBox="0 0 16 16"
+												fill="currentColor"
+												class="w-4 h-4"
 											>
-												<svg
-													xmlns="http://www.w3.org/2000/svg"
-													viewBox="0 0 16 16"
-													fill="currentColor"
-													class="w-4 h-4"
-												>
-													<path
-														d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
-													/>
-												</svg>
-												<!-- [Gradient] Keep adding sources discoverable after the first sync. -->
-												<span>{$i18n.t('Add source')}</span>
-											</button>
-										</Tooltip>
-									{/each}
-								{:else if $config?.integration_providers?.[knowledge?.type]}
-									<!-- No add button for push providers -- files come via API -->
+												<path
+													d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
+												/>
+											</svg>
+											<!-- [Gradient] Keep adding sources discoverable after the first sync. -->
+											<span>{$i18n.t('Add source')}</span>
+										</button>
+									</Tooltip>
+								{:else if activeProvider || $config?.integration_providers?.[knowledge?.type]}
+									<!-- Disabled sync providers and API-managed providers have no add button. -->
 								{:else}
 									<AddContentMenu
 										{structureEditable}
