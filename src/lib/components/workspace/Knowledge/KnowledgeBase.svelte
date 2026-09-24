@@ -781,37 +781,47 @@
 		return directoryIdByPath;
 	};
 
-	// [Gradient] Upload a set of manifest entries with bounded concurrency (the fork's
-	// upload hardening), updating the `syncing` progress line as each lands.
+	// [Gradient] Per top-level folder upload progress, shown on that folder's
+	// row (like a cloud source's live count) while its files go up.
+	let uploadProgress: Map<string, { done: number; total: number }> = new Map();
+	let uploadListRefresh: ReturnType<typeof setTimeout> | null = null;
+	const refreshListingSoon = () => {
+		if (uploadListRefresh) return;
+		uploadListRefresh = setTimeout(() => {
+			uploadListRefresh = null;
+			void getItemsPage();
+		}, 1500);
+	};
+
+	// [Gradient] Upload a set of entries with bounded concurrency (the fork's
+	// upload hardening), hashing each file right before it goes up and
+	// reporting each landing to `onLanded`.
 	const uploadManifestEntries = async (
-		entries: DirectoryManifestEntry[],
-		resolveDirectoryId: (entry: DirectoryManifestEntry) => string | null
+		entries: DirectoryFileEntry[],
+		resolveDirectoryId: (entry: DirectoryFileEntry) => string | null,
+		onLanded: (entry: DirectoryFileEntry) => void = () => {}
 	) => {
 		const total = entries.length;
-		let done = 0;
 		let failedCount = 0;
 		const executing: Set<Promise<void>> = new Set();
 
 		for (const entry of entries) {
 			const fileObject = new File([entry.file], entry.filename, { type: entry.file.type });
-			const task = uploadFile(localStorage.token, fileObject, {
-				knowledge_id: knowledge.id,
-				file_hash: entry.checksum,
-				directory_id: resolveDirectoryId(entry)
-			})
+			const task = computeFileHash(entry.file)
+				.then((checksum) =>
+					uploadFile(localStorage.token, fileObject, {
+						knowledge_id: knowledge.id,
+						file_hash: checksum,
+						directory_id: resolveDirectoryId(entry)
+					})
+				)
 				.catch((e) => {
 					toast.error(`${e}`);
 					return null;
 				})
 				.then((uploadedFile) => {
 					if (!uploadedFile || uploadedFile.error) failedCount++;
-					done++;
-					const displayPath = entry.path ? `${entry.path}/${entry.filename}` : entry.filename;
-					syncing = $i18n.t('Uploading {{current}}/{{total}}: {{file}}', {
-						current: done,
-						total,
-						file: displayPath
-					});
+					onLanded(entry);
 					executing.delete(task);
 				});
 			executing.add(task);
@@ -858,43 +868,65 @@
 		return directoryIdByPath;
 	};
 
+	// The folders are created first and the listing refreshed, so the rows
+	// are on screen within a moment; the files then go up behind them with
+	// the progress on each top-level folder's row.
 	const uploadDirectoryEntries = async (entries: DirectoryFileEntry[]) => {
 		if (!knowledge) return;
 
 		try {
-			syncing = $i18n.t('Computing checksums ({{count}} files)', { count: entries.length });
-			const manifest = await buildDirectoryManifest(entries);
-
 			syncing = $i18n.t('Creating folders...');
-			const directoryIdByPath = await createDirectoriesForPaths([
-				...new Set(manifest.map((entry) => entry.path).filter(Boolean))
-			]);
-			const missing = [...new Set(manifest.map((entry) => entry.path).filter(Boolean))].filter(
-				(path) => !directoryIdByPath[path]
-			);
+			const paths = [...new Set(entries.map((entry) => entry.path).filter(Boolean))];
+			const directoryIdByPath = await createDirectoriesForPaths(paths);
+			const missing = paths.filter((path) => !directoryIdByPath[path]);
 			if (missing.length) {
 				toast.error($i18n.t('Could not create {{count}} folders.', { count: missing.length }));
 				return;
 			}
+			syncing = null;
 
-			const failedCount = await uploadManifestEntries(manifest, (entry) =>
-				entry.path ? (directoryIdByPath[entry.path] ?? null) : currentDirectoryId
+			const topLevelId = (entry: DirectoryFileEntry) =>
+				entry.path ? (directoryIdByPath[entry.path.split('/')[0]] ?? null) : null;
+			const progress = new Map<string, { done: number; total: number }>();
+			for (const entry of entries) {
+				const key = topLevelId(entry);
+				if (!key) continue;
+				const row = progress.get(key) ?? { done: 0, total: 0 };
+				row.total++;
+				progress.set(key, row);
+			}
+			uploadProgress = progress;
+			await getItemsPage();
+
+			const failedCount = await uploadManifestEntries(
+				entries,
+				(entry) => (entry.path ? (directoryIdByPath[entry.path] ?? null) : currentDirectoryId),
+				(entry) => {
+					const key = topLevelId(entry);
+					const row = key ? uploadProgress.get(key) : null;
+					if (row) row.done++;
+					uploadProgress = new Map(uploadProgress);
+					refreshListingSoon();
+				}
 			);
 
 			if (failedCount === 0) {
 				toast.success($i18n.t('File uploaded successfully'));
 			}
 
-			// Awaited: `finally` clears `syncing` on return, and that state change
-			// re-triggers the reactive getItemsPage() above. Racing it against this
-			// refresh let the fetchId guard discard the post-upload response, so a
-			// freshly uploaded folder rendered with child_count 0 until you
-			// navigated into it and back.
+			// Awaited: `finally` clears the progress on return, and that state
+			// change re-triggers the reactive getItemsPage() above. Racing it
+			// against this refresh let the fetchId guard discard the post-upload
+			// response, so a freshly uploaded folder rendered with child_count 0
+			// until you navigated into it and back.
 			await init();
 		} catch (e) {
 			toast.error(`${e}`);
 		} finally {
 			syncing = null;
+			if (uploadListRefresh) clearTimeout(uploadListRefresh);
+			uploadListRefresh = null;
+			uploadProgress = new Map();
 		}
 	};
 
@@ -2419,6 +2451,7 @@
 												{sourcePairs}
 												looseSources={currentDirectoryId === null ? looseSources : []}
 												skippedItems={currentSourcePair ? skippedItems : []}
+												{uploadProgress}
 												skippedProvider={currentSourceProvider}
 												syncAccess={!!knowledge?.write_access}
 												syncBusy={cloudActionBusy}

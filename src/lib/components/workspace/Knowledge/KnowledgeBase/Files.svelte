@@ -71,6 +71,8 @@
 	// bring in, listed greyed out under the synced ones with the reason.
 	export let skippedItems: SkippedItem[] = [];
 	export let skippedProvider = '';
+	// [Gradient] Local folder upload in flight, keyed by top-level directory id.
+	export let uploadProgress: Map<string, { done: number; total: number }> = new Map();
 
 	// Search mode: flat KB-wide hits — directory rows hidden, each file row
 	// shows its folder path (derived from meta.relative_path) instead.
@@ -166,6 +168,7 @@
 				directory={dir}
 				writeAccess={structureEditable}
 				pair={dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null}
+				uploading={uploadProgress.get(dir.id) ?? null}
 				knowledgeId={knowledge?.id ?? ''}
 				{syncAccess}
 				{syncBusy}
@@ -338,10 +341,7 @@
 			</Tooltip>
 		</div>
 		{#each skippedItems as item (item.source_id)}
-			<div
-				class="flex w-full items-center rounded-xl px-1.5 py-0.5 opacity-60"
-				role="listitem"
-			>
+			<div class="flex w-full items-center rounded-xl px-1.5 py-0.5 opacity-60" role="listitem">
 				{#if selection}<SelectCheckbox selectable={false} />{/if}
 				<div class="flex items-center p-1">
 					<DocumentPage className="size-3.5 text-gray-400" />

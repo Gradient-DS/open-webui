@@ -40,6 +40,8 @@
 	export let syncAccess = false;
 	export let syncBusy = false;
 	export let isAdmin = false;
+	// [Gradient] Set while a local folder upload is filling this directory.
+	export let uploading: { done: number; total: number } | null = null;
 
 	// Optional multiselect checkbox (dirs and source roots participate in bulk
 	// delete). selectionActive renders the checkbox column (spacer when the row
@@ -201,7 +203,12 @@
 						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
 					</span>
 				{/if}
-				{#if updatedAt}
+				{#if uploading}
+					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
+						&middot; {$i18n.t('Uploading {{done}} of {{total}}', uploading)}
+						<Spinner className="size-3" />
+					</span>
+				{:else if updatedAt}
 					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="shrink-0">
 						<span class="text-xs text-gray-400">
 							&middot; {$i18n.t('Updated {{time}}', { time: dayjs(updatedAt).fromNow() })}
@@ -211,7 +218,9 @@
 					<span class="text-xs text-gray-400 shrink-0">&middot; {$i18n.t('Not synced yet')}</span>
 				{/if}
 
-				{#if badge === 'failed'}
+				{#if uploading}
+					<!-- the upload spinner above stands in for the processing one -->
+				{:else if badge === 'failed'}
 					<Tooltip
 						content={$i18n.t('{{count}} failed', { count: directory.status_counts?.failed ?? 0 })}
 					>

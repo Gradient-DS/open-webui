@@ -3931,5 +3931,6 @@
   "Open the folder to see which files were skipped.": "Open the folder to see which files were skipped.",
   "Updated {{time}}": "Updated {{time}}",
   "Creating folders...": "Creating folders...",
-  "Could not create {{count}} folders.": "Could not create {{count}} folders."
+  "Could not create {{count}} folders.": "Could not create {{count}} folders.",
+  "Uploading {{done}} of {{total}}": "Uploading {{done}} of {{total}}"
 }
