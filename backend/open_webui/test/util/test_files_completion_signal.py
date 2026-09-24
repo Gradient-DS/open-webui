@@ -21,7 +21,7 @@ def _run_args(*, file_status, collection_name=None):
             )
         )
     )
-    file = SimpleNamespace(content_type='application/pdf')  # not image/video → native process_file branch
+    file = SimpleNamespace(filename='report.pdf', content_type='application/pdf')
     file_item = SimpleNamespace(id='file-1')
     user = SimpleNamespace(id='user-1')
     meta: dict = {}
@@ -46,6 +46,32 @@ def _patch(monkeypatch, *, file_data, process_raises=None):
     files.set_status = AsyncMock()
     monkeypatch.setattr(files_router, 'Files', files)
     return emit, files, process
+
+
+@pytest.mark.asyncio
+async def test_processing_uses_derived_type_before_media_detection(monkeypatch):
+    request, file, file_item, user, file_data = _run_args(file_status='completed')
+    file.filename, file.content_type = 'notes.md', 'image/png'
+    _, files, process = _patch(monkeypatch, file_data=file_data)
+    monkeypatch.setattr(files_router, '_is_text_file', MagicMock(return_value=False))
+    monkeypatch.setattr(files_router.Config, 'get', AsyncMock(side_effect=lambda key, default=None: default))
+    await files_router.process_uploaded_file(request, file, '/tmp/notes.md', file_item, {}, user, db=object())
+    process.assert_awaited_once()
+    files.set_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_text_relabelling_updates_stored_content_type(monkeypatch):
+    request, file, file_item, user, file_data = _run_args(file_status='completed')
+    file.filename, file.content_type = 'source.ts', 'video/mp2t'
+    _, files, process = _patch(monkeypatch, file_data=file_data)
+    files.update_file_metadata_by_id = AsyncMock()
+    monkeypatch.setattr(files_router, '_is_text_file', MagicMock(return_value=True))
+    monkeypatch.setattr(files_router.Config, 'get', AsyncMock(side_effect=lambda key, default=None: default))
+    session = object()
+    await files_router.process_uploaded_file(request, file, '/tmp/source.ts', file_item, {}, user, db=session)
+    files.update_file_metadata_by_id.assert_awaited_once_with('file-1', {'content_type': 'text/plain'}, db=session)
+    process.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -141,6 +141,16 @@ async def test_submit_declares_the_file_and_puts_its_bytes_then_commits(env, mon
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('declared', [None, 'application/octet-stream', 'image/png'])
+async def test_submit_forwards_derived_content_type(env, declared):
+    file = await new_file(env, name='notes.md', content_type=declared)
+    job_id = await submit(env, file)
+    document = env.api.jobs[job_id]['documents'][0]
+    assert document['filename'] == 'notes.md'
+    assert document['content_type'] == 'text/markdown'
+
+
+@pytest.mark.asyncio
 async def test_submit_computes_sha256_from_the_stored_bytes_not_the_row(env):
     """The byte digest replaces a client checksum in the declaration, replay key, and persisted job."""
     file = await new_file(env)
@@ -150,7 +160,7 @@ async def test_submit_computes_sha256_from_the_stored_bytes_not_the_row(env):
     document = env.api.jobs[job_id]['documents'][0]
     assert document['sha256'] == digest
     assert document['filename'] == document['title'] == file.filename
-    assert document['content_type'] == 'application/octet-stream'
+    assert document['content_type'] == 'application/pdf'
     assert env.api.requests[0].headers['Idempotency-Key'] == f'ingest:{file.id}:kb:{digest}:3'
     row = await env.files.Files.get_file_by_id(file.id)
     assert row.meta['soev_job']['sha256'] == digest
@@ -177,11 +187,12 @@ async def test_submit_sends_the_folder_as_the_document_path(env, relative_path, 
 @pytest.mark.parametrize('text', ['', 'produced text', 'é' * 131072])
 async def test_submit_under_the_inline_budget_sends_text_and_no_upload(env, text):
     """Generated text up to the exact UTF-8 budget queues with no storage read, PUT, or commit."""
-    file = await new_file(env)
+    file = await new_file(env, name='recording.mp3', content_type='audio/mpeg')
     file.path = None
     job_id = await submit(env, file, text=text)
     document = env.api.jobs[job_id]['documents'][0]
     assert document['text'] == text
+    assert document['content_type'] == 'text/plain'
     assert 'size' not in document and 'sha256' not in document
     assert [(r.method, r.url.path) for r in env.api.requests] == [('POST', '/v1/jobs')]
     assert env.api.jobs[job_id]['status'] == 'QUEUED' and not env.api.uploads
@@ -197,12 +208,13 @@ async def test_submit_under_the_inline_budget_sends_text_and_no_upload(env, text
 async def test_submit_over_the_inline_budget_uploads_the_text_bytes(env, monkeypatch, budget, text):
     """The configured UTF-8 limit selects a file declaration over generated text bytes."""
     monkeypatch.setattr(env.module.config, 'SOEV_API_INLINE_DOCUMENT_BYTES', budget)
-    file = await new_file(env)
+    file = await new_file(env, name='recording.mp3', content_type='audio/mpeg')
     file.path = None
     job_id = await submit(env, file, text=text)
     document = env.api.jobs[job_id]['documents'][0]
     assert 'text' not in document
     assert document['size'] == len(text.encode())
+    assert document['content_type'] == 'text/plain'
     assert document['sha256'] == hashlib.sha256(text.encode()).hexdigest()
     assert env.api.uploads[job_id, file.id] == text.encode()
     assert env.api.jobs[job_id]['status'] == 'QUEUED'
