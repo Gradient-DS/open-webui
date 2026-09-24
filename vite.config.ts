@@ -45,7 +45,13 @@ export default defineConfig({
 				// ws: true forwards the Socket.IO HTTP-101 upgrade handshake.
 				'/ws': { target, ws: true }
 			};
-		})()
+		})(),
+		// [Gradient] The backend writes every upload under backend/data; each
+		// new file there made the dev server full-reload the page, which threw
+		// a folder upload in progress back to the empty state. This subtree is
+		// never a source, so ignoring it cannot starve HMR (unlike the case
+		// described below).
+		watch: { ignored: ['**/backend/data/**'] }
 		// NOTE: a previous `watch.ignored: ['**/.worktrees/**']` was removed
 		// here. The intent was to suppress HMR for sibling worktrees when a
 		// dev server runs from the repo root, but chokidar matches the
