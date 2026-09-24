@@ -1913,10 +1913,15 @@
 					: 'max-w-[58rem]'} px-2 mx-auto inset-x-0"
 			>
 				<div class="">
+					<!-- [Gradient] -->
 					<input
 						bind:this={filesInputElement}
 						bind:files={inputFiles}
 						type="file"
+						accept={($config?.file?.allowed_extensions ?? [])
+							.filter(Boolean)
+							.map((ext) => `.${ext}`)
+							.join(',')}
 						hidden
 						multiple
 						on:change={async () => {

@@ -407,6 +407,12 @@ type Document = {
 };
 
 type Config = {
+	// [Gradient]
+	file?: {
+		allowed_extensions?: string[];
+		max_size?: number | null;
+		max_count?: number | null;
+	};
 	license_metadata: any;
 	status: boolean;
 	name: string;
