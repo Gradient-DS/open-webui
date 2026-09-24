@@ -3,7 +3,7 @@
     "abi_version": "2026_0",
     "arch": "wasm32",
     "platform": "emscripten_5_0_3",
-    "python": "3.14.0"
+    "python": "3.14.2"
   },
   "packages": {
     "affine": {
@@ -15,7 +15,7 @@
       "install_dir": "site",
       "name": "affine",
       "package_type": "package",
-      "sha256": "a99f162c6cef4c1cef211df087b59ba930672eebebe59c1e2a6aedcbcfb41287",
+      "sha256": "0289ce1f4d7e23668767f3c7a764de4248c187ea987390eebb50e22aa19015f2",
       "unvendored_tests": true,
       "version": "2.4.0"
     },
@@ -23,12 +23,12 @@
       "depends": [
         "affine"
       ],
-      "file_name": "affine-tests.tar",
+      "file_name": "affine-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "affine-tests",
       "package_type": "package",
-      "sha256": "f19683b16f771f68453cd282f8dc6cc144ffcde9985ab055da294e6d8a65f642",
+      "sha256": "e2479dbdef2925bb1fb0838f892c93ce2913e47c33e429c899c87d18abde0ce3",
       "unvendored_tests": false,
       "version": "2.4.0"
     },
@@ -41,7 +41,7 @@
       "install_dir": "site",
       "name": "aiohappyeyeballs",
       "package_type": "package",
-      "sha256": "d44b4f504b16ad3f4d2819a3596c3ca42819d20cbf38521f5657830b33d20acc",
+      "sha256": "253261635543cbc55068b3e183cc6a55cb03c7df6c0be0a9b5533f57d958ba74",
       "unvendored_tests": false,
       "version": "2.6.1"
     },
@@ -63,7 +63,7 @@
       "install_dir": "site",
       "name": "aiohttp",
       "package_type": "package",
-      "sha256": "332277d75d4ffc4aea350323dae0a2297db00a086c9ad03c87475c31b3cc1cd7",
+      "sha256": "382c594b399a26fb8fdb5deda70ce37a83e88b8cbfb4c1d2fa0d15091ac4c97c",
       "unvendored_tests": true,
       "version": "3.13.5"
     },
@@ -71,12 +71,12 @@
       "depends": [
         "aiohttp"
       ],
-      "file_name": "aiohttp-tests.tar",
+      "file_name": "aiohttp-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "aiohttp-tests",
       "package_type": "package",
-      "sha256": "579d3e4cdcbd5e9b6faa945344ffa7ac85928de6987e18c102eb60eddf1d023e",
+      "sha256": "79b742b4c9686fb1338fa9bad9a5ac4e9e827011f34d2ddc8cb1e277046db6ef",
       "unvendored_tests": false,
       "version": "3.13.5"
     },
@@ -91,7 +91,7 @@
       "install_dir": "site",
       "name": "aiosignal",
       "package_type": "package",
-      "sha256": "414e1c05fc0ceb8e3faea9f3c3f5e0dff04f23544236813a379e419319664447",
+      "sha256": "3f9be4b2f2493ebf6a7360ecc8030a66dab6623595bc50866080ecedef39d7d6",
       "unvendored_tests": false,
       "version": "1.4.0"
     },
@@ -110,7 +110,7 @@
       "install_dir": "site",
       "name": "altair",
       "package_type": "package",
-      "sha256": "bed35390f3c370873fc8b18194298759d146450a647ed3dc1b84625a11b21de9",
+      "sha256": "04cb205798bbe9fba755ee20bc8f5187b6a3eeea65bca3e71e61a71840fea52e",
       "unvendored_tests": false,
       "version": "6.0.0"
     },
@@ -123,7 +123,7 @@
       "install_dir": "site",
       "name": "annotated-doc",
       "package_type": "package",
-      "sha256": "506c20d29063f37e4ae1dbd32c373546df4a40c76a760f3fff586168dd03a216",
+      "sha256": "068a3b19d88323a85382789fb6ef8a7f200db6387801dce521312b43d2615bca",
       "unvendored_tests": false,
       "version": "0.0.4"
     },
@@ -136,7 +136,7 @@
       "install_dir": "site",
       "name": "annotated-types",
       "package_type": "package",
-      "sha256": "7beddfd593719e92d8d4d6c290a512ceff0f0879428417fced1384cf5417e8c4",
+      "sha256": "6b34f564725f8d309442f8d15abcceed1bf140fe2412e2c58da721426ae2222e",
       "unvendored_tests": true,
       "version": "0.7.0"
     },
@@ -144,12 +144,12 @@
       "depends": [
         "annotated-types"
       ],
-      "file_name": "annotated-types-tests.tar",
+      "file_name": "annotated-types-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "annotated-types-tests",
       "package_type": "package",
-      "sha256": "b3850cba81505c5a5d0647505ed7b34e619de15553661cc2f156dafce5b2fa65",
+      "sha256": "6f8629fb7a851953963eea6cfdb08aedf44a8b68a3cc514e5e8b5dba4bf723ce",
       "unvendored_tests": false,
       "version": "0.7.0"
     },
@@ -165,35 +165,9 @@
       "install_dir": "site",
       "name": "anyio",
       "package_type": "package",
-      "sha256": "6e4139828bae2bdbc968ac43fafb20007af8fcd22b683f60d245ebd6992cbe3c",
+      "sha256": "2c9c3bcebb7cfd28a3178d14ede3a6f6737dc7484d1d5471407e974dc91aee38",
       "unvendored_tests": false,
       "version": "4.13.0"
-    },
-    "apsw": {
-      "depends": [],
-      "file_name": "apsw-3.51.3.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
-      "imports": [
-        "apsw"
-      ],
-      "install_dir": "site",
-      "name": "apsw",
-      "package_type": "package",
-      "sha256": "204975619eb2c48fb97b5e17056af90254ee5403e2080e989cad87e6f1b229b2",
-      "unvendored_tests": true,
-      "version": "3.51.3.0"
-    },
-    "apsw-tests": {
-      "depends": [
-        "apsw"
-      ],
-      "file_name": "apsw-tests.tar",
-      "imports": [],
-      "install_dir": "site",
-      "name": "apsw-tests",
-      "package_type": "package",
-      "sha256": "9a3366636fa72a6c762b7c31a23abf9343b40997950768dc0759f196cc6e8b15",
-      "unvendored_tests": false,
-      "version": "3.51.3.0"
     },
     "argon2-cffi": {
       "depends": [
@@ -206,7 +180,7 @@
       "install_dir": "site",
       "name": "argon2-cffi",
       "package_type": "package",
-      "sha256": "9aa1f44a7884e477c6df85defbfd8cfc29e4033fd2104fce90a39a49456a8f02",
+      "sha256": "afbf18c2e423198967c2ebeb0593707c7f8252a392351c8c3efbbc62ab6eff4b",
       "unvendored_tests": false,
       "version": "23.1.0"
     },
@@ -221,7 +195,7 @@
       "install_dir": "site",
       "name": "argon2-cffi-bindings",
       "package_type": "package",
-      "sha256": "ede7269ddc8fc1e085dd881aebb0b05dc2dba5cc8cbb31768a736e3b3231796c",
+      "sha256": "61de14328f5b2b51a8f7c8af9bbffbf2299cbd6fa8fa4a532f03facf92290eb4",
       "unvendored_tests": false,
       "version": "25.1.0"
     },
@@ -240,7 +214,7 @@
       "install_dir": "site",
       "name": "astropy",
       "package_type": "package",
-      "sha256": "49f923e7a49fe5a6329f1115bddc780f2f2aae32fa356e1d6c4bdf4cb0e23322",
+      "sha256": "1972ab99cf52f03e57398bb9dc45eecc102395e471f0df3bd7a29f3170e1287f",
       "unvendored_tests": false,
       "version": "7.2.0"
     },
@@ -253,7 +227,7 @@
       "install_dir": "site",
       "name": "astropy_iers_data",
       "package_type": "package",
-      "sha256": "61563e6b47112cfb95d6911a60b07fa70969d33233c5b8a3b100c6501d1ebb3a",
+      "sha256": "89c53cb056dcd146add95d5721fcbda34ca6e6afae1e064094e312d609eba3e4",
       "unvendored_tests": true,
       "version": "0.2026.4.1.15.5.49"
     },
@@ -261,12 +235,12 @@
       "depends": [
         "astropy_iers_data"
       ],
-      "file_name": "astropy-iers-data-tests.tar",
+      "file_name": "astropy-iers-data-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "astropy_iers_data-tests",
       "package_type": "package",
-      "sha256": "3762063a56e00624ec0a361535478d0958a809a56f661ddce40a16dc1343ad9f",
+      "sha256": "2c1051e73b51f842f5b1245bf8b81e0d967aa5e451fd12329647e9c688c40109",
       "unvendored_tests": false,
       "version": "0.2026.4.1.15.5.49"
     },
@@ -281,7 +255,7 @@
       "install_dir": "site",
       "name": "asttokens",
       "package_type": "package",
-      "sha256": "df85a646e630bb2649a22296eea308e3f3cf1cec104970eff772b4bf17dd7b31",
+      "sha256": "17d8be9e2f37492162ad731c2599fc9291653bb313651ae15227e8012b58ef2f",
       "unvendored_tests": false,
       "version": "3.0.1"
     },
@@ -294,7 +268,7 @@
       "install_dir": "site",
       "name": "async-timeout",
       "package_type": "package",
-      "sha256": "e9e8c20bc9f576bc5310d623de8a69dfe7babb1118bd1a59472f7e983a2153ed",
+      "sha256": "1a6ea59de9d70c9b86298e49a72c8e7f1b0715c699253dc02b70f78f78489d24",
       "unvendored_tests": false,
       "version": "5.0.1"
     },
@@ -307,7 +281,7 @@
       "install_dir": "site",
       "name": "atomicwrites",
       "package_type": "package",
-      "sha256": "fc548be9837504e69ef17371f85c7fdd1d075a9c59aebc914467d60b9e6e790c",
+      "sha256": "1f31c24e72b0f06b2f0aeb1118260da4bdd8c72f2c93e2691a85267322a3cee2",
       "unvendored_tests": false,
       "version": "1.4.1"
     },
@@ -323,7 +297,7 @@
       "install_dir": "site",
       "name": "attrs",
       "package_type": "package",
-      "sha256": "b5f2e20d25fbeb55950af8cda6b5ef71d47e60872587d11ab6b6425b0d7c2c92",
+      "sha256": "a4f54da7c9756fe3d366ed4a1513df5cf62dc9ec39df2ece0b5e9fc847029c14",
       "unvendored_tests": false,
       "version": "26.1.0"
     },
@@ -336,24 +310,9 @@
       "install_dir": "site",
       "name": "audioop-lts",
       "package_type": "package",
-      "sha256": "66e83cfbd4ad1081ec8c403ac9982cf8ec30e729cb62f58221a1ca0d37f8ec4e",
+      "sha256": "bed6340f1f6583bb41cefd11003e56b8e4ac88f0f200c93ef317c3b9b300453e",
       "unvendored_tests": false,
       "version": "0.2.2"
-    },
-    "awkward-cpp": {
-      "depends": [
-        "numpy"
-      ],
-      "file_name": "awkward_cpp-52-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
-      "imports": [
-        "awkward_cpp"
-      ],
-      "install_dir": "site",
-      "name": "awkward-cpp",
-      "package_type": "package",
-      "sha256": "37293dab9f38d4fef125a89becc8baf262fe9e72352bcb62b2135e106e9811c9",
-      "unvendored_tests": false,
-      "version": "52"
     },
     "b2d": {
       "depends": [
@@ -369,7 +328,7 @@
       "install_dir": "site",
       "name": "b2d",
       "package_type": "package",
-      "sha256": "0dcf829dce1d9620eb4f9321d98ce096cb68f46ac434859f06d4c01d45b9fbf3",
+      "sha256": "987e80727e192313850bd18171cb7387f55d0603c9270785d5ea2a660f9bed3a",
       "unvendored_tests": false,
       "version": "0.7.4"
     },
@@ -382,7 +341,7 @@
       "install_dir": "site",
       "name": "bcrypt",
       "package_type": "package",
-      "sha256": "8667af694782044a8d38fe43fbb681b4075d1f12f9a3fdc7ddb540fef8f5780f",
+      "sha256": "b6ab3c45635f37d71657d969fe20cc5b8b341f868d04fdf97a6161a775ab06b5",
       "unvendored_tests": false,
       "version": "5.0.0"
     },
@@ -398,7 +357,7 @@
       "install_dir": "site",
       "name": "beautifulsoup4",
       "package_type": "package",
-      "sha256": "95a87dbe58c8dafab021c1f2c003fc9a9c69759a81495ae739f1df483805115e",
+      "sha256": "273af2c1df4e614817ccefff20d8fe0ca13b41f1d9f36938c6c89a955bbf6544",
       "unvendored_tests": false,
       "version": "4.14.3"
     },
@@ -413,7 +372,7 @@
       "install_dir": "site",
       "name": "bilby.cython",
       "package_type": "package",
-      "sha256": "79200bf2b8ae1ac10f3095cdd3a5abeb6af5208b16f143762d90ebfc95ad11e0",
+      "sha256": "35ce5cb56c4b02f6ba87648a71e5ce07809cb053a2eac4207dcb752be4daff73",
       "unvendored_tests": true,
       "version": "0.5.4"
     },
@@ -421,12 +380,12 @@
       "depends": [
         "bilby.cython"
       ],
-      "file_name": "bilby-cython-tests.tar",
+      "file_name": "bilby-cython-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "bilby.cython-tests",
       "package_type": "package",
-      "sha256": "6e820a0a7205d64d232f4a5236012f2f110849c1699f396a483bb7824163e6dc",
+      "sha256": "a892ba0e87e20072cafe94642c7bb2642203a99c97959f124ecfc706bb3c6505",
       "unvendored_tests": false,
       "version": "0.5.4"
     },
@@ -442,7 +401,7 @@
       "install_dir": "site",
       "name": "biopython",
       "package_type": "package",
-      "sha256": "ead5d11932412cb38c7c1fa351f01d58e8e08bb9b6e21234d508d659bce12e14",
+      "sha256": "fe9347e582c02c33b20b711e716a5a7120a23432d4671d0c3f4b69cb68a06463",
       "unvendored_tests": false,
       "version": "1.87"
     },
@@ -455,7 +414,7 @@
       "install_dir": "site",
       "name": "bitarray",
       "package_type": "package",
-      "sha256": "7546a25e733eb23dc9d3fc4f4c5d26adf91f5d26cc20422007308707e40e6bd5",
+      "sha256": "4349f5495a739bc5a68f65a83047e52999ea4cc61e2daa6464dfbf870578d2df",
       "unvendored_tests": true,
       "version": "3.8.1"
     },
@@ -463,12 +422,12 @@
       "depends": [
         "bitarray"
       ],
-      "file_name": "bitarray-tests.tar",
+      "file_name": "bitarray-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "bitarray-tests",
       "package_type": "package",
-      "sha256": "ce1c0b249a871c45d86a1564a3f5a3214b7331c4267d378e952fe2b045140d5c",
+      "sha256": "729654a4df18098f1c11dcffbf8b42be34f82247b5ea836f519d568da3b1e451",
       "unvendored_tests": false,
       "version": "3.8.1"
     },
@@ -483,7 +442,7 @@
       "install_dir": "site",
       "name": "bitstring",
       "package_type": "package",
-      "sha256": "f0ee49a5055b336f96787fc50a3f9f87a72f0ece544622a1bdf2f58be099d50d",
+      "sha256": "f289dd22a55929d3663b8c255eaf4959b6787156d91f3fe89d630e8fbd8df62e",
       "unvendored_tests": false,
       "version": "4.4.0"
     },
@@ -500,7 +459,7 @@
       "install_dir": "site",
       "name": "bleach",
       "package_type": "package",
-      "sha256": "9feea175697d0e0f1f158707649f69641e82fc0dee4211e853c7108031e56949",
+      "sha256": "4e987f2df5a7986d52f3fa28dd2cd4dab1a0801962bea5fe40028b9124630484",
       "unvendored_tests": false,
       "version": "6.3.0"
     },
@@ -524,7 +483,7 @@
       "install_dir": "site",
       "name": "bokeh",
       "package_type": "package",
-      "sha256": "d07aa3f82875cc7dc6fa33fa4c322355387abf5183bf3b69d6395e9ac28d0edf",
+      "sha256": "cb6a3875673a6e504e5c6f990f30f48b2e25c27fdd9fd5a710962de8f6126d7c",
       "unvendored_tests": false,
       "version": "3.9.0"
     },
@@ -539,7 +498,7 @@
       "install_dir": "site",
       "name": "boost-histogram",
       "package_type": "package",
-      "sha256": "f87ca182ba03dced96f0d10f127c6f10ff31972c65d6ed730366dd3a501c847c",
+      "sha256": "d7073bb91e13cde5a9063687564923d1066023a56fb1b3ae7b636f130079e790",
       "unvendored_tests": false,
       "version": "1.7.1"
     },
@@ -554,7 +513,7 @@
       "install_dir": "site",
       "name": "Bottleneck",
       "package_type": "package",
-      "sha256": "05fe8867e043ec1d9c61706ffab30bf3e3f713ce1f73a6bc3f0906aed4379efb",
+      "sha256": "cdcc8273ac032b89a042a05e68d379058b3b825533c54973f7330dd6b9e6e01f",
       "unvendored_tests": false,
       "version": "1.6.0"
     },
@@ -567,7 +526,7 @@
       "install_dir": "site",
       "name": "brotli",
       "package_type": "package",
-      "sha256": "3c8bfbc8d2f98e7488a0bc0f2a97257515385da2e8d268f58617358b91980b87",
+      "sha256": "4c716f7c82ae1e95d1b479251ccae7ebe6dcc57574129535d3adf854f02f2c1c",
       "unvendored_tests": false,
       "version": "1.2.0"
     },
@@ -580,7 +539,7 @@
       "install_dir": "site",
       "name": "cachetools",
       "package_type": "package",
-      "sha256": "2fb7fde243da79d3a2e8ad189ca6e8bbbc02fed69d9f765d3894aebb8606130f",
+      "sha256": "11b6f9c8a583a6d8b439719bc41c2661c4e478ee21b82e65b0b0f810887cc859",
       "unvendored_tests": false,
       "version": "7.0.5"
     },
@@ -599,7 +558,7 @@
       "install_dir": "site",
       "name": "Cartopy",
       "package_type": "package",
-      "sha256": "50ee5e39ccb1f44aad61c8e4ab85f2c7737d11fb550d6aa168c307e789201717",
+      "sha256": "1cb2808c6f3443c1eec38c68bf2213f76bad8c63a53cabddf58ed3cc4d6ee1a0",
       "unvendored_tests": true,
       "version": "0.25.0"
     },
@@ -607,12 +566,12 @@
       "depends": [
         "Cartopy"
       ],
-      "file_name": "cartopy-tests.tar",
+      "file_name": "cartopy-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "Cartopy-tests",
       "package_type": "package",
-      "sha256": "1c96b382904c075666d10da5f0c2b082732c46fbc98072d9c7417bb6b16c1573",
+      "sha256": "c0f5fe04e6757b07bb6da2c58b0f30d1b5f42e6f8117184902b9a9cf9be1692f",
       "unvendored_tests": false,
       "version": "0.25.0"
     },
@@ -627,7 +586,7 @@
       "install_dir": "site",
       "name": "casadi",
       "package_type": "package",
-      "sha256": "d855f4fb60751c1239a8fb281ed54aa6d7a07c47e7dbeee0683f758a36d350d7",
+      "sha256": "5f80f246b4e508e83f7fd3410b705afb3f7ae4ec2fa26fe2af3470121fee9d05",
       "unvendored_tests": false,
       "version": "3.7.2"
     },
@@ -640,7 +599,7 @@
       "install_dir": "site",
       "name": "cbor-diag",
       "package_type": "package",
-      "sha256": "d96a9f4810939567924f8291155fb408234286c6d6a7584b5776ca6a445a037e",
+      "sha256": "7f14ec9771a8ba002211ae02159c19a425090e5949cd4f48fc1d7368b417e7c3",
       "unvendored_tests": false,
       "version": "1.1.2"
     },
@@ -653,7 +612,7 @@
       "install_dir": "site",
       "name": "certifi",
       "package_type": "package",
-      "sha256": "93071d4b932b2c9d0f4aa9a74c8b320135d0cf9f8f8a2c8575b59ee57621d801",
+      "sha256": "733cbce713c1165e05ed96981a8d54d2f5e522a1ad465350a562ec2352823c65",
       "unvendored_tests": false,
       "version": "2026.4.22"
     },
@@ -668,7 +627,7 @@
       "install_dir": "site",
       "name": "cffi",
       "package_type": "package",
-      "sha256": "757845812fc8d2c94b0f0fb664d542e7d6e098263fbb5cda3b89dca5d7eff6d3",
+      "sha256": "257317126fa036cd90ad5d14a603cb636127bbdd90a89cd39c7cffbb5f762b30",
       "unvendored_tests": false,
       "version": "2.0.0"
     },
@@ -683,7 +642,7 @@
       "install_dir": "site",
       "name": "cffi_example",
       "package_type": "package",
-      "sha256": "9825ee063e4acf187fded254808d6bb4e0e59f54db7df1a7039fde6be1069e54",
+      "sha256": "1765c593fe6df2f5be736929bd548da37af62ea29bab111a3eaf3e00c9a9eddb",
       "unvendored_tests": false,
       "version": "0.1"
     },
@@ -698,7 +657,7 @@
       "install_dir": "site",
       "name": "cftime",
       "package_type": "package",
-      "sha256": "cf0797f0ab3800269298d7fb4b63cdfec05c57fb4e42ddc342e58b68a018b5a0",
+      "sha256": "e5eaf869c661704ecb62b032fc77dd8d5bd2d37d9491f3c1c430c38270f255d7",
       "unvendored_tests": false,
       "version": "1.6.5"
     },
@@ -711,7 +670,7 @@
       "install_dir": "site",
       "name": "charset-normalizer",
       "package_type": "package",
-      "sha256": "fdb1aad0f2606f2c05b27de59beabd9c4fc897795996492ccc5e2b7ef2967248",
+      "sha256": "cf0651de4082d2a16e4c2b594768eca0f589f48891c80a89055ded42f73be7f1",
       "unvendored_tests": false,
       "version": "3.4.7"
     },
@@ -727,7 +686,7 @@
       "install_dir": "site",
       "name": "clarabel",
       "package_type": "package",
-      "sha256": "f7d1974d99136cbcc2a61442c3ea471554e4c59d2314d8fcaf716a86c8ca2b9e",
+      "sha256": "4670373b85e96e5f2a531bbe81661210032468783c5d4707bb35a645f198cf50",
       "unvendored_tests": false,
       "version": "0.11.1"
     },
@@ -740,7 +699,7 @@
       "install_dir": "site",
       "name": "click",
       "package_type": "package",
-      "sha256": "200b390f193f56180bfb06987ae9fbb4f3efded531356163b14371d7044469e7",
+      "sha256": "4ece48a8a45e119ceefd8c43b115bfdd6f5346419fee302e90680c554d1ca68a",
       "unvendored_tests": false,
       "version": "8.3.1"
     },
@@ -755,7 +714,7 @@
       "install_dir": "site",
       "name": "cligj",
       "package_type": "package",
-      "sha256": "ff37fb06db319ad13db8801148a7ed12ed4049bcb74ecfb4c730b978187d78d3",
+      "sha256": "14ee5587dcece0fc22b66fc21a5bee3d33ee7e685cc1e7667a4e2ba773b7c621",
       "unvendored_tests": false,
       "version": "0.7.2"
     },
@@ -770,7 +729,7 @@
       "install_dir": "site",
       "name": "clingo",
       "package_type": "package",
-      "sha256": "6355a327fae31cbf0252c3b1f20229b0cfdb762f83febb5f9c01c20e9da53c31",
+      "sha256": "77ad24f6c02a3d7908e3d6390a58122f73ca1568e37302ab052828ca49dae9bb",
       "unvendored_tests": false,
       "version": "5.8.0"
     },
@@ -783,7 +742,7 @@
       "install_dir": "site",
       "name": "cloudpickle",
       "package_type": "package",
-      "sha256": "f668f6a51e8e4f777b843a32aa9aeef228c2751b78cf54b40093e7171ada6fb6",
+      "sha256": "04866f87af06a172fb6fb4f021918b45ca01c0f38c4c379236d994ec52bc2fce",
       "unvendored_tests": false,
       "version": "3.1.2"
     },
@@ -801,7 +760,7 @@
       "install_dir": "site",
       "name": "cmyt",
       "package_type": "package",
-      "sha256": "ea96d300ce8f25953a24990274ddb48d95e677ef01c82175efd02ff9c40ed4b4",
+      "sha256": "6c1c272faa84366ef314e3fa8a0b36ef46b3e9cf13ae020a0dbb07bb67700311",
       "unvendored_tests": false,
       "version": "2.0.2"
     },
@@ -814,7 +773,7 @@
       "install_dir": "site",
       "name": "cobs",
       "package_type": "package",
-      "sha256": "06d9e6b2a57ce3ac3c20cee9e9e827078958fb123bd684513af1b134d0c4fa06",
+      "sha256": "86916bf45b77a2376da11da59fa4eaf93141ab36bae1d5ae1ce73b8ccdcb399f",
       "unvendored_tests": false,
       "version": "1.2.2"
     },
@@ -829,7 +788,7 @@
       "install_dir": "site",
       "name": "colorspacious",
       "package_type": "package",
-      "sha256": "1ef810a223c4ee11f45644a507190d17209579e4a765215ecc00a87fcd6d352e",
+      "sha256": "11483554045aa5d72702c49a3b8e9476b979e9574418186f073bbec6d14edafe",
       "unvendored_tests": false,
       "version": "1.1.2"
     },
@@ -844,7 +803,7 @@
       "install_dir": "site",
       "name": "contourpy",
       "package_type": "package",
-      "sha256": "8af5f4338988b30a65f5c81c0a3f335353546809538e81d35b572ed4595f80b6",
+      "sha256": "d1270323c10ab24141e40a854dcd407625cb4341c9b83301f1111e7db037b57f",
       "unvendored_tests": false,
       "version": "1.3.3"
     },
@@ -860,7 +819,7 @@
       "install_dir": "site",
       "name": "coolprop",
       "package_type": "package",
-      "sha256": "81fdff8e25be7d90492c43d1409788dac9d07ed159761fbba15e33406d88bd0c",
+      "sha256": "97ace0fb5e4cba36693579cb124784bc094a8e6acac89d7f162f0b0ab6c5f8ce",
       "unvendored_tests": true,
       "version": "7.2.0"
     },
@@ -868,12 +827,12 @@
       "depends": [
         "coolprop"
       ],
-      "file_name": "coolprop-tests.tar",
+      "file_name": "coolprop-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "coolprop-tests",
       "package_type": "package",
-      "sha256": "68a7f157cf9d1e531f4986c25cc45c746caf3e7c22a97540a37616629539d7cf",
+      "sha256": "0e8bed28d4dc58b1d51167a7c2cf49929466f1f74f931db7eac51544fc903045",
       "unvendored_tests": false,
       "version": "7.2.0"
     },
@@ -886,7 +845,7 @@
       "install_dir": "site",
       "name": "coverage",
       "package_type": "package",
-      "sha256": "e9508c4e7112ba90d643844f76df5cf12d4cf5f6840e35c8db8b0cf79a436666",
+      "sha256": "da388fc9733c7312553c6d68e51714c0aaeb8928358208bd4ed5393f03e081b6",
       "unvendored_tests": false,
       "version": "7.13.5"
     },
@@ -899,7 +858,7 @@
       "install_dir": "site",
       "name": "crc32c",
       "package_type": "package",
-      "sha256": "611f5a037c41fe4a9fe606c5b001b3fb619a12be4f3b932bf624b46ea1fa3aeb",
+      "sha256": "f2b13fc23b1a5546a75a520bd9421e57352acecc9cd322697eb8891321d093ba",
       "unvendored_tests": false,
       "version": "2.8"
     },
@@ -912,7 +871,7 @@
       "install_dir": "site",
       "name": "crcmod",
       "package_type": "package",
-      "sha256": "4092ec01991782f5c18b26bdd5faac534dd13ca7eeed2c6c3710fd7c44f7e80f",
+      "sha256": "51bb3405eb1fdd98c829411a608da040eab8e9b06370e9bf5d6e9c350da51e3d",
       "unvendored_tests": false,
       "version": "1.7"
     },
@@ -928,7 +887,7 @@
       "install_dir": "site",
       "name": "cryptography",
       "package_type": "package",
-      "sha256": "4e0e7e8e47613dd96110c640b15ee525db72a47946b8b06f8bcd0377c403fc5a",
+      "sha256": "024e379cdb8bcd25cfe818ea12da5752074868b02b067f0af9b1e28b98086844",
       "unvendored_tests": false,
       "version": "47.0.0"
     },
@@ -941,7 +900,7 @@
       "install_dir": "site",
       "name": "cssselect",
       "package_type": "package",
-      "sha256": "3d2b826357fed9e01ee8ee7d420b150212f84871811d5158eda5284ce900f562",
+      "sha256": "3291d6aa95f01c9cdc58aa286107955c65f2f41e38061390edcf047a4d9db05a",
       "unvendored_tests": false,
       "version": "1.4.0"
     },
@@ -958,7 +917,7 @@
       "install_dir": "site",
       "name": "cvxpy-base",
       "package_type": "package",
-      "sha256": "ae61d3fcee03ab4b741cbe004a0e82c421eea1b08d8ac1b718489a31e6768905",
+      "sha256": "77a0dfe093835cc8983d1dc65aa5c27e06fbbd8226682c0ec55be378b3821425",
       "unvendored_tests": true,
       "version": "1.8.2"
     },
@@ -966,12 +925,12 @@
       "depends": [
         "cvxpy-base"
       ],
-      "file_name": "cvxpy-base-tests.tar",
+      "file_name": "cvxpy-base-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "cvxpy-base-tests",
       "package_type": "package",
-      "sha256": "f4e13228d1fdbc25c3278b4a141e3fc0ecd040b1525f98345bd457b390e763be",
+      "sha256": "42d8ba518ec905256dc7ba4cb995f898787128cbebc1688e0e4355af6be80be2",
       "unvendored_tests": false,
       "version": "1.8.2"
     },
@@ -986,7 +945,7 @@
       "install_dir": "site",
       "name": "cycler",
       "package_type": "package",
-      "sha256": "3569bab200be7f85520bf64a3ff334b016e19441ba89b588d2625c3b89da09c7",
+      "sha256": "70682ba25f1503dde0d9d3d98a889480b42b903a5d863b0a7118bc4173aa02c8",
       "unvendored_tests": false,
       "version": "0.12.1"
     },
@@ -999,7 +958,7 @@
       "install_dir": "site",
       "name": "cysignals",
       "package_type": "package",
-      "sha256": "b8ed985b70edaaf696d0b2e9705989d718b2197029a6e62f31d1bcba50cd3570",
+      "sha256": "e7c454be41c013fb1c406e8f90bc4c503bac7f986d7bb27e70ef7735429899b4",
       "unvendored_tests": false,
       "version": "1.12.3"
     },
@@ -1014,7 +973,7 @@
       "install_dir": "site",
       "name": "cytoolz",
       "package_type": "package",
-      "sha256": "75249b7d5d227c4cb25420dec90b82855f1deb730bf7d9cc33b71728a85bc04d",
+      "sha256": "5b2bf6565a50bc71e542502192011ae4737825437b4efdbf660595a8178b6548",
       "unvendored_tests": true,
       "version": "1.1.0"
     },
@@ -1022,12 +981,12 @@
       "depends": [
         "cytoolz"
       ],
-      "file_name": "cytoolz-tests.tar",
+      "file_name": "cytoolz-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "cytoolz-tests",
       "package_type": "package",
-      "sha256": "2f4d16f91b936e5644c796bb66141a445ae3d40e152034a4aa3c356469893264",
+      "sha256": "c80b601851df0c288f82c7221830cef52cc2495e855dc6b377b3bc958056a3ae",
       "unvendored_tests": false,
       "version": "1.1.0"
     },
@@ -1040,7 +999,7 @@
       "install_dir": "site",
       "name": "decorator",
       "package_type": "package",
-      "sha256": "791060972d212b89d6b64c646d940bd647d26d4e5ab3c8e1e8adbae4f1309f8b",
+      "sha256": "70c5b218495d55cd610752b01dc3d9f593dfd720bec271b5bebe4d86b51ae3c0",
       "unvendored_tests": false,
       "version": "5.2.1"
     },
@@ -1056,7 +1015,7 @@
       "install_dir": "site",
       "name": "demes",
       "package_type": "package",
-      "sha256": "b309418ea650960ea606a5994e6b3344ba7dd59bc9c2dcffddeeb5c8bd316a31",
+      "sha256": "2881bdb4d7c050b667e2b1abf04de37f83f9c94b6389e1efa05ffbc3e11ca0ef",
       "unvendored_tests": false,
       "version": "0.2.3"
     },
@@ -1071,7 +1030,7 @@
       "install_dir": "site",
       "name": "deprecated",
       "package_type": "package",
-      "sha256": "e21462ba83bf0c4a32e6b168d0d732b84d06cd95fa312df8e1ccb077e47b1fae",
+      "sha256": "ee6a03ee4b7df7a20c1c3b2498148a7412c983311a79a7f2adcd51cc83b665de",
       "unvendored_tests": false,
       "version": "1.3.1"
     },
@@ -1086,7 +1045,7 @@
       "install_dir": "site",
       "name": "deprecation",
       "package_type": "package",
-      "sha256": "934bb82d017ab64a48211090c3c848811347c5df83d5a0872274345a855a2a42",
+      "sha256": "0c9268f64d204d2afce125b4ac2c5bea53fe94d565cb123608c7ffb00f6e8c54",
       "unvendored_tests": false,
       "version": "2.1.0"
     },
@@ -1099,7 +1058,7 @@
       "install_dir": "site",
       "name": "diskcache",
       "package_type": "package",
-      "sha256": "c33d094aed8b8daba0e1056ffbb0fc16b8053adef6c27586c4f15b62e6500605",
+      "sha256": "70a70ac42172dfbb3ebc08a83cde7543d3d3b55605547f2496b4439280aa1bd2",
       "unvendored_tests": false,
       "version": "5.6.3"
     },
@@ -1112,7 +1071,7 @@
       "install_dir": "site",
       "name": "distlib",
       "package_type": "package",
-      "sha256": "ca1b4112980d6b0cf6dfc9d5a55579395ad4e57d0943659cebc7528ee81be5fb",
+      "sha256": "8830c155132813db028ca640369c1e6fa202d1c6b2a18e6bef90d1b70ce3997d",
       "unvendored_tests": false,
       "version": "0.4.0"
     },
@@ -1125,7 +1084,7 @@
       "install_dir": "site",
       "name": "distro",
       "package_type": "package",
-      "sha256": "56ae1ed8841379b6948b9a564555c1547907a0ecbf863e7cc42a265d0b2728ff",
+      "sha256": "3f709daf5055fd44ca9499f4070ae66e932869b8b17f60dfc2c871274531286d",
       "unvendored_tests": false,
       "version": "1.9.0"
     },
@@ -1138,7 +1097,7 @@
       "install_dir": "site",
       "name": "dnspython",
       "package_type": "package",
-      "sha256": "087740d3b2bb9ac3ca01df6e09c03251e117600b32fda95e202dcd865859c213",
+      "sha256": "e042374c7a79b8737144d19c3e93842cdd7092d02613eef242484496d4b7dd94",
       "unvendored_tests": false,
       "version": "2.8.0"
     },
@@ -1151,7 +1110,7 @@
       "install_dir": "site",
       "name": "docutils",
       "package_type": "package",
-      "sha256": "ecb7755f2afe8e65053f2ab85d1db723d25d830f2bbf80eea18c164715fefc0a",
+      "sha256": "38dae38331bdd7ddbd1cab452174dae095ba184489a1923a89fe23b9f0c654ba",
       "unvendored_tests": false,
       "version": "0.22.4"
     },
@@ -1166,7 +1125,7 @@
       "install_dir": "site",
       "name": "donfig",
       "package_type": "package",
-      "sha256": "f06bc9652c5120591b48db5e0213c5f608e6e5342eb65ef9504fb2bcf78e03b9",
+      "sha256": "794fb3d173a467b43fb93de06d28a0bb2ae5ebc296757285e249e9c7b319aa8f",
       "unvendored_tests": true,
       "version": "0.8.1.post1"
     },
@@ -1174,12 +1133,12 @@
       "depends": [
         "donfig"
       ],
-      "file_name": "donfig-tests.tar",
+      "file_name": "donfig-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "donfig-tests",
       "package_type": "package",
-      "sha256": "afaac9ca0a0788686428898babe7b5c2c25bbe0bb7bc045fc374678ee01561bb",
+      "sha256": "60089b14eebf872129ddcdc1311049ae2b15e51002e513ccc0abe904fde3c4d5",
       "unvendored_tests": false,
       "version": "0.8.1.post1"
     },
@@ -1192,7 +1151,7 @@
       "install_dir": "site",
       "name": "duckdb",
       "package_type": "package",
-      "sha256": "4a17fac33af7e0816d30c1a74103fe93d0c1f21587f042844a8f2eeab8fd35f0",
+      "sha256": "0227c097e5dad26929c65bc8b6c9cf6cd4a882301cd1b5b6420de9138259948e",
       "unvendored_tests": false,
       "version": "1.5.1"
     },
@@ -1207,7 +1166,7 @@
       "install_dir": "site",
       "name": "ewah_bool_utils",
       "package_type": "package",
-      "sha256": "01b54472498df5464b0874ce165ddd9c6eddad6c21bbfb72df1d343c497dde99",
+      "sha256": "ae549b8529bdc04a2926705a3a9fc78bd2e3ed17cbef90733953176a5690fbdd",
       "unvendored_tests": true,
       "version": "1.3.0"
     },
@@ -1215,12 +1174,12 @@
       "depends": [
         "ewah_bool_utils"
       ],
-      "file_name": "ewah-bool-utils-tests.tar",
+      "file_name": "ewah-bool-utils-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "ewah_bool_utils-tests",
       "package_type": "package",
-      "sha256": "ef4d2810d3805e70e0b8eb309f9fc46bd510916b0f53e845d547badbfa92e120",
+      "sha256": "bb7c2e8ff0d407d655e9cc1fdb340dd52f4d9e384434244504e0747c16393951",
       "unvendored_tests": false,
       "version": "1.3.0"
     },
@@ -1233,7 +1192,7 @@
       "install_dir": "site",
       "name": "exceptiongroup",
       "package_type": "package",
-      "sha256": "da3e3885b4f10485ddbe9d13c9cde6feaab7baff61a00099dec474111113f004",
+      "sha256": "19465535880c3c97c9609e52354c63683dc7bce158bfc26c10fed9912832502a",
       "unvendored_tests": false,
       "version": "1.3.1"
     },
@@ -1246,7 +1205,7 @@
       "install_dir": "site",
       "name": "executing",
       "package_type": "package",
-      "sha256": "cc2c5f9bbd2cfc976c2827c3435c4d0ea013c7c6ed4bbbb33dfcc21ae376fd94",
+      "sha256": "38cc37f2fe6b804a260a9f058cde84d3ea977d7a4b1cf17be7a3e80ddcdd06e0",
       "unvendored_tests": false,
       "version": "2.2.1"
     },
@@ -1266,7 +1225,7 @@
       "install_dir": "site",
       "name": "fastapi",
       "package_type": "package",
-      "sha256": "4637c38150c348d357a1dbe128fea60ba81b4d419bdf4532a3fe9b6eef3b8725",
+      "sha256": "d421936efaebe6d79238f57fe74533cfdb88968323429f6d8297899d8a2c8ee9",
       "unvendored_tests": false,
       "version": "0.136.1"
     },
@@ -1286,7 +1245,7 @@
       "install_dir": "site",
       "name": "fiona",
       "package_type": "package",
-      "sha256": "d104c07524010a344ca9d17d300cbbbb0346b2de4ec4718fd0542b1c53fcae11",
+      "sha256": "df30b53ec425ea58f14edcaf5b660c01c61c382170adadd38a397239501ae398",
       "unvendored_tests": false,
       "version": "1.10.1"
     },
@@ -1299,7 +1258,7 @@
       "install_dir": "site",
       "name": "fonttools",
       "package_type": "package",
-      "sha256": "6d8caa09c191f26c47403499d6cff62f3fb9685b978baa047bf791862bcb298a",
+      "sha256": "94f246abe8cd46f0695dc9256cde3966bc637b80148fe72a1e7b0e6623d62144",
       "unvendored_tests": false,
       "version": "4.62.1"
     },
@@ -1312,7 +1271,7 @@
       "install_dir": "site",
       "name": "freesasa",
       "package_type": "package",
-      "sha256": "1382fb95823f3e692b047a0106633d062eb91c129b9193518f518e216b47ae19",
+      "sha256": "3dd351823689eac14bfa95053c360f45fa632026d7fe67f186813dc09c6f6ede",
       "unvendored_tests": false,
       "version": "2.2.1"
     },
@@ -1325,7 +1284,7 @@
       "install_dir": "site",
       "name": "frozenlist",
       "package_type": "package",
-      "sha256": "283d6a832ba0847e71c753611ca882e34103cf45c52489c3c03fcc6ab1b9016b",
+      "sha256": "cd0b4dc30b4aa92afdfbec7b3f7a71764c17702319cc4b809d824f6b08c0d6c4",
       "unvendored_tests": false,
       "version": "1.8.0"
     },
@@ -1338,7 +1297,7 @@
       "install_dir": "site",
       "name": "fsspec",
       "package_type": "package",
-      "sha256": "ed9f0fdaffd4c7a95502a488dda1a4104017d4856fd37b35648b3443097d67b3",
+      "sha256": "aa471719c6ee0bc7a84947803b67dd3cab99d977ba722fd5f69d151b4661adf7",
       "unvendored_tests": true,
       "version": "2026.3.0"
     },
@@ -1346,12 +1305,12 @@
       "depends": [
         "fsspec"
       ],
-      "file_name": "fsspec-tests.tar",
+      "file_name": "fsspec-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "fsspec-tests",
       "package_type": "package",
-      "sha256": "c7cb2c406355cc51235c79cb4935f20ac536c1bf2ce4fa9ee42f557578268493",
+      "sha256": "fff0992dbda287c1dbea7c4e9b8c8671bb9364bdc40f1bdda023ac413f7cfc55",
       "unvendored_tests": false,
       "version": "2026.3.0"
     },
@@ -1364,7 +1323,7 @@
       "install_dir": "site",
       "name": "future",
       "package_type": "package",
-      "sha256": "4df2fa86fa6bb3e16382962877fa469bd4c34b0727778065df28c83194e30cbc",
+      "sha256": "da5c31db9777e8e70221de93c00101e1344b01226c90d3000d3dd7ccf71cd49c",
       "unvendored_tests": true,
       "version": "1.0.0"
     },
@@ -1372,12 +1331,12 @@
       "depends": [
         "future"
       ],
-      "file_name": "future-tests.tar",
+      "file_name": "future-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "future-tests",
       "package_type": "package",
-      "sha256": "87af61eb0b54822adf881f8c0f100b8f248bd96ceb870e78ac238d126a02918e",
+      "sha256": "6956fa6a96c92ad649773c29b7613ac9898288b986bea6c6cbce6878f8e2a0b5",
       "unvendored_tests": false,
       "version": "1.0.0"
     },
@@ -1397,7 +1356,7 @@
       "install_dir": "site",
       "name": "galpy",
       "package_type": "package",
-      "sha256": "bcc0571db64a92b198dc3194096392d3bd8b891c88ae66d327e554457f9f17ef",
+      "sha256": "0b2586990f6e3ef309d3f87355e768d6a6c00ab6b76c53f13c4c6fd5472c2992",
       "unvendored_tests": false,
       "version": "1.11.2"
     },
@@ -1416,7 +1375,7 @@
       "install_dir": "site",
       "name": "geopandas",
       "package_type": "package",
-      "sha256": "fdd989196544d754f4b398132925702393951c29754dd495378bba71773f9c6d",
+      "sha256": "7b79a1500a41e5b9d784d5d0f28544d4cbe7a15e946669db2a9ffcc1c7ffb36a",
       "unvendored_tests": true,
       "version": "1.1.3"
     },
@@ -1424,12 +1383,12 @@
       "depends": [
         "geopandas"
       ],
-      "file_name": "geopandas-tests.tar",
+      "file_name": "geopandas-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "geopandas-tests",
       "package_type": "package",
-      "sha256": "bdf4419386837f618b3d2a52d6625791b943d6499ad92e8c8996e97b748dde4f",
+      "sha256": "0a1776370485d25f3c443287f1ce92b75fe28908438740cafa372690aaf013d4",
       "unvendored_tests": false,
       "version": "1.1.3"
     },
@@ -1442,7 +1401,7 @@
       "install_dir": "site",
       "name": "gmpy2",
       "package_type": "package",
-      "sha256": "85e7920c72fdcf760e89ab5617e83db7ec1a241a9b8b7a02e4e13b3691f10dae",
+      "sha256": "a49d5b0f06a4e732c184551c1fa6ef2c3ef8ccaa30436a51001a87746715da5d",
       "unvendored_tests": false,
       "version": "2.3.0"
     },
@@ -1455,7 +1414,7 @@
       "install_dir": "site",
       "name": "google-crc32c",
       "package_type": "package",
-      "sha256": "9a4c7be63ea36f56795750371c2d8639656ff73721bc0b4c6f6332e38bfb8cef",
+      "sha256": "7fe1eeba4f6db1b59876c3582e6400b2ac2b46dc189e88c4a8c1a9b8e07e48b1",
       "unvendored_tests": false,
       "version": "1.8.0"
     },
@@ -1468,7 +1427,7 @@
       "install_dir": "site",
       "name": "h11",
       "package_type": "package",
-      "sha256": "7a6b1873432ad52e5d2fd147f3239aa5dd2ec9e502fe2aeb73c1e15c7e13545d",
+      "sha256": "8c526e64f7125a54029265c0bebb7fa39d0876f304e008e72ad0e0557d988a76",
       "unvendored_tests": false,
       "version": "0.16.0"
     },
@@ -1481,7 +1440,7 @@
       "install_dir": "site",
       "name": "h3",
       "package_type": "package",
-      "sha256": "cd24caf1fec6e372927eda58a04c5a5c6ffe60f14a483dd7cc5ead0ed3921fb2",
+      "sha256": "a037362f9755e174e98047324b7b88df55645f4b2c80d49903f7de39249b658b",
       "unvendored_tests": false,
       "version": "4.4.2"
     },
@@ -1497,7 +1456,7 @@
       "install_dir": "site",
       "name": "h5py",
       "package_type": "package",
-      "sha256": "1bfda90e046654273d7a3c1e50d6de75e583f328140c2c81044a07f9ecbbfeee",
+      "sha256": "ebd03c4821847073f68ca93bfb226a450081541011060aeb3037677bab2d2809",
       "unvendored_tests": true,
       "version": "3.13.0"
     },
@@ -1505,12 +1464,12 @@
       "depends": [
         "h5py"
       ],
-      "file_name": "h5py-tests.tar",
+      "file_name": "h5py-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "h5py-tests",
       "package_type": "package",
-      "sha256": "2d7f657d04eca6da48d9da7ddd2876010ba1a0e982c796c7072d1301db9d957a",
+      "sha256": "9fb9137938e184368edfec5c5901cba5c9c8c04c3092caabc8b20652c113e623",
       "unvendored_tests": false,
       "version": "3.13.0"
     },
@@ -1526,7 +1485,7 @@
       "install_dir": "site",
       "name": "healpy",
       "package_type": "package",
-      "sha256": "f95b46f903eede8170fa55219fba525ef93877424dc3f637afcec52be28a32d3",
+      "sha256": "2e828066f919128757a187a54065641a324c1fb611013387d1116aec016e9bc6",
       "unvendored_tests": true,
       "version": "1.19.0"
     },
@@ -1534,12 +1493,12 @@
       "depends": [
         "healpy"
       ],
-      "file_name": "healpy-tests.tar",
+      "file_name": "healpy-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "healpy-tests",
       "package_type": "package",
-      "sha256": "81074d227c85d852002a9b07f71f1479ff87b0fc8e2390bfc29709fd24cb9c27",
+      "sha256": "3faaaec5e00017ed70f8834ff95c5fedda6709ebaa3c5018ea78bc6edfa0c2b4",
       "unvendored_tests": false,
       "version": "1.19.0"
     },
@@ -1554,7 +1513,7 @@
       "install_dir": "site",
       "name": "highspy",
       "package_type": "package",
-      "sha256": "8e7d773b1e86db97aee07b6e678883a61fc26066759cb78c4546339bb7ca0843",
+      "sha256": "6e50c173b15a5f1882649ae48459ac0e4878decad8790111a9f5d46b06e036fe",
       "unvendored_tests": false,
       "version": "1.13.1"
     },
@@ -1570,7 +1529,7 @@
       "install_dir": "site",
       "name": "html5lib",
       "package_type": "package",
-      "sha256": "7aa486a68c84c7e4504f504e850e72a26babdeb1d23966e4d6be18119a894aec",
+      "sha256": "c575fb672259d4ae5bfe3be9cdaea7840765a59a49e95df544352147877f4938",
       "unvendored_tests": false,
       "version": "1.1"
     },
@@ -1586,7 +1545,7 @@
       "install_dir": "site",
       "name": "httpcore",
       "package_type": "package",
-      "sha256": "830b23a174d22273fbc2000cd92d5644922e540831909ff2208f771b7c209c25",
+      "sha256": "13a730647fe88b810f077075aa6d97bdfab304ea841ddbba612f9f4d8737a81f",
       "unvendored_tests": false,
       "version": "1.0.9"
     },
@@ -1599,7 +1558,7 @@
       "install_dir": "site",
       "name": "httpx",
       "package_type": "package",
-      "sha256": "80fdeea708b53a5ce509b3669b89b67124acdd241f7bfd131ff8bf215d620400",
+      "sha256": "b76ad06287a99d825b8d4eae92b0296b0a749ef6d24d1b0d69ed9c898398f20d",
       "unvendored_tests": false,
       "version": "0.28.1"
     },
@@ -1612,7 +1571,7 @@
       "install_dir": "site",
       "name": "idna",
       "package_type": "package",
-      "sha256": "1c8df7b3fbc3e2767635c9fd38a8e970ddc0bb36d94ff223250a348e1dfa0e7d",
+      "sha256": "c46f472009930b91b38f3206b8431c6f95e1d47213920e6828f579624afb1c0f",
       "unvendored_tests": false,
       "version": "3.11"
     },
@@ -1627,7 +1586,7 @@
       "install_dir": "site",
       "name": "igraph",
       "package_type": "package",
-      "sha256": "97e32f3fb8e05f61a5a1d655b18e5ba53eb602dba30fdf654fcbddeef93ddcfc",
+      "sha256": "678eaff5995b9ed3dc787b0df26b047639ee451e215f5ee0ef6ff6e357973dec",
       "unvendored_tests": false,
       "version": "1.0.0"
     },
@@ -1643,7 +1602,7 @@
       "install_dir": "site",
       "name": "imageio",
       "package_type": "package",
-      "sha256": "d4a85837a12593eb71a75bb4a3c6a40eea38298d08f205598df20734d2ae4eed",
+      "sha256": "626158c3e19526660db99d88d3c4a48e3a0d8aec01093847775c4c97f30e6d7e",
       "unvendored_tests": false,
       "version": "2.37.3"
     },
@@ -1658,7 +1617,7 @@
       "install_dir": "site",
       "name": "iminuit",
       "package_type": "package",
-      "sha256": "4b73bec92fb52a1fca4433da295a229d2cc87620b733d0dffd78fb9861d277d0",
+      "sha256": "223ddc5337d99a0bafb55edb2aeacce5ea0e8c1fb99fe624acd8ff7b42decc87",
       "unvendored_tests": false,
       "version": "2.30.1"
     },
@@ -1671,9 +1630,31 @@
       "install_dir": "site",
       "name": "iniconfig",
       "package_type": "package",
-      "sha256": "1cd8448eea1c863c970703ed01fa1baf655043150cee772772253e3461b701ed",
+      "sha256": "94eac96a7a1734b126d4af2b612769462d608a8e45eaa24c9a724704f043b7f6",
       "unvendored_tests": false,
       "version": "2.3.0"
+    },
+    "inspice": {
+      "depends": [
+        "numpy",
+        "matplotlib",
+        "pyyaml",
+        "cffi",
+        "diskcache",
+        "h5py",
+        "ply",
+        "libngspice"
+      ],
+      "file_name": "inspice-1.7.0.5-py3-none-any.whl",
+      "imports": [
+        "InSpice"
+      ],
+      "install_dir": "site",
+      "name": "inspice",
+      "package_type": "package",
+      "sha256": "362f9bda409ce1df7958c4c629e291becbf6975ab10da366f24e774f60a893f2",
+      "unvendored_tests": false,
+      "version": "1.7.0.5"
     },
     "ipython": {
       "depends": [
@@ -1696,7 +1677,7 @@
       "install_dir": "site",
       "name": "ipython",
       "package_type": "package",
-      "sha256": "e7ec8a64f4c3be1b32b653134e71f4c136184e6b29f91493cb4ab318aa34113d",
+      "sha256": "31c0bc0d219ac5efb97c3d3284be1f66300621331b944a2fafd175b3495e408a",
       "unvendored_tests": true,
       "version": "9.12.0"
     },
@@ -1704,12 +1685,12 @@
       "depends": [
         "ipython"
       ],
-      "file_name": "ipython-tests.tar",
+      "file_name": "ipython-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "ipython-tests",
       "package_type": "package",
-      "sha256": "a1e74c4de21306f048b48a67ed525d3856d175f30f90458ce2a3512916190091",
+      "sha256": "ca5ca7f58b383a0c3d668bcd8ae1f1cc3d01418bb2aaaf1c353858e505747c9f",
       "unvendored_tests": false,
       "version": "9.12.0"
     },
@@ -1724,7 +1705,7 @@
       "install_dir": "site",
       "name": "jedi",
       "package_type": "package",
-      "sha256": "3d65f786600178d41b4657d12ca5c332ea7ee45484510bee74bc5a9046e7a48f",
+      "sha256": "cb1adff438e7d12cf11cf14323641db73498097a36c3bfc89b89e6350e203e70",
       "unvendored_tests": true,
       "version": "0.19.2"
     },
@@ -1732,12 +1713,12 @@
       "depends": [
         "jedi"
       ],
-      "file_name": "jedi-tests.tar",
+      "file_name": "jedi-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "jedi-tests",
       "package_type": "package",
-      "sha256": "9e107ab31ed7f8d9224b13823e69275a02302dd0ebc60c2c0405bd003aef85c7",
+      "sha256": "bc4e1fff125ebea4c2cbd5b5393e16f5030dffb65192da2244b071d4dde39c22",
       "unvendored_tests": false,
       "version": "0.19.2"
     },
@@ -1752,7 +1733,7 @@
       "install_dir": "site",
       "name": "Jinja2",
       "package_type": "package",
-      "sha256": "e92e71ef947608f60ab57f223b3c9ffedfa261a649d0301524a940ed393ee833",
+      "sha256": "2022253dfc8bbe43e8f0cbdea5295444d071f595a3f47bbef1c0983996ba4001",
       "unvendored_tests": false,
       "version": "3.1.6"
     },
@@ -1765,7 +1746,7 @@
       "install_dir": "site",
       "name": "jiter",
       "package_type": "package",
-      "sha256": "a058ea3b1f99a0fab68e96f9a331d65593452f1a1fce965dcd56fd32ee03db1a",
+      "sha256": "5cab4e636e75a7ae139bffbe725740a291cdfae7a3692ca283931992d2c1f8ef",
       "unvendored_tests": false,
       "version": "0.13.0"
     },
@@ -1778,7 +1759,7 @@
       "install_dir": "site",
       "name": "joblib",
       "package_type": "package",
-      "sha256": "b2263b31e10db62fc9b7d307a270064017040001e6c24a8d6aff1db2d62d4821",
+      "sha256": "9db651775f229d6f30f128f7c36c015aee26e414dd628b04d5bab5087f92e964",
       "unvendored_tests": true,
       "version": "1.5.3"
     },
@@ -1786,12 +1767,12 @@
       "depends": [
         "joblib"
       ],
-      "file_name": "joblib-tests.tar",
+      "file_name": "joblib-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "joblib-tests",
       "package_type": "package",
-      "sha256": "1901989e1888a53904bfb567fa5d27e255e72bd2c65edfac77aa3fd56896834a",
+      "sha256": "c3ccb6f02d6007cca7ff2539dca6244e762fa9ab12e6bfd85d284250d8cc1f39",
       "unvendored_tests": false,
       "version": "1.5.3"
     },
@@ -1806,7 +1787,7 @@
       "install_dir": "site",
       "name": "jsonpatch",
       "package_type": "package",
-      "sha256": "b2b8833d0a866edc12ea9e9dcb8e06b473a144b34141bc8f1063e37885b401ba",
+      "sha256": "de3a83bc00a32df4bbd313ecde06c0900f5d38004a8dc91677610b041d614fd9",
       "unvendored_tests": false,
       "version": "1.33"
     },
@@ -1819,7 +1800,7 @@
       "install_dir": "site",
       "name": "jsonpointer",
       "package_type": "package",
-      "sha256": "daeadffa7d0dd447dbde7a21583fc50f2e0bfab3efba6ed228cb4f617fd8b482",
+      "sha256": "580efd6425f477f1438cef31e332a8636aafdc41ce3d5865a6e7e954e87232cf",
       "unvendored_tests": false,
       "version": "3.1.1"
     },
@@ -1837,7 +1818,7 @@
       "install_dir": "site",
       "name": "jsonschema",
       "package_type": "package",
-      "sha256": "d2d29b9c8db3520b39feac084c913bbe79372f088ffb49fb59f44a1a7b57724a",
+      "sha256": "688a9d2eef98a7db18788d2c4372d3b500aeb4ab87ceb4b382c434d951ce2365",
       "unvendored_tests": true,
       "version": "4.26.0"
     },
@@ -1852,7 +1833,7 @@
       "install_dir": "site",
       "name": "jsonschema_specifications",
       "package_type": "package",
-      "sha256": "ad8df6243b990e76af93135ab36903225cdc03e1730fc433f93ac3934a50d05b",
+      "sha256": "1c2e7b63dae497048359c3ab969acd81275764d6bbb46aa650da6f92f0f93138",
       "unvendored_tests": true,
       "version": "2025.9.1"
     },
@@ -1860,12 +1841,12 @@
       "depends": [
         "jsonschema_specifications"
       ],
-      "file_name": "jsonschema-specifications-tests.tar",
+      "file_name": "jsonschema-specifications-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "jsonschema_specifications-tests",
       "package_type": "package",
-      "sha256": "01de369c9af413ea993b20a95f16934e4983bebe6b883ed1c93f71678ddee491",
+      "sha256": "f6e76fab81a1d8c6e16dd90c51d9140f0242a4c62bef7877e58729bf05625136",
       "unvendored_tests": false,
       "version": "2025.9.1"
     },
@@ -1873,12 +1854,12 @@
       "depends": [
         "jsonschema"
       ],
-      "file_name": "jsonschema-tests.tar",
+      "file_name": "jsonschema-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "jsonschema-tests",
       "package_type": "package",
-      "sha256": "4b8bc3acfa97b81464f27d357ec18c34c3e9a57c889c98d45f4acb375507c08c",
+      "sha256": "83804a28ff65dd822d5e30973ba308458545abdadd8366e03bea164eff9012df",
       "unvendored_tests": false,
       "version": "4.26.0"
     },
@@ -1891,7 +1872,7 @@
       "install_dir": "site",
       "name": "kiwisolver",
       "package_type": "package",
-      "sha256": "7591db9cc1181815eeefb2e7c5b5622a18a3fa334788e1b49eb3e8ad7f90186f",
+      "sha256": "f8b19816e2cf8e36fc2adfabb60ad24dad422dfaffa6087173d829d9924fcc07",
       "unvendored_tests": false,
       "version": "1.5.0"
     },
@@ -1904,7 +1885,7 @@
       "install_dir": "site",
       "name": "lakers-python",
       "package_type": "package",
-      "sha256": "63d2d8e59fc90bb59ad8222890c5460fe999974fb92e2b42eaf8ee170ea89b06",
+      "sha256": "e8126c659339259d9a1c5279919f7a84a8e5f70dbbe2d8be5f13ea8cf1bf4ee9",
       "unvendored_tests": false,
       "version": "0.6.2"
     },
@@ -1917,7 +1898,7 @@
       "install_dir": "site",
       "name": "lazy_loader",
       "package_type": "package",
-      "sha256": "7c11bbbabb45eb8cf9b9674d4d9defc24ae63e0f66baa2ea538deedb5bceec41",
+      "sha256": "f5d163ee931fab9cfd2ba7840f073c66fe45111de33e2009eb9be95d7ce2d57b",
       "unvendored_tests": false,
       "version": "0.5"
     },
@@ -1930,9 +1911,20 @@
       "install_dir": "site",
       "name": "lazy-object-proxy",
       "package_type": "package",
-      "sha256": "2a90592a36f0e1ab5c3ddc3d63248001d8f604606bf4a3ae8f662df1a03fd050",
+      "sha256": "f4225b23c469b38e08b0ee7c698e275bf886f9c9834e9e5d1d98fee0fa1298b0",
       "unvendored_tests": false,
       "version": "1.12.0"
+    },
+    "libblis": {
+      "depends": [],
+      "file_name": "libblis-2.1.zip",
+      "imports": [],
+      "install_dir": "dynlib",
+      "name": "libblis",
+      "package_type": "shared_library",
+      "sha256": "849cf3f56938f6ca4b4e5839294fd085e0ed38aa6cd18a2a6a899f8e9e0a5200",
+      "unvendored_tests": false,
+      "version": "2.1"
     },
     "libcrc32c": {
       "depends": [],
@@ -1941,7 +1933,7 @@
       "install_dir": "dynlib",
       "name": "libcrc32c",
       "package_type": "shared_library",
-      "sha256": "169b2b64b92beef35578835446aefe94553fb316ffc01b9c4f653b39b9e77aa2",
+      "sha256": "e539480330f803b676504ad000d50f814bc39896862b47f5863f15bac9f29522",
       "unvendored_tests": false,
       "version": "1.1.0"
     },
@@ -1956,7 +1948,7 @@
       "install_dir": "site",
       "name": "libcst",
       "package_type": "package",
-      "sha256": "d081efd5f5bf610b6c3c5d6a240df0dea70846be35c98a80052b079a1cef83dc",
+      "sha256": "3091e9e7f900a685829d6fd694a3eac800da795abb0d880f0d105559d2c57a08",
       "unvendored_tests": true,
       "version": "1.8.6"
     },
@@ -1964,12 +1956,12 @@
       "depends": [
         "libcst"
       ],
-      "file_name": "libcst-tests.tar",
+      "file_name": "libcst-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "libcst-tests",
       "package_type": "package",
-      "sha256": "9720735162ec21b8829d5656cdcf21d69364c859ce6042ccb3b82dded2450b35",
+      "sha256": "beea60fe932e0ec51ddf1e3fc8d12e4ee6073cd04f4a581f1866028510c483c4",
       "unvendored_tests": false,
       "version": "1.8.6"
     },
@@ -1982,7 +1974,7 @@
       "install_dir": "dynlib",
       "name": "libgdal",
       "package_type": "shared_library",
-      "sha256": "40f6439b818b75c005ad761cedcc766e4f50f0c85133824224b286ad79c5141e",
+      "sha256": "5b60e36dba64748f4506d6e05ad228484ad4d86e3adcb7dfc35e027cc7c829cd",
       "unvendored_tests": false,
       "version": "3.8.3"
     },
@@ -1993,7 +1985,7 @@
       "install_dir": "dynlib",
       "name": "libgeos",
       "package_type": "shared_library",
-      "sha256": "4afd10fb9e121e12ede733c92319efa5cbde9949af69be848a126213f6816c7d",
+      "sha256": "5ae88ec7592ece7960fbd95d0a129ba0b5b7b15f7d927d508dda2b265954f12a",
       "unvendored_tests": false,
       "version": "3.12.1"
     },
@@ -2004,7 +1996,7 @@
       "install_dir": "dynlib",
       "name": "libhdf5",
       "package_type": "shared_library",
-      "sha256": "5e2e84be80f54cb8b6572ee8e07ba41e537042d6676d17ae1f604727b4351720",
+      "sha256": "4c16a0283af369340efb3215824c091988216f177b2aed6a11a1ed6ccf493268",
       "unvendored_tests": false,
       "version": "1.12.1"
     },
@@ -2015,20 +2007,31 @@
       "install_dir": "dynlib",
       "name": "libheif",
       "package_type": "shared_library",
-      "sha256": "9f7a3bfb1803fbd2f848520ff7281c49015af0840fb0b295e94302734df8b364",
+      "sha256": "0644388a84f6a59141c87b1fccd96cd9c65e995e765934f0e3ca0cc5ef91e74c",
       "unvendored_tests": false,
       "version": "1.12.0"
     },
+    "libngspice": {
+      "depends": [],
+      "file_name": "libngspice-46.zip",
+      "imports": [],
+      "install_dir": "dynlib",
+      "name": "libngspice",
+      "package_type": "shared_library",
+      "sha256": "e2e82ac990748fb434fa044270b475b02e127a3eab427f3ce4fc47791641c841",
+      "unvendored_tests": false,
+      "version": "46"
+    },
     "libopenblas": {
       "depends": [],
-      "file_name": "libopenblas-0.3.28.zip",
+      "file_name": "libopenblas-0.3.31.zip",
       "imports": [],
       "install_dir": "dynlib",
       "name": "libopenblas",
       "package_type": "shared_library",
-      "sha256": "5489d82d8b00ddd3ba283055ba14e2a03d870f1b7e9c07873d6064a8c306ea4c",
+      "sha256": "e9a2f2497a87f886ca3caf953deaeacfbda82ce38ae352a925d08540df9a3778",
       "unvendored_tests": false,
-      "version": "0.3.28"
+      "version": "0.3.31"
     },
     "libproj": {
       "depends": [],
@@ -2050,7 +2053,7 @@
       "install_dir": "site",
       "name": "librt",
       "package_type": "package",
-      "sha256": "8e31c83c95a6bdc6511b915dfe6fe4896a1f47aa76b510557c398dac91dcd31d",
+      "sha256": "fd2128a9f37c5500f1d6f701c4f370bd1dea5fc2ad4d81fc133b8b3c5cce8eb4",
       "unvendored_tests": false,
       "version": "0.8.1"
     },
@@ -2063,7 +2066,7 @@
       "install_dir": "dynlib",
       "name": "libsuitesparse",
       "package_type": "shared_library",
-      "sha256": "72c1fa730dfa1fdc7fbddb134031fcbfdbca18cbbbef5d540421f850bf3f73ca",
+      "sha256": "cc397e24be8c5c2c852236f192b42bad76d4975a4de2f9d90033df48f9852ba9",
       "unvendored_tests": false,
       "version": "5.11.0"
     },
@@ -2074,7 +2077,7 @@
       "install_dir": "dynlib",
       "name": "libtaglib",
       "package_type": "shared_library",
-      "sha256": "28d71b342be8f77f3da7c221973be1dd7ac781dd19e183e579918ea8915a72e7",
+      "sha256": "27df25f24e7518d34bb7bdf7100387087b22a078b8541866c4ee7bed4eb19a68",
       "unvendored_tests": false,
       "version": "2.1.1"
     },
@@ -2091,7 +2094,7 @@
       "install_dir": "site",
       "name": "lightgbm",
       "package_type": "package",
-      "sha256": "1383802204df7e6ac2068b144b495e1a562f2b79bf658f4de5ac93e8da56544f",
+      "sha256": "8a9e47ae29f0435aacfa857e7505ed6152a8031da1e5cbde1916306dc02b3f37",
       "unvendored_tests": false,
       "version": "4.6.0"
     },
@@ -2106,7 +2109,7 @@
       "install_dir": "site",
       "name": "logbook",
       "package_type": "package",
-      "sha256": "c0f85541516c19d4f54958ef70314cf1c6058bae96e3bf0c60c87fe43785418a",
+      "sha256": "b382a02452021c8289ca9559e3308128fccfce950fa98073a5470e9224061547",
       "unvendored_tests": false,
       "version": "1.9.2"
     },
@@ -2119,7 +2122,7 @@
       "install_dir": "site",
       "name": "lxml",
       "package_type": "package",
-      "sha256": "f37f82e09f6d7957aa167440db7ef683439cc3ce1befac1d2ca27e35bd7c95d4",
+      "sha256": "13b273a49a4737efb22148af07644fb1b2db6540768b92d14ecdf852ed2d6148",
       "unvendored_tests": false,
       "version": "6.0.2"
     },
@@ -2132,7 +2135,7 @@
       "install_dir": "site",
       "name": "lz4",
       "package_type": "package",
-      "sha256": "52a18b615af23a21f628c5bb30d9f2447fa9ea3013eecdd6312618c3a76ac228",
+      "sha256": "fc59b274a36110d6d8efc8597c59917721ed8a49a77609c911336d7ede507da5",
       "unvendored_tests": false,
       "version": "4.4.5"
     },
@@ -2145,7 +2148,7 @@
       "install_dir": "site",
       "name": "MarkupSafe",
       "package_type": "package",
-      "sha256": "70d3fb95b0946e2b4a2c182b4e10ddff5e498ebe2bb596a0aa179f0844c56c67",
+      "sha256": "2a95fbfa8456ceffeee3004eae70266976c968e74994cf0be775cb1f5fad399a",
       "unvendored_tests": false,
       "version": "3.0.3"
     },
@@ -2171,7 +2174,7 @@
       "install_dir": "site",
       "name": "matplotlib",
       "package_type": "package",
-      "sha256": "2867b2003ee66d0d2478423f783ec035d432c6560ae86d0e58d096ff98cab6a8",
+      "sha256": "2d127e0fbdfdd139b90c2eb487950913771846991330460fce3b183ba79d8ddb",
       "unvendored_tests": true,
       "version": "3.10.8"
     },
@@ -2186,7 +2189,7 @@
       "install_dir": "site",
       "name": "matplotlib-inline",
       "package_type": "package",
-      "sha256": "16932830c5cd0f7d3ab13642cb68124534d88baf6f29733fdaa1c5e9c9323837",
+      "sha256": "71f6069bbd521ba4f2c2ab3e78952d67e2951c5bbbd5c34655818246ff505af6",
       "unvendored_tests": false,
       "version": "0.2.1"
     },
@@ -2194,12 +2197,12 @@
       "depends": [
         "matplotlib"
       ],
-      "file_name": "matplotlib-tests.tar",
+      "file_name": "matplotlib-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "matplotlib-tests",
       "package_type": "package",
-      "sha256": "262a0505d91ff32ab64aafc0f26e90707d315c8bc04e07455fe0307950d57455",
+      "sha256": "092788a4a53c4163cae25e8cb296a026069486a1438e01d94ca0ec7b8629526e",
       "unvendored_tests": false,
       "version": "3.10.8"
     },
@@ -2212,7 +2215,7 @@
       "install_dir": "site",
       "name": "memory-allocator",
       "package_type": "package",
-      "sha256": "a044a0569d71833e38c7e47fdfe5b7a0064d174facaccfbc45cbac57dcfaa6a0",
+      "sha256": "fb50c73aeb184d02409b7d9033684495a8d5f9a30df1e1524f5f8b50b2ecef15",
       "unvendored_tests": false,
       "version": "0.2.0"
     },
@@ -2225,7 +2228,7 @@
       "install_dir": "site",
       "name": "micropip",
       "package_type": "package",
-      "sha256": "668cd1270f480ac9f93da4a2b4873a252743e4ad3da723d37a7e4c637c4f2314",
+      "sha256": "0ad7104a3cde648e5486a718799f3852f1d782ff19d4bfc13db9dc631df083f8",
       "unvendored_tests": false,
       "version": "0.11.1"
     },
@@ -2240,7 +2243,7 @@
       "install_dir": "site",
       "name": "ml_dtypes",
       "package_type": "package",
-      "sha256": "0a1fae1e5c9a473a65246d83f91fb3388076fbb7a9bc1a91e40fb376047b8563",
+      "sha256": "57e15d565839fe58c5a24461f10586e683c9ffc7010cb9850dacad6688fde9c0",
       "unvendored_tests": false,
       "version": "0.5.4"
     },
@@ -2253,7 +2256,7 @@
       "install_dir": "site",
       "name": "mmh3",
       "package_type": "package",
-      "sha256": "cd381ca02d45cb16cd7f72961fd8d9f050ee03a01596688b5f822771df5a3e41",
+      "sha256": "c5a112c3e6f19f9bfa9f21320c58da6c70547f020ba51b6997eb9450d7f32c87",
       "unvendored_tests": false,
       "version": "5.2.1"
     },
@@ -2266,7 +2269,7 @@
       "install_dir": "site",
       "name": "more-itertools",
       "package_type": "package",
-      "sha256": "d348eb309bd03b414df82dc8bd5b2e1717417434849aeee58d9b4b1b2dff8e7e",
+      "sha256": "054981c047a32157c434a5c75e7f107cfe042f15cbe99b6d1144b082e7747190",
       "unvendored_tests": false,
       "version": "11.0.1"
     },
@@ -2279,7 +2282,7 @@
       "install_dir": "site",
       "name": "mpmath",
       "package_type": "package",
-      "sha256": "625a8215b09034296e02e6a432a26997e08a865e2637d43a7b13ab5faa59306e",
+      "sha256": "2e52d90a17736922c2724d34d03e2c7547e9a44a212dab154f046d763e8bced9",
       "unvendored_tests": true,
       "version": "1.4.1"
     },
@@ -2287,12 +2290,12 @@
       "depends": [
         "mpmath"
       ],
-      "file_name": "mpmath-tests.tar",
+      "file_name": "mpmath-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "mpmath-tests",
       "package_type": "package",
-      "sha256": "ed57401c5d0f9feb1603b0ffbd088097adf87372e330e1e2eee1e1622221257e",
+      "sha256": "9ce6025375360f813112c453ec9985c5405a7185b212c8fa425341b04e5f1436",
       "unvendored_tests": false,
       "version": "1.4.1"
     },
@@ -2305,7 +2308,7 @@
       "install_dir": "site",
       "name": "msgpack",
       "package_type": "package",
-      "sha256": "7888085522053f041fe9c6b1aa5053e90444ea020562dd1097fc58282c7bec07",
+      "sha256": "fd899cf78caf843d929a755bd912ecf255e33fe6d651bb4c8362559ad0672128",
       "unvendored_tests": false,
       "version": "1.1.2"
     },
@@ -2318,7 +2321,7 @@
       "install_dir": "site",
       "name": "msgspec",
       "package_type": "package",
-      "sha256": "c83b7ee0a54570ef95f02c5a665355dbade5fb476b9edd1433335e1272238bb2",
+      "sha256": "946cf89e51388e48c5ac393c94783517eaa4a5c67ffde6fb12375aaa5d1704ec",
       "unvendored_tests": false,
       "version": "0.20.0"
     },
@@ -2337,7 +2340,7 @@
       "install_dir": "site",
       "name": "msprime",
       "package_type": "package",
-      "sha256": "39a9c4f5a9158a7a6235cce55c016943d3dc2b39f7b25b8c81046fc1970db300",
+      "sha256": "8d32907714deb5b06818f5d1ad5fbf9cac81a64089c5fecdf66703ee57903458",
       "unvendored_tests": false,
       "version": "1.4.1"
     },
@@ -2350,7 +2353,7 @@
       "install_dir": "site",
       "name": "multidict",
       "package_type": "package",
-      "sha256": "c2a38d453cafdc024c05cfcf199a86d323aa103e53d2c87060695ba8ea108319",
+      "sha256": "18c85230473f7184d5e062c63e122251fc412f0551d037d324300ccabf2a4e19",
       "unvendored_tests": false,
       "version": "6.7.1"
     },
@@ -2366,7 +2369,7 @@
       "install_dir": "site",
       "name": "munch",
       "package_type": "package",
-      "sha256": "6179e44ed0dcf51ca2a261e0488b82c4ca75a26c1785586c787dac5909caccc9",
+      "sha256": "49ebbe0af22148f89562d01ad29cb76494930a6ef55d6fa78af4e058933ee3f8",
       "unvendored_tests": false,
       "version": "4.0.0"
     },
@@ -2382,7 +2385,7 @@
       "install_dir": "site",
       "name": "mypy",
       "package_type": "package",
-      "sha256": "d4d4e1ad30335236cb6aca2d7c3cdfcfa15195fc7e5a6d6b93e6e2b39b81a963",
+      "sha256": "930353bf544c92f554e81e5c5ee8140f8278860737379c9bd43d127602e58a0e",
       "unvendored_tests": true,
       "version": "1.19.1"
     },
@@ -2390,14 +2393,27 @@
       "depends": [
         "mypy"
       ],
-      "file_name": "mypy-tests.tar",
+      "file_name": "mypy-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "mypy-tests",
       "package_type": "package",
-      "sha256": "7cf7c14d40069e7b5d8f9471a0d1b65df5e9d3710d879ac9c65b909872f2e21d",
+      "sha256": "00f43482274aca1ef9a98f5857d2025f8b1365f510d4ecf822609b32b842ff72",
       "unvendored_tests": false,
       "version": "1.19.1"
+    },
+    "mysqlclient": {
+      "depends": [],
+      "file_name": "mysqlclient-2.2.8-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "imports": [
+        "MySQLdb"
+      ],
+      "install_dir": "site",
+      "name": "mysqlclient",
+      "package_type": "package",
+      "sha256": "962ad4af0ba0a5a22e5ebed1d95e1a973bf4b424755f46377113fd8ff381ee46",
+      "unvendored_tests": false,
+      "version": "2.2.8"
     },
     "narwhals": {
       "depends": [],
@@ -2408,7 +2424,7 @@
       "install_dir": "site",
       "name": "narwhals",
       "package_type": "package",
-      "sha256": "d4a958aa61fca388a6f93ab733c4c45ebee05aaaf8e1cfb97d51987e0399f0bc",
+      "sha256": "70bbc6356b4efc84e498e03e038156d6ecaf3633606df48cd55d8d406bd03ede",
       "unvendored_tests": false,
       "version": "2.18.1"
     },
@@ -2421,7 +2437,7 @@
       "install_dir": "site",
       "name": "ndindex",
       "package_type": "package",
-      "sha256": "0381ba4e0aa7b15b9a659d8735c2da98e5bd59f02c42273c3eb80d00000df4f2",
+      "sha256": "0b63af87af6c537b7e88e81f02d3ad8304116c24467f765047c09144fca61550",
       "unvendored_tests": true,
       "version": "1.10.1"
     },
@@ -2429,12 +2445,12 @@
       "depends": [
         "ndindex"
       ],
-      "file_name": "ndindex-tests.tar",
+      "file_name": "ndindex-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "ndindex-tests",
       "package_type": "package",
-      "sha256": "90cb33fcde8f34aa22f3bba7e36f2f9a54b7d956cf055a486c3e40e9adfbd7b7",
+      "sha256": "af51566cb000e67ca0f9d3e7cc7fd8fd4cb3026012341ab838bb14434fcd8eb9",
       "unvendored_tests": false,
       "version": "1.10.1"
     },
@@ -2452,7 +2468,7 @@
       "install_dir": "site",
       "name": "netcdf4",
       "package_type": "package",
-      "sha256": "f3b876051eaa947c22909c180240116f579a4f057c210d4336488f4a190d9909",
+      "sha256": "5f221ffc58eaa5724a0a943f53052d2e499b5d50702cbc8dd83c6e51969bad61",
       "unvendored_tests": false,
       "version": "1.7.4"
     },
@@ -2470,7 +2486,7 @@
       "install_dir": "site",
       "name": "networkx",
       "package_type": "package",
-      "sha256": "de0354124c06f1b24dbad90defacf49764ab04dd616a13b685493670e199755c",
+      "sha256": "adaee63a7a2088b1bad68ceb2486a8e7fa7dc43b8a90d27de91dd36e2f058126",
       "unvendored_tests": true,
       "version": "3.6.1"
     },
@@ -2478,12 +2494,12 @@
       "depends": [
         "networkx"
       ],
-      "file_name": "networkx-tests.tar",
+      "file_name": "networkx-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "networkx-tests",
       "package_type": "package",
-      "sha256": "757b17ecfbd4a7f917d813ff976a4283e20c7971cfac4ffa8326d81da21a7ab8",
+      "sha256": "c2ea791af47c85ca0c571be73dd2cae81ffb439c2109d52350ab70cf8798b399",
       "unvendored_tests": false,
       "version": "3.6.1"
     },
@@ -2496,7 +2512,7 @@
       "install_dir": "site",
       "name": "newick",
       "package_type": "package",
-      "sha256": "7cfae654b5249f3073285fcfd41a741e025da374bcefd178a4983477b439652d",
+      "sha256": "0c7333b84ea803870388dfccb4567d0ba3d6807553f12ac16ce5d1e8e591aa88",
       "unvendored_tests": false,
       "version": "1.11.0"
     },
@@ -2509,7 +2525,7 @@
       "install_dir": "site",
       "name": "nh3",
       "package_type": "package",
-      "sha256": "beac0668523837dffece22490f091d52df17030d14eb6cae85678f5a84b5ecf5",
+      "sha256": "520347186b2f80d4cb71eef1eaec5d1cdeeac96c771ec45780af7be1fc931312",
       "unvendored_tests": false,
       "version": "0.3.4"
     },
@@ -2524,7 +2540,7 @@
       "install_dir": "site",
       "name": "nlopt",
       "package_type": "package",
-      "sha256": "84f992771a7c4d7e09990f19c095aa93ecf6fbdab670a0a878ead54ba407b8ba",
+      "sha256": "d8584e9ab1abdd33b6d6d0d4f5507916aea03f361bc1b66c875cdb0d541b96b9",
       "unvendored_tests": false,
       "version": "2.9.1"
     },
@@ -2539,7 +2555,7 @@
       "install_dir": "site",
       "name": "nltk",
       "package_type": "package",
-      "sha256": "dc1050a5aec8f3babaa7a6995bc194f81bad637bcfcff0b70527d685d7071896",
+      "sha256": "7e4d15bcc87e7156cfac1832fa50522fa74f7c7742f95f7986f8d4daa2b75a26",
       "unvendored_tests": true,
       "version": "3.9.4"
     },
@@ -2547,12 +2563,12 @@
       "depends": [
         "nltk"
       ],
-      "file_name": "nltk-tests.tar",
+      "file_name": "nltk-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "nltk-tests",
       "package_type": "package",
-      "sha256": "8ef4b2dcc0144c4cf6b5f9f6b4d07186ccce60ff116c1f3ec944bc1c6bb1f28c",
+      "sha256": "f19dc1f13e82d90e310c76fec706341842ccd3278762170e492afc8e11a1619a",
       "unvendored_tests": false,
       "version": "3.9.4"
     },
@@ -2568,7 +2584,7 @@
       "install_dir": "site",
       "name": "numcodecs",
       "package_type": "package",
-      "sha256": "0e796eafa0bf5a563a34406bbed9963ee116b14e6c539a853a266b30e3c35860",
+      "sha256": "3e005ff8f820f15de1b516408d693988019aedbfe4d49bfc73c58d3af9bfd42a",
       "unvendored_tests": true,
       "version": "0.15.1"
     },
@@ -2576,40 +2592,40 @@
       "depends": [
         "numcodecs"
       ],
-      "file_name": "numcodecs-tests.tar",
+      "file_name": "numcodecs-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "numcodecs-tests",
       "package_type": "package",
-      "sha256": "70f55a3708eee999ad7540c75ee1bee0467d409e29cd4b0684745fb325db6dda",
+      "sha256": "c19333fe176a6c46133a18dac0b42c140680ebe4ef28f2fe7ab4a49d9e4a285b",
       "unvendored_tests": false,
       "version": "0.15.1"
     },
     "numpy": {
       "depends": [],
-      "file_name": "numpy-2.4.3-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "file_name": "numpy-2.4.6-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
       "imports": [
         "numpy"
       ],
       "install_dir": "site",
       "name": "numpy",
       "package_type": "package",
-      "sha256": "0cad9c1b91f0082e4f959bc0e0bf5835a2efbba6ab3b1e9d1fe6e7e564cca98e",
+      "sha256": "32959d4137cec8143d75016d029281df3d2e80a232896ed903c2b59e1c44ee9f",
       "unvendored_tests": false,
-      "version": "2.4.3"
+      "version": "2.4.6"
     },
     "numpy-tests": {
       "depends": [],
-      "file_name": "numpy_tests-2.4.3-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "file_name": "numpy_tests-2.4.6-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
       "imports": [
         "numpy-tests"
       ],
       "install_dir": "site",
       "name": "numpy-tests",
       "package_type": "package",
-      "sha256": "0f8d0a18c19c75cb7e2ee1d2f53cedb377284092995e636484711211c7f4c6f2",
+      "sha256": "ece2e8fcd003d2c73a2f94f47e8cb158adf46eabf655b754a538623ad5aba6ef",
       "unvendored_tests": false,
-      "version": "2.4.3"
+      "version": "2.4.6"
     },
     "openai": {
       "depends": [
@@ -2627,7 +2643,7 @@
       "install_dir": "site",
       "name": "openai",
       "package_type": "package",
-      "sha256": "365c3b95509e66a2303130a94f6a66d78e4260d1922ddca272b1d397b299a581",
+      "sha256": "c4a393c0cf58b65344471c0523c19f4bf91c84cd65bc93fcb48ff7c390869ba5",
       "unvendored_tests": false,
       "version": "2.30.0"
     },
@@ -2642,7 +2658,7 @@
       "install_dir": "site",
       "name": "opencv-python",
       "package_type": "package",
-      "sha256": "7aff09fdabbb4c34b0df6178cfdfee19d32c2fafb042f4270cff84d3165e47ef",
+      "sha256": "0fa26edef0801ec27d17dcbb36ddbb1f46d0490d557c0adf66b02751fd55fad3",
       "unvendored_tests": false,
       "version": "4.11.0.86"
     },
@@ -2659,7 +2675,7 @@
       "install_dir": "site",
       "name": "optlang",
       "package_type": "package",
-      "sha256": "87eb845e51ad93d4812c13ec312bec06bc352e018cac7619ea0e2e34bebc5674",
+      "sha256": "14ead95511b2a0f18fb8e871a2a41fc6826ac3ff66e2e88de11518e442c7a5ea",
       "unvendored_tests": true,
       "version": "1.9.0"
     },
@@ -2667,12 +2683,12 @@
       "depends": [
         "optlang"
       ],
-      "file_name": "optlang-tests.tar",
+      "file_name": "optlang-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "optlang-tests",
       "package_type": "package",
-      "sha256": "4aa7bc7eb9cc97be969f2ee6a32b750dfa30213b89f1fa4d140bb32fb77cdef4",
+      "sha256": "4db4050b8de94b27530e1852ca65fba8922a0f2421510db7e9241b7fae102d06",
       "unvendored_tests": false,
       "version": "1.9.0"
     },
@@ -2685,7 +2701,7 @@
       "install_dir": "site",
       "name": "orjson",
       "package_type": "package",
-      "sha256": "8de621cd40c20b316db1fcf7981807f5125a0dc7e65cac8b5c6856ea5f5f247d",
+      "sha256": "bef96b242b2fdea18787f88854e6f3ea26b98fd25e2c8c4ee4d0d19db83403a7",
       "unvendored_tests": false,
       "version": "3.11.8"
     },
@@ -2698,7 +2714,7 @@
       "install_dir": "site",
       "name": "packaging",
       "package_type": "package",
-      "sha256": "2719239437268bcea22845651a242f2c252e2ed984645161dd203546f2a52219",
+      "sha256": "f58ad9d3cde3f3051e3bc82df1db19ff0aa940439dfd5f5d470da61c5ea033bf",
       "unvendored_tests": false,
       "version": "26.1"
     },
@@ -2715,7 +2731,7 @@
       "install_dir": "site",
       "name": "pandas",
       "package_type": "package",
-      "sha256": "51475a2026084c3b600566658fffc95efc5a71593472ab8a561d92a504a15a3e",
+      "sha256": "99cef063109bb03956af3987b2351c4d6615060732597e224e9fc49ecd345392",
       "unvendored_tests": true,
       "version": "3.0.2"
     },
@@ -2723,12 +2739,12 @@
       "depends": [
         "pandas"
       ],
-      "file_name": "pandas-tests.tar",
+      "file_name": "pandas-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "pandas-tests",
       "package_type": "package",
-      "sha256": "0dd88507dfe8ab502e68ac679b2b1d0187b3490b9c1f65aeb8df020b091ff3f0",
+      "sha256": "868701b465e48e6d05da7a0fc253d1655c96bc0b8a5a6c01b13d4beff5bcbc07",
       "unvendored_tests": false,
       "version": "3.0.2"
     },
@@ -2741,7 +2757,7 @@
       "install_dir": "site",
       "name": "parso",
       "package_type": "package",
-      "sha256": "31fad5b0c039c6769850f94b6c7289a738371dbc1b514f497fe997c0c3d90217",
+      "sha256": "759953027815d4cd9c3cfbc677ff58da463ea311d830dbe59ba63df85e32ff49",
       "unvendored_tests": false,
       "version": "0.8.6"
     },
@@ -2757,7 +2773,7 @@
       "install_dir": "site",
       "name": "patsy",
       "package_type": "package",
-      "sha256": "b47a353700dee69323fbc56dff35e19075b0f02537b3aafa0d4dd2d702af4598",
+      "sha256": "fb99cbb27bf444242dfa54825da5b1ce3666ff4dd62a66138f9ab16ba8686956",
       "unvendored_tests": true,
       "version": "1.0.2"
     },
@@ -2765,12 +2781,12 @@
       "depends": [
         "patsy"
       ],
-      "file_name": "patsy-tests.tar",
+      "file_name": "patsy-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "patsy-tests",
       "package_type": "package",
-      "sha256": "897dc50dfd17fa5e83e7c357a34e5ddace039865006c8cb92ad8528b3fd32a0f",
+      "sha256": "82927610d9e30c6ce5eaf4d616abe647ee6558e3d41d3dce75803905e6372ee0",
       "unvendored_tests": false,
       "version": "1.0.2"
     },
@@ -2785,7 +2801,7 @@
       "install_dir": "site",
       "name": "pcodec",
       "package_type": "package",
-      "sha256": "ff3f7669f78213b7b9c048012cdec96d64d44ae734f02566055a54bd61dedce4",
+      "sha256": "8132f03a09e6aad88e63c9cf552af606c855dd350517b2781fb05a7f55fd7bb9",
       "unvendored_tests": false,
       "version": "1.0.1"
     },
@@ -2798,7 +2814,7 @@
       "install_dir": "site",
       "name": "peewee",
       "package_type": "package",
-      "sha256": "5d15c6e19fa05301e5be1e5361da8c51b531f12ca206fe7ff6faabc06fb42e81",
+      "sha256": "4d5da0b0dcc4b64d6566bf9fe130190de3549b15ac992d56bd6831f57f813de6",
       "unvendored_tests": true,
       "version": "4.0.4"
     },
@@ -2806,12 +2822,12 @@
       "depends": [
         "peewee"
       ],
-      "file_name": "peewee-tests.tar",
+      "file_name": "peewee-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "peewee-tests",
       "package_type": "package",
-      "sha256": "997d8f93ed6223b35840ced7d06fda2a0da0752380ab3ebfdba69978af8087c3",
+      "sha256": "59f499323992e92deacb0011264bb83c86a7716eede0be7b3ce266f43c581d2c",
       "unvendored_tests": false,
       "version": "4.0.4"
     },
@@ -2829,7 +2845,7 @@
       "install_dir": "site",
       "name": "phispy",
       "package_type": "package",
-      "sha256": "1ab164679688cb4be5cb50adff229cb62c1a9c961f9535ccdb60f1df5b0f9b4b",
+      "sha256": "929ffe734bbceaaf0d66fac3406aea4d28ba098dd03bd9733caa765e418b4d8b",
       "unvendored_tests": false,
       "version": "5.0.6"
     },
@@ -2845,7 +2861,7 @@
       "install_dir": "site",
       "name": "pi-heif",
       "package_type": "package",
-      "sha256": "72c6a8e9496d4e27dc46a4881a0b48ca3f83b8f30390812450271d582ef1d7d7",
+      "sha256": "21f311ad0000da5b480d8b5cd9ec036bcd870a3aae050c20835621a3d9bd120a",
       "unvendored_tests": false,
       "version": "1.3.0"
     },
@@ -2858,7 +2874,7 @@
       "install_dir": "site",
       "name": "Pillow",
       "package_type": "package",
-      "sha256": "a50d83a8a76d646768e99e93ed5bf365d0b83563fd8b597e77562e75c8f575a9",
+      "sha256": "18b0c6a423b9b9ffe0b6679f8ebe9dc619d557c5647bfda449583d276d79d422",
       "unvendored_tests": false,
       "version": "12.2.0"
     },
@@ -2874,7 +2890,7 @@
       "install_dir": "site",
       "name": "pillow-heif",
       "package_type": "package",
-      "sha256": "b5bd2840cb5fcc119f84b358edcf5cd807f7e4b806f85727cec92ed6e0a4b723",
+      "sha256": "b64d6af46327ffd44ffe6c91652ab7cdc69eade77e48dece9b43cec576e753b4",
       "unvendored_tests": false,
       "version": "1.3.0"
     },
@@ -2887,7 +2903,7 @@
       "install_dir": "site",
       "name": "pkgconfig",
       "package_type": "package",
-      "sha256": "81157722e71ec21c4aca36e97140eb92f44152fc765421e9cbfcddb3b3cc9e6c",
+      "sha256": "79bbfddea0cdf26b5fbf643de41a1b7edccc782ac1c418a725089fc91bb5c85f",
       "unvendored_tests": false,
       "version": "1.6.0"
     },
@@ -2900,7 +2916,7 @@
       "install_dir": "site",
       "name": "platformdirs",
       "package_type": "package",
-      "sha256": "df6b888248eaf3d0ae8938f73c00a57755d66df97b6f8a280f5332cae626aa12",
+      "sha256": "991b73160857f8589b3f6ac26ed993f217596e405e2218abc4d8d92b458cc6a4",
       "unvendored_tests": false,
       "version": "4.9.4"
     },
@@ -2913,7 +2929,7 @@
       "install_dir": "site",
       "name": "pluggy",
       "package_type": "package",
-      "sha256": "8358dcb4259589a6dbb54b42d0c437801bac4c69e843e617e3b529e9b7926fda",
+      "sha256": "191740621d1c50382a331fdee8d644342a8409ea70e46188ca93ad79f78fa199",
       "unvendored_tests": false,
       "version": "1.6.0"
     },
@@ -2926,7 +2942,7 @@
       "install_dir": "site",
       "name": "ply",
       "package_type": "package",
-      "sha256": "aada8dd65148100455fbdead843a4aabff4c412c6c3ea3efd32393be5c9bf0f2",
+      "sha256": "d5afeb676dc0ca786a0f4d85c97bf68062b0f21e1b839ac15f3617f500103c9c",
       "unvendored_tests": false,
       "version": "3.11"
     },
@@ -2939,7 +2955,7 @@
       "install_dir": "site",
       "name": "polars",
       "package_type": "package",
-      "sha256": "3eefe347ffa293521fe54b25b4bd89baea72017eb0738c23dec9028643f66b1b",
+      "sha256": "a1d4cb332059742fed414d8c3fce7590445f36628eb6aaeec86837980b62850e",
       "unvendored_tests": false,
       "version": "1.33.1"
     },
@@ -2954,7 +2970,7 @@
       "install_dir": "site",
       "name": "prompt_toolkit",
       "package_type": "package",
-      "sha256": "a9319fb4f0bd1a1186ff8d47cb06674de431c594f5982ff0fa2bfd57b92a1d04",
+      "sha256": "baec31bee7497706f62615fd1f4a0adcc3ac07aaa428c605898e385417e0e500",
       "unvendored_tests": false,
       "version": "3.0.52"
     },
@@ -2967,7 +2983,7 @@
       "install_dir": "site",
       "name": "propcache",
       "package_type": "package",
-      "sha256": "0110ae103d00b3993dc5c0cf4fb8904239875a62c4a70d24674a118d03a54a9c",
+      "sha256": "3aeda4bba82ff5883018b43ff2ae052765fd92ed40fb6157b025708e9adbf2d4",
       "unvendored_tests": false,
       "version": "0.4.1"
     },
@@ -2980,9 +2996,37 @@
       "install_dir": "site",
       "name": "protobuf",
       "package_type": "package",
-      "sha256": "2337db4f407b60eb09fb041275d865b7cf8c4b5af66a410fb21b4ae2f4aefb66",
+      "sha256": "f5c1f0188c222d716c7844de6282dc646eda6b456cb604206d1f5dfd3708761f",
       "unvendored_tests": false,
       "version": "7.34.1"
+    },
+    "psycopg": {
+      "depends": [
+        "psycopg-c"
+      ],
+      "file_name": "psycopg-3.3.4-py3-none-any.whl",
+      "imports": [
+        "psycopg"
+      ],
+      "install_dir": "site",
+      "name": "psycopg",
+      "package_type": "package",
+      "sha256": "67e03f5d1d5d0bf52a26a466ee0ccea65d79f5174b52c7bcf052ff655e10598b",
+      "unvendored_tests": false,
+      "version": "3.3.4"
+    },
+    "psycopg-c": {
+      "depends": [],
+      "file_name": "psycopg_c-3.3.4-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "imports": [
+        "psycopg_c"
+      ],
+      "install_dir": "site",
+      "name": "psycopg-c",
+      "package_type": "package",
+      "sha256": "7d524abc8311e2985cbf156429c40d7db7d0944ecb43fa0af65d39c1b2fffb97",
+      "unvendored_tests": false,
+      "version": "3.3.4"
     },
     "pure-eval": {
       "depends": [],
@@ -2993,7 +3037,7 @@
       "install_dir": "site",
       "name": "pure-eval",
       "package_type": "package",
-      "sha256": "385e27ddb09a827d352a572bbbdf57bed25f93c1385725c0d6c8d76a9247bdac",
+      "sha256": "51497667f5fae6668334b841e6c3aa090ab1f64c1c649395d60c648a8d4b7b1c",
       "unvendored_tests": false,
       "version": "0.2.3"
     },
@@ -3006,7 +3050,7 @@
       "install_dir": "site",
       "name": "py",
       "package_type": "package",
-      "sha256": "be81603a61919214bdaa4bf9962df662a221ac36a9306b0fbfef1a4188954f72",
+      "sha256": "fc395edd965f8af4ce4a13da8ab49d4dc4acb34b470e11619759eb4d22bc2fa9",
       "unvendored_tests": false,
       "version": "1.11.0"
     },
@@ -3023,7 +3067,7 @@
       "install_dir": "site",
       "name": "pyarrow",
       "package_type": "package",
-      "sha256": "5ec8dcef05b34cdc452e65d7c4e88baaa9b7ff3a91cedb00529d1715d6bf5f0b",
+      "sha256": "c087c97cac59dba80a1be23f79f242ee9c18debacf1997d450603e23a261a84d",
       "unvendored_tests": false,
       "version": "22.0.0"
     },
@@ -3036,7 +3080,7 @@
       "install_dir": "site",
       "name": "pyclipper",
       "package_type": "package",
-      "sha256": "08ac6670349bb59062b66443556a36bece92ef7d99068394cbf9ce87c6efe474",
+      "sha256": "3644f58dcb8a0e23f0f68dc3da3c35897ac63a2d870fcf1f3a216219fa7c69ad",
       "unvendored_tests": false,
       "version": "1.4.0"
     },
@@ -3049,7 +3093,7 @@
       "install_dir": "site",
       "name": "pycparser",
       "package_type": "package",
-      "sha256": "fab73d094251fa60eef1b744db416f4f1fae95b18741b207870b65aa2f3479ed",
+      "sha256": "0977ba3a753c001213dccc66c11957d7b0437a0b69885e380376c256cde7759c",
       "unvendored_tests": false,
       "version": "3.0"
     },
@@ -3062,7 +3106,7 @@
       "install_dir": "site",
       "name": "pycryptodome",
       "package_type": "package",
-      "sha256": "63a29e78ab83afc62df29b26c5fe428c3d7a05ab5e8312c14b8ec51a62f09538",
+      "sha256": "33e595030bf16622b5afc467cac5504ae91f5529c236e99e8a0ac2b4c0b90f14",
       "unvendored_tests": true,
       "version": "3.23.0"
     },
@@ -3070,12 +3114,12 @@
       "depends": [
         "pycryptodome"
       ],
-      "file_name": "pycryptodome-tests.tar",
+      "file_name": "pycryptodome-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "pycryptodome-tests",
       "package_type": "package",
-      "sha256": "7d5bac3bf76937dc5db2654b048de4721e67244613d5cd477742f7a3d71e9dc4",
+      "sha256": "b0ac2fae48373c7707819806d70b625758208727244e3ea620bff3d1ae33632e",
       "unvendored_tests": false,
       "version": "3.23.0"
     },
@@ -3093,7 +3137,7 @@
       "install_dir": "site",
       "name": "pydantic",
       "package_type": "package",
-      "sha256": "f27dd6df3cbc35ce8fdc56571bcd431e724dbee4c48aef4012a33201bf737b68",
+      "sha256": "52d15d19fbe2a62ac9b63348df7b38e5ebb186063a9b923a837dd6e43273b414",
       "unvendored_tests": false,
       "version": "2.12.5"
     },
@@ -3108,7 +3152,7 @@
       "install_dir": "site",
       "name": "pydantic_core",
       "package_type": "package",
-      "sha256": "fad0d59f3602537b4b0342ba6f1a997062b991dffe40f74722cc2b69cb95b075",
+      "sha256": "9802bd7a5e6679ec4c13be778f19f021e6147459c89cc916b913f7970f86dddb",
       "unvendored_tests": false,
       "version": "2.41.5"
     },
@@ -3121,7 +3165,7 @@
       "install_dir": "site",
       "name": "pydoc_data",
       "package_type": "package",
-      "sha256": "4d56d58cd86590088d892487b9a909cafdd139797f6c4ce5fbfe7e7e10e5f265",
+      "sha256": "55738925ca6b05acf78800d47f77eaea536bb6cd0c746ccd4a87b3ab1177f443",
       "unvendored_tests": false,
       "version": "1.0.0"
     },
@@ -3136,7 +3180,7 @@
       "install_dir": "site",
       "name": "pyerfa",
       "package_type": "package",
-      "sha256": "4965ba76433ce57e9f71962020cb4501b0c5aa00f7f68df880e835338c70bcbd",
+      "sha256": "aac4fad285eb03ffa41bcdf3fae8f8845dfa1efee7a445f5a0d5de07f7487a5f",
       "unvendored_tests": true,
       "version": "2.0.1.5"
     },
@@ -3144,12 +3188,12 @@
       "depends": [
         "pyerfa"
       ],
-      "file_name": "pyerfa-tests.tar",
+      "file_name": "pyerfa-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "pyerfa-tests",
       "package_type": "package",
-      "sha256": "36d4d9d649e639f40eb566e3b97bfa35e0d6776edaa737febc65c96b8d8a649a",
+      "sha256": "c869b4b4dad2fe8b484724229bde46f3f758af7893be2afdc38b476b471d7909",
       "unvendored_tests": false,
       "version": "2.0.1.5"
     },
@@ -3162,7 +3206,7 @@
       "install_dir": "site",
       "name": "pygame-ce",
       "package_type": "package",
-      "sha256": "cb4110ae867f54702354a50c98a8c07adb30a23fb2922421ae593c1f307b117d",
+      "sha256": "2e0756afa3a3ce42f89901b550ceed5ab29736b582a21bd0a098ced62daaca30",
       "unvendored_tests": false,
       "version": "2.5.7"
     },
@@ -3175,7 +3219,7 @@
       "install_dir": "site",
       "name": "Pygments",
       "package_type": "package",
-      "sha256": "72b3a2c9c1f6eae60e2023e19d2d706cc0a6e0b2c40cc7fd94b9264a380e7569",
+      "sha256": "30f3c928127039f39462e3690c2e0ff03977c5ee1766df0a1e9bad09a377ae8e",
       "unvendored_tests": false,
       "version": "2.20.0"
     },
@@ -3190,7 +3234,7 @@
       "install_dir": "site",
       "name": "pyheif",
       "package_type": "package",
-      "sha256": "7b4710788e8dff3a7532018eb5636cde5851a4b1d24806bb96f4c131b0f0114e",
+      "sha256": "faeabc0e7f518512e57c874d625853d0b4a6e56d950cab0354e3c100a653957d",
       "unvendored_tests": false,
       "version": "0.8.0"
     },
@@ -3216,7 +3260,7 @@
       "install_dir": "site",
       "name": "pyiceberg",
       "package_type": "package",
-      "sha256": "c6b6209a498acfe34cfb9b9b8e99e854090d33736e05e0bd6867f2a1c35f07c9",
+      "sha256": "38443b948a94b7482cedbe33506a85041527963556f389682ee77a1c6a6953e6",
       "unvendored_tests": false,
       "version": "0.11.1"
     },
@@ -3229,7 +3273,7 @@
       "install_dir": "site",
       "name": "pyinstrument",
       "package_type": "package",
-      "sha256": "34797b20f5228d961a92d9f12fca867c45fcaf35ea1d289a6c6de0dba29c6510",
+      "sha256": "7100fa0f8a57fc4d7f9890240f47d6ee0355acfe940fac3c226fe3aa738ce92f",
       "unvendored_tests": false,
       "version": "5.1.2"
     },
@@ -3245,7 +3289,7 @@
       "install_dir": "site",
       "name": "pymongo",
       "package_type": "package",
-      "sha256": "34415ef94bbfc12863dbcbca9b048d7f4d6e8dec96cf8d5c7be266278db039de",
+      "sha256": "235eac7381bc965e38316621e42400787dee2a944311b2b93f14a3eac44ae206",
       "unvendored_tests": false,
       "version": "4.16.0"
     },
@@ -3259,7 +3303,7 @@
       "install_dir": "site",
       "name": "PyMuPDF",
       "package_type": "package",
-      "sha256": "d4372bb93be6eda3ecd0ea5c203ff1522d8f177121829fe7257122de89bc1cf3",
+      "sha256": "441b6dd0e61f83ef52873b3ce84e6dbff3daf24bf821cd330d7ed060efeffe35",
       "unvendored_tests": false,
       "version": "1.27.2.2"
     },
@@ -3274,7 +3318,7 @@
       "install_dir": "site",
       "name": "pynacl",
       "package_type": "package",
-      "sha256": "5a890d6cf83d53a465dea4b9d4b168c3dbfd7b0ada201e8306d16b03166f72c7",
+      "sha256": "ab8c6df7e28a1ff6740d6bb2dd5fc61b9de19d29d97643751fe31183b49d3cab",
       "unvendored_tests": false,
       "version": "1.6.2"
     },
@@ -3287,7 +3331,7 @@
       "install_dir": "site",
       "name": "pyodide-http",
       "package_type": "package",
-      "sha256": "c1bcb12d64854b0f5365ba34e684e04c389eaa8210eb3c5312db828e26fc3e35",
+      "sha256": "d1e23a5acbddc63b7cb0128eafdf4130c95c763527500887ecabacd2df951b53",
       "unvendored_tests": false,
       "version": "0.2.2"
     },
@@ -3300,7 +3344,7 @@
       "install_dir": "site",
       "name": "pyodide-unix-timezones",
       "package_type": "package",
-      "sha256": "f2677e2cd3c636d14149a2130eeffe9d5bc30a32ed9e80ca455ca69ed23b3c17",
+      "sha256": "513e7746805c85a3d33778934d653c5db83f429f6ab26c13599ab2d55d7602b7",
       "unvendored_tests": false,
       "version": "1.0.0"
     },
@@ -3313,7 +3357,7 @@
       "install_dir": "site",
       "name": "pyparsing",
       "package_type": "package",
-      "sha256": "101eece4e324f842bf46e6f821fe5bc62d79b9ebfa3b399b6aff0e0ab0ee400f",
+      "sha256": "8c3e4bb64e23a66a4c9effc4a5a09a2aafc1db7d70b8451ba3ba5b7fe6d18dd2",
       "unvendored_tests": false,
       "version": "3.3.2"
     },
@@ -3328,7 +3372,7 @@
       "install_dir": "site",
       "name": "pyproj",
       "package_type": "package",
-      "sha256": "5b2f39f2bece8d5b69035a099c844e9fc7969801b5045c1b6928e7ba43a5a2b3",
+      "sha256": "2d6a7ca94d5fb35fdd631644a69b9eabe283c0ef9656588216b4f6ae5db0156c",
       "unvendored_tests": false,
       "version": "3.7.2"
     },
@@ -3341,7 +3385,7 @@
       "install_dir": "site",
       "name": "pyroaring",
       "package_type": "package",
-      "sha256": "7cc8d7f6fb867ad5dc7739b5a3f6e05c56f9644cc138d14b2ae7523eebfb902f",
+      "sha256": "46c34af113b0ff44d55fc33a7ccf6568a590c9b8666ce8d34223f1850cd26d63",
       "unvendored_tests": false,
       "version": "1.0.4"
     },
@@ -3354,7 +3398,7 @@
       "install_dir": "site",
       "name": "pyrodigal",
       "package_type": "package",
-      "sha256": "deffc9214cd92cb01e17796bea2efb8b76a671f1d21f3dea27e89875503163c8",
+      "sha256": "301fdc69b10af3ac5365cf824d1bd0bfbf1af8fb821336e5fa1ffe149bca87a8",
       "unvendored_tests": true,
       "version": "3.7.1"
     },
@@ -3362,12 +3406,12 @@
       "depends": [
         "pyrodigal"
       ],
-      "file_name": "pyrodigal-tests.tar",
+      "file_name": "pyrodigal-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "pyrodigal-tests",
       "package_type": "package",
-      "sha256": "483321a5e49bb0ca0138007d5b5cba910983c88e589594d608469029720a59f3",
+      "sha256": "0931f97899126060f417345d004e36c61a5f868472d39d53cc1ec82ebe290bde",
       "unvendored_tests": false,
       "version": "3.7.1"
     },
@@ -3381,7 +3425,7 @@
       "install_dir": "site",
       "name": "pyrsistent",
       "package_type": "package",
-      "sha256": "76419c4464827bcec17ac9ce1686d1d9b4a57b8e014d48d76de3f73c444c0034",
+      "sha256": "b31a9a48c82c12a54b8520694d789092463fa34269b3921970a607830c844367",
       "unvendored_tests": false,
       "version": "0.20.0"
     },
@@ -3394,7 +3438,7 @@
       "install_dir": "site",
       "name": "pysam",
       "package_type": "package",
-      "sha256": "434f380b709f4f5d7ad6164949bb42d71d6ad7410e1c00d5e904e13e4b8e0bfc",
+      "sha256": "1b9f8990b93a5b7ba03435f3f22628d7533d312811e17d2a2c22f562635c672d",
       "unvendored_tests": false,
       "version": "0.23.0"
     },
@@ -3407,7 +3451,7 @@
       "install_dir": "site",
       "name": "pyshp",
       "package_type": "package",
-      "sha256": "5c1c20f6f3877ca6ed54d6e3da0f60fb53cb090103cad427165a569d01084cfd",
+      "sha256": "02c0799b68e12e746b5f103d629029ce48fee86c9855cc390db59b0dfdedb10a",
       "unvendored_tests": false,
       "version": "3.0.3"
     },
@@ -3420,7 +3464,7 @@
       "install_dir": "site",
       "name": "pytaglib",
       "package_type": "package",
-      "sha256": "e02dbf8f0d69962664b9a049950d005e10cf8ac90ae8da9f48224dd706d43def",
+      "sha256": "a6118c8a51d14ccd43d55f45798e94ef8f155900cdde3001bb2bf975ca3f09d3",
       "unvendored_tests": false,
       "version": "3.2.0"
     },
@@ -3445,7 +3489,7 @@
       "install_dir": "site",
       "name": "pytest",
       "package_type": "package",
-      "sha256": "53053e6052c428bac5aa8d6adc9ee73077c6d10d34881d3fdffc7eb47ca0e4c8",
+      "sha256": "bebde3f51a312150e6221460986ea2488bd498114454c318f833e6fadb436ac8",
       "unvendored_tests": false,
       "version": "9.0.2"
     },
@@ -3460,7 +3504,7 @@
       "install_dir": "site",
       "name": "pytest-asyncio",
       "package_type": "package",
-      "sha256": "c477dbe5cce557b982a85f1ae0c4f65805af34b2e6d8be6ffe63a1fc1cfc1ee6",
+      "sha256": "eb77d36b105e9acdca95d926addb0f4b3bc1d32e6091eaa276899a47ba632daf",
       "unvendored_tests": false,
       "version": "0.25.3"
     },
@@ -3473,7 +3517,7 @@
       "install_dir": "site",
       "name": "pytest-benchmark",
       "package_type": "package",
-      "sha256": "265907a3ce436a612448ee6d6e39a4b36254801af17d09742a95948fcba20278",
+      "sha256": "2b7a3d510f51eb8af23855eb2c96255fe00ad83371445474cb5b4d137e88109c",
       "unvendored_tests": false,
       "version": "4.0.0"
     },
@@ -3490,7 +3534,7 @@
       "install_dir": "site",
       "name": "pytest_httpx",
       "package_type": "package",
-      "sha256": "ca7d6048cca2a641e9eeed8275d39f7a58a4d3bd7608b59b843a72cf18502485",
+      "sha256": "9f51420a6ef8b2877ef3c90ed456e94e067e368ace898b98154af221b1902902",
       "unvendored_tests": false,
       "version": "0.36.0"
     },
@@ -3505,7 +3549,7 @@
       "install_dir": "site",
       "name": "python-calamine",
       "package_type": "package",
-      "sha256": "9b4eca877e7f67fcd63b56079d856d315b5751e484a462c5e38ac1879d7a108b",
+      "sha256": "b7e98e1070aba8539a2feed4ab1c683cef83b4f623873536086bacfc8b640178",
       "unvendored_tests": false,
       "version": "0.6.2"
     },
@@ -3520,22 +3564,9 @@
       "install_dir": "site",
       "name": "python-dateutil",
       "package_type": "package",
-      "sha256": "e0dad39eec43965d30ef0dbe870617bd5a7ca795c65fda722a7ab2bbd2b747e3",
+      "sha256": "9c1d350424840e15c16450ac0b0d6007e908d266746b61d64760dd77263085af",
       "unvendored_tests": false,
       "version": "2.9.0.post0"
-    },
-    "python-flint": {
-      "depends": [],
-      "file_name": "python_flint-0.8.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
-      "imports": [
-        "flint"
-      ],
-      "install_dir": "site",
-      "name": "python-flint",
-      "package_type": "package",
-      "sha256": "41c203caaf46b5cbdc40dccf4cd210ac7f0f748a819e285c62d9a019df5a0c23",
-      "unvendored_tests": false,
-      "version": "0.8.0"
     },
     "python-flirt": {
       "depends": [],
@@ -3546,7 +3577,7 @@
       "install_dir": "site",
       "name": "python-flirt",
       "package_type": "package",
-      "sha256": "0c95b2ac87c9f788cd378a602d12dd3924bb6965cd2e38a9ad2cc4492cc97dcd",
+      "sha256": "b46b3fa55e43d2328acf72e340fc6546de65faadb36d2d5d00fb7951a8ca2aaf",
       "unvendored_tests": false,
       "version": "0.9.10"
     },
@@ -3561,7 +3592,7 @@
       "install_dir": "site",
       "name": "python-sat",
       "package_type": "package",
-      "sha256": "38cd81b473e50bd8f6bc69d957bd2cce477d5979a3b20a0099230312a97a699d",
+      "sha256": "74062d5384026809f528f551d41778fdc4aa843a3629335796b788e2adf81aee",
       "unvendored_tests": false,
       "version": "1.8.dev26"
     },
@@ -3574,7 +3605,7 @@
       "install_dir": "site",
       "name": "python-solvespace",
       "package_type": "package",
-      "sha256": "d5421127c4b63d3b497214704b4a570834c5b333e6a4819b5603e21442219beb",
+      "sha256": "33146e67e513c81c532a17e91987d9bcf7acd5bc137c39fcfdc5cf33433f71a5",
       "unvendored_tests": false,
       "version": "3.0.8"
     },
@@ -3587,7 +3618,7 @@
       "install_dir": "site",
       "name": "pytz",
       "package_type": "package",
-      "sha256": "b746aea4d621b01e8c9c5e8e3a6498daecec99f5bffa429beaf3cd6483b14f61",
+      "sha256": "c8eaf8e55b79c2a7e765bdce5c1b84e05a43a585a16a00efadd96a0b7913914e",
       "unvendored_tests": false,
       "version": "2026.1.post1"
     },
@@ -3602,7 +3633,7 @@
       "install_dir": "site",
       "name": "pywavelets",
       "package_type": "package",
-      "sha256": "87d48ef7c6fb86674c6a41d1b24b24f8fa200815ce4e226dc34f263644df4cf2",
+      "sha256": "bb0af217184f4f601f002e65b5b751d46b268552010476c5af759926045d2113",
       "unvendored_tests": true,
       "version": "1.9.0"
     },
@@ -3610,12 +3641,12 @@
       "depends": [
         "pywavelets"
       ],
-      "file_name": "pywavelets-tests.tar",
+      "file_name": "pywavelets-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "pywavelets-tests",
       "package_type": "package",
-      "sha256": "50910bf44ea60b35074ab79efeee0dc815138d7ea6222abe3193a33f8237ecb2",
+      "sha256": "bbd4e6eb4c52e75f8b36a8efab6c7c966f0e7eb6bdf367b2d84d0000f8c2c1ff",
       "unvendored_tests": false,
       "version": "1.9.0"
     },
@@ -3628,7 +3659,7 @@
       "install_dir": "site",
       "name": "pyxirr",
       "package_type": "package",
-      "sha256": "e7ec55a87a3377d6f75c3d0e2b2c4555cd9893fbf47b26a45162c72e40dbb576",
+      "sha256": "595664b3e0f89c3ebe1fd81cf7eba267e0a138c1098d1ae91047d60aa1231757",
       "unvendored_tests": false,
       "version": "0.10.8"
     },
@@ -3642,7 +3673,7 @@
       "install_dir": "site",
       "name": "pyyaml",
       "package_type": "package",
-      "sha256": "2d30008b0dac84ea05f1ba400837918826368bec76e856798f995f25c630086b",
+      "sha256": "b1447216501f0d3aef290558fe33691dd51b0839e70f9a970defb12b36d82df8",
       "unvendored_tests": false,
       "version": "6.0.3"
     },
@@ -3662,7 +3693,7 @@
       "install_dir": "site",
       "name": "rasterio",
       "package_type": "package",
-      "sha256": "e5283bdb56216058bd718d9cc63dbd22d7367450aabd5b8cafc26f4b7f67c608",
+      "sha256": "dc310197a3ebc69d9a2eb2561c3f8904e33d87b70aff2fd3acd27ee6a67c9b45",
       "unvendored_tests": false,
       "version": "1.5.0"
     },
@@ -3679,7 +3710,7 @@
       "install_dir": "site",
       "name": "rateslib",
       "package_type": "package",
-      "sha256": "68d084741e4ef2208f90222d8326906c0a4a382c37993df6f66b645798983b3d",
+      "sha256": "26672f4b21b91602c95c736d91a074ba4b3006ff02d4fbb71a8953ea984cf0f2",
       "unvendored_tests": false,
       "version": "2.7.1"
     },
@@ -3694,7 +3725,7 @@
       "install_dir": "site",
       "name": "rebound",
       "package_type": "package",
-      "sha256": "4a62db045e6684cb0346590095d5bae2e384e1376cca89a418eabc5f0834b266",
+      "sha256": "757d1721cec78f86a485954bdefb6b6f46e5fbfbc6d822fa7f9aeaa0a63ced5c",
       "unvendored_tests": false,
       "version": "4.4.7"
     },
@@ -3710,7 +3741,7 @@
       "install_dir": "site",
       "name": "reboundx",
       "package_type": "package",
-      "sha256": "37548fecf0821c1d9e5b6b6b0c03905708b6a78614235cf08075f3642755c1aa",
+      "sha256": "b477d29e5e8385114bede1e342a219011c645bebf22c4eced2977e3696334fd6",
       "unvendored_tests": false,
       "version": "4.4.1"
     },
@@ -3727,7 +3758,7 @@
       "install_dir": "site",
       "name": "referencing",
       "package_type": "package",
-      "sha256": "ae7bf99d7fc3f1f3a44a208aa00ad39f1e89037b67a2f699a11887e432e84b0f",
+      "sha256": "683d49e9c00ded55692dce5eedfa2a66c33d0dfd97c44acfaa594c7cc1d222f1",
       "unvendored_tests": true,
       "version": "0.37.0"
     },
@@ -3735,12 +3766,12 @@
       "depends": [
         "referencing"
       ],
-      "file_name": "referencing-tests.tar",
+      "file_name": "referencing-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "referencing-tests",
       "package_type": "package",
-      "sha256": "8980bd7a318df905735b13bd6c172f0c664b22015f56ef67ab203b5f62cbcd4c",
+      "sha256": "a48844c7f0426a92d7ed4649cf58ef077113b21c883e314391f882d3e11285c8",
       "unvendored_tests": false,
       "version": "0.37.0"
     },
@@ -3753,7 +3784,7 @@
       "install_dir": "site",
       "name": "regex",
       "package_type": "package",
-      "sha256": "116203af92638f05a67791cc5a217f860bfab7f6635a41cb6dce08e2691ae6bc",
+      "sha256": "16397ea15ecfe0328e817a7300abba165fca96af0c7ac021986b972509e017f6",
       "unvendored_tests": true,
       "version": "2026.3.32"
     },
@@ -3761,12 +3792,12 @@
       "depends": [
         "regex"
       ],
-      "file_name": "regex-tests.tar",
+      "file_name": "regex-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "regex-tests",
       "package_type": "package",
-      "sha256": "45165dad242c5399cb090bec7bc3e73d3b78e7475725eb31980981d6e8af2ccc",
+      "sha256": "eacd14c84365e77d4031ea76a95077a32ccf796bf1d7f5c669e2b36c16917715",
       "unvendored_tests": false,
       "version": "2026.3.32"
     },
@@ -3784,7 +3815,7 @@
       "install_dir": "site",
       "name": "requests",
       "package_type": "package",
-      "sha256": "6a7c3f883c3b3daa44f03430d812e0b2ff7b9c1714d64aef6418be0e18b51780",
+      "sha256": "bfb73901a8ce1e9545d263b9ef1fa269cc8cf7b8e3b0b04c79f61b3fadc53eb8",
       "unvendored_tests": false,
       "version": "2.33.1"
     },
@@ -3799,7 +3830,7 @@
       "install_dir": "site",
       "name": "retrying",
       "package_type": "package",
-      "sha256": "9e01636b579b24749d9f965e9004e0cd8b10d86712d43c1357827ae726d019e4",
+      "sha256": "5be6c8e2d46973e6b4f401a3b731c71c7a148633e3086993d74c850c2bb16a69",
       "unvendored_tests": false,
       "version": "1.4.2"
     },
@@ -3812,7 +3843,7 @@
       "install_dir": "site",
       "name": "rich",
       "package_type": "package",
-      "sha256": "8e7422e326746554e7f0dd20444830913208cb98e4b0ef1a129f1cc13a63763b",
+      "sha256": "30b0a715a3ce15b8b8439abcceb07c220a9862f74ae9340fc7ee67d33ca180d1",
       "unvendored_tests": false,
       "version": "14.3.3"
     },
@@ -3825,7 +3856,7 @@
       "install_dir": "site",
       "name": "rpds-py",
       "package_type": "package",
-      "sha256": "3b419aa82348a3b54e2e0c47d734bb91753175c7f75ec8e0315300728e761ceb",
+      "sha256": "2c3e22809f0e8c60326216bb080860e7a4fa00b3a91b91fbb55b3be20d9dce77",
       "unvendored_tests": false,
       "version": "0.30.0"
     },
@@ -3838,7 +3869,7 @@
       "install_dir": "site",
       "name": "ruamel.yaml",
       "package_type": "package",
-      "sha256": "eec1c6fae3e4ebf2784c05309c5238a3ca58ac2b71384ae8660fb6eb568af252",
+      "sha256": "5365da90f948b8904cf7f94d52020a316859f9426b4176f8fe93cb27ba0be810",
       "unvendored_tests": false,
       "version": "0.19.1"
     },
@@ -3853,7 +3884,7 @@
       "install_dir": "site",
       "name": "safetensors",
       "package_type": "package",
-      "sha256": "bfa0f826a4404063373e256dc48f08cf8b1b77f67371793c959bcfbadc842ce2",
+      "sha256": "92cb07b191854947e01362ba45255ee99e3be934bce75e8681e2e8a652e50ef1",
       "unvendored_tests": false,
       "version": "0.7.0"
     },
@@ -3875,7 +3906,7 @@
       "install_dir": "site",
       "name": "scikit-image",
       "package_type": "package",
-      "sha256": "ebde167f651748b29adc37d70b4ace2fe5066541c2c00e1b8a1dc99acd92c586",
+      "sha256": "512dc1b54d99c61ee4df5aa849f2cc64a3302c546a69d84a22a220c3e3b203fd",
       "unvendored_tests": true,
       "version": "0.25.2"
     },
@@ -3883,12 +3914,12 @@
       "depends": [
         "scikit-image"
       ],
-      "file_name": "scikit-image-tests.tar",
+      "file_name": "scikit-image-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "scikit-image-tests",
       "package_type": "package",
-      "sha256": "f05e2a4ac0d5be4a9ec8e15d1af25be33a9670cd3c513e116168964375b9aab2",
+      "sha256": "1de9dfbf034601847b67b32aebca377dcbba51762dd7bb4800f35bf12d2c21fd",
       "unvendored_tests": false,
       "version": "0.25.2"
     },
@@ -3905,7 +3936,7 @@
       "install_dir": "site",
       "name": "scikit-learn",
       "package_type": "package",
-      "sha256": "2ebb90e80c0efc5fe4d392197d6838878a7cd8c899c1aa59369d18d0ffe13ca9",
+      "sha256": "3c6dcc1f2afc32ece85382261b794473b22a69f8c885968835147699febc2ea3",
       "unvendored_tests": true,
       "version": "1.8.0"
     },
@@ -3913,12 +3944,12 @@
       "depends": [
         "scikit-learn"
       ],
-      "file_name": "scikit-learn-tests.tar",
+      "file_name": "scikit-learn-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "scikit-learn-tests",
       "package_type": "package",
-      "sha256": "87d182659274e4b46314902dc685efbd944c37bacb5098e0f4c53640a92b6f6e",
+      "sha256": "b5b0ef6b64f580698fa7fe0a223c8208e970a937b96a38f0456db268d21c06e4",
       "unvendored_tests": false,
       "version": "1.8.0"
     },
@@ -3933,7 +3964,7 @@
       "install_dir": "site",
       "name": "scipy",
       "package_type": "package",
-      "sha256": "4ef1569eac793bec84a92fa2eaf24eafb4529ff10c5ed87d1e335063f26142f3",
+      "sha256": "8512aee3e4b36b5a79523628d97d0d34612a366aecbb5b44a08c7ae45dd50d57",
       "unvendored_tests": true,
       "version": "1.18.0"
     },
@@ -3941,12 +3972,12 @@
       "depends": [
         "scipy"
       ],
-      "file_name": "scipy-tests.tar",
+      "file_name": "scipy-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "scipy-tests",
       "package_type": "package",
-      "sha256": "81d55b1106f90ab1c10ebe3037b48574e276ff7b9f01c9f00186b61fed590aaa",
+      "sha256": "215910dcbd7d6760edcad56ac2e30560366cf879450c5c7622592f562843c3d6",
       "unvendored_tests": false,
       "version": "1.18.0"
     },
@@ -3960,7 +3991,7 @@
       "install_dir": "site",
       "name": "screed",
       "package_type": "package",
-      "sha256": "3ddcc3126948b32aa9de96156c54041341d1b36487196c8bd669fc4cdd56791d",
+      "sha256": "4a7b4be1a4c628a7af0be760ff679c8b8d45a109ef1fd17266994012d1e7a23a",
       "unvendored_tests": true,
       "version": "1.1.3"
     },
@@ -3968,12 +3999,12 @@
       "depends": [
         "screed"
       ],
-      "file_name": "screed-tests.tar",
+      "file_name": "screed-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "screed-tests",
       "package_type": "package",
-      "sha256": "3f40e2eea4b7de7e149d0ee9ff5f1e88467fb887a002056777ce5f167ae26083",
+      "sha256": "e0c2794078bd5e9346f13d81b55affac9a6594b896ba0747e4bd16ee0b31f8de",
       "unvendored_tests": false,
       "version": "1.1.3"
     },
@@ -3986,7 +4017,7 @@
       "install_dir": "site",
       "name": "sentencepiece",
       "package_type": "package",
-      "sha256": "c86d4f7b7cbe52a4af3550ff77a5108bc06c88fa9e161fb544715e974010b3ec",
+      "sha256": "47680cf44f21ab1677f422338556d46c6379fdc64be735f4ddcad49fe687053d",
       "unvendored_tests": false,
       "version": "0.2.1"
     },
@@ -4002,7 +4033,7 @@
       "install_dir": "site",
       "name": "setuptools",
       "package_type": "package",
-      "sha256": "43e06cea3e40c5a8594b20341557153e446eec6997e031762c290e0b94639457",
+      "sha256": "5dc47f9c9e9da126476870464a9608a63134ed23a2fa587966e5091b736a338f",
       "unvendored_tests": true,
       "version": "82.0.1"
     },
@@ -4010,12 +4041,12 @@
       "depends": [
         "setuptools"
       ],
-      "file_name": "setuptools-tests.tar",
+      "file_name": "setuptools-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "setuptools-tests",
       "package_type": "package",
-      "sha256": "2e171885528f54769b9a0b881a82233b815f1dd5a40bc414bb3fd52f2ce9da63",
+      "sha256": "f03d2611e38ea64f6c8fb897a4a88fb38e8d4acf90474d069775b3545faf6c68",
       "unvendored_tests": false,
       "version": "82.0.1"
     },
@@ -4030,7 +4061,7 @@
       "install_dir": "site",
       "name": "shapely",
       "package_type": "package",
-      "sha256": "c3e30e879f92e3600819ee25adf6d7c631ab060af8332335a24311f33e935093",
+      "sha256": "6a80ae3a464fb9c7a41a3d8a7ff34644494e38f017d312cdf7720b813c92a31e",
       "unvendored_tests": true,
       "version": "2.1.2"
     },
@@ -4038,12 +4069,12 @@
       "depends": [
         "shapely"
       ],
-      "file_name": "shapely-tests.tar",
+      "file_name": "shapely-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "shapely-tests",
       "package_type": "package",
-      "sha256": "7c00b43ba494ef6ed2f294efcb898cd96e1df7329e96a6059c177919166ca575",
+      "sha256": "6ab9ac8066e986366464209744137b7190ec8a6adb11a9abad54bb7ab60ded73",
       "unvendored_tests": false,
       "version": "2.1.2"
     },
@@ -4056,7 +4087,7 @@
       "install_dir": "site",
       "name": "simplejson",
       "package_type": "package",
-      "sha256": "7280823a6b2a34b23dd91053df2582b7d81d0cdbdafab6a23f5e0545d559f4e1",
+      "sha256": "e48dd13b634777358a09aecef7e9eb677fab6149c4d94daa6c5b7ca245891d2c",
       "unvendored_tests": true,
       "version": "3.20.2"
     },
@@ -4064,12 +4095,12 @@
       "depends": [
         "simplejson"
       ],
-      "file_name": "simplejson-tests.tar",
+      "file_name": "simplejson-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "simplejson-tests",
       "package_type": "package",
-      "sha256": "a3723f4bb513efc0b8da7be330a28edfce45531ce097427eb83ec540bc7fda6a",
+      "sha256": "835751ddb7fd986c4b7a2a39fc3c4a93676aa3455ec03aa270f4fe9773df41ac",
       "unvendored_tests": false,
       "version": "3.20.2"
     },
@@ -4091,7 +4122,7 @@
       "install_dir": "site",
       "name": "sisl",
       "package_type": "package",
-      "sha256": "fffbeefb14cc84852b1244e50106ec88f32e99ecb2dc589cb7e12b6beee9b7bd",
+      "sha256": "c8c37cbee9d892c9c9a2fd5ae83f361ca3ba59f3003e9b04cb18fd21e57cdeca",
       "unvendored_tests": true,
       "version": "0.16.4"
     },
@@ -4099,12 +4130,12 @@
       "depends": [
         "sisl"
       ],
-      "file_name": "sisl-tests.tar",
+      "file_name": "sisl-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "sisl-tests",
       "package_type": "package",
-      "sha256": "d8e1443aae171a6bf40ed95f5d8e2498c6904b44ea4116465b56260ffe731358",
+      "sha256": "5f96426477accae1f086dad01b5b341ec97fa75fed97138ca8353b466ec56f87",
       "unvendored_tests": false,
       "version": "0.16.4"
     },
@@ -4117,7 +4148,7 @@
       "install_dir": "site",
       "name": "six",
       "package_type": "package",
-      "sha256": "c6681057bd87fdec57e811b8e4007bad38deea284052817fa400d542c6423e2d",
+      "sha256": "29edb1e328c61cad6ac21a2ff92c7d274a2b662eb7c12b2d147f04917b765ad6",
       "unvendored_tests": false,
       "version": "1.17.0"
     },
@@ -4132,7 +4163,7 @@
       "install_dir": "site",
       "name": "smart-open",
       "package_type": "package",
-      "sha256": "40fd425b914cbccc4ed428888946090f0332a50a96b354e756c0944bf9fe3f8d",
+      "sha256": "bc9d3a6555efee903e02ac8fe4efd6bf08f0d9ddacb185cb031abfef8ff1bad7",
       "unvendored_tests": false,
       "version": "7.5.1"
     },
@@ -4145,7 +4176,7 @@
       "install_dir": "site",
       "name": "sniffio",
       "package_type": "package",
-      "sha256": "4b7eb20cfa667229d721e3b41fd628633f7007a7296af1f731008728bd54145e",
+      "sha256": "9b1e3d091899a388ec51ecbf44a1746fbdcc4e338156d6048f27d181cdd1794c",
       "unvendored_tests": true,
       "version": "1.3.1"
     },
@@ -4153,12 +4184,12 @@
       "depends": [
         "sniffio"
       ],
-      "file_name": "sniffio-tests.tar",
+      "file_name": "sniffio-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "sniffio-tests",
       "package_type": "package",
-      "sha256": "57b04d4704244167ff6783b5ace1cfc1c20e89b77266407bf8d2049440642669",
+      "sha256": "e62fac22e1f5eb40e4f05002155a26f864bd7a3e29f2b0518387e330f746521d",
       "unvendored_tests": false,
       "version": "1.3.1"
     },
@@ -4171,7 +4202,7 @@
       "install_dir": "site",
       "name": "sortedcontainers",
       "package_type": "package",
-      "sha256": "f9fc70329a6a64a0cca46260abb486035cee345ea9e6f63263529bb05ff3c0d7",
+      "sha256": "32c2f16512e476894f29be9b880d750a4143f7aa78857c8c88f6496390ee9eed",
       "unvendored_tests": false,
       "version": "2.4.0"
     },
@@ -4187,7 +4218,7 @@
       "install_dir": "site",
       "name": "soundfile",
       "package_type": "package",
-      "sha256": "7c1e8d6572b4b850e140ec2f878e68f1f3b41bf515995f830895fc76c3d3ab1f",
+      "sha256": "bb45b0f276988232e049c3a5c5a599556288798ac56dd97ce597880484385d56",
       "unvendored_tests": false,
       "version": "0.12.1"
     },
@@ -4200,7 +4231,7 @@
       "install_dir": "site",
       "name": "soupsieve",
       "package_type": "package",
-      "sha256": "5dad54616ed5b536f4801bed57a9b87e392046869047bb83b41843ffd1152379",
+      "sha256": "2a0b6d32d0c0ca77d86403b73a8cfdd6549bf0d4194e973335f0321fc57c7ee3",
       "unvendored_tests": false,
       "version": "2.8.3"
     },
@@ -4222,7 +4253,7 @@
       "install_dir": "site",
       "name": "sourmash",
       "package_type": "package",
-      "sha256": "733fb24273fc2a9e820217dff0f22a8b6c39f889c54d6c9f4cf4f615237a6c96",
+      "sha256": "3f10b88fde1bb780363e654e9b347300a3cd2ff595764b77e46a3e8aa4cbdff4",
       "unvendored_tests": false,
       "version": "4.8.14"
     },
@@ -4237,7 +4268,7 @@
       "install_dir": "site",
       "name": "soxr",
       "package_type": "package",
-      "sha256": "4a2f6c5d3d1806be42d771a05f2b0aecd75d76b1427ef18542643296d86d8591",
+      "sha256": "21ca574ebc8f5fe15492b5a1215482fa1d05b3ee2b17b23e00f339c2353eda87",
       "unvendored_tests": false,
       "version": "0.5.0.post1"
     },
@@ -4255,7 +4286,7 @@
       "install_dir": "site",
       "name": "sparseqr",
       "package_type": "package",
-      "sha256": "740a56a33ba62304edea14de7302c9681d31e93516f68a84cb483e1cf0f5c4ae",
+      "sha256": "021c08290673d415e71603f41e73f25b8865e1b913ac77a8d96d6e7ef5ccface",
       "unvendored_tests": false,
       "version": "1.2"
     },
@@ -4270,7 +4301,7 @@
       "install_dir": "site",
       "name": "sqlalchemy",
       "package_type": "package",
-      "sha256": "c03b7fbafdc531e366a5f0060efc48bb5ca1b19269a819c84186ec2120e111fe",
+      "sha256": "efcfa0afa3f1f98fb6c883b7604d6ec916819bfdc7566cd965f475433ccf98b4",
       "unvendored_tests": true,
       "version": "2.0.48"
     },
@@ -4278,12 +4309,12 @@
       "depends": [
         "sqlalchemy"
       ],
-      "file_name": "sqlalchemy-tests.tar",
+      "file_name": "sqlalchemy-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "sqlalchemy-tests",
       "package_type": "package",
-      "sha256": "78fdeea3388971c02a61996e46640a2ce9c0ec29471b6a9826c7d977a444b959",
+      "sha256": "6f689a8474bc56874054aed4a063127c4e1bb5222cd2ac16df3872b283c04ccd",
       "unvendored_tests": false,
       "version": "2.0.48"
     },
@@ -4300,7 +4331,7 @@
       "install_dir": "site",
       "name": "stack-data",
       "package_type": "package",
-      "sha256": "aa2bcc8a9652f42a5b999d467697bd23430b6971f9304e5a877dbbcd5af8bd71",
+      "sha256": "05d35330361a91dd9f64df8a9fc33d0a60d5df0c931c75efe6a915bfca45724e",
       "unvendored_tests": false,
       "version": "0.6.3"
     },
@@ -4313,7 +4344,7 @@
       "install_dir": "site",
       "name": "starlette",
       "package_type": "package",
-      "sha256": "640965ea4168a263473c08df5d86be6e6a64625d731e60ad637796faa2173d12",
+      "sha256": "8a48d494e6bd6c12f4787c65dbfeaf71fcb8563eec2bea204c714b3ec032fa7c",
       "unvendored_tests": false,
       "version": "1.0.0"
     },
@@ -4332,7 +4363,7 @@
       "install_dir": "site",
       "name": "statsmodels",
       "package_type": "package",
-      "sha256": "cccb1d00257af36be6b5c91edcdd34f7c383bd7caa42529e4e22811700424795",
+      "sha256": "e6964de612f84421dc48ed6ec2460faa5fe544631af69d6883f5c705e5763335",
       "unvendored_tests": false,
       "version": "0.14.6"
     },
@@ -4347,7 +4378,7 @@
       "install_dir": "site",
       "name": "strictyaml",
       "package_type": "package",
-      "sha256": "a2d7a8685293a679acc5889ae6718bcc784646a6d36d8c3e4dda249dd5dae1fe",
+      "sha256": "5237a7e1c72beb06dd190346b345be1a3aba27f5f8e566934663783e2ed6c29d",
       "unvendored_tests": false,
       "version": "1.7.3"
     },
@@ -4360,7 +4391,7 @@
       "install_dir": "site",
       "name": "svgwrite",
       "package_type": "package",
-      "sha256": "49820ba085f82ecb174698dca75cf92b3bda9559eb865364f9599b535173d63b",
+      "sha256": "0d0cdb4185dca4c95f0ad2ec1c8f09a55a050d2e80b97f53bf6bdae9c291556d",
       "unvendored_tests": false,
       "version": "1.4.3"
     },
@@ -4373,7 +4404,7 @@
       "install_dir": "site",
       "name": "swiglpk",
       "package_type": "package",
-      "sha256": "b5bb2f3007210d9f572237db5046f613e434994b0c556c0125d7a7d94f6cf588",
+      "sha256": "ea232b79a4c815f109986ab2f90496709922e1cacdb4485a8148f0151e2cee0f",
       "unvendored_tests": false,
       "version": "5.0.13"
     },
@@ -4389,7 +4420,7 @@
       "install_dir": "site",
       "name": "sympy",
       "package_type": "package",
-      "sha256": "b95cce43522f14f9cf476b950a91c752e801be3369c1c1fc043a49f0a24bc2e4",
+      "sha256": "28f3303c4409a3c3983409040b9e88b750a70da89cb56968fbf16327f7408f0e",
       "unvendored_tests": true,
       "version": "1.14.0"
     },
@@ -4397,12 +4428,12 @@
       "depends": [
         "sympy"
       ],
-      "file_name": "sympy-tests.tar",
+      "file_name": "sympy-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "sympy-tests",
       "package_type": "package",
-      "sha256": "ade6e104f4b0288424c6d62d72130217082ff9207ca97abe7423ee93f24bf021",
+      "sha256": "b62988e74e76773277a1ca63c41b3495acded275bada07586dc92e0785818d6e",
       "unvendored_tests": false,
       "version": "1.14.0"
     },
@@ -4415,7 +4446,7 @@
       "install_dir": "site",
       "name": "tblib",
       "package_type": "package",
-      "sha256": "8bfb3050d4afae5a674e83e81d38a604b14664c07d2d593517689fed4bb1b7b8",
+      "sha256": "913a7a66c51019c2ed974759b2aa125a069feb259670adac7e4ca803de0417be",
       "unvendored_tests": false,
       "version": "3.2.2"
     },
@@ -4428,7 +4459,7 @@
       "install_dir": "site",
       "name": "termcolor",
       "package_type": "package",
-      "sha256": "1fa53e6f7718ab7fc6fcd043e02ec83d558f0e8d7541239e846cf431bc90fe7a",
+      "sha256": "b3ad4cb58786819d002c301825fcf7c2a5454c95f9f4a07b7b5f2778c3f7260a",
       "unvendored_tests": false,
       "version": "3.3.0"
     },
@@ -4441,7 +4472,7 @@
       "install_dir": "site",
       "name": "texttable",
       "package_type": "package",
-      "sha256": "bdd98999310f95b7ca63cdd0ab1da5da04e1cc573dc6796e2aa40368c86452ff",
+      "sha256": "43949b2d78fa3097b5d5b4222b0a53171084eb4c6eeb8497d5228c98bbee7960",
       "unvendored_tests": false,
       "version": "1.7.0"
     },
@@ -4454,7 +4485,7 @@
       "install_dir": "site",
       "name": "texture2ddecoder",
       "package_type": "package",
-      "sha256": "4f6ef53171d940b06358d3cd3271ba9cc7222bddb9dbeaf7c2ee22e7fafb7e63",
+      "sha256": "cd4036a421251da0caeb90930f3ec94bcfabe7a8e3d752cfb1882c9c8a53cb5d",
       "unvendored_tests": false,
       "version": "1.0.6"
     },
@@ -4467,7 +4498,7 @@
       "install_dir": "site",
       "name": "threadpoolctl",
       "package_type": "package",
-      "sha256": "3aaf76e073749216354f3bf597768410ed3d2575e103e79ecaaf100b84e4ac6e",
+      "sha256": "317b1ec4423325c9c783d34145507c9304eb0b61f406c1a41db9a8776404843e",
       "unvendored_tests": false,
       "version": "3.6.0"
     },
@@ -4484,7 +4515,7 @@
       "install_dir": "site",
       "name": "tiktoken",
       "package_type": "package",
-      "sha256": "719895996dd047ade3c4083fcba9c327be8b3d492b21adca3e94e6eb398863c5",
+      "sha256": "9435765a22ff96dd326d8f71a44afd2e46752ceb5a6918bc2c29b2a4584bd433",
       "unvendored_tests": false,
       "version": "0.12.0"
     },
@@ -4497,7 +4528,7 @@
       "install_dir": "site",
       "name": "tomli",
       "package_type": "package",
-      "sha256": "61330565b8eddb0a8a68887d87c00e56ec3334c282531d0816111bec2c766784",
+      "sha256": "b5020d58b7601efaf3cb5bb424fe00a81e7031b90f2747c2a7af7678b0aa2bac",
       "unvendored_tests": false,
       "version": "2.4.1"
     },
@@ -4510,7 +4541,7 @@
       "install_dir": "site",
       "name": "tomli-w",
       "package_type": "package",
-      "sha256": "ba6f659de7fc740ded43502cdb3d8e75383822eee44ab57dfaca6321f60a9177",
+      "sha256": "ac914446553ec0a797c8d3161228195db3886475ab022cc02101b4a18f8e868c",
       "unvendored_tests": false,
       "version": "1.2.0"
     },
@@ -4524,7 +4555,7 @@
       "install_dir": "site",
       "name": "toolz",
       "package_type": "package",
-      "sha256": "656b542c0fcb8b2275aee1e434856d5649666704974dede177850b9dd9f74066",
+      "sha256": "600c142fcdf7a9ce0072d38df1d38ce28d71fc5e84ed0d4aed6ca6737d0de349",
       "unvendored_tests": true,
       "version": "1.1.0"
     },
@@ -4532,12 +4563,12 @@
       "depends": [
         "toolz"
       ],
-      "file_name": "toolz-tests.tar",
+      "file_name": "toolz-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "toolz-tests",
       "package_type": "package",
-      "sha256": "90295298d48b1e5b5f10d22586753709ecb5683ca87152d0e9ef01b376191303",
+      "sha256": "7887b7c401a4aafbb45fb10a4559bc6756f324748f6832ac9da93d1619d5b63d",
       "unvendored_tests": false,
       "version": "1.1.0"
     },
@@ -4550,7 +4581,7 @@
       "install_dir": "site",
       "name": "tqdm",
       "package_type": "package",
-      "sha256": "acf8cffe10944a27f1689b3498cf1e5e426b27018f609a05b058812b52b74226",
+      "sha256": "f08716f1e1307718c01c03748408ffed22cbbe3c2a098a0d0cb8f616e0642a63",
       "unvendored_tests": false,
       "version": "4.67.3"
     },
@@ -4563,7 +4594,7 @@
       "install_dir": "site",
       "name": "traitlets",
       "package_type": "package",
-      "sha256": "4dde644e216b0f7c5c2afc8692ddd02354a838e11d47b5bab74718ca8e94e725",
+      "sha256": "b767faf502b685952680136221f7c65792bb801ec5b2ed310b865e3c3b083b82",
       "unvendored_tests": true,
       "version": "5.14.3"
     },
@@ -4571,12 +4602,12 @@
       "depends": [
         "traitlets"
       ],
-      "file_name": "traitlets-tests.tar",
+      "file_name": "traitlets-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "traitlets-tests",
       "package_type": "package",
-      "sha256": "fa4e51e507f795d428ee6a9940d139dc249265deb93b56cd82ecafd240a2176f",
+      "sha256": "826abd7b140a97853d0f119a6acef8be51e980b44a34ddf91406ec832997cc2c",
       "unvendored_tests": false,
       "version": "5.14.3"
     },
@@ -4589,7 +4620,7 @@
       "install_dir": "site",
       "name": "traits",
       "package_type": "package",
-      "sha256": "cb2c6d93b837c53bb4b76d9375f1ab65b5d36087a6629b5d4366b1e2df647f05",
+      "sha256": "183cf6f91c89b69d74903273ffb01235cbb18d48ed89e3703e1f8a7cae630873",
       "unvendored_tests": true,
       "version": "7.1.0"
     },
@@ -4597,12 +4628,12 @@
       "depends": [
         "traits"
       ],
-      "file_name": "traits-tests.tar",
+      "file_name": "traits-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "traits-tests",
       "package_type": "package",
-      "sha256": "a22e747198bd19f5a55f74087f767c6c5cb0a964710e58fabc62afd8d91be1e0",
+      "sha256": "c6550147418df0320e40cfdbffc1767139c8d5b8b8cde9089942041c390950c1",
       "unvendored_tests": false,
       "version": "7.1.0"
     },
@@ -4615,7 +4646,7 @@
       "install_dir": "site",
       "name": "tree-sitter",
       "package_type": "package",
-      "sha256": "0e4f03afd3a7f51eddbc3459768e0ffc9c809189e55b4f3c48663a97efb91b88",
+      "sha256": "ff808464dedba6ad3866e5527847dbe5d4c47a71cad0081364a9f067a18a96ab",
       "unvendored_tests": false,
       "version": "0.23.2"
     },
@@ -4630,7 +4661,7 @@
       "install_dir": "site",
       "name": "tree-sitter-go",
       "package_type": "package",
-      "sha256": "06ec0c72f7cbaf2d1dc67d7ead46aa28b8fcfc995ac6b46805bf653719808798",
+      "sha256": "da20ae45f3454991523ef0324dba3b65c1d818dce7fe0ec5bfb0b90a98e8496f",
       "unvendored_tests": false,
       "version": "0.23.3"
     },
@@ -4645,7 +4676,7 @@
       "install_dir": "site",
       "name": "tree-sitter-java",
       "package_type": "package",
-      "sha256": "df91be29258af8437a7866690d56c9c575cab79d106acdce51cddde46fef6bdf",
+      "sha256": "a721984589ad29819d31d510bfcab033cc77b7258b4f418141635597f3415208",
       "unvendored_tests": false,
       "version": "0.23.4"
     },
@@ -4660,7 +4691,7 @@
       "install_dir": "site",
       "name": "tree-sitter-python",
       "package_type": "package",
-      "sha256": "9dfae85ce236618342fbb6650ae95c6e36cc084ad4f12e57689789fb4a592059",
+      "sha256": "e0df3f37eba381081afd63160f00d0e08088db0aef04e98bf7c828794c969168",
       "unvendored_tests": false,
       "version": "0.23.4"
     },
@@ -4677,7 +4708,7 @@
       "install_dir": "site",
       "name": "tskit",
       "package_type": "package",
-      "sha256": "29dd11241a2d3c3d6a2ba5944f8362d0d6f32548379335b08d710a1d9d89d758",
+      "sha256": "a1c005d3be127f272cfb300b59c7d687dc293f8d96dfc2adb68b297373a4463a",
       "unvendored_tests": false,
       "version": "1.0.2"
     },
@@ -4690,7 +4721,7 @@
       "install_dir": "site",
       "name": "typing-extensions",
       "package_type": "package",
-      "sha256": "213fc049fb8bbea5f8369b06c7270cdddd634c2c000f721ce445e22473d66fd5",
+      "sha256": "3f122252f0d498d80f7a684cc1d8baa6fa65b75e99447d77a6dd90e0f04302e3",
       "unvendored_tests": false,
       "version": "4.15.0"
     },
@@ -4703,7 +4734,7 @@
       "install_dir": "site",
       "name": "typing-inspection",
       "package_type": "package",
-      "sha256": "b9719c895b2b6123042043573cbd110c8712d508201dcb3126c378a6face49cb",
+      "sha256": "c9270737700f07813e1a87b63138993997afedbd2548f20fa739cc398f1b9f2f",
       "unvendored_tests": false,
       "version": "0.4.2"
     },
@@ -4716,7 +4747,7 @@
       "install_dir": "site",
       "name": "tzdata",
       "package_type": "package",
-      "sha256": "717c97d3df7fbc3075a872585fec0e182e885853de99043b35ecb0c28c3abe15",
+      "sha256": "55c23b252c1c1ae696b6444be81f11672b80bafe2774278ee6b9f5d11e2a3af8",
       "unvendored_tests": false,
       "version": "2025.3"
     },
@@ -4729,7 +4760,7 @@
       "install_dir": "site",
       "name": "ujson",
       "package_type": "package",
-      "sha256": "9f7eb397ef663d5e7042d2894eb817ea1bbc3947d2aee483d4373efbb15a6850",
+      "sha256": "662a38844b38d575eb7b1d1e9cdd6c402225fc433f4659e7ae742f906d8316ee",
       "unvendored_tests": false,
       "version": "5.12.0"
     },
@@ -4744,7 +4775,7 @@
       "install_dir": "site",
       "name": "uncertainties",
       "package_type": "package",
-      "sha256": "8aba7b65c4e2703900a988d6dceaea0e4f7a548929ca88b1c66443cb01f775c5",
+      "sha256": "5b7af58b40196687f3a92b3533267b916fe362c239732208669a3a931acf1d0e",
       "unvendored_tests": false,
       "version": "3.2.3"
     },
@@ -4761,7 +4792,7 @@
       "install_dir": "site",
       "name": "unyt",
       "package_type": "package",
-      "sha256": "32e3733f84a2ad5efa0651d5fc75e9e93a6e3596f6d8f3e98f6cf8ae5345aebf",
+      "sha256": "d711bedab013ef97ca40a62cef772b7da10bbef1ee55fc7555b9306a11b1239a",
       "unvendored_tests": true,
       "version": "3.1.0"
     },
@@ -4769,12 +4800,12 @@
       "depends": [
         "unyt"
       ],
-      "file_name": "unyt-tests.tar",
+      "file_name": "unyt-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "unyt-tests",
       "package_type": "package",
-      "sha256": "86f643c86c35ff1bd1e36ba37423dc41243af23b60f102d306eb6481adc05ffc",
+      "sha256": "ba296ce669fa27bff69bf0e90b7dbc0869c1911a51ad3d0a04d75dde42a48a13",
       "unvendored_tests": false,
       "version": "3.1.0"
     },
@@ -4787,7 +4818,7 @@
       "install_dir": "site",
       "name": "urllib3",
       "package_type": "package",
-      "sha256": "890b138aa020e1f17842d735901a8869585894b994a3d6a8636f704551de29b3",
+      "sha256": "7d931682456be16a4000b792e697c0ad3790ac7579e97b424e23de2d7cf0311a",
       "unvendored_tests": false,
       "version": "2.6.3"
     },
@@ -4802,7 +4833,7 @@
       "install_dir": "site",
       "name": "vega-datasets",
       "package_type": "package",
-      "sha256": "40921f7c38b5a507081e81980f8a64c5cee3fb7ce44c73a77a5b083066c493b4",
+      "sha256": "516a40f2f34a82146d04e637faa568577f003d18092db7e631811c0f35dae03f",
       "unvendored_tests": true,
       "version": "0.9.0"
     },
@@ -4810,12 +4841,12 @@
       "depends": [
         "vega-datasets"
       ],
-      "file_name": "vega-datasets-tests.tar",
+      "file_name": "vega-datasets-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "vega-datasets-tests",
       "package_type": "package",
-      "sha256": "c76d37a6f35dec9874e3abd29f43217bdb20bb4212956ff38c52e05d26375a0f",
+      "sha256": "e172a9fa1d4912254b9dfd2035a967678669211a66a2ab0dc731f8ae2edca33c",
       "unvendored_tests": false,
       "version": "0.9.0"
     },
@@ -4830,7 +4861,7 @@
       "install_dir": "site",
       "name": "vrplib",
       "package_type": "package",
-      "sha256": "6545d1a48c8dc503bd38564144993881c811e27b735ee226761f7242bfeefeaf",
+      "sha256": "940c47cb9ac533cecbfa7eefa5a75f915760a0add77c3f2a0313de37fab200ac",
       "unvendored_tests": false,
       "version": "2.1.0"
     },
@@ -4843,7 +4874,7 @@
       "install_dir": "site",
       "name": "wcwidth",
       "package_type": "package",
-      "sha256": "96f634dd982132bdf265366a2db9c2d676afcd837f7d0bf07a15d094a667cfd1",
+      "sha256": "28ff3daf700aeabd06f3f4db9ff6827b5da337e1f889fc7ae52dabbcd5eccf5e",
       "unvendored_tests": false,
       "version": "0.6.0"
     },
@@ -4856,7 +4887,7 @@
       "install_dir": "site",
       "name": "webencodings",
       "package_type": "package",
-      "sha256": "6b142d8fdf4cbf0a14ea19512cb6d71abfb6f1422c1067cba18ac5a25079a245",
+      "sha256": "cb897af7ba0287fe3fbacc8b5710a70ca4062fb9e5288cacaf1503339a517a13",
       "unvendored_tests": false,
       "version": "0.5.1"
     },
@@ -4871,7 +4902,7 @@
       "install_dir": "site",
       "name": "wordcloud",
       "package_type": "package",
-      "sha256": "7e9d0d8d70ec7f035990b222fed4c3b3a3768bf20001e2cdddfd0a0337bac18d",
+      "sha256": "fe1a5c131a903b871d330222b715c3fbeeddb523de8a76b23650ed30ab0d3939",
       "unvendored_tests": false,
       "version": "1.9.6"
     },
@@ -4884,7 +4915,7 @@
       "install_dir": "site",
       "name": "wrapt",
       "package_type": "package",
-      "sha256": "bd43f0d4fa46879f74ae5bc3630a743640d96dce0ecff70edc46e8d62153c3b1",
+      "sha256": "9e213b34eba06a0ab8246fc15245d092d53efb650bde891c0a1645830716ff90",
       "unvendored_tests": false,
       "version": "2.1.2"
     },
@@ -4901,7 +4932,7 @@
       "install_dir": "site",
       "name": "xarray",
       "package_type": "package",
-      "sha256": "78043e019e2ca8660c8c301063076a05cba300dfac2ba30b555458817fb1a1bd",
+      "sha256": "3d3b6fee3d897973033d12571d3c8d82820bb7bba6824182c0a524a28f93334c",
       "unvendored_tests": true,
       "version": "2026.2.0"
     },
@@ -4909,12 +4940,12 @@
       "depends": [
         "xarray"
       ],
-      "file_name": "xarray-tests.tar",
+      "file_name": "xarray-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "xarray-tests",
       "package_type": "package",
-      "sha256": "b4c7cfe3435a479201c625239e6a56ca38aad662a30d6681ced95bb7e8f61219",
+      "sha256": "dd706125145698ffffbf46cac603e97a2b3c12b7a0cb5303085692e143ff1b59",
       "unvendored_tests": false,
       "version": "2026.2.0"
     },
@@ -4931,7 +4962,7 @@
       "install_dir": "site",
       "name": "xgboost",
       "package_type": "package",
-      "sha256": "fab99c29e0a2eeca4f7b48f1a78104bda0a1d2db9d3531bc45aeacce15167aa0",
+      "sha256": "4769879497e7b94d681b595dc53106e1d8364b530d7efb6fd18eaf64406bab1a",
       "unvendored_tests": false,
       "version": "2.1.4"
     },
@@ -4944,7 +4975,7 @@
       "install_dir": "site",
       "name": "xlrd",
       "package_type": "package",
-      "sha256": "0cf17c3fecd37bde859cc502c4022a890dcf8ee565f8e8662626f0d7ba514a2b",
+      "sha256": "6129372c3600280cbe3cb9330aa6f82448833ba08c9aad85477edcc5ec50ce29",
       "unvendored_tests": false,
       "version": "2.0.2"
     },
@@ -4957,7 +4988,7 @@
       "install_dir": "site",
       "name": "xxhash",
       "package_type": "package",
-      "sha256": "79db6cdb2e251071a30199374f29fad65257ee8145bf43361ac716a68c327a21",
+      "sha256": "a5f097eb762d2aa2a572d8c4194f37e2085f3cb98969d2fd4c226dc4b1987867",
       "unvendored_tests": false,
       "version": "3.6.0"
     },
@@ -4970,7 +5001,7 @@
       "install_dir": "site",
       "name": "xyzservices",
       "package_type": "package",
-      "sha256": "947091e6c3e6423408d7f0fb794ae1c81fcc8862eb2c222d69180acc0edae12c",
+      "sha256": "9f7cf71e0a8dca3606c0137e1695b06fa4066c8e7173127885695664d2ea7abf",
       "unvendored_tests": true,
       "version": "2026.3.0"
     },
@@ -4978,12 +5009,12 @@
       "depends": [
         "xyzservices"
       ],
-      "file_name": "xyzservices-tests.tar",
+      "file_name": "xyzservices-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "xyzservices-tests",
       "package_type": "package",
-      "sha256": "9fc29843af5c616e9afd0f9d134cd9ec16ad436cc68db81d4000b8eb0b1bd9f1",
+      "sha256": "41bc3d6592f411f8e889da11c5c832aca6480979b8db4b80214fb0c4c459bb4b",
       "unvendored_tests": false,
       "version": "2026.3.0"
     },
@@ -5000,7 +5031,7 @@
       "install_dir": "site",
       "name": "yarl",
       "package_type": "package",
-      "sha256": "b95d563dc55dc74048d5ec6a6c06900fbde94336c4142b427492e7fdae0c0ca9",
+      "sha256": "fa4859d46ccccaaaf4f010c9ac2285213c74fa51c5c54e72828cb81621d9970a",
       "unvendored_tests": false,
       "version": "1.23.0"
     },
@@ -5026,7 +5057,7 @@
       "install_dir": "site",
       "name": "yt",
       "package_type": "package",
-      "sha256": "4a8c8ef08b447472809fa5c2df1002e7de6c8a5c2b8b5136cc8e6d76b1b03100",
+      "sha256": "e143402a92cf24abe462a684e0368eac78ed2fe209b9202efe3410d3d236a7ec",
       "unvendored_tests": false,
       "version": "4.4.0"
     },
@@ -5046,7 +5077,7 @@
       "install_dir": "site",
       "name": "zarr",
       "package_type": "package",
-      "sha256": "33329fb8ca402c0c50f1d12ce69d84ef4345ee1f238b906b773bc06fe4a6f926",
+      "sha256": "2242c266dc772b89e5cbe335ecd7ea619bfc179ac010a7fc1e783f16073b18af",
       "unvendored_tests": true,
       "version": "3.2.1"
     },
@@ -5054,12 +5085,12 @@
       "depends": [
         "zarr"
       ],
-      "file_name": "zarr-tests.tar",
+      "file_name": "zarr-tests.zip",
       "imports": [],
       "install_dir": "site",
       "name": "zarr-tests",
       "package_type": "package",
-      "sha256": "ab4915739f497326a0b1705bb16984bb321dd18b7ff9d2dce05e6d80e966d0b3",
+      "sha256": "8c07f5dfcb613a66fd2e5709343aafe33654620bfecba4bcbf16375e7dff9e58",
       "unvendored_tests": false,
       "version": "3.2.1"
     },
@@ -5073,7 +5104,7 @@
       "install_dir": "site",
       "name": "zengl",
       "package_type": "package",
-      "sha256": "9ff5b6d4c4386b140611dd67787022212f0d98272fb06534bc1a274ecd3197c0",
+      "sha256": "bfb823583c7ac1752f49547c64a3147d07abf93cb5f2b0c1b738c6eb536e522b",
       "unvendored_tests": false,
       "version": "2.7.2"
     },
@@ -5088,7 +5119,7 @@
       "install_dir": "site",
       "name": "zfpy",
       "package_type": "package",
-      "sha256": "7f2e87660fc7828201213a24c02dea88a71786eeff96d33fdfbd6a68a0073179",
+      "sha256": "5d55b47a29d80189ad4943b3cf92eb0d0d295f8eea557be5939a9d3bfea14b10",
       "unvendored_tests": false,
       "version": "1.0.1"
     },
@@ -5103,7 +5134,7 @@
       "install_dir": "site",
       "name": "zstandard",
       "package_type": "package",
-      "sha256": "5b83ee277cf2cbf52187660561ae909c8e1c892047574f873398ab95ed82bd9f",
+      "sha256": "403b2cec368994b65c85e50c3be0cc60d53a1410ba92e89613c9f96b72f1c9c0",
       "unvendored_tests": false,
       "version": "0.25.0"
     },

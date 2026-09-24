@@ -55,7 +55,7 @@ async def test_processing_uses_derived_type_before_media_detection(monkeypatch):
     _, files, process = _patch(monkeypatch, file_data=file_data)
     monkeypatch.setattr(files_router, '_is_text_file', MagicMock(return_value=False))
     monkeypatch.setattr(files_router.Config, 'get', AsyncMock(side_effect=lambda key, default=None: default))
-    await files_router.process_uploaded_file(request, file, '/tmp/notes.md', file_item, {}, user, db=object())
+    await files_router.process_uploaded_file(request, file, 'uploads/notes.md', file_item, {}, user, db=object())
     process.assert_awaited_once()
     files.set_status.assert_not_awaited()
 
@@ -69,7 +69,7 @@ async def test_text_relabelling_updates_stored_content_type(monkeypatch):
     monkeypatch.setattr(files_router, '_is_text_file', MagicMock(return_value=True))
     monkeypatch.setattr(files_router.Config, 'get', AsyncMock(side_effect=lambda key, default=None: default))
     session = object()
-    await files_router.process_uploaded_file(request, file, '/tmp/source.ts', file_item, {}, user, db=session)
+    await files_router.process_uploaded_file(request, file, 'uploads/source.ts', file_item, {}, user, db=session)
     files.update_file_metadata_by_id.assert_awaited_once_with('file-1', {'content_type': 'text/plain'}, db=session)
     process.assert_awaited_once()
 

@@ -355,7 +355,7 @@ def _upload(filename: str, content_type: str, content: bytes) -> UploadFile:
 async def test_route_stores_derived_content_type(monkeypatch, ext, content, expected, declared):
     monkeypatch.setenv('RAG_FILE_SNIFF_MODE', 'enforce')
     _patch_config(monkeypatch, allowed=[ext], engine='tika')
-    monkeypatch.setattr(files_router.Storage, 'upload_file', lambda *args: (content, '/tmp/report'))
+    monkeypatch.setattr(files_router.Storage, 'upload_file', lambda *args: (content, 'uploads/report'))
     insert = AsyncMock(return_value=SimpleNamespace(id='file-1', model_dump=lambda: {}))
     monkeypatch.setattr(files_router.Files, 'insert_new_file', insert)
     process = AsyncMock()
