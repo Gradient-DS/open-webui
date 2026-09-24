@@ -52,6 +52,7 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Files from './KnowledgeBase/Files.svelte';
+	import type { DirectoryItem } from './KnowledgeBase/directory';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
 	import type { CloudSyncProvider, SchedulePair } from './utils/cloudSync';
@@ -239,7 +240,7 @@
 
 	// Directory state (upstream per-level browsing)
 	let currentDirectoryId: string | null = null;
-	let directoryItems: { id: string; name: string }[] = [];
+	let directoryItems: DirectoryItem[] = [];
 	let breadcrumbs: { id: string; name: string; schedule_id?: string | null }[] = [];
 	// KB-wide file total for the cloud quota header (fileItemsTotal is
 	// level/search-scoped in per-level browsing).
@@ -358,7 +359,16 @@
 			fileItems = res.items;
 			fileItemsTotal = res.total;
 			if (!isSearching) {
-				directoryItems = res.directories ?? [];
+				const directories: DirectoryItem[] = res.directories ?? [];
+				directoryItems = [
+					...directoryItems.filter(
+						(dir) =>
+							dir.placeholder &&
+							dir.parent_id === currentDirectoryId &&
+							!directories.some((item) => item.name === dir.name)
+					),
+					...directories
+				];
 				breadcrumbs = res.breadcrumbs ?? [];
 			}
 		}
@@ -793,6 +803,13 @@
 	let uploads: FolderUploadSession[] = [];
 	$: uploadProgress = mergeUploadRows(uploads);
 
+	const removeUploadSession = (session: FolderUploadSession) => {
+		session.dispose();
+		uploads = uploads.filter((upload) => upload !== session);
+		const placeholders = new Set(session.topNames.map((name) => session.placeholderId(name)));
+		directoryItems = directoryItems.filter((dir) => !placeholders.has(dir.id));
+	};
+
 	// [Gradient] Upload a set of entries with bounded concurrency (the fork's
 	// upload hardening), hashing each file right before it goes up and
 	// reporting each landing to `onLanded`.
@@ -893,7 +910,7 @@
 					void getItemsPage();
 				},
 				onFinish: (summary, timedOut) => {
-					uploads = uploads.filter((upload) => upload !== session);
+					removeUploadSession(session);
 					const { variant, message } = buildSyncToast($i18n, summary.label, summary);
 					toast[variant](message);
 					if (!timedOut) void init();
@@ -906,9 +923,11 @@
 			const now = Math.floor(Date.now() / 1000);
 			directoryItems = [
 				...session.topNames
-					.filter((name) => !directoryItems.some((dir) => dir.name === name))
+					.filter((name) => !directoryItems.some((dir) => !dir.placeholder && dir.name === name))
 					.map((name) => ({
 						id: session.placeholderId(name),
+						placeholder: true as const,
+						parent_id: currentDirectoryId,
 						name,
 						created_at: now,
 						updated_at: now
@@ -921,8 +940,7 @@
 			const missing = paths.filter((path) => !directoryIdByPath[path]);
 			if (missing.length) {
 				toast.error($i18n.t('Could not create {{count}} folders.', { count: missing.length }));
-				session.dispose();
-				uploads = uploads.filter((upload) => upload !== session);
+				removeUploadSession(session);
 				await getItemsPage();
 				return;
 			}
@@ -942,7 +960,11 @@
 					)
 			);
 		} catch (e) {
-			if (!session.disposed) toast.error(`${e}`);
+			if (!session.disposed) {
+				removeUploadSession(session);
+				toast.error(`${e}`);
+				await getItemsPage();
+			}
 		} finally {
 			session.completeUploads();
 		}

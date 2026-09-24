@@ -19,6 +19,7 @@
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import DirectoryRow from './DirectoryRow.svelte';
+	import type { DirectoryItem } from './directory';
 	import SourceRow from './SourceRow.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
 	import { directoryItem, fileItem, type KbSelection, type SelectableItem } from './selection';
@@ -52,7 +53,7 @@
 	export let knowledge = null;
 	export let selectedFileId = null;
 	export let files: KnowledgeFile[] = [];
-	export let directories = [];
+	export let directories: DirectoryItem[] = [];
 
 	// [Gradient] Cloud sources live in the listing: a folder source is the
 	// directory row its schedule writes (keyed by the row's schedule_id), a
@@ -87,13 +88,16 @@
 	// and drag-move of files/directories. See utils/structure.ts.
 	export let structureEditable = false;
 
-	export let onClick = (fileId) => {};
-	export let onDelete = (fileId) => {};
-	export let onNavigateDirectory = (directoryId: string) => {};
-	export let onRenameDirectory = (id: string, name: string) => {};
-	export let onDeleteDirectory = (id: string) => {};
-	export let onMoveFilesToDirectory = (fileIds: string[], directoryId: string) => {};
-	export let onMoveDirectoryToDirectory = (dirId: string, targetDirectoryId: string) => {};
+	export let onClick: (fileId: string | null) => void = () => {};
+	export let onDelete: (fileId: string | undefined) => void = () => {};
+	export let onNavigateDirectory: (directoryId: string) => void = () => {};
+	export let onRenameDirectory: (id: string, name: string) => void = () => {};
+	export let onDeleteDirectory: (id: string) => void = () => {};
+	export let onMoveFilesToDirectory: (fileIds: string[], directoryId: string) => void = () => {};
+	export let onMoveDirectoryToDirectory: (
+		dirId: string,
+		targetDirectoryId: string
+	) => void = () => {};
 
 	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
 	export let selection: KbSelection | null = null;
@@ -101,14 +105,15 @@
 	$: selectedStore = selection?.selected;
 	$: selectionModeStore = selection?.selectionMode;
 
-	const isSelectable = (file: any) => !!file?.id && file?.status !== 'uploading';
-	const buildItem = (file: any): SelectableItem =>
-		fileItem(file.id, file?.name ?? file?.meta?.name ?? '');
+	const isSelectable = (file: KnowledgeFile) => !!file?.id && file?.status !== 'uploading';
+	const buildItem = (file: KnowledgeFile): SelectableItem =>
+		fileItem(file.id!, file?.name ?? file?.meta?.name ?? '');
 
-	const buildDirItem = (dir: any): SelectableItem =>
+	const buildDirItem = (dir: DirectoryItem): SelectableItem =>
 		directoryItem(dir.id, dir.name, dir.child_count ?? 0);
 	// Synced folders are removed through their own controls, never in bulk.
-	const isDirSelectable = (dir: any) => !dir.schedule_id && structureEditable;
+	const isDirSelectable = (dir: DirectoryItem) =>
+		!dir.placeholder && !dir.schedule_id && structureEditable;
 
 	// Selection order mirrors render order (dirs first, then files) so
 	// Shift-range and drag-paint spans behave predictably.
@@ -120,7 +125,7 @@
 	$: if (selection) selection.setAvailable(orderedItems);
 	onDestroy(() => selection?.setAvailable([]));
 
-	const onRowClick = (file: any, e: MouseEvent) => {
+	const onRowClick = (file: KnowledgeFile, e: MouseEvent) => {
 		if (selection && selection.consumeDidDrag()) return; // a drag just ended on this row
 		if (selection && isSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
 			e.preventDefault();
@@ -132,13 +137,13 @@
 			selection.select(buildItem(file), orderedItems, e);
 			return;
 		}
-		onClick(file?.id ?? file?.tempId);
+		onClick(file?.id ?? file?.tempId ?? null);
 	};
 
-	const onRowPointerDown = (file: any) => {
+	const onRowPointerDown = (file: KnowledgeFile) => {
 		if (selection && isSelectable(file)) selection.pointerDown(buildItem(file), orderedItems);
 	};
-	const onRowPointerEnter = (file: any) => {
+	const onRowPointerEnter = (file: KnowledgeFile) => {
 		if (selection && isSelectable(file)) selection.pointerEnter(buildItem(file));
 	};
 
@@ -146,7 +151,7 @@
 	// selection, any row drags itself; once a selection exists, only SELECTED
 	// rows are draggable and carry the whole selection — unselected rows stay
 	// paint-select targets, so drag-paint multi-select keeps working.
-	const dragPayloadIds = (file: any, isSel: boolean): string[] => {
+	const dragPayloadIds = (file: KnowledgeFile, isSel: boolean): string[] => {
 		if (isSel && $selectedStore) {
 			return [...$selectedStore.values()].filter((it) => it.kind === 'file').map((it) => it.fileId);
 		}
