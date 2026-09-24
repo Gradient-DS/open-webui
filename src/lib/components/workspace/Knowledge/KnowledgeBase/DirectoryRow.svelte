@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { providerIcon } from '$lib/sources/registry';
 	import dayjs from '$lib/dayjs';
 	import duration from 'dayjs/plugin/duration';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -11,9 +12,6 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
-	import Folder from '$lib/components/icons/Folder.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
@@ -130,7 +128,9 @@
 				if (fileIds.length) {
 					onFileDrop(fileIds, directory.id);
 				}
-			} catch {}
+			} catch {
+				// Ignore malformed drag payloads.
+			}
 			return;
 		}
 		const dirRaw = e.dataTransfer?.getData('application/x-kb-dir-move');
@@ -140,7 +140,9 @@
 				if (data.dirId !== directory.id) {
 					onDirDrop(data.dirId, directory.id);
 				}
-			} catch {}
+			} catch {
+				// Ignore malformed drag payloads.
+			}
 		}
 	}}
 >
@@ -154,12 +156,7 @@
 			on:click={() => onNavigate(directory.id)}
 		>
 			<svelte:component
-				this={pair?.content?.source_kind === 'onedrive' || pair?.acl?.source_kind === 'onedrive'
-					? OneDrive
-					: pair?.content?.source_kind === 'google_drive' ||
-						  pair?.acl?.source_kind === 'google_drive'
-						? GoogleDrive
-						: Folder}
+				this={providerIcon((pair?.content ?? pair?.acl)?.source_kind)}
 				className="size-3.5"
 			/>
 		</button>

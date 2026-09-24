@@ -1,5 +1,6 @@
+import { providerFor } from '$lib/sources/registry';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
-import { CLOUD_PROVIDERS, runIsLive, type SchedulePair } from './cloudSync';
+import { runIsLive, type SchedulePair } from './cloudSync';
 
 export function skippedRunKey(schedule: Schedule | undefined): string {
 	if (!schedule || runIsLive(schedule.last_run)) return '';
@@ -45,9 +46,8 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 	let state: SourceState;
 	if (schedules.some((item) => runIsLive(item.last_run))) state = 'syncing';
 	else if (
-		['suspended:reauth', 'pending', 'revoked'].includes(connection.lifecycle) ||
-		errors.some((error) =>
-			['access_revoked', 'credential_unusable', 'owner_mismatch'].includes(error ?? '')
+		[connection.lifecycle, ...errors].some((code) =>
+			providerFor(connection.source_kind)?.needsReconnectOn.includes(code ?? '')
 		)
 	)
 		state = 'needs_reconnect';
@@ -78,7 +78,7 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 				? 'File'
 				: 'Folder'),
 		path: schedule.path ?? '',
-		provider: CLOUD_PROVIDERS[schedule.source_kind]?.label ?? schedule.source_kind,
+		provider: providerFor(schedule.source_kind)?.label ?? schedule.source_kind,
 		lastSyncedAt: run?.finished_at ?? (run?.outcome ? run.started_at : null),
 		nextDueAt: schedule.next_due_at ?? null,
 		documents: schedule.document_count ?? run?.counts?.landed ?? 0,

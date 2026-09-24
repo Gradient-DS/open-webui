@@ -1,4 +1,5 @@
 <script>
+	import { providerFor } from '$lib/sources/registry';
 	import { toast } from 'svelte-sonner';
 
 	import { goto } from '$app/navigation';
@@ -23,11 +24,8 @@
 		// every type, alongside any provider auto-sync trigger, so the
 		// KB detail page can offer a "Back to assistant" return.
 		const params = new URLSearchParams();
-		if (type === 'onedrive') {
-			params.set('start_onedrive_sync', 'true');
-		} else if (type === 'google_drive') {
-			params.set('start_google_drive_sync', 'true');
-		}
+		const provider = providerFor(type);
+		if (provider) params.set(provider.startParam, 'true');
 		if (returnTo) {
 			params.set('returnTo', returnTo);
 		}
@@ -39,7 +37,7 @@
 
 	const requestedType = $page.url.searchParams.get('type');
 	let type =
-		requestedType && ['local', 'onedrive', 'google_drive'].includes(requestedType)
+		requestedType && (requestedType === 'local' || providerFor(requestedType))
 			? requestedType
 			: 'local';
 	// When set (the "+ Add knowledge" builder flow), carry it through to

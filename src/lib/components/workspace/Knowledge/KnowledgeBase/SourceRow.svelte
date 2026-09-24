@@ -1,10 +1,8 @@
 <script lang="ts">
+	import { providerIcon } from '$lib/sources/registry';
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as I18n } from 'i18next';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
-	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import SourceControls from './SourceControls.svelte';
 	import type { SchedulePair } from '../utils/cloudSync';
 	import { sourceState } from '../utils/sourceState';
@@ -26,14 +24,7 @@
 	role="listitem"
 >
 	<div class="flex items-center p-1" aria-label={$i18n.t(view.provider)}>
-		<svelte:component
-			this={schedule.source_kind === 'onedrive'
-				? OneDrive
-				: schedule.source_kind === 'google_drive'
-					? GoogleDrive
-					: DocumentPage}
-			className="size-3.5"
-		/>
+		<svelte:component this={providerIcon(schedule.source_kind)} className="size-3.5" />
 	</div>
 	<div class="flex flex-1 items-center gap-2 p-2 text-left">
 		<div class="line-clamp-1 text-xs">{schedule.label || $i18n.t(view.label)}</div>

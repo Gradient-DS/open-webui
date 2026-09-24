@@ -1,6 +1,6 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export type CloudProvider = 'onedrive' | 'google_drive';
+export type CloudProvider = string;
 export type ScheduleKind = 'content' | 'acl_refresh';
 export type ScheduleAction = 'run' | 'cancel' | 'suspend' | 'resume';
 

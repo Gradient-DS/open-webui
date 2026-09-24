@@ -1,11 +1,11 @@
 <script lang="ts">
+	import { providers } from '$lib/sources/registry';
 	import dayjs from 'dayjs';
 
 	import { onMount, onDestroy, getContext, createEventDispatcher } from 'svelte';
 	import { searchNotes } from '$lib/apis/notes';
 	import { searchKnowledgeBases, searchKnowledgeFiles } from '$lib/apis/knowledge';
 
-	import { config } from '$lib/stores';
 	import { decodeString } from '$lib/utils';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -15,8 +15,6 @@
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -228,33 +226,19 @@
 						<div class="line-clamp-1">{$i18n.t('Local Knowledge Base')}</div>
 					</button>
 
-					{#if $config?.features?.enable_onedrive_integration}
+					{#each Object.values(providers) as provider}
 						<button
 							class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
 							type="button"
 							on:click={() => {
-								dispatch('create', 'onedrive');
+								dispatch('create', provider.kind);
 								show = false;
 							}}
 						>
-							<OneDrive className="size-4" />
-							<div class="line-clamp-1">{$i18n.t('From OneDrive')}</div>
+							<svelte:component this={provider.icon} className="size-4" />
+							<div class="line-clamp-1">{$i18n.t('From {{label}}', { label: provider.label })}</div>
 						</button>
-					{/if}
-
-					{#if $config?.features?.enable_google_drive_integration}
-						<button
-							class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
-							type="button"
-							on:click={() => {
-								dispatch('create', 'google_drive');
-								show = false;
-							}}
-						>
-							<GoogleDrive className="size-4" />
-							<div class="line-clamp-1">{$i18n.t('From Google Drive')}</div>
-						</button>
-					{/if}
+					{/each}
 				</div>
 			{/if}
 		</div>

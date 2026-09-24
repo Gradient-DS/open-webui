@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { providers } from '$lib/sources/registry';
 	import { getContext } from 'svelte';
 
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -14,9 +15,10 @@
 	$: items = [
 		{ value: '', label: $i18n.t('All Types') },
 		{ value: 'local', label: $i18n.t('Local') },
-		...($config?.features?.enable_onedrive_integration
-			? [{ value: 'onedrive', label: 'OneDrive' }]
-			: []),
+		...Object.values(providers).map((provider) => ({
+			value: provider.kind,
+			label: provider.label
+		})),
 		...Object.entries($config?.integration_providers ?? {}).map(([slug, provider]) => ({
 			value: slug,
 			label: ((provider as { name?: string } | null)?.name ?? slug) as string
