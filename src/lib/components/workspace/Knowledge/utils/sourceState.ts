@@ -103,21 +103,23 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 // (`planned`), how many are fetched from the provider and how many have
 // landed, as sync_execution.py publishes them. Null outside a live run or
 // under a worker that publishes counts only at finish.
-export interface RunProgress {
+export interface FolderProgress {
 	total: number;
-	fetched: number;
-	landed: number;
+	transferred: number;
+	processed: number;
+	failed: number;
 }
 
-export function runProgress(schedule: Schedule): RunProgress | null {
+export function runProgress(schedule: Schedule): FolderProgress | null {
 	const run = schedule.last_run;
 	if (!runIsLive(run)) return null;
 	const counts = run?.counts ?? {};
 	if (typeof counts.planned !== 'number' || counts.planned <= 0) return null;
 	return {
 		total: counts.planned,
-		fetched: Math.min(counts.fetched ?? 0, counts.planned),
-		landed: Math.min(counts.landed ?? 0, counts.planned)
+		transferred: Math.min(counts.fetched ?? 0, counts.planned),
+		processed: Math.min(counts.landed ?? 0, counts.planned),
+		failed: counts.failed ?? 0
 	};
 }
 

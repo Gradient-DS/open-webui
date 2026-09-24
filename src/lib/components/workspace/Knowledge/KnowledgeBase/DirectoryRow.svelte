@@ -19,7 +19,7 @@
 	import { folderBadge } from '../utils/treeStatus';
 	import type { DirectoryItem } from './directory';
 	import type { SchedulePair } from '../utils/cloudSync';
-	import { runProgress, sourceState } from '../utils/sourceState';
+	import { runProgress, sourceState, type FolderProgress } from '../utils/sourceState';
 
 	export let directory: DirectoryItem;
 	export let writeAccess = false;
@@ -32,12 +32,7 @@
 	export let syncBusy = false;
 	export let isAdmin = false;
 	// [Gradient] Set while a local folder upload is filling this directory.
-	export let uploading: {
-		total: number;
-		uploaded: number;
-		processed: number;
-		failed: number;
-	} | null = null;
+	export let uploading: FolderProgress | null = null;
 
 	// Optional multiselect checkbox (dirs and source roots participate in bulk
 	// delete). selectionActive renders the checkbox column (spacer when the row
@@ -60,7 +55,9 @@
 	$: source = pair ? sourceState(pair, (pair.content ?? pair.acl)!.connection) : null;
 	// A live cloud run reports the same shape as a local upload, so the row
 	// reads the same: fetched of planned, then processed of planned.
-	$: syncProgress = pair?.content ? runProgress(pair.content) : null;
+	$: sourceKind = (pair?.content ?? pair?.acl)?.source_kind ?? 'local';
+	let progress: FolderProgress | null;
+	$: progress = uploading ?? (pair?.content ? runProgress(pair.content) : null);
 	$: updatedAt = source
 		? source.lastSyncedAt
 		: directory.updated_at
@@ -197,35 +194,27 @@
 					</div>
 				{/if}
 
-				{#if uploading}
+				{#if progress}
 					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
-						&middot; {$i18n.t('Uploaded {{done}}/{{total}}', {
-							done: uploading.uploaded,
-							total: uploading.total
-						})}
+						&middot; {$i18n.t(
+							sourceKind === 'local' ? 'Uploaded {{done}}/{{total}}' : 'Fetched {{done}}/{{total}}',
+							{
+								done: progress.transferred,
+								total: progress.total
+							}
+						)}
 						&middot; {$i18n.t('Processed {{done}}/{{total}}', {
-							done: uploading.processed,
-							total: uploading.total
+							done: progress.processed,
+							total: progress.total
 						})}
-						<Spinner className="size-3" />
-					</span>
-				{:else if syncProgress}
-					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
-						&middot; {$i18n.t('Fetched {{done}}/{{total}}', {
-							done: syncProgress.fetched,
-							total: syncProgress.total
-						})}
-						&middot; {$i18n.t('Processed {{done}}/{{total}}', {
-							done: syncProgress.landed,
-							total: syncProgress.total
-						})}
+						{#if uploading}<Spinner className="size-3" />{/if}
 					</span>
 				{:else if (directory.child_count ?? null) !== null}
 					<span class="text-xs text-gray-400 shrink-0">
 						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
 					</span>
 				{/if}
-				{#if uploading || syncProgress}
+				{#if progress}
 					<!-- counters above carry the state -->
 				{:else if updatedAt}
 					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="shrink-0">

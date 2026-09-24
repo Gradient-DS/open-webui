@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { FolderProgress } from '../utils/sourceState';
 	import dayjs from '$lib/dayjs';
 	import duration from 'dayjs/plugin/duration';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -75,12 +76,9 @@
 	export let skippedProvider = '';
 	// [Gradient] Set inside a cloud source whose run is live: files show up
 	// as they land, so the listing says more is coming.
-	export let syncing: { fetched: number; landed: number; total: number } | true | null = null;
+	export let syncing: FolderProgress | true | null = null;
 	// [Gradient] Local folder upload in flight, keyed by top-level directory id.
-	export let uploadProgress: Map<
-		string,
-		{ total: number; uploaded: number; processed: number; failed: number }
-	> = new Map();
+	export let uploadProgress: Map<string, FolderProgress> = new Map();
 
 	// Search mode: flat KB-wide hits — directory rows hidden, each file row
 	// shows its folder path (derived from meta.relative_path) instead.
@@ -350,7 +348,7 @@
 				>{syncing === true
 					? $i18n.t('Syncing · files show up as they land')
 					: $i18n.t('Syncing · {{done}}/{{total}} processed · files show up as they land', {
-							done: syncing.landed,
+							done: syncing.processed,
 							total: syncing.total
 						})}</span
 			>

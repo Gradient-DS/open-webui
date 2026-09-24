@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { FolderProgress } from '../utils/sourceState';
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as I18nType } from 'i18next';
@@ -8,11 +9,7 @@
 	const i18n = getContext<Writable<I18nType>>('i18n');
 
 	export let name: string;
-	export let uploading: {
-		total: number;
-		uploaded: number;
-		processed: number;
-	} | null = null;
+	export let uploading: FolderProgress | null = null;
 	export let selectionActive = false;
 </script>
 
@@ -34,7 +31,7 @@
 				{#if uploading}
 					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
 						&middot; {$i18n.t('Uploaded {{done}}/{{total}}', {
-							done: uploading.uploaded,
+							done: uploading.transferred,
 							total: uploading.total
 						})}
 						&middot; {$i18n.t('Processed {{done}}/{{total}}', {

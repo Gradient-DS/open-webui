@@ -30,7 +30,7 @@ describe('FolderUploadSession', () => {
 		expect(mergeUploadRows([first.session, second.session]).get('root')).toEqual({
 			name: 'folder',
 			total: 3,
-			uploaded: 3,
+			transferred: 3,
 			processed: 1,
 			failed: 0
 		});

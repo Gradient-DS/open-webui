@@ -310,7 +310,20 @@ describe('run progress', () => {
 					last_run: { ...run, outcome: null, counts: { planned: 40, fetched: 12, landed: 3 } }
 				})
 			)
-		).toEqual({ total: 40, fetched: 12, landed: 3 });
+		).toEqual({ total: 40, transferred: 12, processed: 3, failed: 0 });
+	});
+	it('includes failures and caps transfer and processing counts at planned work', () => {
+		expect(
+			runProgress(
+				schedule({
+					last_run: {
+						...run,
+						outcome: null,
+						counts: { planned: 5, fetched: 6, landed: 7, failed: 2 }
+					}
+				})
+			)
+		).toEqual({ total: 5, transferred: 5, processed: 5, failed: 2 });
 	});
 });
 
