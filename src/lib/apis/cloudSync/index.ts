@@ -127,3 +127,13 @@ export interface SkippedItem {
 
 export const getSkippedItems = (token: string, knowledgeId: string, id: string) =>
 	request<SkippedItem[]>(token, `${schedulePath(knowledgeId, id)}/skipped`);
+
+export interface SyncPolicy {
+	providers_enabled: string[];
+	scope_shapes_allowed: Record<string, string[]>;
+	min_cadence_minutes: number | null;
+	default_cadence_minutes: number | null;
+}
+
+export const getPolicy = (token: string): Promise<SyncPolicy> =>
+	request<SyncPolicy>(token, '/policy');

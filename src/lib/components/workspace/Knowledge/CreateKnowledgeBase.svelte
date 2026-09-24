@@ -1,4 +1,5 @@
 <script>
+	import { enabledProviders, sourcePolicy } from '$lib/sources/policy';
 	import { providerFor } from '$lib/sources/registry';
 	import { toast } from 'svelte-sonner';
 
@@ -36,8 +37,10 @@
 	let loading = false;
 
 	const requestedType = $page.url.searchParams.get('type');
-	let type =
-		requestedType && (requestedType === 'local' || providerFor(requestedType))
+	$: type =
+		requestedType &&
+		(requestedType === 'local' ||
+			$enabledProviders.some((provider) => provider.kind === requestedType))
 			? requestedType
 			: 'local';
 	// When set (the "+ Add knowledge" builder flow), carry it through to
@@ -203,7 +206,7 @@
 						? `px-3.5 py-1.5 text-sm bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full ${loading ? 'cursor-not-allowed' : ''}`
 						: `text-sm px-4 py-2 transition rounded-lg ${loading ? 'cursor-not-allowed bg-gray-100 dark:bg-gray-800' : 'bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800'}`} flex"
 					type="submit"
-					disabled={loading}
+					disabled={loading || $sourcePolicy === null}
 				>
 					<div class=" self-center font-normal">{$i18n.t('Create Knowledge')}</div>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { loadSourcePolicy } from '$lib/sources/policy';
 	import { providerFor } from '$lib/sources/registry';
 	import { getContext, onMount, onDestroy } from 'svelte';
 	import type { Writable } from 'svelte/store';
@@ -155,6 +156,7 @@
 	}
 
 	onMount(() => {
+		void loadSourcePolicy(localStorage.token);
 		void refresh();
 	});
 	onDestroy(() => {

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { providerFor } from '$lib/sources/registry';
+	import { enabledProviders } from '$lib/sources/policy';
+	import { providerFor, type SourceProvider } from '$lib/sources/registry';
 	import { getContext } from 'svelte';
 	import type { ComponentType } from 'svelte';
 	import type { Writable } from 'svelte/store';
@@ -23,11 +24,12 @@
 		description: string;
 	};
 
-	$: options = getOptions(knowledgeType);
+	$: options = getOptions(knowledgeType, $enabledProviders);
 
-	function getOptions(type: string): UploadOption[] {
+	function getOptions(type: string, enabled: SourceProvider[]): UploadOption[] {
 		const provider = providerFor(type);
 		if (provider) {
+			if (!enabled.some((item) => item.kind === provider.kind)) return [];
 			return [
 				{
 					type: provider.kind,

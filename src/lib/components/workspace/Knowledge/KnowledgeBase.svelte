@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { enabledProviders } from '$lib/sources/policy';
 	import { providers, providerFor, type SourceProvider } from '$lib/sources/registry';
 	/* global FileSystemDirectoryReader, FileSystemEntry, FileSystemFileEntry, FileSystemDirectoryEntry */
 	import { toast } from 'svelte-sonner';
@@ -1108,7 +1109,12 @@
 	};
 
 	const cloudSyncHandler = async (provider: SourceProvider) => {
-		if (!knowledge || cloudActionBusy) return;
+		if (
+			!knowledge ||
+			cloudActionBusy ||
+			!$enabledProviders.some((item) => item.kind === provider.kind)
+		)
+			return;
 		if (syncStatusError) {
 			toast.error($i18n.t('Failed to check background sync status'));
 			return;
@@ -2186,31 +2192,31 @@
 						{#if knowledge?.write_access}
 							<div>
 								{#if activeProvider}
-									<Tooltip
-										content={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}
-									>
-										<button
-											class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
-											disabled={isSyncBusy}
-											aria-label={$i18n.t('Add source')}
-											on:click={() => {
-												cloudSyncHandler(activeProvider);
-											}}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 16 16"
-												fill="currentColor"
-												class="w-4 h-4"
+									{#each $enabledProviders.filter((provider) => provider.kind === activeProvider?.kind) as provider}
+										<Tooltip content={$i18n.t('Sync from {{label}}', { label: provider.label })}>
+											<button
+												class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+												disabled={isSyncBusy}
+												aria-label={$i18n.t('Add source')}
+												on:click={() => {
+													cloudSyncHandler(provider);
+												}}
 											>
-												<path
-													d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
-												/>
-											</svg>
-											<!-- [Gradient] Keep adding sources discoverable after the first sync. -->
-											<span>{$i18n.t('Add source')}</span>
-										</button>
-									</Tooltip>
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													viewBox="0 0 16 16"
+													fill="currentColor"
+													class="w-4 h-4"
+												>
+													<path
+														d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
+													/>
+												</svg>
+												<!-- [Gradient] Keep adding sources discoverable after the first sync. -->
+												<span>{$i18n.t('Add source')}</span>
+											</button>
+										</Tooltip>
+									{/each}
 								{:else if $config?.integration_providers?.[knowledge?.type]}
 									<!-- No add button for push providers -- files come via API -->
 								{:else}

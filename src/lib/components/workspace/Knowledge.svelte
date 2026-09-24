@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { providers, providerFor, providerIcon } from '$lib/sources/registry';
+	import { enabledProviders } from '$lib/sources/policy';
+	import { providerFor, providerIcon } from '$lib/sources/registry';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	dayjs.extend(relativeTime);
@@ -114,7 +115,7 @@
 					showCreateModal = true;
 				}
 			},
-			...Object.values(providers).map((provider) => ({
+			...$enabledProviders.map((provider) => ({
 				id: `knowledge-new-${provider.kind}`,
 				label: $i18n.t('From {{label}}', { label: provider.label }),
 				icon: provider.icon,

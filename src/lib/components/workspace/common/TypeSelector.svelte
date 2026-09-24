@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { providers } from '$lib/sources/registry';
+	import { enabledProviders } from '$lib/sources/policy';
 	import { getContext } from 'svelte';
 
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -15,7 +15,7 @@
 	$: items = [
 		{ value: '', label: $i18n.t('All Types') },
 		{ value: 'local', label: $i18n.t('Local') },
-		...Object.values(providers).map((provider) => ({
+		...$enabledProviders.map((provider) => ({
 			value: provider.kind,
 			label: provider.label
 		})),

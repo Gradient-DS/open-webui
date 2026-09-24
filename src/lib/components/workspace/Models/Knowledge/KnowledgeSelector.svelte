@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { providers } from '$lib/sources/registry';
+	import { enabledProviders, loadSourcePolicy } from '$lib/sources/policy';
 	import dayjs from 'dayjs';
 
 	import { onMount, onDestroy, getContext, createEventDispatcher } from 'svelte';
@@ -104,6 +104,7 @@
 	};
 
 	onMount(async () => {
+		void loadSourcePolicy(localStorage.token);
 		getItems();
 	});
 </script>
@@ -226,7 +227,7 @@
 						<div class="line-clamp-1">{$i18n.t('Local Knowledge Base')}</div>
 					</button>
 
-					{#each Object.values(providers) as provider}
+					{#each $enabledProviders as provider}
 						<button
 							class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
 							type="button"
