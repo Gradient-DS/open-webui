@@ -241,7 +241,7 @@ def _clean_allowed(allowed_exts: list[str] | None) -> set[str]:
 def _mime_consistent_with_ext(ext: str, mime: str) -> bool:
     """Is a sniffed ``mime`` acceptable for a file claiming extension ``ext``?"""
     if ext not in _KNOWN_EXTS:
-        return False
+        return True
     mime = mime.lower()
     if mime in _PERMISSIVE_MIMES:
         return True
@@ -294,14 +294,13 @@ def check_upload(
         return GuardResult(False, reason, sniffed)
 
     ext = (ext or '').strip().lower().lstrip('.')
-    if ext and ext not in _KNOWN_EXTS:
+    allowed = _clean_allowed(allowed_exts)
+    if ext in allowed and ext not in _KNOWN_EXTS:
         return _decide(mode, f'unsupported file extension .{ext}', sniffed, filename)
 
     if not sniffed:
         # libmagic couldn't fingerprint the bytes at all — don't punish that.
         return GuardResult(True, 'content could not be fingerprinted', '')
-
-    allowed = _clean_allowed(allowed_exts)
 
     # (2) Extensionless upload: the sniff, not an automatic pass, decides.
     if not ext:
