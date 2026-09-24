@@ -3929,5 +3929,7 @@
   "{{label}}: sync cancelled": "{{label}}: synchronisatie geannuleerd",
   "{{label}}: sync failed ({{reason}})": "{{label}}: synchronisatie mislukt ({{reason}})",
   "Open the folder to see which files were skipped.": "Open de map om te zien welke bestanden zijn overgeslagen.",
-  "Updated {{time}}": "Bijgewerkt {{time}}"
+  "Updated {{time}}": "Bijgewerkt {{time}}",
+  "Creating folders...": "Mappen aanmaken...",
+  "Could not create {{count}} folders.": "{{count}} mappen konden niet worden aangemaakt."
 }

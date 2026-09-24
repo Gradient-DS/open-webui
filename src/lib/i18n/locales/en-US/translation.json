@@ -3929,5 +3929,7 @@
   "{{label}}: sync cancelled": "{{label}}: sync cancelled",
   "{{label}}: sync failed ({{reason}})": "{{label}}: sync failed ({{reason}})",
   "Open the folder to see which files were skipped.": "Open the folder to see which files were skipped.",
-  "Updated {{time}}": "Updated {{time}}"
+  "Updated {{time}}": "Updated {{time}}",
+  "Creating folders...": "Creating folders...",
+  "Could not create {{count}} folders.": "Could not create {{count}} folders."
 }

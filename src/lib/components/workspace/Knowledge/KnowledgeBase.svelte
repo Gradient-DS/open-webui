@@ -781,11 +781,6 @@
 		return directoryIdByPath;
 	};
 
-	const getDirectoryUploadPath = (path: string) => {
-		const currentPath = breadcrumbs.map((crumb) => crumb.name).join('/');
-		return currentPath && path ? `${currentPath}/${path}` : currentPath || path;
-	};
-
 	// [Gradient] Upload a set of manifest entries with bounded concurrency (the fork's
 	// upload hardening), updating the `syncing` progress line as each lands.
 	const uploadManifestEntries = async (
@@ -836,6 +831,33 @@
 		return failedCount;
 	};
 
+	// [Gradient] Mirror the picked folder under the current directory: every
+	// folder path in the manifest is created parents-first (an existing one
+	// is returned as is), then each file uploads into its folder's id.
+	const createDirectoriesForPaths = async (paths: string[]) => {
+		const directoryIdByPath: Record<string, string | null> = {};
+		const pending = new Set<string>();
+		for (const path of paths) {
+			const segments = path.split('/').filter(Boolean);
+			for (let end = 1; end <= segments.length; end++)
+				pending.add(segments.slice(0, end).join('/'));
+		}
+		for (const dirPath of [...pending].sort((a, b) => a.split('/').length - b.split('/').length)) {
+			const segments = dirPath.split('/');
+			const parentPath = segments.slice(0, -1).join('/');
+			const parentId = parentPath ? directoryIdByPath[parentPath] : currentDirectoryId;
+			if (parentPath && !parentId) continue;
+			const directory = await createKnowledgeDirectory(
+				localStorage.token,
+				knowledge.id,
+				segments.at(-1)!,
+				parentId ?? null
+			);
+			if (directory) directoryIdByPath[dirPath] = directory.id;
+		}
+		return directoryIdByPath;
+	};
+
 	const uploadDirectoryEntries = async (entries: DirectoryFileEntry[]) => {
 		if (!knowledge) return;
 
@@ -843,27 +865,20 @@
 			syncing = $i18n.t('Computing checksums ({{count}} files)', { count: entries.length });
 			const manifest = await buildDirectoryManifest(entries);
 
-			syncing = $i18n.t('Comparing with knowledge base...');
-			const diff = await syncKnowledgeDiff(
-				localStorage.token,
-				id,
-				manifest.map(({ filename, path, checksum, size }) => ({
-					filename,
-					path: getDirectoryUploadPath(path),
-					checksum,
-					size
-				}))
+			syncing = $i18n.t('Creating folders...');
+			const directoryIdByPath = await createDirectoriesForPaths([
+				...new Set(manifest.map((entry) => entry.path).filter(Boolean))
+			]);
+			const missing = [...new Set(manifest.map((entry) => entry.path).filter(Boolean))].filter(
+				(path) => !directoryIdByPath[path]
 			);
-
-			if (!diff) {
-				toast.error($i18n.t('Failed to compare files.'));
+			if (missing.length) {
+				toast.error($i18n.t('Could not create {{count}} folders.', { count: missing.length }));
 				return;
 			}
 
-			const directoryIdByPath = await createMissingDirectories(diff);
-
 			const failedCount = await uploadManifestEntries(manifest, (entry) =>
-				entry.path ? directoryIdByPath[getDirectoryUploadPath(entry.path)] : currentDirectoryId
+				entry.path ? (directoryIdByPath[entry.path] ?? null) : currentDirectoryId
 			);
 
 			if (failedCount === 0) {
@@ -885,6 +900,8 @@
 
 	// Incremental sync: hash locally → diff on server → upload only what
 	// changed, remove what disappeared, mirror the folder structure.
+	// [Gradient] Not offered in the menu: its diff and cleanup routes went
+	// with the sync daemon (11038e9e4). Kept until that decision is final.
 	const syncDirectoryHandler = async () => {
 		if (!structureEditable || !pendingSyncFiles?.length) return;
 
@@ -965,7 +982,7 @@
 
 	const reportCloudError = (error: unknown) => {
 		toast.error(
-			error instanceof cloudSync.CloudSyncError
+			error instanceof Error && error.message
 				? error.message
 				: $i18n.t('Cloud sync request failed.')
 		);
@@ -2274,16 +2291,7 @@
 												document.getElementById('files-input').click();
 											}
 										}}
-										onSync={structureEditable
-											? async () => {
-													pendingSyncFiles = filterAllowedEntries(await collectDirectoryEntries());
-													if (pendingSyncFiles?.length) {
-														showSyncConfirmModal = true;
-													} else {
-														pendingSyncFiles = null;
-													}
-												}
-											: null}
+										onSync={null}
 										onReset={structureEditable
 											? () => {
 													showResetConfirm = true;

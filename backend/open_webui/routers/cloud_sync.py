@@ -5,6 +5,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import HTMLResponse
+from open_webui.config import CORS_ALLOW_ORIGIN
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import CloudSync
@@ -82,9 +83,14 @@ async def connect_done(
     user=Depends(get_verified_user),
 ):
     data = json.dumps({'type': 'soev_connect', 'connection': connection, 'result': result}).replace('<', '\\u003c')
+    # The opener may live on another configured origin than this page (a dev
+    # stack serves the frontend and the API on different ports); a message to
+    # an origin the opener is not on is dropped by the browser, never seen.
+    origins = json.dumps(sorted(origin for origin in CORS_ALLOW_ORIGIN if origin != '*')).replace('<', '\\u003c')
     return HTMLResponse(
         '<!DOCTYPE html><html><body><script>'
-        f'if (window.opener) {{ window.opener.postMessage({data}, window.location.origin); }}'
+        f'if (window.opener) {{ for (const origin of new Set([window.location.origin, ...{origins}])) '
+        f'window.opener.postMessage({data}, origin); }}'
         'window.close();</script></body></html>',
         headers={'Cache-Control': 'no-store'},
     )
