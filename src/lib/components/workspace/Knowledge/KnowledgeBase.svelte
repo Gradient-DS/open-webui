@@ -27,8 +27,6 @@
 		updateKnowledgeDirectory,
 		deleteKnowledgeDirectory,
 		moveFileInKnowledge,
-		syncKnowledgeDiff,
-		syncKnowledgeCleanup,
 		testExternalKnowledgeRetrieval
 	} from '$lib/apis/knowledge';
 	import { processUrl } from '$lib/apis/retrieval';
@@ -80,7 +78,6 @@
 	import EmptyStateCards from './KnowledgeBase/EmptyStateCards.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 
-	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import ConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
@@ -172,11 +169,10 @@
 	let showAddTextContentModal = false;
 	let showNewDirectoryModal = false;
 
-	let showSyncConfirmModal = false;
 	let showAccessControlModal = false;
 	let showResetConfirm = false;
 
-	// Local-directory upload/sync pipeline (upstream v0.10.2)
+	// Local-directory upload pipeline (upstream v0.10.2)
 	type DirectoryHandle = {
 		kind: 'directory';
 		name: string;
@@ -185,9 +181,6 @@
 		>;
 	};
 	type DirectoryFileEntry = { path: string; filename: string; file: File };
-	type DirectoryManifestEntry = DirectoryFileEntry & { checksum: string; size: number };
-	let pendingSyncFiles: DirectoryFileEntry[] | null = null;
-	let syncing: string | null = null;
 
 	type Knowledge = {
 		id: string;
@@ -659,10 +652,10 @@
 		}
 	};
 
-	// ===== Structure-preserving directory upload + incremental sync (upstream v0.10.2) =====
+	// ===== Structure-preserving directory upload (upstream v0.10.2) =====
 
 	// Collect files (with their relative paths) from a picked directory
-	// without uploading. Feeds the structure-preserving upload + sync flows.
+	// without uploading. Feeds the structure-preserving upload flow.
 	const collectDirectoryEntries = async (): Promise<DirectoryFileEntry[] | null> => {
 		const isFileSystemAccessSupported = 'showDirectoryPicker' in window;
 
@@ -736,8 +729,7 @@
 
 	// Client-side extension allow-list for directory entries — mirrors
 	// uploadFileHandler's gate, so a disallowed file never uploads in full
-	// before the server rejects it. Disallowed files can't be in the KB, so
-	// dropping them from a sync manifest is consistent with server state.
+	// before the server rejects it.
 	const filterAllowedEntries = (
 		entries: DirectoryFileEntry[] | null
 	): DirectoryFileEntry[] | null => {
@@ -758,46 +750,6 @@
 			);
 		}
 		return kept;
-	};
-
-	const buildDirectoryManifest = async (
-		entries: DirectoryFileEntry[]
-	): Promise<DirectoryManifestEntry[]> => {
-		return Promise.all(
-			entries.map(async (entry) => ({
-				...entry,
-				checksum: await computeFileHash(entry.file),
-				size: entry.file.size
-			}))
-		);
-	};
-
-	const createMissingDirectories = async (diff: {
-		directory_map?: Record<string, string>;
-		mkdir: string[];
-	}) => {
-		if (!knowledge) return {};
-
-		const directoryIdByPath: Record<string, string> = { ...(diff.directory_map || {}) };
-
-		for (const dirPath of diff.mkdir) {
-			const segments = dirPath.split('/');
-			const name = segments.at(-1)!;
-			const parentPath = segments.slice(0, -1).join('/');
-			const parentId = parentPath ? directoryIdByPath[parentPath] : null;
-
-			const directory = await createKnowledgeDirectory(
-				localStorage.token,
-				knowledge.id,
-				name,
-				parentId
-			);
-			if (directory) {
-				directoryIdByPath[dirPath] = directory.id;
-			}
-		}
-
-		return directoryIdByPath;
 	};
 
 	let uploads: FolderUploadSession[] = [];
@@ -967,88 +919,6 @@
 			}
 		} finally {
 			session.completeUploads();
-		}
-	};
-
-	// Incremental sync: hash locally → diff on server → upload only what
-	// changed, remove what disappeared, mirror the folder structure.
-	// [Gradient] Not offered in the menu: its diff and cleanup routes went
-	// with the sync daemon (11038e9e4). Kept until that decision is final.
-	const syncDirectoryHandler = async () => {
-		if (!structureEditable || !pendingSyncFiles?.length) return;
-
-		try {
-			syncing = $i18n.t('Computing checksums ({{count}} files)', {
-				count: pendingSyncFiles.length
-			});
-			const manifest = await buildDirectoryManifest(pendingSyncFiles);
-			pendingSyncFiles = null;
-
-			syncing = $i18n.t('Comparing with knowledge base...');
-			const diff = await syncKnowledgeDiff(
-				localStorage.token,
-				id,
-				manifest.map(({ filename, path, checksum, size }) => ({ filename, path, checksum, size }))
-			);
-
-			if (!diff) {
-				toast.error($i18n.t('Failed to compare files.'));
-				return;
-			}
-
-			// Cleanup — remove deleted + stale modified files first (routes
-			// through the fork's full deletion cascade server-side).
-			const staleFileIds = [
-				...diff.deleted.map((d: { file_id: string }) => d.file_id),
-				...diff.modified.map((m: { stale_file_id: string }) => m.stale_file_id)
-			];
-
-			if (staleFileIds.length > 0 || diff.rmdir.length > 0) {
-				syncing = $i18n.t('Removing {{count}} stale files...', { count: staleFileIds.length });
-				await syncKnowledgeCleanup(localStorage.token, id, staleFileIds, diff.rmdir);
-			}
-
-			// Create missing directories (parents first)
-			const directoryIdByPath = await createMissingDirectories(diff);
-
-			// Upload added + modified files only
-			const filesToUpload = manifest.filter(
-				(entry) =>
-					diff.added.some(
-						(a: { filename: string; path: string }) =>
-							a.filename === entry.filename && a.path === entry.path
-					) ||
-					diff.modified.some(
-						(m: { filename: string; path: string }) =>
-							m.filename === entry.filename && m.path === entry.path
-					)
-			);
-
-			const failedCount = await uploadManifestEntries(filesToUpload, (entry) =>
-				entry.path ? directoryIdByPath[entry.path] : null
-			);
-
-			// ── 7. Report ──
-			if (failedCount === 0) {
-				toast.success(
-					$i18n.t(
-						'Sync complete: {{added}} added, {{modified}} modified, {{deleted}} deleted, {{unmodified}} unmodified',
-						{
-							added: diff.added.length,
-							modified: diff.modified.length,
-							deleted: diff.deleted.length,
-							unmodified: diff.unmodified_count
-						}
-					)
-				);
-			}
-			// Awaited for the same reason as uploadDirectoryEntries above --
-			// same try/finally shape, same refresh race.
-			await init();
-		} catch (e) {
-			toast.error(`${e}`);
-		} finally {
-			syncing = null;
 		}
 	};
 
@@ -1973,21 +1843,7 @@
 />
 
 <FilesOverlay show={dragged} />
-<SyncConfirmDialog
-	bind:show={showSyncConfirmModal}
-	message={$i18n.t(
-		'{{count}} files selected. Only new and modified files will be uploaded. Deleted files will be removed. The folder structure will be mirrored. Continue?',
-		{ count: pendingSyncFiles?.length ?? 0 }
-	)}
-	on:confirm={() => {
-		syncDirectoryHandler();
-	}}
-	on:cancel={() => {
-		pendingSyncFiles = null;
-	}}
-/>
-
-<SyncConfirmDialog
+<ConfirmDialog
 	bind:show={showBulkRemoveConfirm}
 	title={$bulkBreakdown.sources > 0
 		? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
@@ -2387,7 +2243,6 @@
 												document.getElementById('files-input').click();
 											}
 										}}
-										onSync={null}
 										onReset={structureEditable
 											? () => {
 													showResetConfirm = true;
@@ -2468,19 +2323,6 @@
 							onMoveFiles={(fileIds, dirId) => moveFilesToDirectoryHandler(fileIds, dirId)}
 							onMoveDir={(dirId, targetId) => moveDirectoryHandler(dirId, targetId)}
 						/>
-					</div>
-				{/if}
-
-				{#if syncing}
-					<div class="mx-2 mt-2 -mb-0.5 shrink-0">
-						<div
-							class="flex items-center gap-2 rounded-xl py-1.5 px-2.5 bg-gray-50 dark:bg-gray-850"
-						>
-							<Spinner className="size-3.5 shrink-0" />
-							<div class="text-xs text-gray-500 dark:text-gray-400 truncate">
-								{syncing}
-							</div>
-						</div>
 					</div>
 				{/if}
 
