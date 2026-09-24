@@ -66,6 +66,7 @@
 		oneDriveScope,
 		googleDriveScope,
 		connectResult,
+		trustedConnectOrigins,
 		connectionOutcome,
 		reconnectConnections,
 		pairSchedules,
@@ -1074,8 +1075,9 @@
 					checking = false;
 				}
 			};
+			const trustedOrigins = trustedConnectOrigins(window.location.origin, WEBUI_API_BASE_URL);
 			const handleMessage = (event: MessageEvent) => {
-				const result = connectResult(event, window.location.origin, popup, expectedId);
+				const result = connectResult(event, trustedOrigins, popup, expectedId);
 				if (result === 'pending') {
 					beginExchangeWait();
 					void checkConnection();

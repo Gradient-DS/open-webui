@@ -6,6 +6,7 @@ import {
 	shouldRefetchSyncItems,
 	pairSchedules,
 	connectResult,
+	trustedConnectOrigins,
 	googleDriveScope,
 	oneDriveScope,
 	reconnectConnections,
@@ -61,13 +62,26 @@ it('registers Google folders and files without carrying picker credentials', () 
 describe('connect popup messages', () => {
 	const popup = {} as Window;
 	const origin = 'https://owui.invalid';
+	const trustedOrigins = new Set([origin]);
 	const event = {
 		origin,
 		source: popup,
 		data: { type: 'soev_connect', connection: 'c', result: 'pending' }
 	};
 	it('accepts the expected callback without treating pending as enabled', () => {
-		expect(connectResult(event, origin, popup, 'c')).toBe('pending');
+		expect(connectResult(event, trustedOrigins, popup, 'c')).toBe('pending');
+	});
+	it('accepts the API origin on a split-origin stack', () => {
+		const origins = trustedConnectOrigins('http://localhost:5173', 'http://localhost:8080/api/v1');
+		expect(connectResult({ ...event, origin: 'http://localhost:8080' }, origins, popup, 'c')).toBe(
+			'pending'
+		);
+	});
+	it('rejects foreign origins on a split-origin stack', () => {
+		const origins = trustedConnectOrigins('http://localhost:5173', 'http://localhost:8080/api/v1');
+		expect(
+			connectResult({ ...event, origin: 'https://other.invalid' }, origins, popup, 'c')
+		).toBeNull();
 	});
 	it('ignores other origins, windows, connections, message types and results', () => {
 		for (const invalid of [
@@ -77,13 +91,31 @@ describe('connect popup messages', () => {
 			{ ...event, data: { ...event.data, type: 'onedrive_auth_callback' } },
 			{ ...event, data: { ...event.data, result: 'success' } }
 		])
-			expect(connectResult(invalid, origin, popup, 'c')).toBeNull();
-		expect(connectResult(event, origin, popup)).toBeNull();
+			expect(connectResult(invalid, trustedOrigins, popup, 'c')).toBeNull();
+		expect(connectResult(event, trustedOrigins, popup)).toBeNull();
 	});
 	it.each(['error', 'invalid'])('surfaces a %s callback', (result) => {
-		expect(connectResult({ ...event, data: { ...event.data, result } }, origin, popup, 'c')).toBe(
-			result
+		expect(
+			connectResult({ ...event, data: { ...event.data, result } }, trustedOrigins, popup, 'c')
+		).toBe(result);
+	});
+});
+
+describe('trusted connect origins', () => {
+	const location = 'https://owui.invalid';
+	it.each(['/api/v1', 'api/v1', '', '//api.invalid/api/v1'])(
+		'keeps only the page origin for a relative API base: %s',
+		(apiBase) => {
+			expect(trustedConnectOrigins(location, apiBase)).toEqual(new Set([location]));
+		}
+	);
+	it('adds only the origin of an absolute API base', () => {
+		expect(trustedConnectOrigins(location, 'https://api.invalid:8443/api/v1')).toEqual(
+			new Set([location, 'https://api.invalid:8443'])
 		);
+	});
+	it('does not trust opaque origins', () => {
+		expect(trustedConnectOrigins(location, 'data:text/plain,example')).toEqual(new Set([location]));
 	});
 });
 

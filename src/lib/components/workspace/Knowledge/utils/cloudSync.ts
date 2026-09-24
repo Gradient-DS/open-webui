@@ -33,15 +33,26 @@ export function googleDriveScope(item: {
 	};
 }
 
+export function trustedConnectOrigins(location: string, apiBase: string): Set<string> {
+	const origins = new Set([location]);
+	try {
+		const origin = new URL(apiBase).origin;
+		if (origin !== 'null') origins.add(origin);
+	} catch {
+		// Relative API bases use the page origin.
+	}
+	return origins;
+}
+
 export function connectResult(
 	event: Pick<MessageEvent, 'origin' | 'source' | 'data'>,
-	origin: string,
+	trustedOrigins: Set<string>,
 	popup: Window,
 	connectionId?: string
 ): 'pending' | 'error' | 'invalid' | null {
 	if (
 		!connectionId ||
-		event.origin !== origin ||
+		!trustedOrigins.has(event.origin) ||
 		event.source !== popup ||
 		event.data?.type !== 'soev_connect' ||
 		event.data.connection !== connectionId
