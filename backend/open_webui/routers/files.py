@@ -46,6 +46,7 @@ from open_webui.soev import ingest
 from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.content_types import content_type_for  # [Gradient]
 from open_webui.utils.misc import strict_match_mime_type
 from open_webui.utils.upload_guard import check_upload
 from pydantic import BaseModel, ConfigDict
@@ -146,12 +147,15 @@ async def process_uploaded_file(
 ):
     async def _process_handler(db_session):
         try:
-            content_type = file.content_type
+            # [Gradient]
+            content_type = content_type_for(file.filename, file.content_type)
 
             # Detect mis-labeled text files (e.g. .ts → video/mp2t)
             if content_type and content_type.startswith(('image/', 'video/')):
                 if _is_text_file(file_path):
-                    content_type = 'text/plain'
+                    # [Gradient]
+                    content_type = content_type_for(file.filename, 'text/plain')
+                    await Files.update_file_metadata_by_id(file_item.id, {'content_type': content_type}, db=db_session)
 
             # If destined for a KB, embed directly into the KB collection so
             # we never create a redundant `file-<id>` collection.
@@ -430,6 +434,8 @@ async def upload_file_handler(
     try:
         unsanitized_filename = file.filename
         filename = os.path.basename(unsanitized_filename)
+        # [Gradient]
+        content_type = content_type_for(filename, file.content_type)
 
         file_extension = os.path.splitext(filename)[1]
         # Remove the leading dot from the file extension and lowercase it
@@ -478,16 +484,18 @@ async def upload_file_handler(
         # only signal to the frontend is a single Socket.IO 'file:status'
         # emit — which is exactly the path that drops on a stuck loop and
         # leaves an infinite spinner (see 2026-04-30 sync follow-ups).
-        if process and file.content_type and file.content_type.startswith(('image/', 'video/')):
+        # [Gradient]
+        if process and content_type.startswith(('image/', 'video/')):
             engine = await Config.get('rag.content_extraction_engine')
             stt = await Config.get('audio.stt.supported_content_types', []) or []
             image_engines = {'external', 'datalab_marker', 'mistral_ocr'}
             handles_image = engine in image_engines
-            handles_stt = strict_match_mime_type(stt, file.content_type)
+            handles_stt = strict_match_mime_type(stt, content_type)  # [Gradient]
             if not handles_image and not handles_stt:
                 raise HTTPException(
                     status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                    detail=f'File type {file.content_type} is not supported by the configured extraction engine.',
+                    # [Gradient]
+                    detail=f'File type {content_type} is not supported by the configured extraction engine.',
                 )
 
         # replace filename with uuid (prefer readable storage names for admins,
@@ -570,7 +578,7 @@ async def upload_file_handler(
                     },
                     'meta': {
                         'name': name,
-                        'content_type': (file.content_type if isinstance(file.content_type, str) else None),
+                        'content_type': content_type,  # [Gradient]
                         'size': len(contents),
                         'file_hash': file_hash,
                         'data': file_metadata,

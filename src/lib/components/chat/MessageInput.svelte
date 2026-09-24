@@ -1913,6 +1913,7 @@
 					: 'max-w-[58rem]'} px-2 mx-auto inset-x-0"
 			>
 				<div class="">
+					<!-- [Gradient] -->
 					<input
 						bind:this={filesInputElement}
 						bind:files={inputFiles}

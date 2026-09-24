@@ -20,13 +20,15 @@ from __future__ import annotations
 import io
 import zipfile
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException, UploadFile, status
 from open_webui.routers import files as files_router
 from open_webui.routers.files import upload_file_handler
-from open_webui.utils.upload_guard import GuardResult, check_upload
+from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS, EXTENSION_MIME
+from open_webui.utils.upload_guard import MIME_TO_EXT, GuardResult, _mime_consistent_with_ext, check_upload
+from PIL import Image
 
 # --------------------------------------------------------------------------- #
 # Byte fixtures — real content whose libmagic sniff we rely on.
@@ -161,10 +163,96 @@ def test_pdf_accepted_with_matching_extension():
     assert result.allowed is True
 
 
-def test_unknown_extension_treated_permissively():
-    # .png is not in the mapping; harmless (non-executable) content -> accept.
-    result = check_upload(TXT_BYTES, 'image.png', 'png', ['pdf'], mode='enforce')
+@pytest.mark.parametrize('content', [TXT_BYTES, bytes(512)])
+def test_unknown_extension_is_rejected_when_allowlisted(content):
+    result = check_upload(content, 'image.png', 'png', ['png'], mode='enforce')
+    assert result.allowed is False
+    assert 'unsupported file extension' in result.reason
+
+
+def test_png_passes_with_document_allowlist():
+    buffer = io.BytesIO()
+    Image.new('RGB', (1, 1)).save(buffer, format='PNG')
+    result = check_upload(buffer.getvalue(), 'image.png', 'png', DEFAULT_ALLOWED_EXTENSIONS, mode='enforce')
     assert result.allowed is True
+    assert result.sniffed_mime == 'image/png'
+
+
+@pytest.mark.parametrize('mode', ['enforce', 'log'])
+def test_allowlisted_zip_is_rejected_or_warn_logged(mode, caplog):
+    result = check_upload(ZIP_BYTES, 'archive.zip', 'zip', [*DEFAULT_ALLOWED_EXTENSIONS, 'zip'], mode=mode)
+    assert result.allowed is (mode == 'log')
+    assert result.sniffed_mime == 'application/zip'
+    assert 'unsupported file extension .zip' in result.reason
+    assert result.reason in caplog.text
+    if mode == 'log':
+        assert 'accepted in log mode (would reject in enforce)' in caplog.text
+
+
+@pytest.mark.parametrize(
+    'ext,mime',
+    [
+        ('png', 'image/png'),
+        ('jpg', 'image/jpeg'),
+        ('webp', 'image/webp'),
+        ('mp3', 'audio/mpeg'),
+        ('wav', 'audio/wav'),
+        ('m4a', 'audio/mp4'),
+    ],
+)
+def test_unknown_extension_mime_consistency_is_permissive(ext, mime):
+    assert _mime_consistent_with_ext(ext, mime)
+
+
+@pytest.mark.parametrize('ext,mime', EXTENSION_MIME.items())
+def test_every_allowed_extension_has_a_guard_class(ext, mime):
+    assert _mime_consistent_with_ext(ext, mime)
+    assert not _mime_consistent_with_ext(ext, 'image/png')
+    assert MIME_TO_EXT[mime] in EXTENSION_MIME
+
+
+@pytest.mark.parametrize('ext', ['doc', 'xls', 'ppt', 'msg'])
+@pytest.mark.parametrize(
+    'mime',
+    [
+        'application/x-ole-storage',
+        'application/CDFV2',
+        'application/msword',
+        'application/vnd.ms-excel',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.ms-outlook',
+    ],
+)
+def test_ole_mime_class(ext, mime):
+    assert _mime_consistent_with_ext(ext, mime)
+
+
+@pytest.mark.parametrize('ext', ['doc', 'xls', 'ppt', 'msg'])
+def test_ole_bytes_match_legacy_office_and_msg(ext):
+    content = bytes.fromhex('d0cf11e0a1b11ae1') + bytes(504)
+    assert check_upload(content, f'report.{ext}', ext, [ext], mode='enforce').allowed
+    assert not check_upload(PDF_BYTES, f'report.{ext}', ext, [ext], mode='enforce').allowed
+
+
+@pytest.mark.parametrize('mode', ['enforce', 'log'])
+@pytest.mark.parametrize('allowed', [[], ['doc', 'xls', 'ppt', 'msg']])
+def test_extensionless_ole_requires_a_filename_extension(mode, allowed):
+    content = bytes.fromhex('d0cf11e0a1b11ae1') + bytes(504)
+    result = check_upload(content, 'report', '', allowed, mode=mode)
+    assert result.allowed is (mode == 'log')
+    assert 'ambiguous OLE' in result.reason
+
+
+@pytest.mark.parametrize('ext', ['', 'eml'])
+def test_eml_is_recognized_as_mail(ext):
+    content = b'From: alice@example.com\r\nTo: bob@example.com\r\nSubject: Report\r\n\r\nHello Bob.\r\n'
+    result = check_upload(content, f'message.{ext}', ext, ['eml'], mode='enforce')
+    assert result.allowed
+    assert result.sniffed_mime == 'message/rfc822'
+
+
+def test_eml_accepts_plain_text():
+    assert check_upload(TXT_BYTES, 'message.eml', 'eml', ['eml'], mode='enforce').allowed
 
 
 # --- (3) mismatch: reject in enforce, accept-with-warning in log -----------
@@ -252,6 +340,36 @@ def _user() -> SimpleNamespace:
 
 def _upload(filename: str, content_type: str, content: bytes) -> UploadFile:
     return UploadFile(filename=filename, file=io.BytesIO(content), headers={'content-type': content_type})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'ext,content,expected',
+    [
+        ('md', MD_BYTES, 'text/markdown'),
+        ('json', JSON_BYTES, 'application/json'),
+        ('docx', DOCX_BYTES, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+    ],
+)
+@pytest.mark.parametrize('declared', ['', 'application/octet-stream', 'image/png'])
+async def test_route_stores_derived_content_type(monkeypatch, ext, content, expected, declared):
+    monkeypatch.setenv('RAG_FILE_SNIFF_MODE', 'enforce')
+    _patch_config(monkeypatch, allowed=[ext], engine='tika')
+    monkeypatch.setattr(files_router.Storage, 'upload_file', lambda *args: (content, 'uploads/report'))
+    insert = AsyncMock(return_value=SimpleNamespace(id='file-1', model_dump=lambda: {}))
+    monkeypatch.setattr(files_router.Files, 'insert_new_file', insert)
+    process = AsyncMock()
+    monkeypatch.setattr(files_router, 'process_uploaded_file', process)
+    await upload_file_handler(
+        _request(),
+        file=_upload(f'report.{ext}', declared, content),
+        metadata=None,
+        process=True,
+        process_in_background=False,
+        user=_user(),
+    )
+    assert insert.await_args.args[1].meta['content_type'] == expected
+    process.assert_awaited_once()
 
 
 async def _run(monkeypatch, *, filename, content_type, content, allowed, mode, process=True):
