@@ -95,17 +95,25 @@ MIME_TO_EXT = {
     'text/csv': 'csv',
     'text/tab-separated-values': 'tsv',
     'text/markdown': 'md',
+    'text/x-rst': 'rst',
+    'message/rfc822': 'eml',
     'text/rtf': 'rtf',
     'application/rtf': 'rtf',
     'text/plain': 'txt',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.template': 'dotx',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.template': 'xltx',
     'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'application/vnd.openxmlformats-officedocument.presentationml.template': 'potx',
     'application/vnd.oasis.opendocument.text': 'odt',
     'application/vnd.oasis.opendocument.spreadsheet': 'ods',
     'application/vnd.oasis.opendocument.presentation': 'odp',
     'application/epub+zip': 'epub',
     'application/vnd.ms-outlook': 'msg',
+    'application/msword': 'doc',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.ms-powerpoint': 'ppt',
     'application/x-ole-storage': 'msg',
 }
 
@@ -125,6 +133,7 @@ _TEXT_EXTS = frozenset(
         'xml',
         'json',
         'rst',
+        'eml',
     }
 )
 _TEXT_ADJACENT_MIMES = frozenset(
@@ -134,6 +143,7 @@ _TEXT_ADJACENT_MIMES = frozenset(
         'application/xhtml+xml',
         'application/csv',
         'application/x-ndjson',
+        'message/rfc822',
     }
 )
 
@@ -169,19 +179,20 @@ _CONTAINER_MIMES = frozenset(
     }
 )
 
-# Remaining extensions with a concrete, non-permissive acceptable-MIME set.
+_OLE_EXTS = frozenset({'doc', 'xls', 'ppt', 'msg'})
+_AMBIGUOUS_OLE_MIMES = frozenset({'application/x-ole-storage', 'application/cdfv2', 'application/vnd.ms-office'})
+_OLE_MIMES = _AMBIGUOUS_OLE_MIMES | {
+    'application/msword',
+    'application/vnd.ms-excel',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.ms-outlook',
+}
+
 EXT_TO_MIMES = {
     'pdf': frozenset({'application/pdf'}),
     'rtf': frozenset({'application/rtf', 'text/rtf'}),
-    'msg': frozenset(
-        {
-            'application/vnd.ms-outlook',
-            'application/x-ole-storage',
-            'application/vnd.ms-office',
-            'application/CDFV2',
-        }
-    ),
 }
+_KNOWN_EXTS = _TEXT_EXTS | _CONTAINER_EXTS | _OLE_EXTS | EXT_TO_MIMES.keys()
 
 
 @dataclass(frozen=True)
@@ -229,17 +240,18 @@ def _clean_allowed(allowed_exts: list[str] | None) -> set[str]:
 
 def _mime_consistent_with_ext(ext: str, mime: str) -> bool:
     """Is a sniffed ``mime`` acceptable for a file claiming extension ``ext``?"""
+    if ext not in _KNOWN_EXTS:
+        return False
+    mime = mime.lower()
     if mime in _PERMISSIVE_MIMES:
         return True
     if ext in _TEXT_EXTS:
         return mime.startswith('text/') or mime in _TEXT_ADJACENT_MIMES
     if ext in _CONTAINER_EXTS:
         return mime in _CONTAINER_MIMES
-    acceptable = EXT_TO_MIMES.get(ext)
-    if acceptable is not None:
-        return mime in acceptable
-    # Extension unknown to our tables -> permissive (executables already handled).
-    return True
+    if ext in _OLE_EXTS:
+        return mime in _OLE_MIMES
+    return mime in EXT_TO_MIMES[ext]
 
 
 def _decide(mode: str, reason: str, sniffed: str, filename: str) -> GuardResult:
@@ -273,7 +285,7 @@ def check_upload(
     if mode == MODE_OFF:
         return GuardResult(True, 'sniffing disabled (RAG_FILE_SNIFF_MODE=off)', '')
 
-    sniffed = _sniff(contents)
+    sniffed = _sniff(contents).lower()
 
     # (1) Executables: always rejected — the one hard stop, even in log mode.
     if sniffed in BLOCKED_MIMES:
@@ -281,15 +293,20 @@ def check_upload(
         log.warning('upload_guard: blocking executable upload %r (sniffed %s)', filename, sniffed)
         return GuardResult(False, reason, sniffed)
 
+    ext = (ext or '').strip().lower().lstrip('.')
+    if ext and ext not in _KNOWN_EXTS:
+        return _decide(mode, f'unsupported file extension .{ext}', sniffed, filename)
+
     if not sniffed:
         # libmagic couldn't fingerprint the bytes at all — don't punish that.
         return GuardResult(True, 'content could not be fingerprinted', '')
 
-    ext = (ext or '').strip().lower().lstrip('.')
     allowed = _clean_allowed(allowed_exts)
 
     # (2) Extensionless upload: the sniff, not an automatic pass, decides.
     if not ext:
+        if sniffed in _AMBIGUOUS_OLE_MIMES:
+            return _decide(mode, f'ambiguous OLE content ({sniffed}) requires a file extension', sniffed, filename)
         mapped = MIME_TO_EXT.get(sniffed)
         if not allowed or (mapped is not None and mapped in allowed):
             return GuardResult(True, f'extensionless upload sniffed as {sniffed}', sniffed)
