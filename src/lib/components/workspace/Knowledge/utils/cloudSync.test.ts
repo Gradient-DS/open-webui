@@ -96,7 +96,10 @@ it('deduplicates reconnect banners and trusts polled lifecycle over a stale popu
 	expect(reconnectConnections([schedule, schedule], null)).toEqual([connection]);
 	const enabled = { ...connection, lifecycle: 'enabled' };
 	expect(reconnectConnections([{ connection: enabled } as Schedule], connection)).toEqual([]);
-	expect(reconnectConnections([], { ...connection, lifecycle: 'pending' })).toHaveLength(1);
+	expect(reconnectConnections([], { ...connection, lifecycle: 'pending' })).toEqual([]);
+	expect(
+		reconnectConnections([], { ...connection, lifecycle: 'pending', last_error: 'owner_mismatch' })
+	).toHaveLength(1);
 	expect(reconnectConnections([], { ...connection, lifecycle: 'revoked' })).toEqual([]);
 });
 

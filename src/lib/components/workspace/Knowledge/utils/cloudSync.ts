@@ -59,11 +59,12 @@ export function reconnectConnections(
 		schedules.map((schedule) => [schedule.connection.id, schedule.connection])
 	);
 	if (pending && !connections.has(pending.id)) connections.set(pending.id, pending);
+	// A first-time connect stays `pending` while its popup is open, so only a
+	// suspended connection or a refused consent asks for a reconnect.
 	return [...connections.values()].filter(
 		(connection) =>
 			['onedrive', 'google_drive'].includes(connection.source_kind) &&
-			(['pending', 'suspended:reauth'].includes(connection.lifecycle) ||
-				connection.last_error === 'owner_mismatch')
+			(connection.lifecycle === 'suspended:reauth' || connection.last_error === 'owner_mismatch')
 	);
 }
 

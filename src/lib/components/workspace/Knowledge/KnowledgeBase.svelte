@@ -2018,7 +2018,7 @@
 		<div
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
-			{#if activeProvider || schedules.length || finishingConnectionId}
+			{#if schedules.length || reconnectNeeded.length || finishingConnectionId || syncStatusError}
 				<CloudSyncPanel
 					knowledgeId={knowledge.id}
 					{schedules}
