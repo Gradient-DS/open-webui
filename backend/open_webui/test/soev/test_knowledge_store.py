@@ -1305,3 +1305,52 @@ async def test_empty_file_counts_do_not_query_files(env):
         assert not statements
     finally:
         event.remove(env.engine.sync_engine, 'before_cursor_execute', count)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [None, 404, 403, 503])
+async def test_reference_collections_overlap_and_preserve_order_and_errors(env, monkeypatch, failure):
+    import asyncio
+
+    from open_webui.soev.client import SoevApiError, close_client
+
+    await seed(env, 'other')
+    for key in ('kb', 'other'):
+        env.api.add_document(key, 'first')
+        env.api.add_document(key, 'second')
+    handle = env.api.handle
+    started = set()
+    both_started = asyncio.Event()
+
+    async def delayed(request):
+        response = handle(request)
+        if request.url.path in ('/v1/collections/kb', '/v1/collections/other'):
+            started.add(request.url.path)
+            if len(started) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=2)
+            if failure and (failure != 404 or request.url.path.endswith('/kb')):
+                status = failure if request.url.path.endswith('/kb') else 502
+                return httpx.Response(
+                    status,
+                    json={'code': 'denied', 'detail': 'Unavailable'},
+                    headers={'Content-Type': 'application/problem+json'},
+                )
+        return response
+
+    await close_client()
+    monkeypatch.setattr(env.api, 'handle', delayed)
+    env.api.requests.clear()
+    if failure in (403, 503):
+        with pytest.raises(SoevApiError) as error:
+            await env.store._references({'first', 'second'}, user_id='alice')
+        assert error.value.status == failure
+    else:
+        pairs = await env.store._references({'first', 'second'}, user_id='alice')
+        assert [(row['key'], document['source_id']) for row, document in pairs] == [
+            (key, source) for source in ('first', 'second') for key in ('kb', 'other') if failure != 404 or key != 'kb'
+        ]
+    assert len(started) == 2
+    assert sum(request.url.path == '/v1/collections/kb' for request in env.api.requests) == 1
+    assert sum(request.url.path == '/v1/collections/other' for request in env.api.requests) == 1
+    assert len(env.api.requests) == (3 if failure in (403, 503) else 4)

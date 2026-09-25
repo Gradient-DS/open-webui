@@ -441,12 +441,22 @@ class SoevKnowledgeTable:
         collections = {}
         for source_id in sorted(ids):
             response = await self._get('/v1/documents', params={'source_id': source_id}, user_id=user_id)
+            keys = list(
+                dict.fromkeys(
+                    doc['collection_key'] for doc in response['data'] if doc['collection_key'] not in collections
+                )
+            )
+            rows = await asyncio.gather(
+                *(self._collection(key, user_id=user_id) for key in keys), return_exceptions=True
+            )
+            for key, row in zip(keys, rows):
+                if isinstance(row, BaseException):
+                    raise row
+                collections[key] = row
             for document in response['data']:
-                key = document['collection_key']
-                if key not in collections:
-                    collections[key] = await self._collection(key, user_id=user_id)
-                if collections[key] is not None:
-                    result.append((collections[key], document))
+                collection = collections[document['collection_key']]
+                if collection is not None:
+                    result.append((collection, document))
         return result
 
     async def get_knowledges_by_file_id(self, file_id, db=None):
