@@ -77,7 +77,7 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'services/email/auth.py': 'Missing EMAIL_GRAPH credentials raise before the Microsoft token request.',
     'services/email/graph_mail_client.py': 'Mail token acquisition raises before Graph sendMail when EMAIL_GRAPH credentials are empty.',
     'soev/client.py': 'Targets SOEV_API_URL, empty in CI; tests use httpx.MockTransport.',
-    'storage/provider.py': 'S3 uploads/downloads use S3_ENDPOINT_URL at in-network MinIO with disposable credentials; STORAGE_PROVIDER=s3 leaves Azure Blob and GCS unselected.',
+    'storage/provider.py': 'S3 uploads/downloads use S3_ENDPOINT_URL at the in-network S3 gateway with disposable credentials; STORAGE_PROVIDER=s3 leaves Azure Blob and GCS unselected.',
     'utils/agent.py': 'Agent completions use AGENT_API_BASE_URL at stub, including streaming requests.',
     'utils/anthropic.py': 'Provider passthrough uses configured OpenAI connections at stub; no Anthropic connection is seeded.',
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
@@ -489,7 +489,7 @@ class TestCiStubsEveryDeclaredSink:
         assert compose['networks']['internal']['internal'] is True
         assert set(compose['networks']) == {'internal', 'edge'}
         services = compose['services']
-        assert set(services) == {'entry', 'open-webui', 'postgres', 'weaviate', 'redis', 'stub', 'minio', 'minio-init'}
+        assert set(services) == {'entry', 'open-webui', 'postgres', 'weaviate', 'redis', 'stub', 's3'}
         for name, service in services.items():
             assert set(service['networks']) == ({'internal', 'edge'} if name == 'entry' else {'internal'})
             assert not service.get('network_mode')
@@ -497,11 +497,7 @@ class TestCiStubsEveryDeclaredSink:
             assert not service.get('cap_add')
             assert not service.get('extra_hosts')
             assert not service.get('env_file')
-            if name == 'minio-init':
-                assert services['open-webui']['depends_on'][name]['condition'] == 'service_completed_successfully'
-                assert service['restart'] == 'no'
-            else:
-                assert service.get('healthcheck') and not service['healthcheck'].get('disable')
+            assert service.get('healthcheck') and not service['healthcheck'].get('disable')
             if name != 'entry':
                 assert not service.get('ports'), name
             # No inherited host environment, proxy variables or interpolation.
@@ -512,7 +508,7 @@ class TestCiStubsEveryDeclaredSink:
         assert app['container_name'] == 'open-webui-ci'
         assert app['build']['context'] == '.'
         assert app['build']['dockerfile'] == 'Dockerfile'
-        for dependency in ('postgres', 'weaviate', 'redis', 'stub', 'minio'):
+        for dependency in ('postgres', 'weaviate', 'redis', 'stub', 's3'):
             assert app['depends_on'][dependency]['condition'] == 'service_healthy'
 
     def test_deployed_search_engine_reaches_provider_dispatch(self, compose):

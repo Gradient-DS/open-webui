@@ -22,7 +22,10 @@ DIVERGENCES = {
         'Production reranker hostname replaced by the sealed stub.',
     ),
     'OPENAI_API_BASE_URL': ('http://stub:8000/v1', 'Production LiteLLM hostname replaced by the sealed stub.'),
-    'S3_ENDPOINT_URL': ('http://minio:9000', 'Production object.previder.nl endpoint replaced by in-network MinIO.'),
+    'S3_ENDPOINT_URL': (
+        'http://s3:9000',
+        'Production object.previder.nl endpoint replaced by the in-network S3 gateway.',
+    ),
     'S3_BUCKET_NAME': ('ci-uploads', 'Production bucket replaced by a disposable CI bucket.'),
     'ENABLE_OTEL': (
         '',

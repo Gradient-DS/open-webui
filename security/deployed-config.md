@@ -34,7 +34,7 @@ agentApiEnabled=true and enableAgentProxy=true.
 | ragExternalRerankerUrl | RAG_EXTERNAL_RERANKER_URL | — | http://gradient-reranker.shared-services.svc:8000/v1/rerank | |
 | openaiApiBaseUrl | OPENAI_API_BASE_URL | https://router.huggingface.co/v1 | http://litellm-proxy.shared-services.svc:4000/v1 | chart default is a REAL external host |
 | storageProvider | STORAGE_PROVIDER | — | "s3" | parity: CI selects the same S3 storage provider for uploads and downloads |
-| s3EndpointUrl | S3_ENDPOINT_URL | "" | https://object.previder.nl | CI replaces the production endpoint with in-network MinIO |
+| s3EndpointUrl | S3_ENDPOINT_URL | "" | https://object.previder.nl | CI replaces the production endpoint with the in-network S3 gateway |
 | s3BucketName | S3_BUCKET_NAME | "" | previder-prod-gradient-uploads | CI uses a disposable bucket |
 | enableOnedriveIntegration | — | — | "true" | Graph egress |
 | enableGoogleDriveIntegration/Sync | — | — | "true" | Google egress |
@@ -62,8 +62,8 @@ flags cannot be waived; telemetry is the sole boolean exception.
 | AGENT_API_BASE_URL | http://stub:8000 | Replace the production agents-api hostname with the sealed stub. |
 | OPENAI_API_BASE_URL, RAG_OPENAI_API_BASE_URL | http://stub:8000/v1 | Replace the production LiteLLM hostname with the sealed stub. |
 | RAG_EXTERNAL_RERANKER_URL | http://stub:8000/v1/rerank | Replace the production reranker hostname with the sealed stub. |
-| S3_ENDPOINT_URL | http://minio:9000 | The endpoint hostname remains a divergence: in-network MinIO replaces object.previder.nl. CI drives the same S3 provider code path, but does not cover production TLS or Previder-specific behavior. |
-| S3_BUCKET_NAME | ci-uploads | Disposable bucket replaces previder-prod-gradient-uploads; the init service creates and verifies it before the app starts. |
+| S3_ENDPOINT_URL | http://s3:9000 | The endpoint hostname remains a divergence: the in-network S3 gateway replaces object.previder.nl. CI drives the same S3 provider code path, but does not cover production TLS or Previder-specific behavior. |
+| S3_BUCKET_NAME | ci-uploads | Disposable bucket replaces previder-prod-gradient-uploads; the gateway creates it before it listens and its health check verifies it before the app starts. |
 | ENABLE_OTEL | empty | No Alloy OTLP collector exists in the sealed stack. Disable telemetry exports; they do not decide application request coverage. |
 | Upstream API keys, database password, signing key, S3 credentials | disposable CI values | Production secrets are neither available nor needed by the sealed stack. |
 | OAuth / OneDrive / Google Drive / Graph mail credentials and stored tokens | empty | Provider authentication uses public Microsoft/Google endpoints, including hard-coded URLs. No real provider credentials or tokens are available. Integration, Google sync, email invite and OAuth signup flags remain enabled, but successful cloud authentication, sync and mail delivery are not covered. |
@@ -73,15 +73,17 @@ flags cannot be waived; telemetry is the sole boolean exception.
 
 Caller contracts verified in this checkout:
 
-- S3 storage uses `http://minio:9000`, disposable credentials, region `us-east-1`
-  and `S3_ADDRESSING_STYLE=path`. Both MinIO services join only `internal` and
-  publish no ports. MinIO stores objects in ephemeral `/data`. The one-shot
-  `minio-init` waits for MinIO health, then runs alias setup, idempotent bucket
-  creation and a bucket stat under `sh -e`. The app waits for successful init
-  completion as well as MinIO health; a listening server alone cannot release
-  startup. Recreate the stack together for each fresh run so bucket init runs
-  again after ephemeral data is discarded. The pinned [MinIO image source](https://github.com/minio/minio/blob/RELEASE.2025-04-22T22-12-26Z/Dockerfile.release)
-  includes both `mc` for initialization and `curl` for the readiness check.
+- S3 storage uses `http://s3:9000`, disposable credentials, region `us-east-1`
+  and `S3_ADDRESSING_STYLE=path`. The gateway joins only `internal` and
+  publishes no ports. It is [Versity's S3 gateway](https://github.com/versity/versitygw)
+  on its posix backend, pinned by digest, storing objects in ephemeral `/data`;
+  a bucket is a directory under that root. The service creates the bucket
+  directory under `sh -e` and only then execs the gateway, and its health check
+  requires both the `/health` endpoint and the bucket directory, so a listening
+  server alone cannot release app startup. The gateway verifies SigV4
+  signatures against its root key, which the app's credentials must match.
+  Recreate the stack together for each fresh run so the bucket is created again
+  after ephemeral data is discarded.
 - Agent proxy uses `/v1/models`, `/v1/chat/completions` (JSON or SSE),
   `/v1/gradient_agent_meta` and `/openapi.json`. Metadata exposes
   `config.welcome_message`, as consumed by the chat UI.
