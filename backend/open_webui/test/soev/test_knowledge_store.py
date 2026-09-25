@@ -1247,3 +1247,61 @@ async def test_file_counts_respect_mirrored_document_access(env):
     assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == {}
     listing = await env.store.search_knowledge_bases('alice', {})
     assert listing.items[0].file_count == 12
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('size', [1, 6])
+async def test_file_counts_batch_unlanded_rows_in_one_statement(env, size):
+    keys = ['kb'] + [f'kb-{index}' for index in range(1, size)]
+    env.api.page_size = 200
+    for key in keys[1:]:
+        await seed(env, key)
+    await seed(env, 'private', owner='bob')
+    for key in keys + ['private']:
+        await file(env, f'{key}-landed', key=key, soev_collection_key=key)
+        for suffix, stored_key in [('pending', key), ('quoted', json.dumps(key))]:
+            await env.files.Files.insert_new_file(
+                'alice',
+                env.files.FileForm(
+                    id=f'{key}-{suffix}', filename=suffix, path='', meta={'soev_collection_key': stored_key}
+                ),
+            )
+    statements = []
+
+    def count(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(env.engine.sync_engine, 'before_cursor_execute', count)
+    try:
+        # The former per-KB query performs one statement for each visible KB.
+        for key in keys:
+            assert len(await env.files.Files.get_unlanded_files_for_collection(key)) == 3
+        assert len(statements) == size
+        statements.clear()
+        env.api.requests.clear()
+        assert await env.store.get_file_counts_by_knowledge_ids(
+            keys + ['private', 'missing', 'kb'], user_id='alice'
+        ) == dict.fromkeys(keys, 3)
+        assert len(statements) == 1
+    finally:
+        event.remove(env.engine.sync_engine, 'before_cursor_execute', count)
+    assert len(env.api.requests) == 1 + size
+    assert sum(request.url.path == '/v1/collections' for request in env.api.requests) == 1
+    assert not any('/private/' in request.url.path for request in env.api.requests)
+
+
+@pytest.mark.asyncio
+async def test_empty_file_counts_do_not_query_files(env):
+    statements = []
+
+    def count(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(env.engine.sync_engine, 'before_cursor_execute', count)
+    try:
+        assert await env.store.get_file_counts_by_knowledge_ids([]) == {}
+        assert not env.api.requests
+        assert await env.store.get_file_counts_by_knowledge_ids(['missing']) == {}
+        assert not statements
+    finally:
+        event.remove(env.engine.sync_engine, 'before_cursor_execute', count)
