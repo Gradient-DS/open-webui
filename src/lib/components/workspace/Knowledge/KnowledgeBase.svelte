@@ -2022,7 +2022,7 @@
 									{:else}
 										<div class="text-xs text-gray-500">
 											{$i18n.t('{{COUNT}} files', {
-												COUNT: fileItemsTotal
+												COUNT: kbFileTotal ?? fileItemsTotal
 											})}
 										</div>
 									{/if}
