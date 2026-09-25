@@ -1,9 +1,7 @@
-export interface FolderUpload {
+import type { FolderProgress } from './sourceState';
+
+export interface FolderUpload extends FolderProgress {
 	name: string;
-	total: number;
-	uploaded: number;
-	processed: number;
-	failed: number;
 }
 
 export type FolderUploadSummary = {
@@ -26,7 +24,7 @@ export const ancestorPaths = (path: string): string[] => {
 };
 
 const countRow = (rows: Map<string, FolderUpload>, id: string, name: string) => {
-	const row = rows.get(id) ?? { name, total: 0, uploaded: 0, processed: 0, failed: 0 };
+	const row = rows.get(id) ?? { name, total: 0, transferred: 0, processed: 0, failed: 0 };
 	row.total++;
 	rows.set(id, row);
 };
@@ -40,7 +38,7 @@ export function mergeUploadRows(sessions: FolderUploadSession[]): Map<string, Fo
 			if (!merged) rows.set(id, { ...row });
 			else {
 				merged.total += row.total;
-				merged.uploaded += row.uploaded;
+				merged.transferred += row.transferred;
 				merged.processed += row.processed;
 				merged.failed += row.failed;
 			}
@@ -115,7 +113,7 @@ export class FolderUploadSession {
 		for (const id of rowIds) {
 			const row = this.rows.get(id);
 			if (!row) continue;
-			row.uploaded++;
+			row.transferred++;
 			if (failed) {
 				row.processed++;
 				row.failed++;

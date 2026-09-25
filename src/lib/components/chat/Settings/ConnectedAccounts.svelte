@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { loadSourcePolicy } from '$lib/sources/policy';
+	import { providerFor } from '$lib/sources/registry';
 	import { getContext, onMount, onDestroy } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as I18n } from 'i18next';
@@ -11,7 +13,6 @@
 	import UserSettingSection from './UserSettingSection.svelte';
 	import DisconnectAccountDialog from './DisconnectAccountDialog.svelte';
 	import {
-		CLOUD_PROVIDERS,
 		connectResult,
 		trustedConnectOrigins,
 		connectionOutcome
@@ -28,9 +29,9 @@
 	let showDisconnect = false;
 	let cancelAuthorization: (() => void) | undefined;
 	const provider = (account: Connection) =>
-		CLOUD_PROVIDERS[account.source_kind]?.label ?? account.source_kind;
+		providerFor(account.source_kind)?.label ?? account.source_kind;
 	const status = (account: Connection) =>
-		account.last_error
+		providerFor(account.source_kind)?.needsReconnectOn.includes(account.last_error ?? '')
 			? 'Needs reconnect'
 			: account.lifecycle === 'pending'
 				? 'Pending'
@@ -155,6 +156,7 @@
 	}
 
 	onMount(() => {
+		void loadSourcePolicy(localStorage.token);
 		void refresh();
 	});
 	onDestroy(() => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { loadSourcePolicy } from '$lib/sources/policy';
 	import { onMount, getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
@@ -37,7 +38,8 @@
 		loadWorkspaceCounts();
 	}
 
-	const getCount = (res: any) => res?.total ?? (Array.isArray(res) ? res.length : null);
+	const getCount = (res: { total?: number } | unknown[] | null) =>
+		Array.isArray(res) ? res.length : (res?.total ?? null);
 
 	const loadWorkspaceCounts = async () => {
 		const canViewModels =
@@ -83,6 +85,7 @@
 	};
 
 	onMount(async () => {
+		void loadSourcePolicy(localStorage.token);
 		// Feature flag checks apply to ALL users including admins
 		if ($page.url.pathname.includes('/models') && !isFeatureEnabled('models')) {
 			goto('/');

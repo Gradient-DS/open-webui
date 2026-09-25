@@ -541,3 +541,64 @@ def test_skipped_items_require_readable_knowledge(api):
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
     assert result.status_code == 404
     assert len(api.requests) == 1
+
+
+def test_policy_uses_runtime_credential_without_linking_a_subject(api, monkeypatch) -> None:
+    monkeypatch.setattr(cloud_sync.config, 'SOEV_API_URL', 'https://soev.invalid')
+    policy = {
+        'providers_enabled': ['onedrive', 'confluence'],
+        'scope_shapes_allowed': {'onedrive': ['folder', 'file']},
+        'min_cadence_minutes': 15,
+        'default_cadence_minutes': 60,
+    }
+    api.responses.append(response({**policy, 'updated_by': 'admin', 'limits': {}}))
+    result = api.browser.get('/api/v1/cloud-sync/policy')
+    assert result.status_code == 200
+    assert result.json() == policy
+    assert len(api.requests) == 1
+    request = api.requests[0]
+    assert (request.method, request.url.path) == ('GET', '/v1/sync-policy')
+    assert request.headers['Authorization'] == 'Bearer invalid-test-runtime-key'
+    assert 'X-Soev-Subject' not in request.headers
+    assert api.refs == []
+    api.link.assert_not_awaited()
+
+
+def test_policy_is_empty_without_soev_api(api, monkeypatch) -> None:
+    monkeypatch.setattr(cloud_sync.config, 'SOEV_API_URL', '')
+    result = api.browser.get('/api/v1/cloud-sync/policy')
+    assert result.status_code == 200
+    assert result.json() == {
+        'providers_enabled': [],
+        'scope_shapes_allowed': {},
+        'min_cadence_minutes': None,
+        'default_cadence_minutes': None,
+    }
+    cloud_sync.identity.build_client.assert_not_called()
+    api.link.assert_not_awaited()
+    assert api.requests == []
+
+
+def test_policy_preserves_upstream_forbidden_code(api, monkeypatch) -> None:
+    monkeypatch.setattr(cloud_sync.config, 'SOEV_API_URL', 'https://soev.invalid')
+    api.responses.append(
+        httpx.Response(
+            403,
+            json={'code': 'forbidden', 'detail': 'Policy denied'},
+            headers={'Content-Type': 'application/problem+json'},
+        )
+    )
+    result = api.browser.get('/api/v1/cloud-sync/policy')
+    assert result.status_code == 403
+    assert result.json() == {'detail': {'code': 'forbidden', 'detail': 'Policy denied'}}
+    api.link.assert_not_awaited()
+    assert api.refs == []
+
+
+def test_policy_requires_a_verified_user(api) -> None:
+    def deny() -> None:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    api.app.dependency_overrides[cloud_sync.get_verified_user] = deny
+    assert api.browser.get('/api/v1/cloud-sync/policy').status_code == 401
+    cloud_sync.identity.build_client.assert_not_called()

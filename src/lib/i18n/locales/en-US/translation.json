@@ -3918,6 +3918,7 @@
   "{{label}}: sync failed ({{reason}})": "{{label}}: sync failed ({{reason}})",
   "Could not create {{count}} folders.": "Could not create {{count}} folders.",
   "Fetched {{done}}/{{total}}": "Fetched {{done}}/{{total}}",
+  "From {{label}}": "",
   "No text could be extracted, for example a scanned image without OCR.": "No text could be extracted, for example a scanned image without OCR.",
   "Only PDF, Word, PowerPoint, Excel, CSV, HTML, Markdown, XML and plain-text files are synced. Save the file in one of these formats to include it.": "Only PDF, Word, PowerPoint, Excel, CSV, HTML, Markdown, XML and plain-text files are synced. Save the file in one of these formats to include it.",
   "Open the folder to see which files were skipped.": "Open the folder to see which files were skipped.",

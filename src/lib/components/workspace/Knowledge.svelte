@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { enabledProviders } from '$lib/sources/policy';
+	import { providerFor, providerIcon } from '$lib/sources/registry';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	dayjs.extend(relativeTime);
@@ -29,8 +31,6 @@
 	import Modal from '../common/Modal.svelte';
 	import Search from '../icons/Search.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
-	import OneDrive from '../icons/OneDrive.svelte';
-	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import XMark from '../icons/XMark.svelte';
@@ -115,23 +115,12 @@
 					showCreateModal = true;
 				}
 			},
-			// [Gradient] Cloud KB creation keeps its provider-specific route, gates and logo.
-			// The base id follows upstream's `<section>-new` convention so SplitCreateButton's
-			// primaryAction resolves deterministically rather than falling through to [0].
-			{
-				id: 'knowledge-new-onedrive',
-				label: $i18n.t('From OneDrive'),
-				icon: OneDrive,
-				onClick: () => goto('/workspace/knowledge/create?type=onedrive'),
-				visible: !!$config?.features?.enable_onedrive_integration
-			},
-			{
-				id: 'knowledge-new-google-drive',
-				label: $i18n.t('From Google Drive'),
-				icon: GoogleDrive,
-				onClick: () => goto('/workspace/knowledge/create?type=google_drive'),
-				visible: !!$config?.features?.enable_google_drive_integration
-			}
+			...$enabledProviders.map((provider) => ({
+				id: `knowledge-new-${provider.kind}`,
+				label: $i18n.t('From {{label}}', { label: provider.label }),
+				icon: provider.icon,
+				onClick: () => goto(`/workspace/knowledge/create?type=${encodeURIComponent(provider.kind)}`)
+			}))
 		]);
 	}
 
@@ -493,9 +482,7 @@
 								}}
 							>
 								<div class="flex w-5 shrink-0 items-center justify-center">
-									{#if item?.type === 'onedrive'}<OneDrive className="size-4" />
-									{:else if item?.type === 'google_drive'}<GoogleDrive className="size-4" />
-									{:else}<FolderOpen className="size-4" />{/if}
+									<svelte:component this={providerIcon(item?.type)} className="size-4" />
 								</div>
 								<div class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
 									<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -514,10 +501,8 @@
 												</Tooltip>
 
 												<!-- [Gradient] Provider, sync and suspension chrome. -->
-												{#if item?.type === 'onedrive'}
-													<Badge type="info" content={$i18n.t('OneDrive')} />
-												{:else if item?.type === 'google_drive'}
-													<Badge type="info" content={$i18n.t('Google Drive')} />
+												{#if providerFor(item?.type)}
+													<Badge type="info" content={$i18n.t(providerFor(item?.type)!.label)} />
 												{:else if $config?.integration_providers?.[item?.type]}
 													<Badge
 														type={$config.integration_providers[item.type].badge_type}

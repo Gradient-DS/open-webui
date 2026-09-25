@@ -3918,6 +3918,7 @@
   "{{label}}: sync failed ({{reason}})": "{{label}}: synchronisatie mislukt ({{reason}})",
   "Could not create {{count}} folders.": "{{count}} mappen konden niet worden aangemaakt.",
   "Fetched {{done}}/{{total}}": "{{done}}/{{total}} opgehaald",
+  "From {{label}}": "Van {{label}}",
   "No text could be extracted, for example a scanned image without OCR.": "Er kon geen tekst worden uitgelezen, bijvoorbeeld een gescande afbeelding zonder OCR.",
   "Only PDF, Word, PowerPoint, Excel, CSV, HTML, Markdown, XML and plain-text files are synced. Save the file in one of these formats to include it.": "Alleen PDF-, Word-, PowerPoint-, Excel-, CSV-, HTML-, Markdown-, XML- en tekstbestanden worden gesynchroniseerd. Sla het bestand op in een van deze formaten om het mee te nemen.",
   "Open the folder to see which files were skipped.": "Open de map om te zien welke bestanden zijn overgeslagen.",

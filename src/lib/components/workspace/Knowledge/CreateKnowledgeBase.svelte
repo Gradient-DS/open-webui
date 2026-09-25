@@ -1,4 +1,6 @@
 <script>
+	import { enabledProviders, sourcePolicy } from '$lib/sources/policy';
+	import { providerFor } from '$lib/sources/registry';
 	import { toast } from 'svelte-sonner';
 
 	import { goto } from '$app/navigation';
@@ -23,11 +25,8 @@
 		// every type, alongside any provider auto-sync trigger, so the
 		// KB detail page can offer a "Back to assistant" return.
 		const params = new URLSearchParams();
-		if (type === 'onedrive') {
-			params.set('start_onedrive_sync', 'true');
-		} else if (type === 'google_drive') {
-			params.set('start_google_drive_sync', 'true');
-		}
+		const provider = providerFor(type);
+		if (provider) params.set(provider.startParam, 'true');
 		if (returnTo) {
 			params.set('returnTo', returnTo);
 		}
@@ -38,8 +37,10 @@
 	let loading = false;
 
 	const requestedType = $page.url.searchParams.get('type');
-	let type =
-		requestedType && ['local', 'onedrive', 'google_drive'].includes(requestedType)
+	$: type =
+		requestedType &&
+		(requestedType === 'local' ||
+			$enabledProviders.some((provider) => provider.kind === requestedType))
 			? requestedType
 			: 'local';
 	// When set (the "+ Add knowledge" builder flow), carry it through to
@@ -205,7 +206,7 @@
 						? `px-3.5 py-1.5 text-sm bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full ${loading ? 'cursor-not-allowed' : ''}`
 						: `text-sm px-4 py-2 transition rounded-lg ${loading ? 'cursor-not-allowed bg-gray-100 dark:bg-gray-800' : 'bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800'}`} flex"
 					type="submit"
-					disabled={loading}
+					disabled={loading || $sourcePolicy === null}
 				>
 					<div class=" self-center font-normal">{$i18n.t('Create Knowledge')}</div>
 

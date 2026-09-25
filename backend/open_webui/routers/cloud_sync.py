@@ -5,6 +5,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import HTMLResponse
+from open_webui import config
 from open_webui.config import CORS_ALLOW_ORIGIN
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError
@@ -26,6 +27,32 @@ async def cloud_sync(user=Depends(get_verified_user)):
         if error.constraint is not None:
             detail['constraint'] = error.constraint
         raise HTTPException(status_code=error.status, detail=detail) from None
+
+
+class SyncPolicy(BaseModel):
+    providers_enabled: list[str]
+    scope_shapes_allowed: dict[str, list[str]]
+    min_cadence_minutes: int | None
+    default_cadence_minutes: int | None
+
+
+@router.get('/policy', response_model=SyncPolicy)
+async def get_policy(user: object = Depends(get_verified_user)) -> SyncPolicy:
+    if not config.SOEV_API_URL:
+        return SyncPolicy(
+            providers_enabled=[],
+            scope_shapes_allowed={},
+            min_cadence_minutes=None,
+            default_cadence_minutes=None,
+        )
+    try:
+        policy = await identity.build_client().get('/v1/sync-policy')
+    except SoevApiError as error:
+        detail = {'code': error.code, 'detail': error.detail}
+        if error.constraint is not None:
+            detail['constraint'] = error.constraint
+        raise HTTPException(status_code=error.status, detail=detail) from None
+    return SyncPolicy.model_validate(policy)
 
 
 class ConnectionForm(BaseModel):

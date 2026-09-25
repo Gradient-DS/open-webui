@@ -1,37 +1,6 @@
+import { reconnectCodes } from '$lib/sources/registry';
 import equal from 'fast-deep-equal';
-import type { Connection, RunOutcome, Schedule, ScheduleForm, SyncRun } from '$lib/apis/cloudSync';
-
-export function oneDriveScope(item: {
-	id: string;
-	driveId: string;
-	type: 'file' | 'folder';
-	name: string;
-	path: string;
-}): Pick<ScheduleForm, 'scope' | 'label' | 'path'> {
-	return {
-		label: item.name,
-		path: item.path,
-		scope: {
-			drive_id: item.driveId,
-			item_id: item.id,
-			include_descendants: item.type === 'folder',
-			single_file: item.type === 'file'
-		}
-	};
-}
-
-export function googleDriveScope(item: {
-	id: string;
-	type: 'file' | 'folder';
-	name: string;
-	path: string;
-}): Pick<ScheduleForm, 'scope' | 'label' | 'path'> {
-	return {
-		label: item.name,
-		path: item.path,
-		scope: { file_id: item.id, drive_id: null, include_descendants: item.type === 'folder' }
-	};
-}
+import type { Connection, RunOutcome, Schedule, SyncRun } from '$lib/apis/cloudSync';
 
 export function trustedConnectOrigins(location: string, apiBase: string): Set<string> {
 	const origins = new Set([location]);
@@ -72,10 +41,11 @@ export function reconnectConnections(
 	if (pending && !connections.has(pending.id)) connections.set(pending.id, pending);
 	// A first-time connect stays `pending` while its popup is open, so only a
 	// suspended connection or a refused consent asks for a reconnect.
-	return [...connections.values()].filter(
-		(connection) =>
-			['onedrive', 'google_drive'].includes(connection.source_kind) &&
-			(connection.lifecycle === 'suspended:reauth' || connection.last_error === 'owner_mismatch')
+	return [...connections.values()].filter((connection) =>
+		[
+			...(['pending', 'revoked'].includes(connection.lifecycle) ? [] : [connection.lifecycle]),
+			connection.last_error
+		].some((code) => reconnectCodes(connection.source_kind).includes(code ?? ''))
 	);
 }
 
@@ -117,21 +87,6 @@ export function runCounts(run: SyncRun): { label: string; count: number }[] {
 		return typeof count === 'number' && Number.isFinite(count) ? [{ label, count }] : [];
 	});
 }
-
-export interface CloudSyncProvider {
-	type: 'onedrive' | 'google_drive';
-	label: string;
-	startSyncParam: string;
-}
-
-export const CLOUD_PROVIDERS: Record<string, CloudSyncProvider> = {
-	onedrive: { type: 'onedrive', label: 'OneDrive', startSyncParam: 'start_onedrive_sync' },
-	google_drive: {
-		type: 'google_drive',
-		label: 'Google Drive',
-		startSyncParam: 'start_google_drive_sync'
-	}
-};
 
 export interface SchedulePair {
 	content?: Schedule;

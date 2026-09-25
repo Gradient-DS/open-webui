@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { enabledProviders } from '$lib/sources/policy';
+	import { providerFor, type SourceProvider } from '$lib/sources/registry';
 	import { getContext } from 'svelte';
 	import type { ComponentType } from 'svelte';
 	import type { Writable } from 'svelte/store';
@@ -9,8 +11,6 @@
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 
 	export let knowledgeType: string = 'local';
 	export let integrationProviders: Record<string, unknown> = {};
@@ -19,30 +19,23 @@
 	type UploadOption = {
 		type: string;
 		label: string;
+		labelValues?: { label: string };
 		icon: ComponentType;
 		description: string;
 	};
 
-	$: options = getOptions(knowledgeType);
+	$: options = getOptions(knowledgeType, $enabledProviders);
 
-	function getOptions(type: string): UploadOption[] {
-		if (type === 'onedrive') {
+	function getOptions(type: string, enabled: SourceProvider[]): UploadOption[] {
+		const provider = providerFor(type);
+		if (provider) {
+			if (!enabled.some((item) => item.kind === provider.kind)) return [];
 			return [
 				{
-					type: 'onedrive',
-					label: 'Sync from OneDrive',
-					icon: OneDrive,
-					description:
-						'Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.'
-				}
-			];
-		}
-		if (type === 'google_drive') {
-			return [
-				{
-					type: 'google_drive',
-					label: 'Sync from Google Drive',
-					icon: GoogleDrive,
+					type: provider.kind,
+					label: 'Sync from {{label}}',
+					labelValues: { label: provider.label },
+					icon: provider.icon,
 					description:
 						'Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.'
 				}
@@ -118,7 +111,7 @@
 					<svelte:component this={option.icon} className="size-8" strokeWidth="1.5" />
 				</div>
 				<div class="text-sm font-medium text-gray-700 dark:text-gray-300">
-					{$i18n.t(option.label)}
+					{$i18n.t(option.label, option.labelValues)}
 				</div>
 				<div class="text-xs text-gray-400 dark:text-gray-500">
 					{$i18n.t(option.description)}

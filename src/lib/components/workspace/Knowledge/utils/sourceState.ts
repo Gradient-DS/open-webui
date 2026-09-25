@@ -1,5 +1,6 @@
+import { providerFor, reconnectCodes } from '$lib/sources/registry';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
-import { CLOUD_PROVIDERS, runIsLive, type SchedulePair } from './cloudSync';
+import { runIsLive, type SchedulePair } from './cloudSync';
 
 export function skippedRunKey(schedule: Schedule | undefined): string {
 	if (!schedule || runIsLive(schedule.last_run)) return '';
@@ -45,9 +46,8 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 	let state: SourceState;
 	if (schedules.some((item) => runIsLive(item.last_run))) state = 'syncing';
 	else if (
-		['suspended:reauth', 'pending', 'revoked'].includes(connection.lifecycle) ||
-		errors.some((error) =>
-			['access_revoked', 'credential_unusable', 'owner_mismatch'].includes(error ?? '')
+		[connection.lifecycle, ...errors].some((code) =>
+			reconnectCodes(connection.source_kind).includes(code ?? '')
 		)
 	)
 		state = 'needs_reconnect';
@@ -78,7 +78,7 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 				? 'File'
 				: 'Folder'),
 		path: schedule.path ?? '',
-		provider: CLOUD_PROVIDERS[schedule.source_kind]?.label ?? schedule.source_kind,
+		provider: providerFor(schedule.source_kind)?.label ?? schedule.source_kind,
 		lastSyncedAt: run?.finished_at ?? (run?.outcome ? run.started_at : null),
 		nextDueAt: schedule.next_due_at ?? null,
 		documents: schedule.document_count ?? run?.counts?.landed ?? 0,
@@ -103,21 +103,23 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 // (`planned`), how many are fetched from the provider and how many have
 // landed, as sync_execution.py publishes them. Null outside a live run or
 // under a worker that publishes counts only at finish.
-export interface RunProgress {
+export interface FolderProgress {
 	total: number;
-	fetched: number;
-	landed: number;
+	transferred: number;
+	processed: number;
+	failed: number;
 }
 
-export function runProgress(schedule: Schedule): RunProgress | null {
+export function runProgress(schedule: Schedule): FolderProgress | null {
 	const run = schedule.last_run;
 	if (!runIsLive(run)) return null;
 	const counts = run?.counts ?? {};
 	if (typeof counts.planned !== 'number' || counts.planned <= 0) return null;
 	return {
 		total: counts.planned,
-		fetched: Math.min(counts.fetched ?? 0, counts.planned),
-		landed: Math.min(counts.landed ?? 0, counts.planned)
+		transferred: Math.min(counts.fetched ?? 0, counts.planned),
+		processed: Math.min(counts.landed ?? 0, counts.planned),
+		failed: counts.failed ?? 0
 	};
 }
 

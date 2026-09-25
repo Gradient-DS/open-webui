@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { enabledProviders, loadSourcePolicy } from '$lib/sources/policy';
+	import { providers, providerFor, type SourceProvider } from '$lib/sources/registry';
 	/* global FileSystemDirectoryReader, FileSystemEntry, FileSystemFileEntry, FileSystemDirectoryEntry */
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
@@ -32,18 +34,7 @@
 	import { processUrl } from '$lib/apis/retrieval';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import * as cloudSync from '$lib/apis/cloudSync';
-	import type {
-		Connection,
-		Schedule,
-		ScheduleAction,
-		ScheduleForm,
-		SkippedItem
-	} from '$lib/apis/cloudSync';
-	import { openOneDriveItemPicker } from '$lib/utils/onedrive-file-picker';
-	import {
-		createKnowledgePicker,
-		initialize as initializeGooglePicker
-	} from '$lib/utils/google-drive-picker';
+	import type { Connection, Schedule, ScheduleAction, SkippedItem } from '$lib/apis/cloudSync';
 
 	import { blobToFile, copyToClipboard } from '$lib/utils';
 	import { computeFileHash } from '$lib/utils/hash';
@@ -53,7 +44,7 @@
 	import type { DirectoryItem } from './KnowledgeBase/directory';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
-	import type { CloudSyncProvider, SchedulePair } from './utils/cloudSync';
+	import type { SchedulePair } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
 	import {
 		ancestorPaths,
@@ -62,9 +53,6 @@
 		routeFileStatus
 	} from './utils/folderUpload';
 	import {
-		CLOUD_PROVIDERS,
-		oneDriveScope,
-		googleDriveScope,
 		connectResult,
 		trustedConnectOrigins,
 		connectionOutcome,
@@ -97,7 +85,7 @@
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
 
-	let requestedProvider: CloudSyncProvider | null = null;
+	let requestedProvider: SourceProvider | null = null;
 	let schedules: Schedule[] = [];
 	let connecting: Connection | null = null;
 	let cloudActionBusy = false;
@@ -106,8 +94,9 @@
 	let closeAuthorization: (() => void) | undefined;
 	let syncStatusError = false;
 	let syncStatusRequest = 0;
-	$: activeProvider =
-		requestedProvider ?? (knowledge?.type ? CLOUD_PROVIDERS[knowledge.type] : null);
+	$: activeProvider = requestedProvider ?? (knowledge?.type ? providers[knowledge.type] : null);
+	$: activeProviderEnabled =
+		!!activeProvider && $enabledProviders.some((item) => item.kind === activeProvider.kind);
 	$: isSyncBusy = cloudActionBusy || schedules.some((schedule) => runIsLive(schedule.last_run));
 	$: reconnectNeeded = reconnectConnections(schedules, connecting);
 	// [Gradient] Sources render inside the listing: folder sources on the
@@ -138,8 +127,7 @@
 			: null;
 	$: currentSourceProvider = currentSourcePair
 		? $i18n.t(
-				CLOUD_PROVIDERS[(currentSourcePair.content ?? currentSourcePair.acl)!.source_kind]?.label ??
-					''
+				providers[(currentSourcePair.content ?? currentSourcePair.acl)!.source_kind]?.label ?? ''
 			)
 		: '';
 	let skippedItems: SkippedItem[] = [];
@@ -958,8 +946,7 @@
 	const announceFinishedRun = (schedule: Schedule) => {
 		const run = schedule.last_run;
 		if (!run) return;
-		const label =
-			schedule.label || CLOUD_PROVIDERS[schedule.source_kind]?.label || schedule.source_kind;
+		const label = schedule.label || providers[schedule.source_kind]?.label || schedule.source_kind;
 		if (run.outcome === 'cancelled') {
 			toast.info($i18n.t('{{label}}: sync cancelled', { label }));
 			return;
@@ -1009,7 +996,7 @@
 	};
 
 	const authorizeBackgroundSync = (
-		provider: CloudSyncProvider,
+		provider: SourceProvider,
 		connectionId?: string
 	): Promise<Connection | null> => {
 		closeAuthorization?.();
@@ -1097,12 +1084,12 @@
 				try {
 					const authorization = expectedId
 						? await cloudSync.authorizeConnection(localStorage.token, expectedId)
-						: await cloudSync.createConnection(localStorage.token, provider.type);
+						: await cloudSync.createConnection(localStorage.token, provider.kind);
 					if (finished) return;
 					if ('connection_id' in authorization && typeof authorization.connection_id === 'string')
 						expectedId = authorization.connection_id;
 					if (!expectedId) return finish(null);
-					connecting = { id: expectedId, source_kind: provider.type, lifecycle: 'pending' };
+					connecting = { id: expectedId, source_kind: provider.kind, lifecycle: 'pending' };
 					popup.location.href = authorization.authorize_url;
 				} catch (error) {
 					reportCloudError(error);
@@ -1113,17 +1100,23 @@
 	};
 
 	const reconnect = async (connection: Connection) => {
-		if (cloudActionBusy) return;
+		const provider = providerFor(connection.source_kind);
+		if (cloudActionBusy || !provider) return;
 		cloudActionBusy = true;
 		try {
-			await authorizeBackgroundSync(CLOUD_PROVIDERS[connection.source_kind], connection.id);
+			await authorizeBackgroundSync(provider, connection.id);
 		} finally {
 			cloudActionBusy = false;
 		}
 	};
 
-	const cloudSyncHandler = async (provider: CloudSyncProvider) => {
-		if (!knowledge || cloudActionBusy) return;
+	const cloudSyncHandler = async (provider: SourceProvider) => {
+		if (
+			!knowledge ||
+			cloudActionBusy ||
+			!$enabledProviders.some((item) => item.kind === provider.kind)
+		)
+			return;
 		if (syncStatusError) {
 			toast.error($i18n.t('Failed to check background sync status'));
 			return;
@@ -1131,12 +1124,12 @@
 		cloudActionBusy = true;
 		try {
 			let connection =
-				schedules.find((s) => s.source_kind === provider.type)?.connection ?? connecting;
-			if (connection?.source_kind !== provider.type) connection = null;
+				schedules.find((s) => s.source_kind === provider.kind)?.connection ?? connecting;
+			if (connection?.source_kind !== provider.kind) connection = null;
 			// [Gradient] Reuse the account across knowledge bases before starting consent.
 			if (!connection) {
 				const accounts = (await cloudSync.listConnections(localStorage.token)).filter(
-					(item) => item.source_kind === provider.type && item.lifecycle !== 'revoked'
+					(item) => item.source_kind === provider.kind && item.lifecycle !== 'revoked'
 				);
 				connection = accounts.find((item) => item.lifecycle === 'enabled') ?? accounts[0] ?? null;
 			}
@@ -1144,16 +1137,8 @@
 				connection = await authorizeBackgroundSync(provider, connection?.id);
 			}
 			if (!connection || destroyed) return;
-			let scopes: Pick<ScheduleForm, 'scope' | 'label' | 'path'>[];
-			if (provider.type === 'onedrive') {
-				const items = await openOneDriveItemPicker('organizations');
-				if (!items?.length) return;
-				scopes = items.map(oneDriveScope);
-			} else {
-				const result = await createKnowledgePicker();
-				if (!result?.items.length) return;
-				scopes = result.items.map(googleDriveScope);
-			}
+			const scopes = await provider.pick();
+			if (!scopes?.length) return;
 			let started = 0;
 			for (const source of scopes) {
 				try {
@@ -1189,7 +1174,7 @@
 			repollCloudSyncSoon();
 			knowledge = await getKnowledgeById(localStorage.token, knowledge.id);
 			const url = new URL(window.location.href);
-			url.searchParams.delete(provider.startSyncParam);
+			url.searchParams.delete(provider.startParam);
 			history.replaceState({}, '', url.toString());
 			if (started) toast.success($i18n.t('{{label}} sync started', { label: provider.label }));
 		} catch (error) {
@@ -1768,8 +1753,10 @@
 	// ===== Socket event handler references (for cleanup) =====
 
 	onMount(async () => {
-		if ($config?.features?.enable_google_drive_integration)
-			void initializeGooglePicker().catch(() => {});
+		void loadSourcePolicy(localStorage.token).then(() => {
+			if (destroyed) return;
+			for (const provider of $enabledProviders) void provider.warmUp?.();
+		});
 		id = $page.params.id;
 		knowledgeId = id;
 		// [Gradient] Start all three independent reads together; the first items page covers this poll.
@@ -1791,10 +1778,10 @@
 			knowledgeId = knowledge?.id;
 
 			requestedProvider =
-				Object.values(CLOUD_PROVIDERS).find(
-					(provider) => $page.url.searchParams.get(provider.startSyncParam) === 'true'
+				Object.values(providers).find(
+					(provider) => $page.url.searchParams.get(provider.startParam) === 'true'
 				) ?? null;
-			if (!requestedProvider && !CLOUD_PROVIDERS[knowledge.type ?? '']) clearTimeout(syncPoll);
+			if (!requestedProvider && !providers[knowledge.type ?? '']) clearTimeout(syncPoll);
 		} else {
 			goto('/workspace/knowledge');
 		}
@@ -1900,7 +1887,10 @@
 	id="files-input"
 	bind:files={inputFiles}
 	type="file"
-	accept={($config?.file?.allowed_extensions ?? []).filter(Boolean).map((ext) => `.${ext}`).join(',')}
+	accept={($config?.file?.allowed_extensions ?? [])
+		.filter(Boolean)
+		.map((ext) => `.${ext}`)
+		.join(',')}
 	multiple
 	hidden
 	on:change={async () => {
@@ -2095,7 +2085,7 @@
 							)}
 						{:else}
 							{$i18n.t('Reconnect {{provider}} to resume syncing.', {
-								provider: CLOUD_PROVIDERS[connection.source_kind]?.label ?? connection.source_kind
+								provider: providers[connection.source_kind]?.label ?? connection.source_kind
 							})}
 						{/if}</span
 					>
@@ -2207,9 +2197,9 @@
 
 						{#if knowledge?.write_access}
 							<div>
-								{#if activeProvider}
+								{#if activeProviderEnabled}
 									<Tooltip
-										content={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}
+										content={$i18n.t('Sync from {{label}}', { label: activeProvider!.label })}
 									>
 										<button
 											class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
@@ -2233,8 +2223,8 @@
 											<span>{$i18n.t('Add source')}</span>
 										</button>
 									</Tooltip>
-								{:else if $config?.integration_providers?.[knowledge?.type]}
-									<!-- No add button for push providers -- files come via API -->
+								{:else if activeProvider || $config?.integration_providers?.[knowledge?.type]}
+									<!-- Disabled sync providers and API-managed providers have no add button. -->
 								{:else}
 									<AddContentMenu
 										{structureEditable}
@@ -2418,15 +2408,13 @@
 										</div>
 									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null}
 										<EmptyStateCards
-											knowledgeType={activeProvider?.type ?? knowledge?.type ?? 'local'}
+											knowledgeType={activeProvider?.kind ?? knowledge?.type ?? 'local'}
 											integrationProviders={$config?.integration_providers}
 											onAction={(type) => {
 												if (type === 'integration') {
 													// No-op: files are managed via API
-												} else if (type === 'onedrive') {
-													cloudSyncHandler(CLOUD_PROVIDERS.onedrive);
-												} else if (type === 'google_drive') {
-													cloudSyncHandler(CLOUD_PROVIDERS.google_drive);
+												} else if (providerFor(type)) {
+													cloudSyncHandler(providerFor(type)!);
 												} else if (type === 'directory') {
 													uploadDirectoryHandler();
 												} else if (type === 'web') {
@@ -2537,7 +2525,7 @@
 					),
 				count: removeSourceOtherKbs,
 				provider: $i18n.t(
-					CLOUD_PROVIDERS[removeSource?.source_kind]?.label ?? removeSource?.source_kind ?? ''
+					providers[removeSource?.source_kind]?.label ?? removeSource?.source_kind ?? ''
 				)
 			}
 		)}
