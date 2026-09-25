@@ -54,6 +54,7 @@
 	"type": "module",
 	"overrides": {
 		"tar": "^7.5.22",
+		"systeminformation": "5.33.10",
 		"@huggingface/transformers": {
 			"sharp": "^0.35.3"
 		}
