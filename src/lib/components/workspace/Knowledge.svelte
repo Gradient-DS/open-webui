@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { knowledgeListCache, type KnowledgeListItem } from './Knowledge/utils/listCache';
 	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import { enabledProviders } from '$lib/sources/policy';
 	import { providerFor, providerIcon } from '$lib/sources/registry';
@@ -41,27 +42,6 @@
 	import TagSelector from './common/TagSelector.svelte';
 	import Loader from '../common/Loader.svelte';
 
-	type KnowledgeListItem = {
-		id: string;
-		name: string;
-		description?: string;
-		updated_at: number;
-		file_count?: number;
-		write_access?: boolean;
-		type?: string;
-		suspension_info?: { days_remaining: number };
-		meta?: {
-			document?: unknown;
-			source?: string;
-			external?: { provider?: string; source?: { name?: string }; auth_mode?: string };
-			[key: string]: unknown;
-		};
-		user?: {
-			name?: string;
-			email?: string;
-		};
-	};
-
 	export let showCreateOnMount = false;
 	export let createModalCloseHref = '';
 
@@ -81,8 +61,8 @@
 	let sortKey = 'updated_at';
 	let sortDirection = 'desc';
 
-	let items = null;
-	let total = null;
+	let items: KnowledgeListItem[] | null = null;
+	let total: number | null = null;
 
 	let allItemsLoaded = false;
 	let itemsLoading = false;
@@ -148,18 +128,35 @@
 		await getItemsPage();
 	};
 
+	const listCacheKey = () =>
+		JSON.stringify([
+			$user?.id,
+			localStorage.token,
+			query,
+			viewOption,
+			typeFilter,
+			sourceOption,
+			sortKey,
+			sortDirection
+		]);
+
 	const init = async () => {
 		if (!loaded) return;
 
-		if (items === null) reset();
-		page = 1;
-		allItemsLoaded = false;
-		// Don't null items — keep showing stale data during re-fetch
+		const cached = knowledgeListCache.get(listCacheKey());
+		reset();
+		if (cached) {
+			items = cached.items;
+			total = cached.total;
+		}
 		await getItemsPage(true);
 	};
 
 	const getItemsPage = async (replace = false) => {
 		const currentFetchId = ++fetchId;
+		const cacheKey = listCacheKey();
+		const cacheRevision = knowledgeListCache.revision;
+		const requestedPage = page;
 		itemsLoading = true;
 		const res = await searchKnowledgeBases(
 			localStorage.token,
@@ -174,12 +171,15 @@
 			return [];
 		});
 
-		if (currentFetchId !== fetchId) return; // Stale response, discard
+		if (currentFetchId !== fetchId || cacheRevision !== knowledgeListCache.revision) return;
 
 		if (res) {
 			total = res.total;
 			setWorkspaceCount('knowledge', total);
 			const pageItems: KnowledgeListItem[] = res.items ?? [];
+			if (requestedPage === 1 && typeof res.total === 'number') {
+				knowledgeListCache.set(cacheKey, { items: pageItems, total: res.total }, cacheRevision);
+			}
 
 			if ((pageItems ?? []).length === 0) {
 				allItemsLoaded = true;
@@ -310,6 +310,7 @@
 	});
 
 	onDestroy(() => {
+		fetchId += 1;
 		clearTimeout(searchDebounceTimer);
 	});
 </script>

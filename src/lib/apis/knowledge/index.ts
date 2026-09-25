@@ -1,3 +1,4 @@
+import { knowledgeListCache } from '$lib/components/workspace/Knowledge/utils/listCache';
 import { notifyWorkspaceMutation } from '$lib/stores/workspace-counts';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -38,7 +39,10 @@ export const createNewKnowledge = async (
 		throw error;
 	}
 
-	if (res) notifyWorkspaceMutation('knowledge');
+	if (res) {
+		knowledgeListCache.invalidate();
+		notifyWorkspaceMutation('knowledge');
+	}
 
 	return res;
 };
@@ -338,7 +342,10 @@ export const createExternalKnowledge = async (token: string, payload: object) =>
 		throw error;
 	}
 
-	if (res) notifyWorkspaceMutation('knowledge');
+	if (res) {
+		knowledgeListCache.invalidate();
+		notifyWorkspaceMutation('knowledge');
+	}
 
 	return res;
 };
@@ -809,7 +816,10 @@ export const deleteKnowledgeById = async (token: string, id: string) => {
 		throw error;
 	}
 
-	if (res) notifyWorkspaceMutation('knowledge');
+	if (res) {
+		knowledgeListCache.invalidate();
+		notifyWorkspaceMutation('knowledge');
+	}
 
 	return res;
 };
