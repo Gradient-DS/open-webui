@@ -73,6 +73,24 @@ Component-specific names
 {{- printf "%s-postgres" (include "open-webui-tenant.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/*
+PostgreSQL host every DB consumer connects to (Open WebUI, migration job,
+loader-worker, bootstrap job). Empty postgres.host = the bundled StatefulSet's
+Service; set it for an external server, e.g. a CloudNativePG `<cluster>-rw`
+Service in another namespace. postgres.enabled only gates the bundled
+StatefulSet + Service; it never rewrites hostnames.
+*/}}
+{{- define "open-webui-tenant.postgres.host" -}}
+{{- .Values.postgres.host | default (include "open-webui-tenant.postgres.fullname" .) -}}
+{{- end }}
+
+{{/*
+PostgreSQL port every DB consumer connects to.
+*/}}
+{{- define "open-webui-tenant.postgres.port" -}}
+{{- .Values.postgres.port | default 5432 -}}
+{{- end }}
+
 {{- define "open-webui-tenant.weaviate.fullname" -}}
 {{- printf "%s-weaviate" (include "open-webui-tenant.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
