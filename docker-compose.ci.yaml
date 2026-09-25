@@ -61,48 +61,32 @@ services:
       retries: 20
     networks: [internal]
 
-  # MinIO removed its public images twice: minio/minio and minio/mc left Docker
-  # Hub around 2026-09-11, and quay.io/minio/minio went private on 2026-09-24
-  # (anonymous pulls answer 401). Bitnami's frozen legacy build of the same
-  # server (MinIO 2025-07-23, mc and curl included) is the last public copy;
-  # pinned by digest because the repository receives no further updates. CI and
-  # local runs only; tenants use Scaleway object storage.
-  minio:
-    image: docker.io/bitnamilegacy/minio@sha256:8935e75fa5d11295c17171e4aa49efe390a1193cd7f12e4d21b92af9ffef09d7
-    # The Bitnami scripts would run their own setup and data dir; the binary
-    # itself takes the same server command and root env vars as before.
-    entrypoint: ["/opt/bitnami/minio/bin/minio"]
-    command: ["server", "/data"]
-    environment:
-      MINIO_ROOT_USER: "ci-s3-access-key"
-      MINIO_ROOT_PASSWORD: "ci-only-s3-secret-key"
-      MINIO_BROWSER: "off"
-    tmpfs:
-      - /data
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/minio/health/ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-    networks: [internal]
-
-  minio-init:
-    # This image includes mc as well as the server and curl.
-    image: docker.io/bitnamilegacy/minio@sha256:8935e75fa5d11295c17171e4aa49efe390a1193cd7f12e4d21b92af9ffef09d7
-    restart: "no"
-    environment:
-      S3_ACCESS_KEY_ID: "ci-s3-access-key"
-      S3_SECRET_ACCESS_KEY: "ci-only-s3-secret-key"
-      S3_BUCKET_NAME: "ci-uploads"
+  # S3-compatible object store for the sealed stack. MinIO's public images are
+  # gone (Docker Hub 2026-09-11, quay.io went private 2026-09-24), so the stack
+  # runs Versity's S3 gateway (Apache-2.0, monthly releases) on its posix
+  # backend, pinned by digest. On that backend a bucket is a directory under the
+  # gateway root, so the bucket exists before the gateway listens and the health
+  # check asserts both; no init container is needed. The gateway verifies SigV4
+  # signatures against the root key below, so a credential mismatch with the app
+  # fails loudly. CI and local runs only; tenants use Scaleway object storage.
+  s3:
+    image: ghcr.io/versity/versitygw@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499 # v1.8.0
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        mc alias set ci http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY" --api S3v4 --path on
-        mc mb --ignore-existing "ci/$$S3_BUCKET_NAME"
-        mc stat "ci/$$S3_BUCKET_NAME"
-    depends_on:
-      minio:
-        condition: service_healthy
+        mkdir -p "/data/$$S3_BUCKET_NAME"
+        exec versitygw --port :9000 --health /health posix /data
+    environment:
+      ROOT_ACCESS_KEY_ID: "ci-s3-access-key"
+      ROOT_SECRET_ACCESS_KEY: "ci-only-s3-secret-key"
+      S3_BUCKET_NAME: "ci-uploads"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9000/health && test -d /data/ci-uploads"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     networks: [internal]
 
   open-webui:
@@ -142,12 +126,12 @@ services:
       ENABLE_WEAVIATE_MULTITENANCY_MODE: "true"
       BYPASS_ADMIN_ACCESS_CONTROL: "false"
       STORAGE_PROVIDER: "s3"
-      S3_ENDPOINT_URL: "http://minio:9000"
+      S3_ENDPOINT_URL: "http://s3:9000"
       S3_BUCKET_NAME: "ci-uploads"
       S3_ACCESS_KEY_ID: "ci-s3-access-key"
       S3_SECRET_ACCESS_KEY: "ci-only-s3-secret-key"
       S3_REGION_NAME: "us-east-1"
-      S3_ADDRESSING_STYLE: "path" # MinIO has no bucket-specific DNS names.
+      S3_ADDRESSING_STYLE: "path" # The gateway has no bucket-specific DNS names.
       WEAVIATE_HTTP_HOST: "weaviate"
       WEAVIATE_GRPC_HOST: "weaviate"
       WEAVIATE_HTTP_PORT: "8080"
@@ -321,11 +305,10 @@ services:
         condition: service_healthy
       stub:
         condition: service_healthy
-      minio:
+      s3:
+        # Healthy means listening and the bucket directory exists; the
+        # provider never creates buckets.
         condition: service_healthy
-      minio-init:
-        # The provider never creates buckets; readiness alone is insufficient.
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
       interval: 10s
