@@ -1,5 +1,6 @@
 """Recorded HTTP contracts for the soev-api client and its deployment settings."""
 
+import asyncio
 import json
 import logging
 import os
@@ -599,3 +600,15 @@ async def test_transport_is_shared_without_sharing_credentials_or_cookies(record
     assert transport.is_closed
     await close_client()
     assert _shared_client() is not transport
+
+
+def test_each_event_loop_gets_its_own_transport():
+    from open_webui.soev.client import _shared_client, close_client
+
+    async def transport():
+        return _shared_client()
+
+    first = asyncio.run(transport())
+    second = asyncio.run(transport())
+    assert first is not second
+    asyncio.run(close_client())

@@ -33,7 +33,9 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     original_client = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',
-        lambda **kwargs: original_client(transport=httpx.MockTransport(fake_api.handle), **kwargs),
+        lambda **kwargs: original_client(
+            transport=httpx.MockTransport(lambda request: fake_api.handle(request)), **kwargs
+        ),
     )
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/files.db')
     async with engine.begin() as connection:

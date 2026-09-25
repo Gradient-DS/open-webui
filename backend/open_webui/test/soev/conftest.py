@@ -27,7 +27,9 @@ def chat_http(fake_api: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> FakeSoe
     original_client = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',
-        lambda **kwargs: original_client(transport=httpx.MockTransport(fake_api.handle), **kwargs),
+        lambda **kwargs: original_client(
+            transport=httpx.MockTransport(lambda request: fake_api.handle(request)), **kwargs
+        ),
     )
     return fake_api
 

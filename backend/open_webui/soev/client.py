@@ -18,7 +18,7 @@ import httpx
 from open_webui.soev.request_cache import invalidate, memoized
 
 log = logging.getLogger(__name__)
-_http_client: httpx.AsyncClient | None = None
+_http_client: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
 
 
 class _NoCookies(DefaultCookiePolicy):
@@ -27,22 +27,26 @@ class _NoCookies(DefaultCookiePolicy):
 
 
 def _shared_client() -> httpx.AsyncClient:
+    """The keep-alive client of the running loop; a client never crosses event loops."""
     global _http_client
-    if _http_client is None:
+    loop = asyncio.get_running_loop()
+    if _http_client is None or _http_client[0] is not loop:
         # Credentials remain request-local, including on presigned downloads.
-        _http_client = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        # No connection cap: long chat streams must not queue other soev-api calls.
+        client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=None, max_keepalive_connections=20),
             follow_redirects=False,
             cookies=CookieJar(policy=_NoCookies()),
         )
-    return _http_client
+        _http_client = (loop, client)
+    return _http_client[1]
 
 
 async def close_client() -> None:
     global _http_client
-    client, _http_client = _http_client, None
-    if client is not None:
-        await client.aclose()
+    shared, _http_client = _http_client, None
+    if shared is not None and shared[0] is asyncio.get_running_loop():
+        await shared[1].aclose()
 
 
 @dataclass
