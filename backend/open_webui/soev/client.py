@@ -10,6 +10,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from urllib.parse import quote
 
 import httpx
@@ -17,6 +18,31 @@ import httpx
 from open_webui.soev.request_cache import invalidate, memoized
 
 log = logging.getLogger(__name__)
+_http_client: httpx.AsyncClient | None = None
+
+
+class _NoCookies(DefaultCookiePolicy):
+    def set_ok(self, cookie, request):
+        return False
+
+
+def _shared_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None:
+        # Credentials remain request-local, including on presigned downloads.
+        _http_client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+            follow_redirects=False,
+            cookies=CookieJar(policy=_NoCookies()),
+        )
+    return _http_client
+
+
+async def close_client() -> None:
+    global _http_client
+    client, _http_client = _http_client, None
+    if client is not None:
+        await client.aclose()
 
 
 @dataclass
@@ -163,21 +189,22 @@ class SoevClient:
                 if method == 'GET':
                     headers['Last-Event-ID'] = str(after)
                 timeout = httpx.Timeout(self._timeout, read=660.0)
-                async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-                    async with client.stream(method, f'{self._base_url}{path}', headers=headers, json=body) as response:
-                        if not response.is_success:
-                            await response.aread()
-                            raise _response_error(response)
-                        thread_id = thread_id or _chat_thread_id(response)
-                        yield ChatEvent('connection', {'thread_id': thread_id})
-                        frames = self._follow_chat(response, thread_id, as_user, after, method == 'GET')
-                        async with aclosing(frames):
-                            async for frame in frames:
-                                if frame.position is not None:
-                                    after = max(after, frame.position)
-                                yield frame
-                                if frame.event in {'status', 'error'}:
-                                    return
+                async with _shared_client().stream(
+                    method, f'{self._base_url}{path}', headers=headers, json=body, timeout=timeout
+                ) as response:
+                    if not response.is_success:
+                        await response.aread()
+                        raise _response_error(response)
+                    thread_id = thread_id or _chat_thread_id(response)
+                    yield ChatEvent('connection', {'thread_id': thread_id})
+                    frames = self._follow_chat(response, thread_id, as_user, after, method == 'GET')
+                    async with aclosing(frames):
+                        async for frame in frames:
+                            if frame.position is not None:
+                                after = max(after, frame.position)
+                            yield frame
+                            if frame.event in {'status', 'error'}:
+                                return
                 method, body = 'GET', None
                 path = f'/v1/chat/threads/{quote(thread_id, safe="")}/events'
         except (httpx.TransportError, ValueError):
@@ -219,20 +246,15 @@ class SoevClient:
         headers = {'Authorization': f'Bearer {self._api_key}', 'X-Soev-Subject': self._subject_minter(as_user)}
         try:
             async with AsyncExitStack() as stack:
-                client = await stack.enter_async_context(
-                    httpx.AsyncClient(timeout=self._timeout, follow_redirects=False)
-                )
+                client = _shared_client()
                 response = await stack.enter_async_context(
-                    client.stream('GET', f'{self._base_url}{path}', headers=headers)
+                    client.stream('GET', f'{self._base_url}{path}', headers=headers, timeout=self._timeout)
                 )
                 if response.status_code == 303:
                     location = response.headers.get('Location', '')
                     if not location.startswith(('https://', 'http://')):
                         raise SoevApiError(502, 'upstream_error', 'Invalid original download URL')
-                    download = await stack.enter_async_context(
-                        httpx.AsyncClient(timeout=self._timeout, follow_redirects=False)
-                    )
-                    response = await stack.enter_async_context(download.stream('GET', location))
+                    response = await stack.enter_async_context(client.stream('GET', location, timeout=self._timeout))
                     if not response.is_success:
                         raise SoevApiError(502, 'upstream_error', 'Original download failed')
                 elif not response.is_success:
@@ -247,8 +269,7 @@ class SoevClient:
     async def put_bytes(self, url: str, *, headers: dict[str, str], body: bytes) -> None:
         """Upload bytes using the presigned URL as the sole credential."""
         try:
-            async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=False) as client:
-                response = await client.put(url, headers=headers, content=body)
+            response = await _shared_client().put(url, headers=headers, content=body, timeout=self._timeout)
         except httpx.TransportError as error:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502
             raise SoevApiError(status, 'upload_failed', 'File upload failed') from None
@@ -305,11 +326,10 @@ class SoevClient:
         started = time.perf_counter()
         status = None
         try:
-            async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=False) as client:
-                response = await client.request(
-                    method, f'{self._base_url}{path}', headers=headers, params=params, json=body
-                )
-                status = response.status_code
+            response = await _shared_client().request(
+                method, f'{self._base_url}{path}', headers=headers, params=params, json=body, timeout=self._timeout
+            )
+            status = response.status_code
         except httpx.TransportError as error:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502
             log.warning('soev-api transport failure', extra={'status': status, 'request_id': None})

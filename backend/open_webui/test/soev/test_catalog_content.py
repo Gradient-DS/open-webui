@@ -50,6 +50,9 @@ async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F
             )
         return env.api.handle(request)
 
+    from open_webui.soev.client import close_client
+
+    await close_client()
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',
         lambda **kwargs: AsyncClient(transport=httpx.MockTransport(handle), **kwargs),

@@ -10,11 +10,12 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+import pytest_asyncio
 from open_webui.soev.client import SoevApiError, SoevClient
 
 
-@pytest.fixture
-def recorded_http(monkeypatch):
+@pytest_asyncio.fixture
+async def recorded_http(monkeypatch):
     """Record requests without opening a network connection."""
     requests = []
     responses = []
@@ -35,6 +36,9 @@ def recorded_http(monkeypatch):
 
     monkeypatch.setattr('open_webui.soev.client.httpx.AsyncClient', make_client)
     yield requests, responses
+    from open_webui.soev.client import close_client
+
+    await close_client()
     assert all(client.is_closed for client in clients)
 
 
@@ -558,3 +562,40 @@ async def test_request_debug_log_has_timing_without_credentials_or_query(recorde
     assert message.endswith('ms')
     assert 'private-api-key' not in str(record.__dict__)
     assert 'private-cursor' not in str(record.__dict__)
+
+
+@pytest.mark.asyncio
+async def test_transport_is_shared_without_sharing_credentials_or_cookies(recorded_http):
+    from open_webui.soev.client import _shared_client, close_client
+
+    requests, responses = recorded_http
+    responses.extend(
+        [
+            httpx.Response(200, json={}, headers={'Set-Cookie': 'session=private; Path=/'}),
+            httpx.Response(200, json={}),
+            httpx.Response(303, headers={'Location': 'https://soev.invalid/presigned'}),
+            httpx.Response(200, content=b'original'),
+            httpx.Response(200),
+        ]
+    )
+    alice = SoevClient('https://soev.invalid', 'alice-key', subject_minter=lambda ref: ref, timeout=7)
+    bob = SoevClient('https://soev.invalid', 'bob-key', timeout=11)
+    await alice.get('/v1/collections', as_user='alice')
+    transport = _shared_client()
+    await bob.get('/v1/collections')
+    assert b''.join([chunk async for chunk in alice.stream('/original', as_user='alice')]) == b'original'
+    await bob.put_bytes('https://soev.invalid/upload', headers={}, body=b'upload')
+    assert _shared_client() is transport
+    assert not transport.is_closed
+    assert len(requests) == 5
+    assert requests[1].headers['Authorization'] == 'Bearer bob-key'
+    assert 'X-Soev-Subject' not in requests[1].headers
+    assert [request.extensions['timeout']['read'] for request in requests] == [7, 11, 7, 7, 11]
+    assert all('cookie' not in request.headers for request in requests)
+    for request in requests[3:]:
+        assert 'Authorization' not in request.headers
+        assert 'X-Soev-Subject' not in request.headers
+    await close_client()
+    assert transport.is_closed
+    await close_client()
+    assert _shared_client() is not transport

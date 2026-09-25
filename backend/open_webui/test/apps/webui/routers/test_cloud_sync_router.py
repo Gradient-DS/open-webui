@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from open_webui.routers import cloud_sync
-from open_webui.soev.client import SoevClient
+from open_webui.soev.client import SoevClient, close_client
 
 
 @pytest.fixture
@@ -40,7 +40,9 @@ def api(monkeypatch):
     user = SimpleNamespace(id='alice', role='user', email='alice@example.com')
     app.dependency_overrides[cloud_sync.get_verified_user] = lambda: user
     with TestClient(app) as browser:
+        browser.portal.call(close_client)
         yield SimpleNamespace(browser=browser, app=app, requests=requests, responses=responses, refs=refs, link=link)
+        browser.portal.call(close_client)
     assert not responses
 
 
