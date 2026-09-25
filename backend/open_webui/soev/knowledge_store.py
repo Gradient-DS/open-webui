@@ -192,8 +192,12 @@ class SoevKnowledgeTable:
 
     async def search_knowledge_bases(self, user_id, filter, skip=0, limit=30, db=None):
         rows = await self._collections(user_id=user_id)
-        owners = await self._owners(rows)
-        types = await self._fallback_types(rows, user_id=user_id)
+        owners, types = await asyncio.gather(
+            self._owners(rows), self._fallback_types(rows, user_id=user_id), return_exceptions=True
+        )
+        for result in (owners, types):
+            if isinstance(result, BaseException):
+                raise result
         rows = [
             row
             for row in rows

@@ -1354,3 +1354,47 @@ async def test_reference_collections_overlap_and_preserve_order_and_errors(env, 
     assert sum(request.url.path == '/v1/collections/kb' for request in env.api.requests) == 1
     assert sum(request.url.path == '/v1/collections/other' for request in env.api.requests) == 1
     assert len(env.api.requests) == (3 if failure in (403, 503) else 4)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('owners_fail', [False, True])
+async def test_search_overlaps_owners_and_needed_schedules(env, monkeypatch, owners_fail):
+    import asyncio
+
+    from open_webui.soev.client import close_client
+
+    owners_started, schedules_started = asyncio.Event(), asyncio.Event()
+    handle = env.api.handle
+    owners = env.store._owners
+    owner_error = RuntimeError('owner lookup failed')
+
+    async def delayed(request):
+        response = handle(request)
+        if request.url.path == '/v1/schedules':
+            schedules_started.set()
+            await asyncio.wait_for(owners_started.wait(), timeout=2)
+            if owners_fail:
+                return httpx.Response(503)
+        return response
+
+    async def delayed_owners(rows):
+        owners_started.set()
+        await asyncio.wait_for(schedules_started.wait(), timeout=2)
+        if owners_fail:
+            raise owner_error
+        return await owners(rows)
+
+    await close_client()
+    monkeypatch.setattr(env.api, 'handle', delayed)
+    monkeypatch.setattr(env.store, '_owners', delayed_owners)
+    env.api.requests.clear()
+    if owners_fail:
+        with pytest.raises(RuntimeError) as error:
+            await env.store.search_knowledge_bases('alice', {})
+        assert error.value is owner_error
+    else:
+        result = await env.store.search_knowledge_bases('alice', {})
+        assert [(row.id, row.type) for row in result.items] == [('kb', 'local')]
+    assert owners_started.is_set() and schedules_started.is_set()
+    assert sum(request.url.path == '/v1/schedules' for request in env.api.requests) == 1
+    assert len(env.api.requests) == 4
