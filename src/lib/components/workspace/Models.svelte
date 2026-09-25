@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -20,8 +21,7 @@
 		pinnedModels,
 		settings,
 		user,
-		workspaceActions,
-		workspaceCounts
+		workspaceActions
 	} from '$lib/stores';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import {
@@ -167,7 +167,7 @@
 			if (res) {
 				models = res.items;
 				total = res.total;
-				workspaceCounts.update((counts) => ({ ...counts, models: total }));
+				setWorkspaceCount('models', total);
 
 				// get tags
 				tags = await getModelTags(localStorage.token).catch((error) => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -10,14 +11,7 @@
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import {
-		WEBUI_NAME,
-		config,
-		tools as _tools,
-		user,
-		workspaceActions,
-		workspaceCounts
-	} from '$lib/stores';
+	import { WEBUI_NAME, config, tools as _tools, user, workspaceActions } from '$lib/stores';
 
 	import { goto } from '$app/navigation';
 	import {
@@ -161,7 +155,7 @@
 			return direction * ((a.updated_at ?? 0) - (b.updated_at ?? 0));
 		});
 
-		workspaceCounts.update((counts) => ({ ...counts, tools: filteredItems.length }));
+		setWorkspaceCount('tools', filteredItems.length);
 	};
 
 	const setSortKey = (key: string) => {

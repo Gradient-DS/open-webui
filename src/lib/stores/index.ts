@@ -74,7 +74,8 @@ export const tools = writable(null);
 export const skills = writable(null);
 export const functions = writable(null);
 
-export type WorkspaceSection = 'models' | 'knowledge' | 'prompts' | 'skills' | 'tools';
+export { workspaceCounts } from './workspace-counts';
+export type { WorkspaceSection } from './workspace-counts';
 export type WorkspaceAction = {
 	id: string;
 	label: string;
@@ -87,13 +88,6 @@ export type WorkspaceAction = {
 	icon?: ComponentType<SvelteComponent<{ className?: string }>>;
 };
 
-export const workspaceCounts: Writable<Record<WorkspaceSection, number | null>> = writable({
-	models: null,
-	knowledge: null,
-	prompts: null,
-	skills: null,
-	tools: null
-});
 export const workspaceActions: Writable<WorkspaceAction[]> = writable([]);
 export const adminUserCount: Writable<number | null> = writable(null);
 export const adminGroupCount: Writable<number | null> = writable(null);

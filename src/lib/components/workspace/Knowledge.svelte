@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import { enabledProviders } from '$lib/sources/policy';
 	import { providerFor, providerIcon } from '$lib/sources/registry';
 	import dayjs from 'dayjs';
@@ -12,7 +13,7 @@
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
-	import { WEBUI_NAME, user, config, workspaceActions, workspaceCounts } from '$lib/stores';
+	import { WEBUI_NAME, user, config, workspaceActions } from '$lib/stores';
 	import {
 		deleteKnowledgeById,
 		searchKnowledgeBases,
@@ -177,7 +178,7 @@
 
 		if (res) {
 			total = res.total;
-			workspaceCounts.update((counts) => ({ ...counts, knowledge: total }));
+			setWorkspaceCount('knowledge', total);
 			const pageItems: KnowledgeListItem[] = res.items ?? [];
 
 			if ((pageItems ?? []).length === 0) {

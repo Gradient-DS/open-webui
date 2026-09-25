@@ -3,15 +3,8 @@
 	import { onMount, getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
-	import {
-		WEBUI_NAME,
-		config,
-		showSidebar,
-		user,
-		mobile,
-		workspaceActions,
-		workspaceCounts
-	} from '$lib/stores';
+	import { WEBUI_NAME, config, showSidebar, user, mobile, workspaceActions } from '$lib/stores';
+	import { registerWorkspaceCountLoaders } from '$lib/stores/workspace-counts';
 	import { page } from '$app/stores';
 	// [Gradient] Tenant feature gates also apply to administrators.
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -34,14 +27,7 @@
 		workspaceActions.set([]);
 	}
 
-	$: if (loaded && $page.url.pathname.startsWith('/workspace')) {
-		loadWorkspaceCounts();
-	}
-
-	const getCount = (res: { total?: number } | unknown[] | null) =>
-		Array.isArray(res) ? res.length : (res?.total ?? null);
-
-	const loadWorkspaceCounts = async () => {
+	const loadWorkspaceCounts = () => {
 		const canViewModels =
 			isFeatureEnabled('models') &&
 			($user?.role === 'admin' || $user?.permissions?.workspace?.models);
@@ -59,32 +45,26 @@
 			$config?.features?.enable_plugins &&
 			($user?.role === 'admin' || $user?.permissions?.workspace?.tools);
 
-		const [modelRes, knowledgeRes, promptRes, skillRes, toolRes] = await Promise.all([
-			canViewModels
-				? getModelItems(localStorage.token, null, null, null, null, null, 1).catch(() => null)
-				: null,
-			canViewKnowledge
-				? searchKnowledgeBases(localStorage.token, null, null, 1, null, null, null, null).catch(
-						() => null
-					)
-				: null,
-			canViewPrompts
-				? getPromptItems(localStorage.token, null, null, null, null, null, 1).catch(() => null)
-				: null,
-			canViewSkills ? getSkillItems(localStorage.token, null, null, 1).catch(() => null) : null,
-			canViewTools ? getToolList(localStorage.token).catch(() => null) : null
-		]);
-
-		workspaceCounts.set({
-			models: getCount(modelRes),
-			knowledge: getCount(knowledgeRes),
-			prompts: getCount(promptRes),
-			skills: getCount(skillRes),
-			tools: getCount(toolRes)
+		return registerWorkspaceCountLoaders({
+			models: () =>
+				canViewModels
+					? getModelItems(localStorage.token, null, null, null, null, null, 1)
+					: Promise.resolve(null),
+			knowledge: () =>
+				canViewKnowledge
+					? searchKnowledgeBases(localStorage.token, null, null, 1, null, null, null, null)
+					: Promise.resolve(null),
+			prompts: () =>
+				canViewPrompts
+					? getPromptItems(localStorage.token, null, null, null, null, null, 1)
+					: Promise.resolve(null),
+			skills: () =>
+				canViewSkills ? getSkillItems(localStorage.token, null, null, 1) : Promise.resolve(null),
+			tools: () => (canViewTools ? getToolList(localStorage.token) : Promise.resolve(null))
 		});
 	};
 
-	onMount(async () => {
+	onMount(() => {
 		void loadSourcePolicy(localStorage.token);
 		// Feature flag checks apply to ALL users including admins
 		if ($page.url.pathname.includes('/models') && !isFeatureEnabled('models')) {
@@ -134,6 +114,7 @@
 		}
 
 		loaded = true;
+		return loadWorkspaceCounts();
 	});
 </script>
 

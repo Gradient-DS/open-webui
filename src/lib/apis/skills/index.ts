@@ -1,3 +1,4 @@
+import { notifyWorkspaceMutation } from '$lib/stores/workspace-counts';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const createNewSkill = async (token: string, skill: object) => {
@@ -27,6 +28,8 @@ export const createNewSkill = async (token: string, skill: object) => {
 	if (error) {
 		throw error;
 	}
+
+	if (res) notifyWorkspaceMutation('skills');
 
 	return res;
 };
@@ -323,6 +326,8 @@ export const deleteSkillById = async (token: string, id: string) => {
 	if (error) {
 		throw error;
 	}
+
+	if (res) notifyWorkspaceMutation('skills');
 
 	return res;
 };

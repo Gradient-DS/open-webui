@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -11,7 +12,7 @@
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
-	import { WEBUI_NAME, config, user, workspaceActions, workspaceCounts } from '$lib/stores';
+	import { WEBUI_NAME, config, user, workspaceActions } from '$lib/stores';
 
 	import {
 		createNewPrompt,
@@ -177,7 +178,7 @@
 			if (res) {
 				prompts = res.items;
 				total = res.total;
-				workspaceCounts.update((counts) => ({ ...counts, prompts: total }));
+				setWorkspaceCount('prompts', total);
 
 				// get tags
 				tags = await getPromptTags(localStorage.token).catch((error) => {
