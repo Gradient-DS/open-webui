@@ -61,16 +61,17 @@ services:
       retries: 20
     networks: [internal]
 
-  # quay.io, not Docker Hub: MinIO deleted the minio/minio and minio/mc
-  # repositories from Docker Hub around 2026-09-11, and a pull of this pinned
-  # tag now answers "pull access denied ... may require 'docker login'", which
-  # reads like an auth problem and is not one. quay.io serves the same tag from
-  # the same build -- image config sha256:a1ea29fa28355559ef137d71fc570e508a2
-  # 14ec84ff8083e39bc5428980b015e and creation timestamp both match the copy
-  # pulled from Docker Hub in April 2025 -- so this is a registry swap, not a
-  # version change.
+  # MinIO removed its public images twice: minio/minio and minio/mc left Docker
+  # Hub around 2026-09-11, and quay.io/minio/minio went private on 2026-09-24
+  # (anonymous pulls answer 401). Bitnami's frozen legacy build of the same
+  # server (MinIO 2025-07-23, mc and curl included) is the last public copy;
+  # pinned by digest because the repository receives no further updates. CI and
+  # local runs only; tenants use Scaleway object storage.
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: docker.io/bitnamilegacy/minio@sha256:8935e75fa5d11295c17171e4aa49efe390a1193cd7f12e4d21b92af9ffef09d7
+    # The Bitnami scripts would run their own setup and data dir; the binary
+    # itself takes the same server command and root env vars as before.
+    entrypoint: ["/opt/bitnami/minio/bin/minio"]
     command: ["server", "/data"]
     environment:
       MINIO_ROOT_USER: "ci-s3-access-key"
@@ -86,8 +87,8 @@ services:
     networks: [internal]
 
   minio-init:
-    # This release includes mc as well as the server and curl.
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # This image includes mc as well as the server and curl.
+    image: docker.io/bitnamilegacy/minio@sha256:8935e75fa5d11295c17171e4aa49efe390a1193cd7f12e4d21b92af9ffef09d7
     restart: "no"
     environment:
       S3_ACCESS_KEY_ID: "ci-s3-access-key"
