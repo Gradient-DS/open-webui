@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { prefetchKnowledge } from './Knowledge/utils/prefetch';
 	import { knowledgeListCache, type KnowledgeListItem } from './Knowledge/utils/listCache';
 	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import { enabledProviders } from '$lib/sources/policy';
@@ -237,6 +238,12 @@
 		}
 	};
 
+	const prefetchRow = (item: KnowledgeListItem) => {
+		if (!item.suspension_info && !item.meta?.document) {
+			prefetchKnowledge($user?.id, localStorage.token, item.id);
+		}
+	};
+
 	const openKnowledge = (item: KnowledgeListItem) => {
 		// [Gradient] Suspended KBs stay visible but cannot be opened.
 		if (item.suspension_info) return;
@@ -471,6 +478,8 @@
 									: ''} group flex min-h-8 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-xl px-2 py-1 text-left"
 								role="button"
 								tabindex="0"
+								on:pointerenter={() => prefetchRow(item)}
+								on:focus={() => prefetchRow(item)}
 								on:click={(e) => {
 									if (shouldIgnoreRowClick(e.target)) return;
 									openKnowledge(item);

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { takeKnowledgeDetail, takeKnowledgeItems } from './utils/prefetch';
 	import { enabledProviders, loadSourcePolicy } from '$lib/sources/policy';
 	import { providers, providerFor, type SourceProvider } from '$lib/sources/registry';
 	/* global FileSystemDirectoryReader, FileSystemEntry, FileSystemFileEntry, FileSystemDirectoryEntry */
@@ -303,7 +304,7 @@
 		}
 	}
 
-	const getItemsPage = async () => {
+	const getItemsPage = async (usePrefetch = false) => {
 		if (knowledgeId === null) return;
 
 		// Don't null items — keep showing stale data during re-fetch
@@ -319,7 +320,7 @@
 		// hidden and each hit renders its meta.relative_path breadcrumb.
 		// [Gradient] The same response includes the KB-wide quota total.
 		const isSearching = !!query;
-		const res = await searchKnowledgeFilesById(
+		const args: Parameters<typeof searchKnowledgeFilesById> = [
 			localStorage.token,
 			knowledgeId,
 			query,
@@ -330,9 +331,13 @@
 			null,
 			true,
 			isSearching ? undefined : (currentDirectoryId ?? null)
-		).catch(() => null);
+		];
+		const request = usePrefetch
+			? takeKnowledgeItems($user?.id, args)
+			: { promise: searchKnowledgeFilesById(...args), reused: false };
+		const res = await request.promise.catch(() => null);
 
-		if (currentFetchId !== fetchId) return; // Stale response, discard
+		if (destroyed || currentFetchId !== fetchId) return; // Stale response, discard
 
 		if (res) {
 			fileItems = res.items;
@@ -352,6 +357,7 @@
 			}
 		}
 		if (res?.collection_total != null) kbFileTotal = res.collection_total;
+		if (request.reused) void getItemsPage();
 		queryDebounceActive = false;
 		return res;
 	};
@@ -1750,6 +1756,26 @@
 		}
 	};
 
+	const loadKnowledge = async (requestId: string, usePrefetch = false) => {
+		const request = usePrefetch
+			? takeKnowledgeDetail($user?.id, localStorage.token, requestId)
+			: { promise: getKnowledgeById(localStorage.token, requestId), reused: false };
+		const previous = knowledge;
+		const res = await request.promise.catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+		if (destroyed || knowledge !== previous) return null;
+		if (res) {
+			knowledge = res;
+			if (!Array.isArray(knowledge?.access_grants)) knowledge.access_grants = [];
+		} else {
+			goto('/workspace/knowledge');
+		}
+		if (request.reused) void loadKnowledge(requestId);
+		return res;
+	};
+
 	// ===== Socket event handler references (for cleanup) =====
 
 	onMount(async () => {
@@ -1761,20 +1787,13 @@
 		knowledgeId = id;
 		// [Gradient] Start all three independent reads together; the first items page covers this poll.
 		const [res] = await Promise.all([
-			getKnowledgeById(localStorage.token, id).catch((e) => {
-				toast.error(`${e}`);
-				return null;
-			}),
-			getItemsPage(),
+			loadKnowledge(id, true),
+			getItemsPage(true),
 			pollCloudSyncStatus(false)
 		]);
 
 		if (destroyed) return;
 		if (res) {
-			knowledge = res;
-			if (!Array.isArray(knowledge?.access_grants)) {
-				knowledge.access_grants = [];
-			}
 			knowledgeId = knowledge?.id;
 
 			requestedProvider =
@@ -1782,8 +1801,6 @@
 					(provider) => $page.url.searchParams.get(provider.startParam) === 'true'
 				) ?? null;
 			if (!requestedProvider && !providers[knowledge.type ?? '']) clearTimeout(syncPoll);
-		} else {
-			goto('/workspace/knowledge');
 		}
 
 		if (destroyed) return;
