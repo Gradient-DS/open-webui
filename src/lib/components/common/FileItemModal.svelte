@@ -156,10 +156,10 @@
 			'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
 		(item?.name && item.name.toLowerCase().endsWith('.pptx'));
 
-	const loadExcelContent = async () => {
+	const loadExcelContent = async (content?: ReturnType<typeof getFileContentById>) => {
 		try {
 			excelError = '';
-			const arrayBuffer = await getFileContentById(item.id);
+			const arrayBuffer = await (content ?? getFileContentById(item.id));
 			if (!arrayBuffer) throw new Error('Empty file content');
 			excelWorkbook = await readWorkbook(arrayBuffer);
 			excelSheetNames = excelWorkbook.SheetNames;
@@ -185,21 +185,21 @@
 		renderExcelSheet();
 	}
 
-	const loadDocxContent = async () => {
+	const loadDocxContent = async (content?: ReturnType<typeof getFileContentById>) => {
 		try {
 			docxError = '';
-			docxData = await getFileContentById(item.id);
+			docxData = await (content ?? getFileContentById(item.id));
 		} catch (error) {
 			console.error('Error loading DOCX file:', error);
 			docxError = $i18n.t('Failed to load DOCX file. Please try downloading it instead.');
 		}
 	};
 
-	const loadPptxContent = async () => {
+	const loadPptxContent = async (content?: ReturnType<typeof getFileContentById>) => {
 		try {
 			pptxError = '';
 			const [arrayBuffer, { pptxToImages }] = await Promise.all([
-				getFileContentById(item.id),
+				content ?? getFileContentById(item.id),
 				import('$lib/utils/pptxToHtml')
 			]);
 			const result = await pptxToImages(arrayBuffer);
@@ -233,6 +233,10 @@
 		} else if (item?.type === 'file') {
 			loading = true;
 
+			const content = isExcel || isDocx || isPptx ? getFileContentById(item.id) : undefined;
+			// Observe early rejection while metadata is pending; the preview loader still handles it.
+			void content?.catch(() => {});
+
 			const file = await getFileById(localStorage.token, item.id).catch((e) => {
 				console.error('Error fetching file:', e);
 				return null;
@@ -244,13 +248,13 @@
 
 			// Load Excel content if it's an Excel file
 			if (isExcel) {
-				await loadExcelContent();
+				await loadExcelContent(content);
 			}
 			if (isDocx) {
-				await loadDocxContent();
+				await loadDocxContent(content);
 			}
 			if (isPptx) {
-				await loadPptxContent();
+				await loadPptxContent(content);
 			}
 
 			loading = false;
