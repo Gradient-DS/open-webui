@@ -67,7 +67,8 @@ def test_minio_readiness_and_ephemeral_storage(compose):
     services = compose['services']
     minio = services['minio']
     assert minio['image'] == services['minio-init']['image']
-    assert minio['image'].startswith('quay.io/minio/minio:RELEASE.')
+    assert minio['image'].startswith('docker.io/bitnamilegacy/minio@sha256:')
+    assert minio['entrypoint'] == ['/opt/bitnami/minio/bin/minio']
     assert minio['command'] == ['server', '/data']
     assert '/data' in minio['tmpfs']
     assert minio['healthcheck']['test'] == [
