@@ -111,6 +111,13 @@ jobs:
       - name: Template Helm chart (catch rendering errors)
         run: helm template test-release helm/open-webui-tenant > /dev/null
 
+      - name: Template Helm chart with external Postgres values
+        # All six DB consumers must point at postgres.host, none at the bundled Service.
+        run: |
+          helm template test-release helm/open-webui-tenant -f helm/open-webui-tenant/ci/external-postgres-values.yaml > /tmp/external-postgres.yaml
+          test "$(grep -c 'pg-external.database-staging' /tmp/external-postgres.yaml)" -eq 6
+          ! grep -q 'open-webui-tenant-postgres' /tmp/external-postgres.yaml
+
   docker-build:
     name: Docker Image Build (no push)
     runs-on: ubuntu-latest

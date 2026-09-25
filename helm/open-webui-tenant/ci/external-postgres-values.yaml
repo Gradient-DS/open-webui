@@ -1,0 +1,19 @@
+# Exercises the external-database path in CI (helm template only).
+# loaderWorker and the migration Job are enabled here ONLY so their templates
+# render and prove they use the host helper too; no loader-worker runs against
+# an external server in practice. Port 5433 proves the port override reaches
+# every site (the default 5432 would be indistinguishable).
+postgres:
+  enabled: false
+  host: pg-external.database-staging.svc.cluster.local
+  port: 5433
+  database: staging_openwebui
+  user: staging_openwebui
+openWebui:
+  migrationJob:
+    enabled: true
+loaderWorker:
+  enabled: true
+networkPolicy:
+  extraEgressNamespaces:
+    - database-staging

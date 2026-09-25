@@ -84,8 +84,8 @@ data:
   # Database (PostgreSQL) - local to tenant namespace
   DATABASE_TYPE: {{ .Values.openWebui.config.databaseType | quote }}
   DATABASE_USER: {{ .Values.openWebui.config.databaseUser | quote }}
-  DATABASE_HOST: {{ include "open-webui-tenant.postgres.fullname" . }}
-  DATABASE_PORT: {{ .Values.openWebui.config.databasePort | quote }}
+  DATABASE_HOST: {{ include "open-webui-tenant.postgres.host" . }}
+  DATABASE_PORT: {{ include "open-webui-tenant.postgres.port" . | quote }}
   DATABASE_NAME: {{ .Values.openWebui.config.databaseName | quote }}
 
   # RAG Embeddings

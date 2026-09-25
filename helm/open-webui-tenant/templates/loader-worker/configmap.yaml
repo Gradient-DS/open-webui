@@ -14,8 +14,8 @@ data:
   LOADER_PER_JOB_POLL_CONCURRENCY: {{ .Values.loaderWorker.config.perJobPollConcurrency | default 100 | quote }}
   LOADER_JOB_LEASE_TIMEOUT_SECONDS: {{ .Values.loaderWorker.config.jobLeaseTimeoutSeconds | default 900 | quote }}
   LOADER_EMBEDDER_BATCH_SIZE: {{ .Values.loaderWorker.config.embedderBatchSize | default 100 | quote }}
-  LOADER_DB_HOST: {{ include "open-webui-tenant.postgres.fullname" . | quote }}
-  LOADER_DB_PORT: {{ .Values.postgres.port | default 5432 | quote }}
+  LOADER_DB_HOST: {{ include "open-webui-tenant.postgres.host" . | quote }}
+  LOADER_DB_PORT: {{ include "open-webui-tenant.postgres.port" . | quote }}
   LOADER_DB_NAME: {{ .Values.loaderWorker.postgres.database | default "loader_worker" | quote }}
   LOADER_DB_USER: {{ .Values.loaderWorker.postgres.user | default "loader_worker_app" | quote }}
   # LITELLM base URL the loader-worker hits for embedding (key is sourced from <tenant>-secrets).

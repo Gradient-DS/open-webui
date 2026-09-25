@@ -70,7 +70,7 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: postgres-password
             - name: DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-tenant.postgres.fullname" . }}:5432/{{ .Values.postgres.database }}"
+              value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-tenant.postgres.host" . }}:{{ include "open-webui-tenant.postgres.port" . }}/{{ .Values.postgres.database }}"
           resources:
             {{- toYaml .Values.openWebui.migrationJob.resources | nindent 12 }}
           # open_webui.config mkdirs UPLOAD_DIR at import time regardless of

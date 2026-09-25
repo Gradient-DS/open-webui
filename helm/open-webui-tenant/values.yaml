@@ -232,6 +232,7 @@ openWebui:
     # Database (PostgreSQL) - uses local PostgreSQL in tenant namespace
     databaseType: "postgresql"
     databaseUser: "openwebui"
+    # Unused since chart 1.4.0: DATABASE_PORT follows postgres.port.
     databasePort: "5432"
     databaseName: "openwebui"
 
@@ -721,7 +722,21 @@ openWebui:
 # PostgreSQL
 # -----------------------------------------------------------------------------
 postgres:
+  # Gates only the bundled StatefulSet + Service; never rewrites hostnames.
   enabled: true
+
+  # External server, e.g. a CloudNativePG `<cluster>-rw` Service such as
+  # pg-staging-rw.database-staging.svc.cluster.local. Leave empty for the
+  # bundled StatefulSet. When set, every consumer (Open WebUI, migration job,
+  # loader-worker) connects here and you normally also set `enabled: false`.
+  # Cross-namespace hosts need the target namespace in
+  # networkPolicy.extraEgressNamespaces. The loader-worker bootstrap Job needs
+  # CREATEROLE/CREATEDB and is NOT expected to work against an external server;
+  # run the sync-daemon instead of the loader-worker there.
+  host: ""
+  # Port every consumer connects to (DATABASE_URL, DATABASE_PORT, loader-worker).
+  # Change it only for an external server; the bundled Service listens on 5432.
+  port: 5432
 
   image:
     repository: postgres
