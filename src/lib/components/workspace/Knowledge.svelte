@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { prefetchKnowledge } from './Knowledge/utils/prefetch';
+	import { knowledgeListCache, type KnowledgeListItem } from './Knowledge/utils/listCache';
+	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import { enabledProviders } from '$lib/sources/policy';
 	import { providerFor, providerIcon } from '$lib/sources/registry';
 	import dayjs from 'dayjs';
@@ -12,7 +15,7 @@
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
-	import { WEBUI_NAME, user, config, workspaceActions, workspaceCounts } from '$lib/stores';
+	import { WEBUI_NAME, user, config, workspaceActions } from '$lib/stores';
 	import {
 		deleteKnowledgeById,
 		searchKnowledgeBases,
@@ -40,27 +43,6 @@
 	import TagSelector from './common/TagSelector.svelte';
 	import Loader from '../common/Loader.svelte';
 
-	type KnowledgeListItem = {
-		id: string;
-		name: string;
-		description?: string;
-		updated_at: number;
-		file_count?: number;
-		write_access?: boolean;
-		type?: string;
-		suspension_info?: { days_remaining: number };
-		meta?: {
-			document?: unknown;
-			source?: string;
-			external?: { provider?: string; source?: { name?: string }; auth_mode?: string };
-			[key: string]: unknown;
-		};
-		user?: {
-			name?: string;
-			email?: string;
-		};
-	};
-
 	export let showCreateOnMount = false;
 	export let createModalCloseHref = '';
 
@@ -80,8 +62,8 @@
 	let sortKey = 'updated_at';
 	let sortDirection = 'desc';
 
-	let items = null;
-	let total = null;
+	let items: KnowledgeListItem[] | null = null;
+	let total: number | null = null;
 
 	let allItemsLoaded = false;
 	let itemsLoading = false;
@@ -147,18 +129,35 @@
 		await getItemsPage();
 	};
 
+	const listCacheKey = () =>
+		JSON.stringify([
+			$user?.id,
+			localStorage.token,
+			query,
+			viewOption,
+			typeFilter,
+			sourceOption,
+			sortKey,
+			sortDirection
+		]);
+
 	const init = async () => {
 		if (!loaded) return;
 
-		if (items === null) reset();
-		page = 1;
-		allItemsLoaded = false;
-		// Don't null items — keep showing stale data during re-fetch
+		const cached = knowledgeListCache.get(listCacheKey());
+		reset();
+		if (cached) {
+			items = cached.items;
+			total = cached.total;
+		}
 		await getItemsPage(true);
 	};
 
 	const getItemsPage = async (replace = false) => {
 		const currentFetchId = ++fetchId;
+		const cacheKey = listCacheKey();
+		const cacheRevision = knowledgeListCache.revision;
+		const requestedPage = page;
 		itemsLoading = true;
 		const res = await searchKnowledgeBases(
 			localStorage.token,
@@ -173,12 +172,15 @@
 			return [];
 		});
 
-		if (currentFetchId !== fetchId) return; // Stale response, discard
+		if (currentFetchId !== fetchId || cacheRevision !== knowledgeListCache.revision) return;
 
 		if (res) {
 			total = res.total;
-			workspaceCounts.update((counts) => ({ ...counts, knowledge: total }));
+			setWorkspaceCount('knowledge', total);
 			const pageItems: KnowledgeListItem[] = res.items ?? [];
+			if (requestedPage === 1 && typeof res.total === 'number') {
+				knowledgeListCache.set(cacheKey, { items: pageItems, total: res.total }, cacheRevision);
+			}
 
 			if ((pageItems ?? []).length === 0) {
 				allItemsLoaded = true;
@@ -233,6 +235,12 @@
 			}
 		} catch (e) {
 			toast.error(`${e}`);
+		}
+	};
+
+	const prefetchRow = (item: KnowledgeListItem) => {
+		if (!item.suspension_info && !item.meta?.document) {
+			prefetchKnowledge($user?.id, localStorage.token, item.id);
 		}
 	};
 
@@ -309,6 +317,7 @@
 	});
 
 	onDestroy(() => {
+		fetchId += 1;
 		clearTimeout(searchDebounceTimer);
 	});
 </script>
@@ -469,6 +478,8 @@
 									: ''} group flex min-h-8 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-xl px-2 py-1 text-left"
 								role="button"
 								tabindex="0"
+								on:pointerenter={() => prefetchRow(item)}
+								on:focus={() => prefetchRow(item)}
 								on:click={(e) => {
 									if (shouldIgnoreRowClick(e.target)) return;
 									openKnowledge(item);

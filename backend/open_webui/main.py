@@ -702,6 +702,11 @@ async def lifespan(app: FastAPI):
     app.state.periodic_session_pool_cleanup.cancel()
     app.state.soev_job_poller.cancel()
     await app.state.soev_job_poller
+
+    # [Gradient] Release the soev-api keep-alive pool after its poller stops.
+    from open_webui.soev.client import close_client
+
+    await close_client()
     app.state.scheduler_worker_loop.cancel()
 
     await publish_event(app, EVENTS.SYSTEM_SHUTDOWN_COMPLETED, source='system')

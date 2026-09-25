@@ -7,9 +7,19 @@ import json
 
 import httpx
 import pytest
+import pytest_asyncio
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from open_webui.test.soev.fake_api import FakeSoevApi
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def shared_client_lifecycle():
+    from open_webui.soev.client import close_client
+
+    await close_client()
+    yield
+    await close_client()
 
 
 @pytest.fixture
@@ -17,7 +27,9 @@ def chat_http(fake_api: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> FakeSoe
     original_client = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',
-        lambda **kwargs: original_client(transport=httpx.MockTransport(fake_api.handle), **kwargs),
+        lambda **kwargs: original_client(
+            transport=httpx.MockTransport(lambda request: fake_api.handle(request)), **kwargs
+        ),
     )
     return fake_api
 

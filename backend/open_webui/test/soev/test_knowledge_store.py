@@ -1247,3 +1247,154 @@ async def test_file_counts_respect_mirrored_document_access(env):
     assert await env.store.get_file_counts_by_knowledge_ids(['kb']) == {}
     listing = await env.store.search_knowledge_bases('alice', {})
     assert listing.items[0].file_count == 12
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('size', [1, 6])
+async def test_file_counts_batch_unlanded_rows_in_one_statement(env, size):
+    keys = ['kb'] + [f'kb-{index}' for index in range(1, size)]
+    env.api.page_size = 200
+    for key in keys[1:]:
+        await seed(env, key)
+    await seed(env, 'private', owner='bob')
+    for key in keys + ['private']:
+        await file(env, f'{key}-landed', key=key, soev_collection_key=key)
+        for suffix, stored_key in [('pending', key), ('quoted', json.dumps(key))]:
+            await env.files.Files.insert_new_file(
+                'alice',
+                env.files.FileForm(
+                    id=f'{key}-{suffix}', filename=suffix, path='', meta={'soev_collection_key': stored_key}
+                ),
+            )
+    statements = []
+
+    def count(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(env.engine.sync_engine, 'before_cursor_execute', count)
+    try:
+        # The former per-KB query performs one statement for each visible KB.
+        for key in keys:
+            assert len(await env.files.Files.get_unlanded_files_for_collection(key)) == 3
+        assert len(statements) == size
+        statements.clear()
+        env.api.requests.clear()
+        assert await env.store.get_file_counts_by_knowledge_ids(
+            keys + ['private', 'missing', 'kb'], user_id='alice'
+        ) == dict.fromkeys(keys, 3)
+        assert len(statements) == 1
+    finally:
+        event.remove(env.engine.sync_engine, 'before_cursor_execute', count)
+    assert len(env.api.requests) == 1 + size
+    assert sum(request.url.path == '/v1/collections' for request in env.api.requests) == 1
+    assert not any('/private/' in request.url.path for request in env.api.requests)
+
+
+@pytest.mark.asyncio
+async def test_empty_file_counts_do_not_query_files(env):
+    statements = []
+
+    def count(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(env.engine.sync_engine, 'before_cursor_execute', count)
+    try:
+        assert await env.store.get_file_counts_by_knowledge_ids([]) == {}
+        assert not env.api.requests
+        assert await env.store.get_file_counts_by_knowledge_ids(['missing']) == {}
+        assert not statements
+    finally:
+        event.remove(env.engine.sync_engine, 'before_cursor_execute', count)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [None, 404, 403, 503])
+async def test_reference_collections_overlap_and_preserve_order_and_errors(env, monkeypatch, failure):
+    import asyncio
+
+    from open_webui.soev.client import SoevApiError, close_client
+
+    await seed(env, 'other')
+    for key in ('kb', 'other'):
+        env.api.add_document(key, 'first')
+        env.api.add_document(key, 'second')
+    handle = env.api.handle
+    started = set()
+    both_started = asyncio.Event()
+
+    async def delayed(request):
+        response = handle(request)
+        if request.url.path in ('/v1/collections/kb', '/v1/collections/other'):
+            started.add(request.url.path)
+            if len(started) == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=2)
+            if failure and (failure != 404 or request.url.path.endswith('/kb')):
+                status = failure if request.url.path.endswith('/kb') else 502
+                return httpx.Response(
+                    status,
+                    json={'code': 'denied', 'detail': 'Unavailable'},
+                    headers={'Content-Type': 'application/problem+json'},
+                )
+        return response
+
+    await close_client()
+    monkeypatch.setattr(env.api, 'handle', delayed)
+    env.api.requests.clear()
+    if failure in (403, 503):
+        with pytest.raises(SoevApiError) as error:
+            await env.store._references({'first', 'second'}, user_id='alice')
+        assert error.value.status == failure
+    else:
+        pairs = await env.store._references({'first', 'second'}, user_id='alice')
+        assert [(row['key'], document['source_id']) for row, document in pairs] == [
+            (key, source) for source in ('first', 'second') for key in ('kb', 'other') if failure != 404 or key != 'kb'
+        ]
+    assert len(started) == 2
+    assert sum(request.url.path == '/v1/collections/kb' for request in env.api.requests) == 1
+    assert sum(request.url.path == '/v1/collections/other' for request in env.api.requests) == 1
+    assert len(env.api.requests) == (3 if failure in (403, 503) else 4)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('owners_fail', [False, True])
+async def test_search_overlaps_owners_and_needed_schedules(env, monkeypatch, owners_fail):
+    import asyncio
+
+    from open_webui.soev.client import close_client
+
+    owners_started, schedules_started = asyncio.Event(), asyncio.Event()
+    handle = env.api.handle
+    owners = env.store._owners
+    owner_error = RuntimeError('owner lookup failed')
+
+    async def delayed(request):
+        response = handle(request)
+        if request.url.path == '/v1/schedules':
+            schedules_started.set()
+            await asyncio.wait_for(owners_started.wait(), timeout=2)
+            if owners_fail:
+                return httpx.Response(503)
+        return response
+
+    async def delayed_owners(rows):
+        owners_started.set()
+        await asyncio.wait_for(schedules_started.wait(), timeout=2)
+        if owners_fail:
+            raise owner_error
+        return await owners(rows)
+
+    await close_client()
+    monkeypatch.setattr(env.api, 'handle', delayed)
+    monkeypatch.setattr(env.store, '_owners', delayed_owners)
+    env.api.requests.clear()
+    if owners_fail:
+        with pytest.raises(RuntimeError) as error:
+            await env.store.search_knowledge_bases('alice', {})
+        assert error.value is owner_error
+    else:
+        result = await env.store.search_knowledge_bases('alice', {})
+        assert [(row.id, row.type) for row in result.items] == [('kb', 'local')]
+    assert owners_started.is_set() and schedules_started.is_set()
+    assert sum(request.url.path == '/v1/schedules' for request in env.api.requests) == 1
+    assert len(env.api.requests) == 4

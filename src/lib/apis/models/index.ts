@@ -1,3 +1,4 @@
+import { notifyWorkspaceMutation } from '$lib/stores/workspace-counts';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const getModelItems = async (
@@ -146,6 +147,8 @@ export const importModels = async (token: string, models: object[]) => {
 		throw error;
 	}
 
+	if (res) notifyWorkspaceMutation('models');
+
 	return res;
 };
 
@@ -213,6 +216,8 @@ export const createNewModel = async (token: string, model: object) => {
 	if (error) {
 		throw error;
 	}
+
+	if (res) notifyWorkspaceMutation('models');
 
 	return res;
 };
@@ -387,6 +392,8 @@ export const deleteModelById = async (token: string, id: string) => {
 		throw error;
 	}
 
+	if (res) notifyWorkspaceMutation('models');
+
 	return res;
 };
 
@@ -418,6 +425,8 @@ export const deleteAllModels = async (token: string) => {
 	if (error) {
 		throw error;
 	}
+
+	if (res) notifyWorkspaceMutation('models');
 
 	return res;
 };

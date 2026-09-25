@@ -63,6 +63,7 @@ async def test_members_list_reached_documents_under_the_kb(subscribed_store):
 async def test_counts_include_reached_documents(subscribed_store):
     """The visible collection count includes both owned and subscribed corpus documents."""
     env = subscribed_store
+    env.store._unlanded_files_by_collection = AsyncMock(return_value={'kb': []})
     env.responses.append(
         httpx.Response(200, json={'data': [{'key': 'kb', 'document_count': len(env.documents)}], 'next_cursor': None})
     )
@@ -292,6 +293,7 @@ async def test_opening_a_kb_fetches_each_resource_once(folder_store):
 async def test_counts_use_one_collection_listing(folder_store):
     """Counts read the listing once even when multiple KB ids are requested."""
     env = folder_store
+    env.store._unlanded_files_by_collection = AsyncMock(return_value={'kb': []})
     assert await env.store.get_file_counts_by_knowledge_ids(['kb', 'absent'], user_id='alice') == {'kb': 4}
     assert [request.url.path for request in env.requests] == ['/v1/collections']
 

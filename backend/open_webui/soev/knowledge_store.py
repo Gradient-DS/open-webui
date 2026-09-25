@@ -192,8 +192,12 @@ class SoevKnowledgeTable:
 
     async def search_knowledge_bases(self, user_id, filter, skip=0, limit=30, db=None):
         rows = await self._collections(user_id=user_id)
-        owners = await self._owners(rows)
-        types = await self._fallback_types(rows, user_id=user_id)
+        owners, types = await asyncio.gather(
+            self._owners(rows), self._fallback_types(rows, user_id=user_id), return_exceptions=True
+        )
+        for result in (owners, types):
+            if isinstance(result, BaseException):
+                raise result
         rows = [
             row
             for row in rows
@@ -326,10 +330,11 @@ class SoevKnowledgeTable:
                 return []
             raise
 
-    async def _unlanded(self, key, *, documents=None, collection=None, user_id=None):
+    async def _unlanded(self, key, *, documents=None, collection=None, user_id=None, files=None):
         from open_webui.models.files import Files
 
-        files = await Files.get_unlanded_files_for_collection(key)
+        if files is None:
+            files = await Files.get_unlanded_files_for_collection(key)
         if not files or (collection is None and await self._collection(key, user_id=user_id) is None):
             return []
         if documents is None:
@@ -385,17 +390,42 @@ class SoevKnowledgeTable:
         ids = list(await self._members(knowledge_id))
         return await Files.get_file_metadatas_by_ids(ids) if ids else []
 
+    async def _unlanded_files_by_collection(self, keys):
+        from sqlalchemy import select
+
+        from open_webui.internal.db import get_async_db_context
+        from open_webui.models.files import File, FileModel
+
+        grouped = {key: [] for key in keys}
+        if not grouped:
+            return grouped
+        stored_keys = {}
+        for key in grouped:
+            for value in (key, json.dumps(key)):
+                stored_keys.setdefault(value, []).append(key)
+        async with get_async_db_context() as db:
+            result = await db.execute(
+                select(File).filter(File.meta['soev_collection_key'].as_string().in_(stored_keys))
+            )
+            for row in result.scalars().all():
+                file = FileModel.model_validate(row)
+                for key in stored_keys[file.meta['soev_collection_key']]:
+                    grouped[key].append(file)
+        return grouped
+
     async def get_file_counts_by_knowledge_ids(self, knowledge_ids, db=None, *, user_id: str | None = None):
         result = {}
         requested = set(knowledge_ids)
         if not requested:
             return result
-        for row in await self._pages('/v1/collections', user_id=user_id):
+        rows = [row for row in await self._pages('/v1/collections', user_id=user_id) if row['key'] in requested]
+        files = await self._unlanded_files_by_collection(row['key'] for row in rows)
+        for row in rows:
             key = row['key']
-            if key in requested:
-                count = row['document_count'] + len(await self._unlanded(key, collection=row, user_id=user_id))
-                if count:
-                    result[key] = count
+            unlanded = await self._unlanded(key, collection=row, user_id=user_id, files=files[key])
+            count = row['document_count'] + len(unlanded)
+            if count:
+                result[key] = count
         return result
 
     async def has_file(self, knowledge_id, file_id, db=None):
@@ -415,12 +445,22 @@ class SoevKnowledgeTable:
         collections = {}
         for source_id in sorted(ids):
             response = await self._get('/v1/documents', params={'source_id': source_id}, user_id=user_id)
+            keys = list(
+                dict.fromkeys(
+                    doc['collection_key'] for doc in response['data'] if doc['collection_key'] not in collections
+                )
+            )
+            rows = await asyncio.gather(
+                *(self._collection(key, user_id=user_id) for key in keys), return_exceptions=True
+            )
+            for key, row in zip(keys, rows):
+                if isinstance(row, BaseException):
+                    raise row
+                collections[key] = row
             for document in response['data']:
-                key = document['collection_key']
-                if key not in collections:
-                    collections[key] = await self._collection(key, user_id=user_id)
-                if collections[key] is not None:
-                    result.append((collections[key], document))
+                collection = collections[document['collection_key']]
+                if collection is not None:
+                    result.append((collection, document))
         return result
 
     async def get_knowledges_by_file_id(self, file_id, db=None):
