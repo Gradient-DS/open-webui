@@ -9,6 +9,7 @@ export interface ToastSegments {
 	unchanged?: number;
 	failed?: number;
 	removed?: number;
+	unresolved?: number;
 }
 
 export type ToastVariant = 'success' | 'warning' | 'error' | 'info';
@@ -23,6 +24,14 @@ export function buildSyncToast(
 	label: string | null,
 	s: ToastSegments
 ): ToastResult {
+	if (s.unresolved && s.unresolved > 0) {
+		const body = i18n.t('{{added}} added, {{failed}} failed, {{unresolved}} still processing', {
+			added: s.added ?? 0,
+			failed: s.failed ?? 0,
+			unresolved: s.unresolved
+		});
+		return { variant: 'warning', message: label ? `${label}: ${body}` : body };
+	}
 	const segments: string[] = [];
 	if (s.added && s.added > 0) {
 		segments.push(i18n.t('Added {{count}}', { count: s.added }));

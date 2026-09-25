@@ -129,6 +129,17 @@ def directory_of(directory_id: str) -> tuple[str, tuple[str, ...]]:
     return key, segments
 
 
+SYNC_ROOT_PREFIX = '\0sync:'
+
+
+def sync_root_schedule_id(directory_id: str) -> str | None:
+    """The content schedule behind a synced folder's root row, else None."""
+    _, path = directory_of(directory_id)
+    if len(path) != 1 or not path[0].startswith(SYNC_ROOT_PREFIX):
+        return None
+    return path[0].removeprefix(SYNC_ROOT_PREFIX)
+
+
 def directory_model(key: str, path: tuple[str, ...], *, created_at: int, owner_id: str) -> KnowledgeDirectoryModel:
     if not path:
         raise ValueError('The collection root has no directory model')
@@ -140,6 +151,7 @@ def directory_model(key: str, path: tuple[str, ...], *, created_at: int, owner_i
         user_id=owner_id,
         created_at=created_at,
         updated_at=created_at,
+        schedule_id=sync_root_schedule_id(directory_id(key, path)),
     )
 
 

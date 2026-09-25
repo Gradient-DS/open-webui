@@ -33,15 +33,26 @@ export function googleDriveScope(item: {
 	};
 }
 
+export function trustedConnectOrigins(location: string, apiBase: string): Set<string> {
+	const origins = new Set([location]);
+	try {
+		const origin = new URL(apiBase).origin;
+		if (origin !== 'null') origins.add(origin);
+	} catch {
+		// Relative API bases use the page origin.
+	}
+	return origins;
+}
+
 export function connectResult(
 	event: Pick<MessageEvent, 'origin' | 'source' | 'data'>,
-	origin: string,
+	trustedOrigins: Set<string>,
 	popup: Window,
 	connectionId?: string
 ): 'pending' | 'error' | 'invalid' | null {
 	if (
 		!connectionId ||
-		event.origin !== origin ||
+		!trustedOrigins.has(event.origin) ||
 		event.source !== popup ||
 		event.data?.type !== 'soev_connect' ||
 		event.data.connection !== connectionId
@@ -59,11 +70,12 @@ export function reconnectConnections(
 		schedules.map((schedule) => [schedule.connection.id, schedule.connection])
 	);
 	if (pending && !connections.has(pending.id)) connections.set(pending.id, pending);
+	// A first-time connect stays `pending` while its popup is open, so only a
+	// suspended connection or a refused consent asks for a reconnect.
 	return [...connections.values()].filter(
 		(connection) =>
 			['onedrive', 'google_drive'].includes(connection.source_kind) &&
-			(['pending', 'suspended:reauth'].includes(connection.lifecycle) ||
-				connection.last_error === 'owner_mismatch')
+			(connection.lifecycle === 'suspended:reauth' || connection.last_error === 'owner_mismatch')
 	);
 }
 
@@ -153,6 +165,23 @@ export function connectionOutcome(
 		return { status: 'failed', reason: connection.last_error ?? connection.lifecycle };
 	if (connection.lifecycle === 'enabled') return { status: 'done' };
 	return { status: elapsedMs >= 120000 ? 'gave_up' : 'waiting' };
+}
+
+// Content schedules whose run was live in `previous` and has an outcome in
+// `current`: the moment to tell the user how the sync went.
+export function finishedRuns(previous: Schedule[], current: Schedule[]): Schedule[] {
+	const live = new Set(
+		previous
+			.filter((schedule) => runIsLive(schedule.last_run))
+			.map((schedule) => `${schedule.id}\n${schedule.last_run!.id}`)
+	);
+	return current.filter(
+		(schedule) =>
+			schedule.kind === 'content' &&
+			!!schedule.last_run &&
+			!runIsLive(schedule.last_run) &&
+			live.has(`${schedule.id}\n${schedule.last_run.id}`)
+	);
 }
 
 export function shouldRefetchSyncItems(previous: Schedule[], current: Schedule[]): boolean {

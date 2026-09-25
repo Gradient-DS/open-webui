@@ -19,16 +19,15 @@
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import DirectoryRow from './DirectoryRow.svelte';
+	import PlaceholderRow from './PlaceholderRow.svelte';
+	import type { DirectoryItem } from './directory';
+	import SourceRow from './SourceRow.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
-	import {
-		directoryItem,
-		fileItem,
-		sourceItem,
-		type KbSelection,
-		type SelectableItem
-	} from './selection';
+	import { directoryItem, fileItem, type KbSelection, type SelectableItem } from './selection';
 	import { breadcrumbSegments, fileBadge } from '../utils/treeStatus';
-	import { sourceByRootDirectoryId } from '../utils/sourceMap';
+	import type { Connection, Schedule, ScheduleAction, SkippedItem } from '$lib/apis/cloudSync';
+	import type { SchedulePair } from '../utils/cloudSync';
+	import { skippedExplainer, skippedReason } from '../utils/sourceState';
 
 	type KnowledgeFile = {
 		id?: string;
@@ -55,14 +54,33 @@
 	export let knowledge = null;
 	export let selectedFileId = null;
 	export let files: KnowledgeFile[] = [];
-	export let directories = [];
+	export let directories: DirectoryItem[] = [];
 
-	// Cloud chrome (Phase 3): the provider's sources — directory rows whose id
-	// matches a source's root_directory_id become source roots (remove
-	// affordance + sync spinner + bulk-selectable as 'source' items).
-	export let sources = [];
-	export let isSyncing = false;
-	export let onRemoveSource: ((itemId: string, name: string) => void) | null = null;
+	// [Gradient] Cloud sources live in the listing: a folder source is the
+	// directory row its schedule writes (keyed by the row's schedule_id), a
+	// single-file source gets its own row above the directories.
+	export let sourcePairs: Map<string, SchedulePair> = new Map();
+	export let looseSources: SchedulePair[] = [];
+	export let syncAccess = false;
+	export let syncBusy = false;
+	export let isAdmin = false;
+	export let onSourceAction: (
+		schedules: Schedule[],
+		action: ScheduleAction | 'delete'
+	) => void = () => {};
+	export let onReconnect: (connection: Connection) => void = () => {};
+	// [Gradient] Inside a synced folder: the files the last sync could not
+	// bring in, listed greyed out under the synced ones with the reason.
+	export let skippedItems: SkippedItem[] = [];
+	export let skippedProvider = '';
+	// [Gradient] Set inside a cloud source whose run is live: files show up
+	// as they land, so the listing says more is coming.
+	export let syncing: { fetched: number; landed: number; total: number } | true | null = null;
+	// [Gradient] Local folder upload in flight, keyed by top-level directory id.
+	export let uploadProgress: Map<
+		string,
+		{ total: number; uploaded: number; processed: number; failed: number }
+	> = new Map();
 
 	// Search mode: flat KB-wide hits — directory rows hidden, each file row
 	// shows its folder path (derived from meta.relative_path) instead.
@@ -71,13 +89,16 @@
 	// and drag-move of files/directories. See utils/structure.ts.
 	export let structureEditable = false;
 
-	export let onClick = (fileId) => {};
-	export let onDelete = (fileId) => {};
-	export let onNavigateDirectory = (directoryId: string) => {};
-	export let onRenameDirectory = (id: string, name: string) => {};
-	export let onDeleteDirectory = (id: string) => {};
-	export let onMoveFilesToDirectory = (fileIds: string[], directoryId: string) => {};
-	export let onMoveDirectoryToDirectory = (dirId: string, targetDirectoryId: string) => {};
+	export let onClick: (fileId: string | null) => void = () => {};
+	export let onDelete: (fileId: string | undefined) => void = () => {};
+	export let onNavigateDirectory: (directoryId: string) => void = () => {};
+	export let onRenameDirectory: (id: string, name: string) => void = () => {};
+	export let onDeleteDirectory: (id: string) => void = () => {};
+	export let onMoveFilesToDirectory: (fileIds: string[], directoryId: string) => void = () => {};
+	export let onMoveDirectoryToDirectory: (
+		dirId: string,
+		targetDirectoryId: string
+	) => void = () => {};
 
 	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
 	export let selection: KbSelection | null = null;
@@ -85,22 +106,15 @@
 	$: selectedStore = selection?.selected;
 	$: selectionModeStore = selection?.selectionMode;
 
-	const isSelectable = (file: any) => !!file?.id && file?.status !== 'uploading';
-	const buildItem = (file: any): SelectableItem =>
-		fileItem(file.id, file?.name ?? file?.meta?.name ?? '');
+	const isSelectable = (file: KnowledgeFile) => !!file?.id && file?.status !== 'uploading';
+	const buildItem = (file: KnowledgeFile): SelectableItem =>
+		fileItem(file.id!, file?.name ?? file?.meta?.name ?? '');
 
-	$: sourceRoots = sourceByRootDirectoryId(sources);
-	// Source roots must bulk-delete via removeSource; plain local directories
-	// via the directory-delete endpoint — hence two selectable kinds.
-	const buildDirItem = (dir: any): SelectableItem => {
-		const src = sourceRoots.get(dir.id);
-		return src
-			? sourceItem(src.item_id, src.name ?? dir.name, dir.child_count ?? 0)
-			: directoryItem(dir.id, dir.name, dir.child_count ?? 0);
-	};
-	// Source roots are selectable whenever selection exists (cloud KBs);
-	// plain local dirs additionally need structure-write access.
-	const isDirSelectable = (dir: any) => sourceRoots.has(dir.id) || structureEditable;
+	const buildDirItem = (dir: DirectoryItem): SelectableItem =>
+		directoryItem(dir.id, dir.name, dir.child_count ?? 0);
+	// Synced folders are removed through their own controls, never in bulk.
+	const isDirSelectable = (dir: DirectoryItem) =>
+		!dir.placeholder && !dir.schedule_id && structureEditable;
 
 	// Selection order mirrors render order (dirs first, then files) so
 	// Shift-range and drag-paint spans behave predictably.
@@ -112,7 +126,7 @@
 	$: if (selection) selection.setAvailable(orderedItems);
 	onDestroy(() => selection?.setAvailable([]));
 
-	const onRowClick = (file: any, e: MouseEvent) => {
+	const onRowClick = (file: KnowledgeFile, e: MouseEvent) => {
 		if (selection && selection.consumeDidDrag()) return; // a drag just ended on this row
 		if (selection && isSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
 			e.preventDefault();
@@ -124,13 +138,13 @@
 			selection.select(buildItem(file), orderedItems, e);
 			return;
 		}
-		onClick(file?.id ?? file?.tempId);
+		onClick(file?.id ?? file?.tempId ?? null);
 	};
 
-	const onRowPointerDown = (file: any) => {
+	const onRowPointerDown = (file: KnowledgeFile) => {
 		if (selection && isSelectable(file)) selection.pointerDown(buildItem(file), orderedItems);
 	};
-	const onRowPointerEnter = (file: any) => {
+	const onRowPointerEnter = (file: KnowledgeFile) => {
 		if (selection && isSelectable(file)) selection.pointerEnter(buildItem(file));
 	};
 
@@ -138,7 +152,7 @@
 	// selection, any row drags itself; once a selection exists, only SELECTED
 	// rows are draggable and carry the whole selection — unselected rows stay
 	// paint-select targets, so drag-paint multi-select keeps working.
-	const dragPayloadIds = (file: any, isSel: boolean): string[] => {
+	const dragPayloadIds = (file: KnowledgeFile, isSel: boolean): string[] => {
 		if (isSel && $selectedStore) {
 			return [...$selectedStore.values()].filter((it) => it.kind === 'file').map((it) => it.fileId);
 		}
@@ -147,30 +161,53 @@
 </script>
 
 <div class=" max-h-full flex flex-col w-full gap-[0.03125rem]" role="list">
-	<!-- Directories first -->
+	<!-- Sources and directories first -->
 	{#if !searchMode}
-		{#each directories as dir (dir.id)}
-			{@const srcEntry = sourceRoots.get(dir.id)}
-			{@const dirSel = (selection && $selectedStore?.has(buildDirItem(dir).key)) ?? false}
-			<DirectoryRow
-				directory={dir}
-				writeAccess={structureEditable}
-				source={srcEntry ? { itemId: srcEntry.item_id, name: srcEntry.name ?? dir.name } : null}
-				{isSyncing}
-				onRemoveSource={srcEntry ? onRemoveSource : null}
-				selectionActive={!!selection}
-				selectable={!!(selection && isDirSelectable(dir))}
-				selected={dirSel}
-				checkboxVisible={!!$selectionModeStore}
-				onToggleSelect={() => {
-					if (selection && isDirSelectable(dir)) selection.toggle(buildDirItem(dir));
-				}}
-				onNavigate={(id) => onNavigateDirectory(id)}
-				onRename={(id, name) => onRenameDirectory(id, name)}
-				onDelete={(id) => onDeleteDirectory(id)}
-				onFileDrop={(fileIds, directoryId) => onMoveFilesToDirectory(fileIds, directoryId)}
-				onDirDrop={(dirId, targetId) => onMoveDirectoryToDirectory(dirId, targetId)}
+		{#each looseSources as pair ((pair.content ?? pair.acl)?.id)}
+			<SourceRow
+				knowledgeId={knowledge?.id ?? ''}
+				{pair}
+				writeAccess={syncAccess}
+				busy={syncBusy}
+				{isAdmin}
+				on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
+				on:reconnect={(event) => onReconnect(event.detail)}
 			/>
+		{/each}
+		{#each directories as dir (dir.id)}
+			{#if dir.placeholder}
+				<PlaceholderRow
+					name={dir.name}
+					uploading={uploadProgress.get(dir.id) ?? null}
+					selectionActive={!!selection}
+				/>
+			{:else}
+				{@const dirSel = (selection && $selectedStore?.has(buildDirItem(dir).key)) ?? false}
+				<DirectoryRow
+					directory={dir}
+					writeAccess={structureEditable}
+					pair={dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null}
+					uploading={uploadProgress.get(dir.id) ?? null}
+					knowledgeId={knowledge?.id ?? ''}
+					{syncAccess}
+					{syncBusy}
+					{isAdmin}
+					on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
+					on:reconnect={(event) => onReconnect(event.detail)}
+					selectionActive={!!selection}
+					selectable={!!(selection && isDirSelectable(dir))}
+					selected={dirSel}
+					checkboxVisible={!!$selectionModeStore}
+					onToggleSelect={() => {
+						if (selection && isDirSelectable(dir)) selection.toggle(buildDirItem(dir));
+					}}
+					onNavigate={(id) => onNavigateDirectory(id)}
+					onRename={(id, name) => onRenameDirectory(id, name)}
+					onDelete={(id) => onDeleteDirectory(id)}
+					onFileDrop={(fileIds, directoryId) => onMoveFilesToDirectory(fileIds, directoryId)}
+					onDirDrop={(dirId, targetId) => onMoveDirectoryToDirectory(dirId, targetId)}
+				/>
+			{/if}
 		{/each}
 	{/if}
 
@@ -301,4 +338,67 @@
 			{/if}
 		</div>
 	{/each}
+
+	{#if !searchMode && syncing}
+		<div
+			class="mx-2 mt-3 mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+			role="status"
+			aria-live="polite"
+		>
+			<Spinner className="size-3.5 shrink-0" />
+			<span
+				>{syncing === true
+					? $i18n.t('Syncing · files show up as they land')
+					: $i18n.t('Syncing · {{done}}/{{total}} processed · files show up as they land', {
+							done: syncing.landed,
+							total: syncing.total
+						})}</span
+			>
+		</div>
+	{/if}
+
+	<!-- Skipped files: in the source, not in the knowledge base -->
+	{#if !searchMode && skippedItems.length > 0}
+		<div
+			class="mx-2 mt-3 mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+			role="status"
+		>
+			<ExclamationTriangle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+			<span
+				>{$i18n.t('{{count}} files in this folder could not be synced', {
+					count: skippedItems.length
+				})}</span
+			>
+			<Tooltip
+				content={$i18n.t(
+					'These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.',
+					{ provider: skippedProvider }
+				)}
+			>
+				<span class="cursor-help underline decoration-dotted">{$i18n.t('Why?')}</span>
+			</Tooltip>
+		</div>
+		{#each skippedItems as item (item.source_id)}
+			<div class="flex w-full items-center rounded-xl px-1.5 py-0.5 opacity-60" role="listitem">
+				{#if selection}<SelectCheckbox selectable={false} />{/if}
+				<div class="flex items-center p-1">
+					<DocumentPage className="size-3.5 text-gray-400" />
+				</div>
+				<div class="flex min-w-0 flex-1 items-center gap-2 p-2 text-left">
+					<div class="line-clamp-1 text-sm text-gray-500 dark:text-gray-400">
+						{item.name || item.source_id}
+					</div>
+					<Tooltip
+						content={$i18n.t(skippedExplainer(item.code), { provider: skippedProvider })}
+						className="shrink-0"
+					>
+						<span
+							class="cursor-help rounded-lg bg-amber-500/15 px-1.5 text-xs text-amber-700 dark:text-amber-300"
+							>{$i18n.t(skippedReason(item.code))}</span
+						>
+					</Tooltip>
+				</div>
+			</div>
+		{/each}
+	{/if}
 </div>

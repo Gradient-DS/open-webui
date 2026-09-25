@@ -319,7 +319,6 @@ async def search_knowledge_bases(
 @router.get('/search/files', response_model=KnowledgeFileListResponse)
 async def search_knowledge_files(
     query: str | None = None,
-    include_content: bool = Query(False, description='Include file content in search (expensive).'),
     page: int | None = 1,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
@@ -331,8 +330,6 @@ async def search_knowledge_files(
     filter = {}
     if query:
         filter['query'] = query
-    if include_content:
-        filter['include_content'] = True
 
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     if groups:
@@ -1440,7 +1437,6 @@ async def get_knowledge_files_by_id(
     page: Optional[int] = 1,
     limit: Optional[int] = 30,
     metadata_only: Optional[bool] = False,
-    include_content: bool = Query(False, description='Include file content in search (expensive).'),
     directory_id: str | None = Query(None, description='Filter by directory ID. Pass empty string for root.'),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
@@ -1477,8 +1473,6 @@ async def get_knowledge_files_by_id(
     filter = {}
     if query:
         filter['query'] = query
-    if include_content:
-        filter['include_content'] = True
     if view_option:
         filter['view_option'] = view_option
     if order_by:
@@ -2301,6 +2295,40 @@ async def _verify_knowledge_write_access(id: str, user, db: AsyncSession):
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
     return knowledge
+
+
+@router.post('/{id}/dirs/create', response_model=KnowledgeDirectoryModel)
+async def create_knowledge_directory(
+    request: Request,
+    id: str,
+    form_data: KnowledgeDirectoryCreateForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    # [Gradient] "New directory" and the folder upload create their folders
+    # here; the sync daemon that once shared this route is gone (11038e9e4).
+    await _verify_knowledge_write_access(id, user, db)
+
+    directory = await Knowledges.create_directory(
+        knowledge_id=id,
+        name=form_data.name,
+        user_id=user.id,
+        parent_id=form_data.parent_id,
+        db=db,
+    )
+    if not directory:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Failed to create directory. A directory with this name may already exist at this level.',
+        )
+    await publish_event(
+        request,
+        EVENTS.KNOWLEDGE_DIRECTORY_CREATED,
+        actor=user,
+        subject_id=directory.id,
+        data={'knowledge_id': id, 'name': directory.name, 'parent_id': directory.parent_id},
+    )
+    return directory
 
 
 @router.post('/{id}/dirs/{dir_id}/update', response_model=KnowledgeDirectoryModel)

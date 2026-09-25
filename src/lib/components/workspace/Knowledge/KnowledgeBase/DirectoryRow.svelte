@@ -12,27 +12,34 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
+	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
-	import { folderBadge, type TreeStatusCounts } from '../utils/treeStatus';
+	import SourceControls from './SourceControls.svelte';
+	import { folderBadge } from '../utils/treeStatus';
+	import type { DirectoryItem } from './directory';
+	import type { SchedulePair } from '../utils/cloudSync';
+	import { runProgress, sourceState } from '../utils/sourceState';
 
-	export let directory: {
-		id: string;
-		name: string;
-		created_at: number;
-		updated_at: number;
-		child_count?: number;
-		status_counts?: TreeStatusCounts;
-	};
+	export let directory: DirectoryItem;
 	export let writeAccess = false;
 
-	// Cloud chrome (Phase 3): set when this directory is a provider source's
-	// materialized root (sources[].root_directory_id) — adds the sync spinner
-	// and the remove-source affordance.
-	export let source: { itemId: string; name: string } | null = null;
-	export let isSyncing = false;
-	export let onRemoveSource: ((itemId: string, name: string) => void) | null = null;
+	// [Gradient] Set when this directory is the root a cloud source writes: the
+	// row shows the provider's logo and carries the source's sync controls.
+	export let pair: SchedulePair | null = null;
+	export let knowledgeId = '';
+	export let syncAccess = false;
+	export let syncBusy = false;
+	export let isAdmin = false;
+	// [Gradient] Set while a local folder upload is filling this directory.
+	export let uploading: {
+		total: number;
+		uploaded: number;
+		processed: number;
+		failed: number;
+	} | null = null;
 
 	// Optional multiselect checkbox (dirs and source roots participate in bulk
 	// delete). selectionActive renders the checkbox column (spacer when the row
@@ -50,6 +57,17 @@
 	export let onDirDrop: (dirId: string, targetDirectoryId: string) => void = () => {};
 
 	$: badge = folderBadge(directory.status_counts);
+	// When the row was last updated: the last finished sync for a source root,
+	// the directory's own timestamp otherwise. Shown next to the file count.
+	$: source = pair ? sourceState(pair, (pair.content ?? pair.acl)!.connection) : null;
+	// A live cloud run reports the same shape as a local upload, so the row
+	// reads the same: fetched of planned, then processed of planned.
+	$: syncProgress = pair?.content ? runProgress(pair.content) : null;
+	$: updatedAt = source
+		? source.lastSyncedAt
+		: directory.updated_at
+			? new Date(directory.updated_at * 1000).toISOString()
+			: null;
 	let editing = false;
 	let editName = '';
 	let editInput: HTMLInputElement;
@@ -135,7 +153,15 @@
 			type="button"
 			on:click={() => onNavigate(directory.id)}
 		>
-			<Folder className="size-3.5" />
+			<svelte:component
+				this={pair?.content?.source_kind === 'onedrive' || pair?.acl?.source_kind === 'onedrive'
+					? OneDrive
+					: pair?.content?.source_kind === 'google_drive' ||
+						  pair?.acl?.source_kind === 'google_drive'
+						? GoogleDrive
+						: Folder}
+				className="size-3.5"
+			/>
 		</button>
 	</div>
 
@@ -154,7 +180,8 @@
 					<input
 						bind:this={editInput}
 						bind:value={editName}
-						class="text-xs w-full bg-transparent border-none outline-hidden"
+						class="text-xs bg-transparent border-none outline-hidden"
+						style:width={`${Math.max(editName.length, 4) + 1}ch`}
 						on:keydown={(e) => {
 							if (e.key === 'Enter') submitRename();
 							if (e.key === 'Escape') cancelRename();
@@ -173,18 +200,49 @@
 					</div>
 				{/if}
 
-				{#if source && isSyncing}
-					<span class="text-xs text-gray-400 shrink-0">&middot;</span>
-					<Spinner className="size-3" />
-				{/if}
-
-				{#if (directory.child_count ?? null) !== null}
+				{#if uploading}
+					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
+						&middot; {$i18n.t('Uploaded {{done}}/{{total}}', {
+							done: uploading.uploaded,
+							total: uploading.total
+						})}
+						&middot; {$i18n.t('Processed {{done}}/{{total}}', {
+							done: uploading.processed,
+							total: uploading.total
+						})}
+						<Spinner className="size-3" />
+					</span>
+				{:else if syncProgress}
+					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
+						&middot; {$i18n.t('Fetched {{done}}/{{total}}', {
+							done: syncProgress.fetched,
+							total: syncProgress.total
+						})}
+						&middot; {$i18n.t('Processed {{done}}/{{total}}', {
+							done: syncProgress.landed,
+							total: syncProgress.total
+						})}
+					</span>
+				{:else if (directory.child_count ?? null) !== null}
 					<span class="text-xs text-gray-400 shrink-0">
 						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
 					</span>
 				{/if}
+				{#if uploading || syncProgress}
+					<!-- counters above carry the state -->
+				{:else if updatedAt}
+					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="shrink-0">
+						<span class="text-xs text-gray-400">
+							&middot; {$i18n.t('Updated {{time}}', { time: dayjs(updatedAt).fromNow() })}
+						</span>
+					</Tooltip>
+				{:else if source && source.state !== 'syncing'}
+					<span class="text-xs text-gray-400 shrink-0">&middot; {$i18n.t('Not synced yet')}</span>
+				{/if}
 
-				{#if badge === 'failed'}
+				{#if uploading}
+					<!-- the upload spinner above stands in for the processing one -->
+				{:else if badge === 'failed'}
 					<Tooltip
 						content={$i18n.t('{{count}} failed', { count: directory.status_counts?.failed ?? 0 })}
 					>
@@ -195,30 +253,18 @@
 				{/if}
 			</div>
 		</div>
-
-		<div class="flex items-center gap-2 shrink-0">
-			{#if directory.updated_at}
-				<Tooltip content={dayjs(directory.updated_at * 1000).format('LLLL')}>
-					<div class="text-xs text-gray-400">
-						{dayjs(directory.updated_at * 1000).fromNow()}
-					</div>
-				</Tooltip>
-			{/if}
-		</div>
 	</button>
 
-	{#if source && onRemoveSource}
-		<div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-			<Tooltip content={$i18n.t('Remove Source')}>
-				<button
-					class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
-					type="button"
-					on:click={() => onRemoveSource(source.itemId, source.name)}
-				>
-					<GarbageBin className="size-3.5" />
-				</button>
-			</Tooltip>
-		</div>
+	{#if pair}
+		<SourceControls
+			{knowledgeId}
+			{pair}
+			writeAccess={syncAccess}
+			busy={syncBusy}
+			{isAdmin}
+			on:action
+			on:reconnect
+		/>
 	{/if}
 
 	{#if writeAccess}

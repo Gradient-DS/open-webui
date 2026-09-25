@@ -27,14 +27,18 @@
 		updateKnowledgeDirectory,
 		deleteKnowledgeDirectory,
 		moveFileInKnowledge,
-		syncKnowledgeDiff,
-		syncKnowledgeCleanup,
 		testExternalKnowledgeRetrieval
 	} from '$lib/apis/knowledge';
 	import { processUrl } from '$lib/apis/retrieval';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import * as cloudSync from '$lib/apis/cloudSync';
-	import type { Connection, Schedule, ScheduleAction, ScheduleForm } from '$lib/apis/cloudSync';
+	import type {
+		Connection,
+		Schedule,
+		ScheduleAction,
+		ScheduleForm,
+		SkippedItem
+	} from '$lib/apis/cloudSync';
 	import { openOneDriveItemPicker } from '$lib/utils/onedrive-file-picker';
 	import {
 		createKnowledgePicker,
@@ -46,22 +50,32 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Files from './KnowledgeBase/Files.svelte';
+	import type { DirectoryItem } from './KnowledgeBase/directory';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
-	import CloudSyncPanel from './KnowledgeBase/CloudSyncPanel.svelte';
-	import type { CloudSyncProvider } from './utils/cloudSync';
+	import type { CloudSyncProvider, SchedulePair } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
+	import {
+		ancestorPaths,
+		FolderUploadSession,
+		mergeUploadRows,
+		routeFileStatus
+	} from './utils/folderUpload';
 	import {
 		CLOUD_PROVIDERS,
 		oneDriveScope,
 		googleDriveScope,
 		connectResult,
+		trustedConnectOrigins,
 		connectionOutcome,
 		reconnectConnections,
+		pairSchedules,
 		shouldRefetchSyncItems,
+		finishedRuns,
 		runIsLive
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
+	import { runProgress, skippedRunKey } from './utils/sourceState';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
 	import AddTextContentModal from './KnowledgeBase/AddTextContentModal.svelte';
@@ -70,7 +84,6 @@
 	import EmptyStateCards from './KnowledgeBase/EmptyStateCards.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 
-	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import ConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
@@ -81,10 +94,6 @@
 	import Search from '$lib/components/icons/Search.svelte';
 	import FilesOverlay from '$lib/components/chat/MessageInput/FilesOverlay.svelte';
 	import DropdownOptions from '$lib/components/common/DropdownOptions.svelte';
-	import Dropdown from '$lib/components/common/Dropdown.svelte';
-	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
-	import Checkbox from '$lib/components/common/Checkbox.svelte';
-	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
 
@@ -101,6 +110,54 @@
 		requestedProvider ?? (knowledge?.type ? CLOUD_PROVIDERS[knowledge.type] : null);
 	$: isSyncBusy = cloudActionBusy || schedules.some((schedule) => runIsLive(schedule.last_run));
 	$: reconnectNeeded = reconnectConnections(schedules, connecting);
+	// [Gradient] Sources render inside the listing: folder sources on the
+	// directory row their schedule writes, single-file sources as loose rows.
+	$: sourcePairs = new Map(
+		pairSchedules(schedules).flatMap((pair) =>
+			[pair.content, pair.acl].flatMap((schedule) =>
+				schedule ? [[schedule.id, pair] as [string, SchedulePair]] : []
+			)
+		)
+	);
+	$: looseSources = pairSchedules(schedules).filter(
+		(pair) =>
+			!pair.content ||
+			pair.content.scope.single_file === true ||
+			pair.content.scope.include_descendants === false
+	);
+	// [Gradient] Inside a synced folder's root the listing also shows what the
+	// last sync could not bring in, fetched once per finished run.
+	$: currentSourcePair =
+		(breadcrumbs.at(-1)?.schedule_id && sourcePairs.get(breadcrumbs.at(-1)!.schedule_id!)) || null;
+	// Any level inside a cloud source: the breadcrumb root names its schedule.
+	$: enclosingSourcePair =
+		(breadcrumbs[0]?.schedule_id && sourcePairs.get(breadcrumbs[0].schedule_id!)) || null;
+	$: enclosingSyncing =
+		enclosingSourcePair?.content && runIsLive(enclosingSourcePair.content.last_run)
+			? (runProgress(enclosingSourcePair.content) ?? true)
+			: null;
+	$: currentSourceProvider = currentSourcePair
+		? $i18n.t(
+				CLOUD_PROVIDERS[(currentSourcePair.content ?? currentSourcePair.acl)!.source_kind]?.label ??
+					''
+			)
+		: '';
+	let skippedItems: SkippedItem[] = [];
+	let loadedSkippedRunKey = '';
+	$: skippedKey = skippedRunKey(currentSourcePair?.content);
+	$: if (skippedKey !== loadedSkippedRunKey)
+		void loadSkippedItems(skippedKey, currentSourcePair?.content);
+	const loadSkippedItems = async (key: string, content: Schedule | undefined) => {
+		loadedSkippedRunKey = key;
+		skippedItems = [];
+		if (!key || !content) return;
+		try {
+			const items = await cloudSync.getSkippedItems(localStorage.token, knowledgeId, content.id);
+			if (key === loadedSkippedRunKey) skippedItems = items;
+		} catch {
+			if (key === loadedSkippedRunKey) skippedItems = [];
+		}
+	};
 	// Single derived guard for all structure-write affordances (decision 5) —
 	// local/untyped KBs with write access only. Cloud KBs browse the
 	// sync-written directory structure read-only; push KBs are browse-only.
@@ -110,11 +167,10 @@
 	let showAddTextContentModal = false;
 	let showNewDirectoryModal = false;
 
-	let showSyncConfirmModal = false;
 	let showAccessControlModal = false;
 	let showResetConfirm = false;
 
-	// Local-directory upload/sync pipeline (upstream v0.10.2)
+	// Local-directory upload pipeline (upstream v0.10.2)
 	type DirectoryHandle = {
 		kind: 'directory';
 		name: string;
@@ -123,9 +179,6 @@
 		>;
 	};
 	type DirectoryFileEntry = { path: string; filename: string; file: File };
-	type DirectoryManifestEntry = DirectoryFileEntry & { checksum: string; size: number };
-	let pendingSyncFiles: DirectoryFileEntry[] | null = null;
-	let syncing: string | null = null;
 
 	type Knowledge = {
 		id: string;
@@ -166,7 +219,6 @@
 	let inputFiles = null;
 
 	let query = '';
-	let includeContent = false;
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 
 	let viewOption = null;
@@ -179,8 +231,8 @@
 
 	// Directory state (upstream per-level browsing)
 	let currentDirectoryId: string | null = null;
-	let directoryItems: { id: string; name: string }[] = [];
-	let breadcrumbs: { id: string; name: string }[] = [];
+	let directoryItems: DirectoryItem[] = [];
+	let breadcrumbs: { id: string; name: string; schedule_id?: string | null }[] = [];
 	// KB-wide file total for the cloud quota header (fileItemsTotal is
 	// level/search-scoped in per-level browsing).
 	let kbFileTotal: number | null = null;
@@ -246,7 +298,7 @@
 	// Consolidated reactive block — mirrors Knowledge.svelte list view pattern
 	$: if (loaded && knowledgeId !== null) {
 		// Track all dependencies explicitly
-		void [query, viewOption, sortKey, direction, currentPage, includeContent];
+		void [query, viewOption, sortKey, direction, currentPage];
 
 		if (!itemsInitialized) {
 			itemsInitialized = true;
@@ -289,8 +341,7 @@
 			currentPage,
 			null,
 			true,
-			isSearching ? undefined : (currentDirectoryId ?? null),
-			isSearching ? includeContent : false
+			isSearching ? undefined : (currentDirectoryId ?? null)
 		).catch(() => null);
 
 		if (currentFetchId !== fetchId) return; // Stale response, discard
@@ -299,7 +350,16 @@
 			fileItems = res.items;
 			fileItemsTotal = res.total;
 			if (!isSearching) {
-				directoryItems = res.directories ?? [];
+				const directories: DirectoryItem[] = res.directories ?? [];
+				directoryItems = [
+					...directoryItems.filter(
+						(dir) =>
+							dir.placeholder &&
+							dir.parent_id === currentDirectoryId &&
+							!directories.some((item) => item.name === dir.name)
+					),
+					...directories
+				];
 				breadcrumbs = res.breadcrumbs ?? [];
 			}
 		}
@@ -519,6 +579,7 @@
 					// Don't call addFileHandler here — Socket.IO 'file:status' event
 					// will trigger it when background processing completes. Arm a
 					// 30s polling fallback in case that emit drops (see pollers).
+					singleUploads.add(uploadedFile.id);
 					armUploadStatusFallback(uploadedFile.id);
 				}
 			} else {
@@ -590,10 +651,10 @@
 		}
 	};
 
-	// ===== Structure-preserving directory upload + incremental sync (upstream v0.10.2) =====
+	// ===== Structure-preserving directory upload (upstream v0.10.2) =====
 
 	// Collect files (with their relative paths) from a picked directory
-	// without uploading. Feeds the structure-preserving upload + sync flows.
+	// without uploading. Feeds the structure-preserving upload flow.
 	const collectDirectoryEntries = async (): Promise<DirectoryFileEntry[] | null> => {
 		const isFileSystemAccessSupported = 'showDirectoryPicker' in window;
 
@@ -667,8 +728,7 @@
 
 	// Client-side extension allow-list for directory entries — mirrors
 	// uploadFileHandler's gate, so a disallowed file never uploads in full
-	// before the server rejects it. Disallowed files can't be in the KB, so
-	// dropping them from a sync manifest is consistent with server state.
+	// before the server rejects it.
 	const filterAllowedEntries = (
 		entries: DirectoryFileEntry[] | null
 	): DirectoryFileEntry[] | null => {
@@ -691,82 +751,48 @@
 		return kept;
 	};
 
-	const buildDirectoryManifest = async (
-		entries: DirectoryFileEntry[]
-	): Promise<DirectoryManifestEntry[]> => {
-		return Promise.all(
-			entries.map(async (entry) => ({
-				...entry,
-				checksum: await computeFileHash(entry.file),
-				size: entry.file.size
-			}))
-		);
+	let uploads: FolderUploadSession[] = [];
+	$: uploadProgress = mergeUploadRows(uploads);
+
+	const removeUploadSession = (session: FolderUploadSession) => {
+		session.dispose();
+		uploads = uploads.filter((upload) => upload !== session);
+		const placeholders = new Set(session.topNames.map((name) => session.placeholderId(name)));
+		directoryItems = directoryItems.filter((dir) => !placeholders.has(dir.id));
 	};
 
-	const createMissingDirectories = async (diff: {
-		directory_map?: Record<string, string>;
-		mkdir: string[];
-	}) => {
-		if (!knowledge) return {};
-
-		const directoryIdByPath: Record<string, string> = { ...(diff.directory_map || {}) };
-
-		for (const dirPath of diff.mkdir) {
-			const segments = dirPath.split('/');
-			const name = segments.at(-1)!;
-			const parentPath = segments.slice(0, -1).join('/');
-			const parentId = parentPath ? directoryIdByPath[parentPath] : null;
-
-			const directory = await createKnowledgeDirectory(
-				localStorage.token,
-				knowledge.id,
-				name,
-				parentId
-			);
-			if (directory) {
-				directoryIdByPath[dirPath] = directory.id;
-			}
-		}
-
-		return directoryIdByPath;
-	};
-
-	const getDirectoryUploadPath = (path: string) => {
-		const currentPath = breadcrumbs.map((crumb) => crumb.name).join('/');
-		return currentPath && path ? `${currentPath}/${path}` : currentPath || path;
-	};
-
-	// [Gradient] Upload a set of manifest entries with bounded concurrency (the fork's
-	// upload hardening), updating the `syncing` progress line as each lands.
+	// [Gradient] Upload a set of entries with bounded concurrency (the fork's
+	// upload hardening), hashing each file right before it goes up and
+	// reporting each landing to `onLanded`.
 	const uploadManifestEntries = async (
-		entries: DirectoryManifestEntry[],
-		resolveDirectoryId: (entry: DirectoryManifestEntry) => string | null
+		entries: DirectoryFileEntry[],
+		resolveDirectoryId: (entry: DirectoryFileEntry) => string | null,
+		onLanded: (
+			entry: DirectoryFileEntry,
+			uploadedFile: { id?: string; error?: string } | null
+		) => void = () => {}
 	) => {
 		const total = entries.length;
-		let done = 0;
 		let failedCount = 0;
 		const executing: Set<Promise<void>> = new Set();
 
 		for (const entry of entries) {
 			const fileObject = new File([entry.file], entry.filename, { type: entry.file.type });
-			const task = uploadFile(localStorage.token, fileObject, {
-				knowledge_id: knowledge.id,
-				file_hash: entry.checksum,
-				directory_id: resolveDirectoryId(entry)
-			})
+			const task = computeFileHash(entry.file)
+				.then((checksum) =>
+					uploadFile(localStorage.token, fileObject, {
+						knowledge_id: knowledge.id,
+						file_hash: checksum,
+						directory_id: resolveDirectoryId(entry)
+					})
+				)
 				.catch((e) => {
 					toast.error(`${e}`);
 					return null;
 				})
 				.then((uploadedFile) => {
 					if (!uploadedFile || uploadedFile.error) failedCount++;
-					done++;
-					const displayPath = entry.path ? `${entry.path}/${entry.filename}` : entry.filename;
-					syncing = $i18n.t('Uploading {{current}}/{{total}}: {{file}}', {
-						current: done,
-						total,
-						file: displayPath
-					});
+					onLanded(entry, uploadedFile);
 					executing.delete(task);
 				});
 			executing.add(task);
@@ -786,136 +812,118 @@
 		return failedCount;
 	};
 
+	// [Gradient] Mirror the picked folder under the current directory: the
+	// folders are created level by level, siblings in parallel; an existing
+	// one is returned as is.
+	const createDirectoriesForPaths = async (paths: string[]) => {
+		const directoryIdByPath: Record<string, string> = {};
+		const levels = new Map<number, Set<string>>();
+		for (const path of paths) {
+			for (const prefix of ancestorPaths(path)) {
+				const depth = prefix.split('/').length;
+				levels.set(depth, (levels.get(depth) ?? new Set()).add(prefix));
+			}
+		}
+		for (const depth of [...levels.keys()].sort((a, b) => a - b)) {
+			await Promise.all(
+				[...levels.get(depth)!].map(async (dirPath) => {
+					const segments = dirPath.split('/');
+					const parentPath = segments.slice(0, -1).join('/');
+					const parentId = parentPath ? directoryIdByPath[parentPath] : currentDirectoryId;
+					if (parentPath && !parentId) return;
+					const directory = await createKnowledgeDirectory(
+						localStorage.token,
+						knowledge.id,
+						segments.at(-1)!,
+						parentId ?? null
+					);
+					if (directory) directoryIdByPath[dirPath] = directory.id;
+				})
+			);
+		}
+		return directoryIdByPath;
+	};
+
+	// The picked folder shows at once as a placeholder row, its real rows
+	// replace it as soon as the folders exist, and the files then go up
+	// behind them with the counters on every row they belong to.
 	const uploadDirectoryEntries = async (entries: DirectoryFileEntry[]) => {
 		if (!knowledge) return;
 
+		const session = new FolderUploadSession(
+			uuidv4(),
+			entries.map((entry) => entry.path),
+			{
+				onChange: () => {
+					uploads = [...uploads];
+				},
+				onRefresh: () => {
+					void getItemsPage();
+				},
+				onFinish: (summary, timedOut) => {
+					removeUploadSession(session);
+					const { variant, message } = buildSyncToast($i18n, summary.label, summary);
+					toast[variant](message);
+					if (!timedOut) void init();
+				}
+			}
+		);
+		uploads = [...uploads, session];
 		try {
-			syncing = $i18n.t('Computing checksums ({{count}} files)', { count: entries.length });
-			const manifest = await buildDirectoryManifest(entries);
-
-			syncing = $i18n.t('Comparing with knowledge base...');
-			const diff = await syncKnowledgeDiff(
-				localStorage.token,
-				id,
-				manifest.map(({ filename, path, checksum, size }) => ({
-					filename,
-					path: getDirectoryUploadPath(path),
-					checksum,
-					size
-				}))
-			);
-
-			if (!diff) {
-				toast.error($i18n.t('Failed to compare files.'));
-				return;
-			}
-
-			const directoryIdByPath = await createMissingDirectories(diff);
-
-			const failedCount = await uploadManifestEntries(manifest, (entry) =>
-				entry.path ? directoryIdByPath[getDirectoryUploadPath(entry.path)] : currentDirectoryId
-			);
-
-			if (failedCount === 0) {
-				toast.success($i18n.t('File uploaded successfully'));
-			}
-
-			// Awaited: `finally` clears `syncing` on return, and that state change
-			// re-triggers the reactive getItemsPage() above. Racing it against this
-			// refresh let the fetchId guard discard the post-upload response, so a
-			// freshly uploaded folder rendered with child_count 0 until you
-			// navigated into it and back.
-			await init();
-		} catch (e) {
-			toast.error(`${e}`);
-		} finally {
-			syncing = null;
-		}
-	};
-
-	// Incremental sync: hash locally → diff on server → upload only what
-	// changed, remove what disappeared, mirror the folder structure.
-	const syncDirectoryHandler = async () => {
-		if (!structureEditable || !pendingSyncFiles?.length) return;
-
-		try {
-			syncing = $i18n.t('Computing checksums ({{count}} files)', {
-				count: pendingSyncFiles.length
-			});
-			const manifest = await buildDirectoryManifest(pendingSyncFiles);
-			pendingSyncFiles = null;
-
-			syncing = $i18n.t('Comparing with knowledge base...');
-			const diff = await syncKnowledgeDiff(
-				localStorage.token,
-				id,
-				manifest.map(({ filename, path, checksum, size }) => ({ filename, path, checksum, size }))
-			);
-
-			if (!diff) {
-				toast.error($i18n.t('Failed to compare files.'));
-				return;
-			}
-
-			// Cleanup — remove deleted + stale modified files first (routes
-			// through the fork's full deletion cascade server-side).
-			const staleFileIds = [
-				...diff.deleted.map((d: { file_id: string }) => d.file_id),
-				...diff.modified.map((m: { stale_file_id: string }) => m.stale_file_id)
+			const paths = [...new Set(entries.map((entry) => entry.path).filter(Boolean))];
+			const now = Math.floor(Date.now() / 1000);
+			directoryItems = [
+				...session.topNames
+					.filter((name) => !directoryItems.some((dir) => !dir.placeholder && dir.name === name))
+					.map((name) => ({
+						id: session.placeholderId(name),
+						placeholder: true as const,
+						parent_id: currentDirectoryId,
+						name,
+						created_at: now,
+						updated_at: now
+					})),
+				...directoryItems
 			];
 
-			if (staleFileIds.length > 0 || diff.rmdir.length > 0) {
-				syncing = $i18n.t('Removing {{count}} stale files...', { count: staleFileIds.length });
-				await syncKnowledgeCleanup(localStorage.token, id, staleFileIds, diff.rmdir);
+			const directoryIdByPath = await createDirectoriesForPaths(paths);
+			if (session.disposed) return;
+			const missing = paths.filter((path) => !directoryIdByPath[path]);
+			if (missing.length) {
+				toast.error($i18n.t('Could not create {{count}} folders.', { count: missing.length }));
+				removeUploadSession(session);
+				await getItemsPage();
+				return;
 			}
 
-			// Create missing directories (parents first)
-			const directoryIdByPath = await createMissingDirectories(diff);
-
-			// Upload added + modified files only
-			const filesToUpload = manifest.filter(
-				(entry) =>
-					diff.added.some(
-						(a: { filename: string; path: string }) =>
-							a.filename === entry.filename && a.path === entry.path
-					) ||
-					diff.modified.some(
-						(m: { filename: string; path: string }) =>
-							m.filename === entry.filename && m.path === entry.path
+			session.setDirectories(directoryIdByPath);
+			await getItemsPage();
+			if (session.disposed) return;
+			await uploadManifestEntries(
+				entries,
+				(entry) => (entry.path ? (directoryIdByPath[entry.path] ?? null) : currentDirectoryId),
+				(entry, uploadedFile) =>
+					session.onUploaded(
+						ancestorPaths(entry.path)
+							.map((prefix) => directoryIdByPath[prefix])
+							.filter(Boolean),
+						uploadedFile
 					)
 			);
-
-			const failedCount = await uploadManifestEntries(filesToUpload, (entry) =>
-				entry.path ? directoryIdByPath[entry.path] : null
-			);
-
-			// ── 7. Report ──
-			if (failedCount === 0) {
-				toast.success(
-					$i18n.t(
-						'Sync complete: {{added}} added, {{modified}} modified, {{deleted}} deleted, {{unmodified}} unmodified',
-						{
-							added: diff.added.length,
-							modified: diff.modified.length,
-							deleted: diff.deleted.length,
-							unmodified: diff.unmodified_count
-						}
-					)
-				);
-			}
-			// Awaited for the same reason as uploadDirectoryEntries above --
-			// same try/finally shape, same refresh race.
-			await init();
 		} catch (e) {
-			toast.error(`${e}`);
+			if (!session.disposed) {
+				removeUploadSession(session);
+				toast.error(`${e}`);
+				await getItemsPage();
+			}
 		} finally {
-			syncing = null;
+			session.completeUploads();
 		}
 	};
 
 	const reportCloudError = (error: unknown) => {
 		toast.error(
-			error instanceof cloudSync.CloudSyncError
+			error instanceof Error && error.message
 				? error.message
 				: $i18n.t('Cloud sync request failed.')
 		);
@@ -939,9 +947,41 @@
 		const previous = schedules;
 		schedules = status.schedules;
 		syncStatusError = false;
+		for (const schedule of finishedRuns(previous, schedules)) announceFinishedRun(schedule);
 		const isLive = schedules.some((schedule) => runIsLive(schedule.last_run));
 		if (refreshItems && shouldRefetchSyncItems(previous, schedules)) await getItemsPage();
 		return isLive;
+	};
+
+	// A run the user watched finish gets one toast with what it did; skipped
+	// files point at the folder, where each one is listed with its reason.
+	const announceFinishedRun = (schedule: Schedule) => {
+		const run = schedule.last_run;
+		if (!run) return;
+		const label =
+			schedule.label || CLOUD_PROVIDERS[schedule.source_kind]?.label || schedule.source_kind;
+		if (run.outcome === 'cancelled') {
+			toast.info($i18n.t('{{label}}: sync cancelled', { label }));
+			return;
+		}
+		if (run.outcome === 'failed' && run.error_code && !(run.counts?.failed ?? 0)) {
+			toast.error(
+				$i18n.t('{{label}}: sync failed ({{reason}})', { label, reason: run.error_code })
+			);
+			return;
+		}
+		const counts = run.counts ?? {};
+		const { variant, message } = buildSyncToast($i18n, label, {
+			added: counts.landed,
+			failed: counts.failed,
+			removed: counts.deleted,
+			unchanged: counts.unchanged
+		});
+		toast[variant](
+			(counts.failed ?? 0) > 0
+				? `${message}. ${$i18n.t('Open the folder to see which files were skipped.')}`
+				: message
+		);
 	};
 
 	/** Re-arm the poll now rather than waiting out an idle tick. */
@@ -1035,8 +1075,9 @@
 					checking = false;
 				}
 			};
+			const trustedOrigins = trustedConnectOrigins(window.location.origin, WEBUI_API_BASE_URL);
 			const handleMessage = (event: MessageEvent) => {
-				const result = connectResult(event, window.location.origin, popup, expectedId);
+				const result = connectResult(event, trustedOrigins, popup, expectedId);
 				if (result === 'pending') {
 					beginExchangeWait();
 					void checkConnection();
@@ -1210,6 +1251,13 @@
 		}
 	};
 
+	const singleUploads = new Set<string>();
+	$: {
+		const listedIds = new Set((fileItems ?? []).map((file: { id?: string }) => file.id));
+		for (const fileId of singleUploads) {
+			if (!listedIds.has(fileId)) singleUploads.delete(fileId);
+		}
+	}
 	let uploadBatch = { added: 0, failed: 0 };
 	let fileStatusQueue: Promise<void> = Promise.resolve();
 	// Polling fallback: when a 'file:status' Socket.IO emit drops on the
@@ -1219,6 +1267,18 @@
 	// up, polls /files/{id}/process/status until it terminates or the
 	// 5-minute hard cap kicks in.
 	const pollers = new Map<string, ReturnType<typeof setInterval>>();
+
+	// Processing results arrive one socket event per file; a folder upload
+	// would otherwise toast "1 added" once per file. Wait for the burst to
+	// settle and report the total once.
+	let uploadToastTimer: ReturnType<typeof setTimeout> | null = null;
+	const showBatchedUploadToastSoon = () => {
+		if (uploadToastTimer) clearTimeout(uploadToastTimer);
+		uploadToastTimer = setTimeout(() => {
+			uploadToastTimer = null;
+			showBatchedUploadToast();
+		}, 2000);
+	};
 
 	const showBatchedUploadToast = () => {
 		if (uploadBatch.added === 0 && uploadBatch.failed === 0) return;
@@ -1290,6 +1350,14 @@
 		// mode) — nudge the tree so a direct upload's spinner resolves.
 		scheduleTreeRefresh();
 
+		// Offer terminal events to every session before the batch toast, including
+		// events for files already visible in the listing.
+		if (data.status === 'completed' || data.status === 'failed') {
+			const route = routeFileStatus(uploads, singleUploads, data.file_id, data.status);
+			singleUploads.delete(data.file_id);
+			if (route !== 'batch') return;
+		}
+
 		if (!fileItems) return;
 
 		const idx = fileItems.findIndex((f) => f.id === data.file_id);
@@ -1328,7 +1396,7 @@
 
 		const stillUploading = fileItems.some((f) => f.status === 'uploading');
 		if (!stillUploading) {
-			showBatchedUploadToast();
+			showBatchedUploadToastSoon();
 		}
 	};
 
@@ -1755,6 +1823,8 @@
 		dropZone?.removeEventListener('dragleave', onDragLeave);
 
 		destroyed = true;
+		for (const session of uploads) session.dispose();
+		uploads = [];
 		clearTimeout(syncPoll);
 		closeAuthorization?.();
 		// Clean up file status listener
@@ -1765,6 +1835,7 @@
 			clearInterval(interval);
 		}
 		pollers.clear();
+		singleUploads.clear();
 	});
 </script>
 
@@ -1778,21 +1849,7 @@
 />
 
 <FilesOverlay show={dragged} />
-<SyncConfirmDialog
-	bind:show={showSyncConfirmModal}
-	message={$i18n.t(
-		'{{count}} files selected. Only new and modified files will be uploaded. Deleted files will be removed. The folder structure will be mirrored. Continue?',
-		{ count: pendingSyncFiles?.length ?? 0 }
-	)}
-	on:confirm={() => {
-		syncDirectoryHandler();
-	}}
-	on:cancel={() => {
-		pendingSyncFiles = null;
-	}}
-/>
-
-<SyncConfirmDialog
+<ConfirmDialog
 	bind:show={showBulkRemoveConfirm}
 	title={$bulkBreakdown.sources > 0
 		? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
@@ -2020,19 +2077,41 @@
 		<div
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
-			{#if activeProvider || schedules.length || finishingConnectionId}
-				<CloudSyncPanel
-					knowledgeId={knowledge.id}
-					{schedules}
-					{reconnectNeeded}
-					{finishingConnectionId}
-					{syncStatusError}
-					writeAccess={knowledge.write_access}
-					busy={cloudActionBusy}
-					isAdmin={$user?.role === 'admin'}
-					on:action={(event) => sourceAction(event.detail.schedules, event.detail.action)}
-					on:reconnect={(event) => reconnect(event.detail)}
-				/>
+			<!-- [Gradient] Cloud-sync notices; the sources themselves sit in the listing. -->
+			{#if finishingConnectionId}
+				<p role="status" class="mx-4 mb-1 text-xs text-gray-500 dark:text-gray-400">
+					{$i18n.t('Finishing the connection…')}
+				</p>
+			{/if}
+			{#each reconnectNeeded.filter((connection) => connection.id !== finishingConnectionId && !schedules.some((schedule) => schedule.connection_id === connection.id)) as connection (connection.id)}
+				<div
+					class="mx-4 mb-1 flex items-center justify-between gap-3 text-xs text-amber-700 dark:text-amber-300"
+					role="status"
+				>
+					<span
+						>{#if connection.last_error === 'owner_mismatch'}
+							{$i18n.t(
+								'The account you signed in with is not yours to connect; sign in with your own account.'
+							)}
+						{:else}
+							{$i18n.t('Reconnect {{provider}} to resume syncing.', {
+								provider: CLOUD_PROVIDERS[connection.source_kind]?.label ?? connection.source_kind
+							})}
+						{/if}</span
+					>
+					{#if knowledge.write_access}
+						<button
+							class="font-medium underline"
+							disabled={cloudActionBusy}
+							on:click={() => reconnect(connection)}>{$i18n.t('Reconnect')}</button
+						>
+					{/if}
+				</div>
+			{/each}
+			{#if syncStatusError}
+				<p role="alert" class="mx-4 mb-1 text-xs text-red-500">
+					{$i18n.t('Failed to check background sync status')}
+				</p>
 			{/if}
 
 			{#if isExternalKnowledge}
@@ -2126,37 +2205,6 @@
 							}}
 						/>
 
-						<Dropdown align="end">
-							<button
-								class="p-1.5 mr-1 rounded-xl text-gray-500 bg-transparent hover:text-gray-900 dark:hover:text-gray-100 transition"
-								type="button"
-							>
-								<AdjustmentsHorizontal className="size-3.5" strokeWidth="2" />
-							</button>
-
-							<div slot="content">
-								<DropdownMenu className="min-w-[11.25rem]">
-									<button
-										class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
-										type="button"
-										on:click={() => {
-											includeContent = !includeContent;
-											currentPage = 1;
-										}}
-									>
-										<Checkbox
-											state={includeContent ? 'checked' : 'unchecked'}
-											on:change={(e) => {
-												includeContent = e.detail === 'checked';
-												currentPage = 1;
-											}}
-										/>
-										{$i18n.t('File content')}
-									</button>
-								</DropdownMenu>
-							</div>
-						</Dropdown>
-
 						{#if knowledge?.write_access}
 							<div>
 								{#if activeProvider}
@@ -2164,7 +2212,7 @@
 										content={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}
 									>
 										<button
-											class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
+											class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
 											disabled={isSyncBusy}
 											aria-label={$i18n.t('Add source')}
 											on:click={() => {
@@ -2203,16 +2251,6 @@
 												document.getElementById('files-input').click();
 											}
 										}}
-										onSync={structureEditable
-											? async () => {
-													pendingSyncFiles = filterAllowedEntries(await collectDirectoryEntries());
-													if (pendingSyncFiles?.length) {
-														showSyncConfirmModal = true;
-													} else {
-														pendingSyncFiles = null;
-													}
-												}
-											: null}
 										onReset={structureEditable
 											? () => {
 													showResetConfirm = true;
@@ -2296,19 +2334,6 @@
 					</div>
 				{/if}
 
-				{#if syncing}
-					<div class="mx-2 mt-2 -mb-0.5 shrink-0">
-						<div
-							class="flex items-center gap-2 rounded-xl py-1.5 px-2.5 bg-gray-50 dark:bg-gray-850"
-						>
-							<Spinner className="size-3.5 shrink-0" />
-							<div class="text-xs text-gray-500 dark:text-gray-400 truncate">
-								{syncing}
-							</div>
-						</div>
-					</div>
-				{/if}
-
 				{#if fileItems !== null && fileItemsTotal !== null}
 					<div class="flex flex-row flex-1 min-h-0 gap-2 px-2">
 						<div class="flex-1 flex">
@@ -2330,14 +2355,24 @@
 											/>
 										</div>
 									{/if}
-									{#if fileItems.length > 0 || (!query && directoryItems.length > 0)}
+									{#if fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentDirectoryId === null && looseSources.length > 0) || (currentSourcePair && skippedItems.length > 0)))}
 										<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
 											<Files
 												files={fileItems}
 												directories={query ? [] : directoryItems}
 												searchMode={!!query}
 												{structureEditable}
-												isSyncing={isSyncBusy}
+												{sourcePairs}
+												looseSources={currentDirectoryId === null ? looseSources : []}
+												skippedItems={currentSourcePair ? skippedItems : []}
+												syncing={enclosingSyncing}
+												{uploadProgress}
+												skippedProvider={currentSourceProvider}
+												syncAccess={!!knowledge?.write_access}
+												syncBusy={cloudActionBusy}
+												isAdmin={$user?.role === 'admin'}
+												onSourceAction={(targets, action) => sourceAction(targets, action)}
+												onReconnect={(connection) => reconnect(connection)}
 												{knowledge}
 												{selectedFileId}
 												onClick={(fileId) => {

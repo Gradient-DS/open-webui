@@ -74,16 +74,18 @@ def test_create_connection_returns_the_authorize_url(api, provider):
 
 
 @pytest.mark.parametrize('result', ['pending', 'error', 'invalid'])
-def test_the_done_page_posts_the_result_and_closes(api, result):
-    """The popup posts only its escaped result to the same-origin opener and closes."""
+def test_the_done_page_posts_the_result_and_closes(api, result, monkeypatch):
+    """The popup posts its escaped result to its own origin and each configured product origin, then closes."""
+    monkeypatch.setattr(cloud_sync, 'CORS_ALLOW_ORIGIN', ['*', 'http://localhost:18273', '</script>'])
     connection = '</script><script>alert(1)</script>'
     page = api.browser.get('/api/v1/cloud-sync/connect/done', params={'connection': connection, 'result': result})
     assert page.status_code == 200
     assert page.headers['cache-control'] == 'no-store'
-    assert 'window.location.origin' in page.text
     assert 'window.close();' in page.text
     assert page.text.count('</script>') == 1
-    payload = page.text.split('postMessage(', 1)[1].split(', window.location.origin', 1)[0]
+    origins = page.text.split('new Set([window.location.origin, ...', 1)[1].split('])', 1)[0]
+    assert json.loads(origins) == ['</script>', 'http://localhost:18273']
+    payload = page.text.split('postMessage(', 1)[1].split(', origin)', 1)[0]
     assert json.loads(payload) == {'type': 'soev_connect', 'connection': connection, 'result': result}
     assert not api.requests
 
@@ -423,7 +425,7 @@ def test_connection_usage_requires_a_verified_user(api):
 
 
 def test_skipped_items_list_failed_job_items(api):
-    """Skipped items use the run id, preserve codes and resolve names across document pages."""
+    """Skipped items use the run id, keep the specific reason and resolve names across document pages."""
     api.responses.extend(
         [
             response({'key': 'kb'}),
@@ -459,6 +461,13 @@ def test_skipped_items_list_failed_job_items(api):
                             'status': 'failed',
                             'code': 'processing_failed',
                         },
+                        {
+                            'source_id': 'slow',
+                            'title': 'Slow.pdf',
+                            'status': 'failed',
+                            'code': 'internal_error',
+                            'detail': 'timed_out',
+                        },
                     ]
                 }
             ),
@@ -482,6 +491,7 @@ def test_skipped_items_list_failed_job_items(api):
         {'source_id': 'waiting', 'name': 'waiting', 'code': 'pending'},
         {'source_id': 'empty', 'name': 'Empty.pdf', 'code': 'empty_content'},
         {'source_id': 'broken', 'name': 'Current.pdf', 'code': 'processing_failed'},
+        {'source_id': 'slow', 'name': 'Slow.pdf', 'code': 'timed_out'},
     ]
     assert api.requests[2].url.path == '/v1/jobs/job-1'
     assert dict(api.requests[2].url.params) == {'include_items': 'true'}

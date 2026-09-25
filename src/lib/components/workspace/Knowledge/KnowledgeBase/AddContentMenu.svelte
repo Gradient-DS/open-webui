@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { getContext, createEventDispatcher } from 'svelte';
-	const dispatch = createEventDispatcher();
+	import { getContext } from 'svelte';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
@@ -9,21 +8,21 @@
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import NewFolderAlt from '$lib/components/icons/NewFolderAlt.svelte';
-	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import ArrowUturnLeft from '$lib/components/icons/ArrowUturnLeft.svelte';
 
 	const i18n = getContext('i18n');
 
-	export let onClose: Function = () => {};
+	export let onClose: () => void = () => {};
 
-	export let onUpload: Function = (data) => {};
-	// Structure-write items (New directory / Sync directory / Reset) only
+	export let onUpload: (data: {
+		type: 'new_directory' | 'files' | 'directory' | 'web' | 'text';
+	}) => void = () => {};
+	// Structure-write items (New directory / Reset) only
 	// render when the parent passes the affordance — i.e. structureEditable
 	// local KBs. Cloud / push KBs never get them.
 	export let structureEditable = false;
-	export let onSync: Function | null = null;
-	export let onReset: Function | null = null;
+	export let onReset: (() => void) | null = null;
 
 	let show = false;
 </script>
@@ -96,25 +95,6 @@
 				<FolderOpen strokeWidth="2" />
 				<div class="flex items-center">{$i18n.t('Upload directory')}</div>
 			</button>
-
-			{#if onSync}
-				<Tooltip
-					content={$i18n.t(
-						'Sync a local directory with this knowledge base. Only new and modified files will be uploaded. The directory structure will be mirrored.'
-					)}
-					className="w-full"
-				>
-					<button
-						class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
-						on:click={() => {
-							onSync();
-						}}
-					>
-						<ArrowPath strokeWidth="2" />
-						<div class="flex items-center">{$i18n.t('Sync directory')}</div>
-					</button>
-				</Tooltip>
-			{/if}
 
 			<button
 				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"

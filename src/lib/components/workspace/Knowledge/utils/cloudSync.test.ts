@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import {
+	finishedRuns,
 	connectionOutcome,
 	shouldRefetchSyncItems,
 	pairSchedules,
 	connectResult,
+	trustedConnectOrigins,
 	googleDriveScope,
 	oneDriveScope,
 	reconnectConnections,
@@ -60,13 +62,26 @@ it('registers Google folders and files without carrying picker credentials', () 
 describe('connect popup messages', () => {
 	const popup = {} as Window;
 	const origin = 'https://owui.invalid';
+	const trustedOrigins = new Set([origin]);
 	const event = {
 		origin,
 		source: popup,
 		data: { type: 'soev_connect', connection: 'c', result: 'pending' }
 	};
 	it('accepts the expected callback without treating pending as enabled', () => {
-		expect(connectResult(event, origin, popup, 'c')).toBe('pending');
+		expect(connectResult(event, trustedOrigins, popup, 'c')).toBe('pending');
+	});
+	it('accepts the API origin on a split-origin stack', () => {
+		const origins = trustedConnectOrigins('http://localhost:5173', 'http://localhost:8080/api/v1');
+		expect(connectResult({ ...event, origin: 'http://localhost:8080' }, origins, popup, 'c')).toBe(
+			'pending'
+		);
+	});
+	it('rejects foreign origins on a split-origin stack', () => {
+		const origins = trustedConnectOrigins('http://localhost:5173', 'http://localhost:8080/api/v1');
+		expect(
+			connectResult({ ...event, origin: 'https://other.invalid' }, origins, popup, 'c')
+		).toBeNull();
 	});
 	it('ignores other origins, windows, connections, message types and results', () => {
 		for (const invalid of [
@@ -76,13 +91,31 @@ describe('connect popup messages', () => {
 			{ ...event, data: { ...event.data, type: 'onedrive_auth_callback' } },
 			{ ...event, data: { ...event.data, result: 'success' } }
 		])
-			expect(connectResult(invalid, origin, popup, 'c')).toBeNull();
-		expect(connectResult(event, origin, popup)).toBeNull();
+			expect(connectResult(invalid, trustedOrigins, popup, 'c')).toBeNull();
+		expect(connectResult(event, trustedOrigins, popup)).toBeNull();
 	});
 	it.each(['error', 'invalid'])('surfaces a %s callback', (result) => {
-		expect(connectResult({ ...event, data: { ...event.data, result } }, origin, popup, 'c')).toBe(
-			result
+		expect(
+			connectResult({ ...event, data: { ...event.data, result } }, trustedOrigins, popup, 'c')
+		).toBe(result);
+	});
+});
+
+describe('trusted connect origins', () => {
+	const location = 'https://owui.invalid';
+	it.each(['/api/v1', 'api/v1', '', '//api.invalid/api/v1'])(
+		'keeps only the page origin for a relative API base: %s',
+		(apiBase) => {
+			expect(trustedConnectOrigins(location, apiBase)).toEqual(new Set([location]));
+		}
+	);
+	it('adds only the origin of an absolute API base', () => {
+		expect(trustedConnectOrigins(location, 'https://api.invalid:8443/api/v1')).toEqual(
+			new Set([location, 'https://api.invalid:8443'])
 		);
+	});
+	it('does not trust opaque origins', () => {
+		expect(trustedConnectOrigins(location, 'data:text/plain,example')).toEqual(new Set([location]));
 	});
 });
 
@@ -96,7 +129,10 @@ it('deduplicates reconnect banners and trusts polled lifecycle over a stale popu
 	expect(reconnectConnections([schedule, schedule], null)).toEqual([connection]);
 	const enabled = { ...connection, lifecycle: 'enabled' };
 	expect(reconnectConnections([{ connection: enabled } as Schedule], connection)).toEqual([]);
-	expect(reconnectConnections([], { ...connection, lifecycle: 'pending' })).toHaveLength(1);
+	expect(reconnectConnections([], { ...connection, lifecycle: 'pending' })).toEqual([]);
+	expect(
+		reconnectConnections([], { ...connection, lifecycle: 'pending', last_error: 'owner_mismatch' })
+	).toHaveLength(1);
 	expect(reconnectConnections([], { ...connection, lifecycle: 'revoked' })).toEqual([]);
 });
 
@@ -266,5 +302,29 @@ describe('sync file list refresh', () => {
 		expect(shouldRefetchSyncItems([finished], [finished])).toBe(false);
 		expect(shouldRefetchSyncItems([finished, other], [finished])).toBe(true);
 		expect(shouldRefetchSyncItems([], [])).toBe(false);
+	});
+});
+
+describe('finished runs', () => {
+	const live = { id: 'r1', started_at: '2026-09-18T10:00:00Z', outcome: null };
+	const done = { ...live, finished_at: '2026-09-18T10:01:00Z', outcome: 'succeeded' as const };
+	it('are the content runs that were live before and have an outcome now', () => {
+		const before = [
+			{ ...scheduleFixture('folder', 'content'), last_run: live },
+			{ ...scheduleFixture('acl', 'acl_refresh'), last_run: live },
+			{ ...scheduleFixture('idle', 'content'), last_run: done }
+		];
+		const after = [
+			{ ...scheduleFixture('folder', 'content'), last_run: done },
+			{ ...scheduleFixture('acl', 'acl_refresh'), last_run: done },
+			{ ...scheduleFixture('idle', 'content'), last_run: done }
+		];
+		expect(finishedRuns(before, after).map((schedule) => schedule.id)).toEqual(['folder']);
+	});
+	it('ignore a newer run that replaced the live one', () => {
+		const before = [{ ...scheduleFixture('folder', 'content'), last_run: live }];
+		const after = [{ ...scheduleFixture('folder', 'content'), last_run: { ...done, id: 'r2' } }];
+		expect(finishedRuns(before, after)).toEqual([]);
+		expect(finishedRuns([], after)).toEqual([]);
 	});
 });

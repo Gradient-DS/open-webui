@@ -3,6 +3,7 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as I18n } from 'i18next';
 	import { toast } from 'svelte-sonner';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import * as cloudSync from '$lib/apis/cloudSync';
 	import type { Connection } from '$lib/apis/cloudSync';
 	import Badge from '$lib/components/common/Badge.svelte';
@@ -12,6 +13,7 @@
 	import {
 		CLOUD_PROVIDERS,
 		connectResult,
+		trustedConnectOrigins,
 		connectionOutcome
 	} from '$lib/components/workspace/Knowledge/utils/cloudSync';
 
@@ -106,8 +108,9 @@
 				checking = false;
 			}
 		};
+		const trustedOrigins = trustedConnectOrigins(window.location.origin, WEBUI_API_BASE_URL);
 		const handleMessage = (event: MessageEvent) => {
-			const result = connectResult(event, window.location.origin, popup, account.id);
+			const result = connectResult(event, trustedOrigins, popup, account.id);
 			if (result === 'pending') void check();
 			else if (result === 'error' || result === 'invalid') {
 				toast.error($i18n.t('Authorization failed'));

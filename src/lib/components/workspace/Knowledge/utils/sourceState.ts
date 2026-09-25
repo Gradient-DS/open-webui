@@ -1,6 +1,15 @@
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import { CLOUD_PROVIDERS, runIsLive, type SchedulePair } from './cloudSync';
 
+export function skippedRunKey(schedule: Schedule | undefined): string {
+	if (!schedule || runIsLive(schedule.last_run)) return '';
+	return JSON.stringify([
+		schedule.id,
+		schedule.last_run?.id ?? null,
+		schedule.last_run?.finished_at ?? null
+	]);
+}
+
 export type SourceState =
 	| 'syncing'
 	| 'up_to_date'
@@ -90,22 +99,93 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 	};
 }
 
-export function skippedReason(code: string): string {
-	return (
-		(
-			{
-				unsupported_content_type: 'File type not supported',
-				item_too_large: 'Too large',
-				empty_content: 'Empty document: no text found',
-				processing_failed: 'Processing failed',
-				timed_out: 'Processing timed out',
-				acl_write_failed: 'Internal error',
-				internal_error: 'Internal error',
-				access_revoked: 'No access'
-			} as Record<string, string>
-		)[code] ?? code
-	);
+// What a live run reports while it runs: the items its plan chose to fetch
+// (`planned`), how many are fetched from the provider and how many have
+// landed, as sync_execution.py publishes them. Null outside a live run or
+// under a worker that publishes counts only at finish.
+export interface RunProgress {
+	total: number;
+	fetched: number;
+	landed: number;
 }
+
+export function runProgress(schedule: Schedule): RunProgress | null {
+	const run = schedule.last_run;
+	if (!runIsLive(run)) return null;
+	const counts = run?.counts ?? {};
+	if (typeof counts.planned !== 'number' || counts.planned <= 0) return null;
+	return {
+		total: counts.planned,
+		fetched: Math.min(counts.fetched ?? 0, counts.planned),
+		landed: Math.min(counts.landed ?? 0, counts.planned)
+	};
+}
+
+const SKIP_REASONS: Record<string, { label: string; explainer: string }> = {
+	unsupported_content_type: {
+		label: 'File type not supported',
+		explainer:
+			'Only PDF, Word, PowerPoint, Excel, CSV, HTML, Markdown, XML and plain-text files are synced. Save the file in one of these formats to include it.'
+	},
+	item_too_large: {
+		label: 'Too large',
+		explainer: 'The file is larger than the sync limit allows.'
+	},
+	empty_content: {
+		label: 'Empty document: no text found',
+		explainer: 'No text could be extracted, for example a scanned image without OCR.'
+	},
+	empty_parsed_content: {
+		label: 'Empty document: no text found',
+		explainer: 'No text could be extracted, for example a scanned image without OCR.'
+	},
+	processing_failed: {
+		label: 'Processing failed',
+		explainer: 'The file could not be processed. It is retried on the next sync.'
+	},
+	timed_out: {
+		label: 'Processing timed out',
+		explainer: 'Processing did not finish in time. It is retried on the next sync.'
+	},
+	restricted_item: {
+		label: 'Protected file',
+		explainer: 'The file is protected in {{provider}} and cannot be read.'
+	},
+	access_revoked: {
+		label: 'No access',
+		explainer: 'You no longer have access to this file in {{provider}}.'
+	},
+	not_landed: {
+		label: 'Not synced yet',
+		explainer: 'The file has not been synced yet, so its permissions could not be updated.'
+	}
+};
+const SKIP_FALLBACK = {
+	label: 'Internal error',
+	explainer: 'The file was skipped in the last sync. It is retried on the next sync.'
+};
+
+export function skippedReason(code: string): string {
+	return SKIP_REASONS[code]?.label ?? (code in KNOWN_INTERNAL ? SKIP_FALLBACK.label : code);
+}
+
+// Why a file was skipped, in one sentence the user can act on; `{{provider}}`
+// is left for the caller to fill.
+export function skippedExplainer(code: string): string {
+	return (SKIP_REASONS[code] ?? SKIP_FALLBACK).explainer;
+}
+
+// Worker-internal reasons (sync_execution.py) that mean nothing to the user.
+const KNOWN_INTERNAL: Record<string, true> = {
+	internal_error: true,
+	acl_write_failed: true,
+	acl_read_failed: true,
+	source_failed: true,
+	reach_failed: true,
+	delete_failed: true,
+	blank_failed: true,
+	unresolvable_principal: true
+};
 
 export function sourceTiming(
 	view: Pick<SourceView, 'lastSyncedAt' | 'nextDueAt' | 'documents'> &

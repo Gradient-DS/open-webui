@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule, SyncRun } from '$lib/apis/cloudSync';
-import { sourceState, sourceTiming, skippedReason } from './sourceState';
+import {
+	sourceState,
+	sourceTiming,
+	skippedReason,
+	skippedRunKey,
+	skippedExplainer,
+	runProgress
+} from './sourceState';
 
 const connection: Connection = { id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' };
 const run: SyncRun = {
@@ -24,6 +31,26 @@ const schedule = (changes: Partial<Schedule> = {}): Schedule => ({
 });
 const view = (changes: Partial<Schedule> = {}, account = connection) =>
 	sourceState({ content: schedule(changes) }, account);
+
+describe('skipped run keys', () => {
+	it('does not request skipped items during a live or cancelling run', () => {
+		for (const cancel_requested_at of [null, '2026-09-18T10:00:30Z']) {
+			expect(
+				skippedRunKey(schedule({ last_run: { ...run, outcome: null, cancel_requested_at } }))
+			).toBe('');
+		}
+		expect(skippedRunKey(undefined)).toBe('');
+	});
+	it('keeps a finished run key stable across polls and distinguishes sources and runs', () => {
+		const key = skippedRunKey(schedule({ last_run: run }));
+		expect(key).toBe(JSON.stringify(['s', run.id, run.finished_at]));
+		expect(
+			skippedRunKey(schedule({ last_run: { ...run, counts: { failed: 2 } }, document_count: 5 }))
+		).toBe(key);
+		expect(skippedRunKey(schedule({ id: 'other', last_run: run }))).not.toBe(key);
+		expect(skippedRunKey(schedule({ last_run: { ...run, id: 'next' } }))).not.toBe(key);
+	});
+});
 
 describe('source states', () => {
 	it('syncing', () => {
@@ -264,4 +291,39 @@ it('shows documents so far while the first run lands and never calls landed docu
 	);
 	expect(timing('scheduled', 61).lastSync.key).toBe('{{count}} documents');
 	expect(timing('scheduled', 0).lastSync.key).toBe('Not synced yet · {{count}} documents');
+});
+
+describe('run progress', () => {
+	it('is absent outside a live run', () => {
+		expect(runProgress(schedule({ last_run: run }))).toBeNull();
+		expect(runProgress(schedule({ last_run: null }))).toBeNull();
+	});
+	it('is absent while the worker publishes no planned work', () => {
+		expect(
+			runProgress(schedule({ document_count: 7, last_run: { ...run, outcome: null } }))
+		).toBeNull();
+	});
+	it('reads fetched and landed of planned once a live run carries counts', () => {
+		expect(
+			runProgress(
+				schedule({
+					last_run: { ...run, outcome: null, counts: { planned: 40, fetched: 12, landed: 3 } }
+				})
+			)
+		).toEqual({ total: 40, fetched: 12, landed: 3 });
+	});
+});
+
+describe('skip explainers', () => {
+	it('name the specific reason and keep worker-internal codes generic', () => {
+		expect(skippedReason('timed_out')).toBe('Processing timed out');
+		expect(skippedReason('empty_parsed_content')).toBe('Empty document: no text found');
+		expect(skippedReason('reach_failed')).toBe('Internal error');
+		expect(skippedReason('something_new')).toBe('something_new');
+	});
+	it('explain what the user can do about it', () => {
+		expect(skippedExplainer('unsupported_content_type')).toMatch(/PDF, Word/);
+		expect(skippedExplainer('restricted_item')).toContain('{{provider}}');
+		expect(skippedExplainer('reach_failed')).toMatch(/retried/);
+	});
 });
