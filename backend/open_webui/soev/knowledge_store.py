@@ -181,6 +181,11 @@ class SoevKnowledgeTable:
     async def get_knowledge_by_id(self, id, db=None):
         return await self._knowledge_with_type(await self._collection(id))
 
+    async def describe_knowledge(self, ids, *, user_id=None):
+        """The current name and description of each knowledge base the user can read, by id."""
+        rows = await asyncio.gather(*(self._collection(id, user_id=user_id) for id in ids))
+        return {row['key']: (row['name'], row.get('description') or '') for row in rows if row is not None}
+
     async def get_knowledge_by_id_unfiltered(self, id, db=None):
         return await self._knowledge_with_type(await self._collection(id))
 

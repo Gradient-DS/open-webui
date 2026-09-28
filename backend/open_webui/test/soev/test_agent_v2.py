@@ -178,8 +178,23 @@ async def test_first_turn_regenerate_opens_another_thread(chat: Chat) -> None:
     assert chat.bookmark('regenerated')['thread_id'] == 'thr-2'
 
 
+def seed_collection(api: FakeSoevApi, key: str, name: str, description: str | None = None) -> None:
+    api.collections[key] = {
+        'key': key,
+        'name': name,
+        'description': description,
+        'visibility': 'public',
+        'principals': [],
+        'writers': [],
+        'created_at': api.now,
+        'updated_at': api.now,
+    }
+
+
 @pytest.mark.asyncio
-async def test_one_text_input_and_selected_collection_keys(chat: Chat) -> None:
+async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(chat: Chat) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten', 'Getekende contracten')
+    seed_collection(chat.api, 'kb-b', 'Notulen')
     await chat.turn(
         [
             {'type': 'text', 'text': 'one'},
@@ -187,16 +202,29 @@ async def test_one_text_input_and_selected_collection_keys(chat: Chat) -> None:
             {'type': 'text', 'text': 'two'},
         ],
         'a1',
-        files=[{'type': 'collection', 'id': 'kb-a'}, {'type': 'file', 'id': 'ignored'}],
+        files=[
+            {'type': 'collection', 'id': 'kb-a', 'name': 'Name when picked'},
+            {'type': 'file', 'id': 'ignored'},
+        ],
         knowledge=[{'id': 'kb-a'}, {'id': 'kb-b'}],
     )
     assert chat.mutations()[0][1] == {
-        'input': {'text': 'one\ntwo', 'knowledge': ['kb-a', 'kb-b']},
+        'input': {
+            'text': 'one\ntwo',
+            'knowledge': [
+                {'key': 'kb-a', 'name': 'Contracten', 'description': 'Getekende contracten'},
+                {'key': 'kb-b', 'name': 'Notulen'},
+            ],
+        },
         'agent': 'test',
         'model': 'llm',
     }
-    await chat.turn('next', 'a2', 'a1', files=[{'type': 'collection', 'id': 'kb-c'}])
-    assert chat.mutations()[-1][1]['input']['knowledge'] == ['kb-c']
+
+
+@pytest.mark.asyncio
+async def test_knowledge_the_api_does_not_show_is_still_sent_by_its_key(chat: Chat) -> None:
+    await chat.turn('next', 'a1', files=[{'type': 'collection', 'id': 'kb-gone', 'name': 'Old'}])
+    assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-gone', 'name': 'kb-gone'}]
 
 
 @pytest.mark.asyncio

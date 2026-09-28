@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 import anyio
 from open_webui.models.chats import Chats
+from open_webui.models.knowledge import Knowledges
 from open_webui.socket.main import get_event_emitter
 from open_webui.soev import acting, identity
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
@@ -43,7 +44,24 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
     raise ValueError('A v2 agent turn requires user_message text')
 
 
-def _knowledge(metadata: dict[str, Any]) -> list[str]:
+async def _knowledge(metadata: dict[str, Any]) -> list[dict[str, str]]:
+    """The selected knowledge bases with their current name and description, read at send time.
+
+    One the API does not show the user is still sent, named by its key, so the agent refuses the turn.
+    """
+    keys = _knowledge_keys(metadata)
+    if not keys:
+        return []
+    user_id = None if acting.acting_ref() else metadata['user_id']
+    described = await Knowledges.describe_knowledge(keys, user_id=user_id)
+    entries = []
+    for key in keys:
+        name, description = described.get(key, (key, ''))
+        entries.append({'key': key, 'name': name, **({'description': description} if description else {})})
+    return entries
+
+
+def _knowledge_keys(metadata: dict[str, Any]) -> list[str]:
     """The selected knowledge bases' keys; an OWUI knowledge id is the soev-api collection key."""
     selected = [item for item in metadata.get('files') or [] if item.get('type') == 'collection']
     selected.extend(metadata.get('knowledge') or [])
@@ -422,7 +440,7 @@ async def call_agent_v2(
     """Submit one user message; the thread owns the conversation history."""
     user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
     turn = AgentTurn(identity.build_client(), metadata, user_ref)
-    body = {'input': {'text': _input_text(metadata, form_data), 'knowledge': _knowledge(metadata)}}
+    body = {'input': {'text': _input_text(metadata, form_data), 'knowledge': await _knowledge(metadata)}}
     if isinstance(model, str) and model:
         body['model'] = model
     chunks = turn.run(body, agent)
