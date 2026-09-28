@@ -53,9 +53,7 @@ async def test_reconnected_tail_checks_root_outputs_without_reading_every_frame(
         ]
     ]
     frames = await _collect(
-        client.chat_stream(
-            '/v1/chat/threads', {'agent': 'test', 'input': {'text': 'hello'}}, as_user='owui:user:alice'
-        )
+        client.chat_stream('/v1/chat/threads', {'agent': 'test', 'input': {'text': 'hello'}}, as_user='owui:user:alice')
     )
     assert [event.event for event in frames][-5:] == ['model_output', 'tool_output', 'source', 'model_output', 'status']
     assert sum(request.url.path == '/v1/chat/threads/thr-1' for request in chat_http.chat.requests) == 2
@@ -126,9 +124,7 @@ async def test_fork_delivers_thread_id_and_preserves_owner(chat_http: FakeSoevAp
     client = identity.build_client()
     await identity.ensure_link('owui:user:alice', client)
     await _collect(
-        client.chat_stream(
-            '/v1/chat/threads', {'agent': 'test', 'input': {'text': 'hello'}}, as_user='owui:user:alice'
-        )
+        client.chat_stream('/v1/chat/threads', {'agent': 'test', 'input': {'text': 'hello'}}, as_user='owui:user:alice')
     )
     branch = await client.chat_post('/v1/chat/threads/thr-1/fork', {'at': 1}, as_user='owui:user:alice')
     assert branch['thread_id'] == 'thr-2'
@@ -164,9 +160,7 @@ async def test_terminal_error_is_not_retried(chat_http: FakeSoevApi) -> None:
     await identity.ensure_link('owui:user:alice', client)
     chat_http.chat.turns = [[('error', {'code': 'service_unavailable', 'detail': 'failed'})]]
     frames = await _collect(
-        client.chat_stream(
-            '/v1/chat/threads', {'agent': 'test', 'input': {'text': 'hello'}}, as_user='owui:user:alice'
-        )
+        client.chat_stream('/v1/chat/threads', {'agent': 'test', 'input': {'text': 'hello'}}, as_user='owui:user:alice')
     )
     assert frames[-1].event == 'error'
     assert len(chat_http.chat.requests) == 1
