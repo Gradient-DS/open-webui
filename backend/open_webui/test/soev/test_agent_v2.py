@@ -116,9 +116,9 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
     for index in range(1, 4):
         await chat.turn(f'turn {index}', f'a{index}', f'a{index - 1}' if index > 1 else None)
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': 'turn 1', 'collections': [], 'agent': 'test', 'model': 'llm'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 2', 'collections': [], 'model': 'llm'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 3', 'collections': [], 'model': 'llm'}),
+        ('/v1/chat/threads', {'input': {'text': 'turn 1', 'knowledge': []}, 'agent': 'test', 'model': 'llm'}),
+        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'turn 2', 'knowledge': []}, 'model': 'llm'}),
+        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'turn 3', 'knowledge': []}, 'model': 'llm'}),
     ]
     assert [chat.bookmark(f'a{i}') for i in range(1, 4)] == [
         {'thread_id': 'thr-1', 'position': position} for position in (3, 5, 7)
@@ -148,12 +148,14 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
     await chat.turn(text, 'new-answer', parent, chat_id=chat_id)
     assert chat.mutations()[-2:] == [
         ('/v1/chat/threads/thr-1/fork', {'at': at}),
-        ('/v1/chat/threads/thr-2/inputs', {'input': text, 'collections': [], 'model': 'llm'}),
+        ('/v1/chat/threads/thr-2/inputs', {'input': {'text': text, 'knowledge': []}, 'model': 'llm'}),
     ]
     assert chat.api.chat.threads['thr-1']['events'] == original
     assert chat.bookmark('new-answer', chat_id) == {'thread_id': 'thr-2', 'position': at + 2}
     inputs = [
-        event['payload']['payload'] for event in chat.api.chat.threads['thr-2']['events'] if event['type'] == 'input'
+        event['payload']['payload']['text']
+        for event in chat.api.chat.threads['thr-2']['events']
+        if event['type'] == 'input'
     ]
     assert inputs == (['first', 'second', text] if at == 5 else ['first', text])
 
@@ -189,13 +191,12 @@ async def test_one_text_input_and_selected_collection_keys(chat: Chat) -> None:
         knowledge=[{'id': 'kb-a'}, {'id': 'kb-b'}],
     )
     assert chat.mutations()[0][1] == {
-        'input': 'one\ntwo',
-        'collections': ['kb-a', 'kb-b'],
+        'input': {'text': 'one\ntwo', 'knowledge': ['kb-a', 'kb-b']},
         'agent': 'test',
         'model': 'llm',
     }
     await chat.turn('next', 'a2', 'a1', files=[{'type': 'collection', 'id': 'kb-c'}])
-    assert chat.mutations()[-1][1]['collections'] == ['kb-c']
+    assert chat.mutations()[-1][1]['input']['knowledge'] == ['kb-c']
 
 
 @pytest.mark.asyncio
@@ -210,7 +211,9 @@ async def test_orphaned_input_resumes_before_one_new_input(chat: Chat) -> None:
         '/v1/chat/threads/thr-1/inputs',
     ]
     assert [
-        event['payload']['payload'] for event in chat.api.chat.threads['thr-1']['events'] if event['type'] == 'input'
+        event['payload']['payload']['text']
+        for event in chat.api.chat.threads['thr-1']['events']
+        if event['type'] == 'input'
     ] == ['first', 'second']
     assert chat.bookmark('a2')['position'] == 5
 
@@ -897,7 +900,7 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
         result = await chat.response(None, 'a1', stream=False, **kwargs)
         assert result['choices'][0]['message']['content'] == 'Answer: last question'
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': 'last question', 'collections': [], 'agent': 'test', 'model': 'llm'})
+        ('/v1/chat/threads', {'input': {'text': 'last question', 'knowledge': []}, 'agent': 'test', 'model': 'llm'})
     ]
 
 

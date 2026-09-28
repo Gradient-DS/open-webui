@@ -79,7 +79,7 @@ class FakeChatApi:
         return thread
 
     def _open(self, request: httpx.Request, body: dict, owner: tuple[str, str | None]) -> httpx.Response:
-        if request.method != 'POST' or not isinstance(body.get('input'), str) or 'agent' not in body:
+        if request.method != 'POST' or 'agent' not in body:
             return self.problem(422, 'invalid_field')
         thread = self._new(owner, [frame('opened', 1, {'agent': body['agent']})])
         return self._run(request, body, thread, opening=True)
@@ -112,6 +112,22 @@ class FakeChatApi:
             return self._cancel(thread, body)
         return self.problem(404, 'not_found')
 
+    def _refusal(self, body: dict, *, opening: bool) -> httpx.Response | None:
+        """soev-api refuses unknown body fields; the soev chat agent's input is
+        ``{text, knowledge?, tools?, context?}`` with knowledge a list of KB keys."""
+        allowed = {'input', 'model', 'principals'} | ({'agent'} if opening else {'answering'})
+        if set(body) - allowed:
+            return self.problem(400, 'unknown_field')
+        turn = body.get('input')
+        if (
+            not isinstance(turn, dict)
+            or set(turn) - {'text', 'knowledge', 'tools', 'context'}
+            or not isinstance(turn.get('text'), str)
+            or not all(isinstance(key, str) and key for key in turn.get('knowledge', []))
+        ):
+            return self.problem(422, 'invalid_field')
+        return None
+
     def _cancel(self, thread: dict, body: dict) -> httpx.Response:
         inputs = [event['position'] for event in thread['events'] if event['type'] == 'input']
         if not inputs or body.get('input') != inputs[-1] or thread['state'] not in {'running', 'waiting'}:
@@ -121,13 +137,14 @@ class FakeChatApi:
         return httpx.Response(200, json=self._view(thread))
 
     def _run(self, request: httpx.Request, body: dict, thread: dict, *, opening: bool = False) -> httpx.Response:
-        if not isinstance(body.get('input'), str) or not isinstance(body.get('collections'), list):
-            return self.problem(422, 'invalid_field')
+        if refused := self._refusal(body, opening=opening):
+            return refused
         recorded = [('opened', thread['events'][0])] if opening else []
         event = frame('input', len(thread['events']) + 1, {'payload': body['input']})
         thread['events'].append(event)
         recorded.append(('input', event))
-        turn = self.turns.pop(0) if self.turns else [('model_output', {'content': f'Answer: {body["input"]}'})]
+        answer = f'Answer: {body["input"]["text"]}'
+        turn = self.turns.pop(0) if self.turns else [('model_output', {'content': answer})]
         for kind, payload in turn:
             if kind in {'delta', 'reasoning_delta', 'error'}:
                 recorded.append((kind, payload))

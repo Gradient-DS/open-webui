@@ -43,7 +43,8 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
     raise ValueError('A v2 agent turn requires user_message text')
 
 
-def _collections(metadata: dict[str, Any]) -> list[str]:
+def _knowledge(metadata: dict[str, Any]) -> list[str]:
+    """The selected knowledge bases' keys; an OWUI knowledge id is the soev-api collection key."""
     selected = [item for item in metadata.get('files') or [] if item.get('type') == 'collection']
     selected.extend(metadata.get('knowledge') or [])
     ids = [item if isinstance(item, str) else item['id'] for item in selected]
@@ -421,7 +422,7 @@ async def call_agent_v2(
     """Submit one user message; the thread owns the conversation history."""
     user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
     turn = AgentTurn(identity.build_client(), metadata, user_ref)
-    body = {'input': _input_text(metadata, form_data), 'collections': _collections(metadata)}
+    body = {'input': {'text': _input_text(metadata, form_data), 'knowledge': _knowledge(metadata)}}
     if isinstance(model, str) and model:
         body['model'] = model
     chunks = turn.run(body, agent)
