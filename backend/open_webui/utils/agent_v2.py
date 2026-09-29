@@ -3,6 +3,7 @@ Feed the model picker with an OpenAI-type connection whose base URL is
 <SOEV_API_URL>/v1/chat and whose API key is the soev-api key."""
 
 import asyncio
+import html
 import json
 import logging
 import math
@@ -59,6 +60,18 @@ def _duration(seconds: float, dutch: bool) -> str:
     if rest or not minutes:
         parts.append(f'{rest} {words[2] if rest == 1 else words[3]}')
     return f' {words[4]} '.join(parts)
+
+
+def _marker(status: dict[str, Any]) -> dict[str, Any]:
+    """The v1 anchor for one shown tool call: the frontend hides it and places the call's status and the
+    reasoning around it by its position in the content. The whitespace is what its details tokenizer needs."""
+    text = _PLACEHOLDER.sub(lambda match: str(status.get(match[1], match[0])), status['description'])
+    name = html.escape(status['action'], quote=True)
+    return _chunk(
+        {
+            'content': f'\n\n<details type="tool_calls" done="true" name="{name}">\n<summary>{html.escape(text)}</summary>\n</details>\n\n'
+        }
+    )
 
 
 def _summary(count: int, seconds: float, language: str | None) -> str:
@@ -331,14 +344,21 @@ class AgentTurn:
         if self.emitter:
             await self.emitter({'type': kind, 'data': data})
 
-    async def start_tools(self, calls: list[dict]) -> None:
+    async def start_tools(self, calls: list[dict]) -> list[dict[str, Any]]:
         """Show each call once, while it runs: the frontend appends every status, and settles the last one when
         the message is done."""
         await self.clear_tools()
+        markers = []
         for call in calls:
             self.tool_calls += 1
             if (status := self.tool_status(call)) is not None:
-                await self.emit('status', {**status, 'done': False})
+                markers.append(await self.show_tool(status))
+        return markers
+
+    async def show_tool(self, status: dict[str, Any]) -> dict[str, Any]:
+        """Emit a call's status once, while it runs, and return its anchor for the content."""
+        await self.emit('status', {**status, 'done': False})
+        return _marker(status)
 
     def tool_status(self, call: dict) -> dict[str, Any] | None:
         """The call's declared status filled from the call, else a generic line; `None` while it waits on
@@ -382,17 +402,19 @@ class AgentTurn:
             if call_id is None or waiting == call_id:
                 del self.awaiting_source[key]
 
-    async def record_source(self, payload: dict) -> None:
+    async def record_source(self, payload: dict) -> list[dict[str, Any]]:
+        markers = []
         if (awaiting := self.awaiting_source.pop(payload.get('ref') or payload['id'], None)) is not None:
             _call_id, name, declared, arguments = awaiting
             params = self.tool_params(declared, arguments, payload.get('properties') or {})
             if (filled := _filled(declared, params)) is not None:
-                await self.emit('status', {'action': name, **filled, 'done': False})
+                markers.append(await self.show_tool({'action': name, **filled}))
         source = self.citations.add(payload)
         if source:
             await self.emit('source', source)
         self.turn_sources.add(self.citations.sources[payload['id']]['n'])
         await self.emit('panel_filter', {'ns': sorted(self.turn_sources)})
+        return markers
 
     async def resume(self) -> None:
         events = self.client.chat_stream(
@@ -454,7 +476,7 @@ class AgentTurn:
             self.input_position = self.position
             await self.persist()
         if event.event == 'source':
-            await self.record_source(payload)
+            return await self.record_source(payload)
         if event.event == 'reasoning_delta':
             await self.clear_tools()
             self.partial_reasoning += event.data['text']
@@ -473,14 +495,14 @@ class AgentTurn:
         return []
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
-        await self.start_tools(payload.get('tool_calls', []))
+        markers = await self.start_tools(payload.get('tool_calls', []))
         reasoning = self.remaining_reasoning(payload.get('reasoning') or '')
         content = payload['content']
         if not content.startswith(self.partial):
             log.warning('Durable model output disagrees with streamed text', extra={'thread_id': self.thread_id})
             self.partial = ''
             self.citations.pending = ''
-            return []
+            return markers
         text = self.citations.rewrite(content[len(self.partial) :], final=True)
         self.partial = ''
         chunks = []
@@ -488,7 +510,7 @@ class AgentTurn:
             chunks.append(_chunk({'reasoning_content': reasoning}))
         if text:
             chunks.append(_chunk({'content': text}))
-        return chunks
+        return chunks + markers
 
     def remaining_reasoning(self, reasoning: str) -> str:
         partial, self.partial_reasoning = self.partial_reasoning, ''

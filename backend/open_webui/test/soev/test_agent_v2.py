@@ -676,7 +676,8 @@ async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text
         ]
     ]
     chunks = await chat.turn('question', 'a1')
-    assert content(chunks) == 'Answer [1] and [1].'
+    marker = '\n\n<details type="tool_calls" done="true" name="search">\n<summary>Searching the knowledge base…</summary>\n</details>\n\n'
+    assert content(chunks) == marker + 'Answer [1] and [1].'
     assert content(chunks, 'reasoning_content') == 'PlanExplain'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
     assert [source['n'] for source in sources] == [1, 1]
@@ -1328,8 +1329,11 @@ async def test_opening_a_document_shows_the_title_its_source_carries(declared: C
             ('model_output', {'content': 'done'}),
         ]
     ]
-    await declared.turn('q', 'a1', files=[{'type': 'collection', 'id': 'kb-a'}])
+    chunks = await declared.turn('q', 'a1', files=[{'type': 'collection', 'id': 'kb-a'}])
 
+    assert '<details type="tool_calls" done="true" name="open_document">\n<summary>Reading Leave policy...' in content(
+        chunks
+    )
     reading = {'action': 'open_document', 'description': 'Reading {{doc_title}}...', 'doc_title': 'Leave policy'}
     assert statuses(declared) == [{**reading, 'done': False}]
 
