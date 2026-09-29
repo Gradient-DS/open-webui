@@ -44,6 +44,30 @@ async def _tool_statuses(client: SoevClient) -> dict[str, dict[str, Any]]:
     return statuses
 
 
+def _duration(seconds: float, dutch: bool) -> str:
+    """The turn's duration as the v1 agents wrote it: `24 seconds`, `2 minutes and 5 seconds`."""
+    total = int(seconds)
+    if total <= 0:
+        return 'minder dan een seconde' if dutch else 'less than a second'
+    minutes, rest = divmod(total, 60)
+    words = (
+        ('minuut', 'minuten', 'seconde', 'seconden', 'en')
+        if dutch
+        else ('minute', 'minutes', 'second', 'seconds', 'and')
+    )
+    parts = [f'{minutes} {words[0] if minutes == 1 else words[1]}'] if minutes else []
+    if rest or not minutes:
+        parts.append(f'{rest} {words[2] if rest == 1 else words[3]}')
+    return f' {words[4]} '.join(parts)
+
+
+def _summary(count: int, seconds: float, language: str | None) -> str:
+    """The v1 closing line of a turn that called tools, in the UI's language."""
+    dutch = (language or '').lower().startswith('nl')
+    noun = 'tool' if count == 1 else 'tools'
+    return f'{count} {noun} {"aangeroepen" if dutch else "called"} in {_duration(seconds, dutch)}'
+
+
 def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] | None:
     """The declared template, or its fallback, when every placeholder has a value."""
     for template in (declared.get('template'), declared.get('fallback')):
@@ -234,10 +258,11 @@ class AgentTurn:
         self.turn_sources: set[int] = set()
         self.partial = ''
         self.partial_reasoning = ''
-        self.active_tools: dict[str, dict[str, Any] | None] = {}
+        self.tool_calls = 0
+        self.started = time.monotonic()
         self.tool_statuses: dict[str, dict[str, Any]] = {}
         self.knowledge_names: dict[str, str] = {}
-        self.awaiting_source: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {}
+        self.awaiting_source: dict[str, tuple[str, str, dict[str, Any], dict[str, Any]]] = {}
         self.model: str | None = None
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -307,25 +332,31 @@ class AgentTurn:
             await self.emitter({'type': kind, 'data': data})
 
     async def start_tools(self, calls: list[dict]) -> None:
+        """Show each call once, while it runs: the frontend appends every status, and settles the last one when
+        the message is done."""
         await self.clear_tools()
         for call in calls:
-            status = self.tool_status(call)
-            self.active_tools[call['id']] = status
-            if status is not None:
+            self.tool_calls += 1
+            if (status := self.tool_status(call)) is not None:
                 await self.emit('status', {**status, 'done': False})
 
     def tool_status(self, call: dict) -> dict[str, Any] | None:
         """The call's declared status filled from the call, else a generic line; `None` while it waits on
         the source it returns."""
         name, arguments = call['name'], call.get('arguments') or {}
-        generic = {'description': 'Searching the knowledge base…' if name == 'search' else f'Running {name}…'}
+        # The action names the tool: the frontend lays a turn out as tool activity only for statuses with one.
+        generic = {
+            'action': name,
+            'description': 'Searching the knowledge base…' if name == 'search' else f'Running {name}…',
+        }
         declared = self.tool_statuses.get(name)
         if not isinstance(declared, dict):
             return generic
         if isinstance(source := declared.get('source'), str) and isinstance(arguments.get(source), str):
-            self.awaiting_source[arguments[source]] = (call['id'], declared, arguments)
+            self.awaiting_source[arguments[source]] = (call['id'], name, declared, arguments)
             return None
-        return _filled(declared, self.tool_params(declared, arguments, {})) or generic
+        filled = _filled(declared, self.tool_params(declared, arguments, {}))
+        return {'action': name, **filled} if filled else generic
 
     def tool_params(self, declared: dict[str, Any], arguments: dict, properties: dict) -> dict[str, str]:
         """Each declared param's value: `argument.<name>`, `knowledge.<argument>` or `source.<property>`."""
@@ -346,24 +377,17 @@ class AgentTurn:
         return params
 
     async def clear_tools(self, call_id: str | None = None) -> None:
-        completed = list(self.active_tools) if call_id is None else [call_id]
-        cleared = False
-        for key in completed:
-            status = self.active_tools.pop(key, None)
-            if status is not None:
-                cleared = True
-                await self.emit('status', {**status, 'done': True})
-        running = [status for status in self.active_tools.values() if status is not None]
-        if cleared and running:
-            await self.emit('status', {**running[-1], 'done': False})
+        """Forget the calls still waiting on their source: a call that ended without one shows nothing."""
+        for key, (waiting, *_rest) in list(self.awaiting_source.items()):
+            if call_id is None or waiting == call_id:
+                del self.awaiting_source[key]
 
     async def record_source(self, payload: dict) -> None:
         if (awaiting := self.awaiting_source.pop(payload.get('ref') or payload['id'], None)) is not None:
-            call_id, declared, arguments = awaiting
+            _call_id, name, declared, arguments = awaiting
             params = self.tool_params(declared, arguments, payload.get('properties') or {})
-            if call_id in self.active_tools and (status := _filled(declared, params)) is not None:
-                self.active_tools[call_id] = status
-                await self.emit('status', {**status, 'done': False})
+            if (filled := _filled(declared, params)) is not None:
+                await self.emit('status', {'action': name, **filled, 'done': False})
         source = self.citations.add(payload)
         if source:
             await self.emit('source', source)
@@ -484,7 +508,12 @@ class AgentTurn:
         text = self.citations.rewrite('', final=True)
         chunks = [_chunk({'content': text})] if text else []
         state = event.data.get('state')
-        await self.emit('status', {'description': state or 'error', 'done': True})
+        if state != 'idle':
+            await self.emit('status', {'description': state or 'error', 'done': True})
+        elif self.tool_calls:
+            # The v1 closing line: the frontend keeps the last summary as the header of the tool list.
+            summary = _summary(self.tool_calls, time.monotonic() - self.started, self.metadata.get('user_language'))
+            await self.emit('status', {'action': 'summary', 'description': summary, 'done': True})
         if event.event == 'error':
             chunks.append(
                 _error(
