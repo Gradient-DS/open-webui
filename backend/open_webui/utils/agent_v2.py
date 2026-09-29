@@ -213,7 +213,7 @@ class AgentTurn:
         if not parent_id or not chat_id:
             return
         parent = await Chats.get_message_by_id_and_message_id(chat_id, parent_id)
-        bookmark = (parent or {}).get('agent_v2')
+        bookmark = ((parent or {}).get('meta') or {}).get('agent_v2')
         if not bookmark:
             return
         self.thread_id, self.position = bookmark['thread_id'], bookmark['position']
@@ -231,9 +231,14 @@ class AgentTurn:
     async def persist(self) -> None:
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
         if self.thread_id and chat_id and message_id:
-            await Chats.upsert_message_to_chat_by_id_and_message_id(
-                chat_id, message_id, {'agent_v2': {'thread_id': self.thread_id, 'position': self.position}}
-            )
+            # [Claude] Under meta: reads come from the chat_message table, which drops keys it has no column for.
+            # Merged, because tool approval writes meta too.
+            stored = await Chats.get_message_by_id_and_message_id(chat_id, message_id)
+            meta = {
+                **((stored or {}).get('meta') or {}),
+                'agent_v2': {'thread_id': self.thread_id, 'position': self.position},
+            }
+            await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, {'meta': meta})
 
     async def cancel(self) -> None:
         with anyio.CancelScope(shield=True):

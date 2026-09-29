@@ -7,12 +7,13 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import httpx
 import pytest
 from open_webui import env
 from open_webui.models.agent_configs import AgentConfigs
-from open_webui.models.chats import Chats
+from open_webui.models.chats import ChatForm, Chats
 from open_webui.soev.client import ChatEvent
 from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
@@ -74,7 +75,7 @@ class Chat:
         ]
 
     def bookmark(self, message_id: str, chat_id: str = 'chat') -> dict:
-        return self.messages[chat_id, message_id]['agent_v2']
+        return self.messages[chat_id, message_id]['meta']['agent_v2']
 
     def mutations(self) -> list[tuple[str, dict | None]]:
         return [
@@ -1069,3 +1070,29 @@ async def test_agent_model_is_default_without_resolved_llm(chat: Chat, monkeypat
     )
     await chat.turn('default turn', 'a1', form_data={'model': ''}, model={})
     assert chat.mutations()[0][1]['model'] == 'agent-default'
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_continues_the_thread_in_real_chat_storage(
+    chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored = Chat(chat_http)
+    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v1')
+    monkeypatch.setattr(
+        AgentConfigs, 'get_agent_config_by_id', AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2'}))
+    )
+    monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=AsyncMock()))
+    chat_id = str(uuid4())
+    await Chats.insert_new_chat(chat_id, 'alice', ChatForm(chat={'title': 'Chat', 'history': {'messages': {}}}))
+    for message_id, parent in [('q1', None), ('a1', 'q1'), ('q2', 'a1'), ('a2', 'q2')]:
+        role = 'user' if message_id.startswith('q') else 'assistant'
+        await Chats.upsert_message_to_chat_by_id_and_message_id(
+            chat_id, message_id, {'role': role, 'parentId': parent, 'content': message_id, 'meta': {'kept': message_id}}
+        )
+
+    await stored.turn('first', 'a1', None, chat_id=chat_id)
+    await stored.turn('second', 'a2', 'a1', chat_id=chat_id)
+
+    assert [path for path, _ in stored.mutations()] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
+    answer = await Chats.get_message_by_id_and_message_id(chat_id, 'a2')
+    assert answer['meta'] == {'kept': 'a2', 'agent_v2': {'thread_id': 'thr-1', 'position': 5}}
