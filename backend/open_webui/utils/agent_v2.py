@@ -3,10 +3,12 @@ Feed the model picker with an OpenAI-type connection whose base URL is
 <SOEV_API_URL>/v1/chat and whose API key is the soev-api key."""
 
 import asyncio
+import html
 import json
 import logging
 import math
 import re
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from typing import Any
@@ -24,6 +26,67 @@ from starlette.responses import StreamingResponse
 log = logging.getLogger(__name__)
 _MARKER = re.compile(r'\[([^\[\]]+)\]')
 _ROOT = '/v1/chat/threads'
+_PLACEHOLDER = re.compile(r'{{(\w+)}}')
+# [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
+TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
+
+
+async def _tool_statuses(client: SoevClient) -> dict[str, dict[str, Any]]:
+    """The declared status of each agent tool; none while soev-api cannot say."""
+    if time.monotonic() < TOOL_STATUS_CACHE['expires_at']:
+        return TOOL_STATUS_CACHE['statuses']
+    try:
+        listed = await client.get('/v1/chat/tools')
+        statuses = {tool['name']: tool['status'] for tool in listed['data'] if isinstance(tool.get('status'), dict)}
+    except (SoevApiError, KeyError, TypeError):
+        log.warning("Could not read the agents' tool statuses")
+        statuses = {}
+    TOOL_STATUS_CACHE.update(expires_at=time.monotonic() + 300.0, statuses=statuses)
+    return statuses
+
+
+def _duration(seconds: float, dutch: bool) -> str:
+    """The turn's duration as the v1 agents wrote it: `24 seconds`, `2 minutes and 5 seconds`."""
+    total = int(seconds)
+    if total <= 0:
+        return 'minder dan een seconde' if dutch else 'less than a second'
+    minutes, rest = divmod(total, 60)
+    words = (
+        ('minuut', 'minuten', 'seconde', 'seconden', 'en')
+        if dutch
+        else ('minute', 'minutes', 'second', 'seconds', 'and')
+    )
+    parts = [f'{minutes} {words[0] if minutes == 1 else words[1]}'] if minutes else []
+    if rest or not minutes:
+        parts.append(f'{rest} {words[2] if rest == 1 else words[3]}')
+    return f' {words[4]} '.join(parts)
+
+
+def _marker(status: dict[str, Any]) -> dict[str, Any]:
+    """The v1 anchor for one shown tool call: the frontend hides it and places the call's status and the
+    reasoning around it by its position in the content. The whitespace is what its details tokenizer needs."""
+    text = _PLACEHOLDER.sub(lambda match: str(status.get(match[1], match[0])), status['description'])
+    name = html.escape(status['action'], quote=True)
+    return _chunk(
+        {
+            'content': f'\n\n<details type="tool_calls" done="true" name="{name}">\n<summary>{html.escape(text)}</summary>\n</details>\n\n'
+        }
+    )
+
+
+def _summary(count: int, seconds: float, language: str | None) -> str:
+    """The v1 closing line of a turn that called tools, in the UI's language."""
+    dutch = (language or '').lower().startswith('nl')
+    noun = 'tool' if count == 1 else 'tools'
+    return f'{count} {noun} {"aangeroepen" if dutch else "called"} in {_duration(seconds, dutch)}'
+
+
+def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] | None:
+    """The declared template, or its fallback, when every placeholder has a value."""
+    for template in (declared.get('template'), declared.get('fallback')):
+        if isinstance(template, str) and all(name in params for name in _PLACEHOLDER.findall(template)):
+            return {'description': template, **{name: params[name] for name in _PLACEHOLDER.findall(template)}}
+    return None
 
 
 def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
@@ -208,7 +271,11 @@ class AgentTurn:
         self.turn_sources: set[int] = set()
         self.partial = ''
         self.partial_reasoning = ''
-        self.active_tools: dict[str, str] = {}
+        self.tool_calls = 0
+        self.started = time.monotonic()
+        self.tool_statuses: dict[str, dict[str, Any]] = {}
+        self.knowledge_names: dict[str, str] = {}
+        self.awaiting_source: dict[str, tuple[str, str, dict[str, Any], dict[str, Any]]] = {}
         self.model: str | None = None
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -277,32 +344,77 @@ class AgentTurn:
         if self.emitter:
             await self.emitter({'type': kind, 'data': data})
 
-    async def start_tools(self, calls: list[dict]) -> None:
+    async def start_tools(self, calls: list[dict]) -> list[dict[str, Any]]:
+        """Show each call once, while it runs: the frontend appends every status, and settles the last one when
+        the message is done."""
         await self.clear_tools()
+        markers = []
         for call in calls:
-            name = call['name']
-            description = 'Searching the knowledge base…' if name == 'search' else f'Running {name}…'
-            self.active_tools[call['id']] = description
-            await self.emit('status', {'description': description, 'done': False})
+            self.tool_calls += 1
+            if (status := self.tool_status(call)) is not None:
+                markers.append(await self.show_tool(status))
+        return markers
+
+    async def show_tool(self, status: dict[str, Any]) -> dict[str, Any]:
+        """Emit a call's status once, while it runs, and return its anchor for the content."""
+        await self.emit('status', {**status, 'done': False})
+        return _marker(status)
+
+    def tool_status(self, call: dict) -> dict[str, Any] | None:
+        """The call's declared status filled from the call, else a generic line; `None` while it waits on
+        the source it returns."""
+        name, arguments = call['name'], call.get('arguments') or {}
+        # The action names the tool: the frontend lays a turn out as tool activity only for statuses with one.
+        generic = {
+            'action': name,
+            'description': 'Searching the knowledge base…' if name == 'search' else f'Running {name}…',
+        }
+        declared = self.tool_statuses.get(name)
+        if not isinstance(declared, dict):
+            return generic
+        if isinstance(source := declared.get('source'), str) and isinstance(arguments.get(source), str):
+            self.awaiting_source[arguments[source]] = (call['id'], name, declared, arguments)
+            return None
+        filled = _filled(declared, self.tool_params(declared, arguments, {}))
+        return {'action': name, **filled} if filled else generic
+
+    def tool_params(self, declared: dict[str, Any], arguments: dict, properties: dict) -> dict[str, str]:
+        """Each declared param's value: `argument.<name>`, `knowledge.<argument>` or `source.<property>`."""
+        params = {}
+        for param, binding in (declared.get('params') or {}).items():
+            kind, _, name = str(binding).partition('.')
+            value = None
+            if kind == 'argument':
+                value = arguments.get(name)
+            elif kind == 'knowledge':
+                key = arguments.get(name)
+                only = list(self.knowledge_names.values()) if len(self.knowledge_names) == 1 else [None]
+                value = self.knowledge_names.get(key) if key else only[0]
+            elif kind == 'source':
+                value = properties.get(name)
+            if isinstance(value, str | int | float) and str(value).strip():
+                params[param] = str(value)
+        return params
 
     async def clear_tools(self, call_id: str | None = None) -> None:
-        completed = list(self.active_tools) if call_id is None else [call_id]
-        cleared = False
-        for key in completed:
-            description = self.active_tools.pop(key, None)
-            if description is not None:
-                cleared = True
-                await self.emit('status', {'description': description, 'done': True})
-        if cleared and self.active_tools:
-            description = next(reversed(self.active_tools.values()))
-            await self.emit('status', {'description': description, 'done': False})
+        """Forget the calls still waiting on their source: a call that ended without one shows nothing."""
+        for key, (waiting, *_rest) in list(self.awaiting_source.items()):
+            if call_id is None or waiting == call_id:
+                del self.awaiting_source[key]
 
-    async def record_source(self, payload: dict) -> None:
+    async def record_source(self, payload: dict) -> list[dict[str, Any]]:
+        markers = []
+        if (awaiting := self.awaiting_source.pop(payload.get('ref') or payload['id'], None)) is not None:
+            _call_id, name, declared, arguments = awaiting
+            params = self.tool_params(declared, arguments, payload.get('properties') or {})
+            if (filled := _filled(declared, params)) is not None:
+                markers.append(await self.show_tool({'action': name, **filled}))
         source = self.citations.add(payload)
         if source:
             await self.emit('source', source)
         self.turn_sources.add(self.citations.sources[payload['id']]['n'])
         await self.emit('panel_filter', {'ns': sorted(self.turn_sources)})
+        return markers
 
     async def resume(self) -> None:
         events = self.client.chat_stream(
@@ -364,7 +476,7 @@ class AgentTurn:
             self.input_position = self.position
             await self.persist()
         if event.event == 'source':
-            await self.record_source(payload)
+            return await self.record_source(payload)
         if event.event == 'reasoning_delta':
             await self.clear_tools()
             self.partial_reasoning += event.data['text']
@@ -383,14 +495,14 @@ class AgentTurn:
         return []
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
-        await self.start_tools(payload.get('tool_calls', []))
+        markers = await self.start_tools(payload.get('tool_calls', []))
         reasoning = self.remaining_reasoning(payload.get('reasoning') or '')
         content = payload['content']
         if not content.startswith(self.partial):
             log.warning('Durable model output disagrees with streamed text', extra={'thread_id': self.thread_id})
             self.partial = ''
             self.citations.pending = ''
-            return []
+            return markers
         text = self.citations.rewrite(content[len(self.partial) :], final=True)
         self.partial = ''
         chunks = []
@@ -398,7 +510,7 @@ class AgentTurn:
             chunks.append(_chunk({'reasoning_content': reasoning}))
         if text:
             chunks.append(_chunk({'content': text}))
-        return chunks
+        return chunks + markers
 
     def remaining_reasoning(self, reasoning: str) -> str:
         partial, self.partial_reasoning = self.partial_reasoning, ''
@@ -418,7 +530,12 @@ class AgentTurn:
         text = self.citations.rewrite('', final=True)
         chunks = [_chunk({'content': text})] if text else []
         state = event.data.get('state')
-        await self.emit('status', {'description': state or 'error', 'done': True})
+        if state != 'idle':
+            await self.emit('status', {'description': state or 'error', 'done': True})
+        elif self.tool_calls:
+            # The v1 closing line: the frontend keeps the last summary as the header of the tool list.
+            summary = _summary(self.tool_calls, time.monotonic() - self.started, self.metadata.get('user_language'))
+            await self.emit('status', {'action': 'summary', 'description': summary, 'done': True})
         if event.event == 'error':
             chunks.append(
                 _error(
@@ -435,6 +552,8 @@ class AgentTurn:
         self.model = body.get('model')
         try:
             await identity.ensure_link(self.as_user, self.client)
+            self.tool_statuses = await _tool_statuses(self.client)
+            self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()
             self.emitter = await get_event_emitter(self.metadata)
             await self.emit('panel_filter', {'ns': []})

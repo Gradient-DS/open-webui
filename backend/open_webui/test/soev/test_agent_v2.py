@@ -676,7 +676,8 @@ async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text
         ]
     ]
     chunks = await chat.turn('question', 'a1')
-    assert content(chunks) == 'Answer [1] and [1].'
+    marker = '\n\n<details type="tool_calls" done="true" name="search">\n<summary>Searching the knowledge base…</summary>\n</details>\n\n'
+    assert content(chunks) == marker + 'Answer [1] and [1].'
     assert content(chunks, 'reasoning_content') == 'PlanExplain'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
     assert [source['n'] for source in sources] == [1, 1]
@@ -850,9 +851,7 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
         ('failure', {'message': 'failed'}),
     ],
 )
-async def test_tool_activity_clears_at_result_or_next_model_text(
-    name: str, description: str, kind: str, payload: dict
-) -> None:
+async def test_a_tool_call_shows_once_whatever_ends_it(name: str, description: str, kind: str, payload: dict) -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
     async with asyncio.timeout(2):
@@ -863,18 +862,17 @@ async def test_tool_activity_clears_at_result_or_next_model_text(
             )
         )
         assert [call.args[0] for call in turn.emitter.call_args_list] == [
-            {'type': 'status', 'data': {'description': description, 'done': False}}
+            {'type': 'status', 'data': {'action': name, 'description': description, 'done': False}}
         ]
         data = payload if kind.endswith('delta') else {'stream': 'root', 'payload': payload}
         await turn.render(ChatEvent(kind, data))
     assert [call.args[0] for call in turn.emitter.call_args_list] == [
-        {'type': 'status', 'data': {'description': description, 'done': False}},
-        {'type': 'status', 'data': {'description': description, 'done': True}},
+        {'type': 'status', 'data': {'action': name, 'description': description, 'done': False}}
     ]
 
 
 @pytest.mark.asyncio
-async def test_parallel_tools_keep_remaining_activity_visible() -> None:
+async def test_parallel_tools_each_show_once() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
     async with asyncio.timeout(2):
@@ -890,24 +888,17 @@ async def test_parallel_tools_keep_remaining_activity_visible() -> None:
                 },
             )
         )
-        for stream, call_id in [('child', 'c2'), ('root', 'unknown')]:
-            await turn.render(ChatEvent('tool_output', {'stream': stream, 'payload': {'call_id': call_id}}))
-        assert turn.emitter.call_count == 2
-        await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c2'}}))
-        assert turn.emitter.call_args.args[0]['data'] == {'description': 'Searching the knowledge base…', 'done': False}
-        await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
+        for call_id in ['c2', 'c1']:
+            await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id}}))
     assert [call.args[0]['data'] for call in turn.emitter.call_args_list] == [
-        {'description': 'Searching the knowledge base…', 'done': False},
-        {'description': 'Running calculate…', 'done': False},
-        {'description': 'Running calculate…', 'done': True},
-        {'description': 'Searching the knowledge base…', 'done': False},
-        {'description': 'Searching the knowledge base…', 'done': True},
+        {'action': 'search', 'description': 'Searching the knowledge base…', 'done': False},
+        {'action': 'calculate', 'description': 'Running calculate…', 'done': False},
     ]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('failure', [False, True])
-async def test_turn_end_clears_tool_activity_without_result(chat: Chat, failure: bool) -> None:
+async def test_turn_end_closes_with_the_summary_or_the_failure(chat: Chat, failure: bool) -> None:
     chat.api.chat.turns = [
         [
             ('model_output', {'content': '', 'tool_calls': [{'id': 'c1', 'name': 'search'}]}),
@@ -917,9 +908,10 @@ async def test_turn_end_clears_tool_activity_without_result(chat: Chat, failure:
     chunks = await chat.turn('question', 'a1')
     assert any('error' in chunk for chunk in chunks) == failure
     assert [event['data'] for event in chat.socket if event['type'] == 'status'] == [
-        {'description': 'Searching the knowledge base…', 'done': False},
-        {'description': 'Searching the knowledge base…', 'done': True},
-        {'description': 'error' if failure else 'idle', 'done': True},
+        {'action': 'search', 'description': 'Searching the knowledge base…', 'done': False},
+        {'description': 'error', 'done': True}
+        if failure
+        else {'action': 'summary', 'description': '1 tool called in less than a second', 'done': True},
     ]
 
 
@@ -1028,8 +1020,7 @@ async def test_explicit_stop_and_broken_transport_cancel_the_submitted_input(
     assert streams[0].closed
     assert chat.api.chat.threads['thr-1']['state'] == 'idle'
     assert [event['data'] for event in chat.socket if event['type'] == 'status'] == [
-        {'description': 'Searching the knowledge base…', 'done': False},
-        {'description': 'Searching the knowledge base…', 'done': True},
+        {'action': 'search', 'description': 'Searching the knowledge base…', 'done': False},
     ]
 
 
@@ -1262,3 +1253,123 @@ async def test_a_temporary_turn_ending_after_its_socket_closed_deletes_its_threa
 
     assert temporary.api.chat.threads == {}
     assert socket_main.TEMPORARY_AGENT_THREADS == {}
+
+
+STATUSES = {
+    'search': {
+        'template': 'Searching {{collection_name}} for "{{query}}"...',
+        'fallback': 'Searching all knowledge bases for "{{query}}"...',
+        'params': {'query': 'argument.query', 'collection_name': 'knowledge.knowledge_base'},
+    },
+    'open_document': {'template': 'Reading {{doc_title}}...', 'params': {'doc_title': 'source.title'}, 'source': 'id'},
+}
+
+
+@pytest.fixture
+def declared(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> Chat:
+    """soev-api declares how search and open_document show; two knowledge bases exist."""
+    monkeypatch.setattr(agent_v2, 'TOOL_STATUS_CACHE', {'expires_at': float('inf'), 'statuses': STATUSES})
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    seed_collection(chat.api, 'kb-b', 'Notulen')
+    return chat
+
+
+def statuses(chat: Chat) -> list[dict]:
+    """The tool statuses, without the turn's closing summary."""
+    return [
+        event['data'] for event in chat.socket if event['type'] == 'status' and event['data'].get('action') != 'summary'
+    ]
+
+
+def call(name: str, **arguments: Any) -> tuple[str, dict]:
+    return ('model_output', {'content': '', 'tool_calls': [{'id': 'c1', 'name': name, 'arguments': arguments}]})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'arguments,selected,expected',
+    [
+        (
+            {'query': 'opzegtermijn', 'knowledge_base': 'kb-b'},
+            ['kb-a', 'kb-b'],
+            {'description': 'Searching {{collection_name}} for "{{query}}"...', 'collection_name': 'Notulen'},
+        ),
+        (
+            {'query': 'opzegtermijn'},
+            ['kb-a'],
+            {'description': 'Searching {{collection_name}} for "{{query}}"...', 'collection_name': 'Contracten'},
+        ),
+        (
+            {'query': 'opzegtermijn'},
+            ['kb-a', 'kb-b'],
+            {'description': 'Searching all knowledge bases for "{{query}}"...'},
+        ),
+    ],
+)
+async def test_a_search_shows_its_declared_template_filled_from_the_call(
+    declared: Chat, arguments: dict, selected: list[str], expected: dict
+) -> None:
+    declared.api.chat.turns = [
+        [call('search', **arguments), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]
+    ]
+    await declared.turn('q', 'a1', files=[{'type': 'collection', 'id': key} for key in selected])
+
+    running = {'action': 'search', **expected, 'query': 'opzegtermijn'}
+    assert statuses(declared) == [{**running, 'done': False}]
+
+
+@pytest.mark.asyncio
+async def test_opening_a_document_shows_the_title_its_source_carries(declared: Chat) -> None:
+    source = {'id': 'doc-1', 'ref': 'doc-1', 'text': 'body', 'properties': {'title': 'Leave policy'}}
+    declared.api.chat.turns = [
+        [
+            call('open_document', id='doc-1'),
+            ('source', source),
+            ('tool_output', {'call_id': 'c1'}),
+            ('model_output', {'content': 'done'}),
+        ]
+    ]
+    chunks = await declared.turn('q', 'a1', files=[{'type': 'collection', 'id': 'kb-a'}])
+
+    assert '<details type="tool_calls" done="true" name="open_document">\n<summary>Reading Leave policy...' in content(
+        chunks
+    )
+    reading = {'action': 'open_document', 'description': 'Reading {{doc_title}}...', 'doc_title': 'Leave policy'}
+    assert statuses(declared) == [{**reading, 'done': False}]
+
+
+@pytest.mark.asyncio
+async def test_a_tool_without_a_declared_status_shows_the_generic_line(declared: Chat) -> None:
+    declared.api.chat.turns = [
+        [call('list_documents'), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]
+    ]
+    await declared.turn('q', 'a1')
+
+    assert statuses(declared) == [{'action': 'list_documents', 'description': 'Running list_documents…', 'done': False}]
+
+
+@pytest.mark.parametrize(
+    'count,seconds,language,summary',
+    [
+        (1, 0.4, 'en-US', '1 tool called in less than a second'),
+        (3, 24, None, '3 tools called in 24 seconds'),
+        (2, 125, 'nl-NL', '2 tools aangeroepen in 2 minuten en 5 seconden'),
+        (1, 61, 'nl', '1 tool aangeroepen in 1 minuut en 1 seconde'),
+        (4, 120, 'en', '4 tools called in 2 minutes'),
+    ],
+)
+def test_the_closing_summary_reads_as_the_v1_agents_wrote_it(
+    count: int, seconds: float, language: str | None, summary: str
+) -> None:
+    assert agent_v2._summary(count, seconds, language) == summary
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language(declared: Chat) -> None:
+    declared.api.chat.turns = [
+        [call('list_documents'), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]
+    ]
+    await declared.turn('q', 'a1', user_language='nl-NL')
+
+    closing = [event['data'] for event in declared.socket if event['type'] == 'status'][-1]
+    assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}
