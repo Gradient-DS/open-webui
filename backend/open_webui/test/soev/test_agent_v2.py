@@ -13,8 +13,10 @@ import httpx
 import pytest
 from open_webui import env
 from open_webui.models.agent_configs import AgentConfigs
+from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import ChatForm, Chats
-from open_webui.soev.client import ChatEvent
+from open_webui.soev import agent_threads
+from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
@@ -1149,3 +1151,71 @@ async def test_a_follow_up_continues_the_thread_in_real_chat_storage(
     assert [path for path, _ in stored.mutations()] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
     answer = await Chats.get_message_by_id_and_message_id(chat_id, 'a2')
     assert answer['meta'] == {'kept': 'a2', 'agent_v2': {'thread_id': 'thr-1', 'position': 5}}
+
+
+@pytest.fixture
+def stored(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> Chat:
+    """ChatMessages over the fixture's messages, as the deletion paths read them."""
+
+    def rows(chat_id: str | None = None) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(chat_id=key[0], meta=message.get('meta'))
+            for key, message in chat.messages.items()
+            if chat_id is None or key[0] == chat_id
+        ]
+
+    async def by_chat(chat_id: str) -> list[SimpleNamespace]:
+        return rows(chat_id)
+
+    async def by_user(user_id: str, skip: int = 0, limit: int = 50) -> list[SimpleNamespace]:
+        return rows()[skip : skip + limit]
+
+    monkeypatch.setattr(ChatMessages, 'get_messages_by_chat_id', by_chat)
+    monkeypatch.setattr(ChatMessages, 'get_messages_by_user_id', by_user)
+    return chat
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_chat_deletes_its_threads_and_forks_but_not_a_clones(stored: Chat) -> None:
+    await stored.turn('first', 'a1')
+    await stored.turn('second', 'a2', 'a1')
+    await stored.turn('second again', 'a2b', 'a1')
+    await stored.turn('in the other chat', 'b1', chat_id='other')
+    stored.messages['clone', 'a1'] = copy.deepcopy(stored.messages['chat', 'a1'])
+
+    assert await agent_threads.delete_chat_threads('alice', 'chat') == []
+
+    assert sorted(stored.api.chat.threads) == ['thr-1', 'thr-3']
+    assert [request.url.path for request in stored.api.chat.requests if request.method == 'DELETE'] == [
+        '/v1/chat/threads/thr-2'
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_thread_already_gone_counts_as_deleted_and_an_outage_keeps_it(
+    stored: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await stored.turn('first', 'a1')
+    await stored.turn('elsewhere', 'b1', chat_id='later')
+    del stored.api.chat.threads['thr-1']
+    assert await agent_threads.delete_chat_threads('alice', 'chat') == []
+
+    async def unavailable(*args: Any, **kwargs: Any) -> None:
+        raise SoevApiError(503, 'service_unavailable', 'down')
+
+    monkeypatch.setattr(SoevClient, 'chat_delete', unavailable)
+    assert await agent_threads.delete_chat_threads('alice', 'later') == ['thr-2']
+
+
+@pytest.mark.asyncio
+async def test_deleting_messages_deletes_only_the_threads_no_message_still_bookmarks(stored: Chat) -> None:
+    await stored.turn('first', 'a1')
+    await stored.turn('second', 'a2', 'a1')
+    await stored.turn('first again', 'r1')
+    before = await agent_threads.chat_thread_ids('chat')
+    del stored.messages['chat', 'r1']
+    del stored.messages['chat', 'a2']
+
+    assert await agent_threads.delete_released_threads('alice', before) == []
+
+    assert sorted(stored.api.chat.threads) == ['thr-1']

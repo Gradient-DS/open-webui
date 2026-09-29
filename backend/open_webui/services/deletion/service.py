@@ -274,6 +274,7 @@ class DeletionService:
         """
         from open_webui.models.chats import Chats
         from open_webui.models.tags import Tags
+        from open_webui.soev.agent_threads import delete_chat_threads
 
         report = DeletionReport()
 
@@ -308,6 +309,13 @@ class DeletionService:
                         report.add_db('tag')
                 except Exception as e:
                     report.add_error(f'Failed to cleanup tag {tag_name}: {e}')
+
+        # [Gradient] Its agent threads in soev-api, unless another chat of the user still bookmarks them
+        try:
+            if kept := await delete_chat_threads(chat.user_id, chat_id):
+                report.add_error(f'Agent threads not deleted: {len(kept)}')
+        except Exception as e:
+            report.add_error(f'Failed to delete agent threads of chat {chat_id}: {e}')
 
         # 4. Delete chat (ChatFile junction cascades via FK)
         try:
@@ -461,6 +469,7 @@ class DeletionService:
         from open_webui.models.users import Users
         from open_webui.models.chats import Chats
         from open_webui.models.groups import Groups
+        from open_webui.soev.agent_threads import delete_threads, user_thread_ids
         from open_webui.models.tags import Tags
         from open_webui.models.folders import Folders
         from open_webui.models.prompts import Prompts
@@ -609,6 +618,13 @@ class DeletionService:
             report.add_db('api_key')
         except Exception as e:
             report.add_error(f'Failed to delete API keys: {e}')
+
+        # [Gradient] The user's agent threads in soev-api, before their chats go with the user record
+        try:
+            if kept := await delete_threads(user_id, await user_thread_ids(user_id)):
+                report.add_error(f'Agent threads not deleted: {len(kept)}')
+        except Exception as e:
+            report.add_error(f'Failed to delete agent threads: {e}')
 
         # 5. Finally delete auth and user records
         try:

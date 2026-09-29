@@ -65,6 +65,7 @@ async def _process_pending_chat_deletions():
     from open_webui.models.chats import Chats
     from open_webui.models.tags import Tags
     from open_webui.services.deletion import DeletionService
+    from open_webui.soev.agent_threads import delete_chat_threads
 
     pending_chats = await Chats.get_pending_deletions(limit=100)
     if not pending_chats:
@@ -77,6 +78,10 @@ async def _process_pending_chat_deletions():
 
     for chat in pending_chats:
         try:
+            # [Gradient] Its agent threads first: while one is kept, the chat stays pending and is retried.
+            if await delete_chat_threads(chat.user_id, chat.id):
+                continue
+
             # Collect file IDs from this chat
             chat_files = await Chats.get_files_by_chat_id(chat.id)
             all_file_ids.extend(cf.file_id for cf in chat_files)

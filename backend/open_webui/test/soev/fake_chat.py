@@ -62,6 +62,9 @@ class FakeChatApi:
         if thread is None or thread['owner'] != owner:
             return self.problem(404, 'not_found')
         operation = parts[1] if len(parts) > 1 else 'read'
+        if request.method == 'DELETE' and operation == 'read':
+            del self.threads[parts[0]]
+            return httpx.Response(204)
         return self._operation(request, body or {}, thread, operation)
 
     @staticmethod

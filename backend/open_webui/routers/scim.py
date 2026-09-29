@@ -21,6 +21,7 @@ from open_webui.env import SCIM_AUTH_PROVIDER
 from open_webui.internal.db import get_async_session
 from open_webui.models.groups import GroupModel, Groups
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.agent_threads import delete_threads, user_thread_ids
 from open_webui.utils.auth import (
     decode_token,
     get_admin_user,
@@ -825,6 +826,12 @@ async def delete_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f'User {user_id} not found',
         )
+
+    # [Gradient] The user's agent threads in soev-api go before their chats do
+    try:
+        await delete_threads(user_id, await user_thread_ids(user_id))
+    except Exception:
+        log.exception('Failed to delete the agent threads of user %s', user_id)
 
     success = await Users.delete_user_by_id(user_id, db=db)
     if not success:
