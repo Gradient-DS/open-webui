@@ -62,9 +62,16 @@ async def _knowledge(metadata: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _knowledge_keys(metadata: dict[str, Any]) -> list[str]:
-    """The selected knowledge bases' keys; an OWUI knowledge id is the soev-api collection key."""
+    """The selected knowledge bases' keys; an OWUI knowledge id is the soev-api collection key.
+
+    A model's knowledge also lists files and notes, and legacy entries without an id; none is a collection key.
+    """
     selected = [item for item in metadata.get('files') or [] if item.get('type') == 'collection']
-    selected.extend(metadata.get('knowledge') or [])
+    selected.extend(
+        item
+        for item in metadata.get('knowledge') or []
+        if isinstance(item, str) or (item.get('type', 'collection') == 'collection' and 'id' in item)
+    )
     ids = [item if isinstance(item, str) else item['id'] for item in selected]
     if any(not isinstance(key, str) or not key for key in ids):
         raise ValueError('A collection requires an id')

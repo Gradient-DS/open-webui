@@ -223,6 +223,22 @@ async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(cha
 
 
 @pytest.mark.asyncio
+async def test_a_models_files_notes_and_legacy_entries_are_not_knowledge(chat: Chat) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    await chat.turn(
+        'question',
+        'a1',
+        knowledge=[
+            {'id': 'kb-a', 'type': 'collection'},
+            {'id': 'file-1', 'type': 'file'},
+            {'id': 'note-1', 'type': 'note'},
+            {'collection_name': 'legacy-chroma'},
+        ],
+    )
+    assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-a', 'name': 'Contracten'}]
+
+
+@pytest.mark.asyncio
 async def test_knowledge_the_api_does_not_show_is_still_sent_by_its_key(chat: Chat) -> None:
     await chat.turn('next', 'a1', files=[{'type': 'collection', 'id': 'kb-gone', 'name': 'Old'}])
     assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-gone', 'name': 'kb-gone'}]
