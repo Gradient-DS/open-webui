@@ -3,6 +3,9 @@
 soev-api keeps a v2 agent's conversation in threads owned by the user; OWUI knows them only by the
 `meta.agent_v2` bookmark on each assistant message. A regenerate or an edit forks a thread of its own, and a
 clone of a chat shares the original's threads, so a thread goes only once no message of the user bookmarks it.
+
+A temporary chat has no messages to hold bookmarks: they are kept beside the socket session pool for as long as
+the chat's socket is connected, and its threads go when the socket does, as the chat itself does in the browser.
 """
 
 import logging
@@ -12,6 +15,7 @@ from urllib.parse import quote
 from open_webui.models.chat_messages import ChatMessageModel, ChatMessages
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError
+from open_webui.utils.chat_id import get_temporary_chat_session_id
 
 log = logging.getLogger(__name__)
 _PAGE = 500
@@ -46,13 +50,17 @@ async def delete_threads(user_id: str, thread_ids: Collection[str]) -> list[str]
     Returns the threads a transient failure kept, for the caller to retry. A refusal is logged and not retried:
     it would refuse again.
     """
+    return await _delete(f'owui:user:{user_id}', thread_ids)
+
+
+async def _delete(as_user: str, thread_ids: Collection[str]) -> list[str]:
     if not thread_ids:
         return []
     client = identity.build_client()
     kept = []
     for thread_id in sorted(thread_ids):
         try:
-            await client.chat_delete(f'/v1/chat/threads/{quote(thread_id, safe="")}', as_user=f'owui:user:{user_id}')
+            await client.chat_delete(f'/v1/chat/threads/{quote(thread_id, safe="")}', as_user=as_user)
         except SoevApiError as error:
             if error.status == 404:
                 continue
@@ -77,3 +85,41 @@ async def delete_released_threads(user_id: str, before: Collection[str]) -> list
     if not before:
         return []
     return await delete_threads(user_id, set(before) - await user_thread_ids(user_id))
+
+
+def _temporary() -> dict:
+    from open_webui.socket.main import TEMPORARY_AGENT_THREADS
+
+    return TEMPORARY_AGENT_THREADS
+
+
+def temporary_bookmark(chat_id: str, message_id: str) -> dict | None:
+    """The bookmark a temporary chat's message holds, if its chat is still open."""
+    store = _temporary()
+    return store[chat_id]['bookmarks'].get(message_id) if chat_id in store else None
+
+
+async def remember_temporary(chat_id: str, message_id: str, as_user: str, bookmark: dict) -> None:
+    """Hold a temporary chat's bookmark while its socket is connected; a turn that ends after it is gone deletes
+    its thread at once."""
+    from open_webui.socket.main import SESSION_POOL
+
+    if get_temporary_chat_session_id(chat_id) not in SESSION_POOL:
+        await _delete(as_user, {bookmark['thread_id']})
+        return
+    store = _temporary()
+    entry = store[chat_id] if chat_id in store else {'as_user': as_user, 'bookmarks': {}}
+    entry['bookmarks'][message_id] = bookmark
+    store[chat_id] = entry
+
+
+async def release_temporary(session_ids: Collection[str]) -> None:
+    """The sockets are gone, so their temporary chats are: delete the chats' threads."""
+    store = _temporary()
+    for chat_id, entry in list(store.items()):
+        if get_temporary_chat_session_id(chat_id) not in session_ids:
+            continue
+        del store[chat_id]
+        threads = {bookmark['thread_id'] for bookmark in entry['bookmarks'].values()}
+        if kept := await _delete(entry['as_user'], threads):
+            log.warning('Agent threads of a closed temporary chat not deleted', extra={'count': len(kept)})

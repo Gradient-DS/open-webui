@@ -16,8 +16,9 @@ import anyio
 from open_webui.models.chats import Chats
 from open_webui.models.knowledge import Knowledges
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, identity
+from open_webui.soev import acting, agent_threads, identity
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
+from open_webui.utils.chat_id import is_temporary_chat_id
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
@@ -219,8 +220,11 @@ class AgentTurn:
         chat_id = self.metadata.get('chat_id')
         if not parent_id or not chat_id:
             return
-        parent = await Chats.get_message_by_id_and_message_id(chat_id, parent_id)
-        bookmark = ((parent or {}).get('meta') or {}).get('agent_v2')
+        if is_temporary_chat_id(chat_id):
+            bookmark = agent_threads.temporary_bookmark(chat_id, parent_id)
+        else:
+            parent = await Chats.get_message_by_id_and_message_id(chat_id, parent_id)
+            bookmark = ((parent or {}).get('meta') or {}).get('agent_v2')
         if not bookmark:
             return
         self.thread_id, self.position = bookmark['thread_id'], bookmark['position']
@@ -237,7 +241,10 @@ class AgentTurn:
 
     async def persist(self) -> None:
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
-        if self.thread_id and chat_id and message_id:
+        if self.thread_id and chat_id and message_id and is_temporary_chat_id(chat_id):
+            bookmark = {'thread_id': self.thread_id, 'position': self.position}
+            await agent_threads.remember_temporary(chat_id, message_id, self.as_user, bookmark)
+        elif self.thread_id and chat_id and message_id:
             # [Claude] Under meta: reads come from the chat_message table, which drops keys it has no column for.
             # Merged, because tool approval writes meta too.
             stored = await Chats.get_message_by_id_and_message_id(chat_id, message_id)

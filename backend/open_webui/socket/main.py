@@ -175,6 +175,13 @@ if WEBSOCKET_MANAGER == 'redis':
         redis_sentinels=redis_sentinels,
         redis_cluster=WEBSOCKET_REDIS_CLUSTER,
     )
+    # [Gradient] The agent thread bookmarks of temporary chats, which have no rows to hold them.
+    TEMPORARY_AGENT_THREADS = RedisDict(
+        f'{REDIS_KEY_PREFIX}:temporary_agent_threads',
+        redis_url=WEBSOCKET_REDIS_URL,
+        redis_sentinels=redis_sentinels,
+        redis_cluster=WEBSOCKET_REDIS_CLUSTER,
+    )
 
     clean_up_lock = RedisLock(
         redis_url=WEBSOCKET_REDIS_URL,
@@ -203,6 +210,7 @@ else:
 
     SESSION_POOL = {}
     USAGE_POOL = {}
+    TEMPORARY_AGENT_THREADS = {}
 
     aquire_func = release_func = renew_func = lambda: True
     session_aquire_func = session_release_func = session_renew_func = lambda: True
@@ -251,6 +259,7 @@ async def periodic_session_pool_cleanup():
                         else:
                             for sid in expired:
                                 SESSION_POOL.pop(sid, None)
+                        await _release_temporary_agent_threads(expired)
                     await asyncio.sleep(0)  # don't hold the loop for the whole sweep
 
                 next_cleanup_at = time.monotonic() + SESSION_POOL_TIMEOUT
@@ -962,9 +971,22 @@ async def disconnect(sid, reason=None):
                     USAGE_POOL[model_id] = connections
 
         await YDOC_MANAGER.remove_user_from_all_documents(sid)
+        await _release_temporary_agent_threads([sid])
     else:
         pass
         # print(f"Unknown session ID {sid} disconnected")
+
+
+async def _release_temporary_agent_threads(session_ids: list[str]) -> None:
+    """[Gradient] A temporary chat ends with its socket; its agent threads go with it."""
+    if not session_ids or not TEMPORARY_AGENT_THREADS:
+        return
+    from open_webui.soev.agent_threads import release_temporary
+
+    try:
+        await release_temporary(set(session_ids))
+    except Exception:
+        log.exception('Failed to delete the agent threads of closed temporary chats')
 
 
 async def _make_channel_emitter(request_info):
