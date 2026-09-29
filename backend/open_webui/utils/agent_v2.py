@@ -256,7 +256,12 @@ class AgentTurn:
             if self.terminal or self.input_position is None:
                 return
             try:
-                await self.client.chat_post(self.path('cancel'), {'input': self.input_position}, as_user=self.as_user)
+                cancelled = await self.client.chat_post(
+                    self.path('cancel'), {'input': self.input_position}, as_user=self.as_user
+                )
+                # Bookmark the cancel itself: a fork before it copies an input with no answer, which the next
+                # turn would resume, rerunning the answer the user just stopped.
+                self.position = cancelled['status']['position']
                 await self.persist()
             except Exception:
                 log.warning('Could not cancel v2 agent turn', extra={'thread_id': self.thread_id})

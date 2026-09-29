@@ -1031,6 +1031,43 @@ async def test_explicit_stop_and_broken_transport_cancel_the_submitted_input(
 
 
 @pytest.mark.asyncio
+async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_answer(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat.api.chat.terminal_state = 'running'
+    original = chat.api.chat._response
+    streams = []
+
+    def response(*args: Any, **kwargs: Any) -> httpx.Response:
+        result = original(*args, **kwargs)
+        stream = InterruptedStream(result.content.rsplit(b'event: status', 1)[0], False)
+        streams.append(stream)
+        return httpx.Response(result.status_code, stream=stream, headers=result.headers)
+
+    monkeypatch.setattr(chat.api.chat, '_response', response)
+    task = asyncio.create_task(chat.turn('long essay', 'a1'))
+    async with asyncio.timeout(2):
+        while not streams:
+            await asyncio.sleep(0)
+    await asyncio.wait_for(streams[0].waiting.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=2)
+    monkeypatch.setattr(chat.api.chat, '_response', original)
+    chat.api.chat.terminal_state = 'idle'
+    stopped = len(chat.mutations())
+    cancelled = next(e['position'] for e in chat.api.chat.threads['thr-1']['events'] if e['type'] == 'cancelled')
+    assert chat.bookmark('a1') == {'thread_id': 'thr-1', 'position': cancelled}
+
+    chunks = await chat.turn('what was I asking?', 'a2', 'a1')
+
+    assert content(chunks) == 'Answer: what was I asking?'
+    assert chat.mutations()[stopped:] == [
+        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'what was I asking?', 'knowledge': []}, 'model': 'llm'}),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_legacy_stream_preserves_socket_events_and_message_extras(
     chat: Chat, monkeypatch: pytest.MonkeyPatch
 ) -> None:

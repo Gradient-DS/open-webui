@@ -100,6 +100,9 @@ class FakeChatApi:
             if not 1 <= at <= len(thread['events']):
                 return self.problem(422, 'invalid_field')
             branch = self._new(thread['owner'], copy.deepcopy(thread['events'][:at]))
+            # As in the runtime: a copied input without its answer leaves work nobody is on.
+            if branch['events'][-1]['type'] == 'input':
+                branch['state'] = 'orphaned'
             return httpx.Response(201, json=self._view(branch), headers=self._headers(branch))
         if operation == 'inputs':
             if thread['state'] in {'running', 'orphaned'}:
