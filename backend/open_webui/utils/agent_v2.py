@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import re
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from typing import Any
@@ -24,6 +25,31 @@ from starlette.responses import StreamingResponse
 log = logging.getLogger(__name__)
 _MARKER = re.compile(r'\[([^\[\]]+)\]')
 _ROOT = '/v1/chat/threads'
+_PLACEHOLDER = re.compile(r'{{(\w+)}}')
+# [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
+TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
+
+
+async def _tool_statuses(client: SoevClient) -> dict[str, dict[str, Any]]:
+    """The declared status of each agent tool; none while soev-api cannot say."""
+    if time.monotonic() < TOOL_STATUS_CACHE['expires_at']:
+        return TOOL_STATUS_CACHE['statuses']
+    try:
+        listed = await client.get('/v1/chat/tools')
+        statuses = {tool['name']: tool['status'] for tool in listed['data'] if isinstance(tool.get('status'), dict)}
+    except (SoevApiError, KeyError, TypeError):
+        log.warning("Could not read the agents' tool statuses")
+        statuses = {}
+    TOOL_STATUS_CACHE.update(expires_at=time.monotonic() + 300.0, statuses=statuses)
+    return statuses
+
+
+def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] | None:
+    """The declared template, or its fallback, when every placeholder has a value."""
+    for template in (declared.get('template'), declared.get('fallback')):
+        if isinstance(template, str) and all(name in params for name in _PLACEHOLDER.findall(template)):
+            return {'description': template, **{name: params[name] for name in _PLACEHOLDER.findall(template)}}
+    return None
 
 
 def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
@@ -208,7 +234,10 @@ class AgentTurn:
         self.turn_sources: set[int] = set()
         self.partial = ''
         self.partial_reasoning = ''
-        self.active_tools: dict[str, str] = {}
+        self.active_tools: dict[str, dict[str, Any] | None] = {}
+        self.tool_statuses: dict[str, dict[str, Any]] = {}
+        self.knowledge_names: dict[str, str] = {}
+        self.awaiting_source: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {}
         self.model: str | None = None
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -280,24 +309,61 @@ class AgentTurn:
     async def start_tools(self, calls: list[dict]) -> None:
         await self.clear_tools()
         for call in calls:
-            name = call['name']
-            description = 'Searching the knowledge base…' if name == 'search' else f'Running {name}…'
-            self.active_tools[call['id']] = description
-            await self.emit('status', {'description': description, 'done': False})
+            status = self.tool_status(call)
+            self.active_tools[call['id']] = status
+            if status is not None:
+                await self.emit('status', {**status, 'done': False})
+
+    def tool_status(self, call: dict) -> dict[str, Any] | None:
+        """The call's declared status filled from the call, else a generic line; `None` while it waits on
+        the source it returns."""
+        name, arguments = call['name'], call.get('arguments') or {}
+        generic = {'description': 'Searching the knowledge base…' if name == 'search' else f'Running {name}…'}
+        declared = self.tool_statuses.get(name)
+        if not isinstance(declared, dict):
+            return generic
+        if isinstance(source := declared.get('source'), str) and isinstance(arguments.get(source), str):
+            self.awaiting_source[arguments[source]] = (call['id'], declared, arguments)
+            return None
+        return _filled(declared, self.tool_params(declared, arguments, {})) or generic
+
+    def tool_params(self, declared: dict[str, Any], arguments: dict, properties: dict) -> dict[str, str]:
+        """Each declared param's value: `argument.<name>`, `knowledge.<argument>` or `source.<property>`."""
+        params = {}
+        for param, binding in (declared.get('params') or {}).items():
+            kind, _, name = str(binding).partition('.')
+            value = None
+            if kind == 'argument':
+                value = arguments.get(name)
+            elif kind == 'knowledge':
+                key = arguments.get(name)
+                only = list(self.knowledge_names.values()) if len(self.knowledge_names) == 1 else [None]
+                value = self.knowledge_names.get(key) if key else only[0]
+            elif kind == 'source':
+                value = properties.get(name)
+            if isinstance(value, str | int | float) and str(value).strip():
+                params[param] = str(value)
+        return params
 
     async def clear_tools(self, call_id: str | None = None) -> None:
         completed = list(self.active_tools) if call_id is None else [call_id]
         cleared = False
         for key in completed:
-            description = self.active_tools.pop(key, None)
-            if description is not None:
+            status = self.active_tools.pop(key, None)
+            if status is not None:
                 cleared = True
-                await self.emit('status', {'description': description, 'done': True})
-        if cleared and self.active_tools:
-            description = next(reversed(self.active_tools.values()))
-            await self.emit('status', {'description': description, 'done': False})
+                await self.emit('status', {**status, 'done': True})
+        running = [status for status in self.active_tools.values() if status is not None]
+        if cleared and running:
+            await self.emit('status', {**running[-1], 'done': False})
 
     async def record_source(self, payload: dict) -> None:
+        if (awaiting := self.awaiting_source.pop(payload.get('ref') or payload['id'], None)) is not None:
+            call_id, declared, arguments = awaiting
+            params = self.tool_params(declared, arguments, payload.get('properties') or {})
+            if call_id in self.active_tools and (status := _filled(declared, params)) is not None:
+                self.active_tools[call_id] = status
+                await self.emit('status', {**status, 'done': False})
         source = self.citations.add(payload)
         if source:
             await self.emit('source', source)
@@ -435,6 +501,8 @@ class AgentTurn:
         self.model = body.get('model')
         try:
             await identity.ensure_link(self.as_user, self.client)
+            self.tool_statuses = await _tool_statuses(self.client)
+            self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()
             self.emitter = await get_event_emitter(self.metadata)
             await self.emit('panel_filter', {'ns': []})

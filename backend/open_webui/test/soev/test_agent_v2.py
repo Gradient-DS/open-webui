@@ -1262,3 +1262,96 @@ async def test_a_temporary_turn_ending_after_its_socket_closed_deletes_its_threa
 
     assert temporary.api.chat.threads == {}
     assert socket_main.TEMPORARY_AGENT_THREADS == {}
+
+
+STATUSES = {
+    'search': {
+        'template': 'Searching {{collection_name}} for "{{query}}"...',
+        'fallback': 'Searching all knowledge bases for "{{query}}"...',
+        'params': {'query': 'argument.query', 'collection_name': 'knowledge.knowledge_base'},
+    },
+    'open_document': {'template': 'Reading {{doc_title}}...', 'params': {'doc_title': 'source.title'}, 'source': 'id'},
+}
+
+
+@pytest.fixture
+def declared(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> Chat:
+    """soev-api declares how search and open_document show; two knowledge bases exist."""
+    monkeypatch.setattr(agent_v2, 'TOOL_STATUS_CACHE', {'expires_at': float('inf'), 'statuses': STATUSES})
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    seed_collection(chat.api, 'kb-b', 'Notulen')
+    return chat
+
+
+def statuses(chat: Chat) -> list[dict]:
+    """The tool statuses, without the turn's closing state."""
+    return [
+        event['data'] for event in chat.socket if event['type'] == 'status' and event['data']['description'] != 'idle'
+    ]
+
+
+def call(name: str, **arguments: Any) -> tuple[str, dict]:
+    return ('model_output', {'content': '', 'tool_calls': [{'id': 'c1', 'name': name, 'arguments': arguments}]})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'arguments,selected,expected',
+    [
+        (
+            {'query': 'opzegtermijn', 'knowledge_base': 'kb-b'},
+            ['kb-a', 'kb-b'],
+            {'description': 'Searching {{collection_name}} for "{{query}}"...', 'collection_name': 'Notulen'},
+        ),
+        (
+            {'query': 'opzegtermijn'},
+            ['kb-a'],
+            {'description': 'Searching {{collection_name}} for "{{query}}"...', 'collection_name': 'Contracten'},
+        ),
+        (
+            {'query': 'opzegtermijn'},
+            ['kb-a', 'kb-b'],
+            {'description': 'Searching all knowledge bases for "{{query}}"...'},
+        ),
+    ],
+)
+async def test_a_search_shows_its_declared_template_filled_from_the_call(
+    declared: Chat, arguments: dict, selected: list[str], expected: dict
+) -> None:
+    declared.api.chat.turns = [
+        [call('search', **arguments), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]
+    ]
+    await declared.turn('q', 'a1', files=[{'type': 'collection', 'id': key} for key in selected])
+
+    running = {**expected, 'query': 'opzegtermijn'}
+    assert statuses(declared) == [{**running, 'done': False}, {**running, 'done': True}]
+
+
+@pytest.mark.asyncio
+async def test_opening_a_document_shows_the_title_its_source_carries(declared: Chat) -> None:
+    source = {'id': 'doc-1', 'ref': 'doc-1', 'text': 'body', 'properties': {'title': 'Leave policy'}}
+    declared.api.chat.turns = [
+        [
+            call('open_document', id='doc-1'),
+            ('source', source),
+            ('tool_output', {'call_id': 'c1'}),
+            ('model_output', {'content': 'done'}),
+        ]
+    ]
+    await declared.turn('q', 'a1', files=[{'type': 'collection', 'id': 'kb-a'}])
+
+    reading = {'description': 'Reading {{doc_title}}...', 'doc_title': 'Leave policy'}
+    assert statuses(declared) == [{**reading, 'done': False}, {**reading, 'done': True}]
+
+
+@pytest.mark.asyncio
+async def test_a_tool_without_a_declared_status_shows_the_generic_line(declared: Chat) -> None:
+    declared.api.chat.turns = [
+        [call('list_documents'), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]
+    ]
+    await declared.turn('q', 'a1')
+
+    assert statuses(declared) == [
+        {'description': 'Running list_documents…', 'done': False},
+        {'description': 'Running list_documents…', 'done': True},
+    ]
