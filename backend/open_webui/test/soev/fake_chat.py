@@ -152,7 +152,7 @@ class FakeChatApi:
         answer = f'Answer: {body["input"]["text"]}'
         turn = self.turns.pop(0) if self.turns else [('model_output', {'content': answer})]
         for kind, payload in turn:
-            if kind in {'delta', 'reasoning_delta', 'error'}:
+            if kind in {'delta', 'reasoning_delta', 'citation', 'error'}:
                 recorded.append((kind, payload))
             else:
                 event = frame(kind, len(thread['events']) + 1, payload)

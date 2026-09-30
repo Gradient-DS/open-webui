@@ -24,7 +24,6 @@ from open_webui.utils.chat_id import is_temporary_chat_id
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
-_MARKER = re.compile(r'\[([^\[\]]+)\]')
 _ROOT = '/v1/chat/threads'
 _PLACEHOLDER = re.compile(r'{{(\w+)}}')
 # [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
@@ -86,6 +85,17 @@ def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] 
     for template in (declared.get('template'), declared.get('fallback')):
         if isinstance(template, str) and all(name in params for name in _PLACEHOLDER.findall(template)):
             return {'description': template, **{name: params[name] for name in _PLACEHOLDER.findall(template)}}
+    return None
+
+
+def _from_output(binding: str, elements: list[dict[str, Any]]) -> Any:
+    """[Claude] `count.<type>`: how many distinct elements of a type; `first.<type>.<field>`: a field of the first."""
+    how, _, rest = binding.partition('.')
+    if how == 'count':
+        return len({element.get('id') for element in elements if element.get('type') == rest})
+    if how == 'first':
+        kind, _, field = rest.partition('.')
+        return next((element.get(field) for element in elements if element.get('type') == kind), None)
     return None
 
 
@@ -216,13 +226,36 @@ def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
+def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
+    """[Claude] A text the agent read (a chunk, an opened document's text) with what its document says about it,
+    in the shape `Citations.add` takes."""
+    whole = whole or {}
+    properties = {
+        'title': whole.get('title') or whole.get('filename'),
+        'source_id': whole.get('source_id'),
+        'source_url': whole.get('source_url'),
+        'page_numbers': element.get('pages'),
+        'bboxes': element.get('bboxes'),
+    }
+    return {
+        'id': element['id'],
+        'ref': element['ref'],
+        'text': element.get('text') or '',
+        'properties': {key: value for key, value in properties.items() if value is not None},
+    }
+
+
+def _read(element: dict[str, Any]) -> bool:
+    """[Claude] Whether the agent read this element's text, so an answer may cite it."""
+    return isinstance(element.get('text'), str) and isinstance(element.get('ref'), str)
+
+
 class Citations:
-    """Keep source numbers stable while buffering incomplete citation markers."""
+    """Keep source numbers stable: one per document, in order of first appearance."""
 
     def __init__(self) -> None:
         self.sources: dict[str, dict[str, Any]] = {}
         self.document_numbers: dict[str, int] = {}
-        self.pending = ''
 
     def add(self, source: dict[str, Any]) -> dict[str, Any] | None:
         source_id = source['id']
@@ -243,19 +276,24 @@ class Citations:
         self.sources[source_id] = result
         return result
 
-    def rewrite(self, text: str, *, final: bool = False) -> str:
-        text = self.pending + text
-        self.pending = ''
-        start = text.rfind('[')
-        if not final and start >= 0 and ']' not in text[start:] and len(text) - start <= 64:
-            text, self.pending = text[:start], text[start:]
+    def number(self, citation: dict[str, Any]) -> int | None:
+        """[Claude] The number a served citation shows under; `None` when it is invalid or names no source."""
+        source = self.sources.get(citation.get('source') or '') if citation.get('status') == 'resolved' else None
+        return None if source is None else source['n']
 
-        def replace(match: re.Match[str]) -> str:
-            source_id = match[1]
-            source = self.sources.get(source_id) or self.sources.get(source_id.removeprefix('<').removesuffix('>'))
-            return f'[{source["n"]}]' if source else match[0]
 
-        return _MARKER.sub(replace, text)
+def _marked(text: str, markers: list[tuple[int, int]]) -> str:
+    """[Claude] `text` with ` [n]` inserted at each `(position, n)`, positions in code points; a number repeated at
+    one position shows once."""
+    shown: set[tuple[int, int]] = set()
+    pieces, start = [], 0
+    for at, number in sorted(markers, key=lambda marker: marker[0]):
+        if (at, number) in shown or not 0 <= at <= len(text):
+            continue
+        shown.add((at, number))
+        pieces.append(text[start:at] + f' [{number}]')
+        start = at
+    return ''.join(pieces) + text[start:]
 
 
 class AgentTurn:
@@ -270,12 +308,18 @@ class AgentTurn:
         self.citations = Citations()
         self.turn_sources: set[int] = set()
         self.partial = ''
+        # [Claude] Markers already shown in the answer being streamed, as (position, number).
+        self.streamed: list[tuple[int, int]] = []
+        self.streamed_citations = 0
         self.partial_reasoning = ''
         self.tool_calls = 0
         self.started = time.monotonic()
         self.tool_statuses: dict[str, dict[str, Any]] = {}
         self.knowledge_names: dict[str, str] = {}
-        self.awaiting_source: dict[str, tuple[str, str, dict[str, Any], dict[str, Any]]] = {}
+        # [Claude] Every element the thread showed, by real id; a call's arguments name them by that id.
+        self.elements: dict[str, dict[str, Any]] = {}
+        # [Claude] The calls shown as running, by call id: their tool's name and arguments.
+        self.running: dict[str, tuple[str, dict[str, Any]]] = {}
         self.model: str | None = None
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -303,8 +347,21 @@ class AgentTurn:
 
     def _seed_sources(self, events: list[dict], position: int) -> None:
         for event in events:
-            if event['position'] <= position and event['type'] == 'source':
-                self.citations.add(event['payload'])
+            if event['position'] <= position and event['type'] == 'tool_output' and event.get('stream') == 'root':
+                self.keep(event['payload'])
+
+    def keep(self, output: dict[str, Any]) -> list[dict[str, Any]]:
+        """[Claude] Remember a tool output's elements, and number each text the agent read; the panel entries of
+        the ones not seen before."""
+        elements = output.get('elements') or []
+        self.elements.update({element['id']: element for element in elements if isinstance(element.get('id'), str)})
+        added = []
+        for element in elements:
+            if _read(element):
+                source = self.citations.add(_as_source(element, self.elements.get(element['ref'])))
+                if source:
+                    added.append(source)
+        return added
 
     async def persist(self) -> None:
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
@@ -344,77 +401,85 @@ class AgentTurn:
         if self.emitter:
             await self.emitter({'type': kind, 'data': data})
 
-    async def start_tools(self, calls: list[dict]) -> list[dict[str, Any]]:
-        """Show each call once, while it runs: the frontend appends every status, and settles the last one when
-        the message is done."""
-        await self.clear_tools()
-        markers = []
+    async def start_tools(self, calls: list[dict]) -> None:
+        """Show each call as running. It stays a passing status until its output lands; the frontend replaces a
+        status by a later one with the same `call_id`."""
         for call in calls:
             self.tool_calls += 1
-            if (status := self.tool_status(call)) is not None:
-                markers.append(await self.show_tool(status))
-        return markers
+            name, arguments = call['name'], call.get('arguments') or {}
+            self.running[call['id']] = (name, arguments)
+            await self.emit('status', {**self.tool_status(name, arguments), 'call_id': call['id'], 'done': False})
 
-    async def show_tool(self, status: dict[str, Any]) -> dict[str, Any]:
-        """Emit a call's status once, while it runs, and return its anchor for the content."""
-        await self.emit('status', {**status, 'done': False})
-        return _marker(status)
+    async def end_tool(self, output: dict[str, Any]) -> list[dict[str, Any]]:
+        """[Claude] Show a running call as done, filled from its output, and anchor that line in the content.
 
-    def tool_status(self, call: dict) -> dict[str, Any] | None:
-        """The call's declared status filled from the call, else a generic line; `None` while it waits on
-        the source it returns."""
-        name, arguments = call['name'], call.get('arguments') or {}
+        A call whose output is an error shows what it tried, as it did while running."""
+        if (call := self.running.pop(output.get('call_id') or '', None)) is None:
+            return []
+        name, arguments = call
+        status = self.tool_status(name, arguments, None if output.get('error') else output)
+        await self.emit('status', {**status, 'call_id': output['call_id'], 'done': False})
+        return [_marker(status)]
+
+    def tool_status(self, name: str, arguments: dict, output: dict | None = None) -> dict[str, Any]:
+        """The tool's declared `running` status, or `done` once there is an `output`, else a generic line."""
         # The action names the tool: the frontend lays a turn out as tool activity only for statuses with one.
         generic = {
             'action': name,
             'description': 'Searching the knowledge base…' if name == 'search' else f'Running {name}…',
         }
-        declared = self.tool_statuses.get(name)
+        declared = (self.tool_statuses.get(name) or {}).get('running' if output is None else 'done')
         if not isinstance(declared, dict):
             return generic
-        if isinstance(source := declared.get('source'), str) and isinstance(arguments.get(source), str):
-            self.awaiting_source[arguments[source]] = (call['id'], name, declared, arguments)
-            return None
-        filled = _filled(declared, self.tool_params(declared, arguments, {}))
+        filled = _filled(declared, self.tool_params(declared, arguments, output))
         return {'action': name, **filled} if filled else generic
 
-    def tool_params(self, declared: dict[str, Any], arguments: dict, properties: dict) -> dict[str, str]:
-        """Each declared param's value: `argument.<name>`, `knowledge.<argument>` or `source.<property>`."""
+    def tool_params(self, declared: dict[str, Any], arguments: dict, output: dict | None) -> dict[str, str]:
+        """Each declared param's value: `argument.<name>`, `knowledge.<argument>`, `element.<argument>.<field>`,
+        `output.count.<type>` or `output.first.<type>.<field>`."""
         params = {}
         for param, binding in (declared.get('params') or {}).items():
-            kind, _, name = str(binding).partition('.')
+            kind, _, rest = str(binding).partition('.')
             value = None
             if kind == 'argument':
-                value = arguments.get(name)
+                value = arguments.get(rest)
             elif kind == 'knowledge':
-                key = arguments.get(name)
+                key = arguments.get(rest)
                 only = list(self.knowledge_names.values()) if len(self.knowledge_names) == 1 else [None]
                 value = self.knowledge_names.get(key) if key else only[0]
-            elif kind == 'source':
-                value = properties.get(name)
+            elif kind == 'element':
+                argument, _, field = rest.partition('.')
+                named = arguments.get(argument)
+                value = (self.elements.get(named) or {}).get(field) if isinstance(named, str) else None
+            elif kind == 'output' and output is not None:
+                value = _from_output(rest, output.get('elements') or [])
             if isinstance(value, str | int | float) and str(value).strip():
                 params[param] = str(value)
         return params
 
-    async def clear_tools(self, call_id: str | None = None) -> None:
-        """Forget the calls still waiting on their source: a call that ended without one shows nothing."""
-        for key, (waiting, *_rest) in list(self.awaiting_source.items()):
-            if call_id is None or waiting == call_id:
-                del self.awaiting_source[key]
+    async def clear_tools(self) -> None:
+        """Forget the calls still shown as running: a call that ended without an output shows no done line."""
+        self.running.clear()
 
-    async def record_source(self, payload: dict) -> list[dict[str, Any]]:
-        markers = []
-        if (awaiting := self.awaiting_source.pop(payload.get('ref') or payload['id'], None)) is not None:
-            _call_id, name, declared, arguments = awaiting
-            params = self.tool_params(declared, arguments, payload.get('properties') or {})
-            if (filled := _filled(declared, params)) is not None:
-                markers.append(await self.show_tool({'action': name, **filled}))
-        source = self.citations.add(payload)
-        if source:
+    async def record_output(self, payload: dict) -> list[dict[str, Any]]:
+        """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
+        for source in self.keep(payload):
             await self.emit('source', source)
-        self.turn_sources.add(self.citations.sources[payload['id']]['n'])
-        await self.emit('panel_filter', {'ns': sorted(self.turn_sources)})
-        return markers
+        read = [element['id'] for element in payload.get('elements') or [] if _read(element)]
+        if read:
+            self.turn_sources.update(self.citations.sources[source_id]['n'] for source_id in read)
+            await self.emit('panel_filter', {'ns': sorted(self.turn_sources)})
+        return await self.end_tool(payload)
+
+    def cite(self, citation: dict[str, Any]) -> str:
+        """[Claude] The marker a streamed citation adds after the text already sent, once per number there."""
+        self.streamed_citations += 1
+        number = self.citations.number(citation)
+        at = citation.get('at')
+        if number is None or not isinstance(at, int) or (at, number) in self.streamed:
+            return ''
+        self.streamed.append((at, number))
+        return f' [{number}]'
 
     async def resume(self) -> None:
         events = self.client.chat_stream(
@@ -426,9 +491,8 @@ class AgentTurn:
                     raise SoevApiError(503, event.data.get('code', 'service_unavailable'), 'Recovery failed')
                 if event.position is not None:
                     self.position = event.position
-                if event.event == 'source':
-                    source = self.citations.add(event.data['payload'])
-                    if source:
+                if event.event == 'tool_output' and event.data.get('stream') == 'root':
+                    for source in self.keep(event.data['payload']):
                         await self.emit('source', source)
                 if event.event == 'status' and event.data['state'] not in {'idle', 'waiting'}:
                     raise SoevApiError(409, 'thread_active', 'Recovery did not finish')
@@ -475,42 +539,50 @@ class AgentTurn:
         if event.event == 'input' and event.data.get('stream') == 'root' and self.input_position is None:
             self.input_position = self.position
             await self.persist()
-        if event.event == 'source':
-            return await self.record_source(payload)
         if event.event == 'reasoning_delta':
-            await self.clear_tools()
             self.partial_reasoning += event.data['text']
             return [_chunk({'reasoning_content': event.data['text']})]
         if event.event == 'delta':
-            await self.clear_tools()
             self.partial += event.data['text']
-            text = self.citations.rewrite(event.data['text'])
-            return [_chunk({'content': text})] if text else []
+            return [_chunk({'content': event.data['text']})] if event.data['text'] else []
+        if event.event == 'citation':
+            marker = self.cite(event.data)
+            return [_chunk({'content': marker})] if marker else []
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
-        if event.event in {'tool_output', 'effect_result', 'failure'} and event.data.get('stream') == 'root':
-            await self.clear_tools(payload.get('call_id') if event.event == 'tool_output' else None)
+        if event.event == 'tool_output' and event.data.get('stream') == 'root':
+            return await self.record_output(payload)
+        if event.event == 'failure' and event.data.get('stream') == 'root':
+            await self.clear_tools()
         if event.event in {'status', 'error'}:
             return await self.finish(event)
         return []
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
-        markers = await self.start_tools(payload.get('tool_calls', []))
+        await self.start_tools(payload.get('tool_calls', []))
         reasoning = self.remaining_reasoning(payload.get('reasoning') or '')
-        content = payload['content']
-        if not content.startswith(self.partial):
+        content, partial = payload['content'], self.partial
+        citations = (payload.get('citations') or [])[self.streamed_citations :]
+        streamed = self.streamed
+        self.partial, self.streamed, self.streamed_citations = '', [], 0
+        if not content.startswith(partial):
             log.warning('Durable model output disagrees with streamed text', extra={'thread_id': self.thread_id})
-            self.partial = ''
-            self.citations.pending = ''
-            return markers
-        text = self.citations.rewrite(content[len(self.partial) :], final=True)
-        self.partial = ''
+            return []
+        markers = [
+            (citation['at'] - len(partial), number)
+            for citation in citations
+            if (number := self.citations.number(citation)) is not None
+            and isinstance(citation.get('at'), int)
+            and citation['at'] >= len(partial)
+            and (citation['at'], number) not in streamed
+        ]
+        text = _marked(content[len(partial) :], markers)
         chunks = []
         if reasoning:
             chunks.append(_chunk({'reasoning_content': reasoning}))
         if text:
             chunks.append(_chunk({'content': text}))
-        return chunks + markers
+        return chunks
 
     def remaining_reasoning(self, reasoning: str) -> str:
         partial, self.partial_reasoning = self.partial_reasoning, ''
@@ -527,8 +599,7 @@ class AgentTurn:
         if event.event == 'status':
             self.position = event.data['position']
         await self.persist()
-        text = self.citations.rewrite('', final=True)
-        chunks = [_chunk({'content': text})] if text else []
+        chunks: list[dict[str, Any]] = []
         state = event.data.get('state')
         if state != 'idle':
             await self.emit('status', {'description': state or 'error', 'done': True})
