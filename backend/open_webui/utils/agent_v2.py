@@ -28,6 +28,10 @@ _ROOT = '/v1/chat/threads'
 _PLACEHOLDER = re.compile(r'{{(\w+)}}')
 # [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
 TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
+# [Claude] What the web search toggle asks of the agent's `web_search` tool when on; off asks nothing, so the
+# deployment's default for the tool applies. Configuration: `required` is refused by an agent whose deployment has
+# no web, so pair it with OWUI's web search setting.
+WEB_SEARCH_ON = 'required'
 
 
 async def _tool_statuses(client: SoevClient) -> dict[str, dict[str, Any]]:
@@ -118,21 +122,60 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
     raise ValueError('A v2 agent turn requires user_message text')
 
 
+class KnowledgeUnavailable(Exception):
+    """Selected knowledge bases the API does not show the user: unreadable, or deleted."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__(f'{count} selected knowledge bases are unavailable')
+        self.count = count
+
+
 async def _knowledge(metadata: dict[str, Any]) -> list[dict[str, str]]:
     """The selected knowledge bases with their current name and description, read at send time.
 
-    One the API does not show the user is still sent, named by its key, so the agent refuses the turn.
+    Raises:
+        KnowledgeUnavailable: the API does not show the user every selected one.
     """
     keys = _knowledge_keys(metadata)
     if not keys:
         return []
     user_id = None if acting.acting_ref() else metadata['user_id']
     described = await Knowledges.describe_knowledge(keys, user_id=user_id)
-    entries = []
-    for key in keys:
-        name, description = described.get(key, (key, ''))
-        entries.append({'key': key, 'name': name, **({'description': description} if description else {})})
-    return entries
+    if missing := [key for key in keys if key not in described]:
+        raise KnowledgeUnavailable(len(missing))
+    return [
+        {'key': key, 'name': name, **({'description': description} if description else {})}
+        for key, (name, description) in ((key, described[key]) for key in keys)
+    ]
+
+
+def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
+    """[Claude] The custom model's prompt and the chat's prompt (Chat Controls or the user's own, plus the folder's),
+    each sent only when it says something."""
+    fields = {'assistant_instructions': 'system_prompt', 'user_instructions': 'chat_system_prompt'}
+    return {field: text for field, key in fields.items() if isinstance(text := metadata.get(key), str) and text.strip()}
+
+
+def _tools(metadata: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """[Claude] The tool states the chat's toggles ask, as the turn's `tools` field; none while every toggle is off."""
+    if not (metadata.get('features') or {}).get('web_search'):
+        return {}
+    return {'tools': {'web_search': WEB_SEARCH_ON}}
+
+
+def _unavailable(count: int, language: str | None) -> dict[str, Any]:
+    """[Claude] A count, never names: the name of a knowledge base the user cannot read may itself be confidential."""
+    if (language or '').lower().startswith('nl'):
+        message = (
+            f'Je hebt geen toegang tot {count} van de kennisbanken bij deze assistent of chat. '
+            'Haal ze uit de chat, of vraag je beheerder om toegang.'
+        )
+    else:
+        message = (
+            f"You don't have access to {count} of the knowledge bases on this assistant or chat. "
+            'Remove them from the chat, or ask your admin for access.'
+        )
+    return {'error': {'code': 'knowledge_unavailable', 'message': message}}
 
 
 def _knowledge_keys(metadata: dict[str, Any]) -> list[str]:
@@ -654,10 +697,16 @@ async def call_agent_v2(
     """Submit one user message; the thread owns the conversation history."""
     user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
     turn = AgentTurn(identity.build_client(), metadata, user_ref)
-    body = {'input': {'text': _input_text(metadata, form_data), 'knowledge': await _knowledge(metadata)}}
-    if isinstance(model, str) and model:
-        body['model'] = model
-    chunks = turn.run(body, agent)
+    text = _input_text(metadata, form_data)
+    try:
+        knowledge = await _knowledge(metadata)
+    except KnowledgeUnavailable as unavailable:
+        chunks = _refused(_unavailable(unavailable.count, metadata.get('user_language')))
+    else:
+        body = {'input': {'text': text, 'knowledge': knowledge, **_instructions(metadata), **_tools(metadata)}}
+        if isinstance(model, str) and model:
+            body['model'] = model
+        chunks = turn.run(body, agent)
     if not form_data.get('stream', True):
         message = {'role': 'assistant', 'content': '', 'reasoning_content': ''}
         async with aclosing(chunks):
@@ -675,3 +724,8 @@ async def call_agent_v2(
         yield 'data: [DONE]\n\n'
 
     return StreamingResponse(stream_body(), media_type='text/event-stream')
+
+
+async def _refused(error: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    """A turn refused before anything is sent, shown like any agent error."""
+    yield error

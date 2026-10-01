@@ -243,9 +243,61 @@ async def test_a_models_files_notes_and_legacy_entries_are_not_knowledge(chat: C
 
 
 @pytest.mark.asyncio
-async def test_knowledge_the_api_does_not_show_is_still_sent_by_its_key(chat: Chat) -> None:
-    await chat.turn('next', 'a1', files=[{'type': 'collection', 'id': 'kb-gone', 'name': 'Old'}])
-    assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-gone', 'name': 'kb-gone'}]
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+async def test_knowledge_the_user_cannot_read_refuses_the_turn_by_count_without_names(
+    chat: Chat, language: str
+) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    chunks = await chat.turn(
+        'next',
+        'a1',
+        files=[
+            {'type': 'collection', 'id': 'kb-a'},
+            {'type': 'collection', 'id': 'kb-secret', 'name': 'Integriteitsonderzoek'},
+            {'type': 'collection', 'id': 'kb-gone', 'name': 'Oud'},
+        ],
+        user_language=language,
+    )
+    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
+    assert refusal['code'] == 'knowledge_unavailable'
+    assert '2' in refusal['message']
+    assert not any(hidden in refusal['message'] for hidden in ('kb-secret', 'Integriteitsonderzoek', 'kb-gone'))
+    assert chat.mutations() == []
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_speaks_the_users_language(chat: Chat) -> None:
+    gone = [{'type': 'collection', 'id': 'kb-gone'}]
+    english = await chat.turn('next', 'a1', files=gone, user_language='en-US')
+    dutch = await chat.turn('next', 'a2', files=gone, user_language='nl-NL')
+    assert english[0]['error']['message'] != dutch[0]['error']['message']
+
+
+@pytest.mark.asyncio
+async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_instructions(chat: Chat) -> None:
+    await chat.turn('question', 'a1', system_prompt='Je helpt behandelaars.', chat_system_prompt='Ik ben jurist.')
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['assistant_instructions'] == 'Je helpt behandelaars.'
+    assert sent['user_instructions'] == 'Ik ben jurist.'
+
+
+@pytest.mark.asyncio
+async def test_the_web_search_toggle_on_asks_for_web_search(chat: Chat) -> None:
+    await chat.turn('question', 'a1', features={'web_search': True})
+    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': agent_v2.WEB_SEARCH_ON}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('features', [{'web_search': False}, {}], ids=['off', 'absent'])
+async def test_the_web_search_toggle_off_leaves_web_search_to_the_deployment(chat: Chat, features: dict) -> None:
+    await chat.turn('question', 'a1', features=features)
+    assert 'tools' not in chat.mutations()[-1][1]['input']
+
+
+@pytest.mark.asyncio
+async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
+    await chat.turn('question', 'a1', system_prompt=' ', chat_system_prompt=None)
+    assert chat.mutations()[-1][1]['input'] == {'text': 'question', 'knowledge': []}
 
 
 @pytest.mark.asyncio
