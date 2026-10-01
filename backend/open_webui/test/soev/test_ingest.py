@@ -339,12 +339,52 @@ async def test_the_attachments_collection_is_created_once_per_user(env):
             'visibility': 'restricted',
             'principals': [SERVICE, f'owui:user:{user}'],
             'writers': [f'owui:user:{user}'],
+            'tags': ['chat-attachments'],
         }
         assert request.headers['Idempotency-Key'] == f'kb:{key}'
         reads = [r for r in env.api.requests if r.url.path == f'/v1/collections/{key}']
         assert len(reads) == 2
         assert all('X-Soev-Subject' in r.headers for r in [request, *reads])
     assert 'owui-attachments-alice' != env.module.attachments_collection_key('bob')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('tags', [None, [], ['existing', 'another']])
+async def test_existing_attachments_collection_gets_tagged_once(env, tags):
+    key = await env.module.ensure_attachments_collection('alice', env.client)
+    if tags is None:
+        del env.api.collections[key]['tags']
+    else:
+        env.api.collections[key]['tags'] = tags
+    env.api.requests.clear()
+
+    for _ in range(2):
+        assert await env.module.ensure_attachments_collection('alice', env.client) == key
+
+    assert [(r.method, r.url.path) for r in env.api.requests] == [
+        ('GET', f'/v1/collections/{key}'),
+        ('PATCH', f'/v1/collections/{key}'),
+        ('GET', f'/v1/collections/{key}'),
+    ]
+    update = env.api.requests[1]
+    expected_tags = [*(tags or []), 'chat-attachments']
+    assert json.loads(update.content) == {'tags': expected_tags}
+    assert env.api.collections[key]['tags'] == expected_tags
+    assert update.headers['Idempotency-Key'] == f'kb:{key}:tag:chat-attachments'
+    assert 'X-Soev-Subject' in update.headers
+
+
+@pytest.mark.asyncio
+async def test_already_tagged_attachments_collection_needs_no_update(env):
+    key = await env.module.ensure_attachments_collection('alice', env.client)
+    tags = ['existing', 'chat-attachments']
+    env.api.collections[key]['tags'] = tags
+    env.api.requests.clear()
+
+    assert await env.module.ensure_attachments_collection('alice', env.client) == key
+
+    assert [(r.method, r.url.path) for r in env.api.requests] == [('GET', f'/v1/collections/{key}')]
+    assert env.api.collections[key]['tags'] == tags
 
 
 def test_attachments_collections_are_never_knowledge_bases(env):

@@ -16,6 +16,7 @@ from open_webui.storage.provider import Storage
 from open_webui.utils.content_types import content_type_for
 
 ATTACHMENTS_PREFIX = 'owui-attachments-'
+ATTACHMENTS_TAG = 'chat-attachments'
 
 
 class IngestBusy(Exception):
@@ -67,7 +68,7 @@ async def ensure_attachments_collection(user_id: str, client: SoevClient) -> str
     key = attachments_collection_key(user_id)
     ref = await _as_user(user_id, client)
     try:
-        await client.get(f'/v1/collections/{quote(key, safe="")}', as_user=ref)
+        collection = await client.get(f'/v1/collections/{quote(key, safe="")}', as_user=ref)
     except SoevApiError as error:
         if error.code != 'collection_not_found':
             raise
@@ -80,10 +81,21 @@ async def ensure_attachments_collection(user_id: str, client: SoevClient) -> str
                 'visibility': 'restricted',
                 'principals': [config.SOEV_API_SERVICE_PRINCIPAL, ref],
                 'writers': [ref],
+                'tags': [ATTACHMENTS_TAG],
             },
             as_user=ref,
             idempotency_key=f'kb:{key}',
         )
+    else:
+        tags = collection.get('tags') or []
+        if ATTACHMENTS_TAG not in tags:
+            await client.send(
+                'PATCH',
+                f'/v1/collections/{quote(key, safe="")}',
+                {'tags': [*tags, ATTACHMENTS_TAG]},
+                as_user=ref,
+                idempotency_key=f'kb:{key}:tag:{ATTACHMENTS_TAG}',
+            )
     return key
 
 
