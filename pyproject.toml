@@ -17,7 +17,7 @@ dependencies = [
     "orjson==3.11.9",
     "bcrypt==5.0.0",
     "argon2-cffi==25.1.0",
-    "PyJWT[crypto]==2.14.0",
+    "PyJWT[crypto]==2.15.0",
     "authlib==1.7.2",
     "joserfc==1.7.4",
 
@@ -70,7 +70,7 @@ dependencies = [
     "boto3==1.42.62",
 
     "transformers==5.11.0", # security: CVE-2026-9856 (GHSA-xrqw-3rrv-vx5w, save_pretrained path traversal via chat template names) fixed in 5.10.0, which was yanked upstream — 5.11.0 is the first usable fixed release
-    "sentence-transformers==5.5.1",
+    "sentence-transformers==5.6.0",
     "accelerate==1.15.0", # security: CVE-2026-69112 / GHSA-4j2p-28q2-5m79 (path traversal via unsanitized sharded-checkpoint weight_map entries) fixed in 1.15.0
     "pyarrow==23.0.1", # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fixed in 23.0.1; was pinned to 20 for rpi #15897 — verify rpi build before backporting
     "einops==0.8.2",
@@ -235,6 +235,11 @@ accelerate = false
 # exemption is required here. Remove it once 70.0 ages past the 14-day window on
 # 2026-09-22.
 weasyprint = false
+# Security-fix exemption (2026-10-01): PyJWT 2.15.0 (published 2026-09-23) is
+# the first release fixing CVE-2026-101918; 2.14.0 fixes the earlier
+# CVE-2026-101917 / CVE-2026-102265..102274 batch. Remove this exemption once
+# 2.15.0 ages past the 14-day window on 2026-10-07.
+pyjwt = false
 
 [tool.hatch.build.targets.wheel]
 sources = ["backend"]
