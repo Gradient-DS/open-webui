@@ -17,7 +17,7 @@ from open_webui.models.agent_configs import AgentConfigs
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.socket import main as socket_main
-from open_webui.soev import agent_threads
+from open_webui.soev import agent_threads, ingest
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
@@ -207,10 +207,7 @@ async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(cha
             {'type': 'text', 'text': 'two'},
         ],
         'a1',
-        files=[
-            {'type': 'collection', 'id': 'kb-a', 'name': 'Name when picked'},
-            {'type': 'file', 'id': 'ignored'},
-        ],
+        files=[{'type': 'collection', 'id': 'kb-a', 'name': 'Name when picked'}],
         knowledge=[{'id': 'kb-a'}, {'id': 'kb-b'}],
     )
     assert chat.mutations()[0][1] == {
@@ -271,6 +268,69 @@ async def test_the_refusal_speaks_the_users_language(chat: Chat) -> None:
     english = await chat.turn('next', 'a1', files=gone, user_language='en-US')
     dutch = await chat.turn('next', 'a2', files=gone, user_language='nl-NL')
     assert english[0]['error']['message'] != dutch[0]['error']['message']
+
+
+def stored_files(monkeypatch: pytest.MonkeyPatch, **statuses: str | None) -> None:
+    """File records by id, owned by alice, each with its processing status."""
+    records = {
+        file_id: SimpleNamespace(id=file_id, user_id='alice', filename=f'{file_id}.pdf', meta={'status': status})
+        for file_id, status in statuses.items()
+    }
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', AsyncMock(side_effect=records.get))
+
+
+@pytest.mark.asyncio
+async def test_attached_files_are_sent_with_their_collection_and_name(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored_files(monkeypatch, f1='completed', f2='completed', f3=None)
+    await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'f1', 'name': 'rapport.pdf', 'collection_name': 'owui-attachments-alice'},
+            {'type': 'file', 'id': 'f2', 'name': 'besluit.docx', 'collection_name': ''},
+            {'type': 'file', 'id': 'f3', 'name': 'oud.txt'},
+            {'type': 'file', 'id': 'f1', 'name': 'rapport.pdf', 'collection_name': 'owui-attachments-alice'},
+        ],
+    )
+    attachments_key = ingest.attachments_collection_key('alice')
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': 'owui-attachments-alice', 'file_id': 'f1', 'name': 'rapport.pdf'},
+        {'collection_key': attachments_key, 'file_id': 'f2', 'name': 'besluit.docx'},
+        {'collection_key': attachments_key, 'file_id': 'f3', 'name': 'oud.txt'},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_attached_images_are_not_attachments(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    stored_files(monkeypatch, img='completed')
+    await chat.turn('question', 'a1', files=[{'type': 'file', 'id': 'img', 'content_type': 'image/png'}])
+    assert 'attachments' not in chat.mutations()[-1][1]['input']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+async def test_attached_files_the_agent_cannot_read_refuse_the_turn_by_name(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, language: str
+) -> None:
+    stored_files(monkeypatch, ok='completed', busy='processing', broken='failed')
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'ok', 'name': 'goed.pdf'},
+            {'type': 'file', 'id': 'busy', 'name': 'bezig.pdf'},
+            {'type': 'file', 'id': 'broken', 'name': 'kapot.pdf'},
+            {'type': 'file', 'id': 'deleted', 'name': 'weg.pdf'},
+        ],
+        user_language=language,
+    )
+    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
+    assert refusal['code'] == 'attachments_unavailable'
+    assert all(name in refusal['message'] for name in ('bezig.pdf', 'kapot.pdf', 'weg.pdf'))
+    assert 'goed.pdf' not in refusal['message']
+    assert chat.mutations() == []
 
 
 @pytest.mark.asyncio

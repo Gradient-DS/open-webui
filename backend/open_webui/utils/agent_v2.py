@@ -16,9 +16,10 @@ from urllib.parse import quote
 
 import anyio
 from open_webui.models.chats import Chats
+from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, identity
+from open_webui.soev import acting, agent_threads, identity, ingest
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.utils.chat_id import is_temporary_chat_id
 from starlette.responses import StreamingResponse
@@ -149,6 +150,45 @@ async def _knowledge(metadata: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+class AttachmentsUnavailable(Exception):
+    """[Claude] Attached files the agent cannot read: each name with why (`gone`, `processing`, `failed`)."""
+
+    def __init__(self, files: list[tuple[str, str]]) -> None:
+        super().__init__(f'{len(files)} attached files are unavailable')
+        self.files = files
+
+
+async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+    """[Claude] The files attached in the chat, as the turn's `attachments` field; none while nothing is attached.
+
+    The collection is the one the finished upload reported, else where chat uploads go; the agent checks access.
+
+    Raises:
+        AttachmentsUnavailable: a file is gone, still being processed, or failed.
+    """
+    attached: list[dict[str, str]] = []
+    unavailable: list[tuple[str, str]] = []
+    entries = {
+        entry['id']: entry
+        for entry in metadata.get('files') or []
+        if entry.get('type') == 'file'
+        and entry.get('id')
+        and not (entry.get('content_type') or '').startswith('image/')
+    }
+    for file_id, entry in entries.items():
+        file = await Files.get_file_by_id(file_id)
+        name = entry.get('name') or (file.filename if file is not None else file_id)
+        status = 'gone' if file is None else (file.meta or {}).get('status')
+        if file is None or status in ('processing', 'failed'):
+            unavailable.append((name, status))
+            continue
+        key = entry.get('collection_name') or ingest.attachments_collection_key(file.user_id)
+        attached.append({'collection_key': key, 'file_id': file_id, 'name': name})
+    if unavailable:
+        raise AttachmentsUnavailable(unavailable)
+    return {'attachments': attached} if attached else {}
+
+
 def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
     """[Claude] The custom model's prompt and the chat's prompt (Chat Controls or the user's own, plus the folder's),
     each sent only when it says something."""
@@ -176,6 +216,30 @@ def _unavailable(count: int, language: str | None) -> dict[str, Any]:
             'Remove them from the chat, or ask your admin for access.'
         )
     return {'error': {'code': 'knowledge_unavailable', 'message': message}}
+
+
+_WHY = {
+    'en': {'gone': 'no longer available', 'processing': 'still being processed', 'failed': 'could not be processed'},
+    'nl': {'gone': 'niet meer beschikbaar', 'processing': 'wordt nog verwerkt', 'failed': 'kon niet worden verwerkt'},
+}
+
+
+def _unattached(files: list[tuple[str, str]], language: str | None) -> dict[str, Any]:
+    """[Claude] Names each file: the user attached it, so its name tells them nothing new."""
+    dutch = (language or '').lower().startswith('nl')
+    why = _WHY['nl' if dutch else 'en']
+    listed = ', '.join(f'{name} ({why[reason]})' for name, reason in files)
+    if dutch:
+        message = (
+            f'Deze bijlagen kan de assistent niet lezen: {listed}. '
+            'Verwijder ze onder Besturingselementen → Bestanden en verstuur je bericht opnieuw.'
+        )
+    else:
+        message = (
+            f"The assistant can't read these attached files: {listed}. "
+            'Remove them under Controls → Files and send your message again.'
+        )
+    return {'error': {'code': 'attachments_unavailable', 'message': message}}
 
 
 def _knowledge_keys(metadata: dict[str, Any]) -> list[str]:
@@ -697,16 +761,7 @@ async def call_agent_v2(
     """Submit one user message; the thread owns the conversation history."""
     user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
     turn = AgentTurn(identity.build_client(), metadata, user_ref)
-    text = _input_text(metadata, form_data)
-    try:
-        knowledge = await _knowledge(metadata)
-    except KnowledgeUnavailable as unavailable:
-        chunks = _refused(_unavailable(unavailable.count, metadata.get('user_language')))
-    else:
-        body = {'input': {'text': text, 'knowledge': knowledge, **_instructions(metadata), **_tools(metadata)}}
-        if isinstance(model, str) and model:
-            body['model'] = model
-        chunks = turn.run(body, agent)
+    chunks = await _sent(turn, _input_text(metadata, form_data), metadata, agent=agent, model=model)
     if not form_data.get('stream', True):
         message = {'role': 'assistant', 'content': '', 'reasoning_content': ''}
         async with aclosing(chunks):
@@ -724,6 +779,25 @@ async def call_agent_v2(
         yield 'data: [DONE]\n\n'
 
     return StreamingResponse(stream_body(), media_type='text/event-stream')
+
+
+async def _sent(
+    turn: AgentTurn, text: str, metadata: dict[str, Any], *, agent: str | None, model: str | None
+) -> AsyncIterator[dict[str, Any]]:
+    """[Claude] The turn's chunks: run with its input, or refused before anything is sent."""
+    try:
+        knowledge = await _knowledge(metadata)
+        attachments = await _attachments(metadata)
+    except KnowledgeUnavailable as unavailable:
+        return _refused(_unavailable(unavailable.count, metadata.get('user_language')))
+    except AttachmentsUnavailable as unavailable:
+        return _refused(_unattached(unavailable.files, metadata.get('user_language')))
+    body = {
+        'input': {'text': text, 'knowledge': knowledge, **attachments, **_instructions(metadata), **_tools(metadata)}
+    }
+    if isinstance(model, str) and model:
+        body['model'] = model
+    return turn.run(body, agent)
 
 
 async def _refused(error: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
