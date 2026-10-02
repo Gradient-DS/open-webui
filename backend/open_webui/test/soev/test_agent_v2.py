@@ -437,6 +437,22 @@ def answered(text: str, *citations: dict, **payload: Any) -> tuple[str, dict]:
     return ('model_output', {'content': text, 'citations': list(citations), **payload})
 
 
+def panel(socket: list[dict]) -> list[int]:
+    """[Claude] The numbers the message's source pill lists, as `usedCitations` does: a document's last flags win,
+    and once any source speaks `cited_this_turn` only the cited ones show."""
+    flags: dict[str, dict[str, Any]] = {}
+    for event in socket:
+        if event['type'] == 'source':
+            data = event['data']
+            entry = flags.setdefault(data['source']['id'], {'n': data['n']})
+            entry.update({key: data[key] for key in ('current_turn', 'cited_this_turn') if key in data})
+    shown = list(flags.values())
+    for key in ('cited_this_turn', 'current_turn'):
+        if any(key in entry for entry in shown):
+            return sorted(entry['n'] for entry in shown if entry.get(key))
+    return sorted(entry['n'] for entry in shown)
+
+
 @pytest.mark.asyncio
 async def test_document_numbers_survive_seeded_turns(chat: Chat) -> None:
     """Number documents by first appearance across chunks and seeded turns."""
@@ -450,8 +466,8 @@ async def test_document_numbers_survive_seeded_turns(chat: Chat) -> None:
     ]
     assert content(await chat.turn('first', 'a1')) == 'Eerst [1] [2].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [source['n'] for source in sources] == [1, 1, 1, 2]
-    assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2]}
+    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 1, 2]
+    assert panel(chat.socket) == [1, 2]
     chat.socket.clear()
     chat.api.chat.turns = [
         [
@@ -462,8 +478,8 @@ async def test_document_numbers_survive_seeded_turns(chat: Chat) -> None:
     ]
     assert content(await chat.turn('next', 'a2', 'a1')) == 'Dan [1] [3].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 2, 3]
-    assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2, 3]}
+    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 2, 3, 1, 3]
+    assert panel(chat.socket) == [1, 3]
 
 
 def test_different_documents_with_the_same_title_keep_distinct_numbers() -> None:
@@ -697,13 +713,13 @@ async def test_durable_output_prefix_and_mismatch_do_not_cancel(
 
 
 @pytest.mark.asyncio
-async def test_panel_filter_scopes_chips_to_this_turn_with_cumulative_numbers(chat: Chat) -> None:
-    """Filter retrieved documents using their cumulative numbers across turns."""
+async def test_the_panel_lists_what_this_turn_cited_with_cumulative_numbers(chat: Chat) -> None:
+    """List the sources this turn's answer cites, numbered across turns."""
     second = [document('document-b', 'Second'), chunk('source-b', 'document-b')]
     third = [document('document-c', 'Third'), chunk('source-c', 'document-c')]
     chat.api.chat.turns = [[found(DOCUMENT, CHUNK, *second), answered('First', cited(5, 'source-a'))]]
     await chat.turn('first', 'a1')
-    assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2]}
+    assert panel(chat.socket) == [1]
     chat.socket.clear()
     chat.api.chat.turns = [
         [
@@ -717,14 +733,10 @@ async def test_panel_filter_scopes_chips_to_this_turn_with_cumulative_numbers(ch
         ]
     ]
     assert content(await chat.turn('second', 'a2', 'a1')) == 'Second [2] and [3]; earlier [1]'
-    sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [source['n'] for source in sources] == [1, 2, 3]
-    filters = [event['data'] for event in chat.socket if event['type'] == 'panel_filter']
-    assert filters[0] == {'ns': []}
-    assert filters[-1] == {'ns': [2, 3]}
+    assert panel(chat.socket) == [1, 2, 3]
     chat.socket.clear()
     await chat.turn('third', 'a3', 'a2')
-    assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': []}
+    assert panel(chat.socket) == []
 
 
 @pytest.mark.asyncio
@@ -838,7 +850,7 @@ async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text
     assert 'PRIVATE' not in json.dumps(chunks)
     assert content(chunks, 'reasoning_content') == 'PlanExplain'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [source['n'] for source in sources] == [1, 1]
+    assert [(source['n'], 'cited_this_turn' in source) for source in sources] == [(1, False)] * 2 + [(1, True)] * 2
     assert sources[0]['source'] == {'id': 'document', 'name': 'Document', 'url': 'document'}
     assert sources[0]['document'] == ['quoted passage']
     assert sources[0]['metadata'][0]['source'] == 'document'
@@ -854,7 +866,7 @@ async def test_previous_sources_are_available_in_later_turn_and_fork(chat: Chat)
         chat.socket.clear()
         chat.api.chat.turns = [[answered('Again', cited(5, 'source-a'))]]
         assert content(await chat.turn('again', message_id, 'a1')) == 'Again [1]'
-        assert len([event for event in chat.socket if event['type'] == 'source']) == 1
+        assert panel(chat.socket) == [1]
 
 
 @pytest.mark.asyncio
@@ -1009,7 +1021,7 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
         ('failure', {'message': 'failed'}),
     ],
 )
-async def test_a_tool_call_shows_running_then_done_only_when_its_output_lands(
+async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_its_output(
     name: str, description: str, kind: str, payload: dict
 ) -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
@@ -1025,8 +1037,12 @@ async def test_a_tool_call_shows_running_then_done_only_when_its_output_lands(
         assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
         data = payload if kind.endswith('delta') else {'stream': 'root', 'payload': payload}
         ended = await turn.render(ChatEvent(kind, data))
+        assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
+        await turn.render(ChatEvent('delta', {'text': 'Answer'}))
     answered_call = kind == 'tool_output'
-    assert [call.args[0] for call in turn.emitter.call_args_list] == [status] * (1 + answered_call)
+    ended_status = {'type': 'status', 'data': {**status['data'], 'done': True}}
+    shown = [call.args[0] for call in turn.emitter.call_args_list if call.args[0]['data'].get('action') != 'summary']
+    assert shown == [status] + [ended_status] * answered_call
     assert '<details type="tool_calls"' not in content(started)
     assert ('<details type="tool_calls"' in content(ended)) == answered_call
 
@@ -1050,9 +1066,11 @@ async def test_parallel_tools_each_show_once() -> None:
         )
         for call_id in ['c2', 'c1']:
             await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id}}))
+        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     search = {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False}
     calculate = {'action': 'calculate', 'description': 'Running calculate…', 'call_id': 'c2', 'done': False}
-    assert [call.args[0]['data'] for call in turn.emitter.call_args_list] == [search, calculate, calculate, search]
+    ended = [{**calculate, 'done': True}, {**search, 'done': True}]
+    assert [call.args[0]['data'] for call in turn.emitter.call_args_list] == [search, calculate, *ended]
 
 
 @pytest.mark.asyncio
@@ -1519,7 +1537,7 @@ async def test_a_search_shows_running_from_the_call_and_done_from_its_output(
     counted = {**named, 'passages': '3', 'documents': '2'}
     assert statuses(declared) == [
         {**status, **running, 'query': 'opzegtermijn'},
-        {**status, **done, **counted},
+        {**status, **done, **counted, 'done': True},
     ]
     summary = done['description'].replace('{{passages}}', '3').replace('{{documents}}', '2')
     summary = summary.replace('{{collection_name}}', named.get('collection_name', ''))
@@ -1545,7 +1563,7 @@ async def test_opening_a_document_names_it_by_the_title_already_received(declare
     opening = {'action': 'open_document', 'call_id': 'c1', 'done': False, 'doc_title': 'Leave policy'}
     assert [status for status in statuses(declared) if status['action'] == 'open_document'] == [
         {**opening, 'description': 'Reading {{doc_title}}...'},
-        {**opening, 'description': 'Read {{doc_title}}'},
+        {**opening, 'description': 'Read {{doc_title}}', 'done': True},
     ]
     assert '<summary>Read Leave policy</summary>' in content(chunks)
 
@@ -1558,7 +1576,34 @@ async def test_a_tool_without_a_declared_status_shows_the_generic_line(declared:
     await declared.turn('q', 'a1')
 
     generic = {'action': 'list_documents', 'description': 'Running list_documents…', 'call_id': 'c1', 'done': False}
-    assert statuses(declared) == [generic, generic]
+    assert statuses(declared) == [generic, {**generic, 'done': True}]
+
+
+@pytest.mark.asyncio
+async def test_the_summary_settles_the_tools_once_the_answer_starts(declared: Chat) -> None:
+    declared.api.chat.turns = [
+        [
+            call('list_documents', 'c1'),
+            ('tool_output', {'call_id': 'c1'}),
+            ('delta', {'text': 'Looking further.'}),
+            call('list_documents', 'c2'),
+            ('tool_output', {'call_id': 'c2'}),
+            ('delta', {'text': 'Answer'}),
+            answered('Answer'),
+        ]
+    ]
+    await declared.turn('q', 'a1')
+
+    shown = [event['data'] for event in declared.socket if event['type'] == 'status']
+    order = [status.get('call_id') or status['description'] for status in shown]
+    assert order == [
+        'c1',
+        'c1',
+        '1 tool called in less than a second',
+        'c2',
+        'c2',
+        '2 tools called in less than a second',
+    ]
 
 
 @pytest.mark.parametrize(

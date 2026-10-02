@@ -423,13 +423,16 @@ class AgentTurn:
         self.input_position: int | None = None
         self.terminal = False
         self.citations = Citations()
-        self.turn_sources: set[int] = set()
+        # [Claude] The source ids this turn flagged, per flag: the panel lists the cited ones.
+        self.turn_sources: dict[str, set[str]] = {'current_turn': set(), 'cited_this_turn': set()}
         self.partial = ''
         # [Claude] Markers already shown in the answer being streamed, as (position, number).
         self.streamed: list[tuple[int, int]] = []
         self.streamed_citations = 0
         self.partial_reasoning = ''
         self.tool_calls = 0
+        # [Claude] How many calls the last summary counted.
+        self.summarized = 0
         self.started = time.monotonic()
         self.tool_statuses: dict[str, dict[str, Any]] = {}
         self.knowledge_names: dict[str, str] = {}
@@ -437,6 +440,8 @@ class AgentTurn:
         self.elements: dict[str, dict[str, Any]] = {}
         # [Claude] The calls shown as running, by call id: their tool's name and arguments.
         self.running: dict[str, tuple[str, dict[str, Any]]] = {}
+        # [Claude] Done lines of calls whose output landed, held until the model moves on.
+        self.settling: list[dict[str, Any]] = []
         self.model: str | None = None
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -528,15 +533,22 @@ class AgentTurn:
             await self.emit('status', {**self.tool_status(name, arguments), 'call_id': call['id'], 'done': False})
 
     async def end_tool(self, output: dict[str, Any]) -> list[dict[str, Any]]:
-        """[Claude] Show a running call as done, filled from its output, and anchor that line in the content.
+        """[Claude] Anchor a call's done line in the content once its output lands, and show it once the model
+        moves on (see `settle`): until then the model is still working with what the call returned.
 
         A call whose output is an error shows what it tried, as it did while running."""
         if (call := self.running.pop(output.get('call_id') or '', None)) is None:
             return []
         name, arguments = call
         status = self.tool_status(name, arguments, None if output.get('error') else output)
-        await self.emit('status', {**status, 'call_id': output['call_id'], 'done': False})
+        self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
         return [_marker(status)]
+
+    async def settle(self) -> None:
+        """[Claude] Show the held done lines: the model wrote answer text, called the next tool, or the turn ended."""
+        settling, self.settling = self.settling, []
+        for status in settling:
+            await self.emit('status', status)
 
     def tool_status(self, name: str, arguments: dict, output: dict | None = None) -> dict[str, Any]:
         """The tool's declared `running` status, or `done` once there is an `output`, else a generic line."""
@@ -590,21 +602,28 @@ class AgentTurn:
 
     async def record_output(self, payload: dict) -> list[dict[str, Any]]:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
-        for source in self.keep(payload):
-            await self.emit('source', source)
-        read = [element['id'] for element in payload.get('elements') or [] if _read(element)]
-        if read:
-            self.turn_sources.update(self.citations.sources[source_id]['n'] for source_id in read)
-            await self.emit('panel_filter', {'ns': sorted(self.turn_sources)})
+        self.keep(payload)
+        for element in payload.get('elements') or []:
+            if _read(element):
+                await self.show_source(element['id'], 'current_turn')
         return await self.end_tool(payload)
 
-    def cite(self, citation: dict[str, Any]) -> str:
+    async def show_source(self, source_id: str, flag: str) -> None:
+        """[Claude] Flag a source once per turn: `current_turn` when a tool read it now, `cited_this_turn` when the
+        answer cites it. The panel keeps the last flags it got for a source and lists the cited ones."""
+        if source_id in self.turn_sources[flag] or source_id not in self.citations.sources:
+            return
+        self.turn_sources[flag].add(source_id)
+        await self.emit('source', {**self.citations.sources[source_id], flag: True})
+
+    async def cite(self, citation: dict[str, Any]) -> str:
         """[Claude] The marker a streamed citation adds after the text already sent, once per number there."""
         self.streamed_citations += 1
         number = self.citations.number(citation)
         at = citation.get('at')
         if number is None or not isinstance(at, int) or (at, number) in self.streamed:
             return ''
+        await self.show_source(citation['source'], 'cited_this_turn')
         self.streamed.append((at, number))
         return f' [{number}]'
 
@@ -670,10 +689,14 @@ class AgentTurn:
             self.partial_reasoning += event.data['text']
             return [_chunk({'reasoning_content': event.data['text']})]
         if event.event == 'delta':
+            if event.data['text']:
+                await self.settle()
+            if event.data['text'] and not self.running:
+                await self.summarize()
             self.partial += event.data['text']
             return [_chunk({'content': event.data['text']})] if event.data['text'] else []
         if event.event == 'citation':
-            marker = self.cite(event.data)
+            marker = await self.cite(event.data)
             return [_chunk({'content': marker})] if marker else []
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
@@ -686,6 +709,7 @@ class AgentTurn:
         return []
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
+        await self.settle()
         await self.start_tools(payload.get('tool_calls', []))
         reasoning = self.remaining_reasoning(payload.get('reasoning') or '')
         content, partial = payload['content'], self.partial
@@ -703,6 +727,9 @@ class AgentTurn:
             and citation['at'] >= len(partial)
             and (citation['at'], number) not in streamed
         ]
+        for citation in citations:
+            if self.citations.number(citation) is not None:
+                await self.show_source(citation['source'], 'cited_this_turn')
         text = _marked(content[len(partial) :], markers)
         chunks = []
         if reasoning:
@@ -722,6 +749,7 @@ class AgentTurn:
 
     async def finish(self, event: ChatEvent) -> list[dict[str, Any]]:
         self.terminal = True
+        await self.settle()
         await self.clear_tools()
         if event.event == 'status':
             self.position = event.data['position']
@@ -730,10 +758,8 @@ class AgentTurn:
         state = event.data.get('state')
         if state != 'idle':
             await self.emit('status', {'description': state or 'error', 'done': True})
-        elif self.tool_calls:
-            # The v1 closing line: the frontend keeps the last summary as the header of the tool list.
-            summary = _summary(self.tool_calls, time.monotonic() - self.started, self.metadata.get('user_language'))
-            await self.emit('status', {'action': 'summary', 'description': summary, 'done': True})
+        else:
+            await self.summarize()
         if event.event == 'error':
             chunks.append(
                 _error(
@@ -746,6 +772,15 @@ class AgentTurn:
             chunks.append(_error(state or 'service_unavailable'))
         return chunks
 
+    async def summarize(self) -> None:
+        """[Claude] Settle the tools called since the last summary into the v1 closing line, which the frontend keeps
+        as the header of the tool list: once the answer starts, and at the end if more were called after it."""
+        if self.tool_calls == self.summarized:
+            return
+        self.summarized = self.tool_calls
+        summary = _summary(self.tool_calls, time.monotonic() - self.started, self.metadata.get('user_language'))
+        await self.emit('status', {'action': 'summary', 'description': summary, 'done': True})
+
     async def run(self, body: dict, agent: str | None) -> AsyncIterator[dict[str, Any]]:
         self.model = body.get('model')
         try:
@@ -754,9 +789,9 @@ class AgentTurn:
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()
             self.emitter = await get_event_emitter(self.metadata)
-            await self.emit('panel_filter', {'ns': []})
+            # Earlier turns' sources, so their numbers resolve; flagged so the panel leaves them out.
             for source in self.citations.sources.values():
-                await self.emit('source', source)
+                await self.emit('source', {**source, 'current_turn': False, 'cited_this_turn': False})
             if not self.thread_id:
                 body = {**body, 'agent': agent}
             events = self.events(body)
