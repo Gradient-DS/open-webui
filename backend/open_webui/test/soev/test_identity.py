@@ -75,11 +75,21 @@ def test_platform_user_id_is_stable_and_contains_no_colon(identity_config):
     assert identity.platform_user_id('owui:user:bob') != result
 
 
+def test_the_assertion_has_the_subject_jwt_protected_header(identity_config):
+    """The protected header identifies the signing key and subject assertion type."""
+    identity, _ = identity_config
+    token = identity.mint_assertion('owui:user:alice', now=NOW)
+    assert json.loads(decode_segment(token.split('.')[0])) == {
+        'alg': 'Ed25519',
+        'kid': 'owui-test-key',
+        'typ': 'subject+jwt',
+    }
+
+
 def test_the_assertion_carries_iss_sub_aud_and_a_single_use_jti(identity_config):
     """Assertions name the credential and subject with a new UUID4 on each mint."""
     identity, _ = identity_config
     first, second = [identity.mint_assertion('owui:user:alice', now=NOW) for _ in range(2)]
-    assert json.loads(decode_segment(first.split('.')[0])) == {'alg': 'Ed25519', 'kid': 'owui-test-key', 'typ': 'JWT'}
     payload = claims(first)
     assert payload == {
         'iss': 'runtime-credential',
