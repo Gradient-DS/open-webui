@@ -90,7 +90,7 @@
 			}}
 		>
 			<div class="flex items-start gap-2 min-w-0">
-				<div class="flex-1 min-w-0">
+				<div class="status-header flex-1 min-w-0">
 					{#if isContent(status)}
 						<div class="line-clamp-1 text-gray-500 dark:text-gray-500">
 							{(status.text ?? '').replace(/\s+/g, ' ').trim()}
@@ -181,3 +181,14 @@
 		{/if}
 	</div>
 {/if}
+
+<style>
+	/* [Gradient] The header shows the newest entry, so it swaps between a reasoning
+	   line and a tool line on every event while the turn runs. Each swap mounts a
+	   fresh .status-description, and its fade-and-slide-in replayed every time,
+	   which read as the header flickering and rolling. The header changes in place;
+	   rows in the list keep their entrance. */
+	.status-header :global(.status-description) {
+		animation: none;
+	}
+</style>
