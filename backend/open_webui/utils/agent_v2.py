@@ -104,6 +104,16 @@ def _from_output(binding: str, elements: list[dict[str, Any]]) -> Any:
     return None
 
 
+def _web_items(elements: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """[Claude] Each distinct web address among the elements, as the favicon list the status shows."""
+    items: dict[str, dict[str, str]] = {}
+    for element in elements:
+        url = element.get('url')
+        if isinstance(url, str) and url and url not in items:
+            items[url] = {'link': url, 'title': str(element.get('title') or url)}
+    return list(items.values())
+
+
 def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
     message = metadata.get('user_message')
     if message is None:
@@ -536,10 +546,20 @@ class AgentTurn:
             'description': 'Searching the knowledge base…' if name == 'search' else f'Running {name}…',
         }
         declared = (self.tool_statuses.get(name) or {}).get('running' if output is None else 'done')
-        if not isinstance(declared, dict):
-            return generic
-        filled = _filled(declared, self.tool_params(declared, arguments, output))
-        return {'action': name, **filled} if filled else generic
+        filled = (
+            _filled(declared, self.tool_params(declared, arguments, output)) if isinstance(declared, dict) else None
+        )
+        status = {'action': name, **filled} if filled else generic
+        if items := _web_items(self.touched(arguments, output)):
+            status['items'] = items
+        return status
+
+    def touched(self, arguments: dict, output: dict | None) -> list[dict[str, Any]]:
+        """[Claude] The elements a call reads: its output's once it lands, else the ones its arguments name."""
+        if output is not None:
+            return output.get('elements') or []
+        named = [value for value in arguments.values() if isinstance(value, str)]
+        return [self.elements[value] for value in named if value in self.elements]
 
     def tool_params(self, declared: dict[str, Any], arguments: dict, output: dict | None) -> dict[str, str]:
         """Each declared param's value: `argument.<name>`, `knowledge.<argument>`, `element.<argument>.<field>`,

@@ -1056,6 +1056,30 @@ async def test_parallel_tools_each_show_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_web_calls_carry_the_addresses_they_found_and_read() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    link = {'type': 'link', 'id': 'https://soev.ai/', 'url': 'https://soev.ai/', 'title': 'soev.ai'}
+    other = {'type': 'link', 'id': 'https://gradient-ds.com/', 'url': 'https://gradient-ds.com/'}
+    calls = [('s1', 'web_search', {'query': 'soev'}, [link, other, link]), ('f1', 'fetch', {'link': link['id']}, [])]
+    async with asyncio.timeout(2):
+        for call_id, name, arguments, elements in calls:
+            tool_call = {'id': call_id, 'name': name, 'arguments': arguments}
+            await turn.render(
+                ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': [tool_call]}})
+            )
+            await turn.render(
+                ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id, 'elements': elements}})
+            )
+    shown = [call.args[0]['data'].get('items') for call in turn.emitter.call_args_list]
+    found = [
+        {'link': 'https://soev.ai/', 'title': 'soev.ai'},
+        {'link': 'https://gradient-ds.com/', 'title': 'https://gradient-ds.com/'},
+    ]
+    assert shown == [None, found, found[:1], None]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('failure', [False, True])
 async def test_turn_end_closes_with_the_summary_or_the_failure(chat: Chat, failure: bool) -> None:
     chat.api.chat.turns = [
