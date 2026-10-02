@@ -5648,10 +5648,16 @@ async def streaming_chat_response_handler(response, ctx):
                                             )
                                         )
                                     ):
+                                        # [Gradient] An agent turn thinks again after each tool call,
+                                        # so its reasoning after content opens a new item at the end:
+                                        # the frontend interleaves reasoning and tool markers by their
+                                        # order in the output. Stock turns keep upstream's single item
+                                        # placed before the message.
+                                        interleave = agent_owns_tool_execution(metadata)
                                         reasoning_item = (
                                             existing_reasoning_item
                                             if (reasoning_detail_items and not reasoning_content)
-                                            or message_index is not None
+                                            or (message_index is not None and not interleave)
                                             else None
                                         )
 
@@ -5668,7 +5674,7 @@ async def streaming_chat_response_handler(response, ctx):
                                                     'summary': None,
                                                     'started_at': time.time(),
                                                 }
-                                                if message_index is not None:
+                                                if message_index is not None and not interleave:
                                                     reasoning_item['ended_at'] = time.time()
                                                     reasoning_item['duration'] = 0
                                                     reasoning_item['status'] = 'completed'

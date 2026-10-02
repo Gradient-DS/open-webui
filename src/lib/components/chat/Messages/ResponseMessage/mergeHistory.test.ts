@@ -331,6 +331,22 @@ describe('buildResponseBlocks', () => {
 		expect(contentText(blocks.at(-1))).toBe('Slot.');
 	});
 
+	it('keeps the summary after the last thought, so it heads the group', () => {
+		const content = `${toolMarker()}${reasoningMarker()}Klaar.`;
+		const offsets = parseToolOffsets(content);
+		const r = [reasoning(content.indexOf('<details type="reasoning"'))];
+		const s = [status('web_search'), status('summary', { done: true })];
+		const merged = mergeStatusAndReasoning(s, r, offsets);
+		const blocks = buildResponseBlocks(merged, content, offsets);
+		const group = blocks[0] as { items: { kind: string; action?: string }[] };
+		expect(group.items.map((i) => i.action ?? i.kind)).toEqual([
+			'web_search',
+			'reasoning',
+			'summary'
+		]);
+		expect(contentText(blocks.at(-1))).toBe('Klaar.');
+	});
+
 	it('returns a single content block for a turn that called no tools', () => {
 		const blocks = buildResponseBlocks([], 'Direct antwoord.', []);
 		expect(blocks).toEqual([{ kind: 'content', text: 'Direct antwoord.', contentOffset: 0 }]);

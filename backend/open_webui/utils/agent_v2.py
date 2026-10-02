@@ -611,6 +611,14 @@ class AgentTurn:
                 params[param] = str(value)
         return params
 
+    async def stop_tools(self) -> list[dict[str, Any]]:
+        """[Claude] End the calls the tool budget stopped: they never get an output, and the model answers next,
+        so each shows what it tried, anchored before that answer, as a call whose output is an error does."""
+        chunks = []
+        for call_id in [call_id for call_id in self.running if call_id != _COMPACTION]:
+            chunks += await self.end_tool({'call_id': call_id, 'error': 'budget_exceeded'})
+        return chunks
+
     async def clear_tools(self) -> None:
         """Forget the calls still shown as running: a call that ended without an output shows no done line."""
         self.running.clear()
@@ -719,6 +727,8 @@ class AgentTurn:
             return await self.record_output(payload)
         if event.event in {'compacting', 'compaction'}:
             return await self.summary(event)
+        if event.event == 'budget_exceeded' and event.data.get('stream') == 'root':
+            return await self.stop_tools()
         if event.event == 'failure' and event.data.get('stream') == 'root':
             await self.clear_tools()
         if event.event in {'status', 'error'}:

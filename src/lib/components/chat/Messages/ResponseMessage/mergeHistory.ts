@@ -209,15 +209,18 @@ export function buildResponseBlocks(
 	// Position every timeline item on the same axis as the prose: a reasoning
 	// block already knows its offset, and the k-th status entry sits at the
 	// k-th tool marker. Status entries and markers are NOT guaranteed 1:1 (an
-	// entry can arrive while its marker is still in flight), so a surplus
-	// entry pins to the last known marker — that keeps it in the final tool
-	// group instead of stranding it after the answer.
+	// entry can arrive while its marker is still in flight, and the closing
+	// summary has none), so a surplus entry pins to the item before it in
+	// stream order. That keeps it in the final tool group instead of stranding
+	// it after the answer, and keeps a summary after the last thought, where it
+	// heads the group.
 	const lastToolOffset = toolOffsets.length > 0 ? toolOffsets[toolOffsets.length - 1] : 0;
 	let toolIdx = 0;
+	let previous = lastToolOffset;
 	const positioned = merged.map((item) => {
-		if (item.kind === 'reasoning') return { item, offset: item.contentOffset };
-		const offset = toolOffsets[toolIdx] ?? lastToolOffset;
-		toolIdx++;
+		const offset =
+			item.kind === 'reasoning' ? item.contentOffset : (toolOffsets[toolIdx++] ?? previous);
+		previous = offset;
 		return { item, offset };
 	});
 
