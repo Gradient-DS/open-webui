@@ -170,6 +170,14 @@
 					<!-- $i18n.t("Planning the search strategy...") -->
 					<!-- $i18n.t("Searching the documents...") -->
 					<!-- $i18n.t("Assessing the gathered information...") -->
+					<!-- $i18n.t("Searched the web for \"{{query}}\": {{results}} results") -->
+					<!-- $i18n.t("Reading {{url}}...") -->
+					<!-- $i18n.t("Read {{title}} ({{url}})") -->
+					<!-- $i18n.t("Read {{url}}") -->
+					<!-- $i18n.t("Looking back at earlier results...") -->
+					<!-- $i18n.t("Looked back at earlier results") -->
+					<!-- $i18n.t("Searching the knowledge base…") -->
+					<!-- $i18n.t("Running {{tool}}…") -->
 					{#if status?.description}
 						{$i18n.t(
 							status.description,

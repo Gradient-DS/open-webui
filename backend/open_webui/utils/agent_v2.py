@@ -553,10 +553,12 @@ class AgentTurn:
     def tool_status(self, name: str, arguments: dict, output: dict | None = None) -> dict[str, Any]:
         """The tool's declared `running` status, or `done` once there is an `output`, else a generic line."""
         # The action names the tool: the frontend lays a turn out as tool activity only for statuses with one.
-        generic = {
-            'action': name,
-            'description': 'Searching the knowledge base…' if name == 'search' else f'Running {name}…',
-        }
+        # A template like the declared ones, so the frontend translates it.
+        generic = (
+            {'action': name, 'description': 'Searching the knowledge base…'}
+            if name == 'search'
+            else {'action': name, 'description': 'Running {{tool}}…', 'tool': name}
+        )
         declared = (self.tool_statuses.get(name) or {}).get('running' if output is None else 'done')
         filled = (
             _filled(declared, self.tool_params(declared, arguments, output)) if isinstance(declared, dict) else None
