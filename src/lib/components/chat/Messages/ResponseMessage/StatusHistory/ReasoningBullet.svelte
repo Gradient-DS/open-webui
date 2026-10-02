@@ -83,8 +83,10 @@
 
 <div class="status-description w-full">
 	{#if asHeader}
+		<!-- [Gradient] py-0.5 matches StatusItem, so the header keeps its height
+		     when it swaps between a reasoning line and a tool line. -->
 		<div
-			class="flex items-center gap-1.5 w-full text-left text-[0.9375rem] text-gray-500 dark:text-gray-500"
+			class="flex items-center gap-1.5 w-full py-0.5 text-left text-[0.9375rem] text-gray-500 dark:text-gray-500"
 		>
 			<span class="line-clamp-1 flex-1 {!isDone ? 'shimmer' : ''}">{label}</span>
 		</div>
