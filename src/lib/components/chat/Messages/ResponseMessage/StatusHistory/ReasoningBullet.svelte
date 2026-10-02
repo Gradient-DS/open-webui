@@ -84,7 +84,10 @@
 <div class="status-description w-full">
 	{#if asHeader}
 		<!-- [Gradient] py-0.5 matches StatusItem, so the header keeps its height
-		     when it swaps between a reasoning line and a tool line. -->
+		     when it swaps between a reasoning line and a tool line. The button
+		     below carries it too: a streaming turn shows its first thought as a
+		     standalone bullet and remounts it as this header when the first tool
+		     status arrives, and a different height there reads as a jump. -->
 		<div
 			class="flex items-center gap-1.5 w-full py-0.5 text-left text-[0.9375rem] text-gray-500 dark:text-gray-500"
 		>
@@ -93,7 +96,7 @@
 	{:else}
 		<button
 			type="button"
-			class="flex items-center gap-1.5 w-full text-left text-[0.9375rem] text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+			class="flex items-center gap-1.5 w-full py-0.5 text-left text-[0.9375rem] text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
 			on:click|stopPropagation={() => (open = !open)}
 		>
 			<span class="line-clamp-1 flex-1 {!isDone ? 'shimmer' : ''}">{label}</span>

@@ -468,6 +468,20 @@
 	function scheduleResponsePartsRebuild(items: ReasoningItem[], events: SubAgentEvent[]): void {
 		_rpLatestItems = items;
 		_rpLatestEvents = events;
+		// [Gradient] The first part builds at once: the skeleton hides as soon as
+		// content arrives, so waiting a frame leaves the message empty for that
+		// frame and the first thought pops in after a collapse.
+		if (_memoResponseParts.length === 0 && (items.length > 0 || events.length > 0)) {
+			if (_rpRafId !== null) {
+				cancelAnimationFrame(_rpRafId);
+				_rpRafId = null;
+			}
+			_memoRpItemsRef = items;
+			_memoRpEventsRef = events;
+			_memoRpEventsLen = events.length;
+			_memoResponseParts = buildResponseParts(items, events);
+			return;
+		}
 		if (_rpRafId !== null) return;
 		_rpRafId = requestAnimationFrame(() => {
 			_rpRafId = null;
@@ -1066,7 +1080,7 @@
 							     Turns with no subagents degrade gracefully — responseParts
 							     contains only reasoning items and SubAgentGroup is never
 							     mounted. Turns with no reasoning similarly degrade. -->
-							<div class="flex flex-col gap-1 my-1">
+							<div class="standalone-reasoning flex flex-col gap-1 my-1">
 								{#each responseParts as part (part.kind === 'reasoning' ? `r-${part.item.contentOffset}` : `g-${part.group_id}`)}
 									{#if part.kind === 'reasoning'}
 										<ReasoningBullet
@@ -2148,5 +2162,13 @@
 	.buttons {
 		-ms-overflow-style: none; /* IE and Edge */
 		scrollbar-width: none; /* Firefox */
+	}
+
+	/* [Gradient] A streaming turn's first thought renders here and is remounted as
+	   the StatusHistory header when the first tool status arrives. The header does
+	   not slide in, so a line that is still sliding when it is swapped snaps to a
+	   new spot. It appears in place, as the header does. */
+	.standalone-reasoning :global(.status-description) {
+		animation: none;
 	}
 </style>
