@@ -32,6 +32,7 @@ from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.shared_chats import SharedChatResponse, SharedChats
 from open_webui.models.tags import TagModel, Tags
+from open_webui.soev.agent_threads import chat_thread_ids, delete_released_threads
 from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.socket.main import get_event_emitter
 from open_webui.tasks import get_response_streams_by_chat_id, has_active_tasks, stop_item_tasks
@@ -1487,12 +1488,19 @@ async def delete_chat_message_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    threads = await chat_thread_ids(id)
     chat = await Chats.delete_message_from_chat_by_id_and_message_id(id, message_id)
     if not chat:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+    # [Gradient] The agent threads only the deleted messages bookmarked
+    try:
+        await delete_released_threads(chat.user_id, threads)
+    except Exception:
+        log.exception('Failed to delete the agent threads of chat %s', id)
 
     await publish_event(
         request,

@@ -2,18 +2,23 @@
 
 import asyncio
 import copy
+import html
 import json
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import httpx
 import pytest
 from open_webui import env
 from open_webui.models.agent_configs import AgentConfigs
-from open_webui.models.chats import Chats
-from open_webui.soev.client import ChatEvent
+from open_webui.models.chat_messages import ChatMessages
+from open_webui.models.chats import ChatForm, Chats
+from open_webui.socket import main as socket_main
+from open_webui.soev import agent_threads, ingest
+from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
@@ -74,7 +79,7 @@ class Chat:
         ]
 
     def bookmark(self, message_id: str, chat_id: str = 'chat') -> dict:
-        return self.messages[chat_id, message_id]['agent_v2']
+        return self.messages[chat_id, message_id]['meta']['agent_v2']
 
     def mutations(self) -> list[tuple[str, dict | None]]:
         return [
@@ -116,9 +121,9 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
     for index in range(1, 4):
         await chat.turn(f'turn {index}', f'a{index}', f'a{index - 1}' if index > 1 else None)
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': 'turn 1', 'collections': [], 'agent': 'test', 'model': 'llm'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 2', 'collections': [], 'model': 'llm'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': 'turn 3', 'collections': [], 'model': 'llm'}),
+        ('/v1/chat/threads', {'input': {'text': 'turn 1', 'knowledge': []}, 'agent': 'test', 'model': 'llm'}),
+        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'turn 2', 'knowledge': []}, 'model': 'llm'}),
+        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'turn 3', 'knowledge': []}, 'model': 'llm'}),
     ]
     assert [chat.bookmark(f'a{i}') for i in range(1, 4)] == [
         {'thread_id': 'thr-1', 'position': position} for position in (3, 5, 7)
@@ -148,12 +153,14 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
     await chat.turn(text, 'new-answer', parent, chat_id=chat_id)
     assert chat.mutations()[-2:] == [
         ('/v1/chat/threads/thr-1/fork', {'at': at}),
-        ('/v1/chat/threads/thr-2/inputs', {'input': text, 'collections': [], 'model': 'llm'}),
+        ('/v1/chat/threads/thr-2/inputs', {'input': {'text': text, 'knowledge': []}, 'model': 'llm'}),
     ]
     assert chat.api.chat.threads['thr-1']['events'] == original
     assert chat.bookmark('new-answer', chat_id) == {'thread_id': 'thr-2', 'position': at + 2}
     inputs = [
-        event['payload']['payload'] for event in chat.api.chat.threads['thr-2']['events'] if event['type'] == 'input'
+        event['payload']['payload']['text']
+        for event in chat.api.chat.threads['thr-2']['events']
+        if event['type'] == 'input'
     ]
     assert inputs == (['first', 'second', text] if at == 5 else ['first', text])
 
@@ -176,8 +183,23 @@ async def test_first_turn_regenerate_opens_another_thread(chat: Chat) -> None:
     assert chat.bookmark('regenerated')['thread_id'] == 'thr-2'
 
 
+def seed_collection(api: FakeSoevApi, key: str, name: str, description: str | None = None) -> None:
+    api.collections[key] = {
+        'key': key,
+        'name': name,
+        'description': description,
+        'visibility': 'public',
+        'principals': [],
+        'writers': [],
+        'created_at': api.now,
+        'updated_at': api.now,
+    }
+
+
 @pytest.mark.asyncio
-async def test_one_text_input_and_selected_collection_keys(chat: Chat) -> None:
+async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(chat: Chat) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten', 'Getekende contracten')
+    seed_collection(chat.api, 'kb-b', 'Notulen')
     await chat.turn(
         [
             {'type': 'text', 'text': 'one'},
@@ -185,17 +207,157 @@ async def test_one_text_input_and_selected_collection_keys(chat: Chat) -> None:
             {'type': 'text', 'text': 'two'},
         ],
         'a1',
-        files=[{'type': 'collection', 'id': 'kb-a'}, {'type': 'file', 'id': 'ignored'}],
+        files=[{'type': 'collection', 'id': 'kb-a', 'name': 'Name when picked'}],
         knowledge=[{'id': 'kb-a'}, {'id': 'kb-b'}],
     )
     assert chat.mutations()[0][1] == {
-        'input': 'one\ntwo',
-        'collections': ['kb-a', 'kb-b'],
+        'input': {
+            'text': 'one\ntwo',
+            'knowledge': [
+                {'key': 'kb-a', 'name': 'Contracten', 'description': 'Getekende contracten'},
+                {'key': 'kb-b', 'name': 'Notulen'},
+            ],
+        },
         'agent': 'test',
         'model': 'llm',
     }
-    await chat.turn('next', 'a2', 'a1', files=[{'type': 'collection', 'id': 'kb-c'}])
-    assert chat.mutations()[-1][1]['collections'] == ['kb-c']
+
+
+@pytest.mark.asyncio
+async def test_a_models_files_notes_and_legacy_entries_are_not_knowledge(chat: Chat) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    await chat.turn(
+        'question',
+        'a1',
+        knowledge=[
+            {'id': 'kb-a', 'type': 'collection'},
+            {'id': 'file-1', 'type': 'file'},
+            {'id': 'note-1', 'type': 'note'},
+            {'collection_name': 'legacy-chroma'},
+        ],
+    )
+    assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-a', 'name': 'Contracten'}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+async def test_knowledge_the_user_cannot_read_refuses_the_turn_by_count_without_names(
+    chat: Chat, language: str
+) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    chunks = await chat.turn(
+        'next',
+        'a1',
+        files=[
+            {'type': 'collection', 'id': 'kb-a'},
+            {'type': 'collection', 'id': 'kb-secret', 'name': 'Integriteitsonderzoek'},
+            {'type': 'collection', 'id': 'kb-gone', 'name': 'Oud'},
+        ],
+        user_language=language,
+    )
+    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
+    assert refusal['code'] == 'knowledge_unavailable'
+    assert '2' in refusal['message']
+    assert not any(hidden in refusal['message'] for hidden in ('kb-secret', 'Integriteitsonderzoek', 'kb-gone'))
+    assert chat.mutations() == []
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_speaks_the_users_language(chat: Chat) -> None:
+    gone = [{'type': 'collection', 'id': 'kb-gone'}]
+    english = await chat.turn('next', 'a1', files=gone, user_language='en-US')
+    dutch = await chat.turn('next', 'a2', files=gone, user_language='nl-NL')
+    assert english[0]['error']['message'] != dutch[0]['error']['message']
+
+
+def stored_files(monkeypatch: pytest.MonkeyPatch, **statuses: str | None) -> None:
+    """File records by id, owned by alice, each with its processing status."""
+    records = {
+        file_id: SimpleNamespace(id=file_id, user_id='alice', filename=f'{file_id}.pdf', meta={'status': status})
+        for file_id, status in statuses.items()
+    }
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', AsyncMock(side_effect=records.get))
+
+
+@pytest.mark.asyncio
+async def test_attached_files_are_sent_with_their_collection_and_name(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored_files(monkeypatch, f1='completed', f2='completed', f3=None)
+    await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'f1', 'name': 'rapport.pdf', 'collection_name': 'owui-attachments-alice'},
+            {'type': 'file', 'id': 'f2', 'name': 'besluit.docx', 'collection_name': ''},
+            {'type': 'file', 'id': 'f3', 'name': 'oud.txt'},
+            {'type': 'file', 'id': 'f1', 'name': 'rapport.pdf', 'collection_name': 'owui-attachments-alice'},
+        ],
+    )
+    attachments_key = ingest.attachments_collection_key('alice')
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': 'owui-attachments-alice', 'file_id': 'f1', 'name': 'rapport.pdf'},
+        {'collection_key': attachments_key, 'file_id': 'f2', 'name': 'besluit.docx'},
+        {'collection_key': attachments_key, 'file_id': 'f3', 'name': 'oud.txt'},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_attached_images_are_not_attachments(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    stored_files(monkeypatch, img='completed')
+    await chat.turn('question', 'a1', files=[{'type': 'file', 'id': 'img', 'content_type': 'image/png'}])
+    assert 'attachments' not in chat.mutations()[-1][1]['input']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+async def test_attached_files_the_agent_cannot_read_refuse_the_turn_by_name(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, language: str
+) -> None:
+    stored_files(monkeypatch, ok='completed', busy='processing', broken='failed')
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'ok', 'name': 'goed.pdf'},
+            {'type': 'file', 'id': 'busy', 'name': 'bezig.pdf'},
+            {'type': 'file', 'id': 'broken', 'name': 'kapot.pdf'},
+            {'type': 'file', 'id': 'deleted', 'name': 'weg.pdf'},
+        ],
+        user_language=language,
+    )
+    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
+    assert refusal['code'] == 'attachments_unavailable'
+    assert all(name in refusal['message'] for name in ('bezig.pdf', 'kapot.pdf', 'weg.pdf'))
+    assert 'goed.pdf' not in refusal['message']
+    assert chat.mutations() == []
+
+
+@pytest.mark.asyncio
+async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_instructions(chat: Chat) -> None:
+    await chat.turn('question', 'a1', system_prompt='Je helpt behandelaars.', chat_system_prompt='Ik ben jurist.')
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['assistant_instructions'] == 'Je helpt behandelaars.'
+    assert sent['user_instructions'] == 'Ik ben jurist.'
+
+
+@pytest.mark.asyncio
+async def test_the_web_search_toggle_on_asks_for_web_search(chat: Chat) -> None:
+    await chat.turn('question', 'a1', features={'web_search': True})
+    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': agent_v2.WEB_SEARCH_ON}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('features', [{'web_search': False}, {}], ids=['off', 'absent'])
+async def test_the_web_search_toggle_off_leaves_web_search_to_the_deployment(chat: Chat, features: dict) -> None:
+    await chat.turn('question', 'a1', features=features)
+    assert 'tools' not in chat.mutations()[-1][1]['input']
+
+
+@pytest.mark.asyncio
+async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
+    await chat.turn('question', 'a1', system_prompt=' ', chat_system_prompt=None)
+    assert chat.mutations()[-1][1]['input'] == {'text': 'question', 'knowledge': []}
 
 
 @pytest.mark.asyncio
@@ -210,7 +372,9 @@ async def test_orphaned_input_resumes_before_one_new_input(chat: Chat) -> None:
         '/v1/chat/threads/thr-1/inputs',
     ]
     assert [
-        event['payload']['payload'] for event in chat.api.chat.threads['thr-1']['events'] if event['type'] == 'input'
+        event['payload']['payload']['text']
+        for event in chat.api.chat.threads['thr-1']['events']
+        if event['type'] == 'input'
     ] == ['first', 'second']
     assert chat.bookmark('a2')['position'] == 5
 
@@ -245,35 +409,58 @@ def test_chunks_share_a_document_number_without_losing_text() -> None:
     assert [item['document'] for item in (first, second)] == [['quoted passage'], ['another passage']]
     assert first['n'] == second['n'] == 1
     assert citations.add(SOURCE) is None
-    assert citations.rewrite('[source-a] [<source-b>]', final=True) == '[1] [1]'
+
+
+# [Claude] What the thread API serves: elements in a tool output, and an answer whose text carries no markers,
+# its citations beside it as positions with real ids.
+DOCUMENT = {'type': 'document', 'id': 'document', 'title': 'Document'}
+CHUNK = {'type': 'chunk', 'id': 'source-a', 'ref': 'document', 'text': 'quoted passage', 'pages': [2]}
+
+
+def document(id: str, title: str, **fields: Any) -> dict:
+    return {'type': 'document', 'id': id, 'title': title, **fields}
+
+
+def chunk(id: str, ref: str = 'document', text: str = 'quoted passage', **fields: Any) -> dict:
+    return {'type': 'chunk', 'id': id, 'ref': ref, 'text': text, **fields}
+
+
+def found(*elements: dict, call_id: str = 'c0') -> tuple[str, dict]:
+    return ('tool_output', {'call_id': call_id, 'elements': list(elements)})
+
+
+def cited(at: int, source: str, document: str = 'document') -> dict:
+    return {'at': at, 'status': 'resolved', 'source': source, 'document': document}
+
+
+def answered(text: str, *citations: dict, **payload: Any) -> tuple[str, dict]:
+    return ('model_output', {'content': text, 'citations': list(citations), **payload})
 
 
 @pytest.mark.asyncio
 async def test_document_numbers_survive_seeded_turns(chat: Chat) -> None:
     """Number documents by first appearance across chunks and seeded turns."""
-    chunks = [{**SOURCE, 'id': f'chunk-{index}'} for index in range(3)]
-    second = {**SOURCE, 'id': 'second-1', 'ref': 'second', 'properties': {'title': 'Second'}}
+    chunks = [chunk(f'chunk-{index}') for index in range(3)]
+    second = document('second', 'Second')
     chat.api.chat.turns = [
         [
-            *(('source', chunk) for chunk in chunks),
-            ('source', second),
-            ('model_output', {'content': '[chunk-0] [chunk-1] [chunk-2] [second-1]'}),
+            found(DOCUMENT, *chunks, second, chunk('second-1', 'second')),
+            answered('Eerst.', cited(5, 'chunk-0'), cited(5, 'chunk-1'), cited(5, 'second-1', 'second')),
         ]
     ]
-    assert content(await chat.turn('first', 'a1')) == '[1] [1] [1] [2]'
+    assert content(await chat.turn('first', 'a1')) == 'Eerst [1] [2].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
     assert [source['n'] for source in sources] == [1, 1, 1, 2]
     assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2]}
     chat.socket.clear()
     chat.api.chat.turns = [
         [
-            ('source', {**SOURCE, 'id': 'chunk-3'}),
-            ('source', {**second, 'id': 'second-2'}),
-            ('source', {**SOURCE, 'id': 'third-1', 'ref': 'third', 'properties': {'title': 'Third'}}),
-            ('model_output', {'content': '[chunk-0] [chunk-3] [second-1] [second-2] [third-1]'}),
+            found(DOCUMENT, chunk('chunk-3'), second, chunk('second-2', 'second'), document('third', 'Third')),
+            found(chunk('third-1', 'third'), call_id='c1'),
+            answered('Dan.', cited(3, 'chunk-0'), cited(3, 'third-1', 'third')),
         ]
     ]
-    assert content(await chat.turn('next', 'a2', 'a1')) == '[1] [1] [2] [2] [3]'
+    assert content(await chat.turn('next', 'a2', 'a1')) == 'Dan [1] [3].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
     assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 2, 3]
     assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2, 3]}
@@ -334,39 +521,27 @@ def test_source_pages_require_positive_integers(pages: Any, expected: int | None
 async def test_source_preview_metadata_reaches_the_panel(chat: Chat, as_json: bool) -> None:
     """Emit viewer metadata without mutating input or retaining duplicated chunk data."""
     rects = [RECT, {**RECT, 'page': 1}, {key: value for key, value in RECT.items() if key != 'page'}]
-    properties = {
-        'title': 'report.pdf',
-        'source_id': 'owui-file-id',
-        'page_numbers': [2],
-        'bboxes': json.dumps(rects) if as_json else rects,
-        'chunk_content': 'duplicate',
-        'embedding_text': 'duplicate embedding',
-        'author': 'Author',
-        'derived_raw': '{}',
-        'source_url': None,
-    }
-    original = copy.deepcopy(properties)
-    chat.api.chat.turns = [
-        [('source', {**SOURCE, 'properties': properties}), ('model_output', {'content': 'Answer [source-a]'})]
-    ]
+    report = document('document', 'report.pdf', source_id='owui-file-id', source_url='https://example.org/r')
+    passage = {**CHUNK, 'bboxes': json.dumps(rects) if as_json else rects, 'chunk_index': 4}
+    original = copy.deepcopy(passage)
+    chat.api.chat.turns = [[found(report, passage), answered('Answer', cited(6, 'source-a'))]]
     assert content(await chat.turn('question', 'a1')) == 'Answer [1]'
     source = next(event['data'] for event in chat.socket if event['type'] == 'source')
-    assert source['document'] == [SOURCE['text']]
+    assert source['source'] == {'id': 'document', 'name': 'report.pdf', 'url': 'https://example.org/r'}
+    assert source['document'] == [CHUNK['text']]
     assert source['metadata'][0] == {
         'title': 'report.pdf',
         'source_id': 'owui-file-id',
+        'source_url': 'https://example.org/r',
         'file_id': 'owui-file-id',
         'page': 1,
         'bboxes': [{**RECT, 'page': 1}, {**RECT, 'page': 0}, rects[2]],
-        'author': 'Author',
-        'derived_raw': '{}',
-        'source_url': None,
         'source': 'document',
         'name': 'report.pdf',
         'chunk_id': 'source-a',
         'ref': 'document',
     }
-    assert properties == original
+    assert passage == original
 
 
 @pytest.mark.asyncio
@@ -374,10 +549,8 @@ async def test_source_preview_metadata_reaches_the_panel(chat: Chat, as_json: bo
 async def test_mixed_bboxes_preserve_valid_rectangles(chat: Chat, as_json: bool) -> None:
     """Keep both valid rectangles when a malformed rectangle appears between them."""
     rects = [RECT, {}, {**RECT, 'page': 1}]
-    properties = {'bboxes': json.dumps(rects) if as_json else rects}
-    chat.api.chat.turns = [
-        [('source', {**SOURCE, 'properties': properties}), ('model_output', {'content': 'Answer [source-a]'})]
-    ]
+    passage = {**CHUNK, 'bboxes': json.dumps(rects) if as_json else rects}
+    chat.api.chat.turns = [[found(DOCUMENT, passage), answered('Answer', cited(6, 'source-a'))]]
     assert content(await chat.turn('question', 'a1')) == 'Answer [1]'
     metadata = next(event['data']['metadata'][0] for event in chat.socket if event['type'] == 'source')
     assert metadata['bboxes'] == [{**RECT, 'page': 1}, {**RECT, 'page': 0}]
@@ -413,9 +586,8 @@ async def test_mixed_bboxes_preserve_valid_rectangles(chat: Chat, as_json: bool)
 )
 async def test_malformed_bboxes_never_fail_a_turn(chat: Chat, bboxes: Any) -> None:
     """Ignore malformed rectangle data while delivering the source and answer."""
-    chat.api.chat.turns = [
-        [('source', {**SOURCE, 'properties': {'bboxes': bboxes}}), ('model_output', {'content': 'Answer [source-a]'})]
-    ]
+    passage = {key: value for key, value in CHUNK.items() if key != 'pages'} | {'bboxes': bboxes}
+    chat.api.chat.turns = [[found(DOCUMENT, passage), answered('Answer', cited(6, 'source-a'))]]
     assert content(await chat.turn('question', 'a1')) == 'Answer [1]'
     metadata = next(event['data']['metadata'][0] for event in chat.socket if event['type'] == 'source')
     assert 'bboxes' not in metadata
@@ -434,52 +606,78 @@ def test_absent_optional_source_properties_are_omitted() -> None:
     }
 
 
-@pytest.mark.parametrize('marker', ['[source-a]', '[<source-a>]'])
-def test_every_citation_split_is_rewritten(marker: str) -> None:
-    for split in range(len(marker) + 1):
-        citations = agent_v2.Citations()
-        citations.add(SOURCE)
-        text = citations.rewrite('Text ' + marker[:split]) + citations.rewrite(marker[split:] + ' tail', final=True)
-        assert text == 'Text [1] tail'
-
-
-def test_unclosed_citation_buffer_flushes_after_64_characters() -> None:
-    citations = agent_v2.Citations()
-    assert citations.rewrite('Text [' + 'x' * 63) == 'Text '
-    assert len(citations.pending) == 64
-    assert citations.rewrite('y') == '[' + 'x' * 63 + 'y'
-    assert citations.pending == ''
-    assert citations.rewrite(' rest') == ' rest'
-
-
 @pytest.mark.asyncio
-async def test_citation_marker_survives_three_deltas(chat: Chat) -> None:
+async def test_a_streamed_citation_is_placed_where_it_arrives_and_not_again_at_the_end(chat: Chat) -> None:
     chat.api.chat.turns = [
         [
-            ('source', SOURCE),
-            ('delta', {'text': 'Text ['}),
-            ('delta', {'text': 'source-'}),
-            ('delta', {'text': 'a] tail'}),
-            ('model_output', {'content': 'Text [source-a] tail'}),
+            found(DOCUMENT, CHUNK),
+            ('delta', {'text': 'Text'}),
+            ('citation', cited(4, 'source-a')),
+            ('delta', {'text': ' tail'}),
+            answered('Text tail', cited(4, 'source-a')),
         ]
     ]
     assert content(await chat.turn('question', 'a1')) == 'Text [1] tail'
 
 
 @pytest.mark.asyncio
+async def test_a_citation_streamed_at_the_end_of_the_text_is_not_repeated_by_the_answer(chat: Chat) -> None:
+    chat.api.chat.turns = [
+        [
+            found(DOCUMENT, CHUNK),
+            ('delta', {'text': 'Text'}),
+            ('citation', cited(4, 'source-a')),
+            answered('Text', cited(4, 'source-a')),
+        ]
+    ]
+    assert content(await chat.turn('question', 'a1')) == 'Text [1]'
+
+
+@pytest.mark.asyncio
+async def test_an_answer_not_streamed_gets_its_markers_at_the_served_positions(chat: Chat) -> None:
+    other = document('other', 'Other')
+    chat.api.chat.turns = [
+        [
+            found(DOCUMENT, CHUNK, other, chunk('b-1', 'other')),
+            answered('Eén, twee.', cited(3, 'source-a'), cited(9, 'b-1', 'other')),
+        ]
+    ]
+    assert content(await chat.turn('question', 'a1')) == 'Eén [1], twee [2].'
+
+
+@pytest.mark.asyncio
+async def test_an_invalid_citation_or_an_unknown_source_gets_no_marker(chat: Chat) -> None:
+    invalid = {'at': 4, 'status': 'invalid', 'reason': 'no element has id 9'}
+    chat.api.chat.turns = [
+        [
+            found(DOCUMENT, CHUNK),
+            ('delta', {'text': 'Text'}),
+            ('citation', invalid),
+            ('delta', {'text': ' tail'}),
+            answered('Text tail', invalid, cited(9, 'never-shown')),
+        ]
+    ]
+    assert content(await chat.turn('question', 'a1')) == 'Text tail'
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('close_after', [None, 4])
 @pytest.mark.parametrize(
-    'durable,expected', [('Draft [source-a].', 'Draft [1]. Next.'), ('Revised answer.', 'Draft  Next.')]
+    'durable,expected',
+    [
+        (answered('Draft.', cited(5, 'source-a'), reasoning='reason'), 'Draft [1]. Next.'),
+        (answered('Revised answer.', reasoning='reason'), 'Draft Next.'),
+    ],
 )
 async def test_durable_output_prefix_and_mismatch_do_not_cancel(
-    chat: Chat, caplog: pytest.LogCaptureFixture, close_after: int | None, durable: str, expected: str
+    chat: Chat, caplog: pytest.LogCaptureFixture, close_after: int | None, durable: tuple, expected: str
 ) -> None:
     chat.api.chat.close_after = close_after
     chat.api.chat.turns = [
         [
-            ('source', SOURCE),
-            ('delta', {'text': 'Draft [source-'}),
-            ('model_output', {'content': durable, 'reasoning': 'reason'}),
+            found(DOCUMENT, CHUNK),
+            ('delta', {'text': 'Draft'}),
+            durable,
             ('model_output', {'content': ' Next.'}),
         ]
     ]
@@ -488,31 +686,34 @@ async def test_durable_output_prefix_and_mismatch_do_not_cancel(
     assert not any('error' in chunk for chunk in chunks)
     assert len(chat.mutations()) == 1
     assert chat.bookmark('a1')['position'] == 5
-    mismatch = durable == 'Revised answer.'
+    mismatch = durable[1]['content'] == 'Revised answer.'
     warnings = [record for record in caplog.records if 'disagrees' in record.message]
     assert len(warnings) == int(mismatch)
     if mismatch:
         assert warnings[0].thread_id == 'thr-1'
         assert 'Draft' not in warnings[0].message
-        assert durable not in warnings[0].message
+        assert durable[1]['content'] not in warnings[0].message
         assert content(chunks, 'reasoning_content') == ''
 
 
 @pytest.mark.asyncio
 async def test_panel_filter_scopes_chips_to_this_turn_with_cumulative_numbers(chat: Chat) -> None:
     """Filter retrieved documents using their cumulative numbers across turns."""
-    second = {**SOURCE, 'id': 'source-b', 'ref': 'document-b', 'properties': {'title': 'Second'}}
-    third = {**SOURCE, 'id': 'source-c', 'ref': 'document-c', 'properties': {'title': 'Third'}}
-    chat.api.chat.turns = [[('source', SOURCE), ('source', second), ('model_output', {'content': 'First [source-a]'})]]
+    second = [document('document-b', 'Second'), chunk('source-b', 'document-b')]
+    third = [document('document-c', 'Third'), chunk('source-c', 'document-c')]
+    chat.api.chat.turns = [[found(DOCUMENT, CHUNK, *second), answered('First', cited(5, 'source-a'))]]
     await chat.turn('first', 'a1')
     assert [event['data'] for event in chat.socket if event['type'] == 'panel_filter'][-1] == {'ns': [1, 2]}
     chat.socket.clear()
     chat.api.chat.turns = [
         [
-            ('source', second),
-            ('source', third),
-            ('source', third),
-            ('model_output', {'content': 'Second [source-b] and [source-c]; earlier [source-a]'}),
+            found(*second, *third, third[1]),
+            answered(
+                'Second and; earlier',
+                cited(6, 'source-b', 'document-b'),
+                cited(10, 'source-c', 'document-c'),
+                cited(19, 'source-a'),
+            ),
         ]
     ]
     assert content(await chat.turn('second', 'a2', 'a1')) == 'Second [2] and [3]; earlier [1]'
@@ -614,18 +815,27 @@ async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text
                 'model_output',
                 {'content': '', 'reasoning': 'Plan', 'tool_calls': [{'id': 'c1', 'name': 'search', 'arguments': {}}]},
             ),
-            ('tool_output', {'call_id': 'c1', 'data': 'PRIVATE TOOL RESULT'}),
-            ('source', SOURCE),
-            ('source', SOURCE),
-            ('source', {**SOURCE, 'id': 'source-b', 'text': 'another passage'}),
-            ('delta', {'text': 'Answer [source-'}),
-            ('delta', {'text': 'b] and [source-a].'}),
-            ('model_output', {'content': 'Answer [source-b] and [source-a].', 'reasoning': 'Explain'}),
+            (
+                'tool_output',
+                {
+                    'call_id': 'c1',
+                    'data': 'PRIVATE TOOL RESULT',
+                    'elements': [DOCUMENT, CHUNK, CHUNK, chunk('source-b', text='another passage')],
+                },
+            ),
+            ('delta', {'text': 'Answer'}),
+            ('citation', cited(6, 'source-b')),
+            ('delta', {'text': ' and'}),
+            ('citation', cited(10, 'source-a')),
+            ('delta', {'text': '.'}),
+            answered('Answer and.', cited(6, 'source-b'), cited(10, 'source-a'), reasoning='Explain'),
             ('future_event', {'unknown': 'ignored'}),
         ]
     ]
     chunks = await chat.turn('question', 'a1')
-    assert content(chunks) == 'Answer [1] and [1].'
+    marker = '\n\n<details type="tool_calls" done="true" name="search">\n<summary>Searching the knowledge base…</summary>\n</details>\n\n'
+    assert content(chunks) == marker + 'Answer [1] and [1].'
+    assert 'PRIVATE' not in json.dumps(chunks)
     assert content(chunks, 'reasoning_content') == 'PlanExplain'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
     assert [source['n'] for source in sources] == [1, 1]
@@ -633,16 +843,16 @@ async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text
     assert sources[0]['document'] == ['quoted passage']
     assert sources[0]['metadata'][0]['source'] == 'document'
     assert sources[1]['metadata'][0]['source'] == 'document'
-    assert chat.bookmark('a1')['position'] == 9
+    assert chat.bookmark('a1')['position'] == 6
 
 
 @pytest.mark.asyncio
 async def test_previous_sources_are_available_in_later_turn_and_fork(chat: Chat) -> None:
-    chat.api.chat.turns = [[('source', SOURCE), ('model_output', {'content': 'First [source-a]'})]]
+    chat.api.chat.turns = [[found(DOCUMENT, CHUNK), answered('First', cited(5, 'source-a'))]]
     await chat.turn('first', 'a1')
     for message_id in ('a2', 'regenerated'):
         chat.socket.clear()
-        chat.api.chat.turns = [[('model_output', {'content': 'Again [source-a]'})]]
+        chat.api.chat.turns = [[answered('Again', cited(5, 'source-a'))]]
         assert content(await chat.turn('again', message_id, 'a1')) == 'Again [1]'
         assert len([event for event in chat.socket if event['type'] == 'source']) == 1
 
@@ -651,9 +861,9 @@ async def test_previous_sources_are_available_in_later_turn_and_fork(chat: Chat)
 async def test_capped_stream_recovers_durable_suffix_and_split_marker(chat: Chat) -> None:
     chat.api.chat.turns = [
         [
-            ('source', SOURCE),
-            ('delta', {'text': 'Answer [source-'}),
-            ('model_output', {'content': 'Answer [source-a].'}),
+            found(DOCUMENT, CHUNK),
+            ('delta', {'text': 'Answer'}),
+            answered('Answer.', cited(6, 'source-a')),
         ]
     ]
     chat.api.chat.close_after = 4
@@ -799,31 +1009,30 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
         ('failure', {'message': 'failed'}),
     ],
 )
-async def test_tool_activity_clears_at_result_or_next_model_text(
+async def test_a_tool_call_shows_running_then_done_only_when_its_output_lands(
     name: str, description: str, kind: str, payload: dict
 ) -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
+    status = {'type': 'status', 'data': {'action': name, 'description': description, 'call_id': 'c1', 'done': False}}
     async with asyncio.timeout(2):
-        await turn.render(
+        started = await turn.render(
             ChatEvent(
                 'model_output',
                 {'stream': 'root', 'payload': {'content': '', 'tool_calls': [{'id': 'c1', 'name': name}]}},
             )
         )
-        assert [call.args[0] for call in turn.emitter.call_args_list] == [
-            {'type': 'status', 'data': {'description': description, 'done': False}}
-        ]
+        assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
         data = payload if kind.endswith('delta') else {'stream': 'root', 'payload': payload}
-        await turn.render(ChatEvent(kind, data))
-    assert [call.args[0] for call in turn.emitter.call_args_list] == [
-        {'type': 'status', 'data': {'description': description, 'done': False}},
-        {'type': 'status', 'data': {'description': description, 'done': True}},
-    ]
+        ended = await turn.render(ChatEvent(kind, data))
+    answered_call = kind == 'tool_output'
+    assert [call.args[0] for call in turn.emitter.call_args_list] == [status] * (1 + answered_call)
+    assert '<details type="tool_calls"' not in content(started)
+    assert ('<details type="tool_calls"' in content(ended)) == answered_call
 
 
 @pytest.mark.asyncio
-async def test_parallel_tools_keep_remaining_activity_visible() -> None:
+async def test_parallel_tools_each_show_once() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
     async with asyncio.timeout(2):
@@ -839,24 +1048,16 @@ async def test_parallel_tools_keep_remaining_activity_visible() -> None:
                 },
             )
         )
-        for stream, call_id in [('child', 'c2'), ('root', 'unknown')]:
-            await turn.render(ChatEvent('tool_output', {'stream': stream, 'payload': {'call_id': call_id}}))
-        assert turn.emitter.call_count == 2
-        await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c2'}}))
-        assert turn.emitter.call_args.args[0]['data'] == {'description': 'Searching the knowledge base…', 'done': False}
-        await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
-    assert [call.args[0]['data'] for call in turn.emitter.call_args_list] == [
-        {'description': 'Searching the knowledge base…', 'done': False},
-        {'description': 'Running calculate…', 'done': False},
-        {'description': 'Running calculate…', 'done': True},
-        {'description': 'Searching the knowledge base…', 'done': False},
-        {'description': 'Searching the knowledge base…', 'done': True},
-    ]
+        for call_id in ['c2', 'c1']:
+            await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id}}))
+    search = {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False}
+    calculate = {'action': 'calculate', 'description': 'Running calculate…', 'call_id': 'c2', 'done': False}
+    assert [call.args[0]['data'] for call in turn.emitter.call_args_list] == [search, calculate, calculate, search]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('failure', [False, True])
-async def test_turn_end_clears_tool_activity_without_result(chat: Chat, failure: bool) -> None:
+async def test_turn_end_closes_with_the_summary_or_the_failure(chat: Chat, failure: bool) -> None:
     chat.api.chat.turns = [
         [
             ('model_output', {'content': '', 'tool_calls': [{'id': 'c1', 'name': 'search'}]}),
@@ -866,9 +1067,10 @@ async def test_turn_end_clears_tool_activity_without_result(chat: Chat, failure:
     chunks = await chat.turn('question', 'a1')
     assert any('error' in chunk for chunk in chunks) == failure
     assert [event['data'] for event in chat.socket if event['type'] == 'status'] == [
-        {'description': 'Searching the knowledge base…', 'done': False},
-        {'description': 'Searching the knowledge base…', 'done': True},
-        {'description': 'error' if failure else 'idle', 'done': True},
+        {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False},
+        {'description': 'error', 'done': True}
+        if failure
+        else {'action': 'summary', 'description': '1 tool called in less than a second', 'done': True},
     ]
 
 
@@ -897,7 +1099,7 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
         result = await chat.response(None, 'a1', stream=False, **kwargs)
         assert result['choices'][0]['message']['content'] == 'Answer: last question'
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': 'last question', 'collections': [], 'agent': 'test', 'model': 'llm'})
+        ('/v1/chat/threads', {'input': {'text': 'last question', 'knowledge': []}, 'agent': 'test', 'model': 'llm'})
     ]
 
 
@@ -977,8 +1179,44 @@ async def test_explicit_stop_and_broken_transport_cancel_the_submitted_input(
     assert streams[0].closed
     assert chat.api.chat.threads['thr-1']['state'] == 'idle'
     assert [event['data'] for event in chat.socket if event['type'] == 'status'] == [
-        {'description': 'Searching the knowledge base…', 'done': False},
-        {'description': 'Searching the knowledge base…', 'done': True},
+        {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_answer(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat.api.chat.terminal_state = 'running'
+    original = chat.api.chat._response
+    streams = []
+
+    def response(*args: Any, **kwargs: Any) -> httpx.Response:
+        result = original(*args, **kwargs)
+        stream = InterruptedStream(result.content.rsplit(b'event: status', 1)[0], False)
+        streams.append(stream)
+        return httpx.Response(result.status_code, stream=stream, headers=result.headers)
+
+    monkeypatch.setattr(chat.api.chat, '_response', response)
+    task = asyncio.create_task(chat.turn('long essay', 'a1'))
+    async with asyncio.timeout(2):
+        while not streams:
+            await asyncio.sleep(0)
+    await asyncio.wait_for(streams[0].waiting.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=2)
+    monkeypatch.setattr(chat.api.chat, '_response', original)
+    chat.api.chat.terminal_state = 'idle'
+    stopped = len(chat.mutations())
+    cancelled = next(e['position'] for e in chat.api.chat.threads['thr-1']['events'] if e['type'] == 'cancelled')
+    assert chat.bookmark('a1') == {'thread_id': 'thr-1', 'position': cancelled}
+
+    chunks = await chat.turn('what was I asking?', 'a2', 'a1')
+
+    assert content(chunks) == 'Answer: what was I asking?'
+    assert chat.mutations()[stopped:] == [
+        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'what was I asking?', 'knowledge': []}, 'model': 'llm'}),
     ]
 
 
@@ -1038,3 +1276,289 @@ async def test_agent_model_is_default_without_resolved_llm(chat: Chat, monkeypat
     )
     await chat.turn('default turn', 'a1', form_data={'model': ''}, model={})
     assert chat.mutations()[0][1]['model'] == 'agent-default'
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_continues_the_thread_in_real_chat_storage(
+    chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored = Chat(chat_http)
+    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v1')
+    monkeypatch.setattr(
+        AgentConfigs, 'get_agent_config_by_id', AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2'}))
+    )
+    monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=AsyncMock()))
+    chat_id = str(uuid4())
+    await Chats.insert_new_chat(chat_id, 'alice', ChatForm(chat={'title': 'Chat', 'history': {'messages': {}}}))
+    for message_id, parent in [('q1', None), ('a1', 'q1'), ('q2', 'a1'), ('a2', 'q2')]:
+        role = 'user' if message_id.startswith('q') else 'assistant'
+        await Chats.upsert_message_to_chat_by_id_and_message_id(
+            chat_id, message_id, {'role': role, 'parentId': parent, 'content': message_id, 'meta': {'kept': message_id}}
+        )
+
+    await stored.turn('first', 'a1', None, chat_id=chat_id)
+    await stored.turn('second', 'a2', 'a1', chat_id=chat_id)
+
+    assert [path for path, _ in stored.mutations()] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
+    answer = await Chats.get_message_by_id_and_message_id(chat_id, 'a2')
+    assert answer['meta'] == {'kept': 'a2', 'agent_v2': {'thread_id': 'thr-1', 'position': 5}}
+
+
+@pytest.fixture
+def stored(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> Chat:
+    """ChatMessages over the fixture's messages, as the deletion paths read them."""
+
+    def rows(chat_id: str | None = None) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(chat_id=key[0], meta=message.get('meta'))
+            for key, message in chat.messages.items()
+            if chat_id is None or key[0] == chat_id
+        ]
+
+    async def by_chat(chat_id: str) -> list[SimpleNamespace]:
+        return rows(chat_id)
+
+    async def by_user(user_id: str, skip: int = 0, limit: int = 50) -> list[SimpleNamespace]:
+        return rows()[skip : skip + limit]
+
+    monkeypatch.setattr(ChatMessages, 'get_messages_by_chat_id', by_chat)
+    monkeypatch.setattr(ChatMessages, 'get_messages_by_user_id', by_user)
+    return chat
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_chat_deletes_its_threads_and_forks_but_not_a_clones(stored: Chat) -> None:
+    await stored.turn('first', 'a1')
+    await stored.turn('second', 'a2', 'a1')
+    await stored.turn('second again', 'a2b', 'a1')
+    await stored.turn('in the other chat', 'b1', chat_id='other')
+    stored.messages['clone', 'a1'] = copy.deepcopy(stored.messages['chat', 'a1'])
+
+    assert await agent_threads.delete_chat_threads('alice', 'chat') == []
+
+    assert sorted(stored.api.chat.threads) == ['thr-1', 'thr-3']
+    assert [request.url.path for request in stored.api.chat.requests if request.method == 'DELETE'] == [
+        '/v1/chat/threads/thr-2'
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_thread_already_gone_counts_as_deleted_and_an_outage_keeps_it(
+    stored: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await stored.turn('first', 'a1')
+    await stored.turn('elsewhere', 'b1', chat_id='later')
+    del stored.api.chat.threads['thr-1']
+    assert await agent_threads.delete_chat_threads('alice', 'chat') == []
+
+    async def unavailable(*args: Any, **kwargs: Any) -> None:
+        raise SoevApiError(503, 'service_unavailable', 'down')
+
+    monkeypatch.setattr(SoevClient, 'chat_delete', unavailable)
+    assert await agent_threads.delete_chat_threads('alice', 'later') == ['thr-2']
+
+
+@pytest.mark.asyncio
+async def test_deleting_messages_deletes_only_the_threads_no_message_still_bookmarks(stored: Chat) -> None:
+    await stored.turn('first', 'a1')
+    await stored.turn('second', 'a2', 'a1')
+    await stored.turn('first again', 'r1')
+    before = await agent_threads.chat_thread_ids('chat')
+    del stored.messages['chat', 'r1']
+    del stored.messages['chat', 'a2']
+
+    assert await agent_threads.delete_released_threads('alice', before) == []
+
+    assert sorted(stored.api.chat.threads) == ['thr-1']
+
+
+TEMPORARY = 'temporary:sid-1:chat'
+
+
+@pytest.fixture
+def temporary(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> Chat:
+    """Connected sockets sid-1 and sid-2, and no temporary chat bookmarks yet."""
+    monkeypatch.setattr(socket_main, 'SESSION_POOL', {'sid-1': {}, 'sid-2': {}})
+    monkeypatch.setattr(socket_main, 'TEMPORARY_AGENT_THREADS', {})
+    return chat
+
+
+@pytest.mark.asyncio
+async def test_a_temporary_chat_continues_its_thread_without_storing_messages(temporary: Chat) -> None:
+    await temporary.turn('first', 'a1', chat_id=TEMPORARY)
+    chunks = await temporary.turn('second', 'a2', 'a1', chat_id=TEMPORARY)
+
+    assert content(chunks) == 'Answer: second'
+    assert [path for path, _ in temporary.mutations()] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
+    assert not temporary.messages
+    assert socket_main.TEMPORARY_AGENT_THREADS[TEMPORARY]['bookmarks']['a2'] == {'thread_id': 'thr-1', 'position': 5}
+
+
+@pytest.mark.asyncio
+async def test_a_closed_socket_deletes_its_temporary_chats_threads(temporary: Chat) -> None:
+    await temporary.turn('first', 'a1', chat_id=TEMPORARY)
+    await temporary.turn('regenerated', 'a1b', chat_id=TEMPORARY)
+    await temporary.turn('other tab', 'b1', chat_id='temporary:sid-2:chat')
+
+    await socket_main._release_temporary_agent_threads(['sid-1'])
+
+    assert sorted(temporary.api.chat.threads) == ['thr-3']
+    assert list(socket_main.TEMPORARY_AGENT_THREADS) == ['temporary:sid-2:chat']
+
+
+@pytest.mark.asyncio
+async def test_a_temporary_turn_ending_after_its_socket_closed_deletes_its_thread(temporary: Chat) -> None:
+    await temporary.turn('first', 'a1', chat_id='temporary:sid-gone:chat')
+
+    assert temporary.api.chat.threads == {}
+    assert socket_main.TEMPORARY_AGENT_THREADS == {}
+
+
+QUERY = {'query': 'argument.query', 'collection_name': 'knowledge.knowledge_base'}
+STATUSES = {
+    'search': {
+        'running': {
+            'template': 'Searching {{collection_name}} for "{{query}}"...',
+            'fallback': 'Searching all knowledge bases for "{{query}}"...',
+            'params': QUERY,
+        },
+        'done': {
+            'template': 'Searched {{collection_name}}: {{passages}} passages in {{documents}} documents',
+            'fallback': 'Searched all knowledge bases: {{passages}} passages in {{documents}} documents',
+            'params': {**QUERY, 'passages': 'output.count.chunk', 'documents': 'output.count.document'},
+        },
+    },
+    'open_document': {
+        'running': {'template': 'Reading {{doc_title}}...', 'params': {'doc_title': 'element.document.title'}},
+        'done': {'template': 'Read {{doc_title}}', 'params': {'doc_title': 'output.first.document.title'}},
+    },
+}
+
+
+@pytest.fixture
+def declared(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> Chat:
+    """soev-api declares how search and open_document show; two knowledge bases exist."""
+    monkeypatch.setattr(agent_v2, 'TOOL_STATUS_CACHE', {'expires_at': float('inf'), 'statuses': STATUSES})
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    seed_collection(chat.api, 'kb-b', 'Notulen')
+    return chat
+
+
+def statuses(chat: Chat) -> list[dict]:
+    """The tool statuses, without the turn's closing summary."""
+    return [
+        event['data'] for event in chat.socket if event['type'] == 'status' and event['data'].get('action') != 'summary'
+    ]
+
+
+def call(name: str, call_id: str = 'c1', **arguments: Any) -> tuple[str, dict]:
+    return ('model_output', {'content': '', 'tool_calls': [{'id': call_id, 'name': name, 'arguments': arguments}]})
+
+
+SEARCHED = [DOCUMENT, CHUNK, chunk('source-b'), document('other', 'Other'), chunk('other-1', 'other')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'arguments,selected,running,done',
+    [
+        (
+            {'query': 'opzegtermijn', 'knowledge_base': 'kb-b'},
+            ['kb-a', 'kb-b'],
+            {'description': 'Searching {{collection_name}} for "{{query}}"...', 'collection_name': 'Notulen'},
+            {'description': 'Searched {{collection_name}}: {{passages}} passages in {{documents}} documents'},
+        ),
+        (
+            {'query': 'opzegtermijn'},
+            ['kb-a'],
+            {'description': 'Searching {{collection_name}} for "{{query}}"...', 'collection_name': 'Contracten'},
+            {'description': 'Searched {{collection_name}}: {{passages}} passages in {{documents}} documents'},
+        ),
+        (
+            {'query': 'opzegtermijn'},
+            ['kb-a', 'kb-b'],
+            {'description': 'Searching all knowledge bases for "{{query}}"...'},
+            {'description': 'Searched all knowledge bases: {{passages}} passages in {{documents}} documents'},
+        ),
+    ],
+)
+async def test_a_search_shows_running_from_the_call_and_done_from_its_output(
+    declared: Chat, arguments: dict, selected: list[str], running: dict, done: dict
+) -> None:
+    declared.api.chat.turns = [
+        [call('search', **arguments), found(*SEARCHED, call_id='c1'), ('model_output', {'content': 'done'})]
+    ]
+    chunks = await declared.turn('q', 'a1', files=[{'type': 'collection', 'id': key} for key in selected])
+
+    status = {'action': 'search', 'call_id': 'c1', 'done': False}
+    named = {'collection_name': running['collection_name']} if 'collection_name' in running else {}
+    counted = {**named, 'passages': '3', 'documents': '2'}
+    assert statuses(declared) == [
+        {**status, **running, 'query': 'opzegtermijn'},
+        {**status, **done, **counted},
+    ]
+    summary = done['description'].replace('{{passages}}', '3').replace('{{documents}}', '2')
+    summary = summary.replace('{{collection_name}}', named.get('collection_name', ''))
+    assert content(chunks).count('<details type="tool_calls"') == 1
+    assert f'<summary>{html.escape(summary)}</summary>' in content(chunks)
+
+
+@pytest.mark.asyncio
+async def test_opening_a_document_names_it_by_the_title_already_received(declared: Chat) -> None:
+    policy = document('doc-1', 'Leave policy')
+    read = {'type': 'document-text', 'id': 'doc-1#0-4', 'ref': 'doc-1', 'text': 'body', 'start': 0, 'end': 4}
+    declared.api.chat.turns = [
+        [
+            call('list_documents', 'c0'),
+            found(policy, call_id='c0'),
+            call('open_document', document='doc-1'),
+            found(policy, {**read, 'length': 4}, call_id='c1'),
+            ('model_output', {'content': 'done'}),
+        ]
+    ]
+    chunks = await declared.turn('q', 'a1', files=[{'type': 'collection', 'id': 'kb-a'}])
+
+    opening = {'action': 'open_document', 'call_id': 'c1', 'done': False, 'doc_title': 'Leave policy'}
+    assert [status for status in statuses(declared) if status['action'] == 'open_document'] == [
+        {**opening, 'description': 'Reading {{doc_title}}...'},
+        {**opening, 'description': 'Read {{doc_title}}'},
+    ]
+    assert '<summary>Read Leave policy</summary>' in content(chunks)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_without_a_declared_status_shows_the_generic_line(declared: Chat) -> None:
+    declared.api.chat.turns = [
+        [call('list_documents'), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]
+    ]
+    await declared.turn('q', 'a1')
+
+    generic = {'action': 'list_documents', 'description': 'Running list_documents…', 'call_id': 'c1', 'done': False}
+    assert statuses(declared) == [generic, generic]
+
+
+@pytest.mark.parametrize(
+    'count,seconds,language,summary',
+    [
+        (1, 0.4, 'en-US', '1 tool called in less than a second'),
+        (3, 24, None, '3 tools called in 24 seconds'),
+        (2, 125, 'nl-NL', '2 tools aangeroepen in 2 minuten en 5 seconden'),
+        (1, 61, 'nl', '1 tool aangeroepen in 1 minuut en 1 seconde'),
+        (4, 120, 'en', '4 tools called in 2 minutes'),
+    ],
+)
+def test_the_closing_summary_reads_as_the_v1_agents_wrote_it(
+    count: int, seconds: float, language: str | None, summary: str
+) -> None:
+    assert agent_v2._summary(count, seconds, language) == summary
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language(declared: Chat) -> None:
+    declared.api.chat.turns = [
+        [call('list_documents'), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]
+    ]
+    await declared.turn('q', 'a1', user_language='nl-NL')
+
+    closing = [event['data'] for event in declared.socket if event['type'] == 'status'][-1]
+    assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}

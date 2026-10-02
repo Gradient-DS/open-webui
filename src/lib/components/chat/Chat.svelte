@@ -1323,7 +1323,14 @@
 				const data = event?.data?.data ?? null;
 
 				if (type === 'status') {
-					if (message?.statusHistory) {
+					// [Claude] A v2 tool call shows as running, then as done: the later status of one call replaces the
+					// earlier, so the list keeps one line per call.
+					const earlier = data?.call_id
+						? (message?.statusHistory ?? []).findIndex((status) => status?.call_id === data.call_id)
+						: -1;
+					if (earlier >= 0) {
+						message.statusHistory[earlier] = data;
+					} else if (message?.statusHistory) {
 						message.statusHistory.push(data);
 					} else {
 						message.statusHistory = [data];

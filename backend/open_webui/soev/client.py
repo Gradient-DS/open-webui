@@ -168,6 +168,12 @@ class SoevClient:
             result['thread_id'] = _chat_thread_id(response)
         return result
 
+    async def chat_delete(self, path: str, *, as_user: str) -> None:
+        """Delete a thread once; the chat contract has no mutation replay key."""
+        if not as_user:
+            raise ValueError('Chat requires an acting user')
+        await self._request('DELETE', path, as_user=as_user)
+
     async def chat_stream(
         self,
         path: str,

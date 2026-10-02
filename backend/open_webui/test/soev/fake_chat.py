@@ -62,6 +62,9 @@ class FakeChatApi:
         if thread is None or thread['owner'] != owner:
             return self.problem(404, 'not_found')
         operation = parts[1] if len(parts) > 1 else 'read'
+        if request.method == 'DELETE' and operation == 'read':
+            del self.threads[parts[0]]
+            return httpx.Response(204)
         return self._operation(request, body or {}, thread, operation)
 
     @staticmethod
@@ -79,7 +82,7 @@ class FakeChatApi:
         return thread
 
     def _open(self, request: httpx.Request, body: dict, owner: tuple[str, str | None]) -> httpx.Response:
-        if request.method != 'POST' or not isinstance(body.get('input'), str) or 'agent' not in body:
+        if request.method != 'POST' or 'agent' not in body:
             return self.problem(422, 'invalid_field')
         thread = self._new(owner, [frame('opened', 1, {'agent': body['agent']})])
         return self._run(request, body, thread, opening=True)
@@ -100,6 +103,9 @@ class FakeChatApi:
             if not 1 <= at <= len(thread['events']):
                 return self.problem(422, 'invalid_field')
             branch = self._new(thread['owner'], copy.deepcopy(thread['events'][:at]))
+            # As in the runtime: a copied input without its answer leaves work nobody is on.
+            if branch['events'][-1]['type'] == 'input':
+                branch['state'] = 'orphaned'
             return httpx.Response(201, json=self._view(branch), headers=self._headers(branch))
         if operation == 'inputs':
             if thread['state'] in {'running', 'orphaned'}:
@@ -112,6 +118,22 @@ class FakeChatApi:
             return self._cancel(thread, body)
         return self.problem(404, 'not_found')
 
+    def _refusal(self, body: dict, *, opening: bool) -> httpx.Response | None:
+        """soev-api refuses unknown body fields; the soev chat agent's input is
+        ``{text, knowledge?, tools?, context?}``, each knowledge entry naming a KB by its key."""
+        allowed = {'input', 'model', 'principals'} | ({'agent'} if opening else {'answering'})
+        if set(body) - allowed:
+            return self.problem(400, 'unknown_field')
+        turn = body.get('input')
+        if (
+            not isinstance(turn, dict)
+            or set(turn) - {'text', 'knowledge', 'tools', 'context'}
+            or not isinstance(turn.get('text'), str)
+            or not all(isinstance(entry, dict) and entry.get('key') for entry in turn.get('knowledge', []))
+        ):
+            return self.problem(422, 'invalid_field')
+        return None
+
     def _cancel(self, thread: dict, body: dict) -> httpx.Response:
         inputs = [event['position'] for event in thread['events'] if event['type'] == 'input']
         if not inputs or body.get('input') != inputs[-1] or thread['state'] not in {'running', 'waiting'}:
@@ -121,15 +143,16 @@ class FakeChatApi:
         return httpx.Response(200, json=self._view(thread))
 
     def _run(self, request: httpx.Request, body: dict, thread: dict, *, opening: bool = False) -> httpx.Response:
-        if not isinstance(body.get('input'), str) or not isinstance(body.get('collections'), list):
-            return self.problem(422, 'invalid_field')
+        if refused := self._refusal(body, opening=opening):
+            return refused
         recorded = [('opened', thread['events'][0])] if opening else []
         event = frame('input', len(thread['events']) + 1, {'payload': body['input']})
         thread['events'].append(event)
         recorded.append(('input', event))
-        turn = self.turns.pop(0) if self.turns else [('model_output', {'content': f'Answer: {body["input"]}'})]
+        answer = f'Answer: {body["input"]["text"]}'
+        turn = self.turns.pop(0) if self.turns else [('model_output', {'content': answer})]
         for kind, payload in turn:
-            if kind in {'delta', 'reasoning_delta', 'error'}:
+            if kind in {'delta', 'reasoning_delta', 'citation', 'error'}:
                 recorded.append((kind, payload))
             else:
                 event = frame(kind, len(thread['events']) + 1, payload)
