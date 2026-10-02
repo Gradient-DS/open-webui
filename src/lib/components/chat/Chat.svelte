@@ -2769,6 +2769,36 @@
 		}
 	};
 
+	// [Gradient] Keep a streaming answer in view. Its text is revealed over animation
+	// frames after each delta arrives, so follow the height rather than the events,
+	// and keep following briefly after `done` while the reveal catches up.
+	const FOLLOW_AFTER_DONE_MS = 600;
+	let followRAF: number | null = null;
+	// The position this follow last scrolled to: its own scroll events must not turn autoScroll off
+	// because the content already grew again by the time they are handled.
+	let followScrollTop: number | null = null;
+	const followStreamingResponse = (messageId: string) => {
+		if (followRAF) return;
+		let lastHeight = -1;
+		let doneAt: number | null = null;
+		const step = () => {
+			if (messagesContainerElement && shouldAutoScrollResponse()) {
+				const height = messagesContainerElement.scrollHeight;
+				if (height !== lastHeight) {
+					lastHeight = height;
+					messagesContainerElement.scrollTop = height;
+					followScrollTop = messagesContainerElement.scrollTop;
+				}
+			}
+			if (history.messages[messageId]?.done !== false) doneAt ??= performance.now();
+			followRAF =
+				doneAt === null || performance.now() - doneAt < FOLLOW_AFTER_DONE_MS
+					? requestAnimationFrame(step)
+					: null;
+		};
+		followRAF = requestAnimationFrame(step);
+	};
+
 	let processingQueueChats = new Set<string>();
 
 	const processNextInQueue = async (targetChatId: string) => {
@@ -3050,6 +3080,7 @@
 
 	const responseCompletionEventHandler = (data, message) => {
 		message.output = applyResponseStreamEvent(message.output ?? [], data);
+		followStreamingResponse(message.id);
 
 		if (data?.type === 'response.output_text.delta') {
 			const value = data.delta ?? '';
@@ -4906,6 +4937,13 @@
 									id="messages-container"
 									bind:this={messagesContainerElement}
 									on:scroll={(e) => {
+										if (
+											followScrollTop !== null &&
+											Math.abs(messagesContainerElement.scrollTop - followScrollTop) < 2
+										) {
+											return;
+										}
+										followScrollTop = null;
 										autoScroll =
 											messagesContainerElement.scrollHeight - messagesContainerElement.scrollTop <=
 											messagesContainerElement.clientHeight + 5;
