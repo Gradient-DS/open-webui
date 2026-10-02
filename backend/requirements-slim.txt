@@ -67,7 +67,7 @@ pyarrow==23.0.1 # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fix
 
 ftfy==6.3.1
 chardet==7.4.3
-pypdf==6.16.1 # security: CVE-2026-84309 (infinite loop in TreeObject.insert_child) fixed in 6.16.0; CVE-2026-84310/84311 (unbounded runtime/memory retrieving outlines and extracting XForm objects) fixed in 6.16.1 (prior CVE-2026-71852/71870 + CVE-2026-59935/59936/59937/59938/48735/49460/49461/54530/54531 + GHSA-jm82-fx9c-mx94 fixes stay fixed)
+pypdf==6.19.0 # security: CVE-2026-102993..103000 / PYSEC-2026-4153..4160 (DoS via crafted PDFs) fixed in 6.17.0-6.19.0; earlier fixes (CVE-2026-84309/84310/84311 and prior) stay fixed
 fpdf2==2.8.7
 pymdown-extensions==11.0.1 # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
 docx2txt==0.9
