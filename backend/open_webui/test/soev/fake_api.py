@@ -127,7 +127,7 @@ class FakeSoevApi:
         try:
             header_part, encoded, signature_part = token.split('.')
             header = json.loads(base64.urlsafe_b64decode(header_part + '=' * (-len(header_part) % 4)))
-            if header['alg'] != 'Ed25519':
+            if header['alg'] != 'Ed25519' or header.get('typ') != 'subject+jwt':
                 raise Problem(401, 'credential_invalid')
             jwk = self.signing_keys[header['kid']]
             key = Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(jwk['x'] + '=' * (-len(jwk['x']) % 4)))
