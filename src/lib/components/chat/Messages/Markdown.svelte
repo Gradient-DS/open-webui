@@ -31,7 +31,7 @@
 <script>
 	import { onDestroy } from 'svelte';
 	import { replaceTokens, processResponseContent } from '$lib/utils';
-	import { maskInFlightTag } from '$lib/utils/streamMarkup';
+	import { maskInFlightTag, markupSafeEnd } from '$lib/utils/streamMarkup';
 	import { user } from '$lib/stores';
 
 	import MarkdownTokens from './Markdown/MarkdownTokens.svelte';
@@ -67,12 +67,31 @@
 	let lastContent = '';
 	let lastParsedContent = '';
 
-	const parseTokens = () => {
+	// [Gradient] Streamed text arrives in bursts of a few hundred characters every few
+	// hundred milliseconds, and showing each burst at once reads as jerky. While a
+	// message streams, the shown text catches up with what arrived over
+	// REVEAL_FRAMES animation frames, about one burst interval, so it flows. A
+	// message that is already done when it mounts renders at once.
+	const REVEAL_FRAMES = 18;
+	let revealing = false;
+	let shown = 0;
+	let framesLeft = 0;
+	// What the tokens render as: done only once the reveal has caught up.
+	let settled = done;
+
+	const revealedText = () => {
+		const end = markupSafeEnd(content, Math.min(shown, content.length));
+		// Keep a jump past a whole block, so the next frame does not shrink the text.
+		shown = Math.max(shown, end);
+		return content.slice(0, end);
+	};
+
+	const parseTokens = (text = content, final = done) => {
 		// [Gradient] A pipeline tag the model is still typing (`<document
 		// title="Gesch`) is not a token yet, so marked lexes it as literal text and
 		// it flashes in the bubble until its `>` arrives. Mask that tail while
 		// streaming; the `done` parse always sees the raw content.
-		const source = done ? content : maskInFlightTag(content);
+		const source = final ? text : maskInFlightTag(text);
 		if (source === lastContent) return;
 		lastContent = source;
 
@@ -83,19 +102,40 @@
 		tokens = applyCitationWalker(marked.lexer(processed));
 	};
 
-	const updateHandler = (content, done) => {
-		if (content) {
-			if (done) {
-				cancelAnimationFrame(pendingUpdate);
-				pendingUpdate = null;
-				parseTokens();
-			} else if (!pendingUpdate) {
-				pendingUpdate = requestAnimationFrame(() => {
-					pendingUpdate = null;
-					parseTokens();
-				});
-			}
+	const revealStep = () => {
+		pendingUpdate = null;
+		const remaining = content.length - shown;
+		if (remaining > 0) {
+			shown += Math.ceil(remaining / Math.max(1, framesLeft));
+			framesLeft -= 1;
 		}
+		if (shown >= content.length && done) {
+			revealing = false;
+			settled = true;
+			parseTokens();
+			return;
+		}
+		parseTokens(revealedText(), false);
+		if (shown < content.length) pendingUpdate = requestAnimationFrame(revealStep);
+	};
+
+	const updateHandler = (content, done) => {
+		if (!content) return;
+		if (!done && !revealing) {
+			revealing = true;
+			settled = false;
+		}
+		if (!revealing) {
+			cancelAnimationFrame(pendingUpdate);
+			pendingUpdate = null;
+			settled = done;
+			parseTokens();
+			return;
+		}
+		// Content replaced by a shorter one (a regenerate, a rewrite) restarts from there.
+		shown = Math.min(shown, content.length);
+		framesLeft = REVEAL_FRAMES;
+		if (!pendingUpdate) pendingUpdate = requestAnimationFrame(revealStep);
 	};
 
 	// `done` is passed in rather than closed over so it is a dependency of this
@@ -103,7 +143,6 @@
 	// content delta, or the masked tail would stay hidden.
 	$: updateHandler(content, done);
 
-	// Throttle parsing to once per animation frame while streaming
 	onDestroy(() => {
 		cancelAnimationFrame(pendingUpdate);
 	});
@@ -115,7 +154,7 @@
 		{id}
 		{chatId}
 		{messageId}
-		{done}
+		done={settled}
 		{save}
 		{preview}
 		{compactPreview}

@@ -500,6 +500,7 @@
 	$: visibleResponseContent =
 		getOutputText(message.output) || removeAllDetails(message.content ?? '');
 	$: hasResponseContent = Boolean((message.content ?? '').trim() || message.output?.length);
+	$: hasAnswerText = Boolean(removeAllDetails(renderedContent ?? '').trim());
 
 	let edit = false;
 	let editedContent = '';
@@ -1303,7 +1304,9 @@
 								/>
 							{/if}
 
-							{#if !message.done && !message.error && (hasResponseContent || !hasVisibleStatus)}
+							<!-- [Gradient] The caret marks text being written, so it waits for the answer's first
+							     text: while the model thinks or calls tools, the shimmering line above says so. -->
+							{#if !message.done && !message.error && hasAnswerText}
 								<div class="text-[0.9375rem] leading-relaxed">
 									<span
 										class="inline-block w-[0.125rem] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"

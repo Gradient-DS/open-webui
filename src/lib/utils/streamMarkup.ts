@@ -47,3 +47,48 @@ export const maskInFlightTag = (content: string): string => {
 	);
 	return isMarkup ? content.slice(0, open) : content;
 };
+
+// [Gradient] Where a gradual reveal of `text` may stop at or after `end`, so it never
+// shows half of a construct that renders differently once complete: a <details>
+// block (hidden tool and reasoning markers) shows whole or not at all, and a tag,
+// a `**` or inline-code run, or a `[n]` citation shows once its closing part is
+// revealed with it, or waits while the model is still writing that part.
+const INLINE_PAIRS = ['**', '`'];
+export const markupSafeEnd = (text: string, end: number): number => {
+	const code = text.charCodeAt(end - 1);
+	if (code >= 0xd800 && code <= 0xdbff) end += 1;
+
+	const details = text.lastIndexOf('<details', end - 1);
+	if (details !== -1) {
+		const close = text.indexOf('</details>', details);
+		if (close === -1) return details;
+		end = Math.max(end, close + '</details>'.length);
+	}
+
+	const tag = text.slice(0, end).search(/<\/?[a-zA-Z][^<>]*$/);
+	if (tag !== -1) {
+		const close = text.indexOf('>', end);
+		return close === -1 ? tag : close + 1;
+	}
+
+	const lineStart = text.lastIndexOf('\n', end - 1) + 1;
+	const line = text.slice(lineStart, end);
+	if (!line.trimStart().startsWith('```')) {
+		for (const mark of INLINE_PAIRS) {
+			const opens = line.split(mark).length - 1;
+			if (opens % 2 === 1) {
+				const opener = lineStart + line.lastIndexOf(mark);
+				const closer = text.indexOf(mark, end);
+				return closer === -1 ? opener : closer + mark.length;
+			}
+		}
+	}
+
+	const bracket = line.lastIndexOf('[');
+	if (bracket > line.lastIndexOf(']')) {
+		const close = text.indexOf(']', end);
+		if (close === -1) return lineStart + bracket;
+		if (close - end < 16) return close + 1;
+	}
+	return end;
+};
