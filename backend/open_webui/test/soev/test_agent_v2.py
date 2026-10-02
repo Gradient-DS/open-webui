@@ -1048,6 +1048,30 @@ async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_
 
 
 @pytest.mark.asyncio
+async def test_a_summary_of_the_conversation_shows_running_then_done_when_it_lands() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    turn.tool_statuses = {
+        'compaction': {
+            'running': {'template': 'Summarising...', 'params': {}},
+            'done': {'template': 'Summarised', 'params': {}},
+        }
+    }
+    async with asyncio.timeout(2):
+        started = await turn.render(ChatEvent('compacting', {}))
+        ended = await turn.render(ChatEvent('compaction', {'stream': 'root', 'payload': {'summary': 'kort'}}))
+    shown = [call.args[0]['data'] for call in turn.emitter.call_args_list]
+    assert [(status['action'], status['description'], status['done']) for status in shown] == [
+        ('compaction', 'Summarising...', False),
+        ('compaction', 'Summarised', False),
+    ]
+    assert shown[0]['call_id'] == shown[1]['call_id']
+    assert '<details type="tool_calls"' not in content(started)
+    assert '<details type="tool_calls"' in content(ended)
+    assert 'kort' not in content(ended)
+
+
+@pytest.mark.asyncio
 async def test_parallel_tools_each_show_once() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
