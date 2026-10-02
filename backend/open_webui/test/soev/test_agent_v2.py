@@ -1006,7 +1006,11 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'name,description', [('search', 'Searching the knowledge base…'), ('calculate', 'Running calculate…')]
+    'name,generic',
+    [
+        ('search', {'description': 'Searching the knowledge base…'}),
+        ('calculate', {'description': 'Running {{tool}}…', 'tool': 'calculate'}),
+    ],
 )
 @pytest.mark.parametrize(
     'kind,payload',
@@ -1022,11 +1026,11 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
     ],
 )
 async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_its_output(
-    name: str, description: str, kind: str, payload: dict
+    name: str, generic: dict, kind: str, payload: dict
 ) -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
-    status = {'type': 'status', 'data': {'action': name, 'description': description, 'call_id': 'c1', 'done': False}}
+    status = {'type': 'status', 'data': {'action': name, **generic, 'call_id': 'c1', 'done': False}}
     async with asyncio.timeout(2):
         started = await turn.render(
             ChatEvent(
@@ -1068,7 +1072,13 @@ async def test_parallel_tools_each_show_once() -> None:
             await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id}}))
         await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     search = {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False}
-    calculate = {'action': 'calculate', 'description': 'Running calculate…', 'call_id': 'c2', 'done': False}
+    calculate = {
+        'action': 'calculate',
+        'description': 'Running {{tool}}…',
+        'tool': 'calculate',
+        'call_id': 'c2',
+        'done': False,
+    }
     ended = [{**calculate, 'done': True}, {**search, 'done': True}]
     assert [call.args[0]['data'] for call in turn.emitter.call_args_list] == [search, calculate, *ended]
 
@@ -1089,6 +1099,8 @@ async def test_web_calls_carry_the_addresses_they_found_and_read() -> None:
             await turn.render(
                 ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id, 'elements': elements}})
             )
+        # A finished call shows done once the model moves on.
+        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     shown = [call.args[0]['data'].get('items') for call in turn.emitter.call_args_list]
     found = [
         {'link': 'https://soev.ai/', 'title': 'soev.ai'},
@@ -1575,7 +1587,13 @@ async def test_a_tool_without_a_declared_status_shows_the_generic_line(declared:
     ]
     await declared.turn('q', 'a1')
 
-    generic = {'action': 'list_documents', 'description': 'Running list_documents…', 'call_id': 'c1', 'done': False}
+    generic = {
+        'action': 'list_documents',
+        'description': 'Running {{tool}}…',
+        'tool': 'list_documents',
+        'call_id': 'c1',
+        'done': False,
+    }
     assert statuses(declared) == [generic, {**generic, 'done': True}]
 
 
