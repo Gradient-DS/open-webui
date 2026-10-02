@@ -2985,7 +2985,19 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 'features.memories',
                 await Config.get('user.permissions'),
             ):
-                form_data = await add_memory_context(request, form_data, user, model)
+                if route_to_agent:
+                    # [Gradient] The agent reads the chat's prompt captured above, not these messages, so the
+                    # memories join that prompt.
+                    others = [message for message in form_data['messages'] if message.get('role') != 'system']
+                    memories = get_system_message(
+                        (await add_memory_context(request, {'messages': others}, user, model))['messages']
+                    )
+                    if memories:
+                        metadata['chat_system_prompt'] = '\n\n'.join(
+                            filter(None, [metadata.get('chat_system_prompt'), memories['content']])
+                        )
+                else:
+                    form_data = await add_memory_context(request, form_data, user, model)
 
         if 'web_search' in features and features['web_search'] and await Config.get('web.search.enable'):
             # features is client-supplied; re-check the permission the native FC path enforces.
