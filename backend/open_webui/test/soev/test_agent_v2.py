@@ -1078,6 +1078,29 @@ async def test_a_summary_of_the_conversation_shows_running_then_done_when_it_lan
 
 
 @pytest.mark.asyncio
+async def test_calls_the_budget_stopped_end_before_the_answer() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    calls = [{'id': 'c1', 'name': 'search'}, {'id': 'c2', 'name': 'calculate'}]
+    async with asyncio.timeout(2):
+        await turn.render(
+            ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': calls}})
+        )
+        await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
+        stopped = await turn.render(ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {'count': 3, 'cap': 3}}))
+        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
+    assert '<details type="tool_calls" done="true" name="calculate">' in content(stopped)
+    shown = [call.args[0]['data'] for call in turn.emitter.call_args_list]
+    assert [(status['call_id'], status['done']) for status in shown] == [
+        ('c1', False),
+        ('c2', False),
+        ('c1', True),
+        ('c2', True),
+    ]
+    assert not turn.running
+
+
+@pytest.mark.asyncio
 async def test_parallel_tools_each_show_once() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
