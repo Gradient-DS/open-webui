@@ -1021,7 +1021,7 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
         ('failure', {'message': 'failed'}),
     ],
 )
-async def test_a_tool_call_shows_running_then_done_only_when_its_output_lands(
+async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_its_output(
     name: str, description: str, kind: str, payload: dict
 ) -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
@@ -1037,9 +1037,12 @@ async def test_a_tool_call_shows_running_then_done_only_when_its_output_lands(
         assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
         data = payload if kind.endswith('delta') else {'stream': 'root', 'payload': payload}
         ended = await turn.render(ChatEvent(kind, data))
+        assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
+        await turn.render(ChatEvent('delta', {'text': 'Answer'}))
     answered_call = kind == 'tool_output'
     ended_status = {'type': 'status', 'data': {**status['data'], 'done': True}}
-    assert [call.args[0] for call in turn.emitter.call_args_list] == [status] + [ended_status] * answered_call
+    shown = [call.args[0] for call in turn.emitter.call_args_list if call.args[0]['data'].get('action') != 'summary']
+    assert shown == [status] + [ended_status] * answered_call
     assert '<details type="tool_calls"' not in content(started)
     assert ('<details type="tool_calls"' in content(ended)) == answered_call
 
@@ -1063,6 +1066,7 @@ async def test_parallel_tools_each_show_once() -> None:
         )
         for call_id in ['c2', 'c1']:
             await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id}}))
+        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     search = {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False}
     calculate = {'action': 'calculate', 'description': 'Running calculate…', 'call_id': 'c2', 'done': False}
     ended = [{**calculate, 'done': True}, {**search, 'done': True}]

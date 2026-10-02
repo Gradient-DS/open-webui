@@ -430,6 +430,8 @@ class AgentTurn:
         self.elements: dict[str, dict[str, Any]] = {}
         # [Claude] The calls shown as running, by call id: their tool's name and arguments.
         self.running: dict[str, tuple[str, dict[str, Any]]] = {}
+        # [Claude] Done lines of calls whose output landed, held until the model moves on.
+        self.settling: list[dict[str, Any]] = []
         self.model: str | None = None
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -521,15 +523,22 @@ class AgentTurn:
             await self.emit('status', {**self.tool_status(name, arguments), 'call_id': call['id'], 'done': False})
 
     async def end_tool(self, output: dict[str, Any]) -> list[dict[str, Any]]:
-        """[Claude] Show a running call as done, filled from its output, and anchor that line in the content.
+        """[Claude] Anchor a call's done line in the content once its output lands, and show it once the model
+        moves on (see `settle`): until then the model is still working with what the call returned.
 
         A call whose output is an error shows what it tried, as it did while running."""
         if (call := self.running.pop(output.get('call_id') or '', None)) is None:
             return []
         name, arguments = call
         status = self.tool_status(name, arguments, None if output.get('error') else output)
-        await self.emit('status', {**status, 'call_id': output['call_id'], 'done': True})
+        self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
         return [_marker(status)]
+
+    async def settle(self) -> None:
+        """[Claude] Show the held done lines: the model wrote answer text, called the next tool, or the turn ended."""
+        settling, self.settling = self.settling, []
+        for status in settling:
+            await self.emit('status', status)
 
     def tool_status(self, name: str, arguments: dict, output: dict | None = None) -> dict[str, Any]:
         """The tool's declared `running` status, or `done` once there is an `output`, else a generic line."""
@@ -660,6 +669,8 @@ class AgentTurn:
             self.partial_reasoning += event.data['text']
             return [_chunk({'reasoning_content': event.data['text']})]
         if event.event == 'delta':
+            if event.data['text']:
+                await self.settle()
             if event.data['text'] and not self.running:
                 await self.summarize()
             self.partial += event.data['text']
@@ -678,6 +689,7 @@ class AgentTurn:
         return []
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
+        await self.settle()
         await self.start_tools(payload.get('tool_calls', []))
         reasoning = self.remaining_reasoning(payload.get('reasoning') or '')
         content, partial = payload['content'], self.partial
@@ -717,6 +729,7 @@ class AgentTurn:
 
     async def finish(self, event: ChatEvent) -> list[dict[str, Any]]:
         self.terminal = True
+        await self.settle()
         await self.clear_tools()
         if event.event == 'status':
             self.position = event.data['position']
