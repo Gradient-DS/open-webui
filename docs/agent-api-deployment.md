@@ -44,6 +44,21 @@ By default the agent (persona) is selected server-side via `default_agent` in th
 
 **Unchanged:** streaming to UI, DB persistence, title generation, WebSocket transport, system prompts, memory retrieval, voice mode.
 
+## Title and tag generation under the v2 runtime
+
+Titles, tags and follow-ups are Open WebUI tasks: a plain chat completion on the task model, outside the agent. Under the v2 runtime (`AGENT_API_RUNTIME=v2`), the model connection is soev-api's `/v1/chat`. It lists the models but serves only threads, so a task sent there returns `404 route_not_found` and the chat keeps the first words of the prompt as its title.
+
+When no task model is set, or the one set is not on any connection, the task falls back to the chat model, which is on soev-api. Give Open WebUI a second connection straight to inference (LiteLLM in a cluster) and point the external task model at a model on it:
+
+```env
+OPENAI_API_BASE_URLS=http://soev-api/v1/chat;http://litellm-proxy.shared-services.svc:4000/v1
+OPENAI_API_KEYS=<soev-api key>;<litellm key>
+OPENAI_API_CONFIGS={"0": {"enable": true}, "1": {"enable": true, "model_ids": ["google/gemma-4-31B-it"]}}
+TASK_MODEL_EXTERNAL=google/gemma-4-31B-it
+```
+
+The task model then also appears in the model picker. Hide it under Admin > Models; a hidden model still serves tasks. Hiding is stored on the model in the database and has no environment variable.
+
 ## Request Payload
 
 OpenWebUI POSTs to `{AGENT_API_BASE_URL}/v1/chat/completions` with:
