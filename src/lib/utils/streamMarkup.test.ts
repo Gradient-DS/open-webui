@@ -40,7 +40,8 @@ describe('markupSafeEnd', () => {
 	});
 
 	it('shows a complete details block whole and holds one still being written', () => {
-		const block = 'Voor <details type="tool_calls" done="true"><summary>Read</summary></details> na';
+		const block =
+			'Voor <details type="tool_calls" done="true"><summary>Read</summary></details> na';
 		expect(markupSafeEnd(block, 12)).toBe(block.indexOf(' na'));
 		expect(markupSafeEnd('Voor <details type="tool_calls"><summary>Re', 30)).toBe(5);
 	});

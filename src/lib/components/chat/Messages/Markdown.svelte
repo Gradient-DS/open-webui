@@ -26,7 +26,6 @@
 			mentionExtension({ triggerChar: '$' })
 		]
 	});
-
 </script>
 
 <script>
