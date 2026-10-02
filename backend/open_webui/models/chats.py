@@ -1311,7 +1311,22 @@ class ChatTable:
 
                 if message_id in history.get('messages', {}):
                     status_history = history['messages'][message_id].get('statusHistory', [])
-                    status_history.append(status)
+                    # [Gradient] A v2 tool call reports running, then done: the later status of one
+                    # call replaces the earlier, as the frontend does live, so a reload keeps one
+                    # line per call.
+                    call_id = status.get('call_id') if isinstance(status, dict) else None
+                    earlier = next(
+                        (
+                            index
+                            for index, entry in enumerate(status_history)
+                            if call_id and isinstance(entry, dict) and entry.get('call_id') == call_id
+                        ),
+                        None,
+                    )
+                    if earlier is None:
+                        status_history.append(status)
+                    else:
+                        status_history[earlier] = status
                     history['messages'][message_id]['statusHistory'] = status_history
 
                 chat['history'] = history
