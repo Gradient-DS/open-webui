@@ -27,6 +27,8 @@ from starlette.responses import StreamingResponse
 log = logging.getLogger(__name__)
 _ROOT = '/v1/chat/threads'
 _PLACEHOLDER = re.compile(r'{{(\w+)}}')
+# [Claude] The name and call id a summary of the conversation is shown under, as the agents' tool statuses name it.
+_COMPACTION = 'compaction'
 # [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
 TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
 # [Claude] What the web search toggle asks of the agent's `web_search` tool when on; off asks nothing, so the
@@ -517,6 +519,17 @@ class AgentTurn:
             self.running[call['id']] = (name, arguments)
             await self.emit('status', {**self.tool_status(name, arguments), 'call_id': call['id'], 'done': False})
 
+    async def summary(self, event: ChatEvent) -> list[dict[str, Any]]:
+        """[Claude] Show the agent summarising the conversation as a call named `compaction`: running on
+        `compacting`, done when the root stream's `compaction` event lands. It is not counted as a tool call."""
+        if event.event == 'compacting':
+            self.running[_COMPACTION] = (_COMPACTION, {})
+            await self.emit('status', {**self.tool_status(_COMPACTION, {}), 'call_id': _COMPACTION, 'done': False})
+            return []
+        if event.data.get('stream') != 'root':
+            return []
+        return await self.end_tool({'call_id': _COMPACTION})
+
     async def end_tool(self, output: dict[str, Any]) -> list[dict[str, Any]]:
         """[Claude] Show a running call as done, filled from its output, and anchor that line in the content.
 
@@ -659,6 +672,8 @@ class AgentTurn:
             return await self.model_output(payload)
         if event.event == 'tool_output' and event.data.get('stream') == 'root':
             return await self.record_output(payload)
+        if event.event in {'compacting', 'compaction'}:
+            return await self.summary(event)
         if event.event == 'failure' and event.data.get('stream') == 'root':
             await self.clear_tools()
         if event.event in {'status', 'error'}:
