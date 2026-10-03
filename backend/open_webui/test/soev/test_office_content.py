@@ -28,9 +28,8 @@ class OfficeBytes(httpx.AsyncByteStream):
 def office(monkeypatch):
     user = SimpleNamespace(id='alice', role='user')
     attachment = {'type': 'office', 'element_id': 'element', 'thread_id': 'attached-thread', 'pages': 2}
-    message = SimpleNamespace(files=[attachment], meta={'agent_v2': {'thread_id': 'different-bookmark'}})
     lookup = AsyncMock(return_value=SimpleNamespace(user_id='alice', meta={}, folder_id=None))
-    messages = AsyncMock(return_value=[message])
+    messages = AsyncMock(return_value=[attachment])
     monkeypatch.setattr(chats.Chats, 'get_chat_by_id', lookup)
 
     async def owned(chat_id, user_id, db=None):
@@ -39,7 +38,10 @@ def office(monkeypatch):
     monkeypatch.setattr(chats.Chats, 'get_chat_by_id_and_user_id', owned)
     monkeypatch.setattr(chat_models, 'ENABLE_ADMIN_CHAT_ACCESS', True)
     monkeypatch.setattr(chat_models.AccessGrants, 'has_access', AsyncMock(return_value=False))
-    monkeypatch.setattr(chats.ChatMessages, 'get_messages_by_chat_id', messages)
+    monkeypatch.setattr(chats.ChatMessages, 'get_files_by_chat_id', messages)
+    monkeypatch.setattr(
+        chats.ChatMessages, 'get_messages_by_chat_id', AsyncMock(side_effect=AssertionError('Full messages loaded'))
+    )
     stream = OfficeBytes()
     upstream = httpx.Response(
         200,
@@ -191,3 +193,26 @@ async def test_temporary_office_requires_a_recorded_attachment(office, monkeypat
         response = await client.get('/api/v1/chats/local:socket:chat/office/element/file')
     assert response.status_code == 404
     office.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_files_query_filters_by_chat_without_validating_messages(monkeypatch):
+    from uuid import uuid4
+    from open_webui.models.chat_messages import ChatMessageModel, ChatMessages
+    from open_webui.models.chats import ChatForm, Chats
+
+    chat_id, other_id = str(uuid4()), str(uuid4())
+    attachment = {'type': 'office', 'element_id': 'element', 'thread_id': 'thread'}
+    for id in (chat_id, other_id):
+        await Chats.insert_new_chat(id, 'alice', ChatForm(chat={'history': {'messages': {}}}))
+        await Chats.upsert_message_to_chat_by_id_and_message_id(
+            id, 'answer', {'role': 'assistant', 'content': 'large content ' * 1000, 'files': [attachment]}
+        )
+    await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, 'question', {'role': 'user', 'content': 'q'})
+
+    def no_validation(*args, **kwargs):
+        raise AssertionError('The download query must not load and validate complete messages')
+
+    monkeypatch.setattr(ChatMessageModel, 'model_validate', no_validation)
+    assert await ChatMessages.get_files_by_chat_id(chat_id) == [attachment]
+    assert await ChatMessages.get_files_by_chat_id('missing') == []

@@ -75,12 +75,11 @@ async def get_office_content(
         if chat is None or (chat.user_id != user.id and user.role != 'admin'):
             raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
         as_user = f'owui:user:{chat.user_id}'
-        messages = await ChatMessages.get_messages_by_chat_id(chat_id)
+        files = await ChatMessages.get_files_by_chat_id(chat_id)
         attachment = next(
             (
                 file
-                for message in messages
-                for file in message.files or []
+                for file in files
                 if isinstance(file, dict)
                 and file.get('type') == 'office'
                 and file.get('element_id') == element_id
