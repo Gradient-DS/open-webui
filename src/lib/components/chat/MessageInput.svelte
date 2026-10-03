@@ -1,4 +1,6 @@
 <script lang="ts">
+	import PagePlus from '$lib/components/icons/PagePlus.svelte';
+	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
 	import Component from '../icons/Component.svelte';
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
@@ -2793,7 +2795,7 @@
 															? 'm-1'
 															: 'focus:outline-hidden rounded-full'}"
 													>
-														<Document className="size-3.5" strokeWidth="2" />
+														<PagePlus className="size-3.5" strokeWidth="2" />
 
 														<div class="hidden group-hover:block">
 															<XMark className="size-4" strokeWidth="1.75" />
@@ -2816,7 +2818,7 @@
 															? 'm-1'
 															: 'focus:outline-hidden rounded-full'}"
 													>
-														<Document className="size-3.5" strokeWidth="2" />
+														<PageEdit className="size-3.5" strokeWidth="2" />
 
 														<div class="hidden group-hover:block">
 															<XMark className="size-4" strokeWidth="1.75" />
