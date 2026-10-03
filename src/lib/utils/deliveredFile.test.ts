@@ -108,25 +108,36 @@ describe('delivered files', () => {
 });
 
 describe('Office version selection', () => {
-	it('opens the highest version of the requested file even when another file arrived later', () => {
-		const contents = [
-			{ file: { ...office, version: 3, element_id: 'v3' } },
-			{ file: office },
-			{ file: { ...office, version: 2, element_id: 'v2' } },
-			{ file: { ...office, name: 'other.pptx', version: 4 } },
-			{ file: { ...office, content_type: 'different', version: 5 } },
-			{ markdown: 'Written document' }
-		];
-		expect(newestFileVersionIndex(contents, office)).toBe(0);
+	const v2 = { ...office, element_id: 'v2', edits: office.element_id, version: 2 };
+	const v3 = {
+		...office,
+		element_id: 'v3',
+		edits: v2.element_id,
+		version: 3,
+		name: 'renamed.pptx'
+	};
+	it('follows the v1 → v2 → v3 lineage from any clicked version, even after a rename', () => {
+		const contents = [{ file: v3 }, { file: office }, { file: v2 }, { markdown: 'Document' }];
+		for (const file of [office, v2, v3]) expect(newestFileVersionIndex(contents, file)).toBe(0);
 	});
-	it('uses the last delivery when versions tie and leaves unrelated contents alone', () => {
-		expect(
-			newestFileVersionIndex(
-				[{ file: office }, { file: { ...office, element_id: 'copy' } }],
-				office
-			)
-		).toBe(1);
-		expect(newestFileVersionIndex([{ file: { ...office, name: 'other.pptx' } }], office)).toBe(-1);
+	it('never mixes independent decks with the same name and content type', () => {
+		const other = { ...office, element_id: 'other' };
+		const otherV2 = { ...other, element_id: 'other-v2', edits: other.element_id, version: 2 };
+		const contents = [{ file: office }, { file: v2 }, { file: other }, { file: otherV2 }];
+		expect(newestFileVersionIndex(contents, office)).toBe(1);
+		expect(newestFileVersionIndex(contents, other)).toBe(3);
+	});
+	it('uses the latest delivery when branches share a root and version', () => {
+		const branch = { ...v2, element_id: 'branch-v2' };
+		expect(newestFileVersionIndex([{ file: office }, { file: v2 }, { file: branch }], v2)).toBe(2);
+	});
+	it('can follow references to an ancestor missing from the visible contents', () => {
+		expect(newestFileVersionIndex([{ file: v2 }, { file: v3 }], office)).toBe(1);
+	});
+	it('leaves unrelated contents alone and terminates malformed cycles', () => {
+		expect(newestFileVersionIndex([{ file: { ...office, element_id: 'other' } }], office)).toBe(-1);
 		expect(newestFileVersionIndex([], office)).toBe(-1);
+		const cyclic = { ...v2, edits: 'v3' };
+		expect(newestFileVersionIndex([{ file: cyclic }, { file: v3 }], cyclic)).toBe(-1);
 	});
 });

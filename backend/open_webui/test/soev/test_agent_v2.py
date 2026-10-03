@@ -1833,6 +1833,7 @@ async def test_a_delivered_office_file_is_attached_without_copying_bytes(
                 'element_id': office['id'],
                 'pages': 1,
                 'version': 2,
+                'edits': office['edits'],
             }
         ]
     }
@@ -1904,3 +1905,18 @@ async def test_temporary_office_reference_is_recorded_on_delivery_and_expires_wi
     assert agent_threads.temporary_office(chat_id, office['id'], 'bob') is None
     await agent_threads.release_temporary(['sid-1'])
     assert agent_threads.temporary_office(chat_id, office['id'], 'alice') is None
+
+
+def test_an_original_office_attachment_has_no_parent():
+    attachment = agent_v2._office_attachment(
+        {
+            'id': 'original',
+            'name': 'deck.pptx',
+            'content_type': 'application/office',
+            'size': 1,
+            'pages': [],
+            'version': 1,
+        },
+        'thread',
+    )
+    assert attachment['edits'] is None

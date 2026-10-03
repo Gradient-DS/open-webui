@@ -382,6 +382,7 @@ def _office_attachment(element: dict[str, Any], thread_id: str) -> dict[str, Any
         'element_id': element['id'],
         'pages': len(element['pages']),
         'version': element['version'],
+        'edits': element.get('edits'),
     }
 
 

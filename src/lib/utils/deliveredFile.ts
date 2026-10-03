@@ -14,6 +14,7 @@ export type OfficeAttachment = {
 	element_id: string;
 	pages: number;
 	version: number;
+	edits?: string | null;
 };
 
 export type DeliveredFile = OfficeAttachment;
@@ -67,14 +68,27 @@ export const newestFileVersionIndex = (
 	contents: Array<{ file?: DeliveredFile }>,
 	requested: DeliveredFile
 ): number => {
+	const files = new Map(
+		contents.flatMap(({ file }) => (file ? [[file.element_id, file] as const] : []))
+	);
+	files.set(requested.element_id, requested);
+	const root = (file: DeliveredFile): string | null => {
+		let id = file.element_id;
+		const visited = new Set<string>();
+		while (!visited.has(id)) {
+			visited.add(id);
+			const parent = files.get(id)?.edits;
+			if (!parent) return id;
+			id = parent;
+		}
+		return null;
+	};
+	const requestedRoot = root(requested);
+	if (requestedRoot === null) return -1;
 	let selected = -1;
 	let version = 0;
 	contents.forEach(({ file }, index) => {
-		if (
-			file?.name === requested.name &&
-			file.content_type === requested.content_type &&
-			file.version >= version
-		) {
+		if (file && root(file) === requestedRoot && file.version >= version) {
 			selected = index;
 			version = file.version;
 		}
