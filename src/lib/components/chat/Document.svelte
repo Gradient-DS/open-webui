@@ -51,7 +51,10 @@
 
 	$: if ($requestedOfficeFile) {
 		const newest = newestFileVersionIndex(contents, $requestedOfficeFile);
-		if (newest >= 0) selectedContentIdx = newest;
+		if (newest >= 0) {
+			selectedContentIdx = newest;
+			requestedOfficeFile.set(null);
+		}
 	}
 
 	$: current = contents[selectedContentIdx];
