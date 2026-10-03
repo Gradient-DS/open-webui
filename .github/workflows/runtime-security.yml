@@ -63,12 +63,14 @@ jobs:
       needs.changes.outputs.relevant == 'true'
       || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch'
-    uses: Gradient-DS/security-ci/.github/workflows/runtime-security.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    uses: Gradient-DS/security-ci/.github/workflows/runtime-security.yml@a663b138208458046ef92d1ecbb292b2ff89744f # v7 test
     # The tooling repository is private, so the workflow needs the org App
     # credentials to check itself out; without them it fails at that checkout.
     secrets: inherit
     with:
       compose-file: 'docker-compose.ci.yaml'
+      cache-scope: runtime-security
+      cache-from: type=registry,ref=ghcr.io/gradient-ds/open-webui:cache-slim-linux-amd64-dev
       guarded-containers: 'open-webui-ci'
       health-url: 'http://127.0.0.1:8080/health'
       # Paths are relative to the container's workdir, /app/backend, not to the
