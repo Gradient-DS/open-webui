@@ -69,7 +69,12 @@
 	export let openInternetBlocked = false;
 	export let dataSeparationMessage = '';
 	export let showDocumentWriterButton = false;
+	export let showOfficeButton = false;
+	export let showOfficeEditButton = false;
+	$: if (!officeEnabled) officeEditEnabled = false;
 	export let documentWriterEnabled = false;
+	export let officeEnabled = false;
+	export let officeEditEnabled = false;
 
 	export let onShowValves: Function;
 	export let onClose: Function;
@@ -533,6 +538,56 @@
 
 								<div class=" shrink-0" inert>
 									<Switch state={documentWriterEnabled} />
+								</div>
+							</button>
+						</Tooltip>
+					{/if}
+					{#if showOfficeButton}
+						<Tooltip content={$i18n.t('Create Office files')} placement="top-start">
+							<button
+								class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+								aria-pressed={officeEnabled}
+								on:click={() => {
+									officeEnabled = !officeEnabled;
+								}}
+							>
+								<div class="flex-1 truncate">
+									<div class="flex flex-1 gap-2 items-center">
+										<div class="shrink-0">
+											<PageEdit className="size-3.5" strokeWidth="1.75" />
+										</div>
+
+										<div class=" truncate">{$i18n.t('Create Office files')}</div>
+									</div>
+								</div>
+
+								<div class=" shrink-0" inert>
+									<Switch state={officeEnabled} />
+								</div>
+							</button>
+						</Tooltip>
+					{/if}
+					{#if showOfficeEditButton && officeEnabled}
+						<Tooltip content={$i18n.t('Edit Office files')} placement="top-start">
+							<button
+								class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+								aria-pressed={officeEditEnabled}
+								on:click={() => {
+									officeEditEnabled = !officeEditEnabled;
+								}}
+							>
+								<div class="flex-1 truncate">
+									<div class="flex flex-1 gap-2 items-center">
+										<div class="shrink-0">
+											<PageEdit className="size-3.5" strokeWidth="1.75" />
+										</div>
+
+										<div class=" truncate">{$i18n.t('Edit Office files')}</div>
+									</div>
+								</div>
+
+								<div class=" shrink-0" inert>
+									<Switch state={officeEditEnabled} />
 								</div>
 							</button>
 						</Tooltip>

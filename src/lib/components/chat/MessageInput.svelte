@@ -219,6 +219,8 @@
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = false;
+	export let officeEnabled = false;
+	export let officeEditEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 
@@ -276,6 +278,8 @@
 		webSearchEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
+		officeEnabled,
+		officeEditEnabled,
 		toolApprovalMode
 	};
 
@@ -815,6 +819,13 @@
 			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.document_writer ?? true
 	);
 
+	$: officeCapableModels = selectedModelIds.filter(
+		(id) => $models.find((m) => m.id === id)?.info?.meta?.capabilities?.office === true
+	);
+	$: officeEditCapableModels = selectedModelIds.filter(
+		(id) => $models.find((m) => m.id === id)?.info?.meta?.capabilities?.office_edit === true
+	);
+
 	let terminalCapableModels = [];
 	$: terminalCapableModels = getCapableModelIds(
 		selectedModelIds,
@@ -868,6 +879,23 @@
 			documentWriterCapableModels.length &&
 		$config?.features?.enable_document_writer &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.document_writer);
+
+	$: showOfficeButton =
+		selectedModelIds.length > 0 &&
+		selectedModelIds.length === officeCapableModels.length &&
+		isFeatureEnabled('office') &&
+		$config?.features?.enable_office &&
+		($_user?.role === 'admin' || $_user?.permissions?.features?.office);
+	$: if (!showOfficeButton) officeEnabled = false;
+	$: showOfficeEditButton =
+		selectedModelIds.length > 0 &&
+		selectedModelIds.length === officeEditCapableModels.length &&
+		isFeatureEnabled('office_edit') &&
+		$config?.features?.enable_office_edit &&
+		($_user?.role === 'admin' || $_user?.permissions?.features?.office_edit) &&
+		officeEnabled &&
+		showOfficeButton;
+	$: if (!showOfficeEditButton) officeEditEnabled = false;
 
 	// Disable code interpreter when terminal is active (mutually exclusive)
 	$: if ($selectedTerminalId && codeInterpreterEnabled) {
@@ -2370,6 +2398,8 @@
 															imageGenerationEnabled = false;
 															codeInterpreterEnabled = false;
 															documentWriterEnabled = false;
+															officeEnabled = false;
+															officeEditEnabled = false;
 														}
 													}}
 													on:paste={async (e) => {
@@ -2474,17 +2504,21 @@
 										>
 									{/if}
 
-									{#if isFeatureEnabled('input_menu') && (showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
+									{#if isFeatureEnabled('input_menu') && (showOfficeButton || showOfficeEditButton || showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
 										<div
 											class="flex self-center w-[0.0625rem] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
 										></div>
 									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
-										{#if isFeatureEnabled('input_menu') && (showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
+										{#if isFeatureEnabled('input_menu') && (showOfficeButton || showOfficeEditButton || showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
 											<IntegrationsMenu
 												{showDocumentWriterButton}
+												{showOfficeButton}
+												{showOfficeEditButton}
 												bind:documentWriterEnabled
+												bind:officeEnabled
+												bind:officeEditEnabled
 												{openInternetBlocked}
 												{dataSeparationMessage}
 												selectedModels={selectedModelIds}
@@ -2730,6 +2764,52 @@
 															(documentWriterEnabled = !documentWriterEnabled)}
 														type="button"
 														class=" group p-[0.375rem] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {documentWriterEnabled
+															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
+															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
+														false)
+															? 'm-1'
+															: 'focus:outline-hidden rounded-full'}"
+													>
+														<Document className="size-3.5" strokeWidth="2" />
+
+														<div class="hidden group-hover:block">
+															<XMark className="size-4" strokeWidth="1.75" />
+														</div>
+													</button>
+												</Tooltip>
+											{/if}
+
+											{#if officeEnabled && showOfficeButton}
+												<Tooltip content={$i18n.t('Create Office files')} placement="top">
+													<button
+														aria-label={$i18n.t('Create Office files')}
+														aria-pressed={officeEnabled}
+														on:click|preventDefault={() => (officeEnabled = !officeEnabled)}
+														type="button"
+														class=" group p-[0.375rem] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {officeEnabled
+															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
+															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
+														false)
+															? 'm-1'
+															: 'focus:outline-hidden rounded-full'}"
+													>
+														<Document className="size-3.5" strokeWidth="2" />
+
+														<div class="hidden group-hover:block">
+															<XMark className="size-4" strokeWidth="1.75" />
+														</div>
+													</button>
+												</Tooltip>
+											{/if}
+
+											{#if officeEditEnabled && showOfficeEditButton}
+												<Tooltip content={$i18n.t('Edit Office files')} placement="top">
+													<button
+														aria-label={$i18n.t('Edit Office files')}
+														aria-pressed={officeEditEnabled}
+														on:click|preventDefault={() => (officeEditEnabled = !officeEditEnabled)}
+														type="button"
+														class=" group p-[0.375rem] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {officeEditEnabled
 															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
 															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
 														false)

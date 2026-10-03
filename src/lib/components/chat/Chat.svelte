@@ -363,6 +363,9 @@
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = false;
+	let officeEnabled = false;
+	let officeEditEnabled = false;
+	$: if (!officeEnabled) officeEditEnabled = false;
 	let webSearchActive = false;
 	let showWebSearchConfirm = false;
 	let pendingWebSearchPrompt: string | null = null;
@@ -811,6 +814,8 @@
 			codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
 			// [Gradient] Preserve Document Writer across draft and OAuth restoration.
 			documentWriterEnabled = input.documentWriterEnabled ?? false;
+			officeEnabled = input.officeEnabled ?? false;
+			officeEditEnabled = input.officeEditEnabled ?? false;
 			if (input.toolApprovalMode) {
 				await handleToolApprovalModeChange(input.toolApprovalMode);
 			}
@@ -874,6 +879,8 @@
 		selectedToolIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
+		officeEnabled = false;
+		officeEditEnabled = false;
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		acceptedDataWarnings = new Set();
@@ -954,6 +961,8 @@
 		selectedToolIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
+		officeEnabled = false;
+		officeEditEnabled = false;
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		codeInterpreterEnabled = false;
@@ -992,7 +1001,9 @@
 			webSearchEnabled,
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
-			documentWriterEnabled
+			documentWriterEnabled,
+			officeEnabled,
+			officeEditEnabled
 		});
 		if (current !== lastSavedFeatures) {
 			lastSavedFeatures = current;
@@ -1171,6 +1182,23 @@
 						($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 					) {
 						documentWriterEnabled = model.info.meta.defaultFeatureIds.includes('document_writer');
+					}
+					if (
+						model.info?.meta?.capabilities?.['office'] &&
+						isFeatureEnabled('office') &&
+						$config?.features?.enable_office &&
+						($user?.role === 'admin' || $user?.permissions?.features?.office)
+					) {
+						officeEnabled = model.info.meta.defaultFeatureIds.includes('office');
+					}
+					if (
+						model.info?.meta?.capabilities?.['office_edit'] &&
+						officeEnabled &&
+						isFeatureEnabled('office_edit') &&
+						$config?.features?.enable_office_edit &&
+						($user?.role === 'admin' || $user?.permissions?.features?.office_edit)
+					) {
+						officeEditEnabled = model.info.meta.defaultFeatureIds.includes('office_edit');
 					}
 				}
 
@@ -1797,6 +1825,8 @@
 				imageGenerationEnabled = false;
 				codeInterpreterEnabled = false;
 				documentWriterEnabled = false;
+				officeEnabled = false;
+				officeEditEnabled = false;
 				acceptedDataWarnings = new Set();
 
 				await restoreChatInput(storageChatInput);
@@ -2447,6 +2477,10 @@
 			documentWriterEnabled = true;
 		}
 
+		if ($page.url.searchParams.get('office') === 'true') officeEnabled = true;
+		if (officeEnabled && $page.url.searchParams.get('office-edit') === 'true')
+			officeEditEnabled = true;
+
 		if ($page.url.searchParams.get('tools')) {
 			selectedToolIds = $page.url.searchParams
 				.get('tools')
@@ -2629,6 +2663,8 @@
 				imageGenerationEnabled = chatFeatures.image_generation ?? false;
 				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
 				documentWriterEnabled = chatFeatures.document_writer ?? false;
+				officeEnabled = chatFeatures.office ?? false;
+				officeEditEnabled = chatFeatures.office_edit ?? false;
 
 				// [Gradient] Keep the feature-autosave baseline in sync with the chat we just
 				// loaded, so the reactive at the feature-persist block does not emit a
@@ -2637,7 +2673,9 @@
 					webSearchEnabled,
 					imageGenerationEnabled,
 					codeInterpreterEnabled,
-					documentWriterEnabled
+					documentWriterEnabled,
+					officeEnabled,
+					officeEditEnabled
 				});
 
 				// Load tasks from chat-level DB field
@@ -3291,6 +3329,8 @@
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
 					document_writer: $i18n.t('Document Writer'),
+					office: $i18n.t('Create Office files'),
+					office_edit: $i18n.t('Edit Office files'),
 					image_generation: $i18n.t('Image Generation')
 				};
 				const capabilityLabels = warning.capabilities.map(
@@ -3610,6 +3650,8 @@
 			image_generation: imageGenerationEnabled,
 			code_interpreter: codeInterpreterEnabled,
 			document_writer: documentWriterEnabled,
+			office: officeEnabled,
+			office_edit: officeEditEnabled,
 			knowledge_local: hasLocalKb,
 			knowledge_external: hasExternalKb
 		};
@@ -3877,6 +3919,19 @@
 					$config?.features?.enable_document_writer &&
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
+						: false,
+				office:
+					isFeatureEnabled('office') &&
+					$config?.features?.enable_office &&
+					($user?.role === 'admin' || $user?.permissions?.features?.office)
+						? officeEnabled
+						: false,
+				office_edit:
+					officeEnabled &&
+					isFeatureEnabled('office_edit') &&
+					$config?.features?.enable_office_edit &&
+					($user?.role === 'admin' || $user?.permissions?.features?.office_edit)
+						? officeEnabled && officeEditEnabled
 						: false,
 				web_search: webSearchActive
 			};
@@ -4508,7 +4563,9 @@
 						web_search: webSearchEnabled,
 						image_generation: imageGenerationEnabled,
 						code_interpreter: codeInterpreterEnabled,
-						document_writer: documentWriterEnabled
+						document_writer: documentWriterEnabled,
+						office: officeEnabled,
+						office_edit: officeEditEnabled
 					}
 				});
 			}
@@ -4550,6 +4607,9 @@
 		imageGenerationEnabled,
 		webSearchEnabled,
 		codeInterpreterEnabled,
+		documentWriterEnabled,
+		officeEnabled,
+		officeEditEnabled,
 		toolApprovalMode
 	});
 
@@ -5040,6 +5100,8 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
+										bind:officeEnabled
+										bind:officeEditEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:webSearchEnabled
@@ -5132,6 +5194,8 @@
 										bind:selectedFilterIds
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
+										bind:officeEnabled
+										bind:officeEditEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:webSearchEnabled
@@ -5193,6 +5257,8 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
+									bind:officeEnabled
+									bind:officeEditEnabled
 									bind:webSearchEnabled
 									bind:atSelectedModel
 									bind:showCommands

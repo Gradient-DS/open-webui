@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -8,8 +8,8 @@
 	import { DEFAULT_PERMISSIONS } from '$lib/constants/permissions';
 	import { config } from '$lib/stores';
 
-	export let permissions = {};
-	export let defaultPermissions = {};
+	export let permissions: Record<string, Record<string, boolean>> = {};
+	export let defaultPermissions: Record<string, Record<string, boolean>> = {};
 
 	// Reactive statement to ensure all fields are present in `permissions`
 	$: {
@@ -1120,6 +1120,38 @@
 				<Switch bind:state={permissions.features.document_writer} />
 			</div>
 			{#if defaultPermissions?.features?.document_writer && !permissions.features.document_writer}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Create Office files')}
+				</div>
+				<Switch bind:state={permissions.features.office} />
+			</div>
+			{#if defaultPermissions?.features?.office && !permissions.features.office}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Edit Office files')}
+				</div>
+				<Switch bind:state={permissions.features.office_edit} />
+			</div>
+			{#if defaultPermissions?.features?.office_edit && !permissions.features.office_edit}
 				<div>
 					<div class="text-xs text-gray-500">
 						{$i18n.t('This is a default user permission and will remain enabled.')}

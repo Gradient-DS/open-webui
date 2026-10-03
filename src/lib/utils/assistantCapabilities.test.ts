@@ -1,15 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import {
-	togglesFromMeta,
-	applyToggles,
-	type AssistantToggles
-} from './assistantCapabilities';
+import { togglesFromMeta, applyToggles, type AssistantToggles } from './assistantCapabilities';
 
 const ALL_ON: AssistantToggles = {
 	web_search: true,
 	image_generation: true,
 	code_interpreter: true,
 	document_writer: true,
+	office: true,
+	office_edit: true,
 	vision: true,
 	file_upload: true,
 	citations: true
@@ -19,6 +17,8 @@ const ALL_OFF: AssistantToggles = {
 	image_generation: false,
 	code_interpreter: false,
 	document_writer: false,
+	office: false,
+	office_edit: false,
 	vision: false,
 	file_upload: false,
 	citations: false
@@ -46,10 +46,7 @@ describe('applyToggles', () => {
 	});
 
 	it('preserves advanced meta fields it does not own', () => {
-		const meta = applyToggles(
-			{ toolIds: ['t1'], capabilities: { status_updates: true } },
-			ALL_OFF
-		);
+		const meta = applyToggles({ toolIds: ['t1'], capabilities: { status_updates: true } }, ALL_OFF);
 		expect(meta.toolIds).toEqual(['t1']);
 		expect(meta.capabilities.status_updates).toBe(true);
 	});
@@ -69,7 +66,9 @@ describe('round-trip togglesFromMeta(applyToggles(...))', () => {
 		ALL_ON,
 		ALL_OFF,
 		{ ...ALL_OFF, web_search: true, citations: true },
-		{ ...ALL_OFF, document_writer: true, vision: true }
+		{ ...ALL_OFF, document_writer: true, vision: true },
+		{ ...ALL_OFF, office: true },
+		{ ...ALL_OFF, office: true, office_edit: true }
 	]) {
 		it(`is identity for ${JSON.stringify(sample)}`, () => {
 			expect(togglesFromMeta(applyToggles({}, sample))).toEqual(sample);
@@ -84,5 +83,24 @@ describe('togglesFromMeta', () => {
 			...ALL_OFF,
 			vision: true
 		});
+	});
+});
+
+describe('Office toggles', () => {
+	it('maps both Office toggles to capabilities and default features without builtin tools', () => {
+		const meta = applyToggles({}, { ...ALL_OFF, office: true, office_edit: true });
+		expect(meta.capabilities).toMatchObject({ office: true, office_edit: true });
+		expect(meta.defaultFeatureIds).toEqual(['office', 'office_edit']);
+		expect(meta.builtinTools.office).toBeUndefined();
+		expect(meta.builtinTools.office_edit).toBeUndefined();
+	});
+	it('clears editing when creation is off, including stale default features', () => {
+		const meta = applyToggles(
+			{ defaultFeatureIds: ['office', 'office_edit', 'custom'] },
+			{ ...ALL_OFF, office_edit: true }
+		);
+		expect(meta.capabilities).toMatchObject({ office: false, office_edit: false });
+		expect(meta.defaultFeatureIds).toEqual(['custom']);
+		expect(togglesFromMeta({ capabilities: { office_edit: true } })).toEqual(ALL_OFF);
 	});
 });

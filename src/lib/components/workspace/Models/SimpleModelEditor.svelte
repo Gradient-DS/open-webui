@@ -143,6 +143,8 @@
 				image_generation: !!draft.capabilities?.image_generation,
 				code_interpreter: !!draft.capabilities?.code_interpreter,
 				document_writer: !!draft.capabilities?.document_writer,
+				office: !!draft.capabilities?.office,
+				office_edit: !!draft.capabilities?.office_edit,
 				vision: !!draft.capabilities?.vision,
 				file_upload: !!draft.capabilities?.file_upload,
 				citations: !!draft.capabilities?.citations
