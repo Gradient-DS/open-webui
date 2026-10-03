@@ -328,15 +328,31 @@ async def test_office_cannot_bypass_disabled_gate(feature, gate):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('saved', [{}, {'office': False, 'office_edit': False}])
-async def test_office_permissions_fill_old_settings_without_overriding_saved_values(saved):
+@pytest.mark.parametrize('saved', [{}, {'office': False, 'office_edit': False}, {'web_search': False, 'custom': True}])
+async def test_feature_permission_defaults_preserve_saved_values_and_match_authorization(saved):
+    from unittest.mock import AsyncMock
+    from open_webui.config import DEFAULT_USER_PERMISSIONS
+    from open_webui.utils.access_control import get_permissions, has_permission
+
+    original = dict(saved)
+    with patch('open_webui.models.groups.Groups.get_groups_by_member_id', AsyncMock(return_value=[])):
+        result = await get_permissions('alice', {'features': saved})
+        for key, enabled in result['features'].items():
+            assert await has_permission('alice', f'features.{key}', {'features': dict(saved)}) is enabled
+    assert result['features'] == {**DEFAULT_USER_PERMISSIONS['features'], **saved}
+    assert saved == original
+
+
+@pytest.mark.asyncio
+async def test_feature_defaults_allow_group_grants_without_mutating_global_defaults():
+    from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from open_webui.config import DEFAULT_USER_PERMISSIONS
     from open_webui.utils.access_control import get_permissions
 
-    with patch('open_webui.models.groups.Groups.get_groups_by_member_id', AsyncMock(return_value=[])):
-        result = await get_permissions('alice', {'features': saved})
-    assert result['features'] == {
-        key: saved.get(key, DEFAULT_USER_PERMISSIONS['features'][key]) for key in ('office', 'office_edit')
-    }
-    assert saved == {} or saved == {'office': False, 'office_edit': False}
+    defaults = dict(DEFAULT_USER_PERMISSIONS['features'])
+    groups = [SimpleNamespace(permissions={'features': {'api_keys': True}})]
+    with patch('open_webui.models.groups.Groups.get_groups_by_member_id', AsyncMock(return_value=groups)):
+        result = await get_permissions('alice', {})
+    assert result['features']['api_keys'] is True
+    assert DEFAULT_USER_PERMISSIONS['features'] == defaults
