@@ -66,7 +66,7 @@ async def get_office_content(
 ):
     if part != 'file' and not re.fullmatch(r'page-[1-9][0-9]*', part):
         raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
-    chat = await Chats.get_chat_by_id(chat_id)
+    chat = await Chats.get_chat_by_id_for_user(chat_id, user)
     if chat is None or (chat.user_id != user.id and user.role != 'admin'):
         raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
     messages = await ChatMessages.get_messages_by_chat_id(chat_id)

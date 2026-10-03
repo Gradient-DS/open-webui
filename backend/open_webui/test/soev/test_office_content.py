@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI
+from open_webui.models import chats as chat_models
 from open_webui.routers import chats
 from open_webui.soev.client import SoevApiError
 
@@ -27,9 +28,16 @@ def office(monkeypatch):
     user = SimpleNamespace(id='alice', role='user')
     attachment = {'type': 'office', 'element_id': 'element', 'thread_id': 'attached-thread', 'pages': 2}
     message = SimpleNamespace(files=[attachment], meta={'agent_v2': {'thread_id': 'different-bookmark'}})
-    lookup = AsyncMock(return_value=SimpleNamespace(user_id='alice'))
+    lookup = AsyncMock(return_value=SimpleNamespace(user_id='alice', meta={}, folder_id=None))
     messages = AsyncMock(return_value=[message])
     monkeypatch.setattr(chats.Chats, 'get_chat_by_id', lookup)
+
+    async def owned(chat_id, user_id, db=None):
+        return await lookup(chat_id, db=db) if user_id == 'alice' else None
+
+    monkeypatch.setattr(chats.Chats, 'get_chat_by_id_and_user_id', owned)
+    monkeypatch.setattr(chat_models, 'ENABLE_ADMIN_CHAT_ACCESS', True)
+    monkeypatch.setattr(chat_models.AccessGrants, 'has_access', AsyncMock(return_value=False))
     monkeypatch.setattr(chats.ChatMessages, 'get_messages_by_chat_id', messages)
     stream = OfficeBytes()
     upstream = httpx.Response(
@@ -71,7 +79,7 @@ async def test_download_relays_bytes_and_headers_as_chat_owner(office, admin):
     for header in ('content-type', 'content-disposition', 'cache-control'):
         assert response.headers[header] == office.upstream.headers[header]
     assert 'x-private-upstream' not in response.headers
-    office.lookup.assert_awaited_once_with('chat')
+    office.lookup.assert_awaited_once_with('chat', db=None)
     office.messages.assert_awaited_once_with('chat')
     office.get.assert_awaited_once_with(
         '/v1/chat/threads/attached-thread/office/element', as_user='owui:user:alice', params={'part': 'file'}
@@ -126,3 +134,13 @@ async def test_upstream_errors_are_resolved_before_response_headers(office, stat
     async with office.client as client:
         response = await client.get('/api/v1/chats/chat/office/element/file')
     assert response.status_code == status
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_download_when_admin_chat_access_is_disabled(office, monkeypatch):
+    monkeypatch.setattr(chat_models, 'ENABLE_ADMIN_CHAT_ACCESS', False)
+    office.user.id, office.user.role = 'admin', 'admin'
+    async with office.client as client:
+        response = await client.get('/api/v1/chats/chat/office/element/file')
+    assert response.status_code == 404
+    office.get.assert_not_awaited()
