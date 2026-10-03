@@ -32,6 +32,7 @@ jobs:
   changes:
     name: Decide whether runtime paths changed
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
     steps:
@@ -120,6 +121,7 @@ jobs:
     # rule, and a dead gate reads exactly like a passing one.
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:

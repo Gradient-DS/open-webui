@@ -6,10 +6,16 @@ on:
       - test
       - main
 
+# Cancel a superseded run of the same pull request; never cancel anything else.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   migration-tests:
     name: Migration Tests (SQLite + Postgres)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres

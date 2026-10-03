@@ -67,6 +67,7 @@ jobs:
     needs: [source, image]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Fail unless every security job succeeded
         env:
