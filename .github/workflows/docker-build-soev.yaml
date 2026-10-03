@@ -142,6 +142,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      scan-ref: ${{ steps.scan-ref.outputs.ref }}
     steps:
       - name: Set repository and image name to lowercase
         run: |
@@ -210,6 +212,35 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+      # The linux/amd64 manifest of the index just pushed: the platform the
+      # tenants run and the one security.yml used to rebuild and scan.
+      - name: Resolve the amd64 digest to scan
+        id: scan-ref
+        env:
+          INDEX: ${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          digest=$(docker buildx imagetools inspect --raw "$INDEX" | jq -r '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest')
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no linux/amd64 manifest in $INDEX"; exit 1; }
+          echo "ref=${FULL_IMAGE_NAME}@${digest}" >> "$GITHUB_OUTPUT"
+          echo "Scanning ${FULL_IMAGE_NAME}@${digest}"
+
+  # The push-time image scan, of the bytes that were just published, instead
+  # of security.yml rebuilding the image. PRs still build and scan in
+  # security.yml; tags are not scanned here, as before (their commit was
+  # scanned when it was pushed to its branch).
+  scan-image:
+    if: startsWith(github.ref, 'refs/heads/')
+    needs: [merge-slim-images]
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
+    with:
+      image-name: open-webui
+      image-ref: ${{ needs.merge-slim-images.outputs.scan-ref }}
 
   publish-helm-chart:
     # Run after image jobs succeed OR when they were skipped (chart-only tag).

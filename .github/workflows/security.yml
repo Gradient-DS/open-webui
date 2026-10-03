@@ -37,7 +37,10 @@ jobs:
       python-requirements: 'backend/requirements.txt backend/requirements-slim.txt'
       node-dirs: '.'
 
+  # Not on push: a push to main/dev/test is scanned by docker-build-soev.yaml's
+  # `scan-image`, on the digest it published.
   image:
+    if: github.event_name != 'push'
     uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
     secrets: inherit
     permissions:
@@ -86,6 +89,9 @@ jobs:
         env:
           SOURCE: ${{ needs.source.result }}
           IMAGE: ${{ needs.image.result }}
+          EVENT: ${{ github.event_name }}
         run: |
-          echo "source=$SOURCE  image=$IMAGE"
-          [ "$SOURCE" = "success" ] && [ "$IMAGE" = "success" ]
+          echo "event=$EVENT  source=$SOURCE  image=$IMAGE"
+          [ "$SOURCE" = "success" ] || exit 1
+          # On push the image is scanned by docker-build-soev.yaml instead.
+          [ "$IMAGE" = "success" ] || { [ "$EVENT" = "push" ] && [ "$IMAGE" = "skipped" ]; }
