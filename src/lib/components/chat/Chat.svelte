@@ -39,6 +39,7 @@
 		showDocument,
 		documentContents,
 		openDocumentTabSignal,
+		requestedOfficeFile,
 		tools,
 		skills,
 		toolServers,
@@ -1406,10 +1407,11 @@
 					// [Gradient] A delivered Office file opens the document panel, like a generated document.
 					if (
 						(data.files ?? []).some(isDeliveredFile) &&
-						isFeatureEnabled('document_writer') &&
+						isFeatureEnabled('office') &&
 						($settings?.detectDocuments ?? true) &&
 						!$mobile
 					) {
+						requestedOfficeFile.set(data.files.filter(isDeliveredFile).at(-1) ?? null);
 						showDocument.set(true);
 						showControls.set(true);
 						openDocumentTabSignal.update((n) => n + 1);
@@ -2110,6 +2112,7 @@
 		} else {
 			artifactContents.set([]);
 			documentContents.set([]);
+			requestedOfficeFile.set(null);
 		}
 	};
 
@@ -2429,6 +2432,7 @@
 		await showArtifacts.set(false);
 		await showDocument.set(false);
 		documentContents.set([]);
+		requestedOfficeFile.set(null);
 
 		if (!embedded && $page.url.pathname.includes('/c/')) {
 			window.history.replaceState(history.state, '', `/`);

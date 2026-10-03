@@ -62,3 +62,22 @@ export const downloadDeliveredFile = async (file: DeliveredFile, chatId: string)
 /** The file's type as its extension, e.g. PPTX. */
 export const fileKind = (file: DeliveredFile): string =>
 	(file.name.split('.').pop() ?? '').toUpperCase();
+
+export const newestFileVersionIndex = (
+	contents: Array<{ file?: DeliveredFile }>,
+	requested: DeliveredFile
+): number => {
+	let selected = -1;
+	let version = 0;
+	contents.forEach(({ file }, index) => {
+		if (
+			file?.name === requested.name &&
+			file.content_type === requested.content_type &&
+			file.version >= version
+		) {
+			selected = index;
+			version = file.version;
+		}
+	});
+	return selected;
+};

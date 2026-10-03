@@ -8,6 +8,8 @@ const DUTCH: Record<string, string> = {
 	'read {{count}} websites': '{{count}} websites gelezen',
 	'read a document': 'een document gelezen',
 	'created a file': 'een bestand gemaakt',
+	'edited a file': 'een bestand aangepast',
+	'{{count}} files edited': '{{count}} bestanden aangepast',
 	and: 'en'
 };
 
@@ -35,6 +37,23 @@ describe('describeBlock', () => {
 	it('counts an Office agent steps as the making of its file', () => {
 		const items = [{ action: 'create_office_file' }, { action: 'run' }, { action: 'preview' }];
 		expect(describeBlock(items, t)).toBe('Een bestand gemaakt');
+	});
+
+	it('summarizes Office edits without counting the agent’s internal steps', () => {
+		expect(
+			describeBlock([{ action: 'edit_office_file' }, { action: 'run' }, { action: 'preview' }], t)
+		).toBe('Een bestand aangepast');
+		expect(describeBlock([{ action: 'edit_office_file' }, { action: 'edit_office_file' }], t)).toBe(
+			'2 bestanden aangepast'
+		);
+		const english = (key: string, options?: Record<string, unknown>) =>
+			key.replace('{{count}}', String(options?.count ?? ''));
+		expect(describeBlock([{ action: 'edit_office_file' }, { action: 'run' }], english)).toBe(
+			'Edited a file'
+		);
+		expect(
+			describeBlock([{ action: 'edit_office_file' }, { action: 'edit_office_file' }], english)
+		).toBe('2 files edited');
 	});
 
 	it('leaves a block of one step to its own line', () => {

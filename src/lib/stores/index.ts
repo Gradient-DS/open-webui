@@ -166,6 +166,7 @@ export const artifactContents = writable(null);
 
 export const showDocument = writable(false);
 export const openDocumentTabSignal = writable(0);
+export const requestedOfficeFile = writable<DeliveredFile | null>(null);
 
 export const submitPromptSignal: Writable<{ text: string; ts: number } | null> = writable(null);
 

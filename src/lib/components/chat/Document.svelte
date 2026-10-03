@@ -6,7 +6,14 @@
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 
-	import { chatId, config, showControls, showDocument, documentContents } from '$lib/stores';
+	import {
+		chatId,
+		config,
+		showControls,
+		showDocument,
+		documentContents,
+		requestedOfficeFile
+	} from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
 
@@ -25,6 +32,7 @@
 		type DeliveredFile,
 		downloadDeliveredFile,
 		fileKind,
+		newestFileVersionIndex,
 		loadPages
 	} from '$lib/utils/deliveredFile';
 
@@ -40,6 +48,11 @@
 	let copied = false;
 	let downloadOpen = false;
 	let citationsElement: any = null;
+
+	$: if ($requestedOfficeFile) {
+		const newest = newestFileVersionIndex(contents, $requestedOfficeFile);
+		if (newest >= 0) selectedContentIdx = newest;
+	}
 
 	$: current = contents[selectedContentIdx];
 	// [Gradient] Shared snapshots have no Office download route.

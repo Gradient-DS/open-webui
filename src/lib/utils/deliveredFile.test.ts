@@ -10,6 +10,7 @@ import {
 	fileKind,
 	isDeliveredFile,
 	loadPages,
+	newestFileVersionIndex,
 	type OfficeAttachment
 } from './deliveredFile';
 
@@ -103,5 +104,29 @@ describe('delivered files', () => {
 
 	it('a plain upload is not a delivered file', () => {
 		expect(isDeliveredFile({ type: 'file', id: 'upload', pages: ['page'] })).toBe(false);
+	});
+});
+
+describe('Office version selection', () => {
+	it('opens the highest version of the requested file even when another file arrived later', () => {
+		const contents = [
+			{ file: { ...office, version: 3, element_id: 'v3' } },
+			{ file: office },
+			{ file: { ...office, version: 2, element_id: 'v2' } },
+			{ file: { ...office, name: 'other.pptx', version: 4 } },
+			{ file: { ...office, content_type: 'different', version: 5 } },
+			{ markdown: 'Written document' }
+		];
+		expect(newestFileVersionIndex(contents, office)).toBe(0);
+	});
+	it('uses the last delivery when versions tie and leaves unrelated contents alone', () => {
+		expect(
+			newestFileVersionIndex(
+				[{ file: office }, { file: { ...office, element_id: 'copy' } }],
+				office
+			)
+		).toBe(1);
+		expect(newestFileVersionIndex([{ file: { ...office, name: 'other.pptx' } }], office)).toBe(-1);
+		expect(newestFileVersionIndex([], office)).toBe(-1);
 	});
 });

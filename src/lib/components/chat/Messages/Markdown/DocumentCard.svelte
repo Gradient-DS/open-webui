@@ -4,9 +4,15 @@
 	import { getContext } from 'svelte';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
-	import { config, showControls, showDocument, openDocumentTabSignal } from '$lib/stores';
+	import {
+		config,
+		showControls,
+		showDocument,
+		openDocumentTabSignal,
+		requestedOfficeFile
+	} from '$lib/stores';
 	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
 
 	import Document from '$lib/components/icons/Document.svelte';
@@ -44,11 +50,12 @@
 
 	const openDocument = () => {
 		// Toggle: if the side panel is already showing the document, close it.
-		if ($showControls && $showDocument) {
+		if (!file && $showControls && $showDocument) {
 			showControls.set(false);
 			showDocument.set(false);
 			return;
 		}
+		requestedOfficeFile.set(file);
 		showDocument.set(true);
 		showControls.set(true);
 		openDocumentTabSignal.update((n) => n + 1);
@@ -135,6 +142,9 @@
 			</div>
 			<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
 				{file ? fileKind(file) : $i18n.t('Document')}
+				{#if file && file.version > 1}
+					<span class="ml-1">{$i18n.t('v{{version}}', { version: file.version })}</span>
+				{/if}
 			</div>
 		</div>
 
