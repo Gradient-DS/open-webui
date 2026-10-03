@@ -18,9 +18,12 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+# Same rule as security.yml: cancel only a superseded pull-request run.
+# Scheduled and dispatched runs both have ref = the default branch, so a shared
+# group let a manual dispatch cancel the nightly audit (or the other way round).
 concurrency:
-  group: runtime-security-${{ github.ref }}
-  cancel-in-progress: true
+  group: runtime-security-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -29,6 +32,7 @@ jobs:
   changes:
     name: Decide whether runtime paths changed
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
     steps:
@@ -117,6 +121,7 @@ jobs:
     # rule, and a dead gate reads exactly like a passing one.
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
