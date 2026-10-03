@@ -367,3 +367,15 @@ dev tenants track `^dev-<sha>-<run>$` numerically ascending, test tenants track
 `^v<major>.<minor>.<patch>$`, range `>=1.0.0`** — i.e. prod advances only on an
 explicit release tag. `:main` and `:latest` are published by CI but no prod
 ImagePolicy follows them.
+
+---
+
+## Docker build context excludes `.git`
+
+`.dockerignore` excludes `.git` (plus the CI-only `.security-tooling` and `.falco`
+checkouts), and `docker-build-soev.yaml` checks out with `persist-credentials: false`.
+The frontend build stage does `COPY . .`, and the public `cache-slim-*` registry
+cache is written with `mode=max`, so without this the checkout's `.git/config`
+(including the job token) ended up in a public cache layer. The SvelteKit
+`version.name` in `svelte.config.js` therefore reads `APP_BUILD_HASH` (the commit,
+set from `BUILD_HASH` in the Dockerfile) before falling back to `git rev-parse`.
