@@ -5,6 +5,9 @@ import re
 from urllib.parse import quote
 from uuid import uuid4
 
+import anyio
+import httpx
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
@@ -50,11 +53,35 @@ from open_webui.utils.misc import get_message_list
 from open_webui.utils.models import get_all_models
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.background import BackgroundTask
+from starlette.types import Receive, Scope, Send
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# [Gradient] A stream must close even if response headers fail or the browser disconnects.
+_OFFICE_HEADERS = {'X-Content-Type-Options': 'nosniff'}
+
+
+class _OfficeStreamingResponse(StreamingResponse):
+    def __init__(self, upstream: httpx.Response):
+        self.upstream = upstream
+        headers = {
+            key: upstream.headers[key]
+            for key in ('Content-Type', 'Content-Disposition', 'Cache-Control')
+            if key in upstream.headers
+        }
+        super().__init__(
+            upstream.aiter_bytes(), status_code=upstream.status_code, headers={**headers, **_OFFICE_HEADERS}
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await self.upstream.aclose()
 
 
 # [Gradient] Resolve Office references from stored messages; bytes remain in the agent's storage.
@@ -66,14 +93,14 @@ async def get_office_content(
     user=Depends(get_verified_user),
 ):
     if part != 'file' and not re.fullmatch(r'page-[1-9][0-9]*', part):
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_OFFICE_HEADERS)
     if is_temporary_chat_id(chat_id):
         attachment = agent_threads.temporary_office(chat_id, element_id, user.id)
         as_user = f'owui:user:{user.id}'
     else:
         chat = await Chats.get_chat_by_id_for_user(chat_id, user)
         if chat is None or (chat.user_id != user.id and user.role != 'admin'):
-            raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+            raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_OFFICE_HEADERS)
         as_user = f'owui:user:{chat.user_id}'
         files = await ChatMessages.get_files_by_chat_id(chat_id)
         attachment = next(
@@ -89,7 +116,7 @@ async def get_office_content(
             None,
         )
     if attachment is None:
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_OFFICE_HEADERS)
     path = f'/v1/chat/threads/{quote(attachment["thread_id"], safe="")}/office/{quote(element_id, safe="")}'
     try:
         upstream = await identity.build_client().chat_get_stream(
@@ -101,25 +128,9 @@ async def get_office_content(
         # [Gradient] Neither upstream problem text nor credential configuration belongs in the response.
         code = 404 if isinstance(error, SoevApiError) and error.status == 404 else 502
         detail = ERROR_MESSAGES.NOT_FOUND if code == 404 else 'Office file download failed'
-        raise HTTPException(status_code=code, detail=detail) from None
+        raise HTTPException(status_code=code, detail=detail, headers=_OFFICE_HEADERS) from None
 
-    async def body():
-        try:
-            async for chunk in upstream.aiter_bytes():
-                yield chunk
-        finally:
-            await upstream.aclose()
-
-    return StreamingResponse(
-        body(),
-        status_code=upstream.status_code,
-        headers={
-            key: upstream.headers[key]
-            for key in ('Content-Type', 'Content-Disposition', 'Cache-Control')
-            if key in upstream.headers
-        },
-        background=BackgroundTask(upstream.aclose),
-    )
+    return _OfficeStreamingResponse(upstream)
 
 
 CHAT_CONFIG_KEYS = {
