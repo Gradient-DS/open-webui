@@ -1701,41 +1701,39 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
 
 
 @pytest.mark.asyncio
-async def test_a_delivered_office_file_is_stored_as_the_users_and_attached_to_the_message(
+async def test_a_delivered_office_file_is_attached_without_copying_bytes(
     chat: Chat, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from open_webui.storage import provider
-
-    stored: dict[str, bytes] = {}
-    monkeypatch.setattr(
-        provider.Storage, 'upload_file', lambda file, name, tags: (stored.setdefault(name, file.read()), f'/up/{name}')
-    )
+    # [Gradient] C1 has no inline bytes; neither the file nor its pages enter OWUI Files.
     inserted = AsyncMock()
     monkeypatch.setattr(agent_v2.Files, 'insert_new_file', inserted)
     office = {
         'type': 'office-file',
-        'id': 'task/begroting.xlsx',
+        'id': uuid4().hex,
         'name': 'begroting.xlsx',
         'content_type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'content': 'UEsDBA==',
-        'pages': ['iVBORw0KGgo='],
+        'size': 4,
+        'sha256': 'a' * 64,
+        'key': 'owner/office/workbook.xlsx',
+        'pages': [{'key': 'owner/office/page.png', 'sha256': 'b' * 64, 'size': 8}],
+        'version': 2,
+        'edits': uuid4().hex,
     }
     chat.api.chat.turns = [[found(office), answered('Klaar.')]]
     await chat.turn('Maak een begroting', 'a1')
-    workbook, page = stored
-    assert workbook.endswith('_begroting.xlsx') and stored[workbook] == b'PK\x03\x04'
-    assert page.endswith('_begroting.xlsx-page-1.png') and stored[page] == b'\x89PNG\r\n\x1a\n'
-    (user_id, form), (_, png) = (call.args for call in inserted.await_args_list)
-    assert user_id == 'alice' and form.filename == 'begroting.xlsx' and form.path == f'/up/{workbook}'
+    inserted.assert_not_awaited()
     (event,) = [event['data'] for event in chat.socket if event['type'] == 'files']
     assert event == {
         'files': [
             {
-                'type': 'file',
-                'id': form.id,
-                'name': 'begroting.xlsx',
-                'url': f'/api/v1/files/{form.id}/content',
-                'pages': [png.id],
+                'type': 'office',
+                'name': office['name'],
+                'content_type': office['content_type'],
+                'size': 4,
+                'thread_id': chat.bookmark('a1')['thread_id'],
+                'element_id': office['id'],
+                'pages': 1,
+                'version': 2,
             }
         ]
     }

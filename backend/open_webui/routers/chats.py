@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
@@ -32,6 +34,8 @@ from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.shared_chats import SharedChatResponse, SharedChats
 from open_webui.models.tags import TagModel, Tags
+from open_webui.soev import identity
+from open_webui.soev.client import SoevApiError
 from open_webui.soev.agent_threads import chat_thread_ids, delete_released_threads
 from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.socket.main import get_event_emitter
@@ -45,10 +49,70 @@ from open_webui.utils.misc import get_message_list
 from open_webui.utils.models import get_all_models
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# [Gradient] Resolve Office references from stored messages; bytes remain in the agent's storage.
+@router.get('/{chat_id}/office/{element_id}/{part}')
+async def get_office_content(
+    chat_id: str,
+    element_id: str,
+    part: str,
+    user=Depends(get_verified_user),
+):
+    if part != 'file' and not re.fullmatch(r'page-[1-9][0-9]*', part):
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+    chat = await Chats.get_chat_by_id(chat_id)
+    if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+    messages = await ChatMessages.get_messages_by_chat_id(chat_id)
+    attachment = next(
+        (
+            file
+            for message in messages
+            for file in message.files or []
+            if isinstance(file, dict)
+            and file.get('type') == 'office'
+            and file.get('element_id') == element_id
+            and isinstance(file.get('thread_id'), str)
+            and file['thread_id']
+        ),
+        None,
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+    path = f'/v1/chat/threads/{quote(attachment["thread_id"], safe="")}/office/{quote(element_id, safe="")}'
+    try:
+        upstream = await identity.build_client().chat_get_stream(
+            path,
+            as_user=f'owui:user:{chat.user_id}',
+            params={'part': part.replace('page-', 'page:', 1)},
+        )
+    except SoevApiError as error:
+        raise HTTPException(status_code=error.status, detail=error.detail) from None
+
+    async def body():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream.aclose()
+
+    return StreamingResponse(
+        body(),
+        status_code=upstream.status_code,
+        headers={
+            key: upstream.headers[key]
+            for key in ('Content-Type', 'Content-Disposition', 'Cache-Control')
+            if key in upstream.headers
+        },
+        background=BackgroundTask(upstream.aclose),
+    )
+
 
 CHAT_CONFIG_KEYS = {
     'CONTEXT_COMPACTION_MODEL': 'chat.context_compaction.model',

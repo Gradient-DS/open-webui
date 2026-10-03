@@ -3,16 +3,12 @@ Feed the model picker with an OpenAI-type connection whose base URL is
 <SOEV_API_URL>/v1/chat and whose API key is the soev-api key."""
 
 import asyncio
-import base64
-import binascii
 import html
-import io
 import json
 import logging
 import math
 import re
 import time
-import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from typing import Any
@@ -20,7 +16,7 @@ from urllib.parse import quote
 
 import anyio
 from open_webui.models.chats import Chats
-from open_webui.models.files import FileForm, Files
+from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
 from open_webui.socket.main import get_event_emitter
 from open_webui.soev import acting, agent_threads, identity, ingest
@@ -368,38 +364,21 @@ def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[st
     }
 
 
-#: [Claude] The element an Office tool delivers a file as; its `content` is the file in base64.
+# [Gradient] Office bytes stay on the agent side; messages keep only their references.
 OFFICE_FILE = 'office-file'
 
 
-async def _store_file(content: bytes, name: str, content_type: str, user_id: str) -> str:
-    """[Claude] Store bytes as the user's file; returns its id."""
-    from open_webui.storage.provider import Storage  # deferred: the provider reads config at import
-
-    file_id = str(uuid.uuid4())
-    tags = {'OpenWebUI-User-Id': user_id, 'OpenWebUI-File-Id': file_id}
-    _, path = await asyncio.to_thread(Storage.upload_file, io.BytesIO(content), f'{file_id}_{name}', tags)
-    meta = {'name': name, 'content_type': content_type, 'size': len(content)}
-    await Files.insert_new_file(user_id, FileForm(id=file_id, filename=name, path=path, meta=meta))
-    return file_id
-
-
-def _content_url(file_id: str) -> str:
-    return f'/api/v1/files/{file_id}/content'
-
-
-async def _store_office_file(element: dict[str, Any], user_id: str) -> dict[str, Any]:
-    """[Claude] Store a delivered Office file and its rendered pages as the user's, and return it as a message
-    attachment whose `pages`, the ids of the page images, the document panel shows."""
-    name = element['name']
-    file_id = await _store_file(
-        base64.b64decode(element['content'], validate=True), name, element['content_type'], user_id
-    )
-    pages = [
-        await _store_file(base64.b64decode(page, validate=True), f'{name}-page-{n}.png', 'image/png', user_id)
-        for n, page in enumerate(element.get('pages') or [], 1)
-    ]
-    return {'type': 'file', 'id': file_id, 'name': name, 'url': _content_url(file_id), 'pages': pages}
+def _office_attachment(element: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    return {
+        'type': 'office',
+        'name': element['name'],
+        'content_type': element['content_type'],
+        'size': element['size'],
+        'thread_id': thread_id,
+        'element_id': element['id'],
+        'pages': len(element['pages']),
+        'version': element['version'],
+    }
 
 
 _ROOT_STREAM = 'root'
@@ -706,13 +685,13 @@ class AgentTurn:
         return await self.end_tool(payload)
 
     async def attach_files(self, elements: list[dict[str, Any]]) -> None:
-        """[Claude] Attach each delivered Office file to the assistant message: the emitter keeps it there."""
-        if not elements:
+        """[Gradient] Attach Office references using the same thread this message bookmarks."""
+        if not elements or not self.thread_id:
             return
         try:
-            files = [await _store_office_file(element, self.metadata['user_id']) for element in elements]
-        except (KeyError, ValueError, binascii.Error, OSError):
-            log.exception('Could not store an Office file', extra={'thread_id': self.thread_id})
+            files = [_office_attachment(element, self.thread_id) for element in elements]
+        except (KeyError, TypeError):
+            log.exception('Could not attach an Office file', extra={'thread_id': self.thread_id})
             return
         await self.emit('files', {'files': files})
 

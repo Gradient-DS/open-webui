@@ -174,6 +174,33 @@ class SoevClient:
             raise ValueError('Chat requires an acting user')
         await self._request('DELETE', path, as_user=as_user)
 
+    async def chat_get_stream(self, path: str, *, as_user: str, params: dict | None = None) -> httpx.Response:
+        """[Gradient] Open a thread byte stream with status and headers; the caller must close it."""
+        if not path.startswith('/v1/chat/threads/'):
+            raise ValueError('A chat GET requires a thread path')
+        if not as_user or self._subject_minter is None:
+            raise ValueError('Chat requires an acting user and subject minter')
+        headers = {
+            'Authorization': f'Bearer {self._api_key}',
+            'X-Soev-Subject': self._subject_minter(as_user),
+        }
+        try:
+            client = _shared_client()
+            request = client.build_request(
+                'GET', f'{self._base_url}{path}', headers=headers, params=params, timeout=self._timeout
+            )
+            response = await client.send(request, stream=True)
+            if not response.is_success:
+                try:
+                    await response.aread()
+                    raise _response_error(response)
+                finally:
+                    await response.aclose()
+            return response
+        except httpx.TransportError as error:
+            status = 504 if isinstance(error, httpx.TimeoutException) else 502
+            raise SoevApiError(status, 'upstream_error', 'Chat download failed') from None
+
     async def chat_stream(
         self,
         path: str,

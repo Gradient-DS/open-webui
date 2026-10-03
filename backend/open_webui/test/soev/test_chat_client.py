@@ -165,3 +165,64 @@ async def test_terminal_error_is_not_retried(chat_http: FakeSoevApi) -> None:
     assert frames[-1].event == 'error'
     assert len(chat_http.chat.requests) == 1
     assert json.loads(chat_http.chat.requests[0].content)['input'] == {'text': 'hello'}
+
+
+# [Gradient] Office GETs expose headers without reading or copying the body in advance.
+@pytest.mark.asyncio
+async def test_chat_get_stream_keeps_bytes_lazy_and_uses_the_acting_user(monkeypatch):
+    from open_webui.soev import client as client_module
+    from open_webui.soev.client import SoevClient
+
+    class Bytes(httpx.AsyncByteStream):
+        read = False
+        closed = False
+
+        async def __aiter__(self):
+            self.read = True
+            yield b'office'
+
+        async def aclose(self):
+            self.closed = True
+
+    body = Bytes()
+    requests = []
+    subjects = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, stream=body, headers={'Content-Type': 'image/png'})
+
+    def mint(subject):
+        subjects.append(subject)
+        return 'assertion'
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        monkeypatch.setattr(client_module, '_shared_client', lambda: http)
+        client = SoevClient('https://soev.test', 'key', subject_minter=mint)
+        response = await client.chat_get_stream(
+            '/v1/chat/threads/thread/office/element', as_user='owui:user:alice', params={'part': 'page:1'}
+        )
+        assert not body.read
+        assert response.status_code == 200 and response.headers['Content-Type'] == 'image/png'
+        assert b''.join([chunk async for chunk in response.aiter_bytes()]) == b'office'
+        await response.aclose()
+    assert body.closed
+    assert subjects == ['owui:user:alice']
+    assert requests[0].headers['Authorization'] == 'Bearer key'
+    assert requests[0].headers['X-Soev-Subject'] == 'assertion'
+    assert requests[0].url.params['part'] == 'page:1'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', [404, 502])
+async def test_chat_get_stream_closes_failed_responses(identity_config, identity_http, status):
+    requests, responses = identity_http
+    response = httpx.Response(status, json={'detail': 'unavailable'})
+    responses.append(response)
+    with pytest.raises(SoevApiError) as caught:
+        await identity.build_client().chat_get_stream(
+            '/v1/chat/threads/thread/office/element', as_user='owui:user:alice'
+        )
+    assert caught.value.status == status
+    assert response.is_closed
+    assert len(requests) == 1
