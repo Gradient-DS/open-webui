@@ -6,6 +6,7 @@ import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 import type { AudioQueue } from '$lib/utils/audio';
 import type { ProfileRule } from '$lib/utils/models/profile';
+import type { DeliveredFile } from '$lib/utils/deliveredFile';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
 
@@ -180,6 +181,8 @@ export const documentContents: Writable<Array<{
 	title: string;
 	markdown: string;
 	sources?: any[];
+	// [Gradient] An Office file an agent delivered: the panel shows its rendered pages, not markdown.
+	file?: DeliveredFile;
 }> | null> = writable(null);
 
 export const embed = writable(null);

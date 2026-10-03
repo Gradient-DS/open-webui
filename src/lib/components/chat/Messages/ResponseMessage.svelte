@@ -65,6 +65,8 @@
 	import PresentUIDispatcher from './Markdown/PresentUIDispatcher.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
+	import DocumentCard from './Markdown/DocumentCard.svelte';
+	import { isDeliveredFile } from '$lib/utils/deliveredFile';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
 	import { fade } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
@@ -366,15 +368,12 @@
 		: [];
 	$: renderedContent = useBlockLayout ? (tailBlock?.text ?? '') : (message?.content ?? '');
 
-	// [Gradient] ONE activity timeline per turn. buildResponseBlocks already orders
-	// tool groups and the model's inter-tool prose on a single offset axis; flatten
-	// that into one row list rather than mounting a StatusHistory per status-group.
-	// Per-group mounting gave each group its own header, its own expand state and
-	// its own header promotion, which is why a multi-tool turn read as several
-	// separate boxes instead of one sequence.
-	$: timelineItems = useBlockLayout
-		? leadingBlocks.flatMap((b) => (b.kind === 'status-group' ? b.items : [b]))
-		: mergedHistory;
+	// [Gradient] A turn without prose between its tools is one timeline. A turn with
+	// prose renders block by block (see the status-group branch below): Lex chose on
+	// 2026-10-02 to keep that prose in the message, where it first streamed, and to
+	// start a new collapsed status block after it, over one timeline that moved the
+	// prose into the status list once the next tool started.
+	$: timelineItems = mergedHistory;
 
 	// Whether at least one tool actually ran this turn. Used together with the
 	// streaming heuristic below to gate the StatusHistory dropdown:
@@ -396,6 +395,14 @@
 			(statusEntries.length > 0 && !(statusEntries.at(-1)?.hidden ?? false)));
 
 	$: hasVisibleStatus = shouldShowStatusHistory;
+	// [Gradient] The turn runs, its statuses show, none is running and no answer text is
+	// streaming: the model is thinking about its next step.
+	$: thinkingBetweenSteps =
+		!(message?.done ?? false) &&
+		!message?.error &&
+		hasVisibleStatus &&
+		statusEntries.every((entry) => entry?.done !== false) &&
+		!(useBlockLayout ? renderedContent : hasResponseContent);
 
 	// Build a time-ordered list of reasoning items and subagent groups for the
 	// reasoning_only protocol path (bezwaar turns). Each subagent-group part
@@ -1094,11 +1101,49 @@
 									{/if}
 								{/each}
 							</div>
+						{:else if shouldShowStatusHistory && useBlockLayout}
+							<!-- [Gradient] Each run of tool statuses and reasoning is its own
+							     collapsed block; the model's prose between runs stays in the
+							     message, where it first streamed, instead of moving into the
+							     status list once the next tool starts. The final answer is the
+							     ContentRenderer below, so the tail renders exactly once. -->
+							{#each leadingBlocks as block, blockIdx}
+								{#if block.kind === 'status-group'}
+									<StatusHistory
+										id={`${chatId}-${message.id}-status-${blockIdx}`}
+										statusHistory={block.items}
+										messageDone={(message?.done ?? false) || blockIdx < leadingBlocks.length - 1}
+										sources={message.sources}
+										{editCodeBlock}
+										{model}
+										onSourceClick={async (sid) => {
+											if (citationsElement) {
+												citationsElement?.showSourceModal(sid);
+											}
+										}}
+									/>
+								{:else}
+									<div class="w-full min-w-0 my-1">
+										<ContentRenderer
+											id={`${chatId}-${message.id}-prose-${blockIdx}`}
+											content={block.text}
+											sources={message.sources}
+											floatingButtons={false}
+											save={false}
+											preview={false}
+											{editCodeBlock}
+											done={true}
+											{model}
+											onSourceClick={async (sid) => {
+												if (citationsElement) {
+													citationsElement?.showSourceModal(sid);
+												}
+											}}
+										/>
+									</div>
+								{/if}
+							{/each}
 						{:else if shouldShowStatusHistory}
-							<!-- [Gradient] One chronological timeline: reasoning, tool statuses
-							     and the model's inter-tool prose, in stream order. The final
-							     answer is NOT here — it stays in the ContentRenderer below, so
-							     the tail renders exactly once. -->
 							<StatusHistory
 								id={`${chatId}-${message.id}-status`}
 								statusHistory={timelineItems}
@@ -1130,6 +1175,8 @@
 									<div>
 										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 											<Image src={file.url} alt={file.name || $i18n.t('Generated Image')} />
+										{:else if isDeliveredFile(file)}
+											<DocumentCard title={file.name} {file} />
 										{:else}
 											<FileItem
 												item={file}
@@ -1316,6 +1363,12 @@
 										updateChat();
 									}}
 								/>
+							{/if}
+
+							<!-- [Gradient] Between steps the model may think for minutes with nothing running:
+							     the generating indicator says the turn goes on. -->
+							{#if thinkingBetweenSteps}
+								<Skeleton />
 							{/if}
 
 							<!-- [Gradient] The caret marks text being written, so it waits for the answer's first

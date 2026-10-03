@@ -1698,3 +1698,89 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
 
     closing = [event['data'] for event in declared.socket if event['type'] == 'status'][-1]
     assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}
+
+
+@pytest.mark.asyncio
+async def test_a_delivered_office_file_is_stored_as_the_users_and_attached_to_the_message(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from open_webui.storage import provider
+
+    stored: dict[str, bytes] = {}
+    monkeypatch.setattr(
+        provider.Storage, 'upload_file', lambda file, name, tags: (stored.setdefault(name, file.read()), f'/up/{name}')
+    )
+    inserted = AsyncMock()
+    monkeypatch.setattr(agent_v2.Files, 'insert_new_file', inserted)
+    office = {
+        'type': 'office-file',
+        'id': 'task/begroting.xlsx',
+        'name': 'begroting.xlsx',
+        'content_type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'content': 'UEsDBA==',
+        'pages': ['iVBORw0KGgo='],
+    }
+    chat.api.chat.turns = [[found(office), answered('Klaar.')]]
+    await chat.turn('Maak een begroting', 'a1')
+    workbook, page = stored
+    assert workbook.endswith('_begroting.xlsx') and stored[workbook] == b'PK\x03\x04'
+    assert page.endswith('_begroting.xlsx-page-1.png') and stored[page] == b'\x89PNG\r\n\x1a\n'
+    (user_id, form), (_, png) = (call.args for call in inserted.await_args_list)
+    assert user_id == 'alice' and form.filename == 'begroting.xlsx' and form.path == f'/up/{workbook}'
+    (event,) = [event['data'] for event in chat.socket if event['type'] == 'files']
+    assert event == {
+        'files': [
+            {
+                'type': 'file',
+                'id': form.id,
+                'name': 'begroting.xlsx',
+                'url': f'/api/v1/files/{form.id}/content',
+                'pages': [png.id],
+            }
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_subagents_tool_calls_show_as_statuses_by_their_own_ids(declared: Chat) -> None:
+    child = 'root/create_office_file#0@2'
+    path = {'path': 'argument.path'}
+    writing = {
+        'running': {'template': 'Writing {{path}}...', 'params': path},
+        'done': {'template': 'Wrote {{path}}', 'params': path},
+    }
+    agent_v2.TOOL_STATUS_CACHE['statuses'] = {**STATUSES, 'write_file': writing}
+    _, payload = call('write_file', path='/workspace/deck.html', content='x')
+    declared.api.chat.turns = [
+        [
+            call('create_office_file', kind='pptx', brief='b', language='nl'),
+            (f'model_output@{child}', payload),
+            (f'tool_output@{child}', {'call_id': 'c1', 'text': 'ok'}),
+            ('tool_output', {'call_id': 'c1', 'error': 'no file'}),
+            ('model_output', {'content': 'Helaas.'}),
+        ]
+    ]
+
+    chunks = await declared.turn('Maak een deck', 'a1')
+
+    shown = [(status['call_id'], status['description'], status['done']) for status in statuses(declared)]
+    assert (f'{child}:c1', 'Writing {{path}}...', False) in shown
+    assert (f'{child}:c1', 'Wrote {{path}}', True) in shown
+    assert [call_id for call_id, _, done in shown if done].count('c1') == 1
+    assert content(chunks).endswith('Helaas.')
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_budget_stopped_shows_it_did_not_run(declared: Chat) -> None:
+    declared.api.chat.turns = [
+        [
+            call('search', query='q'),
+            ('budget_exceeded', {'count': 4, 'cap': 3}),
+            ('model_output', {'content': 'Zonder zoeken.'}),
+        ]
+    ]
+
+    await declared.turn('q', 'a1')
+
+    (stopped,) = [status for status in statuses(declared) if status['done']]
+    assert stopped['description'] == 'Not run: the agent used all its steps for this message'

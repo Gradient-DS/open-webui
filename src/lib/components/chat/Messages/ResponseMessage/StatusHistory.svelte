@@ -9,6 +9,7 @@
 	import ContentRenderer from '../ContentRenderer.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
+	import { describeBlock } from '$lib/utils/statusSummary';
 
 	// Heterogeneous list: each entry is either a status update (default) or a
 	// reasoning bullet (when `kind === 'reasoning'`). ResponseMessage builds
@@ -54,6 +55,12 @@
 	// reasoning bullets it separated adjacent to each other. That is what read as
 	// "reasoning is not interleaved with the tool calls".
 	$: status = history.at(-1) ?? null;
+	// [Gradient] A finished block says what it did; the turn's closing tool count, when
+	// this block has it, stays its header.
+	$: blockSummary =
+		messageDone && !history.some((item) => item?.action === 'summary')
+			? describeBlock(history, (key, options) => $i18n.t(key, options))
+			: null;
 	$: historyItems = history.slice(0, -1);
 
 	$: if (!equal(statusHistory, history)) {
@@ -82,7 +89,7 @@
 {#if history && history.length > 0}
 	<div class="text-[0.9375rem] flex flex-col w-full my-1">
 		<button
-			class="w-full text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+			class="w-full text-left text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
 			aria-label={$i18n.t('Toggle status history')}
 			aria-expanded={showHistory}
 			on:click={() => {
@@ -91,7 +98,9 @@
 		>
 			<div class="flex items-start gap-2 min-w-0">
 				<div class="status-header flex-1 min-w-0">
-					{#if isContent(status)}
+					{#if blockSummary}
+						<div class="line-clamp-1 text-gray-500 dark:text-gray-500">{blockSummary}</div>
+					{:else if isContent(status)}
 						<div class="line-clamp-1 text-gray-500 dark:text-gray-500">
 							{(status.text ?? '').replace(/\s+/g, ' ').trim()}
 						</div>

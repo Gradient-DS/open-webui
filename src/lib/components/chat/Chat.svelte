@@ -2,6 +2,7 @@
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
+	import { isDeliveredFile } from '$lib/utils/deliveredFile';
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -37,6 +38,7 @@
 		artifactContents,
 		showDocument,
 		documentContents,
+		openDocumentTabSignal,
 		tools,
 		skills,
 		toolServers,
@@ -1373,6 +1375,17 @@
 					message.content = data.content;
 				} else if (type === 'chat:message:files' || type === 'files') {
 					message.files = data.files;
+					// [Gradient] A delivered Office file opens the document panel, like a generated document.
+					if (
+						(data.files ?? []).some(isDeliveredFile) &&
+						isFeatureEnabled('document_writer') &&
+						($settings?.detectDocuments ?? true) &&
+						!$mobile
+					) {
+						showDocument.set(true);
+						showControls.set(true);
+						openDocumentTabSignal.update((n) => n + 1);
+					}
 				} else if (type === 'chat:message:tasks') {
 					chatTasks = data.tasks;
 				} else if (type === 'chat:message:embeds' || type === 'embeds') {
@@ -2236,6 +2249,9 @@
 					const sources = message?.sources ?? [];
 					docs = [...docs, ...documents.map((doc) => ({ ...doc, sources }))];
 				}
+				// [Gradient] Office files an agent delivered open in the same panel.
+				const delivered = (message?.files ?? []).filter(isDeliveredFile);
+				docs = [...docs, ...delivered.map((file) => ({ title: file.name, markdown: '', file }))];
 			}
 		});
 		documentContents.set(docs);

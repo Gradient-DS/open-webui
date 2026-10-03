@@ -151,11 +151,13 @@ class FakeChatApi:
         recorded.append(('input', event))
         answer = f'Answer: {body["input"]["text"]}'
         turn = self.turns.pop(0) if self.turns else [('model_output', {'content': answer})]
-        for kind, payload in turn:
+        for scripted, payload in turn:
+            # [Claude] `kind@stream` records an event in a subagent's stream.
+            kind, _, stream = scripted.partition('@')
             if kind in {'delta', 'reasoning_delta', 'citation', 'error'}:
                 recorded.append((kind, payload))
             else:
-                event = frame(kind, len(thread['events']) + 1, payload)
+                event = frame(kind, len(thread['events']) + 1, payload, stream=stream or 'root')
                 thread['events'].append(event)
                 recorded.append((kind, event))
         thread['state'] = self.terminal_state

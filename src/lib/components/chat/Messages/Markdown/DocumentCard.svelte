@@ -12,6 +12,7 @@
 	import Download from '$lib/components/icons/Download.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import { type DeliveredFile, downloadDeliveredFile, fileKind } from '$lib/utils/deliveredFile';
 
 	export let id: string = '';
 	export let title: string = '';
@@ -19,11 +20,23 @@
 	export let done: boolean = true;
 	export let messageDone: boolean = true;
 	export let className: string = '';
+	// [Gradient] An Office file an agent delivered: downloaded as is, not exported from markdown.
+	export let file: DeliveredFile | null = null;
 
 	let downloadOpen = false;
 
 	$: isExecuting = !done || !messageDone;
 	$: displayTitle = title || $i18n.t('Document');
+
+	const downloadFile = async () => {
+		if (!file) return;
+		try {
+			await downloadDeliveredFile(file);
+		} catch (e) {
+			console.error(e);
+			toast.error($i18n.t('Failed to download file'));
+		}
+	};
 
 	const openDocument = () => {
 		// Toggle: if the side panel is already showing the document, close it.
@@ -112,11 +125,23 @@
 			{displayTitle}
 		</div>
 		<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
-			{$i18n.t('Document')}
+			{file ? fileKind(file) : $i18n.t('Document')}
 		</div>
 	</div>
 
-	{#if !isExecuting && markdown}
+	{#if file}
+		<div class="shrink-0" on:click|stopPropagation on:keydown|stopPropagation>
+			<button
+				type="button"
+				class="flex items-center gap-1.5 text-xs font-medium bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition rounded-full px-3 py-1.5"
+				aria-label={$i18n.t('Download')}
+				on:click={downloadFile}
+			>
+				<Download className="size-3.5" strokeWidth="2" />
+				<span>{$i18n.t('Download')}</span>
+			</button>
+		</div>
+	{:else if !isExecuting && markdown}
 		<div class="shrink-0" on:click|stopPropagation on:keydown|stopPropagation>
 			<Dropdown
 				bind:show={downloadOpen}
