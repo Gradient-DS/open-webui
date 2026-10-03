@@ -672,9 +672,7 @@ class AgentTurn:
         answers next, so each shows that it did not run, anchored before that answer."""
         chunks = []
         stopped = [
-            call_id
-            for call_id in self.running
-            if call_id != _COMPACTION and self.call_streams.get(call_id) == stream
+            call_id for call_id in self.running if call_id != _COMPACTION and self.call_streams.get(call_id) == stream
         ]
         for call_id in stopped:
             chunks += await self.end_tool({'call_id': call_id, 'error': _NOT_RUN})

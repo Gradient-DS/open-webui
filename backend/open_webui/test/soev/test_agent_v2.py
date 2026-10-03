@@ -1749,7 +1749,7 @@ async def test_a_tool_without_a_declared_status_shows_the_generic_line(declared:
 
 
 @pytest.mark.asyncio
-async def test_the_summary_settles_the_tools_once_the_answer_starts(declared: Chat) -> None:
+async def test_the_summary_settles_the_tools_once_when_the_turn_ends(declared: Chat) -> None:
     declared.api.chat.turns = [
         [
             call('list_documents', 'c1'),
@@ -1765,14 +1765,8 @@ async def test_the_summary_settles_the_tools_once_the_answer_starts(declared: Ch
 
     shown = [event['data'] for event in declared.socket if event['type'] == 'status']
     order = [status.get('call_id') or status['description'] for status in shown]
-    assert order == [
-        'c1',
-        'c1',
-        '1 tool called in less than a second',
-        'c2',
-        'c2',
-        '2 tools called in less than a second',
-    ]
+    # Text between tool calls is not the turn's end: the closing line comes once.
+    assert order == ['c1', 'c1', 'c2', 'c2', '2 tools called in less than a second']
 
 
 @pytest.mark.parametrize(
