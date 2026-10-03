@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import { getContext } from 'svelte';
 	import fileSaver from 'file-saver';
@@ -24,13 +25,15 @@
 	export let file: DeliveredFile | null = null;
 	export let chatId: string = '';
 
+	// [Gradient] Shared snapshots have no Office download route.
+	$: sharedChat = $page.url.pathname.startsWith('/s/');
 	let downloadOpen = false;
 
 	$: isExecuting = !done || !messageDone;
 	$: displayTitle = title || $i18n.t('Document');
 
 	const downloadFile = async () => {
-		if (!file) return;
+		if (!file || sharedChat) return;
 		try {
 			await downloadDeliveredFile(file, chatId);
 		} catch (e) {
@@ -99,108 +102,114 @@
 	};
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events -->
-<!-- svelte-ignore a11y-no-static-element-interactions -->
-<div
-	{id}
-	class="{className} group relative flex items-center gap-3 w-full max-w-md p-2.5 pr-2 rounded-2xl border border-gray-100 dark:border-gray-800/60 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition cursor-pointer"
-	role="button"
-	tabindex="0"
-	aria-label={$i18n.t('Open document: {{title}}', { title: displayTitle })}
-	on:click={openDocument}
-	on:keydown={(e) => {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault();
-			openDocument();
-		}
-	}}
->
+{#if file && sharedChat}
+	<p class="text-xs text-gray-500 dark:text-gray-400">
+		{$i18n.t('Office files are not available in shared chats')}
+	</p>
+{:else}
+	<!-- svelte-ignore a11y-click-events-have-key-events -->
+	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
-		class="shrink-0 flex items-center justify-center size-10 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
+		{id}
+		class="{className} group relative flex items-center gap-3 w-full max-w-md p-2.5 pr-2 rounded-2xl border border-gray-100 dark:border-gray-800/60 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition cursor-pointer"
+		role="button"
+		tabindex="0"
+		aria-label={$i18n.t('Open document: {{title}}', { title: displayTitle })}
+		on:click={openDocument}
+		on:keydown={(e) => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				openDocument();
+			}
+		}}
 	>
-		<Document className="size-5" strokeWidth="1.5" />
-	</div>
-
-	<div class="flex-1 min-w-0 {isExecuting ? 'shimmer' : ''}">
-		<div class="text-sm font-medium text-gray-900 dark:text-white line-clamp-1">
-			{displayTitle}
+		<div
+			class="shrink-0 flex items-center justify-center size-10 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
+		>
+			<Document className="size-5" strokeWidth="1.5" />
 		</div>
-		<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
-			{file ? fileKind(file) : $i18n.t('Document')}
-		</div>
-	</div>
 
-	{#if file}
-		<div class="shrink-0" on:click|stopPropagation on:keydown|stopPropagation>
-			<button
-				type="button"
-				class="flex items-center gap-1.5 text-xs font-medium bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition rounded-full px-3 py-1.5"
-				aria-label={$i18n.t('Download')}
-				on:click={downloadFile}
-			>
-				<Download className="size-3.5" strokeWidth="2" />
-				<span>{$i18n.t('Download')}</span>
-			</button>
+		<div class="flex-1 min-w-0 {isExecuting ? 'shimmer' : ''}">
+			<div class="text-sm font-medium text-gray-900 dark:text-white line-clamp-1">
+				{displayTitle}
+			</div>
+			<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+				{file ? fileKind(file) : $i18n.t('Document')}
+			</div>
 		</div>
-	{:else if !isExecuting && markdown}
-		<div class="shrink-0" on:click|stopPropagation on:keydown|stopPropagation>
-			<Dropdown
-				bind:show={downloadOpen}
-				align="end"
-				contentClass="select-none min-w-[200px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-			>
-				<Tooltip content={$i18n.t('Download')}>
-					<button
-						type="button"
-						class="flex items-center gap-1.5 text-xs font-medium bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition rounded-full px-3 py-1.5"
-						aria-label={$i18n.t('Download')}
-					>
-						<Download className="size-3.5" strokeWidth="2" />
-						<span>{$i18n.t('Download')}</span>
-					</button>
-				</Tooltip>
 
-				<div slot="content">
-					<button
-						type="button"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-						on:click={downloadMd}
-					>
-						<div class="flex items-center line-clamp-1">
-							{$i18n.t('Markdown (.md)')}
-						</div>
-					</button>
-					<button
-						type="button"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-						on:click={downloadTxt}
-					>
-						<div class="flex items-center line-clamp-1">
-							{$i18n.t('Plain text (.txt)')}
-						</div>
-					</button>
-					<button
-						type="button"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-						on:click={downloadPdf}
-					>
-						<div class="flex items-center line-clamp-1">
-							{$i18n.t('PDF document (.pdf)')}
-						</div>
-					</button>
-					{#if $config?.features?.enable_docx_export ?? true}
+		{#if file}
+			<div class="shrink-0" on:click|stopPropagation on:keydown|stopPropagation>
+				<button
+					type="button"
+					class="flex items-center gap-1.5 text-xs font-medium bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition rounded-full px-3 py-1.5"
+					aria-label={$i18n.t('Download')}
+					on:click={downloadFile}
+				>
+					<Download className="size-3.5" strokeWidth="2" />
+					<span>{$i18n.t('Download')}</span>
+				</button>
+			</div>
+		{:else if !isExecuting && markdown}
+			<div class="shrink-0" on:click|stopPropagation on:keydown|stopPropagation>
+				<Dropdown
+					bind:show={downloadOpen}
+					align="end"
+					contentClass="select-none min-w-[200px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+				>
+					<Tooltip content={$i18n.t('Download')}>
+						<button
+							type="button"
+							class="flex items-center gap-1.5 text-xs font-medium bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition rounded-full px-3 py-1.5"
+							aria-label={$i18n.t('Download')}
+						>
+							<Download className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Download')}</span>
+						</button>
+					</Tooltip>
+
+					<div slot="content">
 						<button
 							type="button"
 							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-							on:click={downloadDocx}
+							on:click={downloadMd}
 						>
 							<div class="flex items-center line-clamp-1">
-								{$i18n.t('Word document (.docx)')}
+								{$i18n.t('Markdown (.md)')}
 							</div>
 						</button>
-					{/if}
-				</div>
-			</Dropdown>
-		</div>
-	{/if}
-</div>
+						<button
+							type="button"
+							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+							on:click={downloadTxt}
+						>
+							<div class="flex items-center line-clamp-1">
+								{$i18n.t('Plain text (.txt)')}
+							</div>
+						</button>
+						<button
+							type="button"
+							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+							on:click={downloadPdf}
+						>
+							<div class="flex items-center line-clamp-1">
+								{$i18n.t('PDF document (.pdf)')}
+							</div>
+						</button>
+						{#if $config?.features?.enable_docx_export ?? true}
+							<button
+								type="button"
+								class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+								on:click={downloadDocx}
+							>
+								<div class="flex items-center line-clamp-1">
+									{$i18n.t('Word document (.docx)')}
+								</div>
+							</button>
+						{/if}
+					</div>
+				</Dropdown>
+			</div>
+		{/if}
+	</div>
+{/if}

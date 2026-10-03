@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import { onMount, onDestroy, getContext } from 'svelte';
 	import fileSaver from 'file-saver';
@@ -41,13 +42,16 @@
 	let citationsElement: any = null;
 
 	$: current = contents[selectedContentIdx];
+	// [Gradient] Shared snapshots have no Office download route.
+	$: sharedChat = $page.url.pathname.startsWith('/s/');
 
 	// [Gradient] A delivered Office file shows its rendered pages, loaded with the user's token.
 	let pages: string[] = [];
 	let currentPage = 0;
 	let pagesError = false;
 	let pagesFor: DeliveredFile | undefined;
-	$: if (current?.file !== pagesFor) showPages(current?.file);
+	$: previewFile = sharedChat ? undefined : current?.file;
+	$: if (previewFile !== pagesFor) showPages(previewFile);
 
 	const showPages = async (file: DeliveredFile | undefined) => {
 		pagesFor = file;
@@ -69,7 +73,7 @@
 	onDestroy(() => pages.forEach((url) => URL.revokeObjectURL(url)));
 
 	const downloadFile = async () => {
-		if (!current?.file) return;
+		if (!current?.file || sharedChat) return;
 		try {
 			await downloadDeliveredFile(current.file, $chatId);
 		} catch (e) {
@@ -253,7 +257,7 @@
 						{/if}
 					</div>
 
-					{#if current.file}
+					{#if current.file && !sharedChat}
 						<div class="flex items-center gap-1.5 shrink-0">
 							<Tooltip content={$i18n.t('Download')}>
 								<button
@@ -265,7 +269,7 @@
 								</button>
 							</Tooltip>
 						</div>
-					{:else}
+					{:else if !current.file}
 						<div class="flex items-center gap-1.5 shrink-0">
 							<button
 								class="copy-code-button bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md px-1.5 py-0.5 whitespace-nowrap"
@@ -342,7 +346,11 @@
 		<div class="flex-1 w-full h-full overflow-y-auto">
 			<div class="h-full flex flex-col">
 				{#if contents.length > 0 && current?.file}
-					{#if pages.length > 0}
+					{#if sharedChat}
+						<p class="m-auto text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t('Office files are not available in shared chats')}
+						</p>
+					{:else if pages.length > 0}
 						<PptxPreview
 							slides={pages}
 							bind:currentSlide={currentPage}
