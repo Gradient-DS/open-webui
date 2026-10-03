@@ -10,6 +10,8 @@ export type Feature =
 	| 'capture'
 	| 'artifacts'
 	| 'document_writer'
+	| 'office'
+	| 'office_edit'
 	| 'playground'
 	| 'chat_overview'
 	| 'notes_ai_controls'

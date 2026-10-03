@@ -1785,9 +1785,9 @@
 			</p>
 		</div>
 	{/if}
-	<!-- [Gradient] Document Writer detection follows the shared settings inheritance. -->
-	{#if isFeatureEnabled('document_writer')}
-		<div class={sectionHeadingClass}>{$i18n.t('Document Writer')}</div>
+	<!-- [Gradient] Detection is shared by generated documents and Office files. -->
+	{#if isFeatureEnabled('document_writer') || isFeatureEnabled('office')}
+		<div class={sectionHeadingClass}>{$i18n.t('Documents')}</div>
 		<div>
 			<div class={settingRowClass}>
 				<div id="detect-documents-label" class={settingLabelClass}>

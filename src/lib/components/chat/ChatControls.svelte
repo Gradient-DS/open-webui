@@ -96,7 +96,9 @@
 		terminalFilesAvailable ||
 		(codeInterpreterEnabled && $config?.code?.interpreter_engine !== 'jupyter');
 	$: showOverviewTab = hasMessages && isFeatureEnabled('chat_overview');
-	$: showDocumentTab = isFeatureEnabled('document_writer') && ($documentContents?.length ?? 0) > 0;
+	$: showDocumentTab = ($documentContents ?? []).some((doc) =>
+		isFeatureEnabled(doc.file ? 'office' : 'document_writer')
+	);
 
 	$: showSourcesTab = true; // [Gradient]
 	// Tab fallback: if active tab becomes hidden, switch to next available

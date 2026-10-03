@@ -15,7 +15,9 @@
 		web_search: 'enable_web_search',
 		image_generation: 'enable_image_generation',
 		code_interpreter: 'enable_code_interpreter',
-		document_writer: 'enable_document_writer'
+		document_writer: 'enable_document_writer',
+		office: 'enable_office',
+		office_edit: 'enable_office_edit'
 	};
 
 	const allRows: { key: keyof AssistantToggles; icon: string; label: string }[] = [
@@ -23,6 +25,8 @@
 		{ key: 'image_generation', icon: '🎨', label: 'Generate images' },
 		{ key: 'code_interpreter', icon: '💻', label: 'Run code & analyze data' },
 		{ key: 'document_writer', icon: '📝', label: 'Write documents' },
+		{ key: 'office', icon: '📝', label: 'Create Office files' },
+		{ key: 'office_edit', icon: '📝', label: 'Edit Office files' },
 		{ key: 'vision', icon: '👁️', label: 'Understand images' },
 		{ key: 'file_upload', icon: '📎', label: 'Read uploaded files' },
 		{ key: 'citations', icon: '🔗', label: 'Show sources' }
@@ -30,9 +34,11 @@
 
 	// Drop any capability whose instance feature flag is off.
 	$: rows = allRows.filter((row) => {
+		if (row.key === 'office_edit' && !toggles.office) return false;
 		const guard = configGuards[row.key];
 		return !guard || !!($config?.features as any)?.[guard];
 	});
+	$: if (!toggles.office && toggles.office_edit) toggles.office_edit = false;
 </script>
 
 <div class="flex flex-col gap-2.5">

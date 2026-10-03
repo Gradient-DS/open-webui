@@ -16,6 +16,8 @@
 		image_generation: 'enable_image_generation',
 		code_interpreter: 'enable_code_interpreter',
 		document_writer: 'enable_document_writer',
+		office: 'enable_office',
+		office_edit: 'enable_office_edit',
 		builtin_tools: 'feature_builtin_tools'
 	};
 
@@ -47,6 +49,14 @@
 		document_writer: {
 			label: $i18n.t('Document Writer'),
 			description: $i18n.t('Model can write and create downloadable documents')
+		},
+		office: {
+			label: $i18n.t('Create Office files'),
+			description: $i18n.t('Model can create Office files')
+		},
+		office_edit: {
+			label: $i18n.t('Edit Office files'),
+			description: $i18n.t('Model can edit Office files made in this conversation')
 		},
 		terminal: {
 			label: $i18n.t('Terminal'),
@@ -86,11 +96,13 @@
 
 	const setCapability = (capability: Capability, checked: boolean) => {
 		capabilities[capability] = checked;
+		if (capability === 'office' && !checked) capabilities.office_edit = false;
 		capabilities = capabilities;
 	};
 
 	// Hide file_context when file_upload is disabled
 	$: visibleCapabilities = (Object.keys(capabilityLabels) as Capability[]).filter((cap) => {
+		if (cap === 'office_edit' && !capabilities.office) return false;
 		if (cap === 'file_context' && !capabilities.file_upload) {
 			return false;
 		}

@@ -1,11 +1,19 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
-	import { onMount, getContext } from 'svelte';
+	import { onMount, onDestroy, getContext } from 'svelte';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 
-	import { chatId, config, showControls, showDocument, documentContents } from '$lib/stores';
+	import {
+		chatId,
+		config,
+		showControls,
+		showDocument,
+		documentContents,
+		requestedOfficeFile
+	} from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
 
@@ -19,6 +27,14 @@
 	import Download from '../icons/Download.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
+	import PptxPreview from '../common/PptxPreview.svelte';
+	import {
+		type DeliveredFile,
+		downloadDeliveredFile,
+		fileKind,
+		newestFileVersionIndex,
+		loadPages
+	} from '$lib/utils/deliveredFile';
 
 	export let overlay = false;
 
@@ -26,13 +42,61 @@
 		title: string;
 		markdown: string;
 		sources?: any[];
+		file?: DeliveredFile;
 	}> = [];
 	let selectedContentIdx = 0;
 	let copied = false;
 	let downloadOpen = false;
 	let citationsElement: any = null;
 
+	$: if ($requestedOfficeFile) {
+		const newest = newestFileVersionIndex(contents, $requestedOfficeFile);
+		if (newest >= 0) {
+			selectedContentIdx = newest;
+			requestedOfficeFile.set(null);
+		}
+	}
+
 	$: current = contents[selectedContentIdx];
+	// [Gradient] Shared snapshots have no Office download route.
+	$: sharedChat = $page.url.pathname.startsWith('/s/');
+
+	// [Gradient] A delivered Office file shows its rendered pages, loaded with the user's token.
+	let pages: string[] = [];
+	let currentPage = 0;
+	let pagesError = false;
+	let pagesFor: DeliveredFile | undefined;
+	$: previewFile = sharedChat ? undefined : current?.file;
+	$: if (previewFile !== pagesFor) showPages(previewFile);
+
+	const showPages = async (file: DeliveredFile | undefined) => {
+		pagesFor = file;
+		pages.forEach((url) => URL.revokeObjectURL(url));
+		pages = [];
+		currentPage = 0;
+		pagesError = false;
+		if (!file) return;
+		try {
+			const loaded = await loadPages(file, $chatId);
+			if (pagesFor !== file) return loaded.forEach((url) => URL.revokeObjectURL(url));
+			pages = loaded;
+		} catch (e) {
+			console.error(e);
+			pagesError = true;
+		}
+	};
+
+	onDestroy(() => pages.forEach((url) => URL.revokeObjectURL(url)));
+
+	const downloadFile = async () => {
+		if (!current?.file || sharedChat) return;
+		try {
+			await downloadDeliveredFile(current.file, $chatId);
+		} catch (e) {
+			console.error(e);
+			toast.error($i18n.t('Failed to download file'));
+		}
+	};
 
 	function navigateContent(direction: 'prev' | 'next') {
 		selectedContentIdx =
@@ -209,70 +273,84 @@
 						{/if}
 					</div>
 
-					<div class="flex items-center gap-1.5 shrink-0">
-						<button
-							class="copy-code-button bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md px-1.5 py-0.5 whitespace-nowrap"
-							on:click={() => {
-								copyToClipboard(getExportMarkdown(), null, true);
-								copied = true;
-								setTimeout(() => {
-									copied = false;
-								}, 2000);
-							}}>{copied ? $i18n.t('Copied') : $i18n.t('Copy')}</button
-						>
-
-						<Dropdown
-							bind:show={downloadOpen}
-							align="end"
-							contentClass="select-none min-w-[180px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-						>
+					{#if current.file && !sharedChat}
+						<div class="flex items-center gap-1.5 shrink-0">
 							<Tooltip content={$i18n.t('Download')}>
 								<button
 									class="bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md p-0.5"
 									aria-label={$i18n.t('Download')}
+									on:click={downloadFile}
 								>
 									<Download className="size-3.5" />
 								</button>
 							</Tooltip>
+						</div>
+					{:else if !current.file}
+						<div class="flex items-center gap-1.5 shrink-0">
+							<button
+								class="copy-code-button bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md px-1.5 py-0.5 whitespace-nowrap"
+								on:click={() => {
+									copyToClipboard(getExportMarkdown(), null, true);
+									copied = true;
+									setTimeout(() => {
+										copied = false;
+									}, 2000);
+								}}>{copied ? $i18n.t('Copied') : $i18n.t('Copy')}</button
+							>
 
-							<div slot="content">
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadMd}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('Markdown (.md)')}
-									</div>
-								</button>
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadTxt}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('Plain text (.txt)')}
-									</div>
-								</button>
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadPdf}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('PDF document (.pdf)')}
-									</div>
-								</button>
-								{#if $config?.features?.enable_docx_export ?? true}
+							<Dropdown
+								bind:show={downloadOpen}
+								align="end"
+								contentClass="select-none min-w-[180px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+							>
+								<Tooltip content={$i18n.t('Download')}>
+									<button
+										class="bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md p-0.5"
+										aria-label={$i18n.t('Download')}
+									>
+										<Download className="size-3.5" />
+									</button>
+								</Tooltip>
+
+								<div slot="content">
 									<button
 										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-										on:click={downloadDocx}
+										on:click={downloadMd}
 									>
 										<div class="flex items-center line-clamp-1">
-											{$i18n.t('Word document (.docx)')}
+											{$i18n.t('Markdown (.md)')}
 										</div>
 									</button>
-								{/if}
-							</div>
-						</Dropdown>
-					</div>
+									<button
+										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+										on:click={downloadTxt}
+									>
+										<div class="flex items-center line-clamp-1">
+											{$i18n.t('Plain text (.txt)')}
+										</div>
+									</button>
+									<button
+										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+										on:click={downloadPdf}
+									>
+										<div class="flex items-center line-clamp-1">
+											{$i18n.t('PDF document (.pdf)')}
+										</div>
+									</button>
+									{#if $config?.features?.enable_docx_export ?? true}
+										<button
+											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+											on:click={downloadDocx}
+										>
+											<div class="flex items-center line-clamp-1">
+												{$i18n.t('Word document (.docx)')}
+											</div>
+										</button>
+									{/if}
+								</div>
+							</Dropdown>
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}
@@ -283,7 +361,29 @@
 
 		<div class="flex-1 w-full h-full overflow-y-auto">
 			<div class="h-full flex flex-col">
-				{#if contents.length > 0 && current}
+				{#if contents.length > 0 && current?.file}
+					{#if sharedChat}
+						<p class="m-auto text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t('Office files are not available in shared chats')}
+						</p>
+					{:else if pages.length > 0}
+						<PptxPreview
+							slides={pages}
+							bind:currentSlide={currentPage}
+							className="h-full"
+							itemLabel={fileKind(current.file) === 'PPTX' ? $i18n.t('Slide') : $i18n.t('Page')}
+							listLabel={fileKind(current.file) === 'PPTX' ? $i18n.t('Slides') : $i18n.t('Pages')}
+						/>
+					{:else if current.file.pages === 0}
+						<p class="m-auto text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t('No preview available. Download the file to open it.')}
+						</p>
+					{:else if pagesError}
+						<div class="m-auto text-xs text-red-500">
+							{$i18n.t('Failed to load the preview. Download the file instead.')}
+						</div>
+					{/if}
+				{:else if contents.length > 0 && current}
 					<div class="max-w-3xl w-full mx-auto px-6 py-6 prose dark:prose-invert">
 						<ContentRenderer
 							id={`document-${$chatId ?? 'preview'}-${selectedContentIdx}`}

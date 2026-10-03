@@ -1016,7 +1016,9 @@
 											'web_search',
 											'code_interpreter',
 											'image_generation',
-											'document_writer'
+											'document_writer',
+											'office',
+											'office_edit'
 										].includes(key)
 								)
 								.map(([key, value]) => key)}
