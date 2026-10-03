@@ -9,8 +9,10 @@ on:
   # pre-existing dependency advisory shows up looking like a release blocker.
   pull_request:
     branches: [main, dev, test]
+  # Daily: catches advisories published against code and images that have not
+  # changed, which a push whose scans are reused (see `reuse`) does not.
   schedule:
-    - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
+    - cron: '0 6 * * *'
 
 # Only a superseded pull-request run is cancelled: its commit is no longer the
 # one that would merge. Push and scheduled runs each get a group of their own
@@ -22,9 +24,53 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
+  # On push: did a pull-request run of this workflow already pass on exactly
+  # this git tree? Only then are `source` and `lockfile-age` skipped. Any
+  # difference, including another PR landing in between, runs everything.
+  reuse:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      hit: ${{ steps.trust.outputs.hit }}
+    steps:
+      - id: check
+        uses: Gradient-DS/security-ci/actions/tested-tree/check@323449ab6e138872d5993a86d849cd3697075289 # v6
+        with:
+          workflow-key: security
+
+      # Public repo: a fork PR's run executes the fork's copy of this file and
+      # could upload a record for any tree. Trust only a record made by a
+      # pull_request run from a branch of this repository.
+      - name: Accept only a same-repository pull request's record
+        id: trust
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HIT: ${{ steps.check.outputs.hit }}
+          RUN_URL: ${{ steps.check.outputs.run-url }}
+        run: |
+          set -euo pipefail
+          if [ "$HIT" != "true" ]; then echo "hit=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          origin=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${RUN_URL##*/}" --jq '.event + " " + .head_repository.full_name')
+          if [ "$origin" = "pull_request $GITHUB_REPOSITORY" ]; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Ignoring tested-tree record from $RUN_URL ($origin); running everything"
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
   source:
-    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@33d2ef167da03d3edfd6732684c17347cc957c82 # v5
+    needs: reuse
+    # Every PR and scheduled run; a push unless its exact tree already passed.
+    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
+    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
     secrets: inherit
     permissions:
       contents: read
@@ -37,20 +83,76 @@ jobs:
       python-requirements: 'backend/requirements.txt backend/requirements-slim.txt'
       node-dirs: '.'
 
+  # Pull requests only. A push to main/dev/test is scanned by
+  # docker-build-soev.yaml's `scan-image`, on the digest it published; the
+  # daily run scans the published digests (`image-published`).
   image:
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@33d2ef167da03d3edfd6732684c17347cc957c82 # v5
+    if: github.event_name == 'pull_request'
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
     secrets: inherit
+    permissions:
+      contents: read
+      packages: read
     with:
       context: .
       dockerfile: Dockerfile
       image-name: open-webui
+      # The build args docker-build-soev.yaml ships with, so the scanned image
+      # is the production one (UID/GID 1000) and its layers match dev's
+      # registry cache. A gha cache write would only evict other entries: the
+      # repo is over its GHA cache limit, and the registry cache is fresher.
       build-args: |
+        BUILD_HASH=${{ github.sha }}
         USE_SLIM=true
+        UID=1000
+        GID=1000
+      # Public package: readable without auth, so fork PRs can read it too.
+      cache-from: type=registry,ref=ghcr.io/gradient-ds/open-webui:cache-slim-linux-amd64-dev
+      cache-write: false
+
+  # Scheduled: the linux/amd64 digest each branch tag currently points at.
+  resolve-published:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      dev: ${{ steps.resolve.outputs.dev }}
+      test: ${{ steps.resolve.outputs.test }}
+      main: ${{ steps.resolve.outputs.main }}
+    steps:
+      - id: resolve
+        run: |
+          set -euo pipefail
+          for branch in dev test main; do
+            digest=$(docker buildx imagetools inspect --raw "ghcr.io/gradient-ds/open-webui:$branch" | jq -r '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest')
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no linux/amd64 manifest for :$branch"; exit 1; }
+            echo "$branch=ghcr.io/gradient-ds/open-webui@$digest" >> "$GITHUB_OUTPUT"
+            echo "$branch -> $digest"
+          done
+
+  image-published:
+    needs: resolve-published
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [dev, test, main]
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
+    with:
+      image-name: open-webui-${{ matrix.branch }}
+      image-ref: ${{ needs.resolve-published.outputs[matrix.branch] }}
 
   # Job id (and thus the status-check name shown to branch protection) must
   # stay exactly "lockfile-age" — it is configured as a required check on
   # dev and main so a too-young package-lock.json cannot merge.
   lockfile-age:
+    needs: reuse
+    # Same reuse rule as `source`: a package only gets older, so a tree that
+    # passed keeps passing.
+    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -63,16 +165,54 @@ jobs:
       - name: Check package-lock.json publish ages
         run: node scripts/check-lockfile-age.mjs
 
+  # Named so a required check cannot be satisfied by runtime-security.yml's
+  # `runtime-gate` or any other workflow's generic `gate`.
   gate:
-    needs: [source, image]
+    name: security-gate
+    needs: [reuse, source, image, image-published]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Fail unless every security job succeeded
+      - name: Fail unless every security job that applies succeeded
         env:
+          EVENT: ${{ github.event_name }}
+          REUSE: ${{ needs.reuse.result }}
+          REUSED: ${{ needs.reuse.outputs.hit }}
           SOURCE: ${{ needs.source.result }}
           IMAGE: ${{ needs.image.result }}
+          PUBLISHED: ${{ needs.image-published.result }}
         run: |
-          echo "source=$SOURCE  image=$IMAGE"
-          [ "$SOURCE" = "success" ] && [ "$IMAGE" = "success" ]
+          echo "event=$EVENT  reuse=$REUSE  reused=$REUSED  source=$SOURCE  image=$IMAGE  published=$PUBLISHED"
+          # A failed tree lookup is red, never a silent pass or skip.
+          if [ "$EVENT" = "push" ] && [ "$REUSE" != "success" ]; then echo "tested-tree lookup did not succeed"; exit 1; fi
+          # A skipped source scan passes only on an exact-tree reuse.
+          [ "$SOURCE" = "success" ] || { [ "$EVENT" = "push" ] && [ "$REUSE" = "success" ] && [ "$REUSED" = "true" ] && [ "$SOURCE" = "skipped" ]; } || exit 1
+          case "$EVENT" in
+            pull_request) [ "$IMAGE" = "success" ] ;;
+            schedule) [ "$PUBLISHED" = "success" ] ;;
+            # The pushed digest is scanned by docker-build-soev.yaml.
+            push) true ;;
+            *) echo "unexpected event $EVENT"; exit 1 ;;
+          esac
+
+  # Last: marks this PR's merge tree as passed, for `reuse` on the push that
+  # lands it. Only when every scan really ran and passed, and never for a fork.
+  record:
+    needs: [source, image, lockfile-age, gate]
+    # !cancelled(): without it the implicit success() also demands the
+    # skipped `reuse` job upstream, and record would never run on a PR.
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.source.result == 'success'
+      && needs.image.result == 'success'
+      && needs.lockfile-age.result == 'success'
+      && needs.gate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: Gradient-DS/security-ci/actions/tested-tree/record@323449ab6e138872d5993a86d849cd3697075289 # v6
+        with:
+          workflow-key: security
