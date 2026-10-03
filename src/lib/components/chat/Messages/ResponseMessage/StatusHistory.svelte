@@ -60,6 +60,9 @@
 			? describeBlock(history, (key, options) => $i18n.t(key, options))
 			: null;
 	$: historyItems = history.length > 1 ? history : [];
+	// [Gradient] A step that is still running keeps the block shimmering, also while a
+	// subagent thinks between its own steps under a running Office call.
+	$: blockRunning = !messageDone && history.some((item) => item?.done === false);
 
 	$: if (!equal(statusHistory, history)) {
 		history = statusHistory;
@@ -114,8 +117,8 @@
 						/>
 					{:else}
 						<StatusItem
-							{status}
-							done={messageDone || status?.done !== false}
+							status={blockRunning ? { ...status, done: false } : status}
+							done={!blockRunning}
 							forceVisible={true}
 							asHeader={true}
 						/>
@@ -180,7 +183,7 @@
 								{:else}
 									<StatusItem
 										status={item}
-										done={messageDone || idx < historyItems.length - 1 || item?.done !== false}
+										done={messageDone || item?.done !== false}
 										forceVisible={true}
 									/>
 								{/if}
