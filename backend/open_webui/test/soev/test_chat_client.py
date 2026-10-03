@@ -226,3 +226,29 @@ async def test_chat_get_stream_closes_failed_responses(identity_config, identity
     assert caught.value.status == status
     assert response.is_closed
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_download_does_not_read_upstream_error_body(monkeypatch):
+    from open_webui.soev import client as client_module
+    from open_webui.soev.client import SoevClient
+
+    class UnboundedProblem(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            raise AssertionError('The upstream error body must not be read')
+            yield b''
+
+        async def aclose(self):
+            self.closed = True
+
+    body = UnboundedProblem()
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(500, stream=body))
+    ) as http:
+        monkeypatch.setattr(client_module, '_shared_client', lambda: http)
+        client = SoevClient('https://soev.test', 'key', subject_minter=lambda user: 'assertion')
+        with pytest.raises(SoevApiError):
+            await client.chat_get_stream('/v1/chat/threads/thread/office/element', as_user='owui:user:alice')
+    assert body.closed

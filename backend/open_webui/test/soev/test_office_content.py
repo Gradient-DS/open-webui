@@ -131,12 +131,16 @@ async def test_only_file_and_positive_page_parts_are_allowed(office, part):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('status', [404, 502])
+@pytest.mark.parametrize('status', [400, 401, 403, 404, 409, 429, 500, 502, 503, 504])
 async def test_upstream_errors_are_resolved_before_response_headers(office, status):
-    office.get.side_effect = SoevApiError(status, 'upstream_error', 'Unavailable')
+    office.get.side_effect = SoevApiError(status, 'upstream_error', 'private upstream problem text')
     async with office.client as client:
         response = await client.get('/api/v1/chats/chat/office/element/file')
-    assert response.status_code == status
+    assert response.status_code == (404 if status == 404 else 502)
+    assert 'private upstream' not in response.text
+    assert response.json()['detail'] == (
+        chats.ERROR_MESSAGES.NOT_FOUND if status == 404 else 'Office file download failed'
+    )
 
 
 @pytest.mark.asyncio
@@ -216,3 +220,12 @@ async def test_files_query_filters_by_chat_without_validating_messages(monkeypat
     monkeypatch.setattr(ChatMessageModel, 'model_validate', no_validation)
     assert await ChatMessages.get_files_by_chat_id(chat_id) == [attachment]
     assert await ChatMessages.get_files_by_chat_id('missing') == []
+
+
+@pytest.mark.asyncio
+async def test_missing_subject_minter_returns_generic_bad_gateway(office):
+    office.get.side_effect = ValueError('private credential configuration')
+    async with office.client as client:
+        response = await client.get('/api/v1/chats/chat/office/element/file')
+    assert response.status_code == 502
+    assert response.json() == {'detail': 'Office file download failed'}

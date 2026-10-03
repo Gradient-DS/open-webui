@@ -191,11 +191,9 @@ class SoevClient:
             )
             response = await client.send(request, stream=True)
             if not response.is_success:
-                try:
-                    await response.aread()
-                    raise _response_error(response)
-                finally:
-                    await response.aclose()
+                # [Gradient] Download failures never need an untrusted, potentially unbounded problem body.
+                await response.aclose()
+                raise SoevApiError(response.status_code, 'upstream_error', 'Chat download failed')
             return response
         except httpx.TransportError as error:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502

@@ -97,8 +97,11 @@ async def get_office_content(
             as_user=as_user,
             params={'part': part.replace('page-', 'page:', 1)},
         )
-    except SoevApiError as error:
-        raise HTTPException(status_code=error.status, detail=error.detail) from None
+    except (SoevApiError, ValueError) as error:
+        # [Gradient] Neither upstream problem text nor credential configuration belongs in the response.
+        code = 404 if isinstance(error, SoevApiError) and error.status == 404 else 502
+        detail = ERROR_MESSAGES.NOT_FOUND if code == 404 else 'Office file download failed'
+        raise HTTPException(status_code=code, detail=detail) from None
 
     async def body():
         try:
