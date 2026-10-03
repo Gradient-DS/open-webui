@@ -23,6 +23,9 @@ from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
 
+# What every turn sends while no toggle is on: each tool state, off included.
+TOOLS_OFF = {'create_office_file': 'off', 'edit_office_file': 'off', 'web_search': 'off', 'fetch': 'off'}
+
 
 @dataclass
 class Chat:
@@ -127,7 +130,7 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
                 'input': {
                     'text': 'turn 1',
                     'knowledge': [],
-                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                    'tools': TOOLS_OFF,
                 },
                 'agent': 'test',
                 'model': 'llm',
@@ -139,7 +142,7 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
                 'input': {
                     'text': 'turn 2',
                     'knowledge': [],
-                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                    'tools': TOOLS_OFF,
                 },
                 'model': 'llm',
             },
@@ -150,7 +153,7 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
                 'input': {
                     'text': 'turn 3',
                     'knowledge': [],
-                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                    'tools': TOOLS_OFF,
                 },
                 'model': 'llm',
             },
@@ -190,7 +193,7 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
                 'input': {
                     'text': text,
                     'knowledge': [],
-                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                    'tools': TOOLS_OFF,
                 },
                 'model': 'llm',
             },
@@ -254,7 +257,7 @@ async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(cha
     assert chat.mutations()[0][1] == {
         'input': {
             'text': 'one\ntwo',
-            'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+            'tools': TOOLS_OFF,
             'knowledge': [
                 {'key': 'kb-a', 'name': 'Contracten', 'description': 'Getekende contracten'},
                 {'key': 'kb-b', 'name': 'Notulen'},
@@ -388,6 +391,7 @@ async def test_the_web_search_toggle_on_asks_for_web_search(chat: Chat) -> None:
     await chat.turn('question', 'a1', features={'web_search': True})
     assert chat.mutations()[-1][1]['input']['tools'] == {
         'web_search': agent_v2.WEB_SEARCH_ON,
+        'fetch': 'auto',
         'create_office_file': 'off',
         'edit_office_file': 'off',
     }
@@ -395,9 +399,14 @@ async def test_the_web_search_toggle_on_asks_for_web_search(chat: Chat) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('features', [{'web_search': False}, {}], ids=['off', 'absent'])
-async def test_the_web_search_toggle_off_leaves_web_search_to_the_deployment(chat: Chat, features: dict) -> None:
+async def test_the_web_search_toggle_off_turns_search_and_fetch_off(chat: Chat, features: dict) -> None:
     await chat.turn('question', 'a1', features=features)
-    assert chat.mutations()[-1][1]['input']['tools'] == {'create_office_file': 'off', 'edit_office_file': 'off'}
+    assert chat.mutations()[-1][1]['input']['tools'] == {
+        'web_search': 'off',
+        'fetch': 'off',
+        'create_office_file': 'off',
+        'edit_office_file': 'off',
+    }
 
 
 @pytest.mark.asyncio
@@ -416,9 +425,9 @@ async def test_office_toggles_always_send_both_tool_states(chat: Chat, office, o
     expected = {
         'create_office_file': 'auto' if office else 'off',
         'edit_office_file': 'auto' if office and office_edit else 'off',
+        'web_search': agent_v2.WEB_SEARCH_ON if web_search else 'off',
+        'fetch': 'auto' if web_search else 'off',
     }
-    if web_search:
-        expected['web_search'] = agent_v2.WEB_SEARCH_ON
     assert chat.mutations()[-1][1]['input']['tools'] == expected
 
 
@@ -428,7 +437,7 @@ async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
     assert chat.mutations()[-1][1]['input'] == {
         'text': 'question',
         'knowledge': [],
-        'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+        'tools': TOOLS_OFF,
     }
 
 
@@ -1280,7 +1289,7 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
                 'input': {
                     'text': 'last question',
                     'knowledge': [],
-                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                    'tools': TOOLS_OFF,
                 },
                 'agent': 'test',
                 'model': 'llm',
@@ -1408,7 +1417,7 @@ async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_ans
                 'input': {
                     'text': 'what was I asking?',
                     'knowledge': [],
-                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                    'tools': TOOLS_OFF,
                 },
                 'model': 'llm',
             },

@@ -210,13 +210,17 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
 
 def _tools(metadata: dict[str, Any]) -> dict[str, dict[str, str]]:
     features = metadata.get('features') or {}
-    tools = {
-        'create_office_file': 'auto' if features.get('office') else 'off',
-        'edit_office_file': 'auto' if features.get('office') and features.get('office_edit') else 'off',
+    # [Claude] Every state is sent, off included: a tool the toggles leave off must be off,
+    # whatever the agent's own default.
+    web = bool(features.get('web_search'))
+    return {
+        'tools': {
+            'create_office_file': 'auto' if features.get('office') else 'off',
+            'edit_office_file': 'auto' if features.get('office') and features.get('office_edit') else 'off',
+            'web_search': WEB_SEARCH_ON if web else 'off',
+            'fetch': 'auto' if web else 'off',
+        }
     }
-    if features.get('web_search'):
-        tools['web_search'] = WEB_SEARCH_ON
-    return {'tools': tools}
 
 
 def _unavailable(count: int, language: str | None) -> dict[str, Any]:
