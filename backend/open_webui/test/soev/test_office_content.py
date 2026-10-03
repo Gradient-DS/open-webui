@@ -1,5 +1,6 @@
 """[Gradient] Office downloads are authorized by the chat and its stored attachments."""
 
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -142,5 +143,51 @@ async def test_admin_cannot_download_when_admin_chat_access_is_disabled(office, 
     office.user.id, office.user.role = 'admin', 'admin'
     async with office.client as client:
         response = await client.get('/api/v1/chats/chat/office/element/file')
+    assert response.status_code == 404
+    office.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'user_id,role,expected', [('alice', 'user', 200), ('bob', 'user', 404), ('admin', 'admin', 404)]
+)
+async def test_temporary_office_is_available_only_to_its_owner(office, monkeypatch, user_id, role, expected):
+    class DetachedValues(dict):
+        def get(self, key, default=None):
+            return deepcopy(super().get(key, default))
+
+    store = {
+        'local:socket:chat': {
+            'as_user': 'owui:user:alice',
+            'bookmarks': {'answer': {'thread_id': 'attached-thread', 'position': 4}},
+        }
+    }
+    store = DetachedValues(store)
+    monkeypatch.setattr(chats.agent_threads, '_temporary', lambda: store)
+    chats.agent_threads.remember_temporary_office('local:socket:chat', 'alice', [office.attachment])
+    office.user.id, office.user.role = user_id, role
+    async with office.client as client:
+        response = await client.get('/api/v1/chats/local:socket:chat/office/element/file')
+    assert response.status_code == expected
+    office.lookup.assert_not_awaited()
+    office.messages.assert_not_awaited()
+    if expected == 200:
+        assert response.content == b'office-bytes'
+        office.get.assert_awaited_once_with(
+            '/v1/chat/threads/attached-thread/office/element', as_user='owui:user:alice', params={'part': 'file'}
+        )
+    else:
+        office.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case', ['no-chat', 'no-element', 'wrong-owner-emission'])
+async def test_temporary_office_requires_a_recorded_attachment(office, monkeypatch, case):
+    store = {} if case == 'no-chat' else {'local:socket:chat': {'as_user': 'owui:user:alice', 'bookmarks': {}}}
+    monkeypatch.setattr(chats.agent_threads, '_temporary', lambda: store)
+    if case == 'wrong-owner-emission':
+        chats.agent_threads.remember_temporary_office('local:socket:chat', 'bob', [office.attachment])
+    async with office.client as client:
+        response = await client.get('/api/v1/chats/local:socket:chat/office/element/file')
     assert response.status_code == 404
     office.get.assert_not_awaited()

@@ -34,7 +34,7 @@ from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.shared_chats import SharedChatResponse, SharedChats
 from open_webui.models.tags import TagModel, Tags
-from open_webui.soev import identity
+from open_webui.soev import agent_threads, identity
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.agent_threads import chat_thread_ids, delete_released_threads
 from open_webui.services.remaining_request_bodies import access_grants_body
@@ -43,6 +43,7 @@ from open_webui.tasks import get_response_streams_by_chat_id, has_active_tasks, 
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
 from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.auth import bearer_security, get_admin_user, get_current_user, get_verified_user
+from open_webui.utils.chat_id import is_temporary_chat_id
 from open_webui.utils.chat_fork import build_fork_history
 from open_webui.utils.context_compaction import compact_chat_branch, get_chat_context_usage
 from open_webui.utils.misc import get_message_list
@@ -66,30 +67,35 @@ async def get_office_content(
 ):
     if part != 'file' and not re.fullmatch(r'page-[1-9][0-9]*', part):
         raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
-    chat = await Chats.get_chat_by_id_for_user(chat_id, user)
-    if chat is None or (chat.user_id != user.id and user.role != 'admin'):
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
-    messages = await ChatMessages.get_messages_by_chat_id(chat_id)
-    attachment = next(
-        (
-            file
-            for message in messages
-            for file in message.files or []
-            if isinstance(file, dict)
-            and file.get('type') == 'office'
-            and file.get('element_id') == element_id
-            and isinstance(file.get('thread_id'), str)
-            and file['thread_id']
-        ),
-        None,
-    )
+    if is_temporary_chat_id(chat_id):
+        attachment = agent_threads.temporary_office(chat_id, element_id, user.id)
+        as_user = f'owui:user:{user.id}'
+    else:
+        chat = await Chats.get_chat_by_id_for_user(chat_id, user)
+        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+            raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        as_user = f'owui:user:{chat.user_id}'
+        messages = await ChatMessages.get_messages_by_chat_id(chat_id)
+        attachment = next(
+            (
+                file
+                for message in messages
+                for file in message.files or []
+                if isinstance(file, dict)
+                and file.get('type') == 'office'
+                and file.get('element_id') == element_id
+                and isinstance(file.get('thread_id'), str)
+                and file['thread_id']
+            ),
+            None,
+        )
     if attachment is None:
         raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
     path = f'/v1/chat/threads/{quote(attachment["thread_id"], safe="")}/office/{quote(element_id, safe="")}'
     try:
         upstream = await identity.build_client().chat_get_stream(
             path,
-            as_user=f'owui:user:{chat.user_id}',
+            as_user=as_user,
             params={'part': part.replace('page-', 'page:', 1)},
         )
     except SoevApiError as error:

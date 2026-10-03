@@ -1701,8 +1701,9 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('branch', [False, True])
 async def test_a_delivered_office_file_is_attached_without_copying_bytes(
-    chat: Chat, monkeypatch: pytest.MonkeyPatch
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, branch: bool
 ) -> None:
     # [Gradient] C1 has no inline bytes; neither the file nor its pages enter OWUI Files.
     inserted = AsyncMock()
@@ -1719,8 +1720,13 @@ async def test_a_delivered_office_file_is_attached_without_copying_bytes(
         'version': 2,
         'edits': uuid4().hex,
     }
+    if branch:
+        await chat.turn('first', 'parent')
+        await chat.turn('second', 'old-answer', 'parent')
+        assert chat.bookmark('parent')['position'] < len(chat.api.chat.threads['thr-1']['events'])
     chat.api.chat.turns = [[found(office), answered('Klaar.')]]
-    await chat.turn('Maak een begroting', 'a1')
+    await chat.turn('Maak een begroting', 'a1', 'parent' if branch else None)
+    assert chat.bookmark('a1')['thread_id'] == ('thr-2' if branch else 'thr-1')
     inserted.assert_not_awaited()
     (event,) = [event['data'] for event in chat.socket if event['type'] == 'files']
     assert event == {
@@ -1782,3 +1788,26 @@ async def test_a_call_the_budget_stopped_shows_it_did_not_run(declared: Chat) ->
 
     (stopped,) = [status for status in statuses(declared) if status['done']]
     assert stopped['description'] == 'Not run: the agent used all its steps for this message'
+
+
+@pytest.mark.asyncio
+async def test_temporary_office_reference_is_recorded_on_delivery_and_expires_with_chat(temporary: Chat):
+    office = {
+        'type': 'office-file',
+        'id': uuid4().hex,
+        'name': 'deck.pptx',
+        'content_type': 'application/office',
+        'size': 42,
+        'pages': [],
+        'version': 1,
+    }
+    temporary.api.chat.turns = [[found(office), answered('Done')]]
+    chat_id = 'local:sid-1:office'
+    await temporary.turn('make a deck', 'answer', chat_id=chat_id)
+    attachment = agent_threads.temporary_office(chat_id, office['id'], 'alice')
+    assert attachment['thread_id'] == agent_threads.temporary_bookmark(chat_id, 'answer')['thread_id']
+    assert attachment == next(event['data']['files'][0] for event in temporary.socket if event['type'] == 'files')
+    assert not temporary.messages
+    assert agent_threads.temporary_office(chat_id, office['id'], 'bob') is None
+    await agent_threads.release_temporary(['sid-1'])
+    assert agent_threads.temporary_office(chat_id, office['id'], 'alice') is None

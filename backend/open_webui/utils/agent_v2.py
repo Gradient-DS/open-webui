@@ -693,6 +693,9 @@ class AgentTurn:
         except (KeyError, TypeError):
             log.exception('Could not attach an Office file', extra={'thread_id': self.thread_id})
             return
+        chat_id = self.metadata.get('chat_id')
+        if is_temporary_chat_id(chat_id):
+            agent_threads.remember_temporary_office(chat_id, self.metadata['user_id'], files)
         await self.emit('files', {'files': files})
 
     async def show_source(self, source_id: str, flag: str) -> None:
