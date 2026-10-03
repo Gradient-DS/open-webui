@@ -358,6 +358,10 @@
 							itemLabel={fileKind(current.file) === 'PPTX' ? $i18n.t('Slide') : $i18n.t('Page')}
 							listLabel={fileKind(current.file) === 'PPTX' ? $i18n.t('Slides') : $i18n.t('Pages')}
 						/>
+					{:else if current.file.pages === 0}
+						<p class="m-auto text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t('No preview available. Download the file to open it.')}
+						</p>
 					{:else if pagesError}
 						<div class="m-auto text-xs text-red-500">
 							{$i18n.t('Failed to load the preview. Download the file instead.')}
