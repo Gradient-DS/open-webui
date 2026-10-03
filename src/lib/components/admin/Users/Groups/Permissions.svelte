@@ -1144,21 +1144,23 @@
 			{/if}
 		</div>
 
-		<div class="flex flex-col w-full">
-			<div class="flex w-full justify-between my-1">
-				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Edit Office files')}
-				</div>
-				<Switch bind:state={permissions.features.office_edit} />
-			</div>
-			{#if defaultPermissions?.features?.office_edit && !permissions.features.office_edit}
-				<div>
-					<div class="text-xs text-gray-500">
-						{$i18n.t('This is a default user permission and will remain enabled.')}
+		{#if permissions.features.office}
+			<div class="flex flex-col w-full">
+				<div class="flex w-full justify-between my-1">
+					<div class=" self-center text-xs font-medium">
+						{$i18n.t('Edit Office files')}
 					</div>
+					<Switch bind:state={permissions.features.office_edit} />
 				</div>
-			{/if}
-		</div>
+				{#if defaultPermissions?.features?.office_edit && !permissions.features.office_edit}
+					<div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('This is a default user permission and will remain enabled.')}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 		<div class="flex flex-col w-full">
 			<Tooltip
