@@ -63,6 +63,10 @@
 	// [Gradient] A step that is still running keeps the block shimmering, also while a
 	// subagent thinks between its own steps under a running Office call.
 	$: blockRunning = !messageDone && history.some((item) => item?.done === false);
+	// A row shimmers while its own step runs; the newest row also while the block does,
+	// so the list ends on the line the header shows.
+	$: running = (item, idx) =>
+		!messageDone && (item?.done === false || (blockRunning && idx === historyItems.length - 1));
 
 	$: if (!equal(statusHistory, history)) {
 		history = statusHistory;
@@ -182,8 +186,8 @@
 									/>
 								{:else}
 									<StatusItem
-										status={item}
-										done={messageDone || item?.done !== false}
+										status={running(item, idx) ? { ...item, done: false } : item}
+										done={!running(item, idx)}
 										forceVisible={true}
 									/>
 								{/if}
