@@ -287,6 +287,8 @@ class FeaturesPermissions(BaseModel):
     image_generation: bool = True
     code_interpreter: bool = True
     document_writer: bool = True
+    office: bool = True
+    office_edit: bool = True
     memories: bool = True
     automations: bool = False
     calendar: bool = True

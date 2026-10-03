@@ -1967,6 +1967,11 @@ USER_PERMISSIONS_FEATURES_USER_WEBHOOKS = (
 USER_PERMISSIONS_SETTINGS_INTERFACE = os.getenv('USER_PERMISSIONS_SETTINGS_INTERFACE', 'True').lower() == 'true'
 
 
+USER_PERMISSIONS_FEATURES_OFFICE = os.environ.get('USER_PERMISSIONS_FEATURES_OFFICE', 'True').lower() == 'true'
+USER_PERMISSIONS_FEATURES_OFFICE_EDIT = (
+    os.environ.get('USER_PERMISSIONS_FEATURES_OFFICE_EDIT', 'True').lower() == 'true'
+)
+
 DEFAULT_USER_PERMISSIONS = {
     'workspace': {
         'models': USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS,
@@ -2037,6 +2042,8 @@ DEFAULT_USER_PERMISSIONS = {
         'direct_tool_servers': USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS,
         # Chat features
         'web_search': USER_PERMISSIONS_FEATURES_WEB_SEARCH,
+        'office': USER_PERMISSIONS_FEATURES_OFFICE,
+        'office_edit': USER_PERMISSIONS_FEATURES_OFFICE_EDIT,
         'image_generation': USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
         'code_interpreter': USER_PERMISSIONS_FEATURES_CODE_INTERPRETER,
         'memories': USER_PERMISSIONS_FEATURES_MEMORIES,
@@ -2961,6 +2968,8 @@ FEATURE_CAPTURE = os.environ.get('FEATURE_CAPTURE', 'True').lower() == 'true'
 FEATURE_ARTIFACTS = os.environ.get('FEATURE_ARTIFACTS', 'True').lower() == 'true'
 
 FEATURE_DOCUMENT_WRITER = os.environ.get('FEATURE_DOCUMENT_WRITER', 'True').lower() == 'true'
+FEATURE_OFFICE = os.environ.get('FEATURE_OFFICE', 'True').lower() == 'true'
+FEATURE_OFFICE_EDIT = os.environ.get('FEATURE_OFFICE_EDIT', 'True').lower() == 'true'
 
 FEATURE_PLAYGROUND = os.environ.get('FEATURE_PLAYGROUND', 'True').lower() == 'true'
 
@@ -3041,6 +3050,8 @@ ENABLE_CITATION_TEXT_HIGHLIGHT = os.environ.get('ENABLE_CITATION_TEXT_HIGHLIGHT'
 SOEV_LOGIN_FOOTER = os.environ.get('SOEV_LOGIN_FOOTER', 'Powered by [soev.ai](https://soev.ai)')
 
 ENABLE_DOCUMENT_WRITER = os.environ.get('ENABLE_DOCUMENT_WRITER', 'False').lower() == 'true'
+ENABLE_OFFICE = os.environ.get('ENABLE_OFFICE', 'True').lower() == 'true'
+ENABLE_OFFICE_EDIT = os.environ.get('ENABLE_OFFICE_EDIT', 'True').lower() == 'true'
 
 DOCUMENT_WRITER_PROMPT_TEMPLATE = os.environ.get('DOCUMENT_WRITER_PROMPT_TEMPLATE', '')
 
@@ -3537,6 +3548,8 @@ DEFAULT_CONFIG = {
     'auth.enable_2fa': ENABLE_2FA,
     'auth.require_2fa': REQUIRE_2FA,
     'document_writer.enable': ENABLE_DOCUMENT_WRITER,
+    'office.enable': ENABLE_OFFICE,
+    'office_edit.enable': ENABLE_OFFICE_EDIT,
     'document_writer.prompt_template': DOCUMENT_WRITER_PROMPT_TEMPLATE,
     'email.enable_forgot_password': ENABLE_FORGOT_PASSWORD,
     'email.enable_invites': ENABLE_EMAIL_INVITES,

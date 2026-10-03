@@ -209,10 +209,14 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
 
 
 def _tools(metadata: dict[str, Any]) -> dict[str, dict[str, str]]:
-    """[Claude] The tool states the chat's toggles ask, as the turn's `tools` field; none while every toggle is off."""
-    if not (metadata.get('features') or {}).get('web_search'):
-        return {}
-    return {'tools': {'web_search': WEB_SEARCH_ON}}
+    features = metadata.get('features') or {}
+    tools = {
+        'create_office_file': 'auto' if features.get('office') else 'off',
+        'edit_office_file': 'auto' if features.get('office') and features.get('office_edit') else 'off',
+    }
+    if features.get('web_search'):
+        tools['web_search'] = WEB_SEARCH_ON
+    return {'tools': tools}
 
 
 def _unavailable(count: int, language: str | None) -> dict[str, Any]:

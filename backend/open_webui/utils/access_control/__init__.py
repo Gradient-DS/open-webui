@@ -58,6 +58,11 @@ async def get_permissions(
 
     # Deep copy default permissions to avoid modifying the original dict
     permissions = JSONCodec.loads(JSONCodec.dumps(default_permissions))
+    # Older saved permission settings predate the Office toggles.
+    permissions = fill_missing_permissions(
+        permissions,
+        {'features': {key: DEFAULT_USER_PERMISSIONS['features'][key] for key in ('office', 'office_edit')}},
+    )
 
     # Combine permissions from all user groups
     for group in user_groups:

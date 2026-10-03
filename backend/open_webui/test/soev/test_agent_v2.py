@@ -121,9 +121,40 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
     for index in range(1, 4):
         await chat.turn(f'turn {index}', f'a{index}', f'a{index - 1}' if index > 1 else None)
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': {'text': 'turn 1', 'knowledge': []}, 'agent': 'test', 'model': 'llm'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'turn 2', 'knowledge': []}, 'model': 'llm'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'turn 3', 'knowledge': []}, 'model': 'llm'}),
+        (
+            '/v1/chat/threads',
+            {
+                'input': {
+                    'text': 'turn 1',
+                    'knowledge': [],
+                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                },
+                'agent': 'test',
+                'model': 'llm',
+            },
+        ),
+        (
+            '/v1/chat/threads/thr-1/inputs',
+            {
+                'input': {
+                    'text': 'turn 2',
+                    'knowledge': [],
+                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                },
+                'model': 'llm',
+            },
+        ),
+        (
+            '/v1/chat/threads/thr-1/inputs',
+            {
+                'input': {
+                    'text': 'turn 3',
+                    'knowledge': [],
+                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                },
+                'model': 'llm',
+            },
+        ),
     ]
     assert [chat.bookmark(f'a{i}') for i in range(1, 4)] == [
         {'thread_id': 'thr-1', 'position': position} for position in (3, 5, 7)
@@ -153,7 +184,17 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
     await chat.turn(text, 'new-answer', parent, chat_id=chat_id)
     assert chat.mutations()[-2:] == [
         ('/v1/chat/threads/thr-1/fork', {'at': at}),
-        ('/v1/chat/threads/thr-2/inputs', {'input': {'text': text, 'knowledge': []}, 'model': 'llm'}),
+        (
+            '/v1/chat/threads/thr-2/inputs',
+            {
+                'input': {
+                    'text': text,
+                    'knowledge': [],
+                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                },
+                'model': 'llm',
+            },
+        ),
     ]
     assert chat.api.chat.threads['thr-1']['events'] == original
     assert chat.bookmark('new-answer', chat_id) == {'thread_id': 'thr-2', 'position': at + 2}
@@ -213,6 +254,7 @@ async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(cha
     assert chat.mutations()[0][1] == {
         'input': {
             'text': 'one\ntwo',
+            'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
             'knowledge': [
                 {'key': 'kb-a', 'name': 'Contracten', 'description': 'Getekende contracten'},
                 {'key': 'kb-b', 'name': 'Notulen'},
@@ -344,20 +386,50 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 @pytest.mark.asyncio
 async def test_the_web_search_toggle_on_asks_for_web_search(chat: Chat) -> None:
     await chat.turn('question', 'a1', features={'web_search': True})
-    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': agent_v2.WEB_SEARCH_ON}
+    assert chat.mutations()[-1][1]['input']['tools'] == {
+        'web_search': agent_v2.WEB_SEARCH_ON,
+        'create_office_file': 'off',
+        'edit_office_file': 'off',
+    }
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('features', [{'web_search': False}, {}], ids=['off', 'absent'])
 async def test_the_web_search_toggle_off_leaves_web_search_to_the_deployment(chat: Chat, features: dict) -> None:
     await chat.turn('question', 'a1', features=features)
-    assert 'tools' not in chat.mutations()[-1][1]['input']
+    assert chat.mutations()[-1][1]['input']['tools'] == {'create_office_file': 'off', 'edit_office_file': 'off'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('office,office_edit', [(False, False), (False, True), (True, False), (True, True)])
+@pytest.mark.parametrize('web_search', [False, True])
+async def test_office_toggles_always_send_both_tool_states(chat: Chat, office, office_edit, web_search) -> None:
+    await chat.turn(
+        'question',
+        'a1',
+        features={
+            'office': office,
+            'office_edit': office_edit,
+            'web_search': web_search,
+        },
+    )
+    expected = {
+        'create_office_file': 'auto' if office else 'off',
+        'edit_office_file': 'auto' if office and office_edit else 'off',
+    }
+    if web_search:
+        expected['web_search'] = agent_v2.WEB_SEARCH_ON
+    assert chat.mutations()[-1][1]['input']['tools'] == expected
 
 
 @pytest.mark.asyncio
 async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
     await chat.turn('question', 'a1', system_prompt=' ', chat_system_prompt=None)
-    assert chat.mutations()[-1][1]['input'] == {'text': 'question', 'knowledge': []}
+    assert chat.mutations()[-1][1]['input'] == {
+        'text': 'question',
+        'knowledge': [],
+        'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+    }
 
 
 @pytest.mark.asyncio
@@ -1202,7 +1274,18 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
         result = await chat.response(None, 'a1', stream=False, **kwargs)
         assert result['choices'][0]['message']['content'] == 'Answer: last question'
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': {'text': 'last question', 'knowledge': []}, 'agent': 'test', 'model': 'llm'})
+        (
+            '/v1/chat/threads',
+            {
+                'input': {
+                    'text': 'last question',
+                    'knowledge': [],
+                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                },
+                'agent': 'test',
+                'model': 'llm',
+            },
+        )
     ]
 
 
@@ -1319,7 +1402,17 @@ async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_ans
 
     assert content(chunks) == 'Answer: what was I asking?'
     assert chat.mutations()[stopped:] == [
-        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'what was I asking?', 'knowledge': []}, 'model': 'llm'}),
+        (
+            '/v1/chat/threads/thr-1/inputs',
+            {
+                'input': {
+                    'text': 'what was I asking?',
+                    'knowledge': [],
+                    'tools': {'create_office_file': 'off', 'edit_office_file': 'off'},
+                },
+                'model': 'llm',
+            },
+        ),
     ]
 
 
