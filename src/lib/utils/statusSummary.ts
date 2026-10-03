@@ -20,7 +20,7 @@ const PHRASES: Array<{ actions: string[]; one: string; many: string }> = [
 		many: 'read {{count}} documents'
 	},
 	{ actions: ['create_office_file'], one: 'created a file', many: 'created {{count}} files' },
-	{ actions: ['edit_office_file'], one: 'edited a file', many: '{{count}} files edited' }
+	{ actions: ['edit_office_file'], one: 'edited a file', many: 'edited {{count}} files' }
 ];
 
 const OTHER = { one: 'took a step', many: 'took {{count}} steps' };

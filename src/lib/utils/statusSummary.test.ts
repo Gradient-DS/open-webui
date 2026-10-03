@@ -9,7 +9,7 @@ const DUTCH: Record<string, string> = {
 	'read a document': 'een document gelezen',
 	'created a file': 'een bestand gemaakt',
 	'edited a file': 'een bestand aangepast',
-	'{{count}} files edited': '{{count}} bestanden aangepast',
+	'edited {{count}} files': '{{count}} bestanden aangepast',
 	and: 'en'
 };
 
@@ -53,7 +53,7 @@ describe('describeBlock', () => {
 		);
 		expect(
 			describeBlock([{ action: 'edit_office_file' }, { action: 'edit_office_file' }], english)
-		).toBe('2 files edited');
+		).toBe('Edited 2 files');
 	});
 
 	it('leaves a block of one step to its own line', () => {
