@@ -177,14 +177,17 @@ jobs:
       - name: Fail unless every security job that applies succeeded
         env:
           EVENT: ${{ github.event_name }}
+          REUSE: ${{ needs.reuse.result }}
           REUSED: ${{ needs.reuse.outputs.hit }}
           SOURCE: ${{ needs.source.result }}
           IMAGE: ${{ needs.image.result }}
           PUBLISHED: ${{ needs.image-published.result }}
         run: |
-          echo "event=$EVENT  reused=$REUSED  source=$SOURCE  image=$IMAGE  published=$PUBLISHED"
+          echo "event=$EVENT  reuse=$REUSE  reused=$REUSED  source=$SOURCE  image=$IMAGE  published=$PUBLISHED"
+          # A failed tree lookup is red, never a silent pass or skip.
+          if [ "$EVENT" = "push" ] && [ "$REUSE" != "success" ]; then echo "tested-tree lookup did not succeed"; exit 1; fi
           # A skipped source scan passes only on an exact-tree reuse.
-          [ "$SOURCE" = "success" ] || { [ "$EVENT" = "push" ] && [ "$REUSED" = "true" ] && [ "$SOURCE" = "skipped" ]; } || exit 1
+          [ "$SOURCE" = "success" ] || { [ "$EVENT" = "push" ] && [ "$REUSE" = "success" ] && [ "$REUSED" = "true" ] && [ "$SOURCE" = "skipped" ]; } || exit 1
           case "$EVENT" in
             pull_request) [ "$IMAGE" = "success" ] ;;
             schedule) [ "$PUBLISHED" = "success" ] ;;
@@ -197,8 +200,11 @@ jobs:
   # lands it. Only when every scan really ran and passed, and never for a fork.
   record:
     needs: [source, image, lockfile-age, gate]
+    # !cancelled(): without it the implicit success() also demands the
+    # skipped `reuse` job upstream, and record would never run on a PR.
     if: >-
-      github.event_name == 'pull_request'
+      !cancelled()
+      && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
       && needs.source.result == 'success'
       && needs.image.result == 'success'
