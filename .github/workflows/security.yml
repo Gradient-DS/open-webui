@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   source:
-    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@33d2ef167da03d3edfd6732684c17347cc957c82 # v5
+    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
     secrets: inherit
     permissions:
       contents: read
@@ -38,14 +38,27 @@ jobs:
       node-dirs: '.'
 
   image:
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@33d2ef167da03d3edfd6732684c17347cc957c82 # v5
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
     secrets: inherit
+    permissions:
+      contents: read
+      packages: read
     with:
       context: .
       dockerfile: Dockerfile
       image-name: open-webui
+      # The build args docker-build-soev.yaml ships with, so the scanned image
+      # is the production one (UID/GID 1000) and its layers match dev's
+      # registry cache. A gha cache write would only evict other entries: the
+      # repo is over its GHA cache limit, and the registry cache is fresher.
       build-args: |
+        BUILD_HASH=${{ github.sha }}
         USE_SLIM=true
+        UID=1000
+        GID=1000
+      # Public package: readable without auth, so fork PRs can read it too.
+      cache-from: type=registry,ref=ghcr.io/gradient-ds/open-webui:cache-slim-linux-amd64-dev
+      cache-write: false
 
   # Job id (and thus the status-check name shown to branch protection) must
   # stay exactly "lockfile-age" — it is configured as a required check on
