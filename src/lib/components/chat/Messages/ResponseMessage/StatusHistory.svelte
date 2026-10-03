@@ -48,12 +48,10 @@
 
 	let history = [];
 
-	// [Gradient] The promoted header is ALWAYS the newest entry and the list is
-	// everything before it, so the expanded list stays one contiguous
-	// chronological run. The previous rule promoted the last NON-reasoning entry,
-	// which lifted a tool status out of the MIDDLE of the timeline and left the
-	// reasoning bullets it separated adjacent to each other. That is what read as
-	// "reasoning is not interleaved with the tool calls".
+	// [Gradient] The promoted header is ALWAYS the newest entry, and the list is the
+	// whole block in order, the newest included, so it ends where the header is.
+	// The previous rule promoted the last NON-reasoning entry, which lifted a tool
+	// status out of the MIDDLE of the timeline. A block of one entry is its header.
 	$: status = history.at(-1) ?? null;
 	// [Gradient] A finished block says what it did; the turn's closing tool count, when
 	// this block has it, stays its header.
@@ -61,7 +59,7 @@
 		messageDone && !history.some((item) => item?.action === 'summary')
 			? describeBlock(history, (key, options) => $i18n.t(key, options))
 			: null;
-	$: historyItems = history.slice(0, -1);
+	$: historyItems = history.length > 1 ? history : [];
 
 	$: if (!equal(statusHistory, history)) {
 		history = statusHistory;
@@ -180,7 +178,11 @@
 										attributes={item.attributes ?? {}}
 									/>
 								{:else}
-									<StatusItem status={item} done={true} forceVisible={true} />
+									<StatusItem
+										status={item}
+										done={messageDone || idx < historyItems.length - 1 || item?.done !== false}
+										forceVisible={true}
+									/>
 								{/if}
 							</div>
 						{/each}
