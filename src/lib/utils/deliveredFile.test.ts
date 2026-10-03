@@ -1,12 +1,10 @@
-// [Gradient] Office references use chat authorization; legacy delivered files keep working.
+// [Gradient] Office references use chat authorization.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { saveAs } = vi.hoisted(() => ({ saveAs: vi.fn() }));
 vi.mock('file-saver', () => ({ default: { saveAs } }));
-vi.mock('$lib/apis/files', () => ({ getFileContentById: vi.fn() }));
 vi.mock('$lib/constants', () => ({ WEBUI_API_BASE_URL: '/api/v1' }));
 
-import { getFileContentById } from '$lib/apis/files';
 import {
 	downloadDeliveredFile,
 	fileKind,
@@ -25,14 +23,6 @@ const office: OfficeAttachment = {
 	pages: 2,
 	version: 1
 };
-const legacy = {
-	type: 'file' as const,
-	id: 'old-file',
-	name: 'old.pptx',
-	url: '/old',
-	pages: ['p1', 'p2']
-};
-
 beforeEach(() => {
 	vi.stubGlobal('localStorage', { token: 'user-token' });
 	vi.stubGlobal(
@@ -49,10 +39,10 @@ afterEach(() => {
 });
 
 describe('delivered files', () => {
-	it('recognizes Office references including files without previews and legacy files', () => {
+	it('recognizes Office references including files without previews', () => {
 		expect(isDeliveredFile(office)).toBe(true);
 		expect(isDeliveredFile({ ...office, pages: 0 })).toBe(true);
-		expect(isDeliveredFile(legacy)).toBe(true);
+		expect(isDeliveredFile({ ...office, thread_id: undefined })).toBe(true);
 		expect(fileKind(office)).toBe('PPTX');
 	});
 
@@ -63,7 +53,6 @@ describe('delivered files', () => {
 		{ ...office, pages: [] },
 		{ ...office, pages: -1 },
 		{ ...office, pages: 1.5 },
-		{ ...office, thread_id: '' },
 		{ ...office, element_id: null },
 		{ ...office, version: 0 },
 		{ ...office, size: -1 }
@@ -78,7 +67,6 @@ describe('delivered files', () => {
 			credentials: 'include'
 		});
 		expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'deck.pptx');
-		expect(getFileContentById).not.toHaveBeenCalled();
 	});
 
 	it('loads one-based page routes in parallel and preserves their order', async () => {
@@ -113,12 +101,7 @@ describe('delivered files', () => {
 		expect(fetch).not.toHaveBeenCalled();
 	});
 
-	it('still loads and downloads legacy OWUI Files', async () => {
-		vi.mocked(getFileContentById).mockResolvedValue(new ArrayBuffer(4));
-		await loadPages(legacy, 'chat');
-		await downloadDeliveredFile(legacy, 'chat');
-		expect(vi.mocked(getFileContentById).mock.calls).toEqual([['p1'], ['p2'], ['old-file']]);
-		expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'old.pptx');
-		expect(fetch).not.toHaveBeenCalled();
+	it('a plain upload is not a delivered file', () => {
+		expect(isDeliveredFile({ type: 'file', id: 'upload', pages: ['page'] })).toBe(false);
 	});
 });
