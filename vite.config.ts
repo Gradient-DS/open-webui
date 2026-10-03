@@ -1,7 +1,41 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
-import { viteStaticCopy } from 'vite-plugin-static-copy';
+import { createReadStream, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+// [Gradient] Serves and emits onnxruntime-web's JSEP runtime under /wasm/
+// (kokoro.worker.ts sets wasmPaths to it). Replaces vite-plugin-static-copy,
+// whose chokidar 3 -> braces chain has no fixed release (GHSA-vfj7-8cjw-p6xm).
+const ortDist = 'node_modules/onnxruntime-web/dist';
+const ortJsepFiles = () => readdirSync(ortDist).filter((name) => name.includes('.jsep.'));
+
+function ortWasm(): Plugin {
+	return {
+		name: 'gradient:ort-wasm',
+		configureServer(server) {
+			server.middlewares.use('/wasm', (req, res, next) => {
+				const name = (req.url ?? '').split('?')[0].slice(1);
+				if (!ortJsepFiles().includes(name)) return next();
+				res.setHeader(
+					'Content-Type',
+					name.endsWith('.wasm') ? 'application/wasm' : 'text/javascript'
+				);
+				createReadStream(join(ortDist, name)).pipe(res);
+			});
+		},
+		generateBundle() {
+			if (this.environment.config.consumer !== 'client') return;
+			for (const name of ortJsepFiles()) {
+				this.emitFile({
+					type: 'asset',
+					fileName: `wasm/${name}`,
+					source: readFileSync(join(ortDist, name))
+				});
+			}
+		}
+	};
+}
 
 // [Gradient] An allocated dev-stack port takes precedence over the upstream URL override.
 const backendTarget = process.env.OWUI_BE_PORT
@@ -11,15 +45,7 @@ const backendTarget = process.env.OWUI_BE_PORT
 export default defineConfig({
 	plugins: [
 		sveltekit(),
-		viteStaticCopy({
-			targets: [
-				{
-					src: 'node_modules/onnxruntime-web/dist/*.jsep.*',
-
-					dest: 'wasm'
-				}
-			]
-		})
+		ortWasm() // [Gradient]
 	],
 	define: {
 		APP_VERSION: JSON.stringify(process.env.npm_package_version),

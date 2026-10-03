@@ -367,3 +367,15 @@ dev tenants track `^dev-<sha>-<run>$` numerically ascending, test tenants track
 `^v<major>.<minor>.<patch>$`, range `>=1.0.0`** — i.e. prod advances only on an
 explicit release tag. `:main` and `:latest` are published by CI but no prod
 ImagePolicy follows them.
+
+## onnxruntime wasm copy without vite-plugin-static-copy
+
+Upstream copies `node_modules/onnxruntime-web/dist/*.jsep.*` to `/wasm/` with
+`vite-plugin-static-copy`. Every release of that plugin depends on chokidar 3,
+which pulls in braces. braces has a high advisory (GHSA-vfj7-8cjw-p6xm) and no
+fixed release, so the fork dropped the plugin. The inline `ortWasm()` plugin in
+`vite.config.ts` does the same job: in dev it serves the files at `/wasm/`, and
+in the client build it emits them to `wasm/`. `src/lib/workers/kokoro.worker.ts`
+reads them from there, and the build output is byte-identical. On an upstream
+merge, keep `ortWasm()` and do not re-add the plugin to `package.json`. Revisit
+once braces ships a fix or the plugin moves off chokidar 3.
