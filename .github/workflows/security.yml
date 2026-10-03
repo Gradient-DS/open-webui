@@ -12,11 +12,15 @@ on:
   schedule:
     - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
 
-# Cancel a superseded run of the same event+ref (e.g. rapid re-pushes) so we
-# don't pile up in-progress scans. Push and PR events stay separate contexts.
+# Only a superseded pull-request run is cancelled: its commit is no longer the
+# one that would merge. Push and scheduled runs each get a group of their own
+# (keyed on run_id), because every push to dev/test/main is a distinct tree
+# that must be scanned -- grouping them by ref cancelled 12 of 27 dev-push
+# scans, and even with cancel-in-progress off a shared group still drops the
+# older of two queued runs.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   source:
