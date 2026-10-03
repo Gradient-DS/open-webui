@@ -99,7 +99,8 @@
 		assistant_id?: string; // [Gradient]
 		content: string;
 		output?: OutputItem[];
-		files?: { type: string; url: string }[];
+		// [Gradient] Office attachments resolve their content through the owning chat.
+		files?: { type: string; url?: string; name?: string; content_type?: string; size?: number }[];
 		timestamp: number;
 		role: string;
 		statusHistory?: {
@@ -1166,24 +1167,24 @@
 							{/each}
 						{/if}
 
-						{#if message?.files && message.files?.filter( (f) => ['image', 'file'].includes(f.type) ).length > 0}
+						{#if message?.files && message.files?.filter( (f) => ['image', 'file', 'office'].includes(f.type) ).length > 0}
 							<div
 								class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap"
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
-								{#each message.files.filter((f) => ['image', 'file'].includes(f.type)) as file}
+								{#each message.files.filter( (f) => ['image', 'file', 'office'].includes(f.type) ) as file}
 									<div>
 										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 											<Image src={file.url} alt={file.name || $i18n.t('Generated Image')} />
 										{:else if isDeliveredFile(file)}
-											<DocumentCard title={file.name} {file} />
+											<DocumentCard title={file.name} {file} {chatId} />
 										{:else}
 											<FileItem
 												item={file}
 												url={file.url}
-												name={file.name}
+												name={file.name ?? ''}
 												type={file.type}
-												size={file?.size}
+												size={file?.size ?? 0}
 												small={true}
 											/>
 										{/if}

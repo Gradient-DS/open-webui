@@ -22,6 +22,7 @@
 	export let className: string = '';
 	// [Gradient] An Office file an agent delivered: downloaded as is, not exported from markdown.
 	export let file: DeliveredFile | null = null;
+	export let chatId: string = '';
 
 	let downloadOpen = false;
 
@@ -31,7 +32,7 @@
 	const downloadFile = async () => {
 		if (!file) return;
 		try {
-			await downloadDeliveredFile(file);
+			await downloadDeliveredFile(file, chatId);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to download file'));

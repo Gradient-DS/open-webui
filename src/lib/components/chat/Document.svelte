@@ -57,7 +57,7 @@
 		pagesError = false;
 		if (!file) return;
 		try {
-			const loaded = await loadPages(file);
+			const loaded = await loadPages(file, $chatId);
 			if (pagesFor !== file) return loaded.forEach((url) => URL.revokeObjectURL(url));
 			pages = loaded;
 		} catch (e) {
@@ -71,7 +71,7 @@
 	const downloadFile = async () => {
 		if (!current?.file) return;
 		try {
-			await downloadDeliveredFile(current.file);
+			await downloadDeliveredFile(current.file, $chatId);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to download file'));
