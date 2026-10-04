@@ -10,7 +10,7 @@
 	import { searchKnowledgeBases, searchKnowledgeFilesById } from '$lib/apis/knowledge';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Database from '$lib/components/icons/Database.svelte';
+	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
@@ -232,11 +232,11 @@
 						>
 							<div class="w-full text-left text-black dark:text-gray-100 flex items-center gap-1">
 								<Tooltip content={$i18n.t('Collection')} placement="top">
-									<!-- [Gradient] Per-provider collection icons. -->
+									<!-- [Gradient] Per-provider collection icons; local KBs are folders. -->
 									{#if item.type === 'onedrive'}<OneDrive className="size-3.5" />
 									{:else if item.type === 'google_drive'}<GoogleDrive className="size-3.5" />
 									{:else if item.type === 'confluence'}<Confluence className="size-3.5" />
-									{:else}<Database className="size-3.5" />{/if}
+									{:else}<FolderOpen className="size-3.5" />{/if}
 								</Tooltip>
 
 								<Tooltip

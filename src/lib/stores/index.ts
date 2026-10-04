@@ -436,6 +436,8 @@ type Config = {
 		enable_google_drive_integration: boolean;
 		enable_google_drive_sync?: boolean;
 		enable_onedrive_integration: boolean;
+		enable_onedrive_personal?: boolean;
+		enable_onedrive_business?: boolean;
 		enable_confluence_integration?: boolean;
 		enable_confluence_sync?: boolean;
 		confluence_kb_mode?: string;
