@@ -93,7 +93,7 @@
 	export let inputFilesHandler: (files: File[]) => void;
 
 	export let uploadGoogleDriveHandler: () => void;
-	export let uploadOneDriveHandler: (authorityType: 'personal' | 'organizations') => void;
+	export let uploadOneDriveHandler: () => void;
 	// [Gradient] Assistant-builder restrictions and strict data-separation state. Item keys
 	// match the pin ids: 'upload_files', 'capture', 'attach_webpage', 'attach_notes',
 	// 'google_drive', 'onedrive', 'knowledge', 'reference_chats', 'tools', 'skills',
@@ -209,7 +209,6 @@
 				? $i18n.t('You do not have permission to upload files.')
 				: '';
 
-	$: oneDrivePersonal = !!$config?.features?.enable_onedrive_personal;
 	$: oneDriveBusiness = !!$config?.features?.enable_onedrive_business;
 
 	// Item visibility, also used to hide empty section headers.
@@ -225,7 +224,7 @@
 		fileUploadEnabled &&
 		itemAllowed('onedrive') &&
 		!!$config?.features?.enable_onedrive_integration &&
-		(oneDrivePersonal || oneDriveBusiness);
+		oneDriveBusiness;
 	$: showKnowledge = itemAllowed('knowledge') && isFeatureEnabled('knowledge');
 	$: showReferenceChats = itemAllowed('reference_chats') && isFeatureEnabled('reference_chats');
 
@@ -712,21 +711,15 @@
 					{/if}
 
 					{#if showOneDrive}
-						<!-- Both account types: pick one in a submenu; otherwise open directly. -->
 						<MenuItem
 							label={$i18n.t('OneDrive Files')}
 							pinId="onedrive"
-							submenu={oneDrivePersonal && oneDriveBusiness}
 							tooltip={internalBlocked ? dataSeparationMessage : ''}
 							disabled={internalBlocked}
 							onClick={() => {
 								if (internalBlocked) return;
-								if (oneDrivePersonal && oneDriveBusiness) {
-									tab = 'microsoft_onedrive';
-								} else {
-									uploadOneDriveHandler(oneDriveBusiness ? 'organizations' : 'personal');
-									closeMenu();
-								}
+								uploadOneDriveHandler();
+								closeMenu();
 							}}
 						>
 							<OneDrive slot="icon" className="size-3.5" />
@@ -1026,8 +1019,6 @@
 										{$i18n.t('Files')}
 									{:else if tab === 'chats'}
 										{$i18n.t('Reference chats')}
-									{:else if tab === 'microsoft_onedrive'}
-										{$i18n.t('Microsoft OneDrive')}
 									{:else if tab === 'tool_permissions'}
 										{$i18n.t('Tool Permissions')}
 									{:else if tab === 'tools'}
@@ -1050,32 +1041,6 @@
 						<Files {onSelect} />
 					{:else if tab === 'chats'}
 						<Chats {onSelect} />
-					{:else if tab === 'microsoft_onedrive'}
-						{#if oneDrivePersonal}
-							<button
-								class={subRowClass}
-								type="button"
-								on:click={() => {
-									uploadOneDriveHandler('personal');
-									closeMenu();
-								}}
-							>
-								<div class="line-clamp-1">{$i18n.t('Microsoft OneDrive (personal)')}</div>
-							</button>
-						{/if}
-
-						{#if oneDriveBusiness}
-							<button
-								class={subRowClass}
-								type="button"
-								on:click={() => {
-									uploadOneDriveHandler('organizations');
-									closeMenu();
-								}}
-							>
-								<div class="line-clamp-1">{$i18n.t('Microsoft OneDrive (work/school)')}</div>
-							</button>
-						{/if}
 					{:else if tab === 'tool_permissions'}
 						<div class="space-y-1">
 							{#each toolApprovalModes as mode}

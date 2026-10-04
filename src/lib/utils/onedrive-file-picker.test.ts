@@ -2,11 +2,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock MSAL so getMsalInstance()/getGraphApiToken() resolve a fake token
 // without touching the network or a real browser.
-const auth = vi.hoisted(() => ({ silent: vi.fn(), popup: vi.fn() }));
+const auth = vi.hoisted(() => ({
+	silent: vi.fn(),
+	popup: vi.fn(),
+	construct: vi.fn(),
+	initialize: vi.fn()
+}));
 
 vi.mock('@azure/msal-browser', () => {
 	class PublicClientApplication {
-		async initialize() {}
+		constructor(config: unknown) {
+			auth.construct(config);
+		}
+		async initialize() {
+			auth.initialize();
+		}
 		async acquireTokenSilent() {
 			auth.silent();
 			return { accessToken: 'graph-token', account: {} };
@@ -35,7 +45,6 @@ function stubFetch(sharepointUrl: string) {
 				json: async () => ({
 					onedrive: {
 						client_id_business: 'biz-client',
-						client_id_personal: 'personal-client',
 						sharepoint_url: sharepointUrl,
 						sharepoint_tenant_id: 'common'
 					}
@@ -70,7 +79,7 @@ describe('OneDriveConfig.resolveHost', () => {
 
 		const { OneDriveConfig } = await import('./onedrive-file-picker');
 		const config = OneDriveConfig.getInstance();
-		await config.resolveHost('organizations');
+		await config.resolveHost();
 
 		expect(config.getBaseUrl()).toBe('https://static.sharepoint.com');
 		expect(meDriveCalls(fetchSpy)).toBe(0);
@@ -82,7 +91,7 @@ describe('OneDriveConfig.resolveHost', () => {
 
 		const { OneDriveConfig } = await import('./onedrive-file-picker');
 		const config = OneDriveConfig.getInstance();
-		await config.resolveHost('organizations');
+		await config.resolveHost();
 
 		expect(config.getBaseUrl()).toBe('https://derived-my.sharepoint.com');
 		expect(meDriveCalls(fetchSpy)).toBe(1);
@@ -94,8 +103,8 @@ describe('OneDriveConfig.resolveHost', () => {
 
 		const { OneDriveConfig } = await import('./onedrive-file-picker');
 		const config = OneDriveConfig.getInstance();
-		await config.resolveHost('organizations');
-		await config.resolveHost('organizations');
+		await config.resolveHost();
+		await config.resolveHost();
 
 		expect(config.getBaseUrl()).toBe('https://derived-my.sharepoint.com');
 		expect(meDriveCalls(fetchSpy)).toBe(1);
@@ -178,21 +187,36 @@ describe('business picker user gesture', () => {
 	});
 });
 
-it('business prefetch preserves personal authority and caches separate MSAL clients', async () => {
+it('concurrent picker preparation shares one organisational MSAL client', async () => {
 	vi.resetModules();
 	auth.silent.mockReset();
 	vi.stubGlobal('window', { location: { origin: 'http://localhost' } });
 	vi.stubGlobal('fetch', stubFetch('https://static.sharepoint.com'));
 	const picker = await import('./onedrive-file-picker');
 	const config = picker.OneDriveConfig.getInstance();
-	await config.initialize('personal');
+	auth.construct.mockClear();
+	const [first, second] = await Promise.all([config.getMsalInstance(), config.getMsalInstance()]);
 	await picker.prepareBusinessDocumentPicker();
-	expect(config.getAuthorityType()).toBe('personal');
-	const [business, personal, businessAgain] = await Promise.all([
-		config.getMsalInstance('organizations'),
-		config.getMsalInstance('personal'),
-		config.getMsalInstance('organizations')
-	]);
-	expect(business).not.toBe(personal);
-	expect(business).toBe(businessAgain);
+	expect(first).toBe(second);
+	expect(auth.construct).toHaveBeenCalledExactlyOnceWith({
+		auth: {
+			authority: 'https://login.microsoftonline.com/organizations',
+			clientId: 'biz-client',
+			redirectUri: 'http://localhost'
+		}
+	});
+	expect(await config.getMsalInstance()).toBe(first);
+});
+
+it('retries a failed MSAL initialization on the next attempt', async () => {
+	vi.resetModules();
+	vi.stubGlobal('window', { location: { origin: 'http://localhost' } });
+	vi.stubGlobal('fetch', stubFetch('https://static.sharepoint.com'));
+	const { OneDriveConfig } = await import('./onedrive-file-picker');
+	auth.initialize.mockImplementationOnce(() => {
+		throw new Error('initialization failed');
+	});
+	const config = OneDriveConfig.getInstance();
+	await expect(config.getMsalInstance()).rejects.toThrow('initialization failed');
+	await expect(config.getMsalInstance()).resolves.toBeDefined();
 });

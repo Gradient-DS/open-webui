@@ -84,9 +84,8 @@ The chat OneDrive picker returns `DocumentReference` metadata (including eTag), 
 `POST /files/onedrive/attach` calls platform `/v1/attach` with the acting user. Its strict
 schema rejects tokens and caller-selected collections. The platform rechecks grant,
 readability and size, skipping only reach for the explicit user selection. Missing organisational picker
-version metadata is refused. Personal (MSA) accounts explicitly retain the previous
-browser download/upload path; this exception is REVIEW pending the product decision. Existing file
-count limits apply. Microsoft picker payload/version availability needs a tenant check.
+version metadata is refused. The picker supports organisational accounts only and always
+attaches by reference. Existing file count limits apply. Microsoft picker payload/version availability needs a tenant check.
 
 The consumer API credential needs both ingest and the dedicated attach capability for
 picker commissioning; provision attach only to consumer products. The platform budgets
@@ -122,9 +121,8 @@ connection's provider_tenant_id and provider_identity before choosing its grant.
 Picker keys are user-namespaced and identity conflicts return typed 403/409 responses.
 If an older reference event lacks MIME metadata, successful job polling reads the
 completed document as its owning user and fills content_type before marking it ready.
-Business prefetch does not change the active picker authority. MSAL initialization
-is cached per authority, including in-flight initialization, so warming a business
-account cannot replace the personal-account client during a user click.
+MSAL uses one organisational client and caches in-flight initialization across picker
+preparation and clicks. Personal Microsoft accounts and browser byte downloads are unsupported.
 
 Attach tool summaries show "Could not open document" for refusals and failures.
 An attached event (including processing) or an existing document keeps the success label.

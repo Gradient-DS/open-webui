@@ -43,8 +43,7 @@
 	import { enableLiveDocuments } from '$lib/apis/cloudSync';
 	import {
 		beginBusinessDocumentPicker,
-		prepareBusinessDocumentPicker,
-		pickAndDownloadFilesModal
+		prepareBusinessDocumentPicker
 	} from '$lib/utils/onedrive-file-picker';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
@@ -1072,67 +1071,7 @@
 		}
 	};
 
-	const personalOneDriveHandler = async (authorityType: 'personal') => {
-		const tempItemIds: string[] = [];
-		try {
-			const filesData = await pickAndDownloadFilesModal(authorityType, {
-				onFilesSelected: (items) => {
-					for (const item of items) {
-						const tempItemId = uuidv4();
-						tempItemIds.push(tempItemId);
-						files = [
-							...files,
-							{
-								type: 'file',
-								file: '',
-								id: null,
-								url: '',
-								name: item.name,
-								collection_name: '',
-								status: 'uploading',
-								size: 0,
-								error: '',
-								itemId: tempItemId
-							}
-						];
-					}
-				}
-			});
-			if (filesData.length > 0) {
-				for (let i = 0; i < filesData.length; i++) {
-					const fileData = filesData[i];
-					const file = new File([fileData.blob], fileData.name, {
-						type: fileData.blob.type || 'application/octet-stream'
-					});
-					// Match placeholder by name since download order may differ
-					const matchingItemId = tempItemIds.find((id) => {
-						const item = files.find((f) => f.itemId === id);
-						return item && item.name === fileData.name;
-					});
-					await uploadFileHandler(file, true, {}, matchingItemId || null);
-				}
-				// Clean up any placeholders for files that failed to download
-				const downloadedNames = new Set(filesData.map((f) => f.name));
-				files = files.filter((f) => {
-					if (tempItemIds.includes(f.itemId ?? '') && !downloadedNames.has(f.name ?? '')) {
-						return false;
-					}
-					return true;
-				});
-			} else if (tempItemIds.length > 0) {
-				// All downloads failed
-				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
-			}
-		} catch (error) {
-			if (tempItemIds.length > 0) {
-				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
-			}
-			console.error('OneDrive Error:', error);
-		}
-	};
-
-	const oneDriveHandler = async (authorityType: 'personal' | 'organizations') => {
-		if (authorityType === 'personal') return personalOneDriveHandler(authorityType);
+	const oneDriveHandler = async () => {
 		try {
 			const rows = liveDocumentConnections(localStorage.token);
 			if (!rows) throw new Error('Connection status is loading. Try again.');
@@ -2749,25 +2688,14 @@
 															<GoogleDrive className="size-4" />
 														</button>
 													</Tooltip>
-												{:else if itemId === 'onedrive' && inputMenuFileUploadEnabled && $config?.features?.enable_onedrive_integration && ($config?.features?.enable_onedrive_personal || $config?.features?.enable_onedrive_business)}
+												{:else if itemId === 'onedrive' && inputMenuFileUploadEnabled && $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
 													<Tooltip content={$i18n.t('OneDrive Files')} placement="top">
 														<button
 															class={pinnedButtonClass}
 															type="button"
 															aria-label={$i18n.t('OneDrive Files')}
 															on:click={() => {
-																if (
-																	$config?.features?.enable_onedrive_personal &&
-																	$config?.features?.enable_onedrive_business
-																) {
-																	inputMenuRef?.openTab('microsoft_onedrive');
-																} else {
-																	oneDriveHandler(
-																		$config?.features?.enable_onedrive_business
-																			? 'organizations'
-																			: 'personal'
-																	);
-																}
+																oneDriveHandler();
 															}}
 														>
 															<OneDrive className="size-4" />
