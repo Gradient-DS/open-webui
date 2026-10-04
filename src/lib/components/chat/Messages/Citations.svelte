@@ -13,7 +13,7 @@
 
 	export let sources = [];
 	export let readOnly = false;
-	// [Gradient] False keeps only pill clicks: the document panel shows sources in the sources panel.
+	// [Gradient] False keeps only pill clicks (SoevCitations' read-only path).
 	export let listed = true;
 	/**
 	 * [Gradient] Whether the parent message has finished streaming. Used to

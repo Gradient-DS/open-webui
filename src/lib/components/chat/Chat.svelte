@@ -2231,7 +2231,8 @@
 						...docs,
 						...documents.map((doc) => ({
 							...doc,
-							sources
+							sources,
+							messageId: message.id
 						}))
 					];
 				}

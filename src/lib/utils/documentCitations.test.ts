@@ -20,3 +20,11 @@ describe('markdown exports', () => {
 		expect(getExportMarkdown('Text', sources, 'Bronnen')).toContain('[3] Third.pdf');
 	});
 });
+
+describe('superscript export', () => {
+	it('raises body citations for print and keeps the source list labels plain', () => {
+		const out = getExportMarkdown('Fact [3].', sources, 'Bronnen', true);
+		expect(out).toContain('Fact <sup>[1]</sup>.');
+		expect(out).toContain('[1] Third.pdf');
+	});
+});

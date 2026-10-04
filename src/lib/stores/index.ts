@@ -178,8 +178,9 @@ export type ChoiceRegistration = {
 export const choiceBlockRegistry: Writable<Record<string, Record<string, ChoiceRegistration>>> =
 	writable({});
 export const selectedDocumentIndex = writable(0);
-export const documentContents: Writable<Array<AgentDocument & { sources?: any[] }> | null> =
-	writable(null);
+export const documentContents: Writable<Array<
+	AgentDocument & { sources?: any[]; messageId?: string }
+> | null> = writable(null);
 
 export const embed = writable(null);
 

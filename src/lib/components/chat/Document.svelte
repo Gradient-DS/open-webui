@@ -50,11 +50,11 @@
 		return cleaned.length > 0 ? cleaned : 'document';
 	};
 
-	const getExportMarkdown = () => {
+	const getExportMarkdown = (superscript = false) => {
 		if (!current) return '';
 		return current.format === 'html'
 			? current.content
-			: exportMarkdown(current.content, current.sources ?? [], $i18n.t('Sources'));
+			: exportMarkdown(current.content, current.sources ?? [], $i18n.t('Sources'), superscript);
 	};
 
 	const downloadMd = () => {
@@ -78,7 +78,7 @@
 	const downloadPdf = async () => {
 		if (!current) return;
 		try {
-			await printDocument(current.title, getExportMarkdown(), current.format);
+			await printDocument(current.title, getExportMarkdown(true), current.format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
@@ -303,11 +303,13 @@
 						</div>
 					{/if}
 					{#if current.format === 'markdown' && (current.sources ?? []).length > 0}
+						<!-- The message's own id lets the sources panel open that question's group. -->
 						<Citations
 							bind:this={citationsElement}
-							id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
+							id={current.messageId ?? ''}
 							chatId={$chatId ?? ''}
 							sources={current.sources}
+							listed={false}
 						/>
 					{/if}
 				{:else}
