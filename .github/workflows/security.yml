@@ -31,6 +31,9 @@ jobs:
   # On push: did a pull-request run of this workflow already pass on exactly
   # this git tree? Only then are `source` and `lockfile-age` skipped. Any
   # difference, including another PR landing in between, runs everything.
+  # Public repo: a fork PR's run executes the fork's copy of this file and
+  # could upload a record for any tree. security-ci v7's `check` trusts only
+  # a record uploaded by a pull_request run from a branch of this repository.
   reuse:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -39,38 +42,18 @@ jobs:
       contents: read
       actions: read
     outputs:
-      hit: ${{ steps.trust.outputs.hit }}
+      hit: ${{ steps.check.outputs.hit }}
     steps:
       - id: check
-        uses: Gradient-DS/security-ci/actions/tested-tree/check@323449ab6e138872d5993a86d849cd3697075289 # v6
+        uses: Gradient-DS/security-ci/actions/tested-tree/check@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
         with:
           workflow-key: security
-
-      # Public repo: a fork PR's run executes the fork's copy of this file and
-      # could upload a record for any tree. Trust only a record made by a
-      # pull_request run from a branch of this repository.
-      - name: Accept only a same-repository pull request's record
-        id: trust
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HIT: ${{ steps.check.outputs.hit }}
-          RUN_URL: ${{ steps.check.outputs.run-url }}
-        run: |
-          set -euo pipefail
-          if [ "$HIT" != "true" ]; then echo "hit=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          origin=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${RUN_URL##*/}" --jq '.event + " " + .head_repository.full_name')
-          if [ "$origin" = "pull_request $GITHUB_REPOSITORY" ]; then
-            echo "hit=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Ignoring tested-tree record from $RUN_URL ($origin); running everything"
-            echo "hit=false" >> "$GITHUB_OUTPUT"
-          fi
 
   source:
     needs: reuse
     # Every PR and scheduled run; a push unless its exact tree already passed.
     if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
-    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
     secrets: inherit
     permissions:
       contents: read
@@ -88,7 +71,7 @@ jobs:
   # daily run scans the published digests (`image-published`).
   image:
     if: github.event_name == 'pull_request'
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
     secrets: inherit
     permissions:
       contents: read
@@ -139,14 +122,16 @@ jobs:
       fail-fast: false
       matrix:
         branch: [dev, test, main]
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
     secrets: inherit
     permissions:
       contents: read
       packages: read
+      issues: write
     with:
       image-name: open-webui-${{ matrix.branch }}
       image-ref: ${{ needs.resolve-published.outputs[matrix.branch] }}
+      notify-on-schedule-failure: true
 
   # Job id (and thus the status-check name shown to branch protection) must
   # stay exactly "lockfile-age" — it is configured as a required check on
@@ -216,6 +201,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: Gradient-DS/security-ci/actions/tested-tree/record@323449ab6e138872d5993a86d849cd3697075289 # v6
+      - uses: Gradient-DS/security-ci/actions/tested-tree/record@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
         with:
           workflow-key: security

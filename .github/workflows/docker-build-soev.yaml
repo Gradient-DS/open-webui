@@ -239,7 +239,7 @@ jobs:
   scan-image:
     if: startsWith(github.ref, 'refs/heads/')
     needs: [merge-slim-images]
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
     secrets: inherit
     permissions:
       contents: read
