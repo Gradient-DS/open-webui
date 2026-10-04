@@ -1,10 +1,13 @@
 """Exercise v2 routing and branching against the authenticated fake relay."""
 
 import asyncio
+import base64
 import copy
+import hashlib
 import html
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -23,8 +26,8 @@ from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
 
-# The turn's tools field while both controls are Uit (or absent).
-TOOLS_OFF = {'web_search': 'off', 'write_pdf': 'off'}
+# The turn's tools field while the web search control is Uit (or absent).
+WEB_SEARCH_OFF = {'web_search': 'off'}
 
 
 @dataclass
@@ -113,7 +116,6 @@ def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> Chat:
     )
     monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=emit))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=True))
-    monkeypatch.setattr(agent_v2, '_pdf_writer_allowed', AsyncMock(return_value=True))
     return result
 
 
@@ -128,15 +130,15 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
     assert chat.mutations() == [
         (
             '/v1/chat/threads',
-            {'input': {'text': 'turn 1', 'knowledge': [], 'tools': TOOLS_OFF}, 'agent': 'test', 'model': 'llm'},
+            {'input': {'text': 'turn 1', 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'agent': 'test', 'model': 'llm'},
         ),
         (
             '/v1/chat/threads/thr-1/inputs',
-            {'input': {'text': 'turn 2', 'knowledge': [], 'tools': TOOLS_OFF}, 'model': 'llm'},
+            {'input': {'text': 'turn 2', 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'model': 'llm'},
         ),
         (
             '/v1/chat/threads/thr-1/inputs',
-            {'input': {'text': 'turn 3', 'knowledge': [], 'tools': TOOLS_OFF}, 'model': 'llm'},
+            {'input': {'text': 'turn 3', 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'model': 'llm'},
         ),
     ]
     assert [chat.bookmark(f'a{i}') for i in range(1, 4)] == [
@@ -169,7 +171,7 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
         ('/v1/chat/threads/thr-1/fork', {'at': at}),
         (
             '/v1/chat/threads/thr-2/inputs',
-            {'input': {'text': text, 'knowledge': [], 'tools': TOOLS_OFF}, 'model': 'llm'},
+            {'input': {'text': text, 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'model': 'llm'},
         ),
     ]
     assert chat.api.chat.threads['thr-1']['events'] == original
@@ -234,7 +236,7 @@ async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(cha
                 {'key': 'kb-a', 'name': 'Contracten', 'description': 'Getekende contracten'},
                 {'key': 'kb-b', 'name': 'Notulen'},
             ],
-            'tools': TOOLS_OFF,
+            'tools': WEB_SEARCH_OFF,
         },
         'agent': 'test',
         'model': 'llm',
@@ -325,6 +327,7 @@ async def test_attached_images_are_not_attachments(chat: Chat, monkeypatch: pyte
     stored_files(monkeypatch, img='completed')
     await chat.turn('question', 'a1', files=[{'type': 'file', 'id': 'img', 'content_type': 'image/png'}])
     assert 'attachments' not in chat.mutations()[-1][1]['input']
+    assert 'images' not in chat.mutations()[-1][1]['input']
 
 
 @pytest.mark.asyncio
@@ -374,7 +377,7 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 )
 async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, features: dict, state: str) -> None:
     await chat.turn('question', 'a1', features=features)
-    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': state, 'write_pdf': 'off'}
+    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': state}
 
 
 @pytest.mark.parametrize(
@@ -388,19 +391,19 @@ async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, 
     ids=['always', 'auto', 'off', 'no-features'],
 )
 def test_tools_maps_the_web_search_features_to_tool_states(features: dict | None, state: str) -> None:
-    assert agent_v2._tools({'features': features}, True, True) == {'tools': {'web_search': state, 'write_pdf': 'off'}}
+    assert agent_v2._tools({'features': features}, True) == {'tools': {'web_search': state}}
 
 
 @pytest.mark.parametrize('features', [{'web_search': True, 'web_search_required': True}, {'web_search': True}])
 def test_tools_sends_off_when_owui_does_not_allow_web_search(features: dict) -> None:
-    assert agent_v2._tools({'features': features}, False, True) == {'tools': {'web_search': 'off', 'write_pdf': 'off'}}
+    assert agent_v2._tools({'features': features}, False) == {'tools': {'web_search': 'off'}}
 
 
 @pytest.mark.asyncio
 async def test_a_disallowed_turn_asks_the_agent_for_no_web_search(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
     await chat.turn('question', 'a1', features={'web_search': True, 'web_search_required': True})
-    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': 'off', 'write_pdf': 'off'}
+    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': 'off'}
 
 
 @pytest.mark.asyncio
@@ -434,7 +437,7 @@ async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
     assert chat.mutations()[-1][1]['input'] == {
         'text': 'question',
         'knowledge': [],
-        'tools': {'web_search': 'off', 'write_pdf': 'off'},
+        'tools': {'web_search': 'off'},
     }
 
 
@@ -1283,7 +1286,7 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
         (
             '/v1/chat/threads',
             {
-                'input': {'text': 'last question', 'knowledge': [], 'tools': TOOLS_OFF},
+                'input': {'text': 'last question', 'knowledge': [], 'tools': WEB_SEARCH_OFF},
                 'agent': 'test',
                 'model': 'llm',
             },
@@ -1406,7 +1409,7 @@ async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_ans
     assert chat.mutations()[stopped:] == [
         (
             '/v1/chat/threads/thr-1/inputs',
-            {'input': {'text': 'what was I asking?', 'knowledge': [], 'tools': TOOLS_OFF}, 'model': 'llm'},
+            {'input': {'text': 'what was I asking?', 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'model': 'llm'},
         ),
     ]
 
@@ -1788,134 +1791,191 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
     assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('state', ['off', 'auto', 'required'])
-async def test_the_document_writer_control_sends_both_tool_states(chat: Chat, state: str) -> None:
-    """The document writer and web search controls send independent states on every turn."""
-    features = {
-        'web_search': True,
-        'document_writer': state != 'off',
-        'document_writer_required': state == 'required',
-    }
-    assert agent_v2._tools({'features': features}, True, True) == {'tools': {'web_search': 'auto', 'write_pdf': state}}
-    await chat.turn('question', 'a1', features=features)
-    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': 'auto', 'write_pdf': state}
+IMAGE_BYTES = base64.b64decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='
+)
+IMAGE_URL = 'data:image/png;base64,' + base64.b64encode(IMAGE_BYTES).decode()
+IMAGE_REFERENCE = {
+    'id': 'a' * 32,
+    'sha256': hashlib.sha256(IMAGE_BYTES).hexdigest(),
+    'size': len(IMAGE_BYTES),
+    'media_type': 'image/png',
+    'name': 'photo.png',
+}
 
 
-@pytest.mark.asyncio
-async def test_a_disallowed_turn_asks_the_agent_for_no_pdf(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
-    """OWUI permission overrides a client's required document writer state."""
-    monkeypatch.setattr(agent_v2, '_pdf_writer_allowed', AsyncMock(return_value=False))
-    features = {'document_writer': True, 'document_writer_required': True}
-    assert agent_v2._tools({'features': features}, True, False) == {'tools': TOOLS_OFF}
-    await chat.turn('question', 'a1', features=features)
-    assert chat.mutations()[-1][1]['input']['tools'] == TOOLS_OFF
+@pytest.fixture
+def image_upload(monkeypatch):
+    upload = AsyncMock(return_value=IMAGE_REFERENCE)
+    monkeypatch.setattr(SoevClient, 'post_bytes', upload)
+    return upload
+
+
+@pytest.fixture
+def saved_image(tmp_path, monkeypatch):
+    path = tmp_path / 'photo.png'
+    path.write_bytes(IMAGE_BYTES)
+    file = SimpleNamespace(id='saved-image', user_id='alice', filename='photo.png', path=str(path), meta={})
+    file.lookup = AsyncMock(return_value=file)
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', file.lookup)
+    monkeypatch.setattr(
+        agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='alice', role='user'))
+    )
+    monkeypatch.setattr(agent_v2.Storage, 'get_file', lambda path: path)
+
+    async def update(file_id, meta):
+        assert file_id == file.id
+        file.meta.update(meta)
+        return file
+
+    file.update = AsyncMock(side_effect=update)
+    monkeypatch.setattr(agent_v2.Files, 'update_file_metadata_by_id', file.update)
+    return file
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ('feature', 'enabled', 'role', 'permitted', 'allowed'),
-    [
-        (False, True, 'admin', True, False),
-        (True, False, 'admin', True, False),
-        (True, True, 'admin', False, True),
-        (True, True, 'user', True, True),
-        (True, True, 'user', False, False),
-        (True, True, None, True, False),
-    ],
-    ids=['tenant-off', 'setting-off', 'admin', 'user-permitted', 'user-denied', 'unknown-user'],
+    'entry', [{'type': 'image', 'id': 'saved-image'}, {'content_type': 'image/jpg', 'url': 'saved-image'}]
 )
-async def test_pdf_writer_allowed_needs_the_tenant_setting_and_the_users_permission(
-    monkeypatch: pytest.MonkeyPatch, feature: bool, enabled: bool, role: str | None, permitted: bool, allowed: bool
-) -> None:
-    """All users need the tenant flag and admin setting; ordinary users also need permission."""
-
-    async def config_get(key: str, default=None):
-        return {'document_writer.enable': enabled, 'user.permissions': {}}.get(key, default)
-
-    user = SimpleNamespace(id='u1', role=role) if role else None
-    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda key: feature if key == 'document_writer' else False)
-    monkeypatch.setattr(agent_v2.Config, 'get', config_get)
-    monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=user))
-    permission = AsyncMock(return_value=permitted)
-    monkeypatch.setattr(agent_v2, 'has_permission', permission)
-    assert await agent_v2._pdf_writer_allowed('u1') is allowed
-    if feature and enabled and role == 'user':
-        permission.assert_awaited_once_with('u1', 'features.document_writer', {})
-    else:
-        permission.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('format', ['markdown', 'html'])
-@pytest.mark.parametrize('close_after', [None, 4])
-async def test_pdf_documents_follow_the_tool_marker_and_survive_the_final_answer(
-    chat: Chat, format: str, close_after: int | None
-) -> None:
-    """Documents stay in output order, escaped exactly, across streamed and durable answer reconciliation."""
-    chat.api.chat.close_after = close_after
-    documents = [
-        {
-            'type': 'pdf-document',
-            'id': uuid4().hex,
-            'ref': None,
-            'properties': {},
-            'text': None,
-            'title': """Factuur <Advies> & "werk" '2026'""",
-            'format': format,
-            'content': """<h1 title="a">A & B's</h1>\n> "Quote" """,
-        },
-        {
-            'type': 'pdf-document',
-            'id': uuid4().hex,
-            'ref': 'must-not-be-cited',
-            'properties': {},
-            'text': 'must-not-be-cited',
-            'title': 'Second',
-            'format': format,
-            'content': 'Second body',
-        },
-    ]
-    chat.api.chat.turns = [
-        [
-            ('model_output', {'content': 'Before.', 'tool_calls': [{'id': 'c1', 'name': 'write_pdf'}]}),
-            found(*documents, call_id='c1'),
-            ('delta', {'text': 'After'}),
-            ('model_output', {'content': 'After.'}),
-        ]
-    ]
-    expected = (
-        '\n\n<details type="tool_calls" done="true" name="write_pdf">\n<summary>Running write_pdf…</summary>\n</details>\n\n'
-        f'<details type="document" format="{format}" '
-        'title="Factuur &lt;Advies&gt; &amp; &quot;werk&quot; &#x27;2026&#x27;" done="true">'
-        '\n<summary>Document</summary>\n'
-        '&lt;h1 title=&quot;a&quot;&gt;A &amp; B&#x27;s&lt;/h1&gt;\n&gt; &quot;Quote&quot; \n</details>\n\n'
-        f'<details type="document" format="{format}" title="Second" done="true">'
-        '\n<summary>Document</summary>\nSecond body\n</details>\n\n'
+async def test_saved_image_upload_is_reused_after_access_check_on_retry(chat, image_upload, saved_image, entry):
+    metadata = {'user_message': {'content': 'describe', 'files': [entry]}}
+    for index in range(2):
+        await chat.turn('describe', f'a{index}', **metadata)
+        assert chat.mutations()[-1][1]['input']['images'] == [IMAGE_REFERENCE]
+    image_upload.assert_awaited_once_with(
+        '/v1/chat/images', IMAGE_BYTES, as_user='owui:user:alice', params={'name': 'photo.png'}
     )
-    assert content(await chat.turn('write a document', 'a1')) == 'Before.' + expected + 'After.'
-    assert not any(event['type'] == 'source' for event in chat.socket)
-    assert [(status['action'], status['done']) for status in statuses(chat)] == [
-        ('write_pdf', False),
-        ('write_pdf', True),
-    ]
+    assert saved_image.meta['soev_image'] == IMAGE_REFERENCE
+    assert saved_image.lookup.await_count == 2
+    assert saved_image.update.await_count == 1
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('format', ['pdf', '', None])
-async def test_bad_pdf_document_formats_are_logged_and_skipped(
-    chat: Chat, caplog: pytest.LogCaptureFixture, format: str | None
-) -> None:
-    """An invalid document cannot crash the turn or leave its tool status running."""
-    chat.api.chat.turns = [
-        [
-            call('write_pdf'),
-            found({'type': 'pdf-document', 'id': 'bad', 'format': format}, call_id='c1'),
-            ('model_output', {'content': 'Answer'}),
-        ]
-    ]
-    answer = content(await chat.turn('write a document', 'a1'))
-    assert answer.endswith('Answer') and 'type="document"' not in answer
-    assert not any(event['type'] == 'source' for event in chat.socket)
-    assert [status['done'] for status in statuses(chat)] == [False, True]
-    assert any('unsupported format' in record.message and record.element_id == 'bad' for record in caplog.records)
+@pytest.mark.parametrize('change', ['bytes', 'caller'])
+async def test_image_cache_does_not_reuse_changed_bytes_or_another_callers_reference(
+    chat, image_upload, saved_image, change
+):
+    metadata = {'user_message': {'content': 'describe', 'files': [{'type': 'image', 'id': saved_image.id}]}}
+    await chat.turn('describe', 'a1', **metadata)
+    if change == 'bytes':
+        Path(saved_image.path).write_bytes(IMAGE_BYTES + b'changed')
+    else:
+        saved_image.meta['soev_image_user'] = 'owui:user:bob'
+    await chat.turn('describe', 'a2', **metadata)
+    assert image_upload.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_saved_image_access_is_checked_before_using_cached_reference(
+    chat, image_upload, saved_image, monkeypatch
+):
+    saved_image.user_id = 'bob'
+    saved_image.meta = {'soev_image': IMAGE_REFERENCE, 'soev_image_user': 'owui:user:alice'}
+    access = AsyncMock(return_value=False)
+    monkeypatch.setattr(agent_v2, 'has_access_to_file', access)
+    chunks = await chat.turn(
+        'describe', 'a1', user_message={'content': 'describe', 'files': [{'type': 'image', 'id': saved_image.id}]}
+    )
+    assert chunks[0]['error']['code'] == 'images_unavailable'
+    assert chat.mutations() == []
+    image_upload.assert_not_awaited()
+    access.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_temporary_chat_images_come_only_from_current_user_message(chat, image_upload, monkeypatch):
+    update = AsyncMock()
+    monkeypatch.setattr(agent_v2.Files, 'update_file_metadata_by_id', update)
+    await chat.turn(
+        'describe',
+        'a1',
+        chat_id='local:test',
+        user_message={
+            'content': [{'type': 'text', 'text': 'describe'}, {'type': 'image_url', 'image_url': {'url': 'ignored'}}],
+            'files': [{'type': 'image', 'url': IMAGE_URL, 'name': 'photo.png'}, {'type': 'file', 'id': 'document'}],
+        },
+        files=[{'type': 'image', 'url': 'ignored'}] * 5,
+        form_data={'messages': [{'role': 'user', 'files': [{'type': 'image', 'url': 'old image'}]}]},
+    )
+    sent = chat.mutations()[-1][1]['input']
+    assert sent == {'text': 'describe', 'knowledge': [], 'tools': WEB_SEARCH_OFF, 'images': [IMAGE_REFERENCE]}
+    image_upload.assert_awaited_once_with(
+        '/v1/chat/images', IMAGE_BYTES, as_user='owui:user:alice', params={'name': 'photo.png'}
+    )
+    update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+async def test_more_than_four_images_refuses_before_upload_or_turn(chat, image_upload, language):
+    chunks = await chat.turn(
+        'describe',
+        'a1',
+        user_language=language,
+        user_message={'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL}] * 5},
+    )
+    assert chunks[0]['error']['code'] == 'images_unavailable'
+    assert ('maximaal 4' if language == 'nl-NL' else 'at most 4') in chunks[0]['error']['message']
+    assert chat.mutations() == []
+    image_upload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_four_images_are_allowed(chat, image_upload):
+    await chat.turn(
+        'describe', 'a1', user_message={'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL}] * 4}
+    )
+    assert chat.mutations()[-1][1]['input']['images'] == [IMAGE_REFERENCE] * 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'url',
+    [
+        'data:text/plain;base64,aGk=',
+        'data:image/png;base64,!!!',
+        'data:image/png;base64,',
+        'data:image/png;base64,a',
+        'data:image/png,raw',
+    ],
+)
+async def test_invalid_image_data_url_refuses_turn(chat, image_upload, url):
+    chunks = await chat.turn(
+        'describe',
+        'a1',
+        user_message={'content': 'describe', 'files': [{'type': 'image', 'url': url, 'name': 'bad.png'}]},
+    )
+    assert chunks[0]['error']['code'] == 'images_unavailable'
+    assert 'bad.png (invalid image data)' in chunks[0]['error']['message']
+    assert chat.mutations() == []
+    image_upload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,reason', [(413, '10 MiB'), (415, 'PNG, JPEG, WebP')])
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+async def test_image_upload_validation_errors_name_the_file(chat, image_upload, status, reason, language):
+    image_upload.side_effect = SoevApiError(status, 'image_invalid', 'upstream detail')
+    chunks = await chat.turn(
+        'describe',
+        'a1',
+        user_language=language,
+        user_message={'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL, 'name': 'bad.png'}]},
+    )
+    error = chunks[0]['error']
+    assert error['code'] == 'images_unavailable'
+    assert 'bad.png' in error['message'] and reason in error['message']
+    assert ('Verwijder' if language == 'nl-NL' else 'Remove') in error['message']
+    assert chat.mutations() == []
+
+
+@pytest.mark.asyncio
+async def test_other_image_upload_errors_propagate(chat, image_upload):
+    error = SoevApiError(503, 'service_unavailable', 'unavailable')
+    image_upload.side_effect = error
+    with pytest.raises(SoevApiError) as caught:
+        await chat.turn(
+            'describe', 'a1', user_message={'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL}]}
+        )
+    assert caught.value is error
+    assert chat.mutations() == []
