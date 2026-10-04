@@ -5,7 +5,7 @@
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
-	import { getContext, onDestroy, onMount, tick } from 'svelte';
+	import { getContext, setContext, onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -177,6 +177,17 @@
 	$: messageInputDropzoneId = embedded ? 'note-chat-input-dropzone' : 'chat-pane';
 
 	const eventTarget = new EventTarget();
+	setContext('removeReferenceAttachment', async (id: string) => {
+		chatFiles = chatFiles.filter((file) => file.id !== id);
+		for (const message of Object.values(history.messages) as any[]) {
+			if (message.files?.some((file: ChatAttachment) => file.id === id)) {
+				message.removed_attachment_ids = [...(message.removed_attachment_ids ?? []), id];
+				message.files = message.files.filter((file: ChatAttachment) => file.id !== id);
+			}
+		}
+		history = history;
+		await saveChatHandler($chatId, history);
+	});
 
 	let messageInput: MessageInput | undefined;
 	let messagesRef: Messages | undefined;
@@ -1420,10 +1431,16 @@
 				} else if (type === 'chat:message' || type === 'replace') {
 					message.content = data.content;
 				} else if (type === 'chat:message:files' || type === 'files') {
-					message.files = data.files;
+					const previous = new Set((message.files ?? []).map((file: ChatAttachment) => file.id));
+					const removed = new Set(message.removed_attachment_ids ?? []);
+					message.files = data.files.filter((file: ChatAttachment) => !removed.has(file.id));
 					chatFiles = mergeFiles(
 						chatFiles,
-						data.files.filter((file: ChatAttachment) => file.source)
+						message.files.filter(
+							(file: ChatAttachment) =>
+								file.source &&
+								(!previous.has(file.id) || chatFiles.some((item) => item.id === file.id))
+						)
 					);
 				} else if (type === 'action_required') {
 					message.action_required = data;
@@ -3976,11 +3993,6 @@
 			.filter((message) => message.files)
 			.flatMap((message) => message.files);
 
-		chatFiles = mergeFiles(
-			chatFiles,
-			chatMessageFiles.filter((file: ChatAttachment) => file.source)
-		);
-
 		// Filter chatFiles to only include files that are in the chatMessageFiles
 		chatFiles = chatFiles.filter((item) => {
 			const fileExists = chatMessageFiles.some((messageFile) => messageFile.id === item.id);
@@ -4605,6 +4617,7 @@
 		imageGenerationEnabled,
 		webSearchEnabled,
 		webSearchRequired,
+		liveDocumentsState,
 		codeInterpreterEnabled,
 		toolApprovalMode
 	});

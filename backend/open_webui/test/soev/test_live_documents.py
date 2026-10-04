@@ -19,6 +19,7 @@ def attachment():
         'provider_ref': {'grant_id': 'g', 'drive_id': 'd', 'item_id': 'i', 'etag': 'e'},
         'attached_by': 'agent',
         'status': 'ready',
+        'content_type': 'application/pdf',
         'call_id': 'call',
         'elements': [],
     }
@@ -47,8 +48,7 @@ async def test_event_poll_and_next_turn(env, monkeypatch):  # noqa: F811
     assert len(rows) == 1
     assert rows[0].id == attachment()['source_id'] and rows[0].path == ''
     assert len(messages['files']) == 1
-    with pytest.raises(agent_v2.AttachmentsUnavailable):
-        await agent_v2._attachments(messages)
+    assert await agent_v2._attachments(messages) == {'attachment_notes': ['still processing: Quarterly plan.pdf']}
     client = SimpleNamespace(get=AsyncMock(return_value={'status': 'SUCCEEDED'}), send=AsyncMock())
     assert await env.jobs.poll_once(client, now=rows[0].meta['soev_job']['submitted_at']) == 1
     client.send.assert_not_awaited()
@@ -107,6 +107,8 @@ async def test_original_proxy_rechecks_subject_without_storage(env, monkeypatch,
         assert error.value.status_code == 403
     else:
         result = await response
+        assert result.media_type == 'application/pdf'
+        assert result.headers['content-disposition'].startswith('attachment' if named else 'inline')
         assert b''.join([part async for part in result.body_iterator]) == b'original bytes'
     assert calls == [(f'/v1/collections/owui-attachments-alice/documents/{file.id}/original', 'owui:user:alice')]
     assert closed == [True]
@@ -155,3 +157,82 @@ def test_document_states_require_server_permission(allowed, state):
     expected = state if allowed and state in ('auto', 'required') else 'off'
     tools = agent_v2._tools({'features': {'live_documents': state}}, False, allowed)['tools']
     assert tools['search_live_documents'] == tools['attach_live_document'] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', ['failed', 'processing', 'gone'])
+async def test_unavailable_reference_does_not_block_next_turn(env, monkeypatch, status):  # noqa: F811
+    from open_webui.soev import live_documents
+    from open_webui.utils import agent_v2
+
+    row = await live_documents.register_attachment('alice', attachment())
+    if status == 'gone':
+        await env.files.Files.delete_file_by_id(row.id)
+    else:
+        await env.files.Files.set_status(row.id, status)
+    monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
+    turn = SimpleNamespace(client=env.client, run=Mock(return_value='stream'))
+    assert (
+        await agent_v2._sent(
+            turn, 'next', {'user_id': 'alice', 'files': [live_documents.chat_file(row)]}, agent=None, model=None
+        )
+        == 'stream'
+    )
+    sent = turn.run.call_args.args[0]['input']
+    assert 'attachments' not in sent
+    assert ('still processing: Quarterly plan.pdf' in sent['text']) == (status == 'processing')
+
+
+@pytest.mark.asyncio
+async def test_collection_cache_and_setup_failure(env, monkeypatch):  # noqa: F811
+    from open_webui.soev import live_documents
+    from open_webui.utils import agent_v2
+
+    live_documents._collections.clear()
+    setup = AsyncMock(return_value='owui-attachments-alice')
+    monkeypatch.setattr(live_documents.ingest, 'ensure_attachments_collection', setup)
+    assert await live_documents.attachment_collection('alice', env.client) == 'owui-attachments-alice'
+    await live_documents.attachment_collection('alice', env.client)
+    assert setup.await_count == 1
+    live_documents._collections.clear()
+    setup.side_effect = RuntimeError('unavailable')
+    monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
+    turn = SimpleNamespace(client=env.client, run=Mock(return_value='stream'))
+    await agent_v2._sent(
+        turn, 'hello', {'user_id': 'alice', 'features': {'live_documents': 'auto'}}, agent=None, model=None
+    )
+    sent = turn.run.call_args.args[0]['input']
+    assert 'live documents unavailable this turn' in sent['text']
+    assert sent['tools']['attach_live_document'] == 'off'
+    assert 'attachment_collection' not in sent
+
+
+@pytest.mark.asyncio
+async def test_delete_reference_skips_s3_storage(env, monkeypatch):  # noqa: F811
+    from open_webui.routers import files
+    from open_webui.soev import live_documents
+    from open_webui.storage.provider import S3StorageProvider
+
+    row = await live_documents.register_attachment('alice', attachment())
+    monkeypatch.setattr(files.ingest, 'cancel', AsyncMock())
+    monkeypatch.setattr(files.Knowledges, 'get_knowledges_by_file_id', AsyncMock(return_value=[]))
+    monkeypatch.setattr(files, 'publish_event', AsyncMock())
+    storage = Mock(spec=S3StorageProvider)
+    storage.delete_file.side_effect = AssertionError('Empty reference path passed to S3')
+    monkeypatch.setattr(files, 'Storage', storage)
+    assert await files.delete_file_by_id(
+        id=row.id, request=Mock(), user=SimpleNamespace(id='alice', role='user'), db=None
+    )
+    storage.delete_file.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mismatched_agent_event_is_skipped(env):  # noqa: F811
+    from open_webui.utils.agent_v2 import AgentTurn
+
+    turn = AgentTurn(env.client, {'user_id': 'alice'}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    await turn.attached({**attachment(), 'collection_key': 'foreign'})
+    turn.emitter.assert_not_awaited()

@@ -170,7 +170,7 @@ class AttachmentsUnavailable(Exception):
         self.files = files
 
 
-async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     """[Claude] The files attached in the chat, as the turn's `attachments` field; none while nothing is attached.
 
     The collection is the one the finished upload reported, else where chat uploads go; the agent checks access.
@@ -180,6 +180,7 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str
     """
     attached: list[dict[str, str]] = []
     unavailable: list[tuple[str, str]] = []
+    notes: list[str] = []
     entries = {
         entry['id']: entry
         for entry in metadata.get('files') or []
@@ -192,7 +193,12 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str
         name = entry.get('name') or (file.filename if file is not None else file_id)
         status = 'gone' if file is None else (file.meta or {}).get('status')
         if file is None or status in ('processing', 'failed'):
-            unavailable.append((name, status))
+            if entry.get('attached_by') or (file is not None and (file.meta or {}).get('attached_by')):
+                log.info('Skipping reference attachment %s (%s)', file_id, status)
+                if status == 'processing':
+                    notes.append(f'still processing: {name}')
+            else:
+                unavailable.append((name, status))
             continue
         key = (
             (file.meta or {}).get('collection_name')
@@ -205,7 +211,7 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str
         attached.append(item)
     if unavailable:
         raise AttachmentsUnavailable(unavailable)
-    return {'attachments': attached} if attached else {}
+    return {**({'attachments': attached} if attached else {}), **({'attachment_notes': notes} if notes else {})}
 
 
 def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
@@ -659,7 +665,11 @@ class AgentTurn:
         self.running.clear()
 
     async def attached(self, payload: dict) -> None:
-        file = await live_documents.register_attachment(self.metadata['user_id'], payload)
+        try:
+            file = await live_documents.register_attachment(self.metadata['user_id'], payload)
+        except live_documents.AttachmentMismatch as error:
+            log.warning('Skipping mismatched attachment event (%s)', error.status)
+            return
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
         stored = {}
         if chat_id and message_id and not is_temporary_chat_id(chat_id):
@@ -929,11 +939,25 @@ async def _sent(
     except AttachmentsUnavailable as unavailable:
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
     tools = _tools(metadata, await _web_search_allowed(metadata['user_id']), await _live_documents_allowed())
+    notes = attachments.pop('attachment_notes', [])
+    collection = {}
+    references = any(entry.get('attached_by') or entry.get('source') for entry in metadata.get('files') or [])
+    if tools['tools']['search_live_documents'] != 'off' or references:
+        try:
+            collection['attachment_collection'] = await live_documents.attachment_collection(
+                metadata['user_id'], turn.client
+            )
+        except Exception:
+            log.warning('Live document collection unavailable this turn', exc_info=False)
+            notes.append('live documents unavailable this turn')
+            tools['tools'].update(search_live_documents='off', attach_live_document='off')
+    if notes:
+        text += '\n\nAttachment status:\n' + '\n'.join(notes)
     body = {
         'input': {
             'text': text,
             'knowledge': knowledge,
-            'attachment_collection': await ingest.ensure_attachments_collection(metadata['user_id'], turn.client),
+            **collection,
             **attachments,
             **_instructions(metadata),
             **tools,
