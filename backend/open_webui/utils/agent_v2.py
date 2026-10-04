@@ -71,15 +71,15 @@ def _duration(seconds: float, dutch: bool) -> str:
 
 def _marker(status: dict[str, Any], elements: list[dict[str, Any]]) -> dict[str, Any]:
     """The v1 anchor for one shown tool call: the frontend hides it and places the call's status and the
-    reasoning around it by its position in the content. The whitespace is what its details tokenizer needs."""
-    documents = [element for element in elements if element.get('type') == 'pdf-document']
-    if documents:
-        return _chunk({'content': ''.join(_document_marker(document) for document in documents)})
+    reasoning around it by its position in the content. The whitespace is what its details tokenizer needs.
+    A written PDF document follows its call's anchor."""
     text = _PLACEHOLDER.sub(lambda match: str(status.get(match[1], match[0])), status['description'])
     name = html.escape(status['action'], quote=True)
+    documents = ''.join(_document_marker(element) for element in elements if element.get('type') == 'pdf-document')
     return _chunk(
         {
             'content': f'\n\n<details type="tool_calls" done="true" name="{name}">\n<summary>{html.escape(text)}</summary>\n</details>\n\n'
+            + documents
         }
     )
 
@@ -94,7 +94,7 @@ def _document_marker(element: dict[str, Any]) -> str:
     content = html.escape(element['content'], quote=True)
     return (
         f'<details type="document" format="{format}" title="{title}" done="true">'
-        f'<summary>Document</summary>\n{content}\n</details>'
+        f'<summary>Document</summary>\n{content}\n</details>\n\n'
     )
 
 

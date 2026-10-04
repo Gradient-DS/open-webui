@@ -1849,7 +1849,7 @@ async def test_pdf_writer_allowed_needs_the_tenant_setting_and_the_users_permiss
 @pytest.mark.asyncio
 @pytest.mark.parametrize('format', ['markdown', 'html'])
 @pytest.mark.parametrize('close_after', [None, 4])
-async def test_pdf_documents_replace_the_tool_marker_and_survive_the_final_answer(
+async def test_pdf_documents_follow_the_tool_marker_and_survive_the_final_answer(
     chat: Chat, format: str, close_after: int | None
 ) -> None:
     """Documents stay in output order, escaped exactly, across streamed and durable answer reconciliation."""
@@ -1885,12 +1885,13 @@ async def test_pdf_documents_replace_the_tool_marker_and_survive_the_final_answe
         ]
     ]
     expected = (
+        '\n\n<details type="tool_calls" done="true" name="write_pdf">\n<summary>Running write_pdf…</summary>\n</details>\n\n'
         f'<details type="document" format="{format}" '
         'title="Factuur &lt;Advies&gt; &amp; &quot;werk&quot; &#x27;2026&#x27;" done="true">'
         '<summary>Document</summary>\n'
-        '&lt;h1 title=&quot;a&quot;&gt;A &amp; B&#x27;s&lt;/h1&gt;\n&gt; &quot;Quote&quot; \n</details>'
+        '&lt;h1 title=&quot;a&quot;&gt;A &amp; B&#x27;s&lt;/h1&gt;\n&gt; &quot;Quote&quot; \n</details>\n\n'
         f'<details type="document" format="{format}" title="Second" done="true">'
-        '<summary>Document</summary>\nSecond body\n</details>'
+        '<summary>Document</summary>\nSecond body\n</details>\n\n'
     )
     assert content(await chat.turn('write a document', 'a1')) == 'Before.' + expected + 'After.'
     assert not any(event['type'] == 'source' for event in chat.socket)
