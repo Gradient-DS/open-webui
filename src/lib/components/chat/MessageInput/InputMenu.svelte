@@ -778,6 +778,13 @@
 						<MenuItem
 							label={$i18n.t('OneDrive search')}
 							pinId="live_documents"
+							ariaLabel={stateAriaLabel(
+								$i18n.t('OneDrive search'),
+								liveDocumentsState,
+								liveDocumentsState === 'off'
+									? $i18n.t(TOOL_OFF_DESCRIPTION)
+									: $i18n.t('The model decides whether to search OneDrive')
+							)}
 							tooltip={stateAriaLabel(
 								$i18n.t('OneDrive search'),
 								liveDocumentsState,
