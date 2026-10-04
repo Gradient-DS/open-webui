@@ -230,7 +230,7 @@ async def _image_bytes(entry: dict, user: str) -> tuple[bytes, FileModel | None,
     if not file_id:
         return _image_data(url, name), None, name
     file = await Files.get_file_by_id(file_id)
-    reader = await Users.get_user_by_id(user.removeprefix('owui:user:'))
+    reader = await identity.user_of(user)
     if file is None or reader is None:
         raise ImagesUnavailable('gone', name)
     if file.user_id != reader.id and reader.role != 'admin' and not await has_access_to_file(file.id, 'read', reader):
