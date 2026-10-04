@@ -112,6 +112,7 @@ def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> Chat:
         AgentConfigs, 'get_agent_config_by_id', AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2'}))
     )
     monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=emit))
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=True))
     return result
 
 
@@ -386,7 +387,44 @@ async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, 
     ids=['always', 'auto', 'off', 'no-features'],
 )
 def test_tools_maps_the_web_search_features_to_tool_states(features: dict | None, state: str) -> None:
-    assert agent_v2._tools({'features': features}) == {'tools': {'web_search': state}}
+    assert agent_v2._tools({'features': features}, True) == {'tools': {'web_search': state}}
+
+
+@pytest.mark.parametrize('features', [{'web_search': True, 'web_search_required': True}, {'web_search': True}])
+def test_tools_sends_off_when_owui_does_not_allow_web_search(features: dict) -> None:
+    assert agent_v2._tools({'features': features}, False) == {'tools': {'web_search': 'off'}}
+
+
+@pytest.mark.asyncio
+async def test_a_disallowed_turn_asks_the_agent_for_no_web_search(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
+    await chat.turn('question', 'a1', features={'web_search': True, 'web_search_required': True})
+    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': 'off'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('enabled', 'role', 'permitted', 'allowed'),
+    [
+        (False, 'admin', True, False),
+        (True, 'admin', False, True),
+        (True, 'user', True, True),
+        (True, 'user', False, False),
+        (True, None, True, False),
+    ],
+    ids=['tenant-off', 'admin', 'user-permitted', 'user-denied', 'unknown-user'],
+)
+async def test_web_search_allowed_needs_the_tenant_setting_and_the_users_permission(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool, role: str | None, permitted: bool, allowed: bool
+) -> None:
+    async def config_get(key: str, default=None):
+        return {'web.search.enable': enabled, 'user.permissions': {}}.get(key, default)
+
+    user = SimpleNamespace(id='u1', role=role) if role else None
+    monkeypatch.setattr(agent_v2.Config, 'get', config_get)
+    monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=user))
+    monkeypatch.setattr(agent_v2, 'has_permission', AsyncMock(return_value=permitted))
+    assert await agent_v2._web_search_allowed('u1') is allowed
 
 
 @pytest.mark.asyncio
