@@ -4,14 +4,18 @@
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
-		connectLiveDocuments,
-		prefetchLiveDocuments,
+		connectLiveSource,
+		prefetchLiveConnections,
 		consentLabels
-	} from '$lib/utils/live-documents';
+	} from '$lib/utils/live-connections';
 	const i18n = getContext<Readable<I18n>>('i18n');
 	export let provider: string;
 	onMount(() => {
-		void prefetchLiveDocuments(localStorage.token, provider).catch(() => {});
+		void prefetchLiveConnections(
+			localStorage.token,
+			provider,
+			provider === 'outlook_mail' ? 'mail' : 'live_documents'
+		).catch(() => {});
 	});
 	let busy = false;
 	let connected = false;
@@ -25,7 +29,11 @@
 		on:click={async () => {
 			busy = true;
 			try {
-				await connectLiveDocuments(localStorage.token, provider);
+				await connectLiveSource(
+					localStorage.token,
+					provider,
+					provider === 'outlook_mail' ? 'mail' : 'live_documents'
+				);
 				connected = true;
 			} catch {
 				toast.error($i18n.t('Could not connect account'));
@@ -35,7 +43,11 @@
 		}}
 	>
 		{$i18n.t(
-			connected ? 'Account connected. Enable file search to continue.' : consentLabels[provider]
+			connected
+				? provider === 'outlook_mail'
+					? 'Account connected. Enable mail search to continue.'
+					: 'Account connected. Enable file search to continue.'
+				: consentLabels[provider]
 		)}
 	</button>
 </div>

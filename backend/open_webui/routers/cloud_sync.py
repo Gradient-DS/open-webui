@@ -57,7 +57,7 @@ async def get_policy(user: object = Depends(get_verified_user)) -> SyncPolicy:
 
 class ConnectionForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    provider: Literal['onedrive', 'google_drive', 'confluence']
+    provider: Literal['onedrive', 'outlook_mail', 'google_drive', 'confluence']
 
 
 class ScheduleForm(BaseModel):
@@ -167,11 +167,11 @@ async def skipped_items(knowledge_id: str, schedule_id: str, sync=Depends(cloud_
     return await sync.skipped_items(knowledge_id, schedule_id)
 
 
-@router.get('/connections/{connection_id}/live-documents')
-async def live_document_grants(connection_id: str, sync=Depends(cloud_sync)):
-    return await sync.live_document_grants(connection_id)
+@router.get('/connections/{connection_id}/live/{family}')
+async def live_grants(connection_id: str, family: Literal['live_documents', 'mail'], sync=Depends(cloud_sync)):
+    return await sync.live_grants(connection_id, family)
 
 
-@router.post('/connections/{connection_id}/live-documents')
-async def enable_live_documents(connection_id: str, sync=Depends(cloud_sync)):
-    return await sync.enable_live_documents(connection_id)
+@router.post('/connections/{connection_id}/live/{family}')
+async def enable_live_family(connection_id: str, family: Literal['live_documents', 'mail'], sync=Depends(cloud_sync)):
+    return await sync.enable_live_family(connection_id, family)

@@ -1,11 +1,11 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import * as api from '$lib/apis/cloudSync';
-import { connectLiveDocuments, prefetchLiveDocuments } from './live-documents';
+import { connectLiveSource, prefetchLiveConnections } from './live-connections';
 vi.mock('$lib/apis/cloudSync', async (original) => ({
 	...(await original<typeof import('$lib/apis/cloudSync')>()),
 	listConnections: vi.fn(),
-	listLiveDocumentGrants: vi.fn(),
-	enableLiveDocuments: vi.fn(),
+	listLiveGrants: vi.fn(),
+	enableLiveFamily: vi.fn(),
 	createConnection: vi.fn(),
 	authorizeConnection: vi.fn(),
 	getConnection: vi.fn()
@@ -34,11 +34,11 @@ it('reuses an enabled grant without starting authorization', async () => {
 	vi.mocked(api.listConnections).mockResolvedValue([
 		{ id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' }
 	]);
-	vi.mocked(api.listLiveDocumentGrants).mockResolvedValue([
+	vi.mocked(api.listLiveGrants).mockResolvedValue([
 		{ id: 'g', lifecycle: 'enabled', families: ['live_documents'] }
 	]);
-	await prefetchLiveDocuments('session');
-	expect(await connectLiveDocuments('session')).toBe('g');
+	await prefetchLiveConnections('session');
+	expect(await connectLiveSource('session')).toBe('g');
 	expect(api.authorizeConnection).not.toHaveBeenCalled();
 	expect(window.open).not.toHaveBeenCalled();
 });
@@ -53,43 +53,43 @@ it('ignores forged completion and grants only after the owned connection is enab
 		source_kind: 'onedrive',
 		lifecycle: 'enabled'
 	});
-	vi.mocked(api.enableLiveDocuments).mockResolvedValue({
+	vi.mocked(api.enableLiveFamily).mockResolvedValue({
 		id: 'g',
 		lifecycle: 'enabled',
 		families: ['live_documents']
 	});
-	await prefetchLiveDocuments('session');
-	const pending = connectLiveDocuments('session');
+	await prefetchLiveConnections('session');
+	const pending = connectLiveSource('session');
 	await vi.advanceTimersByTimeAsync(0);
 	receive({
 		origin: 'https://evil.invalid',
 		source: popup,
 		data: { type: 'soev_connect', connection: 'c', result: 'pending' }
 	});
-	expect(api.enableLiveDocuments).not.toHaveBeenCalled();
+	expect(api.enableLiveFamily).not.toHaveBeenCalled();
 	receive({
 		origin: 'https://app.invalid',
 		source: popup,
 		data: { type: 'soev_connect', connection: 'c', result: 'pending' }
 	});
 	expect(await pending).toBe('g');
-	expect(api.enableLiveDocuments).toHaveBeenCalledWith('session', 'c');
+	expect(api.enableLiveFamily).toHaveBeenCalledWith('session', 'c', 'live_documents');
 });
 it('propagates policy denial without authorizing a disabled feature', async () => {
 	vi.mocked(api.listConnections).mockResolvedValue([
 		{ id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' }
 	]);
-	vi.mocked(api.listLiveDocumentGrants).mockResolvedValue([]);
-	vi.mocked(api.enableLiveDocuments).mockRejectedValue(
+	vi.mocked(api.listLiveGrants).mockResolvedValue([]);
+	vi.mocked(api.enableLiveFamily).mockRejectedValue(
 		new api.CloudSyncError(403, 'policy_forbids', 'Live documents are disabled')
 	);
-	await prefetchLiveDocuments('session');
-	await expect(connectLiveDocuments('session')).rejects.toThrow('Live documents are disabled');
+	await prefetchLiveConnections('session');
+	await expect(connectLiveSource('session')).rejects.toThrow('Live documents are disabled');
 	expect(api.authorizeConnection).not.toHaveBeenCalled();
 });
 
 it('sends a picker reference to the consumer with session authorization and an operation id', async () => {
-	const { attachPickedDocument } = await import('./live-documents');
+	const { attachPickedDocument } = await import('./live-connections');
 	const fetchSpy = vi.fn().mockResolvedValue({
 		ok: true,
 		json: async () => ({ id: 'source', type: 'file', status: 'processing' })
@@ -122,8 +122,8 @@ it.each(['suspended:reauth', 'enabled'])(
 		vi.mocked(api.authorizeConnection).mockResolvedValue({
 			authorize_url: 'https://provider.invalid/auth'
 		});
-		await prefetchLiveDocuments('session');
-		const pending = connectLiveDocuments('session');
+		await prefetchLiveConnections('session');
+		const pending = connectLiveSource('session');
 		expect(window.open).toHaveBeenCalledOnce();
 		await vi.advanceTimersByTimeAsync(0);
 		expect(api.authorizeConnection).toHaveBeenCalledWith('session', 'c');
@@ -137,7 +137,7 @@ it.each(['suspended:reauth', 'enabled'])(
 );
 
 it('selects only the picker tenant and object identity, regardless of connection order', async () => {
-	const { matchingPickerConnection } = await import('./live-documents');
+	const { matchingPickerConnection } = await import('./live-connections');
 	const rows = ['other', 'chosen'].map((id) => ({
 		connection: {
 			id,
@@ -162,4 +162,21 @@ it('selects only the picker tenant and object identity, regardless of connection
 			account
 		)
 	).toThrow('does not match');
+});
+
+it('keeps mail consent separate from document consent', async () => {
+	vi.mocked(api.listConnections).mockResolvedValue([
+		{ id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' },
+		{ id: 'm', source_kind: 'outlook_mail', lifecycle: 'enabled' }
+	]);
+	vi.mocked(api.listLiveGrants).mockImplementation(async (_token, id, family) => [
+		{ id: `${id}-grant`, lifecycle: 'enabled', families: [family!] }
+	]);
+	await Promise.all([
+		prefetchLiveConnections('mail-session', 'onedrive', 'live_documents'),
+		prefetchLiveConnections('mail-session', 'outlook_mail', 'mail')
+	]);
+	expect(await connectLiveSource('mail-session', 'outlook_mail', 'mail')).toBe('m-grant');
+	expect(await connectLiveSource('mail-session', 'onedrive', 'live_documents')).toBe('c-grant');
+	expect(window.open).not.toHaveBeenCalled();
 });

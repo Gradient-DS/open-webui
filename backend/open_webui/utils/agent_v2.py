@@ -222,7 +222,7 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
 
 
 def _tools(
-    metadata: dict[str, Any], web_search_allowed: bool, live_documents_allowed: bool
+    metadata: dict[str, Any], web_search_allowed: bool, live_documents_allowed: bool, live_mail_allowed: bool
 ) -> dict[str, dict[str, str]]:
     """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
     default never decides for the user, and so is every turn where OWUI does not allow web search."""
@@ -230,7 +230,24 @@ def _tools(
     documents = (metadata.get('features') or {}).get('live_documents') if live_documents_allowed else 'off'
     if documents not in ('auto', 'required'):
         documents = 'off'
-    return {'tools': {'web_search': state, 'search_live_documents': documents, 'attach_live_document': documents}}
+    mail = (metadata.get('features') or {}).get('live_mail') if live_mail_allowed else 'off'
+    if mail not in ('auto', 'required'):
+        mail = 'off'
+    return {
+        'tools': {
+            'web_search': state,
+            'search_live_documents': documents,
+            'attach_live_document': documents,
+            'search_mail': mail,
+            'read_mail': mail,
+        }
+    }
+
+
+async def _live_mail_allowed() -> bool:
+    from open_webui.env import AGENT_API_ENABLED
+
+    return AGENT_API_ENABLED and bool(await Config.get('live_mail.enable'))
 
 
 async def _live_documents_allowed() -> bool:
@@ -600,6 +617,10 @@ class AgentTurn:
             or not (attached or any(element.get('type') == 'document' for element in output.get('elements') or []))
         ):
             status = {'action': name, 'description': 'Could not open document'}
+        if name == 'read_mail' and (
+            output.get('error') or not any(e.get('type') == 'mail-text' for e in output.get('elements') or [])
+        ):
+            status = {'action': name, 'description': 'Could not read email'}
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
         return [_marker(status)]
 
@@ -943,7 +964,12 @@ async def _sent(
         return _refused(_unavailable(unavailable.count, metadata.get('user_language')))
     except AttachmentsUnavailable as unavailable:
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
-    tools = _tools(metadata, await _web_search_allowed(metadata['user_id']), await _live_documents_allowed())
+    tools = _tools(
+        metadata,
+        await _web_search_allowed(metadata['user_id']),
+        await _live_documents_allowed(),
+        await _live_mail_allowed(),
+    )
     notes = attachments.pop('attachment_notes', [])
     collection = {}
     references = any(entry.get('attached_by') or entry.get('source') for entry in metadata.get('files') or [])

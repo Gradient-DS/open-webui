@@ -3976,5 +3976,14 @@
   "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.": "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.",
   "Updated {{time}}": "Updated {{time}}",
   "Uploaded {{done}}/{{total}}": "Uploaded {{done}}/{{total}}",
-  "You no longer have access to this file in {{provider}}.": "You no longer have access to this file in {{provider}}."
+  "You no longer have access to this file in {{provider}}.": "You no longer have access to this file in {{provider}}.",
+  "Account connected. Enable mail search to continue.": "",
+  "Could not read email": "",
+  "Mail search": "",
+  "Read email": "",
+  "Reading email...": "",
+  "Searched your mail": "",
+  "Searching your mail...": "",
+  "The model decides whether to search your mail": "",
+  "connect_provider_outlook_mail": "Connect Outlook"
 }

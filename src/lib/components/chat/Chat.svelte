@@ -372,6 +372,7 @@
 
 	let imageGenerationEnabled = false;
 	let liveDocumentsState: ToolState = 'off';
+	let liveMailState: ToolState = 'off';
 	let webSearchEnabled = false;
 	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
 	let webSearchRequired = false;
@@ -827,6 +828,7 @@
 			webSearchEnabled = input.webSearchEnabled ?? false;
 			webSearchRequired = input.webSearchRequired ?? false;
 			liveDocumentsState = liveDocumentState(input.liveDocumentsState);
+			liveMailState = liveDocumentState(input.liveMailState);
 			webSearchFromDraft = input.webSearchEnabled !== undefined;
 			imageGenerationEnabled = input.imageGenerationEnabled ?? false;
 			codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
@@ -893,6 +895,7 @@
 
 		files = [];
 		liveDocumentsState = 'off';
+		liveMailState = 'off';
 		selectedToolIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
@@ -974,6 +977,7 @@
 		chatFiles = [];
 		files = [];
 		liveDocumentsState = 'off';
+		liveMailState = 'off';
 		selectedToolIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
@@ -1014,6 +1018,7 @@
 		const current = JSON.stringify({
 			webSearchEnabled,
 			liveDocumentsState,
+			liveMailState,
 			webSearchRequired,
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
@@ -2683,6 +2688,7 @@
 
 				const chatFeatures = chatContent?.features ?? {};
 				liveDocumentsState = liveDocumentState(chatFeatures.live_documents);
+				liveMailState = liveDocumentState(chatFeatures.live_mail);
 				webSearchEnabled = chatFeatures.web_search ?? false;
 				// Chats saved before Altijd existed carry only web_search and read as Auto.
 				webSearchRequired = chatFeatures.web_search_required ?? false;
@@ -2696,6 +2702,7 @@
 				lastSavedFeatures = JSON.stringify({
 					webSearchEnabled,
 					liveDocumentsState,
+					liveMailState,
 					webSearchRequired,
 					imageGenerationEnabled,
 					codeInterpreterEnabled,
@@ -3941,6 +3948,7 @@
 						? documentWriterEnabled
 						: false,
 				live_documents: liveDocumentsState,
+				live_mail: liveMailState,
 				web_search: webSearchActive,
 				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
 				web_search_required: webSearchActive && webSearchRequired
@@ -4571,6 +4579,7 @@
 					files: chatFiles,
 					features: {
 						live_documents: liveDocumentsState,
+						live_mail: liveMailState,
 						web_search: webSearchEnabled,
 						web_search_required: webSearchEnabled && webSearchRequired,
 						image_generation: imageGenerationEnabled,
@@ -4618,6 +4627,7 @@
 		webSearchEnabled,
 		webSearchRequired,
 		liveDocumentsState,
+		liveMailState,
 		codeInterpreterEnabled,
 		toolApprovalMode
 	});
@@ -5112,6 +5122,7 @@
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
+										bind:liveMailState
 										bind:webSearchEnabled
 										bind:webSearchRequired
 										bind:atSelectedModel
@@ -5206,6 +5217,7 @@
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
+										bind:liveMailState
 										bind:webSearchEnabled
 										bind:webSearchRequired
 										bind:atSelectedModel
@@ -5267,6 +5279,7 @@
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
 									bind:liveDocumentsState
+									bind:liveMailState
 									bind:webSearchEnabled
 									bind:webSearchRequired
 									bind:atSelectedModel

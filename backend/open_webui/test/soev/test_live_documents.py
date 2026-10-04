@@ -129,8 +129,14 @@ async def test_every_turn_supplies_collection_and_separate_tool_states(env, monk
     assert result == 'stream'
     body = turn.run.call_args.args[0]['input']
     assert body['attachment_collection'] == 'owui-attachments-alice'
-    assert body['tools'] == {'web_search': 'off', 'search_live_documents': 'auto', 'attach_live_document': 'auto'}
-    assert agent_v2._tools({}, False, False)['tools']['search_live_documents'] == 'off'
+    assert body['tools'] == {
+        'web_search': 'off',
+        'search_live_documents': 'auto',
+        'attach_live_document': 'auto',
+        'search_mail': 'off',
+        'read_mail': 'off',
+    }
+    assert agent_v2._tools({}, False, False, False)['tools']['search_live_documents'] == 'off'
 
 
 @pytest.mark.asyncio
@@ -155,7 +161,7 @@ def test_document_states_require_server_permission(allowed, state):
     from open_webui.utils import agent_v2
 
     expected = state if allowed and state in ('auto', 'required') else 'off'
-    tools = agent_v2._tools({'features': {'live_documents': state}}, False, allowed)['tools']
+    tools = agent_v2._tools({'features': {'live_documents': state}}, False, allowed, False)['tools']
     assert tools['search_live_documents'] == tools['attach_live_document'] == expected
 
 

@@ -606,24 +606,25 @@ def test_policy_requires_a_verified_user(api) -> None:
     cloud_sync.identity.build_client.assert_not_called()
 
 
+@pytest.mark.parametrize('provider,family', [('onedrive', 'live_documents'), ('outlook_mail', 'mail')])
 @pytest.mark.parametrize('lifecycle', ['enabled', 'suspended', 'missing'])
-def test_live_document_grant_enable_uses_owned_connection(api, lifecycle):
+def test_live_document_grant_enable_uses_owned_connection(api, lifecycle, provider, family):
     """Only a user's OneDrive grant is reused, resumed or created with the document family."""
-    grant = {'id': 'g', 'families': ['live_documents'], 'lifecycle': lifecycle}
+    grant = {'id': 'g', 'families': [family], 'lifecycle': lifecycle}
     api.responses.extend(
         [
-            response({'id': 'c', 'source_kind': 'onedrive'}),
+            response({'id': 'c', 'source_kind': provider}),
             response({'data': [] if lifecycle == 'missing' else [grant]}),
         ]
     )
     if lifecycle != 'enabled':
         api.responses.append(response({**grant, 'lifecycle': 'enabled'}))
-    result = api.browser.post('/api/v1/cloud-sync/connections/c/live-documents')
+    result = api.browser.post(f'/api/v1/cloud-sync/connections/c/live/{family}')
     assert result.status_code == 200 and result.json()['lifecycle'] == 'enabled'
     assert all(r.headers.get('X-Soev-Subject') for r in api.requests)
     if lifecycle == 'missing':
-        assert json.loads(api.requests[-1].content) == {'families': ['live_documents']}
-        assert api.requests[-1].headers['Idempotency-Key'] == 'live-documents:c'
+        assert json.loads(api.requests[-1].content) == {'families': [family]}
+        assert api.requests[-1].headers['Idempotency-Key'] == f'live:{family}:c'
     elif lifecycle == 'suspended':
         assert api.requests[-1].method == 'PATCH'
         assert json.loads(api.requests[-1].content) == {'enabled': True}
@@ -633,5 +634,5 @@ def test_live_document_grant_is_provider_neutral(api):
     """The platform decides which providers can grant the document family."""
     grant = {'id': 'g', 'families': ['live_documents'], 'lifecycle': 'enabled'}
     api.responses.extend([response({'id': 'c', 'source_kind': 'google_drive'}), response({'data': [grant]})])
-    result = api.browser.post('/api/v1/cloud-sync/connections/c/live-documents')
+    result = api.browser.post('/api/v1/cloud-sync/connections/c/live/live_documents')
     assert result.status_code == 200 and result.json() == grant

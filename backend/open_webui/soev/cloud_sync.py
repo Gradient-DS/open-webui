@@ -24,13 +24,13 @@ class CloudSync:
     async def connection(self, connection_id: str) -> dict:
         return await self._get(f'/v1/connections/{quote(connection_id, safe="")}')
 
-    async def live_document_grants(self, connection_id: str) -> list[dict]:
+    async def live_grants(self, connection_id: str, family: str) -> list[dict]:
         await self.connection(connection_id)
         result = await self._get(f'/v1/connections/{quote(connection_id, safe="")}/live-grants')
-        return [grant for grant in result['data'] if 'live_documents' in grant['families']]
+        return [grant for grant in result['data'] if family in grant['families']]
 
-    async def enable_live_documents(self, connection_id: str) -> dict:
-        grants = await self.live_document_grants(connection_id)
+    async def enable_live_family(self, connection_id: str, family: str) -> dict:
+        grants = await self.live_grants(connection_id, family)
         path = f'/v1/connections/{quote(connection_id, safe="")}/live-grants'
         for grant in grants:
             if grant['lifecycle'] == 'enabled':
@@ -40,9 +40,9 @@ class CloudSync:
         return await self.client.send(
             'POST',
             path,
-            {'families': ['live_documents']},
+            {'families': [family]},
             as_user=self.user_ref,
-            idempotency_key=f'live-documents:{connection_id}',
+            idempotency_key=f'live:{family}:{connection_id}',
         )
 
     async def connection_usage(self, connection_id: str) -> dict:

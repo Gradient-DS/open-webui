@@ -2755,6 +2755,7 @@ async def get_app_config(request: Request):
         'google_drive.enable',
         'onedrive.enable',
         'live_documents.enable',
+        'live_mail.enable',
         'memories.enable',
         'ui.default_models',
         'ui.default_pinned_models',
@@ -2954,6 +2955,7 @@ async def get_app_config(request: Request):
                     ),
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
                     'enable_agent_proxy': config.get('agent_proxy.enable'),  # [Gradient]
+                    'enable_live_mail': AGENT_API_ENABLED and config.get('live_mail.enable'),
                     'enable_live_documents': AGENT_API_ENABLED and config.get('live_documents.enable'),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
                     'feature_agent_picker': FEATURE_AGENT_PICKER,  # [Gradient]

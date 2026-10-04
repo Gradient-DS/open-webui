@@ -483,6 +483,7 @@ type Config = {
 		feature_admin_settings_tabs?: string[];
 		feature_agent_api_enabled?: boolean;
 		enable_live_documents?: boolean;
+		enable_live_mail?: boolean;
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
 		feature_skill_files?: boolean;

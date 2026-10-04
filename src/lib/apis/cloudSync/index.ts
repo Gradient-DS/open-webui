@@ -140,12 +140,18 @@ export interface SyncPolicy {
 export const getPolicy = (token: string): Promise<SyncPolicy> =>
 	request<SyncPolicy>(token, '/policy');
 
-export interface LiveDocumentGrant {
+export interface LiveGrant {
 	id: string;
 	lifecycle: string;
 	families: string[];
 }
-export const listLiveDocumentGrants = (token: string, id: string) =>
-	request<LiveDocumentGrant[]>(token, `${connectionPath(id)}/live-documents`);
-export const enableLiveDocuments = (token: string, id: string) =>
-	request<LiveDocumentGrant>(token, `${connectionPath(id)}/live-documents`, 'POST');
+export const listLiveGrants = (
+	token: string,
+	id: string,
+	family: 'live_documents' | 'mail' = 'live_documents'
+) => request<LiveGrant[]>(token, `${connectionPath(id)}/live/${family}`);
+export const enableLiveFamily = (
+	token: string,
+	id: string,
+	family: 'live_documents' | 'mail' = 'live_documents'
+) => request<LiveGrant>(token, `${connectionPath(id)}/live/${family}`, 'POST');

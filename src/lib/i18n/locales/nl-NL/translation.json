@@ -3976,5 +3976,14 @@
   "These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.": "Deze bestanden staan in {{provider}} maar zijn hier niet doorzoekbaar. Beweeg over een reden om te zien wat je eraan kunt doen. De volgende synchronisatie probeert alles opnieuw wat niet definitief is overgeslagen.",
   "Updated {{time}}": "Bijgewerkt {{time}}",
   "Uploaded {{done}}/{{total}}": "{{done}}/{{total}} geüpload",
-  "You no longer have access to this file in {{provider}}.": "Je hebt geen toegang meer tot dit bestand in {{provider}}."
+  "You no longer have access to this file in {{provider}}.": "Je hebt geen toegang meer tot dit bestand in {{provider}}.",
+  "Account connected. Enable mail search to continue.": "Account verbonden. Schakel e-mail zoeken in om verder te gaan.",
+  "Could not read email": "Kon e-mail niet lezen",
+  "Mail search": "E-mail zoeken",
+  "Read email": "E-mail gelezen",
+  "Reading email...": "E-mail lezen...",
+  "Searched your mail": "Je e-mail doorzocht",
+  "Searching your mail...": "Je e-mail doorzoeken...",
+  "The model decides whether to search your mail": "Het model bepaalt of het je e-mail doorzoekt",
+  "connect_provider_outlook_mail": "Outlook verbinden"
 }

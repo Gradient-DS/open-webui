@@ -20,7 +20,7 @@
 		type ToolState
 	} from '$lib/utils/toolState';
 	import { prepareBusinessDocumentPicker } from '$lib/utils/onedrive-file-picker';
-	import { connectLiveDocuments, prefetchLiveDocuments } from '$lib/utils/live-documents';
+	import { connectLiveSource, prefetchLiveConnections } from '$lib/utils/live-connections';
 	import { LIVE_DOCUMENT_STATES } from '$lib/utils/toolState';
 	import { toast } from 'svelte-sonner';
 
@@ -55,6 +55,7 @@
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
+	import MailSearch from '$lib/components/icons/MailSearch.svelte';
 	import Chats from './InputMenu/Chats.svelte';
 	import Files from './InputMenu/Files.svelte';
 	import Notes from './InputMenu/Notes.svelte';
@@ -119,21 +120,30 @@
 	export let showWebSearchButton = false;
 	export let webSearchEnabled = false;
 	export let liveDocumentsState: ToolState = 'off';
+	export let liveMailState: ToolState = 'off';
 	let connectingDocuments = false;
-	export const cycleLiveDocuments = async () => {
-		if (connectingDocuments) return;
-		const next = nextToolState(liveDocumentsState, LIVE_DOCUMENT_STATES);
-		connectingDocuments = true;
+	let connectingMail = false;
+	async function cycleLive(family: 'live_documents' | 'mail') {
+		const mail = family === 'mail';
+		if (mail ? connectingMail : connectingDocuments) return;
+		const state = mail ? liveMailState : liveDocumentsState;
+		const next = nextToolState(state, LIVE_DOCUMENT_STATES);
+		if (mail) connectingMail = true;
+		else connectingDocuments = true;
 		try {
-			if (next !== 'off' && liveDocumentsState === 'off')
-				await connectLiveDocuments(localStorage.token);
-			liveDocumentsState = next;
+			if (next !== 'off' && state === 'off')
+				await connectLiveSource(localStorage.token, mail ? 'outlook_mail' : 'onedrive', family);
+			if (mail) liveMailState = next;
+			else liveDocumentsState = next;
 		} catch (error) {
 			toast.error(String(error));
 		} finally {
-			connectingDocuments = false;
+			if (mail) connectingMail = false;
+			else connectingDocuments = false;
 		}
-	};
+	}
+	export const cycleLiveDocuments = () => cycleLive('live_documents');
+	export const cycleLiveMail = () => cycleLive('mail');
 	// [Gradient] Altijd; webSearchEnabled alone is Auto.
 	export let webSearchRequired = false;
 	export let showImageGenerationButton = false;
@@ -156,7 +166,10 @@
 		show &&
 		($config?.features?.enable_live_documents || $config?.features?.enable_onedrive_business)
 	) {
-		void prefetchLiveDocuments(localStorage.token).catch(() => {});
+		void prefetchLiveConnections(localStorage.token).catch(() => {});
+	}
+	$: if (show && $config?.features?.enable_live_mail) {
+		void prefetchLiveConnections(localStorage.token, 'outlook_mail', 'mail').catch(() => {});
 	}
 	$: if (show && $config?.features?.enable_onedrive_business) {
 		void prepareBusinessDocumentPicker().catch(() => {});
@@ -234,6 +247,7 @@
 	$: showSkills =
 		itemAllowed('skills') && isFeatureEnabled('skills') && Object.keys(skills ?? {}).length > 0;
 	$: showFilters = itemAllowed('filters') && (toggleFilters ?? []).length > 0;
+	$: showLiveMail = itemAllowed('live_mail') && !!$config?.features?.enable_live_mail;
 	$: showLiveDocuments =
 		itemAllowed('live_documents') && !!$config?.features?.enable_live_documents;
 	$: showWebSearch = itemAllowed('web_search') && showWebSearchButton;
@@ -247,6 +261,7 @@
 		showUploadFiles || showCapture || showWebpage || showNotes || showGoogleDrive || showOneDrive;
 	$: anyKnowledge = showKnowledge || showReferenceChats;
 	$: anyTools =
+		showLiveMail ||
 		showLiveDocuments ||
 		showTools ||
 		showSkills ||
@@ -773,6 +788,32 @@
 							<div class="h-px mx-1 my-1 bg-gray-100 dark:bg-gray-800"></div>
 						{/if}
 						<div class={sectionHeaderClass}>{$i18n.t('Attach tools')}</div>
+					{/if}
+
+					{#if showLiveMail}
+						<MenuItem
+							label={$i18n.t('Mail search')}
+							pinId="live_mail"
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Mail search'),
+								liveMailState,
+								liveMailState === 'off'
+									? $i18n.t(TOOL_OFF_DESCRIPTION)
+									: $i18n.t('The model decides whether to search your mail')
+							)}
+							tooltip={stateAriaLabel(
+								$i18n.t('Mail search'),
+								liveMailState,
+								liveMailState === 'off'
+									? $i18n.t(TOOL_OFF_DESCRIPTION)
+									: $i18n.t('The model decides whether to search your mail')
+							)}
+							toolState={liveMailState}
+							disabled={connectingMail}
+							onClick={cycleLiveMail}
+						>
+							<MailSearch slot="icon" className="size-3.5" />
+						</MenuItem>
 					{/if}
 
 					{#if showLiveDocuments}

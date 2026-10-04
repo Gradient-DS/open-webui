@@ -131,3 +131,17 @@ and tooltip. The picker retains the plain cloud; pinned tooltip labels are
 "OneDrive files" and "OneDrive search", translated through i18n.
 
 Consent polling treats suspended:reauth with a cleared last_error as pending until exchange enables the reused connection. A stored failure still terminates polling, and the normal timeout applies.
+
+### Live mail
+
+`ENABLE_LIVE_MAIL=true` enables the server gate (`live_mail.enable`, default false),
+exposed as `features.enable_live_mail` only with `AGENT_API_ENABLED`. The `/api/config`
+config read includes the key. `features.live_mail` maps to `search_mail` and `read_mail`;
+both stay off unless the gate allows them. The Mail search menu/pin has independent
+chat and draft state, defaults off, and consents to `outlook_mail` on first enable.
+
+`utils/live-connections.ts` shares consent/prefetch across provider and family pairs.
+The proxy uses `/cloud-sync/connections/{id}/live/{family}` for `mail` or
+`live_documents`; grants and snapshots stay separate. `consentLabels` includes
+Outlook for ActionRequired cards. Mail sources keep Outlook links and render in the
+citation panel; they never create File rows or ingestion jobs.
