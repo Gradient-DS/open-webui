@@ -20,6 +20,10 @@ const config = {
 		// poll for new version name every 60 seconds (to trigger reload mechanic in +layout.svelte)
 		version: {
 			name: (() => {
+				// [Gradient] Image builds exclude .git from the context, so the commit
+				// arrives as APP_BUILD_HASH (set from BUILD_HASH in the Dockerfile).
+				const buildHash = process.env.APP_BUILD_HASH;
+				if (buildHash && buildHash !== 'dev-build') return buildHash;
 				try {
 					return child_process.execSync('git rev-parse HEAD').toString().trim();
 				} catch {
