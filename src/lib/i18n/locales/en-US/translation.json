@@ -1,4 +1,6 @@
 {
+  "Searching your mail for \"{{keywords}}\"...": "Searching your mail for \"{{keywords}}\"...",
+  "Searched your mail for \"{{keywords}}\"": "Searched your mail for \"{{keywords}}\"",
   "Connection status is loading. Try again.": "Connection status is loading. Try again.",
   "Sign in to OneDrive again to finish opening the picker.": "Sign in to OneDrive again to finish opening the picker.",
   "OneDrive is loading. Open the menu and try again.": "OneDrive is loading. Open the menu and try again.",

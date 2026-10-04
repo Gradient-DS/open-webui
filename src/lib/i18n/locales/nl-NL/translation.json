@@ -1,4 +1,6 @@
 {
+  "Searching your mail for \"{{keywords}}\"...": "Je mail doorzoeken naar \"{{keywords}}\"...",
+  "Searched your mail for \"{{keywords}}\"": "Je mail doorzocht naar \"{{keywords}}\"",
   "Connection status is loading. Try again.": "De verbindingsstatus wordt geladen. Probeer het opnieuw.",
   "Sign in to OneDrive again to finish opening the picker.": "Meld je opnieuw aan bij OneDrive om de bestandskiezer te openen.",
   "OneDrive is loading. Open the menu and try again.": "OneDrive wordt geladen. Open het menu en probeer het opnieuw.",

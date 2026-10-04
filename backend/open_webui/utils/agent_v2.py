@@ -664,6 +664,8 @@ class AgentTurn:
             value = None
             if kind == 'argument':
                 value = arguments.get(rest)
+                if isinstance(value, list) and all(isinstance(item, str) for item in value):
+                    value = ', '.join(item for item in value if item.strip())
             elif kind == 'knowledge':
                 key = arguments.get(rest)
                 only = list(self.knowledge_names.values()) if len(self.knowledge_names) == 1 else [None]

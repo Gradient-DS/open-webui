@@ -1918,3 +1918,11 @@ async def test_read_mail_status_reports_refusals(success):
     output = {'elements': [{'type': 'mail-text'}]} if success else {'text': 'Mail request refused: not_found'}
     await turn.end_tool({'call_id': 'read', **output})
     assert turn.settling[0]['description'] == ('Read email' if success else 'Could not read email')
+
+
+def test_status_params_join_list_arguments():
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    declared = {'params': {'keywords': 'argument.keywords'}}
+    assert turn.tool_params(declared, {'keywords': ['begroting', ' ', 'fietspad']}, None) == {
+        'keywords': 'begroting, fietspad'
+    }
