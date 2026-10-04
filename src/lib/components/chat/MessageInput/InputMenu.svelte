@@ -54,6 +54,7 @@
 	import LinkSlash from '$lib/components/icons/LinkSlash.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
 	import Chats from './InputMenu/Chats.svelte';
 	import Files from './InputMenu/Files.svelte';
 	import Notes from './InputMenu/Notes.svelte';
@@ -796,7 +797,7 @@
 							disabled={connectingDocuments}
 							onClick={cycleLiveDocuments}
 						>
-							<OneDrive slot="icon" className="size-3.5" />
+							<OneDriveSearch slot="icon" className="size-3.5" />
 						</MenuItem>
 					{/if}
 
