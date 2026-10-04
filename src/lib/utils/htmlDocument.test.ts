@@ -36,7 +36,7 @@ describe('HTML document security boundary', () => {
 		String.raw`@\69mport "http://evil.test/style";`
 	])('strips CSS loads: %s', (css) => {
 		const doc = parse(`<style>${css}</style><p style='${css}' data-load='${css}'>Safe</p>`);
-		expect(doc.querySelector('style')).toBeNull();
+		expect(doc.querySelector('style:not([data-page-boxes])')).toBeNull();
 		expect(doc.querySelector('p')?.attributes.length).toBe(0);
 	});
 	it('removes all event handlers and navigation links, retaining local anchors', () => {
@@ -64,7 +64,15 @@ describe('HTML document security boundary', () => {
 		expect(doc.title).toBe(title);
 		expect(doc.querySelectorAll('title')).toHaveLength(1);
 		expect(doc.querySelector('script')).toBeNull();
-		expect(doc.querySelector('style')?.textContent).toBe(css);
+		expect(doc.querySelector('style:not([data-page-boxes])')?.textContent).toBe(css);
 		expect(doc.querySelector('p')?.getAttribute('style')).toBe('color: red');
+	});
+});
+
+describe('print header and footer', () => {
+	it('empties the page margin boxes so the browser prints no title, date or URL', () => {
+		const html = sanitizeDocumentHtml('<html><head></head><body><p>x</p></body></html>', 'T');
+		expect(html).toContain('@top-center { content: ""; }');
+		expect(html).toContain('@bottom-left { content: ""; }');
 	});
 });

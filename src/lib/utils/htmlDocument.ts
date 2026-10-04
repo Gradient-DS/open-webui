@@ -3,6 +3,16 @@ import DOMPurify, { type Config } from 'dompurify';
 export const DOCUMENT_CSP =
 	"default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
 export const DOCUMENT_SANDBOX = 'allow-same-origin allow-modals';
+const PAGE_MARGIN_BOXES = `@page { ${[
+	'top-left',
+	'top-center',
+	'top-right',
+	'bottom-left',
+	'bottom-center',
+	'bottom-right'
+]
+	.map((box) => `@${box} { content: ""; }`)
+	.join(' ')} }`;
 export const DOCUMENT_PURIFY_CONFIG: Config = {
 	WHOLE_DOCUMENT: true,
 	RETURN_DOM: true,
@@ -80,5 +90,10 @@ export function sanitizeDocumentHtml(content: string, title: string): string {
 	const titleElement = doc.createElement('title');
 	titleElement.textContent = title;
 	csp.after(titleElement);
+	// Empty margin boxes replace the browser's own print header (date, title) and footer (URL, page).
+	const pageBoxes = doc.createElement('style');
+	pageBoxes.dataset.pageBoxes = '';
+	pageBoxes.textContent = PAGE_MARGIN_BOXES;
+	head.append(pageBoxes);
 	return `<!doctype html>\n${root.outerHTML}`;
 }
