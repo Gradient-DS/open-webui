@@ -1,9 +1,11 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { toast } from 'svelte-sonner';
-	import { getContext } from 'svelte';
+	import { getContext, tick } from 'svelte';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	import {
 		config,
@@ -35,15 +37,16 @@
 	$: isExecuting = !done || !messageDone;
 	$: displayTitle = title || $i18n.t('Document');
 
-	const openDocument = () => {
+	const openDocument = async () => {
 		const index = ($documentContents ?? []).findIndex(
 			(document) =>
 				document.title === title && document.content === content && document.format === format
 		);
-		if (index !== -1) selectedDocumentIndex.set(index);
 		showDocument.set(true);
 		showControls.set(true);
 		openDocumentTabSignal.update((n) => n + 1);
+		await tick();
+		if (index !== -1) selectedDocumentIndex.set(index);
 	};
 
 	const sanitizeFilename = (name: string) => {
@@ -93,7 +96,6 @@
 	};
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
 	{id}

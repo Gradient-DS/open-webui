@@ -9,7 +9,7 @@ const marker = (format: string, content: string, title = 'Report') =>
 
 describe('agent documents', () => {
 	it.each(['html', 'markdown'])('unescapes %s content and title exactly once', (format) => {
-		const content = `<p title="A & B">'quoted' &lt;literal&gt;</p>`;
+		const content = `  <p title="A & B">'quoted' &lt;literal&gt;</p>  \n`;
 		const title = `<Report> & "quotes" 'apostrophe'`;
 		expect(extractDocumentsFromMessage(marker(format, content, title))).toEqual([
 			{ title, content, format, isAgentDocument: true }

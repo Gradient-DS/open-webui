@@ -492,6 +492,8 @@ type Config = {
 		enable_channels?: boolean;
 		enable_notes?: boolean;
 		enable_code_interpreter?: boolean;
+		enable_document_writer?: boolean;
+		enable_docx_export?: boolean;
 		enable_code_execution?: boolean;
 		enable_data_warnings?: boolean;
 		enable_feedback_report?: boolean;

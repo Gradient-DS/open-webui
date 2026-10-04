@@ -2618,7 +2618,7 @@
 				webSearchRequired = chatFeatures.web_search_required ?? false;
 				imageGenerationEnabled = chatFeatures.image_generation ?? false;
 				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
-				documentWriterEnabled = chatFeatures.document_writer ?? true;
+				documentWriterEnabled = chatFeatures.document_writer ?? false;
 				documentWriterRequired =
 					documentWriterEnabled && (chatFeatures.document_writer_required ?? false);
 

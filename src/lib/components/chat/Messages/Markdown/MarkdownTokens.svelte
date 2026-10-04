@@ -24,6 +24,7 @@
 	import Download from '$lib/components/icons/Download.svelte';
 	import ConsecutiveDetailsGroup from './ConsecutiveDetailsGroup.svelte';
 	import DocumentCard from './DocumentCard.svelte';
+	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 
 	import HtmlToken from './HTMLToken.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
@@ -456,13 +457,13 @@
 					{@const textContent = getDetailTextContent(detailToken)}
 
 					{#if detailToken?.attributes?.type === 'document'}
+						{@const document = extractDocumentsFromMessage(detailToken.raw)[0]}
 						<DocumentCard
 							id={`${id}-${tokenIdx}-${detailIdx}-doc`}
-							title={decode(detailToken?.attributes?.title ?? detailToken.summary ?? '')}
-							content={detailToken?.attributes?.format
-								? decode(detailToken?.text ?? '')
-								: (detailToken?.text ?? '')}
-							format={detailToken?.attributes?.format === 'html' ? 'html' : 'markdown'}
+							title={document?.title ??
+								decode(detailToken?.attributes?.title ?? detailToken.summary ?? '')}
+							content={document?.content ?? detailToken?.text ?? ''}
+							format={document?.format ?? 'markdown'}
 							done={detailToken?.attributes?.done !== 'false'}
 							messageDone={done}
 						/>
@@ -540,11 +541,12 @@
 			<!-- Reasoning blocks are consumed by StatusHistory upstream and
 			     rendered as bullets there. Skipping here avoids duplicate display. -->
 		{:else if token?.attributes?.type === 'document'}
+			{@const document = extractDocumentsFromMessage(token.raw)[0]}
 			<DocumentCard
 				id={`${id}-${tokenIdx}-doc`}
-				title={decode(token?.attributes?.title ?? token.summary ?? '')}
-				content={token?.attributes?.format ? decode(token?.text ?? '') : (token?.text ?? '')}
-				format={token?.attributes?.format === 'html' ? 'html' : 'markdown'}
+				title={document?.title ?? decode(token?.attributes?.title ?? token.summary ?? '')}
+				content={document?.content ?? token?.text ?? ''}
+				format={document?.format ?? 'markdown'}
 				done={token?.attributes?.done !== 'false'}
 				messageDone={done}
 			/>

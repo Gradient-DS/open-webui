@@ -22,11 +22,14 @@ export function extractDocumentsFromMessage(content: string): AgentDocument[] {
 		);
 		if (attributes.type === 'document') {
 			const isAgentDocument = attributes.format !== undefined;
-			const body = match[2].replace(/^\s*<summary>[\s\S]*?<\/summary>\s*/i, '').trim();
-			if (body)
+			const body = match[2].replace(/^\s*<summary>[\s\S]*?<\/summary>/i, '');
+			const documentContent = isAgentDocument
+				? decode(body.replace(/^\r?\n/, '').replace(/\r?\n$/, ''))
+				: body.trim();
+			if (documentContent)
 				documents.push({
 					title: decode(attributes.title ?? ''),
-					content: isAgentDocument ? decode(body) : body,
+					content: documentContent,
 					format: attributes.format === 'html' ? 'html' : 'markdown',
 					isAgentDocument
 				});

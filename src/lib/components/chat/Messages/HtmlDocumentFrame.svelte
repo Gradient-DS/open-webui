@@ -10,6 +10,10 @@
 	const scale = $derived(Math.min(1, width / pageWidth));
 	const srcdoc = $derived(browser ? sanitizeDocumentHtml(content, title) : '');
 
+	$effect(() => {
+		if (srcdoc) height = pageHeight;
+	});
+
 	function resizeFrame(event: Event) {
 		const frame = event.currentTarget as HTMLIFrameElement;
 		height = Math.max(pageHeight, frame.contentDocument?.documentElement.scrollHeight ?? 0);
