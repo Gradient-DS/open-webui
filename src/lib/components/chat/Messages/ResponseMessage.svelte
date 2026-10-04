@@ -103,7 +103,15 @@
 		assistant_id?: string; // [Gradient]
 		content: string;
 		output?: OutputItem[];
-		files?: { type: string; url: string; id?: string; attached_by?: string }[];
+		files?: {
+			type: string;
+			url: string;
+			id?: string;
+			attached_by?: string;
+			name?: string;
+			content_type?: string;
+			size?: number;
+		}[];
 		timestamp: number;
 		role: string;
 		statusHistory?: {
