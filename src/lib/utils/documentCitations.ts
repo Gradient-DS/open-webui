@@ -106,8 +106,9 @@ export function transformDocumentCitations(
 			const metadata = source.metadata?.[0];
 			const url =
 				source.source?.url || (/^https?:\/\//.test(metadata?.source ?? '') ? metadata?.source : '');
-			const reference = url || metadata?.name || source.source?.name || metadata?.source || '';
-			line.textContent = `[${number}] ${documentSourceLabel(source)}, ${reference}`;
+			// Full names in print, written like the markdown export's source list.
+			const name = metadata?.name || source.source?.name || metadata?.source || url || '';
+			line.textContent = `[${number}] ${name}${url && url !== name ? ` - ${url}` : ''}`;
 			section.append(line);
 		}
 		doc.body.append(section);

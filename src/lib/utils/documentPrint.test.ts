@@ -82,7 +82,7 @@ it('prints HTML citations as first-use numbers with a translated source list and
 	const doc = new DOMParser().parseFromString(html, 'text/html');
 	expect(doc.querySelector('p')?.textContent).toBe('Claim [1] and [1].');
 	expect(doc.querySelector('section')?.textContent).toBe(
-		'Bronnen[1] example.com, https://www.example.com/report'
+		'Bronnen[1] https://www.example.com/report'
 	);
 	expect(doc.querySelector('button')).toBeNull();
 	expect(doc.querySelector('style[data-page-boxes]')?.textContent).toContain('@bottom-left');

@@ -64,7 +64,7 @@ describe('HTML citations', () => {
 		expect(doc.querySelector('div')?.textContent).toBe('[2, 1] [99]');
 		expect(doc.querySelector('h2')?.textContent).toBe('Bronnen');
 		expect(doc.querySelector('section')?.textContent).toBe(
-			'Bronnen[1] Third.pdf, Third.pdf[2] example.com, https://www.example.com/article'
+			'Bronnen[1] Third.pdf[2] https://www.example.com/article'
 		);
 		expect(doc.querySelector('button')).toBeNull();
 		expect(doc.querySelector('section')?.textContent).not.toContain('First.pdf');
