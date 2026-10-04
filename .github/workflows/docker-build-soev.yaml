@@ -116,11 +116,15 @@ jobs:
           outputs: type=image,"name=${{ env.BUILD_OUTPUT_NAMES }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=registry,ref=${{ steps.cache-meta.outputs.tags }}
           cache-to: type=registry,ref=${{ steps.cache-meta.outputs.tags }},mode=max
+          # [Gradient] APT_UPGRADE_EPOCH is per run: the Dockerfile's apt upgrade
+          # layer never comes from the registry cache, so every image ships today's
+          # Debian fixes.
           build-args: |
             BUILD_HASH=${{ github.sha }}
             USE_SLIM=true
             UID=1000
             GID=1000
+            APT_UPGRADE_EPOCH=${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Export digest
         run: |
