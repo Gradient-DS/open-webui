@@ -120,15 +120,16 @@ class FakeChatApi:
 
     def _refusal(self, body: dict, *, opening: bool) -> httpx.Response | None:
         """soev-api refuses unknown body fields; the soev chat agent's input is
-        ``{text, knowledge?, tools?, context?}``, each knowledge entry naming a KB by its key."""
+        ``{text, knowledge?, tools?, context?, documents?}``, each knowledge entry naming a KB by its key."""
         allowed = {'input', 'model', 'principals'} | ({'agent'} if opening else {'answering'})
         if set(body) - allowed:
             return self.problem(400, 'unknown_field')
         turn = body.get('input')
         if (
             not isinstance(turn, dict)
-            or set(turn) - {'text', 'knowledge', 'tools', 'context'}
+            or set(turn) - {'text', 'knowledge', 'tools', 'context', 'documents'}
             or not isinstance(turn.get('text'), str)
+            or turn.get('documents', 'off') not in ('off', 'auto', 'required')
             or not all(isinstance(entry, dict) and entry.get('key') for entry in turn.get('knowledge', []))
         ):
             return self.problem(422, 'invalid_field')
