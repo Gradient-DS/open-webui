@@ -119,3 +119,5 @@ the click stack; a new resource requiring consent asks for another click rather
 than opening a delayed popup. Match the picker tenant and object ID against the
 connection's provider_tenant_id and provider_identity before choosing its grant.
 Picker keys are user-namespaced and identity conflicts return typed 403/409 responses.
+If an older reference event lacks MIME metadata, successful job polling reads the
+completed document as its owning user and fills content_type before marking it ready.
