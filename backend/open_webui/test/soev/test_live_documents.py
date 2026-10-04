@@ -236,3 +236,40 @@ async def test_mismatched_agent_event_is_skipped(env):  # noqa: F811
     turn.emitter = AsyncMock()
     await turn.attached({**attachment(), 'collection_key': 'foreign'})
     turn.emitter.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  # noqa: F811
+    """A captured real TicketAttacher event stays pending without blocking the next turn."""
+    import json
+    from pathlib import Path
+
+    from open_webui.soev.client import ChatEvent
+    from open_webui.utils import agent_v2
+
+    payload = json.loads((Path(__file__).parent / 'fixtures' / 'live_document_processing.json').read_text())
+    message = {}
+
+    async def upsert(chat, message_id, update):
+        message.update(update)
+
+    monkeypatch.setattr(agent_v2.Chats, 'get_message_by_id_and_message_id', AsyncMock(side_effect=lambda *a: message))
+    monkeypatch.setattr(agent_v2.Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
+    turn = agent_v2.AgentTurn(env.client, {'user_id': 'alice', 'chat_id': 'slow', 'message_id': 'm'}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    await turn.render_event(ChatEvent('attached', {'stream': 'root', 'payload': payload}))
+    row = await env.files.Files.get_file_by_id(payload['source_id'])
+    assert row.meta['status'] == 'processing'
+    assert row.meta['content_type'] == payload['content_type']
+    monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
+    next_turn = SimpleNamespace(client=env.client, run=Mock(return_value='stream'))
+    assert (
+        await agent_v2._sent(
+            next_turn, 'Read it', {'user_id': 'alice', 'files': message['files']}, agent=None, model=None
+        )
+        == 'stream'
+    )
+    sent = next_turn.run.call_args.args[0]['input']
+    assert 'attachments' not in sent
+    assert 'still processing: ' + payload['name'] in sent['text']
