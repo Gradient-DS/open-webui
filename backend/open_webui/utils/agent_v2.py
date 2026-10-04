@@ -25,7 +25,8 @@ from open_webui.soev import acting, agent_threads, identity, ingest
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.chat_id import is_temporary_chat_id
-from open_webui.utils.web_search_state import web_search_state
+from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.tool_state import tool_state
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
@@ -68,15 +69,32 @@ def _duration(seconds: float, dutch: bool) -> str:
     return f' {words[4]} '.join(parts)
 
 
-def _marker(status: dict[str, Any]) -> dict[str, Any]:
+def _marker(status: dict[str, Any], elements: list[dict[str, Any]]) -> dict[str, Any]:
     """The v1 anchor for one shown tool call: the frontend hides it and places the call's status and the
-    reasoning around it by its position in the content. The whitespace is what its details tokenizer needs."""
+    reasoning around it by its position in the content. The whitespace is what its details tokenizer needs.
+    A written PDF document follows its call's anchor."""
     text = _PLACEHOLDER.sub(lambda match: str(status.get(match[1], match[0])), status['description'])
     name = html.escape(status['action'], quote=True)
+    documents = ''.join(_document_marker(element) for element in elements if element.get('type') == 'pdf-document')
     return _chunk(
         {
             'content': f'\n\n<details type="tool_calls" done="true" name="{name}">\n<summary>{html.escape(text)}</summary>\n</details>\n\n'
+            + documents
         }
+    )
+
+
+def _document_marker(element: dict[str, Any]) -> str:
+    """Escape a generated document as a renderer marker; unsupported formats never enter message content."""
+    format = element.get('format')
+    if format not in ('markdown', 'html'):
+        log.warning('Skipping pdf-document with unsupported format', extra={'element_id': element.get('id')})
+        return ''
+    title = html.escape(element['title'], quote=True)
+    content = html.escape(element['content'], quote=True)
+    return (
+        f'<details type="document" format="{format}" title="{title}" done="true">'
+        f'\n<summary>Document</summary>\n{content}\n</details>\n\n'
     )
 
 
@@ -208,11 +226,15 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
     return {field: text for field, key in fields.items() if isinstance(text := metadata.get(key), str) and text.strip()}
 
 
-def _tools(metadata: dict[str, Any], web_search_allowed: bool) -> dict[str, dict[str, str]]:
-    """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
-    default never decides for the user, and so is every turn where OWUI does not allow web search."""
-    state = web_search_state(metadata.get('features')) if web_search_allowed else 'off'
-    return {'tools': {'web_search': state}}
+def _tools(metadata: dict[str, Any], web_search_allowed: bool, pdf_writer_allowed: bool) -> dict[str, dict[str, str]]:
+    """Send each control's state explicitly, forced off where OWUI does not allow the tool."""
+    features = metadata.get('features')
+    return {
+        'tools': {
+            'web_search': tool_state(features, 'web_search') if web_search_allowed else 'off',
+            'write_pdf': tool_state(features, 'document_writer') if pdf_writer_allowed else 'off',
+        }
+    }
 
 
 async def _web_search_allowed(user_id: str) -> bool:
@@ -224,6 +246,18 @@ async def _web_search_allowed(user_id: str) -> bool:
         return False
     return user.role == 'admin' or await has_permission(
         user.id, 'features.web_search', await Config.get('user.permissions')
+    )
+
+
+async def _pdf_writer_allowed(user_id: str) -> bool:
+    """Client-supplied document writer flags require tenant access, the admin setting and user permission."""
+    if not is_feature_enabled('document_writer') or not await Config.get('document_writer.enable'):
+        return False
+    user = await Users.get_user_by_id(user_id)
+    if user is None:
+        return False
+    return user.role == 'admin' or await has_permission(
+        user.id, 'features.document_writer', await Config.get('user.permissions')
     )
 
 
@@ -378,7 +412,11 @@ def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[st
 
 def _read(element: dict[str, Any]) -> bool:
     """[Claude] Whether the agent read this element's text, so an answer may cite it."""
-    return isinstance(element.get('text'), str) and isinstance(element.get('ref'), str)
+    return (
+        element.get('type') != 'pdf-document'
+        and isinstance(element.get('text'), str)
+        and isinstance(element.get('ref'), str)
+    )
 
 
 class Citations:
@@ -567,7 +605,7 @@ class AgentTurn:
         name, arguments = call
         status = self.tool_status(name, arguments, None if output.get('error') else output)
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
-        return [_marker(status)]
+        return [_marker(status, output.get('elements') or [])]
 
     async def settle(self) -> None:
         """[Claude] Show the held done lines: the model wrote answer text, called the next tool, or the turn ended."""
@@ -886,7 +924,9 @@ async def _sent(
         return _refused(_unavailable(unavailable.count, metadata.get('user_language')))
     except AttachmentsUnavailable as unavailable:
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
-    tools = _tools(metadata, await _web_search_allowed(metadata['user_id']))
+    tools = _tools(
+        metadata, await _web_search_allowed(metadata['user_id']), await _pdf_writer_allowed(metadata['user_id'])
+    )
     body = {'input': {'text': text, 'knowledge': knowledge, **attachments, **_instructions(metadata), **tools}}
     if isinstance(model, str) and model:
         body['model'] = model
