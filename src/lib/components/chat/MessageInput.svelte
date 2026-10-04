@@ -75,6 +75,13 @@
 		getWeekday
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
+	import {
+		TOOL_OFF_DESCRIPTION,
+		TOOL_STATE_LABELS,
+		WEB_SEARCH_STATE_DESCRIPTIONS,
+		webSearchState,
+		type ToolState
+	} from '$lib/utils/toolState';
 	import { uploadFile, getFileAttachments } from '$lib/apis/files';
 	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
 	import { generateAutoCompletion } from '$lib/apis';
@@ -225,6 +232,8 @@
 
 	export let imageGenerationEnabled = false;
 	export let webSearchEnabled = false;
+	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
+	export let webSearchRequired = false;
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = false;
 	export let toolApprovalMode = 'full';
@@ -282,6 +291,7 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
+		webSearchRequired,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
 		toolApprovalMode
@@ -974,14 +984,33 @@
 		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
 	$: webUploadEnabled = $_user?.role === 'admin' || ($_user?.permissions?.chat?.web_upload ?? true);
 
-	let inputMenuRef: { openTab: (tab: string) => void; openWebpageModal: () => void } | undefined;
+	// [Gradient] Altijd needs web search to be possible: every rule that turns web search
+	// off (data separation, model capability, image generation, Escape) lands on Uit.
+	$: if (!webSearchEnabled && webSearchRequired) {
+		webSearchRequired = false;
+	}
+	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
+
+	let inputMenuRef:
+		| {
+				openTab: (tab: string) => void;
+				openWebpageModal: () => void;
+				cycleWebSearch: () => void;
+				cycleTool: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
+		  }
+		| undefined;
+	const pinnedStateTooltip = (label: string, state: ToolState, description: string) =>
+		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
 	const pinnedButtonClass =
 		'p-[0.375rem] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden shrink-0';
-	const pinnedToggleClass = (active: boolean) =>
+	// Altijd (or an active toggle) gets the accent, Auto a subtle outline, Uit none.
+	const pinnedToggleClass = (active: boolean | ToolState) =>
 		`p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden shrink-0 ${
-			active
+			active === true || active === 'required'
 				? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
-				: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+				: active === 'auto'
+					? 'border-dashed border-gray-300 dark:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
+					: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
 		}`;
 
 	const googleDriveHandler = async () => {
@@ -2505,6 +2534,7 @@
 											bind:selectedSkillIds
 											bind:selectedFilterIds
 											bind:webSearchEnabled
+											bind:webSearchRequired
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
 											bind:documentWriterEnabled
@@ -2699,23 +2729,22 @@
 															? $i18n.t(
 																	'Web search and image generation cannot run in the same turn'
 																)
-															: $i18n.t('Web Search')}
+															: pinnedStateTooltip(
+																	$i18n.t('Web Search'),
+																	webSearchToolState,
+																	$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+																)}
 														placement="top"
 													>
 														<button
 															type="button"
-															aria-label={$i18n.t('Web Search')}
-															aria-pressed={webSearchEnabled}
-															on:click|preventDefault={() => {
-																webSearchEnabled = !webSearchEnabled;
-																if (webSearchEnabled) {
-																	imageGenerationEnabled = false;
-																}
-																onWebSearchToggle(webSearchEnabled);
-															}}
-															class={pinnedToggleClass(
-																webSearchEnabled || ($settings?.webSearch ?? false) === 'always'
+															aria-label={pinnedStateTooltip(
+																$i18n.t('Web Search'),
+																webSearchToolState,
+																$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
 															)}
+															on:click|preventDefault={() => inputMenuRef?.cycleWebSearch()}
+															class={pinnedToggleClass(webSearchToolState)}
 														>
 															<GlobeAlt className="size-4" strokeWidth="1.75" />
 														</button>
@@ -2726,27 +2755,37 @@
 															? $i18n.t(
 																	'Web search and image generation cannot run in the same turn'
 																)
-															: $i18n.t('Image')}
+															: pinnedStateTooltip(
+																	$i18n.t('Image'),
+																	imageGenerationEnabled ? 'required' : 'off',
+																	imageGenerationEnabled
+																		? $i18n.t('Generate an image')
+																		: $i18n.t(TOOL_OFF_DESCRIPTION)
+																)}
 														placement="top"
 													>
 														<button
 															type="button"
 															aria-label={$i18n.t('Image')}
 															aria-pressed={imageGenerationEnabled}
-															on:click|preventDefault={() => {
-																imageGenerationEnabled = !imageGenerationEnabled;
-																if (imageGenerationEnabled && webSearchEnabled) {
-																	webSearchEnabled = false;
-																	onWebSearchToggle(false);
-																}
-															}}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('image_generation')}
 															class={pinnedToggleClass(imageGenerationEnabled)}
 														>
 															<Photo className="size-4" strokeWidth="1.75" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
-													<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
+													<Tooltip
+														content={pinnedStateTooltip(
+															$i18n.t('Code Interpreter'),
+															codeInterpreterEnabled ? 'required' : 'off',
+															codeInterpreterEnabled
+																? $i18n.t('Execute code for analysis')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
 														<button
 															type="button"
 															aria-label={codeInterpreterEnabled
@@ -2754,14 +2793,23 @@
 																: $i18n.t('Enable Code Interpreter')}
 															aria-pressed={codeInterpreterEnabled}
 															on:click|preventDefault={() =>
-																(codeInterpreterEnabled = !codeInterpreterEnabled)}
+																inputMenuRef?.cycleTool('code_interpreter')}
 															class={pinnedToggleClass(codeInterpreterEnabled)}
 														>
 															<Terminal className="size-4" strokeWidth="1.75" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'document_writer' && showDocumentWriterButton}
-													<Tooltip content={$i18n.t('Document Writer')} placement="top">
+													<Tooltip
+														content={pinnedStateTooltip(
+															$i18n.t('Document Writer'),
+															documentWriterEnabled ? 'required' : 'off',
+															documentWriterEnabled
+																? $i18n.t('Write a document')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
 														<button
 															type="button"
 															aria-label={documentWriterEnabled
@@ -2769,7 +2817,7 @@
 																: $i18n.t('Enable Document Writer')}
 															aria-pressed={documentWriterEnabled}
 															on:click|preventDefault={() =>
-																(documentWriterEnabled = !documentWriterEnabled)}
+																inputMenuRef?.cycleTool('document_writer')}
 															class={pinnedToggleClass(documentWriterEnabled)}
 														>
 															<Document className="size-4" strokeWidth="1.75" />
@@ -2950,15 +2998,25 @@
 												{/if}
 											{/each}
 
-											{#if webSearchEnabled && showWebSearchButton && !pinnedInputItems.includes('web_search')}
-												<Tooltip content={$i18n.t('Web Search')} placement="top">
+											<!-- [Gradient] Only Altijd is worth a chip: Auto is the default. Its X drops back to Auto. -->
+											{#if webSearchToolState === 'required' && showWebSearchButton && !pinnedInputItems.includes('web_search')}
+												<Tooltip
+													content={pinnedStateTooltip(
+														$i18n.t('Web Search'),
+														webSearchToolState,
+														$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+													)}
+													placement="top"
+												>
 													<button
-														on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+														on:click|preventDefault={() => (webSearchRequired = false)}
 														type="button"
-														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
-														($settings?.webSearch ?? false) === 'always'
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
+														aria-label={pinnedStateTooltip(
+															$i18n.t('Web Search'),
+															webSearchToolState,
+															$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+														)}
+														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20"
 													>
 														<GlobeAlt className="size-4" strokeWidth="1.75" />
 														<div class="hidden group-hover:block">

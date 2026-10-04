@@ -359,6 +359,10 @@
 
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
+	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
+	let webSearchRequired = false;
+	// A restored draft keeps its web search state over the new-chat default.
+	let webSearchFromDraft = false;
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = false;
 	let webSearchActive = false;
@@ -373,11 +377,13 @@
 				(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
 			).length === currentModels.length;
 
+		// [Gradient] Auto and Altijd both make web search possible. The 'always' user setting
+		// and a model's default features now set the starting state (setDefaults) instead.
 		webSearchActive = Boolean(
 			$config?.features?.enable_web_search &&
 			($user?.role === 'admin' || $user?.permissions?.features?.web_search) &&
-			(webSearchEnabled ||
-				(allModelsSupportWebSearch && ($settings?.webSearch ?? false) === 'always'))
+			allModelsSupportWebSearch &&
+			webSearchEnabled
 		);
 	}
 
@@ -805,6 +811,8 @@
 			selectedSkillIds = input.selectedSkillIds ?? [];
 			selectedFilterIds = input.selectedFilterIds ?? [];
 			webSearchEnabled = input.webSearchEnabled ?? false;
+			webSearchRequired = input.webSearchRequired ?? false;
+			webSearchFromDraft = input.webSearchEnabled !== undefined;
 			imageGenerationEnabled = input.imageGenerationEnabled ?? false;
 			codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
 			// [Gradient] Preserve Document Writer across draft and OAuth restoration.
@@ -988,6 +996,7 @@
 	$: if ($chatId && !loading && !$temporaryChatEnabled && history?.currentId) {
 		const current = JSON.stringify({
 			webSearchEnabled,
+			webSearchRequired,
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
 			documentWriterEnabled
@@ -1077,6 +1086,19 @@
 			if (!$skills) {
 				skills.set(await getSkills(localStorage.token));
 			}
+			// [Gradient] A new chat starts web search on Auto, or Altijd when the user asks for
+			// it always. Strict data separation starts on Uit: Auto may reach the open internet,
+			// which would lock a fresh chat away from internal documents before anything is sent.
+			if (!history?.currentId && !webSearchFromDraft) {
+				const webSearchAllowed =
+					$config?.features?.enable_web_search &&
+					($user?.role === 'admin' || $user?.permissions?.features?.web_search);
+				const always = ($settings?.webSearch ?? null) === 'always';
+				const strict = $config?.features?.feature_strict_data_separation ?? false;
+				webSearchEnabled = Boolean(webSearchAllowed && (always || !strict));
+				webSearchRequired = Boolean(webSearchAllowed && always);
+			}
+
 			if (selectedModels.length !== 1 && !atSelectedModel) {
 				return;
 			}
@@ -1152,7 +1174,12 @@
 						$config?.features?.enable_web_search &&
 						($user?.role === 'admin' || $user?.permissions?.features?.web_search)
 					) {
-						webSearchEnabled = model.info.meta.defaultFeatureIds.includes('web_search');
+						// [Gradient] A default-on web search starts on Altijd; otherwise the chat
+						// keeps the starting state set above.
+						if (model.info.meta.defaultFeatureIds.includes('web_search')) {
+							webSearchEnabled = true;
+							webSearchRequired = true;
+						}
 					}
 
 					if (
@@ -2391,6 +2418,7 @@
 		autoScroll = true;
 
 		// resetInput() must stay last: the selected model's defaults override the draft's selection.
+		webSearchFromDraft = false;
 		await restoreChatInput(sessionStorage.getItem('chat-input'));
 		await resetInput();
 		await chatId.set('');
@@ -2417,6 +2445,7 @@
 
 		if ($page.url.searchParams.get('web-search') === 'true') {
 			webSearchEnabled = true;
+			webSearchRequired = true;
 		}
 
 		if ($page.url.searchParams.get('image-generation') === 'true') {
@@ -2610,6 +2639,8 @@
 
 				const chatFeatures = chatContent?.features ?? {};
 				webSearchEnabled = chatFeatures.web_search ?? false;
+				// Chats saved before Altijd existed carry only web_search and read as Auto.
+				webSearchRequired = chatFeatures.web_search_required ?? false;
 				imageGenerationEnabled = chatFeatures.image_generation ?? false;
 				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
 				documentWriterEnabled = chatFeatures.document_writer ?? false;
@@ -2619,6 +2650,7 @@
 				// redundant full-history save right after load. Key order must match that block.
 				lastSavedFeatures = JSON.stringify({
 					webSearchEnabled,
+					webSearchRequired,
 					imageGenerationEnabled,
 					codeInterpreterEnabled,
 					documentWriterEnabled
@@ -3862,7 +3894,9 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
 						: false,
-				web_search: webSearchActive
+				web_search: webSearchActive,
+				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
+				web_search_required: webSearchActive && webSearchRequired
 			};
 
 		if ($settings?.memory ?? $config?.features?.enable_memories ?? false) {
@@ -4490,6 +4524,7 @@
 					files: chatFiles,
 					features: {
 						web_search: webSearchEnabled,
+						web_search_required: webSearchEnabled && webSearchRequired,
 						image_generation: imageGenerationEnabled,
 						code_interpreter: codeInterpreterEnabled,
 						document_writer: documentWriterEnabled
@@ -4533,6 +4568,7 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
+		webSearchRequired,
 		codeInterpreterEnabled,
 		toolApprovalMode
 	});
@@ -5027,6 +5063,7 @@
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:webSearchEnabled
+										bind:webSearchRequired
 										bind:atSelectedModel
 										bind:showCommands
 										bind:dragged
@@ -5119,6 +5156,7 @@
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:webSearchEnabled
+										bind:webSearchRequired
 										bind:atSelectedModel
 										bind:showCommands
 										bind:dragged
@@ -5178,6 +5216,7 @@
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
 									bind:webSearchEnabled
+									bind:webSearchRequired
 									bind:atSelectedModel
 									bind:showCommands
 									bind:dragged

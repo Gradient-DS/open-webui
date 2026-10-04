@@ -24,6 +24,8 @@ export interface ChatDraft {
 	selectedFilterIds: string[];
 	imageGenerationEnabled: boolean;
 	webSearchEnabled: boolean;
+	/** [Gradient] Web search Altijd; webSearchEnabled alone is Auto. */
+	webSearchRequired: boolean;
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
 	toolApprovalMode: string;

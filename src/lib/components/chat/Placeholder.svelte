@@ -57,6 +57,7 @@
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = false;
 	export let webSearchEnabled = false;
+	export let webSearchRequired = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 	export let oauthRedirectHandler: ChatInputCallbacks['oauthRedirectHandler'] = () => {};
@@ -281,6 +282,7 @@
 						bind:codeInterpreterEnabled
 						bind:documentWriterEnabled
 						bind:webSearchEnabled
+						bind:webSearchRequired
 						bind:atSelectedModel
 						bind:showCommands
 						bind:dragged

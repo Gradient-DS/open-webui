@@ -8,6 +8,17 @@
 	import { getContext, onDestroy, tick } from 'svelte';
 	import type { ChatInputCallbacks } from '$lib/types/chatAttachment';
 	import { fly } from 'svelte/transition';
+	import {
+		BINARY_TOOL_STATES,
+		TOOL_OFF_DESCRIPTION,
+		TOOL_STATE_LABELS,
+		WEB_SEARCH_STATE_DESCRIPTIONS,
+		WEB_SEARCH_STATES,
+		nextToolState,
+		webSearchFlags,
+		webSearchState,
+		type ToolState
+	} from '$lib/utils/toolState';
 	import { toast } from 'svelte-sonner';
 
 	import { config, user, tools as _tools, skills as _skills, toolServers } from '$lib/stores';
@@ -103,6 +114,8 @@
 	export let toggleFilters: ToggleFilter[] = [];
 	export let showWebSearchButton = false;
 	export let webSearchEnabled = false;
+	// [Gradient] Altijd; webSearchEnabled alone is Auto.
+	export let webSearchRequired = false;
 	export let showImageGenerationButton = false;
 	export let imageGenerationEnabled = false;
 	export let showCodeInterpreterButton = false;
@@ -443,26 +456,49 @@
 		}
 	};
 
-	const toggleWebSearch = () => {
-		// [Gradient] Strict data separation and #171 capability exclusion.
+	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
+	$: imageGenerationState = (imageGenerationEnabled ? 'required' : 'off') as ToolState;
+	$: codeInterpreterState = (codeInterpreterEnabled ? 'required' : 'off') as ToolState;
+	$: documentWriterState = (documentWriterEnabled ? 'required' : 'off') as ToolState;
+
+	const stateAriaLabel = (label: string, state: ToolState, description: string) =>
+		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
+
+	// [Gradient] Web search cycles Auto, Altijd, Uit. Exported for the pinned composer button.
+	export const cycleWebSearch = () => {
+		// Strict data separation and #171 capability exclusion.
 		if (openInternetBlocked) return;
-		webSearchEnabled = !webSearchEnabled;
-		if (webSearchEnabled) {
-			if (imageGenerationEnabled)
-				toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
+		const wasOff = !webSearchEnabled;
+		const { enabled, required } = webSearchFlags(
+			nextToolState(webSearchToolState, WEB_SEARCH_STATES)
+		);
+		webSearchEnabled = enabled;
+		webSearchRequired = required;
+		if (webSearchEnabled && imageGenerationEnabled) {
+			toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
 			imageGenerationEnabled = false;
 		}
-		onWebSearchToggle(webSearchEnabled);
+		// The confirmation flow cares about web search becoming possible, not about Altijd.
+		if (wasOff !== !webSearchEnabled) onWebSearchToggle(webSearchEnabled);
 	};
 
-	const toggleImageGeneration = () => {
-		// [Gradient] #171: image generation takes over from web search.
-		imageGenerationEnabled = !imageGenerationEnabled;
-		if (imageGenerationEnabled) {
-			if (webSearchEnabled)
+	// [Gradient] Two-state tools cycle Uit and Altijd. Exported for the pinned composer buttons.
+	export const cycleTool = (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => {
+		if (tool === 'image_generation') {
+			imageGenerationEnabled =
+				nextToolState(imageGenerationState, BINARY_TOOL_STATES) === 'required';
+			// #171: image generation takes over from web search, which must then be Uit.
+			if (imageGenerationEnabled && webSearchEnabled) {
 				toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
-			webSearchEnabled = false;
-			onWebSearchToggle(false);
+				webSearchEnabled = false;
+				webSearchRequired = false;
+				onWebSearchToggle(false);
+			}
+		} else if (tool === 'code_interpreter') {
+			codeInterpreterEnabled =
+				nextToolState(codeInterpreterState, BINARY_TOOL_STATES) === 'required';
+		} else {
+			documentWriterEnabled = nextToolState(documentWriterState, BINARY_TOOL_STATES) === 'required';
 		}
 	};
 
@@ -718,15 +754,20 @@
 						<MenuItem
 							label={$i18n.t('Search the web')}
 							pinId="web_search"
-							toggle={webSearchEnabled}
+							toolState={webSearchToolState}
 							tooltipPlacement="top-start"
 							tooltip={openInternetBlocked
 								? dataSeparationMessage
 								: imageGenerationEnabled
 									? $i18n.t('Web search and image generation cannot run in the same turn')
-									: $i18n.t('Search the internet')}
+									: $i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Search the web'),
+								webSearchToolState,
+								$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+							)}
 							disabled={openInternetBlocked}
-							onClick={toggleWebSearch}
+							onClick={cycleWebSearch}
 						>
 							<GlobeAlt slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -737,12 +778,21 @@
 						<MenuItem
 							label={$i18n.t('Image')}
 							pinId="image_generation"
-							toggle={imageGenerationEnabled}
+							toolState={imageGenerationState}
 							tooltipPlacement="top-start"
 							tooltip={webSearchEnabled
 								? $i18n.t('Web search and image generation cannot run in the same turn')
-								: $i18n.t('Generate an image')}
-							onClick={toggleImageGeneration}
+								: imageGenerationEnabled
+									? $i18n.t('Generate an image')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Image'),
+								imageGenerationState,
+								imageGenerationEnabled
+									? $i18n.t('Generate an image')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)
+							)}
+							onClick={() => cycleTool('image_generation')}
 						>
 							<Photo slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -752,12 +802,19 @@
 						<MenuItem
 							label={$i18n.t('Code Interpreter')}
 							pinId="code_interpreter"
-							toggle={codeInterpreterEnabled}
+							toolState={codeInterpreterState}
 							tooltipPlacement="top-start"
-							tooltip={$i18n.t('Execute code for analysis')}
-							onClick={() => {
-								codeInterpreterEnabled = !codeInterpreterEnabled;
-							}}
+							tooltip={codeInterpreterEnabled
+								? $i18n.t('Execute code for analysis')
+								: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Code Interpreter'),
+								codeInterpreterState,
+								codeInterpreterEnabled
+									? $i18n.t('Execute code for analysis')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)
+							)}
+							onClick={() => cycleTool('code_interpreter')}
 						>
 							<Terminal slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
@@ -767,12 +824,17 @@
 						<MenuItem
 							label={$i18n.t('Document Writer')}
 							pinId="document_writer"
-							toggle={documentWriterEnabled}
+							toolState={documentWriterState}
 							tooltipPlacement="top-start"
-							tooltip={$i18n.t('Write a document')}
-							onClick={() => {
-								documentWriterEnabled = !documentWriterEnabled;
-							}}
+							tooltip={documentWriterEnabled
+								? $i18n.t('Write a document')
+								: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Document Writer'),
+								documentWriterState,
+								documentWriterEnabled ? $i18n.t('Write a document') : $i18n.t(TOOL_OFF_DESCRIPTION)
+							)}
+							onClick={() => cycleTool('document_writer')}
 						>
 							<Document slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
