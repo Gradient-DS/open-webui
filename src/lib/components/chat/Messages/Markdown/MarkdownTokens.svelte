@@ -24,7 +24,6 @@
 	import Download from '$lib/components/icons/Download.svelte';
 	import ConsecutiveDetailsGroup from './ConsecutiveDetailsGroup.svelte';
 	import DocumentCard from './DocumentCard.svelte';
-	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 
 	import HtmlToken from './HTMLToken.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
@@ -457,13 +456,10 @@
 					{@const textContent = getDetailTextContent(detailToken)}
 
 					{#if detailToken?.attributes?.type === 'document'}
-						{@const document = extractDocumentsFromMessage(detailToken.raw)[0]}
 						<DocumentCard
 							id={`${id}-${tokenIdx}-${detailIdx}-doc`}
-							title={document?.title ??
-								decode(detailToken?.attributes?.title ?? detailToken.summary ?? '')}
-							content={document?.content ?? detailToken?.text ?? ''}
-							format={document?.format ?? 'markdown'}
+							title={decode(detailToken?.attributes?.title ?? detailToken.summary ?? '')}
+							content={detailToken?.text ?? ''}
 							done={detailToken?.attributes?.done !== 'false'}
 							messageDone={done}
 						/>
@@ -534,6 +530,14 @@
 				{/each}
 			</div>
 		</ConsecutiveDetailsGroup>
+	{:else if token.type === 'document'}
+		<DocumentCard
+			id={`${id}-${tokenIdx}-doc`}
+			title={token.document.title}
+			content={token.document.content}
+			format={token.document.format}
+			done={token.document.done}
+		/>
 	{:else if token.type === 'details'}
 		{@const textContent = getDetailTextContent(token)}
 
@@ -541,12 +545,10 @@
 			<!-- Reasoning blocks are consumed by StatusHistory upstream and
 			     rendered as bullets there. Skipping here avoids duplicate display. -->
 		{:else if token?.attributes?.type === 'document'}
-			{@const document = extractDocumentsFromMessage(token.raw)[0]}
 			<DocumentCard
 				id={`${id}-${tokenIdx}-doc`}
-				title={document?.title ?? decode(token?.attributes?.title ?? token.summary ?? '')}
-				content={document?.content ?? token?.text ?? ''}
-				format={document?.format ?? 'markdown'}
+				title={decode(token?.attributes?.title ?? token.summary ?? '')}
+				content={token?.text ?? ''}
 				done={token?.attributes?.done !== 'false'}
 				messageDone={done}
 			/>

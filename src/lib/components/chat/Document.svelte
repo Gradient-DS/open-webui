@@ -23,11 +23,7 @@
 	import ContentRenderer from './Messages/ContentRenderer.svelte';
 	import HtmlDocumentFrame from './Messages/HtmlDocumentFrame.svelte';
 	import Citations from './Messages/SoevCitations.svelte';
-	import {
-		normalizeCitations,
-		buildFullSourceList,
-		formatSourcesAsMarkdown
-	} from '$lib/utils/citations';
+	import { getExportMarkdown as exportMarkdown } from '$lib/utils/documentCitations';
 	import Download from '../icons/Download.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
@@ -53,17 +49,11 @@
 		return cleaned.length > 0 ? cleaned : 'document';
 	};
 
-	// Build the content to export: normalize [N] citations in the markdown and append a
-	// source appendix. When the body has no [N] markers, fall back to the full source
-	// list so the downloaded file matches what the Citations footer shows on screen.
 	const getExportMarkdown = () => {
 		if (!current) return '';
-		const sources = current.sources ?? [];
-		if (current.isAgentDocument || sources.length === 0) return current.content;
-		const { content, sourceList } = normalizeCitations(current.content, sources);
-		const appendix = sourceList.length > 0 ? sourceList : buildFullSourceList(sources);
-		if (appendix.length === 0) return current.content;
-		return `${content}\n\n---\n\n${formatSourcesAsMarkdown(appendix)}\n`;
+		return current.format === 'html'
+			? current.content
+			: exportMarkdown(current.content, current.sources ?? [], $i18n.t('Sources'));
 	};
 
 	const downloadMd = () => {
@@ -87,7 +77,13 @@
 	const downloadPdf = async () => {
 		if (!current) return;
 		try {
-			await printDocument(current.title, getExportMarkdown(), current.format);
+			await printDocument(
+				current.title,
+				getExportMarkdown(),
+				current.format,
+				current.sources,
+				$i18n.t('Sources')
+			);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
@@ -289,29 +285,39 @@
 			<div class="h-full flex flex-col">
 				{#if contents.length > 0 && current}
 					{#if current.format === 'html'}
-						<HtmlDocumentFrame content={current.content} title={current.title} />
+						{#key $selectedDocumentIndex}
+							<HtmlDocumentFrame
+								content={current.content}
+								title={current.title}
+								done={current.done}
+								sources={current.sources ?? []}
+								onSourceClick={(id) => citationsElement?.showSourceModal(id)}
+							/>
+						{/key}
 					{:else}
 						<div class="max-w-3xl w-full mx-auto px-6 py-6 prose dark:prose-invert">
 							<ContentRenderer
 								id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
+								messageId={`document-${$selectedDocumentIndex}`}
+								history={undefined}
 								content={current.content}
-								done={true}
+								done={current.done}
 								editCodeBlock={false}
-								sources={current.isAgentDocument ? [] : current.sources}
+								sources={current.sources}
 								floatingButtons={false}
 								onSourceClick={((id: any) => citationsElement?.showSourceModal(id)) as any}
 							/>
 						</div>
-						{#if !current.isAgentDocument && (current.sources ?? []).length > 0}
-							<div class="max-w-3xl w-full mx-auto px-6 pb-6">
-								<Citations
-									bind:this={citationsElement}
-									id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
-									chatId={$chatId ?? ''}
-									sources={current.isAgentDocument ? [] : current.sources}
-								/>
-							</div>
-						{/if}
+					{/if}
+					{#if (current.sources ?? []).length > 0}
+						<div class="max-w-3xl w-full mx-auto px-6 pb-6">
+							<Citations
+								bind:this={citationsElement}
+								id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
+								chatId={$chatId ?? ''}
+								sources={current.sources}
+							/>
+						</div>
 					{/if}
 				{:else}
 					<div class="m-auto font-medium text-xs text-gray-900 dark:text-white">

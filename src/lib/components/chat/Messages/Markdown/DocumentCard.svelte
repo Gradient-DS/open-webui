@@ -16,6 +16,7 @@
 		selectedDocumentIndex
 	} from '$lib/stores';
 	import { exportDocumentAsDocx } from '$lib/apis/utils';
+	import { getExportMarkdown } from '$lib/utils/documentCitations';
 	import { printDocument } from '$lib/utils/documentPrint';
 
 	import type { DocumentFormat } from '$lib/utils/agentDocument';
@@ -54,10 +55,18 @@
 		return cleaned.length > 0 ? cleaned : 'document';
 	};
 
+	$: sources =
+		($documentContents ?? []).find(
+			(document) =>
+				document.title === title && document.content === content && document.format === format
+		)?.sources ?? [];
+	$: exportContent =
+		format === 'markdown' ? getExportMarkdown(content, sources, $i18n.t('Sources')) : content;
+
 	const downloadMd = () => {
 		if (!content) return;
 		saveAs(
-			new Blob([content], { type: 'text/markdown;charset=utf-8' }),
+			new Blob([exportContent], { type: 'text/markdown;charset=utf-8' }),
 			`${sanitizeFilename(displayTitle)}.md`
 		);
 		downloadOpen = false;
@@ -66,7 +75,7 @@
 	const downloadTxt = () => {
 		if (!content) return;
 		saveAs(
-			new Blob([content], { type: 'text/plain;charset=utf-8' }),
+			new Blob([exportContent], { type: 'text/plain;charset=utf-8' }),
 			`${sanitizeFilename(displayTitle)}.txt`
 		);
 		downloadOpen = false;
@@ -75,7 +84,7 @@
 	const downloadPdf = async () => {
 		if (!content) return;
 		try {
-			await printDocument(displayTitle, content, format);
+			await printDocument(displayTitle, exportContent, format, sources, $i18n.t('Sources'));
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
@@ -86,7 +95,7 @@
 	const downloadDocx = async () => {
 		if (!content) return;
 		try {
-			const blob = await exportDocumentAsDocx(localStorage.token, displayTitle, content);
+			const blob = await exportDocumentAsDocx(localStorage.token, displayTitle, exportContent);
 			if (blob) saveAs(blob, `${sanitizeFilename(displayTitle)}.docx`);
 		} catch (e) {
 			console.error(e);
@@ -122,7 +131,9 @@
 			{displayTitle}
 		</div>
 		<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
-			{format === 'html' ? $i18n.t('HTML') : $i18n.t('Markdown')}
+			{format === 'html' ? $i18n.t('HTML') : $i18n.t('Markdown')} · {isExecuting
+				? $i18n.t('Writing document...')
+				: $i18n.t('Done')}
 		</div>
 	</div>
 

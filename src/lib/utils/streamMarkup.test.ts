@@ -72,13 +72,16 @@ describe('markupSafeEnd', () => {
 	});
 });
 
-it('holds every partial agent document until its closing details arrives', () => {
-	const marker =
-		'<details type="document" format="html" title="Report" done="true">\n<summary>Document</summary>\n&lt;h1&gt;Report&lt;/h1&gt;\n</details>';
-	for (let end = 1; end < marker.length; end++) {
-		const partial = 'Before ' + marker.slice(0, end);
-		const masked = maskInFlightTag(partial);
-		expect(markupSafeEnd(masked, masked.length)).toBeLessThanOrEqual(7);
-	}
-	expect(markupSafeEnd('Before ' + marker, 20)).toBe(7 + marker.length);
+it('reveals an open document as soon as its opening tag is complete', () => {
+	const text = 'Before <document title="Report"># Draft';
+	expect(markupSafeEnd(text, 10)).toBe(text.length);
+	expect(maskInFlightTag('Before <document title="Report')).toBe('Before ');
+	expect(maskInFlightTag('Before <document title="Report">Body</doc')).toBe(
+		'Before <document title="Report">Body'
+	);
+});
+
+it('does not let HTML details inside a completed document hold back following text', () => {
+	const text = '<document format="html"><details>Body</details></document> After';
+	expect(markupSafeEnd(text, text.length)).toBe(text.length);
 });

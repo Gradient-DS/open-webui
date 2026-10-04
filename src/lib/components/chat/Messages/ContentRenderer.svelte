@@ -4,7 +4,9 @@
 
 	import Markdown from './Markdown.svelte';
 	import StructuredOutputRenderer from './StructuredOutputRenderer.svelte';
-	import { hasDocumentOutput } from './structuredOutput';
+	import { maskInFlightTag } from '$lib/utils/streamMarkup';
+	import { DOCUMENT_OPEN } from '$lib/utils/agentDocument';
+	import { getOutputText, hasDocumentOutput } from './structuredOutput';
 	import {
 		artifactCode,
 		chatId as currentChatId,
@@ -83,6 +85,7 @@
 
 	export let done = true;
 	export let model = null;
+	/** @type {import('./Citations/reduceSources').RawSource[] | null} */
 	export let sources = null;
 
 	export let save = false;
@@ -112,8 +115,10 @@
 		// side panel never auto-opens for a reloaded chat.
 		const hasDocument =
 			hasDocumentOutput(output) ||
+			DOCUMENT_OPEN.test(getOutputText(output)) ||
 			(typeof content === 'string' &&
-				(/<details\b[^>]*\btype="document"/.test(content) ||
+				(DOCUMENT_OPEN.test(content) ||
+					/<details\b[^>]*\btype="document"/.test(content) ||
 					/<details\b[^>]*\btype="tool_calls"[^>]*\bname="write_document"/.test(content)));
 
 		if (
@@ -340,7 +345,7 @@
 			onUpdate={markdownUpdateHandler}
 			onPreview={previewHandler}
 		/>
-	{:else if $settings?.renderMarkdownInAssistantMessages ?? true}
+	{:else if ($settings?.renderMarkdownInAssistantMessages ?? true) || DOCUMENT_OPEN.test(content)}
 		<div class="markdown-prose">
 			<Markdown
 				{id}
@@ -383,7 +388,9 @@
 			</div>
 		{/if}
 		{#if extracted.plainContent}
-			<div class="whitespace-pre-wrap text-[0.9375rem]">{extracted.plainContent}</div>
+			<div class="whitespace-pre-wrap text-[0.9375rem]">
+				{maskInFlightTag(extracted.plainContent)}
+			</div>
 		{/if}
 	{/if}
 </div>

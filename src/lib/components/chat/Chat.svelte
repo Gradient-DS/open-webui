@@ -2231,7 +2231,7 @@
 						...docs,
 						...documents.map((doc) => ({
 							...doc,
-							sources: doc.isAgentDocument ? undefined : sources
+							sources
 						}))
 					];
 				}

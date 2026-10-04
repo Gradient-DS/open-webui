@@ -66,3 +66,24 @@ describe('markdown line breaks', () => {
 		expect(html).toContain('[1] Een<br>');
 	});
 });
+
+it('prints HTML citations as first-use numbers with a translated source list and no pills', () => {
+	const sources = ['Unused', 'https://www.example.com/report'].map((name) => ({
+		source: { name },
+		document: ['text']
+	}));
+	const html = buildPrintDocument(
+		'Report',
+		'<p>Claim [2] and [2].</p>',
+		'html',
+		sources,
+		'Bronnen'
+	);
+	const doc = new DOMParser().parseFromString(html, 'text/html');
+	expect(doc.querySelector('p')?.textContent).toBe('Claim [1] and [1].');
+	expect(doc.querySelector('section')?.textContent).toBe(
+		'Bronnen[1] example.com, https://www.example.com/report'
+	);
+	expect(doc.querySelector('button')).toBeNull();
+	expect(doc.querySelector('style[data-page-boxes]')?.textContent).toContain('@bottom-left');
+});
