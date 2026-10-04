@@ -105,3 +105,7 @@ completed document as its owning user and fills content_type before marking it r
 
 Attach tool summaries show "Could not open document" for refusals and failures.
 An attached event (including processing) or an existing document keeps the success label.
+
+OneDrive search uses the cloud-and-magnifier icon in its menu row, pinned button
+and tooltip. The picker retains the plain cloud; pinned tooltip labels are
+"OneDrive files" and "OneDrive search", translated through i18n.

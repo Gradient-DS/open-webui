@@ -133,6 +133,7 @@
 	import DocumentArrowUp from '../icons/DocumentArrowUp.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
+	import OneDriveSearch from '../icons/OneDriveSearch.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import Knobs from '../icons/Knobs.svelte';
@@ -1002,6 +1003,7 @@
 				cycleTool: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
 		  }
 		| undefined;
+	const liveDocumentsTooltipId = `onedrive-search-${uuidv4()}`;
 	const pinnedStateTooltip = (label: string, state: ToolState, description: string) =>
 		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
 	const pinnedButtonClass =
@@ -2682,11 +2684,11 @@
 														</button>
 													</Tooltip>
 												{:else if itemId === 'onedrive' && inputMenuFileUploadEnabled && $config?.features?.enable_onedrive_integration && ($config?.features?.enable_onedrive_personal || $config?.features?.enable_onedrive_business)}
-													<Tooltip content={$i18n.t('OneDrive Files')} placement="top">
+													<Tooltip content={$i18n.t('OneDrive files')} placement="top">
 														<button
 															class={pinnedButtonClass}
 															type="button"
-															aria-label={$i18n.t('OneDrive Files')}
+															aria-label={$i18n.t('OneDrive files')}
 															on:click={() => {
 																if (
 																	$config?.features?.enable_onedrive_personal &&
@@ -2781,6 +2783,7 @@
 													</Tooltip>
 												{:else if itemId === 'live_documents' && $config?.features?.enable_live_documents}
 													<Tooltip
+														elementId={liveDocumentsTooltipId}
 														content={pinnedStateTooltip(
 															$i18n.t('OneDrive search'),
 															liveDocumentsState,
@@ -2797,8 +2800,22 @@
 															on:click|preventDefault={() => inputMenuRef?.cycleLiveDocuments()}
 															class={pinnedToggleClass(liveDocumentsState)}
 														>
-															<OneDrive className="size-4" />
+															<OneDriveSearch className="size-4" />
 														</button>
+														<div slot="tooltip" class="hidden">
+															<div id={liveDocumentsTooltipId} class="flex items-center gap-2">
+																<OneDriveSearch className="size-4 shrink-0" />
+																<span
+																	>{pinnedStateTooltip(
+																		$i18n.t('OneDrive search'),
+																		liveDocumentsState,
+																		liveDocumentsState !== 'off'
+																			? $i18n.t('The model decides whether to search OneDrive')
+																			: $i18n.t(TOOL_OFF_DESCRIPTION)
+																	)}</span
+																>
+															</div>
+														</div>
 													</Tooltip>
 												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
 													<Tooltip
