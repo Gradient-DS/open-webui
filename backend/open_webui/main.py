@@ -2754,6 +2754,7 @@ async def get_app_config(request: Request):
         'users.enable_status',
         'google_drive.enable',
         'onedrive.enable',
+        'live_documents.enable',
         'memories.enable',
         'ui.default_models',
         'ui.default_pinned_models',
