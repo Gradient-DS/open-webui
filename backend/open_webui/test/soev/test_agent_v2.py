@@ -1831,3 +1831,28 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
 
     closing = [event['data'] for event in declared.socket if event['type'] == 'status'][-1]
     assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'output,attached,expected',
+    [
+        ({'text': 'Document request refused: not_readable'}, False, 'Could not open document'),
+        ({'text': 'Attachment failed: processing_failed'}, False, 'Could not open document'),
+        ({'elements': [{'type': 'action_required', 'id': 'connect'}]}, False, 'Could not open document'),
+        ({'error': 'tool_failed'}, False, 'Could not open document'),
+        ({'elements': [{'type': 'document', 'id': 'doc'}]}, False, 'Opened document'),
+        ({'status': 'processing'}, True, 'Opened document'),
+        ({'status': 'ready'}, True, 'Opened document'),
+    ],
+)
+async def test_attach_summary_reflects_the_outcome(output: dict, attached: bool, expected: str) -> None:
+    """Refusals and errors cannot claim success; accepted and existing attachments can."""
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {'attach_live_document': {'done': {'template': 'Opened document', 'params': {}}}}
+    turn.running['attach'] = ('attach_live_document', {})
+    chunks = await turn.end_tool({'call_id': 'attach', **output}, attached=attached)
+    assert f'<summary>{expected}</summary>' in content(chunks)
+    assert turn.settling == [
+        {'action': 'attach_live_document', 'description': expected, 'call_id': 'attach', 'done': True}
+    ]

@@ -119,7 +119,8 @@
 	export let webSearchEnabled = false;
 	export let liveDocumentsState: ToolState = 'off';
 	let connectingDocuments = false;
-	const cycleLiveDocuments = async () => {
+	export const cycleLiveDocuments = async () => {
+		if (connectingDocuments) return;
 		const next = nextToolState(liveDocumentsState, LIVE_DOCUMENT_STATES);
 		connectingDocuments = true;
 		try {
@@ -783,6 +784,14 @@
 					{#if showLiveDocuments}
 						<MenuItem
 							label={$i18n.t('OneDrive search')}
+							pinId="live_documents"
+							tooltip={stateAriaLabel(
+								$i18n.t('OneDrive search'),
+								liveDocumentsState,
+								liveDocumentsState === 'off'
+									? $i18n.t(TOOL_OFF_DESCRIPTION)
+									: $i18n.t('The model decides whether to search OneDrive')
+							)}
 							toolState={liveDocumentsState}
 							disabled={connectingDocuments}
 							onClick={cycleLiveDocuments}

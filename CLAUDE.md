@@ -93,7 +93,8 @@ picker commissioning; provision attach only to consumer products. The platform b
 picker attach and inspect per subject and UTC minute (default 10), independently of
 idempotency keys. Picker refusals preserve provider and Retry-After, including
 connection_required (409), not_readable (422), and provider_throttled (503).
-Live documents use an explicit off/auto/required tool state in InputMenu (off by default).
+OneDrive search can be pinned to the composer; both controls cycle off/auto (off by default)
+and share the same consent flow.
 Set ENABLE_LIVE_DOCUMENTS=true (config key live_documents.enable, default false) alongside
 AGENT_API_ENABLED to offer the control. The server gates every requested document tool state
 with that setting; enable the matching platform live_documents setting as well.
@@ -124,3 +125,6 @@ completed document as its owning user and fills content_type before marking it r
 Business prefetch does not change the active picker authority. MSAL initialization
 is cached per authority, including in-flight initialization, so warming a business
 account cannot replace the personal-account client during a user click.
+
+Attach tool summaries show "Could not open document" for refusals and failures.
+An attached event (including processing) or an existing document keeps the success label.

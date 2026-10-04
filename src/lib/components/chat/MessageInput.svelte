@@ -1010,6 +1010,7 @@
 				openTab: (tab: string) => void;
 				openWebpageModal: () => void;
 				cycleWebSearch: () => void;
+				cycleLiveDocuments: () => Promise<void>;
 				cycleTool: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
 		  }
 		| undefined;
@@ -2844,6 +2845,29 @@
 															class={pinnedToggleClass(imageGenerationEnabled)}
 														>
 															<Photo className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'live_documents' && $config?.features?.enable_live_documents}
+													<Tooltip
+														content={pinnedStateTooltip(
+															$i18n.t('OneDrive search'),
+															liveDocumentsState,
+															liveDocumentsState !== 'off'
+																? $i18n.t('The model decides whether to search OneDrive')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={liveDocumentsState !== 'off'
+																? $i18n.t('OneDrive search')
+																: $i18n.t('OneDrive search')}
+															aria-pressed={liveDocumentsState !== 'off'}
+															on:click|preventDefault={() => inputMenuRef?.cycleLiveDocuments()}
+															class={pinnedToggleClass(liveDocumentsState)}
+														>
+															<OneDrive className="size-4" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}

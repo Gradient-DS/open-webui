@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	BINARY_TOOL_STATES,
+	LIVE_DOCUMENT_STATES,
 	WEB_SEARCH_STATES,
 	nextToolState,
 	webSearchFlags,
@@ -8,6 +9,10 @@ import {
 } from './toolState';
 
 describe('nextToolState', () => {
+	it('cycles OneDrive search off and auto without requiring a search', () => {
+		expect(nextToolState('off', LIVE_DOCUMENT_STATES)).toBe('auto');
+		expect(nextToolState('auto', LIVE_DOCUMENT_STATES)).toBe('off');
+	});
 	it('cycles web search Auto, Altijd, Uit and back', () => {
 		expect(nextToolState('auto', WEB_SEARCH_STATES)).toBe('required');
 		expect(nextToolState('required', WEB_SEARCH_STATES)).toBe('off');
