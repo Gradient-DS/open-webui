@@ -6,11 +6,19 @@
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 
-	import { chatId, config, showControls, showDocument, documentContents } from '$lib/stores';
+	import {
+		chatId,
+		config,
+		showControls,
+		showDocument,
+		documentContents,
+		selectedDocumentIndex
+	} from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
 
 	import ContentRenderer from './Messages/ContentRenderer.svelte';
+	import HtmlDocumentFrame from './Messages/HtmlDocumentFrame.svelte';
 	import Citations from './Messages/SoevCitations.svelte';
 	import {
 		normalizeCitations,
@@ -24,18 +32,17 @@
 	export let overlay = false;
 
 	let contents: Array<AgentDocument & { sources?: any[] }> = [];
-	let selectedContentIdx = 0;
 	let copied = false;
 	let downloadOpen = false;
 	let citationsElement: any = null;
 
-	$: current = contents[selectedContentIdx];
+	$: current = contents[$selectedDocumentIndex];
 
 	function navigateContent(direction: 'prev' | 'next') {
-		selectedContentIdx =
+		$selectedDocumentIndex =
 			direction === 'prev'
-				? Math.max(selectedContentIdx - 1, 0)
-				: Math.min(selectedContentIdx + 1, contents.length - 1);
+				? Math.max($selectedDocumentIndex - 1, 0)
+				: Math.min($selectedDocumentIndex + 1, contents.length - 1);
 	}
 
 	const sanitizeFilename = (name: string) => {
@@ -115,14 +122,14 @@
 				if (hadContents) {
 					showControls.set(false);
 					showDocument.set(false);
-					selectedContentIdx = 0;
+					$selectedDocumentIndex = 0;
 				}
 			} else {
 				hadContents = true;
 				if (newContents.length > contents.length) {
-					selectedContentIdx = newContents.length - 1;
-				} else if (selectedContentIdx >= newContents.length) {
-					selectedContentIdx = Math.max(newContents.length - 1, 0);
+					$selectedDocumentIndex = newContents.length - 1;
+				} else if ($selectedDocumentIndex >= newContents.length) {
+					$selectedDocumentIndex = Math.max(newContents.length - 1, 0);
 				}
 			}
 
@@ -168,7 +175,7 @@
 
 							<div class="text-xs self-center dark:text-gray-100 min-w-fit">
 								{$i18n.t('Version {{selectedVersion}} of {{totalVersions}}', {
-									selectedVersion: selectedContentIdx + 1,
+									selectedVersion: $selectedDocumentIndex + 1,
 									totalVersions: contents.length
 								})}
 							</div>
@@ -233,22 +240,24 @@
 							</Tooltip>
 
 							<div slot="content">
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadMd}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('Markdown (.md)')}
-									</div>
-								</button>
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadTxt}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('Plain text (.txt)')}
-									</div>
-								</button>
+								{#if current.format === 'markdown'}
+									<button
+										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+										on:click={downloadMd}
+									>
+										<div class="flex items-center line-clamp-1">
+											{$i18n.t('Markdown (.md)')}
+										</div>
+									</button>
+									<button
+										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+										on:click={downloadTxt}
+									>
+										<div class="flex items-center line-clamp-1">
+											{$i18n.t('Plain text (.txt)')}
+										</div>
+									</button>
+								{/if}
 								<button
 									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 									on:click={downloadPdf}
@@ -257,7 +266,7 @@
 										{$i18n.t('PDF document (.pdf)')}
 									</div>
 								</button>
-								{#if $config?.features?.enable_docx_export ?? true}
+								{#if current.format === 'markdown' && ($config?.features?.enable_docx_export ?? true)}
 									<button
 										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 										on:click={downloadDocx}
@@ -281,26 +290,30 @@
 		<div class="flex-1 w-full h-full overflow-y-auto">
 			<div class="h-full flex flex-col">
 				{#if contents.length > 0 && current}
-					<div class="max-w-3xl w-full mx-auto px-6 py-6 prose dark:prose-invert">
-						<ContentRenderer
-							id={`document-${$chatId ?? 'preview'}-${selectedContentIdx}`}
-							content={current.content}
-							done={true}
-							editCodeBlock={false}
-							sources={current.sources}
-							floatingButtons={false}
-							onSourceClick={((id: any) => citationsElement?.showSourceModal(id)) as any}
-						/>
-					</div>
-					{#if (current.sources ?? []).length > 0}
-						<div class="max-w-3xl w-full mx-auto px-6 pb-6">
-							<Citations
-								bind:this={citationsElement}
-								id={`document-${$chatId ?? 'preview'}-${selectedContentIdx}`}
-								chatId={$chatId ?? ''}
-								sources={current.sources}
+					{#if current.format === 'html'}
+						<HtmlDocumentFrame content={current.content} title={current.title} />
+					{:else}
+						<div class="max-w-3xl w-full mx-auto px-6 py-6 prose dark:prose-invert">
+							<ContentRenderer
+								id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
+								content={current.content}
+								done={true}
+								editCodeBlock={false}
+								sources={current.isAgentDocument ? [] : current.sources}
+								floatingButtons={false}
+								onSourceClick={((id: any) => citationsElement?.showSourceModal(id)) as any}
 							/>
 						</div>
+						{#if !current.isAgentDocument && (current.sources ?? []).length > 0}
+							<div class="max-w-3xl w-full mx-auto px-6 pb-6">
+								<Citations
+									bind:this={citationsElement}
+									id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
+									chatId={$chatId ?? ''}
+									sources={current.isAgentDocument ? [] : current.sources}
+								/>
+							</div>
+						{/if}
 					{/if}
 				{:else}
 					<div class="m-auto font-medium text-xs text-gray-900 dark:text-white">

@@ -5,9 +5,17 @@
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 
-	import { config, showControls, showDocument, openDocumentTabSignal } from '$lib/stores';
+	import {
+		config,
+		showControls,
+		showDocument,
+		openDocumentTabSignal,
+		documentContents,
+		selectedDocumentIndex
+	} from '$lib/stores';
 	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
 
+	import type { DocumentFormat } from '$lib/utils/agentDocument';
 	import Document from '$lib/components/icons/Document.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -15,7 +23,8 @@
 
 	export let id: string = '';
 	export let title: string = '';
-	export let markdown: string = '';
+	export let content: string = '';
+	export let format: DocumentFormat = 'markdown';
 	export let done: boolean = true;
 	export let messageDone: boolean = true;
 	export let className: string = '';
@@ -26,12 +35,11 @@
 	$: displayTitle = title || $i18n.t('Document');
 
 	const openDocument = () => {
-		// Toggle: if the side panel is already showing the document, close it.
-		if ($showControls && $showDocument) {
-			showControls.set(false);
-			showDocument.set(false);
-			return;
-		}
+		const index = ($documentContents ?? []).findIndex(
+			(document) =>
+				document.title === title && document.content === content && document.format === format
+		);
+		if (index !== -1) selectedDocumentIndex.set(index);
 		showDocument.set(true);
 		showControls.set(true);
 		openDocumentTabSignal.update((n) => n + 1);
@@ -43,27 +51,27 @@
 	};
 
 	const downloadMd = () => {
-		if (!markdown) return;
+		if (!content) return;
 		saveAs(
-			new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
+			new Blob([content], { type: 'text/markdown;charset=utf-8' }),
 			`${sanitizeFilename(displayTitle)}.md`
 		);
 		downloadOpen = false;
 	};
 
 	const downloadTxt = () => {
-		if (!markdown) return;
+		if (!content) return;
 		saveAs(
-			new Blob([markdown], { type: 'text/plain;charset=utf-8' }),
+			new Blob([content], { type: 'text/plain;charset=utf-8' }),
 			`${sanitizeFilename(displayTitle)}.txt`
 		);
 		downloadOpen = false;
 	};
 
 	const downloadPdf = async () => {
-		if (!markdown) return;
+		if (!content) return;
 		try {
-			const blob = await exportDocumentAsPdf(localStorage.token, displayTitle, markdown);
+			const blob = await exportDocumentAsPdf(localStorage.token, displayTitle, content);
 			if (blob) saveAs(blob, `${sanitizeFilename(displayTitle)}.pdf`);
 		} catch (e) {
 			console.error(e);
@@ -73,9 +81,9 @@
 	};
 
 	const downloadDocx = async () => {
-		if (!markdown) return;
+		if (!content) return;
 		try {
-			const blob = await exportDocumentAsDocx(localStorage.token, displayTitle, markdown);
+			const blob = await exportDocumentAsDocx(localStorage.token, displayTitle, content);
 			if (blob) saveAs(blob, `${sanitizeFilename(displayTitle)}.docx`);
 		} catch (e) {
 			console.error(e);
@@ -112,11 +120,11 @@
 			{displayTitle}
 		</div>
 		<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
-			{$i18n.t('Document')}
+			{format === 'html' ? $i18n.t('HTML') : $i18n.t('Markdown')}
 		</div>
 	</div>
 
-	{#if !isExecuting && markdown}
+	{#if !isExecuting && content}
 		<div class="shrink-0" on:click|stopPropagation on:keydown|stopPropagation>
 			<Dropdown
 				bind:show={downloadOpen}
@@ -135,24 +143,26 @@
 				</Tooltip>
 
 				<div slot="content">
-					<button
-						type="button"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-						on:click={downloadMd}
-					>
-						<div class="flex items-center line-clamp-1">
-							{$i18n.t('Markdown (.md)')}
-						</div>
-					</button>
-					<button
-						type="button"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-						on:click={downloadTxt}
-					>
-						<div class="flex items-center line-clamp-1">
-							{$i18n.t('Plain text (.txt)')}
-						</div>
-					</button>
+					{#if format === 'markdown'}
+						<button
+							type="button"
+							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+							on:click={downloadMd}
+						>
+							<div class="flex items-center line-clamp-1">
+								{$i18n.t('Markdown (.md)')}
+							</div>
+						</button>
+						<button
+							type="button"
+							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+							on:click={downloadTxt}
+						>
+							<div class="flex items-center line-clamp-1">
+								{$i18n.t('Plain text (.txt)')}
+							</div>
+						</button>
+					{/if}
 					<button
 						type="button"
 						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
@@ -162,7 +172,7 @@
 							{$i18n.t('PDF document (.pdf)')}
 						</div>
 					</button>
-					{#if $config?.features?.enable_docx_export ?? true}
+					{#if format === 'markdown' && ($config?.features?.enable_docx_export ?? true)}
 						<button
 							type="button"
 							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"

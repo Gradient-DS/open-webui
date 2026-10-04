@@ -459,7 +459,10 @@
 						<DocumentCard
 							id={`${id}-${tokenIdx}-${detailIdx}-doc`}
 							title={decode(detailToken?.attributes?.title ?? detailToken.summary ?? '')}
-							markdown={decode(detailToken?.text ?? '')}
+							content={detailToken?.attributes?.format
+								? decode(detailToken?.text ?? '')
+								: (detailToken?.text ?? '')}
+							format={detailToken?.attributes?.format === 'html' ? 'html' : 'markdown'}
 							done={detailToken?.attributes?.done !== 'false'}
 							messageDone={done}
 						/>
@@ -468,7 +471,7 @@
 						<DocumentCard
 							id={`${id}-${tokenIdx}-${detailIdx}-wdoc`}
 							title={wdocArgs.title}
-							markdown={wdocArgs.markdown}
+							content={wdocArgs.markdown}
 							done={detailToken?.attributes?.done === 'true'}
 							messageDone={done}
 						/>
@@ -540,7 +543,8 @@
 			<DocumentCard
 				id={`${id}-${tokenIdx}-doc`}
 				title={decode(token?.attributes?.title ?? token.summary ?? '')}
-				markdown={decode(token?.text ?? '')}
+				content={token?.attributes?.format ? decode(token?.text ?? '') : (token?.text ?? '')}
+				format={token?.attributes?.format === 'html' ? 'html' : 'markdown'}
 				done={token?.attributes?.done !== 'false'}
 				messageDone={done}
 			/>
@@ -549,7 +553,7 @@
 			<DocumentCard
 				id={`${id}-${tokenIdx}-wdoc`}
 				title={wdocArgs.title}
-				markdown={wdocArgs.markdown}
+				content={wdocArgs.markdown}
 				done={token?.attributes?.done === 'true'}
 				messageDone={done}
 			/>
