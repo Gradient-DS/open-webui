@@ -91,3 +91,47 @@ describe('OneDriveConfig.resolveHost', () => {
 		expect(meDriveCalls(fetchSpy)).toBe(1);
 	});
 });
+
+describe('documentReference', () => {
+	it('returns only versioned identity and display metadata without provider credentials or bytes', async () => {
+		const { documentReference } = await import('./onedrive-file-picker');
+		const fetchSpy = vi.fn();
+		vi.stubGlobal('fetch', fetchSpy);
+		const item = {
+			id: 'i',
+			name: 'Plan.pdf',
+			parentReference: { driveId: 'd' },
+			eTag: 'v1',
+			webUrl: 'https://tenant.sharepoint.com/plan.pdf',
+			size: 123,
+			'@content.downloadUrl': 'https://never-fetch.invalid',
+			access_token: 'never-forward'
+		};
+		expect(documentReference(item)).toEqual({
+			drive_id: 'd',
+			item_id: 'i',
+			name: 'Plan.pdf',
+			etag: 'v1',
+			web_url: item.webUrl,
+			size: 123
+		});
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+	it.each(['eTag', 'id', 'parentReference', 'webUrl', 'size'])(
+		'refuses a picker item missing %s',
+		async (field) => {
+			const { documentReference } = await import('./onedrive-file-picker');
+			const item = {
+				id: 'i',
+				name: 'Plan.pdf',
+				parentReference: { driveId: 'd' },
+				eTag: 'v1',
+				webUrl: 'https://tenant.sharepoint.com/plan.pdf',
+				size: 123
+			};
+			expect(() => documentReference({ ...item, [field]: undefined })).toThrow(
+				'versioned document reference'
+			);
+		}
+	);
+});

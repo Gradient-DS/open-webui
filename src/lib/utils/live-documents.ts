@@ -1,3 +1,5 @@
+import type { DocumentReference } from './onedrive-file-picker';
+import type { ChatAttachment } from '$lib/types/chatAttachment';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import {
 	listConnections,
@@ -75,4 +77,26 @@ export async function connectLiveDocuments(token: string): Promise<string> {
 	} finally {
 		popup.close();
 	}
+}
+
+export async function attachPickedDocument(
+	token: string,
+	grantId: string,
+	reference: DocumentReference,
+	requestId: string
+): Promise<ChatAttachment> {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/files/onedrive/attach`, {
+		method: 'POST',
+		headers: {
+			Authorization: `Bearer ${token}`,
+			'Content-Type': 'application/json',
+			'Idempotency-Key': requestId
+		},
+		body: JSON.stringify({ grant_id: grantId, ...reference })
+	});
+	if (!response.ok) {
+		const problem = await response.json();
+		throw new Error(problem.detail?.code ?? 'request_failed');
+	}
+	return response.json();
 }

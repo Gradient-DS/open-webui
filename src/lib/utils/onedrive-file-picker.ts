@@ -403,75 +403,39 @@ interface OneDriveFileInfo {
 	[key: string]: any;
 }
 
-// Download file from OneDrive
-async function downloadOneDriveFile(
-	fileInfo: OneDriveFileInfo,
-	authorityType?: 'personal' | 'organizations'
-): Promise<Blob> {
-	// Extract the base URL from the endpoint to use as the resource for token acquisition
-	// The endpoint might be different from the configured SharePoint URL (e.g., user's personal OneDrive)
-	const endpoint = fileInfo['@sharePoint.endpoint'];
-	let resource: string | undefined;
-	if (endpoint && authorityType === 'organizations') {
-		// Extract the base URL (e.g., https://tenant-my.sharepoint.com from https://tenant-my.sharepoint.com/_api/v2.0)
-		try {
-			const url = new URL(endpoint);
-			resource = `${url.protocol}//${url.host}`;
-		} catch {
-			// Fall back to using the endpoint as-is if URL parsing fails
-			resource = endpoint.split('/_api')[0];
-		}
+export interface DocumentReference {
+	drive_id: string;
+	item_id: string;
+	name: string;
+	etag: string;
+	web_url: string;
+	size: number;
+}
+
+export function documentReference(item: OneDriveFileInfo): DocumentReference {
+	const drive = item.parentReference?.driveId;
+	if (
+		!drive ||
+		!item.id ||
+		!item.name ||
+		typeof item.eTag !== 'string' ||
+		!item.eTag ||
+		typeof item.webUrl !== 'string' ||
+		!item.webUrl.startsWith('https://') ||
+		!Number.isSafeInteger(item.size) ||
+		item.size < 0 ||
+		item.folder
+	) {
+		throw new Error('The picker did not return a versioned document reference');
 	}
-
-	const accessToken = await getToken(resource, authorityType);
-	if (!accessToken) {
-		throw new Error('Unable to retrieve OneDrive access token.');
-	}
-
-	// The endpoint URL is provided in the file info
-	if (!fileInfo.parentReference?.driveId) {
-		throw new Error('File info missing parentReference.driveId');
-	}
-	const fileInfoUrl = `${endpoint}/drives/${fileInfo.parentReference.driveId}/items/${fileInfo.id}`;
-
-	const response = await fetch(fileInfoUrl, {
-		headers: {
-			Authorization: `Bearer ${accessToken}`
-		}
-	});
-
-	if (!response.ok) {
-		throw new Error(`Failed to fetch file information: ${response.status} ${response.statusText}`);
-	}
-
-	const fileData = await response.json();
-	const downloadUrl = fileData['@content.downloadUrl'];
-
-	if (!downloadUrl) {
-		throw new Error('Download URL not found in file data');
-	}
-
-	const downloadResponse = await fetch(downloadUrl);
-
-	if (!downloadResponse.ok) {
-		throw new Error(
-			`Failed to download file: ${downloadResponse.status} ${downloadResponse.statusText}`
-		);
-	}
-
-	const blob = await downloadResponse.blob();
-
-	// Verify the blob has content - empty blobs indicate download failure
-	if (blob.size === 0) {
-		console.error('OneDrive download returned empty blob', {
-			fileId: fileInfo.id,
-			fileName: fileInfo.name,
-			endpoint: endpoint
-		});
-		throw new Error('Downloaded file is empty. This may be due to permission issues.');
-	}
-
-	return blob;
+	return {
+		drive_id: drive,
+		item_id: item.id,
+		name: item.name,
+		etag: item.eTag,
+		web_url: item.webUrl,
+		size: item.size
+	};
 }
 
 // Open OneDrive file picker and return selected file metadata
@@ -627,22 +591,6 @@ export async function openOneDrivePicker(
 
 		initializePicker();
 	});
-}
-
-// Pick and download file from OneDrive (popup version)
-export async function pickAndDownloadFile(
-	authorityType?: 'personal' | 'organizations'
-): Promise<{ blob: Blob; name: string } | null> {
-	const pickerResult = await openOneDrivePicker(authorityType);
-
-	if (!pickerResult || !pickerResult.items || pickerResult.items.length === 0) {
-		return null;
-	}
-
-	const selectedFile = pickerResult.items[0];
-	const blob = await downloadOneDriveFile(selectedFile, authorityType);
-
-	return { blob, name: selectedFile.name };
 }
 
 // Get file picker params with channelId parameter (for modal use)
@@ -995,53 +943,11 @@ export async function openOneDriveFilePickerModal(
 	});
 }
 
-// Pick and download file from OneDrive using modal (iframe version)
-export async function pickAndDownloadFileModal(
+export async function pickDocumentReferencesModal(
 	authorityType?: 'personal' | 'organizations'
-): Promise<{ blob: Blob; name: string } | null> {
-	const pickerResult = await openOneDriveFilePickerModal(authorityType);
-
-	if (!pickerResult || !pickerResult.items || pickerResult.items.length === 0) {
-		return null;
-	}
-
-	const selectedFile = pickerResult.items[0];
-	const blob = await downloadOneDriveFile(selectedFile, authorityType);
-
-	return { blob, name: selectedFile.name };
-}
-
-// Pick and download multiple files from OneDrive using modal (iframe version)
-export async function pickAndDownloadFilesModal(
-	authorityType?: 'personal' | 'organizations',
-	options?: {
-		onFilesSelected?: (items: Array<{ name: string }>) => void;
-	}
-): Promise<Array<{ blob: Blob; name: string }>> {
-	const pickerResult = await openOneDriveFilePickerModal(authorityType);
-
-	if (!pickerResult || !pickerResult.items || pickerResult.items.length === 0) {
-		return [];
-	}
-
-	// Notify before downloads start (for instant placeholder feedback)
-	options?.onFilesSelected?.(pickerResult.items.map((item) => ({ name: item.name })));
-
-	// Download all selected files in parallel
-	const downloadPromises = pickerResult.items.map(async (item) => {
-		try {
-			const blob = await downloadOneDriveFile(item, authorityType);
-			return { blob, name: item.name };
-		} catch (error) {
-			console.error(`Failed to download file ${item.name}:`, error);
-			return null;
-		}
-	});
-
-	const results = await Promise.all(downloadPromises);
-
-	// Filter out failed downloads
-	return results.filter((result): result is { blob: Blob; name: string } => result !== null);
+): Promise<DocumentReference[]> {
+	const selected = await openOneDriveFilePickerModal(authorityType);
+	return (selected?.items ?? []).map(documentReference);
 }
 
 // Open OneDrive folder picker in an embedded modal (iframe)
@@ -1739,4 +1645,4 @@ export async function getGraphApiToken(
 	return accessToken;
 }
 
-export { downloadOneDriveFile, getToken, OneDriveConfig };
+export { getToken, OneDriveConfig };

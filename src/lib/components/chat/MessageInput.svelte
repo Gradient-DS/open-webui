@@ -35,7 +35,8 @@
 		createPicker,
 		initialize as initializeGooglePicker
 	} from '$lib/utils/google-drive-picker';
-	import { pickAndDownloadFilesModal } from '$lib/utils/onedrive-file-picker';
+	import { connectLiveDocuments, attachPickedDocument } from '$lib/utils/live-documents';
+	import { pickDocumentReferencesModal } from '$lib/utils/onedrive-file-picker';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 	const dispatch = createEventDispatcher();
@@ -971,62 +972,40 @@
 		}
 	};
 
-	const oneDriveHandler = async (authorityType) => {
-		const tempItemIds: string[] = [];
+	const oneDriveHandler = async (authorityType: 'personal' | 'organizations') => {
 		try {
-			const filesData = await pickAndDownloadFilesModal(authorityType, {
-				onFilesSelected: (items) => {
-					for (const item of items) {
-						const tempItemId = uuidv4();
-						tempItemIds.push(tempItemId);
-						files = [
-							...files,
-							{
-								type: 'file',
-								file: '',
-								id: null,
-								url: '',
-								name: item.name,
-								collection_name: '',
-								status: 'uploading',
-								size: 0,
-								error: '',
-								itemId: tempItemId
-							}
-						];
+			const grantId = await connectLiveDocuments(localStorage.token);
+			const references = await pickDocumentReferencesModal(authorityType);
+			for (const reference of references) {
+				const itemId = uuidv4();
+				files = [
+					...files,
+					{
+						type: 'file',
+						id: null,
+						itemId,
+						name: reference.name,
+						status: 'uploading',
+						size: reference.size
 					}
+				];
+				try {
+					const attached = await attachPickedDocument(
+						localStorage.token,
+						grantId,
+						reference,
+						itemId
+					);
+					files = files.map((file) =>
+						file.itemId === itemId ? { ...attached, itemId, size: reference.size } : file
+					);
+				} catch {
+					files = files.filter((file) => file.itemId !== itemId);
+					toast.error($i18n.t('Could not attach OneDrive file'));
 				}
-			});
-			if (filesData.length > 0) {
-				for (let i = 0; i < filesData.length; i++) {
-					const fileData = filesData[i];
-					const file = new File([fileData.blob], fileData.name, {
-						type: fileData.blob.type || 'application/octet-stream'
-					});
-					// Match placeholder by name since download order may differ
-					const matchingItemId = tempItemIds.find((id) => {
-						const item = files.find((f) => f.itemId === id);
-						return item && item.name === fileData.name;
-					});
-					await uploadFileHandler(file, true, {}, matchingItemId || null);
-				}
-				// Clean up any placeholders for files that failed to download
-				const downloadedNames = new Set(filesData.map((f) => f.name));
-				files = files.filter((f) => {
-					if (tempItemIds.includes(f.itemId ?? '') && !downloadedNames.has(f.name ?? '')) {
-						return false;
-					}
-					return true;
-				});
-			} else if (tempItemIds.length > 0) {
-				// All downloads failed
-				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
 			}
-		} catch (error) {
-			if (tempItemIds.length > 0) {
-				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
-			}
-			console.error('OneDrive Error:', error);
+		} catch {
+			toast.error($i18n.t('Could not attach OneDrive file'));
 		}
 	};
 

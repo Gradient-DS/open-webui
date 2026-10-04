@@ -84,3 +84,31 @@ it('propagates policy denial without authorizing a disabled feature', async () =
 	await expect(connectLiveDocuments('session')).rejects.toThrow('Live documents are disabled');
 	expect(api.authorizeConnection).not.toHaveBeenCalled();
 });
+
+it('sends a picker reference to the consumer with session authorization and an operation id', async () => {
+	const { attachPickedDocument } = await import('./live-documents');
+	const fetchSpy = vi
+		.fn()
+		.mockResolvedValue({
+			ok: true,
+			json: async () => ({ id: 'source', type: 'file', status: 'processing' })
+		});
+	vi.stubGlobal('fetch', fetchSpy);
+	const ref = {
+		drive_id: 'd',
+		item_id: 'i',
+		etag: 'v1',
+		name: 'Plan.pdf',
+		web_url: 'https://tenant.sharepoint.com/plan.pdf',
+		size: 123
+	};
+	expect((await attachPickedDocument('session', 'grant', ref, 'operation')).id).toBe('source');
+	const [url, request] = fetchSpy.mock.calls[0];
+	expect(url).toMatch(/\/files\/onedrive\/attach$/);
+	expect(request.headers).toEqual({
+		Authorization: 'Bearer session',
+		'Content-Type': 'application/json',
+		'Idempotency-Key': 'operation'
+	});
+	expect(JSON.parse(request.body)).toEqual({ grant_id: 'grant', ...ref });
+});

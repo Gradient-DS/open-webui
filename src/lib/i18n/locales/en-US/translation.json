@@ -762,6 +762,7 @@
   "Copy the latest assistant response when it completes.": "",
   "Copy to clipboard": "",
   "Copying to clipboard was successful!": "",
+  "Could not attach OneDrive file": "",
   "Could not connect OneDrive": "",
   "Could not connect to OneDrive to determine your location.": "",
   "Could not delete the shared knowledge base.": "",
