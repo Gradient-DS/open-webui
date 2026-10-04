@@ -2953,6 +2953,7 @@ async def get_app_config(request: Request):
                     ),
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
                     'enable_agent_proxy': config.get('agent_proxy.enable'),  # [Gradient]
+                    'enable_live_documents': AGENT_API_ENABLED and config.get('live_documents.enable'),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
                     'feature_agent_picker': FEATURE_AGENT_PICKER,  # [Gradient]
                     'agent_picker_default_slug': config.get('agent_api.picker_default_slug'),  # [Gradient]

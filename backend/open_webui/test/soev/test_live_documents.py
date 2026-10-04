@@ -118,15 +118,17 @@ async def test_every_turn_supplies_collection_and_separate_tool_states(env, monk
     """The collection is created through the consumer and both document tools require the toggle."""
     from open_webui.utils import agent_v2
 
+    monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
     turn = SimpleNamespace(client=env.client, run=Mock(return_value='stream'))
     result = await agent_v2._sent(
-        turn, 'hello', {'user_id': 'alice', 'features': {'live_documents': True}}, agent=None, model=None
+        turn, 'hello', {'user_id': 'alice', 'features': {'live_documents': 'auto'}}, agent=None, model=None
     )
     assert result == 'stream'
     body = turn.run.call_args.args[0]['input']
     assert body['attachment_collection'] == 'owui-attachments-alice'
-    assert body['tools'] == {'search_live_documents': 'auto', 'attach_live_document': 'auto'}
-    assert agent_v2._tools({}) == {}
+    assert body['tools'] == {'web_search': 'off', 'search_live_documents': 'auto', 'attach_live_document': 'auto'}
+    assert agent_v2._tools({}, False, False)['tools']['search_live_documents'] == 'off'
 
 
 @pytest.mark.asyncio
@@ -143,3 +145,13 @@ async def test_connect_action_is_emitted(env):  # noqa: F811
         }
     )
     turn.emitter.assert_any_await({'type': 'action_required', 'data': {'kind': 'connect', 'provider': 'onedrive'}})
+
+
+@pytest.mark.parametrize('allowed', [True, False])
+@pytest.mark.parametrize('state', ['off', 'auto', 'required', True, None])
+def test_document_states_require_server_permission(allowed, state):
+    from open_webui.utils import agent_v2
+
+    expected = state if allowed and state in ('auto', 'required') else 'off'
+    tools = agent_v2._tools({'features': {'live_documents': state}}, False, allowed)['tools']
+    assert tools['search_live_documents'] == tools['attach_live_document'] == expected

@@ -108,6 +108,14 @@
 		};
 	}
 
+	/**
+	 * [Gradient] Expose the room on the roomier side as `--dropdown-available-height`, so
+	 * content with its own scroll areas can cap itself to it instead of overflowing.
+	 */
+	function setAvailableHeight(height: number) {
+		contentEl?.style.setProperty('--dropdown-available-height', `${Math.max(0, height)}px`);
+	}
+
 	function positionContentDefault() {
 		if (!triggerEl || !contentEl) return;
 		const rect = triggerEl.getBoundingClientRect();
@@ -127,6 +135,8 @@
 		} else if (side === 'top' && spaceAbove < contentHeight && spaceBelow > spaceAbove) {
 			openAbove = false;
 		}
+
+		setAvailableHeight(Math.max(spaceAbove, spaceBelow) - 8);
 
 		if (openAbove) {
 			contentEl.style.bottom = `${window.innerHeight - rect.top + sideOffset}px`;
@@ -179,6 +189,8 @@
 		} else if (side === 'top' && spaceAbove < contentHeight && spaceBelow > spaceAbove) {
 			openAbove = false;
 		}
+
+		setAvailableHeight(Math.max(spaceAbove, spaceBelow));
 
 		const availableHeight = Math.max(0, openAbove ? spaceAbove : spaceBelow);
 		const constrainedHeight = contentHeight

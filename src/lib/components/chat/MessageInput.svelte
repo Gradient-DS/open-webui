@@ -1,6 +1,4 @@
 <script lang="ts">
-	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
-	import Component from '../icons/Component.svelte';
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
 	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
@@ -78,6 +76,13 @@
 		getWeekday
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
+	import {
+		TOOL_OFF_DESCRIPTION,
+		TOOL_STATE_LABELS,
+		WEB_SEARCH_STATE_DESCRIPTIONS,
+		webSearchState,
+		type ToolState
+	} from '$lib/utils/toolState';
 	import { uploadFile, getFileAttachments } from '$lib/apis/files';
 	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
 	import { generateAutoCompletion } from '$lib/apis';
@@ -119,6 +124,16 @@
 	import PlusAlt from '../icons/PlusAlt.svelte';
 	import Terminal from '../icons/Terminal.svelte';
 	import Document from '../icons/Document.svelte';
+	// [Gradient] Icons for items pinned from the "+" menu.
+	import Clip from '../icons/Clip.svelte';
+	import Camera from '../icons/Camera.svelte';
+	import Link from '../icons/Link.svelte';
+	import PageEdit from '../icons/PageEdit.svelte';
+	import FolderOpen from '../icons/FolderOpen.svelte';
+	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
+	import DocumentArrowUp from '../icons/DocumentArrowUp.svelte';
+	import GoogleDrive from '../icons/GoogleDrive.svelte';
+	import OneDrive from '../icons/OneDrive.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import Knobs from '../icons/Knobs.svelte';
@@ -217,8 +232,10 @@
 	export let selectedFilterIds: string[] = [];
 
 	export let imageGenerationEnabled = false;
-	export let liveDocumentsEnabled = false;
+	export let liveDocumentsState: ToolState = 'off';
 	export let webSearchEnabled = false;
+	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
+	export let webSearchRequired = false;
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = false;
 	export let toolApprovalMode = 'full';
@@ -276,6 +293,8 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
+		webSearchRequired,
+		liveDocumentsState,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
 		toolApprovalMode
@@ -925,8 +944,77 @@
 	$: if (dataSeparationHistorySide === 'internal' && webSearchEnabled) {
 		webSearchEnabled = false;
 	}
+	// [Gradient] Pinned-bar buttons for the blocked side are hidden; the "+" menu still
+	// shows them grayed out with the explanatory tooltip.
+	$: dataSeparationBlockedItems = new Set(
+		strictDataSeparation
+			? [
+					...(openInternetBlocked ? ['attach_webpage', 'web_search'] : []),
+					...(internalBlocked
+						? [
+								'upload_files',
+								'capture',
+								'attach_files',
+								'attach_notes',
+								'knowledge',
+								'reference_chats',
+								'google_drive',
+								'onedrive'
+							]
+						: [])
+				]
+			: []
+	);
 
-	let inputMenuRef;
+	// [Gradient] Pinned "+" menu items, rendered as buttons in the composer bar. The
+	// "Attach Files" submenu shares the upload_files restriction key with the menu.
+	$: pinnedInputItems = ($settings?.pinnedInputItems ?? []).filter(
+		(id) =>
+			(inputMenuRestrictTo === null ||
+				inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
+				(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
+			!dataSeparationBlockedItems.has(id)
+	);
+	$: inputMenuFileUploadCapableModels = getFilesystemUploadTerminal(
+		$selectedTerminalId,
+		$terminalServers,
+		$settings
+	)
+		? selectedModelIds
+		: fileUploadCapableModels;
+	$: inputMenuFileUploadEnabled =
+		inputMenuFileUploadCapableModels.length === selectedModelIds.length &&
+		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
+	$: webUploadEnabled = $_user?.role === 'admin' || ($_user?.permissions?.chat?.web_upload ?? true);
+
+	// [Gradient] Altijd needs web search to be possible: every rule that turns web search
+	// off (data separation, model capability, image generation, Escape) lands on Uit.
+	$: if (!webSearchEnabled && webSearchRequired) {
+		webSearchRequired = false;
+	}
+	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
+
+	let inputMenuRef:
+		| {
+				openTab: (tab: string) => void;
+				openWebpageModal: () => void;
+				cycleWebSearch: () => void;
+				cycleTool: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
+		  }
+		| undefined;
+	const pinnedStateTooltip = (label: string, state: ToolState, description: string) =>
+		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
+	const pinnedButtonClass =
+		'p-[0.375rem] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden shrink-0';
+	// Altijd (or an active toggle) gets the accent, Auto a subtle outline, Uit none.
+	const pinnedToggleClass = (active: boolean | ToolState) =>
+		`p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden shrink-0 ${
+			active === true || active === 'required'
+				? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
+				: active === 'auto'
+					? 'border-dashed border-gray-300 dark:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
+					: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+		}`;
 
 	const googleDriveHandler = async () => {
 		let tempItemId: string | null = null;
@@ -2397,23 +2485,18 @@
 
 							<div class=" flex justify-between mt-0.5 mb-2 mx-0.5 max-w-full" dir="ltr">
 								<div class="ml-1 self-end flex items-center flex-1 min-w-0">
-									<!-- [Gradient] One tenant flag controls both composer menus. -->
+									<!-- [Gradient] One "+" menu holds context, knowledge and tools. -->
 									{#if isFeatureEnabled('input_menu')}
 										<InputMenu
 											bind:this={inputMenuRef}
+											bind:liveDocumentsState
 											restrictTo={inputMenuRestrictTo}
 											{openInternetBlocked}
 											{internalBlocked}
 											{dataSeparationMessage}
 											bind:files
 											selectedModels={selectedModelIds}
-											fileUploadCapableModels={getFilesystemUploadTerminal(
-												$selectedTerminalId,
-												$terminalServers,
-												$settings
-											)
-												? selectedModelIds
-												: fileUploadCapableModels}
+											fileUploadCapableModels={inputMenuFileUploadCapableModels}
 											{toolApprovalMode}
 											{onToolApprovalModeChange}
 											{screenCaptureHandler}
@@ -2424,6 +2507,33 @@
 											uploadGoogleDriveHandler={googleDriveHandler}
 											uploadOneDriveHandler={oneDriveHandler}
 											{onUpload}
+											{toggleFilters}
+											{showWebSearchButton}
+											{showImageGenerationButton}
+											{showCodeInterpreterButton}
+											{showDocumentWriterButton}
+											bind:selectedToolIds
+											bind:selectedSkillIds
+											bind:selectedFilterIds
+											bind:webSearchEnabled
+											bind:webSearchRequired
+											bind:imageGenerationEnabled
+											bind:codeInterpreterEnabled
+											bind:documentWriterEnabled
+											oauthRedirectHandler={(tool: {
+												id: string;
+												serverId: string;
+												authType?: string | null;
+											}) => oauthRedirectHandler(tool, chatInputDraft)}
+											{onWebSearchToggle}
+											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
+											onShowValves={(e) => {
+												const { type, id } = e;
+												selectedValvesType = type;
+												selectedValvesItemId = id;
+												showValvesModal = true;
+												integrationsMenuCloseOnOutsideClick = false;
+											}}
 											onClose={async () => {
 												await tick();
 
@@ -2454,66 +2564,7 @@
 										>
 									{/if}
 
-									{#if isFeatureEnabled('input_menu') && ($config?.features?.feature_agent_api_enabled || showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
-										<div
-											class="flex self-center w-[0.0625rem] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
-										></div>
-									{/if}
-
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
-										{#if isFeatureEnabled('input_menu') && ($config?.features?.feature_agent_api_enabled || showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
-											<IntegrationsMenu
-												showLiveDocumentsButton={Boolean(
-													$config?.features?.feature_agent_api_enabled
-												)}
-												bind:liveDocumentsEnabled
-												{showDocumentWriterButton}
-												bind:documentWriterEnabled
-												{openInternetBlocked}
-												{dataSeparationMessage}
-												selectedModels={selectedModelIds}
-												{toggleFilters}
-												{showWebSearchButton}
-												{showImageGenerationButton}
-												{showCodeInterpreterButton}
-												bind:selectedToolIds
-												bind:selectedSkillIds
-												bind:selectedFilterIds
-												bind:webSearchEnabled
-												bind:imageGenerationEnabled
-												bind:codeInterpreterEnabled
-												oauthRedirectHandler={(tool: {
-													id: string;
-													serverId: string;
-													authType?: string | null;
-												}) => oauthRedirectHandler(tool, chatInputDraft)}
-												{onWebSearchToggle}
-												closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-												onShowValves={(e) => {
-													const { type, id } = e;
-													selectedValvesType = type;
-													selectedValvesItemId = id;
-													showValvesModal = true;
-													integrationsMenuCloseOnOutsideClick = false;
-												}}
-												onClose={async () => {
-													await tick();
-
-													const chatInput = document.getElementById('chat-input');
-													chatInput?.focus();
-												}}
-											>
-												<button
-													type="button"
-													id="integration-menu-button"
-													class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-[1.875rem] flex justify-center items-center outline-hidden focus:outline-hidden shrink-0"
-													aria-label={$i18n.t('Integrations')}
-												>
-													<Component className="size-4.5" strokeWidth="1.5" />
-												</button>
-											</IntegrationsMenu>
-										{/if}
-
 										{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
 											<div class="ml-1 flex gap-1.5 shrink-0">
 												<Tooltip content={$i18n.t('Valves')} placement="top">
@@ -2534,7 +2585,296 @@
 										{/if}
 
 										<div class="ml-1 flex gap-1.5 shrink-0">
-											{#if (selectedToolIds ?? []).length > 0}
+											<!-- [Gradient] Items pinned from the "+" menu, same gates as the menu. -->
+											{#each pinnedInputItems as itemId (itemId)}
+												{#if itemId === 'upload_files' && inputMenuFileUploadEnabled}
+													<Tooltip content={$i18n.t('Upload Files')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Upload Files')}
+															on:click={() => filesInputElement.click()}
+														>
+															<Clip className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'capture' && inputMenuFileUploadEnabled && isFeatureEnabled('capture')}
+													<Tooltip content={$i18n.t('Capture')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Capture')}
+															on:click={() => {
+																if (!$mobile) {
+																	screenCaptureHandler();
+																} else {
+																	document.getElementById('camera-input')?.click();
+																}
+															}}
+														>
+															<Camera className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_webpage' && webUploadEnabled && isFeatureEnabled('webpage_url')}
+													<Tooltip content={$i18n.t('Webpage URL')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Webpage URL')}
+															on:click={() => inputMenuRef?.openWebpageModal()}
+														>
+															<Link className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_files' && inputMenuFileUploadEnabled}
+													<Tooltip content={$i18n.t('Attach Files')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Attach Files')}
+															on:click={() => inputMenuRef?.openTab('files')}
+														>
+															<DocumentArrowUp className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_notes' && ($config?.features?.enable_notes ?? false)}
+													<Tooltip content={$i18n.t('Attach Notes')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Attach Notes')}
+															on:click={() => inputMenuRef?.openTab('notes')}
+														>
+															<PageEdit className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'google_drive' && inputMenuFileUploadEnabled && $config?.features?.enable_google_drive_integration}
+													<Tooltip content={$i18n.t('Google Drive')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Google Drive')}
+															on:click={googleDriveHandler}
+														>
+															<GoogleDrive className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'onedrive' && inputMenuFileUploadEnabled && $config?.features?.enable_onedrive_integration && ($config?.features?.enable_onedrive_personal || $config?.features?.enable_onedrive_business)}
+													<Tooltip content={$i18n.t('OneDrive Files')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('OneDrive Files')}
+															on:click={() => {
+																if (
+																	$config?.features?.enable_onedrive_personal &&
+																	$config?.features?.enable_onedrive_business
+																) {
+																	inputMenuRef?.openTab('microsoft_onedrive');
+																} else {
+																	oneDriveHandler(
+																		$config?.features?.enable_onedrive_business
+																			? 'organizations'
+																			: 'personal'
+																	);
+																}
+															}}
+														>
+															<OneDrive className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'knowledge' && isFeatureEnabled('knowledge')}
+													<Tooltip content={$i18n.t('Knowledge database')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Knowledge database')}
+															on:click={() => inputMenuRef?.openTab('knowledge')}
+														>
+															<FolderOpen className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'reference_chats' && isFeatureEnabled('reference_chats')}
+													<Tooltip content={$i18n.t('Reference chats')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Reference chats')}
+															on:click={() => inputMenuRef?.openTab('chats')}
+														>
+															<ClockRotateRight className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'web_search' && showWebSearchButton}
+													<Tooltip
+														content={imageGenerationEnabled
+															? $i18n.t(
+																	'Web search and image generation cannot run in the same turn'
+																)
+															: pinnedStateTooltip(
+																	$i18n.t('Web Search'),
+																	webSearchToolState,
+																	$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+																)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={pinnedStateTooltip(
+																$i18n.t('Web Search'),
+																webSearchToolState,
+																$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+															)}
+															on:click|preventDefault={() => inputMenuRef?.cycleWebSearch()}
+															class={pinnedToggleClass(webSearchToolState)}
+														>
+															<GlobeAlt className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'image_generation' && showImageGenerationButton}
+													<Tooltip
+														content={webSearchEnabled
+															? $i18n.t(
+																	'Web search and image generation cannot run in the same turn'
+																)
+															: pinnedStateTooltip(
+																	$i18n.t('Image'),
+																	imageGenerationEnabled ? 'required' : 'off',
+																	imageGenerationEnabled
+																		? $i18n.t('Generate an image')
+																		: $i18n.t(TOOL_OFF_DESCRIPTION)
+																)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={$i18n.t('Image')}
+															aria-pressed={imageGenerationEnabled}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('image_generation')}
+															class={pinnedToggleClass(imageGenerationEnabled)}
+														>
+															<Photo className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
+													<Tooltip
+														content={pinnedStateTooltip(
+															$i18n.t('Code Interpreter'),
+															codeInterpreterEnabled ? 'required' : 'off',
+															codeInterpreterEnabled
+																? $i18n.t('Execute code for analysis')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={codeInterpreterEnabled
+																? $i18n.t('Disable Code Interpreter')
+																: $i18n.t('Enable Code Interpreter')}
+															aria-pressed={codeInterpreterEnabled}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('code_interpreter')}
+															class={pinnedToggleClass(codeInterpreterEnabled)}
+														>
+															<Terminal className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'document_writer' && showDocumentWriterButton}
+													<Tooltip
+														content={pinnedStateTooltip(
+															$i18n.t('Document Writer'),
+															documentWriterEnabled ? 'required' : 'off',
+															documentWriterEnabled
+																? $i18n.t('Write a document')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={documentWriterEnabled
+																? $i18n.t('Disable Document Writer')
+																: $i18n.t('Enable Document Writer')}
+															aria-pressed={documentWriterEnabled}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('document_writer')}
+															class={pinnedToggleClass(documentWriterEnabled)}
+														>
+															<Document className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'tools' && showToolsButton}
+													<Tooltip content={$i18n.t('Tools')} placement="top">
+														<button
+															type="button"
+															aria-label={$i18n.t('Tools')}
+															on:click|preventDefault={() => inputMenuRef?.openTab('tools')}
+															class={pinnedToggleClass((selectedToolIds ?? []).length > 0)}
+														>
+															<Wrench className="size-4" strokeWidth="1.75" />
+															{#if (selectedToolIds ?? []).length > 0}
+																<span class="text-sm">{selectedToolIds.length}</span>
+															{/if}
+														</button>
+													</Tooltip>
+												{:else if itemId === 'skills' && showSkillsButton}
+													<Tooltip content={$i18n.t('Skills')} placement="top">
+														<button
+															type="button"
+															aria-label={$i18n.t('Skills')}
+															on:click|preventDefault={() => inputMenuRef?.openTab('skills')}
+															class={pinnedToggleClass((selectedSkillIds ?? []).length > 0)}
+														>
+															<Cube className="size-4" strokeWidth="1.75" />
+															{#if (selectedSkillIds ?? []).length > 0}
+																<span class="text-sm">{selectedSkillIds.length}</span>
+															{/if}
+														</button>
+													</Tooltip>
+												{:else if itemId.startsWith('filter:')}
+													{@const pinnedFilterId = itemId.slice('filter:'.length)}
+													{@const pinnedFilter = toggleFilters.find(
+														(f: { id: string }) => f.id === pinnedFilterId
+													)}
+													{#if pinnedFilter}
+														<Tooltip content={pinnedFilter?.name} placement="top">
+															<button
+																type="button"
+																aria-label={pinnedFilter?.name}
+																aria-pressed={selectedFilterIds.includes(pinnedFilterId)}
+																on:click|preventDefault={() => {
+																	selectedFilterIds = selectedFilterIds.includes(pinnedFilterId)
+																		? selectedFilterIds.filter((id) => id !== pinnedFilterId)
+																		: [...selectedFilterIds, pinnedFilterId];
+																}}
+																class={pinnedToggleClass(
+																	selectedFilterIds.includes(pinnedFilterId)
+																)}
+															>
+																{#if pinnedFilter?.icon}
+																	<div class="size-4 items-center flex justify-center">
+																		<img
+																			src={pinnedFilter.icon}
+																			class="size-3.5 {pinnedFilter.icon.includes('data:image/svg')
+																				? 'dark:invert-[80%]'
+																				: ''}"
+																			style="fill: currentColor;"
+																			alt={pinnedFilter.name}
+																		/>
+																	</div>
+																{:else}
+																	<Sparkles className="size-4" strokeWidth="1.75" />
+																{/if}
+															</button>
+														</Tooltip>
+													{/if}
+												{/if}
+											{/each}
+
+											<!-- [Gradient] Active capabilities that are not pinned. -->
+											{#if (selectedToolIds ?? []).length > 0 && !(showToolsButton && pinnedInputItems.includes('tools'))}
 												<Tooltip
 													content={$i18n.t('{{COUNT}} Available Tools', {
 														COUNT: (selectedToolIds ?? []).length
@@ -2557,7 +2897,7 @@
 												</Tooltip>
 											{/if}
 
-											{#if (selectedSkillIds ?? []).length > 0}
+											{#if (selectedSkillIds ?? []).length > 0 && !(showSkillsButton && pinnedInputItems.includes('skills'))}
 												<Tooltip
 													content={$i18n.t('{{COUNT}} Available Skills', {
 														COUNT: (selectedSkillIds ?? []).length
@@ -2582,7 +2922,7 @@
 
 											{#each selectedFilterIds as filterId (filterId)}
 												{@const filter = toggleFilters.find((f) => f.id === filterId)}
-												{#if filter}
+												{#if filter && !pinnedInputItems.includes(`filter:${filterId}`)}
 													<Tooltip content={filter?.name} placement="top">
 														<button
 															on:click|preventDefault={() => {
@@ -2640,15 +2980,25 @@
 												{/if}
 											{/each}
 
-											{#if webSearchEnabled && showWebSearchButton}
-												<Tooltip content={$i18n.t('Web Search')} placement="top">
+											<!-- [Gradient] Only Altijd is worth a chip: Auto is the default. Its X drops back to Auto. -->
+											{#if webSearchToolState === 'required' && showWebSearchButton && !pinnedInputItems.includes('web_search')}
+												<Tooltip
+													content={pinnedStateTooltip(
+														$i18n.t('Web Search'),
+														webSearchToolState,
+														$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+													)}
+													placement="top"
+												>
 													<button
-														on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+														on:click|preventDefault={() => (webSearchRequired = false)}
 														type="button"
-														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
-														($settings?.webSearch ?? false) === 'always'
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
+														aria-label={pinnedStateTooltip(
+															$i18n.t('Web Search'),
+															webSearchToolState,
+															$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+														)}
+														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20"
 													>
 														<GlobeAlt className="size-4" strokeWidth="1.75" />
 														<div class="hidden group-hover:block">
@@ -2658,7 +3008,7 @@
 												</Tooltip>
 											{/if}
 
-											{#if imageGenerationEnabled && showImageGenerationButton}
+											{#if imageGenerationEnabled && showImageGenerationButton && !pinnedInputItems.includes('image_generation')}
 												<Tooltip content={$i18n.t('Image')} placement="top">
 													<button
 														on:click|preventDefault={() =>
@@ -2676,7 +3026,7 @@
 												</Tooltip>
 											{/if}
 
-											{#if codeInterpreterEnabled && showCodeInterpreterButton}
+											{#if codeInterpreterEnabled && showCodeInterpreterButton && !pinnedInputItems.includes('code_interpreter')}
 												<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
 													<button
 														aria-label={codeInterpreterEnabled
@@ -2703,7 +3053,7 @@
 											{/if}
 
 											<!-- [Gradient] Echo the active Document Writer capability. -->
-											{#if documentWriterEnabled && showDocumentWriterButton}
+											{#if documentWriterEnabled && showDocumentWriterButton && !pinnedInputItems.includes('document_writer')}
 												<Tooltip content={$i18n.t('Document Writer')} placement="top">
 													<button
 														aria-label={documentWriterEnabled

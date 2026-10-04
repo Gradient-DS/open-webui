@@ -92,3 +92,7 @@ picker commissioning; provision attach only to consumer products. The platform b
 picker attach and inspect per subject and UTC minute (default 10), independently of
 idempotency keys. Picker refusals preserve provider and Retry-After, including
 connection_required (409), not_readable (422), and provider_throttled (503).
+Live documents use an explicit off/auto/required tool state in InputMenu (off by default).
+Set ENABLE_LIVE_DOCUMENTS=true (config key live_documents.enable, default false) alongside
+AGENT_API_ENABLED to offer the control. The server gates every requested document tool state
+with that setting; enable the matching platform live_documents setting as well.
