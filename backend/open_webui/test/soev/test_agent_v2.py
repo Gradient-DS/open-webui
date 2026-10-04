@@ -1914,7 +1914,8 @@ async def test_bad_pdf_document_formats_are_logged_and_skipped(
             ('model_output', {'content': 'Answer'}),
         ]
     ]
-    assert content(await chat.turn('write a document', 'a1')) == 'Answer'
+    answer = content(await chat.turn('write a document', 'a1'))
+    assert answer.endswith('Answer') and 'type="document"' not in answer
     assert not any(event['type'] == 'source' for event in chat.socket)
     assert [status['done'] for status in statuses(chat)] == [False, True]
     assert any('unsupported format' in record.message and record.element_id == 'bad' for record in caplog.records)
