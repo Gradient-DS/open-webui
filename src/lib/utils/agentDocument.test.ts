@@ -5,7 +5,7 @@ import { encode } from 'html-entities';
 import { extractDocumentsFromMessage } from './agentDocument';
 
 const marker = (format: string, content: string, title = 'Report') =>
-	`<details type="document" format="${format}" title="${encode(title)}" done="true"><summary>Document</summary>\n${encode(content)}\n</details>`;
+	`<details type="document" format="${format}" title="${encode(title)}" done="true">\n<summary>Document</summary>\n${encode(content)}\n</details>`;
 
 describe('agent documents', () => {
 	it.each(['html', 'markdown'])('unescapes %s content and title exactly once', (format) => {

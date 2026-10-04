@@ -74,7 +74,7 @@ describe('markupSafeEnd', () => {
 
 it('holds every partial agent document until its closing details arrives', () => {
 	const marker =
-		'<details type="document" format="html" title="Report" done="true"><summary>Document</summary>\n&lt;h1&gt;Report&lt;/h1&gt;\n</details>';
+		'<details type="document" format="html" title="Report" done="true">\n<summary>Document</summary>\n&lt;h1&gt;Report&lt;/h1&gt;\n</details>';
 	for (let end = 1; end < marker.length; end++) {
 		const partial = 'Before ' + marker.slice(0, end);
 		const masked = maskInFlightTag(partial);
