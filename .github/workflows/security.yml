@@ -101,11 +101,14 @@ jobs:
       # is the production one (UID/GID 1000) and its layers match dev's
       # registry cache. A gha cache write would only evict other entries: the
       # repo is over its GHA cache limit, and the registry cache is fresher.
+      # [Gradient] APT_UPGRADE_EPOCH is per run, as in docker-build-soev.yaml, so
+      # the scan sees today's Debian fixes even where dev's cache holds older ones.
       build-args: |
         BUILD_HASH=${{ github.sha }}
         USE_SLIM=true
         UID=1000
         GID=1000
+        APT_UPGRADE_EPOCH=${{ github.run_id }}-${{ github.run_attempt }}
       # Public package: readable without auth, so fork PRs can read it too.
       cache-from: type=registry,ref=ghcr.io/gradient-ds/open-webui:cache-slim-linux-amd64-dev
       cache-write: false

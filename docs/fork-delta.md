@@ -390,3 +390,17 @@ cache is written with `mode=max`, so without this the checkout's `.git/config`
 (including the job token) ended up in a public cache layer. The SvelteKit
 `version.name` in `svelte.config.js` therefore reads `APP_BUILD_HASH` (the commit,
 set from `BUILD_HASH` in the Dockerfile) before falling back to `git rev-parse`.
+
+## Fresh OS security fixes on every image build
+
+The Dockerfile's final stage ends its installs with an `apt-get upgrade` layer
+behind `ARG APT_UPGRADE_EPOCH`. `docker-build-soev.yaml` (both arch legs) and
+the PR scan build in `security.yml` pass `${{ github.run_id }}-${{ github.run_attempt }}`,
+so that layer never comes from cache. Why: the `cache-slim-*` registry cache is
+written with `mode=max`, so the `apt-get install` layer that holds the Debian
+packages was served from cache until the `python:3.11-slim-bookworm` tag moved,
+and shipped images missed fixes published in between (CVE-2026-103111,
+libpcre2-8-0, failed dev's digest scan). The layer sits after the uv install, so
+the dependency layers stay cached. Upstream has no registry cache, so this is
+fork-only. `runtime-security.yml` builds the same Dockerfile through compose
+without a cache, so its build always runs the layer and needs no epoch.
