@@ -379,3 +379,14 @@ in the client build it emits them to `wasm/`. `src/lib/workers/kokoro.worker.ts`
 reads them from there, and the build output is byte-identical. On an upstream
 merge, keep `ortWasm()` and do not re-add the plugin to `package.json`. Revisit
 once braces ships a fix or the plugin moves off chokidar 3.
+---
+
+## Docker build context excludes `.git`
+
+`.dockerignore` excludes `.git` (plus the CI-only `.security-tooling` and `.falco`
+checkouts), and `docker-build-soev.yaml` checks out with `persist-credentials: false`.
+The frontend build stage does `COPY . .`, and the public `cache-slim-*` registry
+cache is written with `mode=max`, so without this the checkout's `.git/config`
+(including the job token) ended up in a public cache layer. The SvelteKit
+`version.name` in `svelte.config.js` therefore reads `APP_BUILD_HASH` (the commit,
+set from `BUILD_HASH` in the Dockerfile) before falling back to `git rev-parse`.

@@ -1,4 +1,9 @@
 .github
+# [Gradient] Never ship git metadata (and the checkout's credentials) into
+# build stages or the public registry cache; CI scan tooling stays out too.
+.git
+.security-tooling
+.falco
 .DS_Store
 docs
 kubernetes
