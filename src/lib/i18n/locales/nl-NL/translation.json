@@ -5,6 +5,8 @@
   "The picker account changed. Open the picker again.": "Het account van de bestandskiezer is gewijzigd. Open de bestandskiezer opnieuw.",
   "The picker account does not match a connected OneDrive account. Connect that account and try again.": "Het gekozen account komt niet overeen met een verbonden OneDrive-account. Verbind dat account en probeer het opnieuw.",
   "OneDrive connected. Choose your files again.": "OneDrive is verbonden. Kies je bestanden opnieuw.",
+  "Searching your files...": "Je bestanden doorzoeken...",
+  "Searched your files": "Je bestanden doorzocht",
   "'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "'s', 'm', 'h', 'd', 'w', of '-1' for geen vervaldatum.",
   "(latest)": "(nieuwste)",
   "(leave blank for to use commercial endpoint)": "(laat leeg voor een comercieel endpoint)",

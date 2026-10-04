@@ -5,6 +5,8 @@
   "The picker account changed. Open the picker again.": "The picker account changed. Open the picker again.",
   "The picker account does not match a connected OneDrive account. Connect that account and try again.": "The picker account does not match a connected OneDrive account. Connect that account and try again.",
   "OneDrive connected. Choose your files again.": "OneDrive connected. Choose your files again.",
+  "Searching your files...": "Searching your files...",
+  "Searched your files": "Searched your files",
   "'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "",
   "(latest)": "",
   "(leave blank for to use commercial endpoint)": "",
