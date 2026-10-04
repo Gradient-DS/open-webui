@@ -115,12 +115,23 @@ def _chat_thread_id(response: httpx.Response) -> str:
 class SoevApiError(Exception):
     """A soev-api problem or a sanitized upstream failure."""
 
-    def __init__(self, status: int, code: str, detail: str, constraint: str | None = None) -> None:
+    def __init__(
+        self,
+        status: int,
+        code: str,
+        detail: str,
+        constraint: str | None = None,
+        *,
+        provider: str | None = None,
+        retry_after: str | None = None,
+    ) -> None:
         super().__init__(detail)
         self.status = status
         self.code = code
         self.detail = detail
         self.constraint = constraint
+        self.provider = provider
+        self.retry_after = retry_after
 
 
 def _response_error(response: httpx.Response) -> SoevApiError:
@@ -139,7 +150,15 @@ def _response_error(response: httpx.Response) -> SoevApiError:
         return fallback
     if constraint is not None and not isinstance(constraint, str):
         return fallback
-    return SoevApiError(status, code, fallback.detail if status >= 500 else detail, constraint)
+    provider = problem.get('provider')
+    return SoevApiError(
+        status,
+        code,
+        fallback.detail if status >= 500 else detail,
+        constraint,
+        provider=provider if isinstance(provider, str) else None,
+        retry_after=response.headers.get('Retry-After'),
+    )
 
 
 class SoevClient:
