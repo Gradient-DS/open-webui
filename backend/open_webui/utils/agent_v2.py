@@ -22,6 +22,7 @@ from open_webui.socket.main import get_event_emitter
 from open_webui.soev import acting, agent_threads, identity, ingest
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.utils.chat_id import is_temporary_chat_id
+from open_webui.utils.web_search_state import web_search_state
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
@@ -31,10 +32,6 @@ _PLACEHOLDER = re.compile(r'{{(\w+)}}')
 _COMPACTION = 'compaction'
 # [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
 TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
-# [Claude] What the web search toggle asks of the agent's `web_search` tool when on; off asks nothing, so the
-# deployment's default for the tool applies. Configuration: `required` is refused by an agent whose deployment has
-# no web, so pair it with OWUI's web search setting.
-WEB_SEARCH_ON = 'required'
 
 
 async def _tool_statuses(client: SoevClient) -> dict[str, dict[str, Any]]:
@@ -209,10 +206,10 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
 
 
 def _tools(metadata: dict[str, Any]) -> dict[str, dict[str, str]]:
-    """[Claude] The tool states the chat's toggles ask, as the turn's `tools` field; none while every toggle is off."""
-    if not (metadata.get('features') or {}).get('web_search'):
-        return {}
-    return {'tools': {'web_search': WEB_SEARCH_ON}}
+    """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
+    default never decides for the user. `required` is refused by an agent whose deployment has no web, so pair
+    Altijd with OWUI's web search setting."""
+    return {'tools': {'web_search': web_search_state(metadata.get('features'))}}
 
 
 def _unavailable(count: int, language: str | None) -> dict[str, Any]:
