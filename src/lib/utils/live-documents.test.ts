@@ -88,7 +88,6 @@ it('propagates policy denial without authorizing a disabled feature', async () =
 	expect(api.authorizeConnection).not.toHaveBeenCalled();
 });
 
-<<<<<<< HEAD
 it('sends a picker reference to the consumer with session authorization and an operation id', async () => {
 	const { attachPickedDocument } = await import('./live-documents');
 	const fetchSpy = vi
@@ -116,7 +115,6 @@ it('sends a picker reference to the consumer with session authorization and an o
 	});
 	expect(JSON.parse(request.body)).toEqual({ grant_id: 'grant', ...ref });
 });
-=======
 it.each(['suspended:reauth', 'enabled'])(
 	'reauthorizes %s connections with a reauth error',
 	async (lifecycle) => {
@@ -139,4 +137,3 @@ it.each(['suspended:reauth', 'enabled'])(
 		await expect(pending).rejects.toThrow('Provider connection failed');
 	}
 );
->>>>>>> feat/live-documents-p6
