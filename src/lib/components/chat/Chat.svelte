@@ -364,7 +364,9 @@
 	// A restored draft keeps its web search state over the new-chat default.
 	let webSearchFromDraft = false;
 	let codeInterpreterEnabled = false;
-	let documentWriterEnabled = false;
+	let documentWriterEnabled = true;
+	let documentWriterRequired = false;
+	let documentWriterFromDraft = false;
 	let webSearchActive = false;
 	let showWebSearchConfirm = false;
 	let pendingWebSearchPrompt: string | null = null;
@@ -816,7 +818,9 @@
 			imageGenerationEnabled = input.imageGenerationEnabled ?? false;
 			codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
 			// [Gradient] Preserve Document Writer across draft and OAuth restoration.
-			documentWriterEnabled = input.documentWriterEnabled ?? false;
+			documentWriterEnabled = input.documentWriterEnabled ?? true;
+			documentWriterRequired = input.documentWriterRequired ?? false;
+			documentWriterFromDraft = input.documentWriterEnabled !== undefined;
 			if (input.toolApprovalMode) {
 				await handleToolApprovalModeChange(input.toolApprovalMode);
 			}
@@ -999,7 +1003,8 @@
 			webSearchRequired,
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
-			documentWriterEnabled
+			documentWriterEnabled,
+			documentWriterRequired
 		});
 		if (current !== lastSavedFeatures) {
 			lastSavedFeatures = current;
@@ -1099,6 +1104,12 @@
 				webSearchRequired = Boolean(webSearchAllowed && always);
 			}
 
+			// [Gradient] PDF writer reads no external data, including under strict separation.
+			if (!history?.currentId && !documentWriterFromDraft) {
+				documentWriterEnabled = true;
+				documentWriterRequired = false;
+			}
+
 			if (selectedModels.length !== 1 && !atSelectedModel) {
 				return;
 			}
@@ -1195,7 +1206,13 @@
 						$config?.features?.enable_document_writer &&
 						($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 					) {
-						documentWriterEnabled = model.info.meta.defaultFeatureIds.includes('document_writer');
+						if (
+							!documentWriterFromDraft &&
+							model.info.meta.defaultFeatureIds.includes('document_writer')
+						) {
+							documentWriterEnabled = true;
+							documentWriterRequired = true;
+						}
 					}
 				}
 
@@ -1810,7 +1827,8 @@
 				webSearchEnabled = false;
 				imageGenerationEnabled = false;
 				codeInterpreterEnabled = false;
-				documentWriterEnabled = false;
+				documentWriterEnabled = true;
+				documentWriterRequired = false;
 				acceptedDataWarnings = new Set();
 
 				await restoreChatInput(storageChatInput);
@@ -2419,6 +2437,7 @@
 
 		// resetInput() must stay last: the selected model's defaults override the draft's selection.
 		webSearchFromDraft = false;
+		documentWriterFromDraft = false;
 		await restoreChatInput(sessionStorage.getItem('chat-input'));
 		await resetInput();
 		await chatId.set('');
@@ -2456,8 +2475,10 @@
 			codeInterpreterEnabled = true;
 		}
 
-		if ($page.url.searchParams.get('document-writer') === 'true') {
-			documentWriterEnabled = true;
+		const writerParam = $page.url.searchParams.get('document-writer');
+		if (writerParam !== null) {
+			documentWriterEnabled = ['true', 'auto', 'required'].includes(writerParam);
+			documentWriterRequired = ['true', 'required'].includes(writerParam);
 		}
 
 		if ($page.url.searchParams.get('tools')) {
@@ -2643,7 +2664,9 @@
 				webSearchRequired = chatFeatures.web_search_required ?? false;
 				imageGenerationEnabled = chatFeatures.image_generation ?? false;
 				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
-				documentWriterEnabled = chatFeatures.document_writer ?? false;
+				documentWriterEnabled = chatFeatures.document_writer ?? true;
+				documentWriterRequired =
+					documentWriterEnabled && (chatFeatures.document_writer_required ?? false);
 
 				// [Gradient] Keep the feature-autosave baseline in sync with the chat we just
 				// loaded, so the reactive at the feature-persist block does not emit a
@@ -2653,7 +2676,8 @@
 					webSearchRequired,
 					imageGenerationEnabled,
 					codeInterpreterEnabled,
-					documentWriterEnabled
+					documentWriterEnabled,
+					documentWriterRequired
 				});
 
 				// Load tasks from chat-level DB field
@@ -3894,6 +3918,12 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
 						: false,
+				document_writer_required: Boolean(
+					$config?.features?.enable_document_writer &&
+					($user?.role === 'admin' || $user?.permissions?.features?.document_writer) &&
+					documentWriterEnabled &&
+					documentWriterRequired
+				),
 				web_search: webSearchActive,
 				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
 				web_search_required: webSearchActive && webSearchRequired
@@ -4527,7 +4557,8 @@
 						web_search_required: webSearchEnabled && webSearchRequired,
 						image_generation: imageGenerationEnabled,
 						code_interpreter: codeInterpreterEnabled,
-						document_writer: documentWriterEnabled
+						document_writer: documentWriterEnabled,
+						document_writer_required: documentWriterEnabled && documentWriterRequired
 					}
 				});
 			}
@@ -5060,6 +5091,7 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
+										bind:documentWriterRequired
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:webSearchEnabled
@@ -5215,6 +5247,7 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
+									bind:documentWriterRequired
 									bind:webSearchEnabled
 									bind:webSearchRequired
 									bind:atSelectedModel
