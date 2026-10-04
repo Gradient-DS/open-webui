@@ -1,4 +1,6 @@
 {
+  "Searching your files for \"{{query}}\"...": "Searching your files for \"{{query}}\"...",
+  "Searched your files for \"{{query}}\"": "Searched your files for \"{{query}}\"",
   "Searching your files...": "Searching your files...",
   "Searched your files": "Searched your files",
   "'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "",

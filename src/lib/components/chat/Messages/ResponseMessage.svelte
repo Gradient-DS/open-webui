@@ -11,9 +11,6 @@
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	const dispatch = createEventDispatcher();
-	const removeReferenceAttachment = getContext<((id: string) => Promise<void>) | undefined>(
-		'removeReferenceAttachment'
-	);
 
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -1150,8 +1147,6 @@
 										{:else}
 											<FileItem
 												item={file}
-												dismissible={!!file.attached_by && !!removeReferenceAttachment}
-												on:dismiss={() => file.id && removeReferenceAttachment?.(file.id)}
 												url={file.url}
 												name={file.name}
 												type={file.type}
