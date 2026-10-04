@@ -361,6 +361,12 @@ class ChatMessageTable:
             )
             return result.scalar_one_or_none() is not None
 
+    async def get_files_by_chat_id(self, chat_id: str, db: Optional[AsyncSession] = None) -> list[dict]:
+        # [Gradient] Office downloads need attachment references, not message content or validation.
+        async with get_async_db_context(db) as session:
+            result = await session.execute(select(ChatMessage.files).where(ChatMessage.chat_id == chat_id))
+            return [file for files in result.scalars() for file in (files or []) if isinstance(file, dict)]
+
     async def get_messages_by_chat_id(self, chat_id: str, db: Optional[AsyncSession] = None) -> list[ChatMessageModel]:
         async with get_async_db_context(db) as db:
             result = await db.execute(

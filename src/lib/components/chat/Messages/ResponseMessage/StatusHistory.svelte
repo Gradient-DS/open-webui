@@ -9,6 +9,7 @@
 	import ContentRenderer from '../ContentRenderer.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
+	import { describeBlock } from '$lib/utils/statusSummary';
 
 	// Heterogeneous list: each entry is either a status update (default) or a
 	// reasoning bullet (when `kind === 'reasoning'`). ResponseMessage builds
@@ -47,14 +48,24 @@
 
 	let history = [];
 
-	// [Gradient] The promoted header is ALWAYS the newest entry and the list is
-	// everything before it, so the expanded list stays one contiguous
-	// chronological run. The previous rule promoted the last NON-reasoning entry,
-	// which lifted a tool status out of the MIDDLE of the timeline and left the
-	// reasoning bullets it separated adjacent to each other. That is what read as
-	// "reasoning is not interleaved with the tool calls".
+	// [Gradient] The promoted header is ALWAYS the newest entry, and the list is the
+	// whole block in order, the newest included, so it ends where the header is.
+	// The previous rule promoted the last NON-reasoning entry, which lifted a tool
+	// status out of the MIDDLE of the timeline. A block of one entry is its header.
 	$: status = history.at(-1) ?? null;
-	$: historyItems = history.slice(0, -1);
+	// [Gradient] A finished block says what it did; the turn's closing tool count, when
+	// this block has it, stays its header.
+	$: blockSummary =
+		messageDone && !history.some((item) => item?.action === 'summary')
+			? describeBlock(history, (key, options) => $i18n.t(key, options))
+			: null;
+	$: historyItems = history.length > 1 ? history : [];
+	// [Gradient] A step that is still running keeps the block shimmering, also while a
+	// subagent thinks between its own steps under a running Office call.
+	$: blockRunning = !messageDone && history.some((item) => item?.done === false);
+	// Only the newest row shimmers, with the header, while the block runs; earlier
+	// rows read as history even when a step under them (an Office call) still runs.
+	$: running = (_item, idx) => blockRunning && idx === historyItems.length - 1;
 
 	$: if (!equal(statusHistory, history)) {
 		history = statusHistory;
@@ -82,7 +93,7 @@
 {#if history && history.length > 0}
 	<div class="text-[0.9375rem] flex flex-col w-full my-1">
 		<button
-			class="w-full text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+			class="w-full text-left text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
 			aria-label={$i18n.t('Toggle status history')}
 			aria-expanded={showHistory}
 			on:click={() => {
@@ -91,7 +102,9 @@
 		>
 			<div class="flex items-start gap-2 min-w-0">
 				<div class="status-header flex-1 min-w-0">
-					{#if isContent(status)}
+					{#if blockSummary}
+						<div class="line-clamp-1 text-gray-500 dark:text-gray-500">{blockSummary}</div>
+					{:else if isContent(status)}
 						<div class="line-clamp-1 text-gray-500 dark:text-gray-500">
 							{(status.text ?? '').replace(/\s+/g, ' ').trim()}
 						</div>
@@ -107,8 +120,8 @@
 						/>
 					{:else}
 						<StatusItem
-							{status}
-							done={messageDone || status?.done !== false}
+							status={blockRunning ? { ...status, done: false } : status}
+							done={!blockRunning}
 							forceVisible={true}
 							asHeader={true}
 						/>
@@ -171,7 +184,11 @@
 										attributes={item.attributes ?? {}}
 									/>
 								{:else}
-									<StatusItem status={item} done={true} forceVisible={true} />
+									<StatusItem
+										status={running(item, idx) ? { ...item, done: false } : item}
+										done={!running(item, idx)}
+										forceVisible={true}
+									/>
 								{/if}
 							</div>
 						{/each}

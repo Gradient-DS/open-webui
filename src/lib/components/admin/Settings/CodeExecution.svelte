@@ -17,6 +17,7 @@
 	export let saveHandler: Function;
 
 	let config: any = null;
+	$: if (config && !config.ENABLE_OFFICE) config.ENABLE_OFFICE_EDIT = false;
 
 	let engines = ['pyodide', 'jupyter'];
 	const inputClass =
@@ -272,6 +273,18 @@
 					</AdminSettingField>
 				{/if}
 			</AdminSettingSection>
+			{#if isFeatureEnabled('office')}
+				<AdminSettingSection title={$i18n.t('Office files')}>
+					<AdminSettingRow label={$i18n.t('Create Office files')} let:labelId>
+						<Switch bind:state={config.ENABLE_OFFICE} ariaLabelledbyId={labelId} />
+					</AdminSettingRow>
+					{#if config.ENABLE_OFFICE && isFeatureEnabled('office_edit')}
+						<AdminSettingRow label={$i18n.t('Edit Office files')} let:labelId>
+							<Switch bind:state={config.ENABLE_OFFICE_EDIT} ariaLabelledbyId={labelId} />
+						</AdminSettingRow>
+					{/if}
+				</AdminSettingSection>
+			{/if}
 			<!-- [Gradient] Document Writer remains tenant gated. -->
 			{#if isFeatureEnabled('document_writer')}
 				<AdminSettingSection title={$i18n.t('Document Writer')}>

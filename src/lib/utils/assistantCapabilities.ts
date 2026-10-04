@@ -12,6 +12,8 @@ export interface AssistantToggles {
 	image_generation: boolean;
 	code_interpreter: boolean;
 	document_writer: boolean;
+	office: boolean;
+	office_edit: boolean;
 	vision: boolean;
 	file_upload: boolean;
 	citations: boolean;
@@ -22,7 +24,9 @@ const FEATURE_TOGGLES = [
 	'web_search',
 	'image_generation',
 	'code_interpreter',
-	'document_writer'
+	'document_writer',
+	'office',
+	'office_edit'
 ] as const;
 
 /** Toggles that are also built-in function-calling tools (meta.builtinTools). */
@@ -36,6 +40,8 @@ export function togglesFromMeta(meta: any): AssistantToggles {
 		image_generation: !!c.image_generation,
 		code_interpreter: !!c.code_interpreter,
 		document_writer: !!c.document_writer,
+		office: !!c.office,
+		office_edit: !!c.office && !!c.office_edit,
 		vision: !!c.vision,
 		file_upload: !!c.file_upload,
 		citations: !!c.citations
@@ -52,6 +58,8 @@ export function applyToggles(meta: any, toggles: AssistantToggles): any {
 	capabilities.image_generation = toggles.image_generation;
 	capabilities.code_interpreter = toggles.code_interpreter;
 	capabilities.document_writer = toggles.document_writer;
+	capabilities.office = toggles.office;
+	capabilities.office_edit = toggles.office && toggles.office_edit;
 	capabilities.vision = toggles.vision;
 	capabilities.file_upload = toggles.file_upload;
 	capabilities.file_context = toggles.file_upload;
@@ -60,7 +68,7 @@ export function applyToggles(meta: any, toggles: AssistantToggles): any {
 	const otherFeatures = (meta?.defaultFeatureIds ?? []).filter(
 		(id: string) => !FEATURE_TOGGLES.includes(id as (typeof FEATURE_TOGGLES)[number])
 	);
-	const enabledFeatures = FEATURE_TOGGLES.filter((id) => toggles[id]);
+	const enabledFeatures = FEATURE_TOGGLES.filter((id) => capabilities[id]);
 	const defaultFeatureIds = [...otherFeatures, ...enabledFeatures];
 
 	const builtinTools = { ...(meta?.builtinTools ?? {}) };

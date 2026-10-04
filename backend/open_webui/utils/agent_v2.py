@@ -209,10 +209,18 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
 
 
 def _tools(metadata: dict[str, Any]) -> dict[str, dict[str, str]]:
-    """[Claude] The tool states the chat's toggles ask, as the turn's `tools` field; none while every toggle is off."""
-    if not (metadata.get('features') or {}).get('web_search'):
-        return {}
-    return {'tools': {'web_search': WEB_SEARCH_ON}}
+    features = metadata.get('features') or {}
+    # [Claude] Every state is sent, off included: a tool the toggles leave off must be off,
+    # whatever the agent's own default.
+    web = bool(features.get('web_search'))
+    return {
+        'tools': {
+            'create_office_file': 'auto' if features.get('office') else 'off',
+            'edit_office_file': 'auto' if features.get('office') and features.get('office_edit') else 'off',
+            'web_search': WEB_SEARCH_ON if web else 'off',
+            'fetch': 'auto' if web else 'off',
+        }
+    }
 
 
 def _unavailable(count: int, language: str | None) -> dict[str, Any]:
@@ -364,6 +372,34 @@ def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[st
     }
 
 
+# [Gradient] Office bytes stay on the agent side; messages keep only their references.
+OFFICE_FILE = 'office-file'
+
+
+def _office_attachment(element: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    return {
+        'type': 'office',
+        'name': element['name'],
+        'content_type': element['content_type'],
+        'size': element['size'],
+        'thread_id': thread_id,
+        'element_id': element['id'],
+        'pages': len(element['pages']),
+        'version': element['version'],
+        'edits': element.get('edits'),
+    }
+
+
+_ROOT_STREAM = 'root'
+#: [Claude] The error a call stopped by the tool budget ends with: it never ran.
+_NOT_RUN = 'budget_exceeded'
+
+
+def _call_key(stream: str, call_id: str) -> str:
+    """[Claude] A call's id as statuses name it: a subagent's prefixed with its stream."""
+    return call_id if stream == _ROOT_STREAM else f'{stream}:{call_id}'
+
+
 def _read(element: dict[str, Any]) -> bool:
     """[Claude] Whether the agent read this element's text, so an answer may cite it."""
     return isinstance(element.get('text'), str) and isinstance(element.get('ref'), str)
@@ -442,6 +478,8 @@ class AgentTurn:
         self.elements: dict[str, dict[str, Any]] = {}
         # [Claude] The calls shown as running, by call id: their tool's name and arguments.
         self.running: dict[str, tuple[str, dict[str, Any]]] = {}
+        # [Claude] The stream each shown call was made in.
+        self.call_streams: dict[str, str] = {}
         # [Claude] Done lines of calls whose output landed, held until the model moves on.
         self.settling: list[dict[str, Any]] = []
         self.model: str | None = None
@@ -525,14 +563,28 @@ class AgentTurn:
         if self.emitter:
             await self.emitter({'type': kind, 'data': data})
 
-    async def start_tools(self, calls: list[dict]) -> None:
+    async def start_tools(self, calls: list[dict], stream: str = _ROOT_STREAM) -> None:
         """Show each call as running. It stays a passing status until its output lands; the frontend replaces a
-        status by a later one with the same `call_id`."""
+        status by a later one with the same `call_id`. [Claude] A subagent's calls are shown too, by an id that
+        names their stream: its model numbers its calls on its own."""
         for call in calls:
             self.tool_calls += 1
             name, arguments = call['name'], call.get('arguments') or {}
-            self.running[call['id']] = (name, arguments)
-            await self.emit('status', {**self.tool_status(name, arguments), 'call_id': call['id'], 'done': False})
+            call_id = _call_key(stream, call['id'])
+            self.running[call_id] = (name, arguments)
+            self.call_streams[call_id] = stream
+            await self.emit('status', {**self.tool_status(name, arguments), 'call_id': call_id, 'done': False})
+
+    async def summary(self, event: ChatEvent) -> list[dict[str, Any]]:
+        """[Claude] Show the agent summarising the conversation as a call named `compaction`: running on
+        `compacting`, done when the root stream's `compaction` event lands. It is not counted as a tool call."""
+        if event.event == 'compacting':
+            self.running[_COMPACTION] = (_COMPACTION, {})
+            await self.emit('status', {**self.tool_status(_COMPACTION, {}), 'call_id': _COMPACTION, 'done': False})
+            return []
+        if event.data.get('stream') != 'root':
+            return []
+        return await self.end_tool({'call_id': _COMPACTION})
 
     async def summary(self, event: ChatEvent) -> list[dict[str, Any]]:
         """[Claude] Show the agent summarising the conversation as a call named `compaction`: running on
@@ -553,7 +605,11 @@ class AgentTurn:
         if (call := self.running.pop(output.get('call_id') or '', None)) is None:
             return []
         name, arguments = call
-        status = self.tool_status(name, arguments, None if output.get('error') else output)
+        status = (
+            {'action': name, 'description': 'Not run: the agent used all its steps for this message'}
+            if output.get('error') == _NOT_RUN
+            else self.tool_status(name, arguments, None if output.get('error') else output)
+        )
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
         return [_marker(status)]
 
@@ -611,12 +667,15 @@ class AgentTurn:
                 params[param] = str(value)
         return params
 
-    async def stop_tools(self) -> list[dict[str, Any]]:
-        """[Claude] End the calls the tool budget stopped: they never get an output, and the model answers next,
-        so each shows what it tried, anchored before that answer, as a call whose output is an error does."""
+    async def stop_tools(self, stream: str = _ROOT_STREAM) -> list[dict[str, Any]]:
+        """[Claude] End the calls of `stream` the tool budget stopped: they never get an output, and the model
+        answers next, so each shows that it did not run, anchored before that answer."""
         chunks = []
-        for call_id in [call_id for call_id in self.running if call_id != _COMPACTION]:
-            chunks += await self.end_tool({'call_id': call_id, 'error': 'budget_exceeded'})
+        stopped = [
+            call_id for call_id in self.running if call_id != _COMPACTION and self.call_streams.get(call_id) == stream
+        ]
+        for call_id in stopped:
+            chunks += await self.end_tool({'call_id': call_id, 'error': _NOT_RUN})
         return chunks
 
     async def clear_tools(self) -> None:
@@ -629,7 +688,22 @@ class AgentTurn:
         for element in payload.get('elements') or []:
             if _read(element):
                 await self.show_source(element['id'], 'current_turn')
+        await self.attach_files([e for e in payload.get('elements') or [] if e.get('type') == OFFICE_FILE])
         return await self.end_tool(payload)
+
+    async def attach_files(self, elements: list[dict[str, Any]]) -> None:
+        """[Gradient] Attach Office references using the same thread this message bookmarks."""
+        if not elements or not self.thread_id:
+            return
+        try:
+            files = [_office_attachment(element, self.thread_id) for element in elements]
+        except (KeyError, TypeError):
+            log.exception('Could not attach an Office file', extra={'thread_id': self.thread_id})
+            return
+        chat_id = self.metadata.get('chat_id')
+        if is_temporary_chat_id(chat_id):
+            agent_threads.remember_temporary_office(chat_id, self.metadata['user_id'], files)
+        await self.emit('files', {'files': files})
 
     async def show_source(self, source_id: str, flag: str) -> None:
         """[Claude] Flag a source once per turn: `current_turn` when a tool read it now, `cited_this_turn` when the
@@ -714,8 +788,6 @@ class AgentTurn:
         if event.event == 'delta':
             if event.data['text']:
                 await self.settle()
-            if event.data['text'] and not self.running:
-                await self.summarize()
             self.partial += event.data['text']
             return [_chunk({'content': event.data['text']})] if event.data['text'] else []
         if event.event == 'citation':
@@ -725,6 +797,8 @@ class AgentTurn:
             return await self.model_output(payload)
         if event.event == 'tool_output' and event.data.get('stream') == 'root':
             return await self.record_output(payload)
+        if event.event in {'model_output', 'tool_output', 'budget_exceeded'}:
+            return await self.subagent_step(event)
         if event.event in {'compacting', 'compaction'}:
             return await self.summary(event)
         if event.event == 'budget_exceeded' and event.data.get('stream') == 'root':
@@ -734,6 +808,22 @@ class AgentTurn:
         if event.event in {'status', 'error'}:
             return await self.finish(event)
         return []
+
+    async def subagent_step(self, event: ChatEvent) -> list[dict[str, Any]]:
+        """[Claude] Show a subagent's work while its call runs: each tool it calls, running, then done and anchored
+        in the content as its output lands, so the steps read in the order they happened, before the done line of
+        the call that started the subagent. Its answer is that call's output, not text of this message."""
+        stream, payload = event.data.get('stream') or '', event.data.get('payload') or {}
+        chunks: list[dict[str, Any]] = []
+        if event.event == 'model_output':
+            await self.settle()
+            await self.start_tools(payload.get('tool_calls', []), stream)
+        elif event.event == 'tool_output':
+            chunks = await self.end_tool({**payload, 'call_id': _call_key(stream, payload.get('call_id') or '')})
+        else:
+            chunks = await self.stop_tools(stream)
+        await self.settle()
+        return chunks
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
         await self.settle()
@@ -800,8 +890,8 @@ class AgentTurn:
         return chunks
 
     async def summarize(self) -> None:
-        """[Claude] Settle the tools called since the last summary into the v1 closing line, which the frontend keeps
-        as the header of the tool list: once the answer starts, and at the end if more were called after it."""
+        """[Claude] Settle the tools the turn called into the v1 closing line, which the frontend keeps as the header
+        of the tool list: once, when the turn ends; text between tool calls is not its end."""
         if self.tool_calls == self.summarized:
             return
         self.summarized = self.tool_calls

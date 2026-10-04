@@ -58,6 +58,11 @@ async def get_permissions(
 
     # Deep copy default permissions to avoid modifying the original dict
     permissions = JSONCodec.loads(JSONCodec.dumps(default_permissions))
+    # Keep reported feature permissions consistent with has_permission for older saved settings.
+    permissions = fill_missing_permissions(
+        permissions,
+        {'features': DEFAULT_USER_PERMISSIONS['features'].copy()},
+    )
 
     # Combine permissions from all user groups
     for group in user_groups:

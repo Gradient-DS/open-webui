@@ -23,6 +23,9 @@ from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
 
+# What every turn sends while no toggle is on: each tool state, off included.
+TOOLS_OFF = {'create_office_file': 'off', 'edit_office_file': 'off', 'web_search': 'off', 'fetch': 'off'}
+
 
 @dataclass
 class Chat:
@@ -121,9 +124,40 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
     for index in range(1, 4):
         await chat.turn(f'turn {index}', f'a{index}', f'a{index - 1}' if index > 1 else None)
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': {'text': 'turn 1', 'knowledge': []}, 'agent': 'test', 'model': 'llm'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'turn 2', 'knowledge': []}, 'model': 'llm'}),
-        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'turn 3', 'knowledge': []}, 'model': 'llm'}),
+        (
+            '/v1/chat/threads',
+            {
+                'input': {
+                    'text': 'turn 1',
+                    'knowledge': [],
+                    'tools': TOOLS_OFF,
+                },
+                'agent': 'test',
+                'model': 'llm',
+            },
+        ),
+        (
+            '/v1/chat/threads/thr-1/inputs',
+            {
+                'input': {
+                    'text': 'turn 2',
+                    'knowledge': [],
+                    'tools': TOOLS_OFF,
+                },
+                'model': 'llm',
+            },
+        ),
+        (
+            '/v1/chat/threads/thr-1/inputs',
+            {
+                'input': {
+                    'text': 'turn 3',
+                    'knowledge': [],
+                    'tools': TOOLS_OFF,
+                },
+                'model': 'llm',
+            },
+        ),
     ]
     assert [chat.bookmark(f'a{i}') for i in range(1, 4)] == [
         {'thread_id': 'thr-1', 'position': position} for position in (3, 5, 7)
@@ -153,7 +187,17 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
     await chat.turn(text, 'new-answer', parent, chat_id=chat_id)
     assert chat.mutations()[-2:] == [
         ('/v1/chat/threads/thr-1/fork', {'at': at}),
-        ('/v1/chat/threads/thr-2/inputs', {'input': {'text': text, 'knowledge': []}, 'model': 'llm'}),
+        (
+            '/v1/chat/threads/thr-2/inputs',
+            {
+                'input': {
+                    'text': text,
+                    'knowledge': [],
+                    'tools': TOOLS_OFF,
+                },
+                'model': 'llm',
+            },
+        ),
     ]
     assert chat.api.chat.threads['thr-1']['events'] == original
     assert chat.bookmark('new-answer', chat_id) == {'thread_id': 'thr-2', 'position': at + 2}
@@ -213,6 +257,7 @@ async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(cha
     assert chat.mutations()[0][1] == {
         'input': {
             'text': 'one\ntwo',
+            'tools': TOOLS_OFF,
             'knowledge': [
                 {'key': 'kb-a', 'name': 'Contracten', 'description': 'Getekende contracten'},
                 {'key': 'kb-b', 'name': 'Notulen'},
@@ -344,20 +389,56 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 @pytest.mark.asyncio
 async def test_the_web_search_toggle_on_asks_for_web_search(chat: Chat) -> None:
     await chat.turn('question', 'a1', features={'web_search': True})
-    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': agent_v2.WEB_SEARCH_ON}
+    assert chat.mutations()[-1][1]['input']['tools'] == {
+        'web_search': agent_v2.WEB_SEARCH_ON,
+        'fetch': 'auto',
+        'create_office_file': 'off',
+        'edit_office_file': 'off',
+    }
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('features', [{'web_search': False}, {}], ids=['off', 'absent'])
-async def test_the_web_search_toggle_off_leaves_web_search_to_the_deployment(chat: Chat, features: dict) -> None:
+async def test_the_web_search_toggle_off_turns_search_and_fetch_off(chat: Chat, features: dict) -> None:
     await chat.turn('question', 'a1', features=features)
-    assert 'tools' not in chat.mutations()[-1][1]['input']
+    assert chat.mutations()[-1][1]['input']['tools'] == {
+        'web_search': 'off',
+        'fetch': 'off',
+        'create_office_file': 'off',
+        'edit_office_file': 'off',
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('office,office_edit', [(False, False), (False, True), (True, False), (True, True)])
+@pytest.mark.parametrize('web_search', [False, True])
+async def test_office_toggles_always_send_both_tool_states(chat: Chat, office, office_edit, web_search) -> None:
+    await chat.turn(
+        'question',
+        'a1',
+        features={
+            'office': office,
+            'office_edit': office_edit,
+            'web_search': web_search,
+        },
+    )
+    expected = {
+        'create_office_file': 'auto' if office else 'off',
+        'edit_office_file': 'auto' if office and office_edit else 'off',
+        'web_search': agent_v2.WEB_SEARCH_ON if web_search else 'off',
+        'fetch': 'auto' if web_search else 'off',
+    }
+    assert chat.mutations()[-1][1]['input']['tools'] == expected
 
 
 @pytest.mark.asyncio
 async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
     await chat.turn('question', 'a1', system_prompt=' ', chat_system_prompt=None)
-    assert chat.mutations()[-1][1]['input'] == {'text': 'question', 'knowledge': []}
+    assert chat.mutations()[-1][1]['input'] == {
+        'text': 'question',
+        'knowledge': [],
+        'tools': TOOLS_OFF,
+    }
 
 
 @pytest.mark.asyncio
@@ -1202,7 +1283,18 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
         result = await chat.response(None, 'a1', stream=False, **kwargs)
         assert result['choices'][0]['message']['content'] == 'Answer: last question'
     assert chat.mutations() == [
-        ('/v1/chat/threads', {'input': {'text': 'last question', 'knowledge': []}, 'agent': 'test', 'model': 'llm'})
+        (
+            '/v1/chat/threads',
+            {
+                'input': {
+                    'text': 'last question',
+                    'knowledge': [],
+                    'tools': TOOLS_OFF,
+                },
+                'agent': 'test',
+                'model': 'llm',
+            },
+        )
     ]
 
 
@@ -1319,7 +1411,17 @@ async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_ans
 
     assert content(chunks) == 'Answer: what was I asking?'
     assert chat.mutations()[stopped:] == [
-        ('/v1/chat/threads/thr-1/inputs', {'input': {'text': 'what was I asking?', 'knowledge': []}, 'model': 'llm'}),
+        (
+            '/v1/chat/threads/thr-1/inputs',
+            {
+                'input': {
+                    'text': 'what was I asking?',
+                    'knowledge': [],
+                    'tools': TOOLS_OFF,
+                },
+                'model': 'llm',
+            },
+        ),
     ]
 
 
@@ -1647,7 +1749,7 @@ async def test_a_tool_without_a_declared_status_shows_the_generic_line(declared:
 
 
 @pytest.mark.asyncio
-async def test_the_summary_settles_the_tools_once_the_answer_starts(declared: Chat) -> None:
+async def test_the_summary_settles_the_tools_once_when_the_turn_ends(declared: Chat) -> None:
     declared.api.chat.turns = [
         [
             call('list_documents', 'c1'),
@@ -1663,14 +1765,8 @@ async def test_the_summary_settles_the_tools_once_the_answer_starts(declared: Ch
 
     shown = [event['data'] for event in declared.socket if event['type'] == 'status']
     order = [status.get('call_id') or status['description'] for status in shown]
-    assert order == [
-        'c1',
-        'c1',
-        '1 tool called in less than a second',
-        'c2',
-        'c2',
-        '2 tools called in less than a second',
-    ]
+    # Text between tool calls is not the turn's end: the closing line comes once.
+    assert order == ['c1', 'c1', 'c2', 'c2', '2 tools called in less than a second']
 
 
 @pytest.mark.parametrize(
@@ -1698,3 +1794,132 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
 
     closing = [event['data'] for event in declared.socket if event['type'] == 'status'][-1]
     assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('branch', [False, True])
+async def test_a_delivered_office_file_is_attached_without_copying_bytes(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, branch: bool
+) -> None:
+    # [Gradient] C1 has no inline bytes; neither the file nor its pages enter OWUI Files.
+    inserted = AsyncMock()
+    monkeypatch.setattr(agent_v2.Files, 'insert_new_file', inserted)
+    office = {
+        'type': 'office-file',
+        'id': uuid4().hex,
+        'name': 'begroting.xlsx',
+        'content_type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'size': 4,
+        'sha256': 'a' * 64,
+        'key': 'owner/office/workbook.xlsx',
+        'pages': [{'key': 'owner/office/page.png', 'sha256': 'b' * 64, 'size': 8}],
+        'version': 2,
+        'edits': uuid4().hex,
+    }
+    if branch:
+        await chat.turn('first', 'parent')
+        await chat.turn('second', 'old-answer', 'parent')
+        assert chat.bookmark('parent')['position'] < len(chat.api.chat.threads['thr-1']['events'])
+    chat.api.chat.turns = [[found(office), answered('Klaar.')]]
+    await chat.turn('Maak een begroting', 'a1', 'parent' if branch else None)
+    assert chat.bookmark('a1')['thread_id'] == ('thr-2' if branch else 'thr-1')
+    inserted.assert_not_awaited()
+    (event,) = [event['data'] for event in chat.socket if event['type'] == 'files']
+    assert event == {
+        'files': [
+            {
+                'type': 'office',
+                'name': office['name'],
+                'content_type': office['content_type'],
+                'size': 4,
+                'thread_id': chat.bookmark('a1')['thread_id'],
+                'element_id': office['id'],
+                'pages': 1,
+                'version': 2,
+                'edits': office['edits'],
+            }
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_subagents_tool_calls_show_as_statuses_by_their_own_ids(declared: Chat) -> None:
+    child = 'root/create_office_file#0@2'
+    path = {'path': 'argument.path'}
+    writing = {
+        'running': {'template': 'Writing {{path}}...', 'params': path},
+        'done': {'template': 'Wrote {{path}}', 'params': path},
+    }
+    agent_v2.TOOL_STATUS_CACHE['statuses'] = {**STATUSES, 'write_file': writing}
+    _, payload = call('write_file', path='/workspace/deck.html', content='x')
+    declared.api.chat.turns = [
+        [
+            call('create_office_file', kind='pptx', brief='b', language='nl'),
+            (f'model_output@{child}', payload),
+            (f'tool_output@{child}', {'call_id': 'c1', 'text': 'ok'}),
+            ('tool_output', {'call_id': 'c1', 'error': 'no file'}),
+            ('model_output', {'content': 'Helaas.'}),
+        ]
+    ]
+
+    chunks = await declared.turn('Maak een deck', 'a1')
+
+    shown = [(status['call_id'], status['description'], status['done']) for status in statuses(declared)]
+    assert (f'{child}:c1', 'Writing {{path}}...', False) in shown
+    assert (f'{child}:c1', 'Wrote {{path}}', True) in shown
+    assert [call_id for call_id, _, done in shown if done].count('c1') == 1
+    assert content(chunks).endswith('Helaas.')
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_budget_stopped_shows_it_did_not_run(declared: Chat) -> None:
+    declared.api.chat.turns = [
+        [
+            call('search', query='q'),
+            ('budget_exceeded', {'count': 4, 'cap': 3}),
+            ('model_output', {'content': 'Zonder zoeken.'}),
+        ]
+    ]
+
+    await declared.turn('q', 'a1')
+
+    (stopped,) = [status for status in statuses(declared) if status['done']]
+    assert stopped['description'] == 'Not run: the agent used all its steps for this message'
+
+
+@pytest.mark.asyncio
+async def test_temporary_office_reference_is_recorded_on_delivery_and_expires_with_chat(temporary: Chat):
+    office = {
+        'type': 'office-file',
+        'id': uuid4().hex,
+        'name': 'deck.pptx',
+        'content_type': 'application/office',
+        'size': 42,
+        'pages': [],
+        'version': 1,
+    }
+    temporary.api.chat.turns = [[found(office), answered('Done')]]
+    chat_id = 'local:sid-1:office'
+    await temporary.turn('make a deck', 'answer', chat_id=chat_id)
+    attachment = agent_threads.temporary_office(chat_id, office['id'], 'alice')
+    assert attachment['thread_id'] == agent_threads.temporary_bookmark(chat_id, 'answer')['thread_id']
+    assert attachment == next(event['data']['files'][0] for event in temporary.socket if event['type'] == 'files')
+    assert not temporary.messages
+    assert agent_threads.temporary_office(chat_id, office['id'], 'bob') is None
+    await agent_threads.release_temporary(['sid-1'])
+    assert agent_threads.temporary_office(chat_id, office['id'], 'alice') is None
+
+
+def test_an_original_office_attachment_has_no_parent():
+    attachment = agent_v2._office_attachment(
+        {
+            'id': 'original',
+            'name': 'deck.pptx',
+            'content_type': 'application/office',
+            'size': 1,
+            'pages': [],
+            'version': 1,
+        },
+        'thread',
+    )
+    assert attachment['edits'] is None

@@ -51,6 +51,10 @@ CONNECTIONS_CONFIG_KEYS = {
     'ENABLE_BASE_MODELS_CACHE': 'models.base_models_cache',
 }
 CODE_EXECUTION_CONFIG_KEYS = {
+    'ENABLE_DOCUMENT_WRITER': 'document_writer.enable',
+    'DOCUMENT_WRITER_PROMPT_TEMPLATE': 'document_writer.prompt_template',
+    'ENABLE_OFFICE': 'office.enable',
+    'ENABLE_OFFICE_EDIT': 'office_edit.enable',
     'ENABLE_CODE_EXECUTION': 'code_execution.enable',
     'CODE_EXECUTION_ENGINE': 'code_execution.engine',
     'CODE_EXECUTION_JUPYTER_URL': 'code_execution.jupyter.url',
@@ -716,6 +720,10 @@ async def verify_tool_servers_config(
 # CodeInterpreterConfig
 ############################
 class CodeInterpreterConfigForm(BaseModel):
+    ENABLE_DOCUMENT_WRITER: bool = False
+    DOCUMENT_WRITER_PROMPT_TEMPLATE: str = ''
+    ENABLE_OFFICE: bool = True
+    ENABLE_OFFICE_EDIT: bool = True
     ENABLE_CODE_EXECUTION: bool
     CODE_EXECUTION_ENGINE: str
     CODE_EXECUTION_JUPYTER_URL: str | None
@@ -742,7 +750,14 @@ async def get_code_execution_config(request: Request, user=Depends(get_admin_use
 async def set_code_execution_config(
     request: Request, form_data: CodeInterpreterConfigForm, user=Depends(get_admin_user)
 ):
-    await Config.upsert(config_updates(form_data.model_dump(), CODE_EXECUTION_CONFIG_KEYS))
+    data = form_data.model_dump(exclude_unset=True)
+    if 'ENABLE_OFFICE' in data or 'ENABLE_OFFICE_EDIT' in data:
+        office_enabled = data.get('ENABLE_OFFICE')
+        if office_enabled is None:
+            office_enabled = await Config.get('office.enable')
+        if not office_enabled:
+            data['ENABLE_OFFICE_EDIT'] = False
+    await Config.upsert(config_updates(data, CODE_EXECUTION_CONFIG_KEYS))
     values = await get_config_values(CODE_EXECUTION_CONFIG_KEYS)
     await publish_event(
         request,

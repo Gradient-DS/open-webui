@@ -56,6 +56,8 @@
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = false;
+	export let officeEnabled = false;
+	export let officeEditEnabled = false;
 	export let webSearchEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
@@ -280,6 +282,8 @@
 						bind:imageGenerationEnabled
 						bind:codeInterpreterEnabled
 						bind:documentWriterEnabled
+						bind:officeEnabled
+						bind:officeEditEnabled
 						bind:webSearchEnabled
 						bind:atSelectedModel
 						bind:showCommands
