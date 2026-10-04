@@ -145,7 +145,6 @@ from open_webui.utils.webhook import post_webhook
 # [Gradient] Fork-only imports (upstream equivalents already imported above).
 from open_webui.utils.agent_routing import agent_owns_tool_execution
 from open_webui.utils.skill_bundles import resolve_skill_bundle_files
-from open_webui.utils.web_search_state import should_force_web_search
 from open_webui.utils.data_separation import request_mixes_data_sources
 from open_webui.config import (
     DEFAULT_DOCUMENT_WRITER_PROMPT,
@@ -3007,9 +3006,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 'features.web_search',
                 await Config.get('user.permissions'),
             ):
-                if should_force_web_search(
-                    features, metadata.get('params', {}).get('function_calling'), route_to_agent
-                ):
+                # Skip forced RAG web search when native FC is enabled - model can use web_search tool
+                # [Gradient] The agent owns web search on routed requests.
+                if metadata.get('params', {}).get('function_calling') == 'legacy' and not route_to_agent:
                     form_data = await chat_web_search_handler(request, form_data, extra_params, user)
 
         if 'image_generation' in features and features['image_generation']:
