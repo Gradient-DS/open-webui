@@ -79,3 +79,8 @@ with `auto` state; both remain off by default. `/cloud-sync/connections/{id}/liv
 lists or enables owned OneDrive live grants. The toggle and Connect OneDrive card share the
 existing cloud consent popup and verify its origin, opener and connection before polling.
 No new OWUI environment variables are required. Platform live documents must be enabled.
+
+Live documents use an explicit off/auto/required tool state in InputMenu (off by default).
+Set ENABLE_LIVE_DOCUMENTS=true (config key live_documents.enable, default false) alongside
+AGENT_API_ENABLED to offer the control. The server gates every requested document tool state
+with that setting; enable the matching platform live_documents setting as well.

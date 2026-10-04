@@ -23,6 +23,9 @@ from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
 
+# The turn's tools field while the web search control is Uit (or absent).
+WEB_SEARCH_OFF = {'web_search': 'off', 'search_live_documents': 'off', 'attach_live_document': 'off'}
+
 
 @dataclass
 class Chat:
@@ -109,6 +112,7 @@ def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> Chat:
         AgentConfigs, 'get_agent_config_by_id', AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2'}))
     )
     monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=emit))
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=True))
     return result
 
 
@@ -124,7 +128,12 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
         (
             '/v1/chat/threads',
             {
-                'input': {'text': 'turn 1', 'knowledge': [], 'attachment_collection': 'owui-attachments-alice'},
+                'input': {
+                    'text': 'turn 1',
+                    'knowledge': [],
+                    'attachment_collection': 'owui-attachments-alice',
+                    'tools': WEB_SEARCH_OFF,
+                },
                 'agent': 'test',
                 'model': 'llm',
             },
@@ -132,14 +141,24 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
         (
             '/v1/chat/threads/thr-1/inputs',
             {
-                'input': {'text': 'turn 2', 'knowledge': [], 'attachment_collection': 'owui-attachments-alice'},
+                'input': {
+                    'text': 'turn 2',
+                    'knowledge': [],
+                    'attachment_collection': 'owui-attachments-alice',
+                    'tools': WEB_SEARCH_OFF,
+                },
                 'model': 'llm',
             },
         ),
         (
             '/v1/chat/threads/thr-1/inputs',
             {
-                'input': {'text': 'turn 3', 'knowledge': [], 'attachment_collection': 'owui-attachments-alice'},
+                'input': {
+                    'text': 'turn 3',
+                    'knowledge': [],
+                    'attachment_collection': 'owui-attachments-alice',
+                    'tools': WEB_SEARCH_OFF,
+                },
                 'model': 'llm',
             },
         ),
@@ -175,7 +194,12 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
         (
             '/v1/chat/threads/thr-2/inputs',
             {
-                'input': {'text': text, 'knowledge': [], 'attachment_collection': 'owui-attachments-alice'},
+                'input': {
+                    'text': text,
+                    'knowledge': [],
+                    'attachment_collection': 'owui-attachments-alice',
+                    'tools': WEB_SEARCH_OFF,
+                },
                 'model': 'llm',
             },
         ),
@@ -243,6 +267,7 @@ async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(cha
                 {'key': 'kb-a', 'name': 'Contracten', 'description': 'Getekende contracten'},
                 {'key': 'kb-b', 'name': 'Notulen'},
             ],
+            'tools': WEB_SEARCH_OFF,
         },
         'agent': 'test',
         'model': 'llm',
@@ -368,16 +393,78 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 
 
 @pytest.mark.asyncio
-async def test_the_web_search_toggle_on_asks_for_web_search(chat: Chat) -> None:
-    await chat.turn('question', 'a1', features={'web_search': True})
-    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': agent_v2.WEB_SEARCH_ON}
+@pytest.mark.parametrize(
+    ('features', 'state'),
+    [
+        ({'web_search': True, 'web_search_required': True}, 'required'),
+        ({'web_search': True}, 'auto'),
+        ({'web_search': True, 'web_search_required': False}, 'auto'),
+        ({'web_search': False}, 'off'),
+        ({'web_search': False, 'web_search_required': True}, 'off'),
+        ({}, 'off'),
+    ],
+    ids=['always', 'auto', 'auto-explicit', 'off', 'off-ignores-required', 'absent'],
+)
+async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, features: dict, state: str) -> None:
+    await chat.turn('question', 'a1', features=features)
+    assert chat.mutations()[-1][1]['input']['tools'] == {**WEB_SEARCH_OFF, 'web_search': state}
+
+
+@pytest.mark.parametrize(
+    ('features', 'state'),
+    [
+        ({'web_search': True, 'web_search_required': True}, 'required'),
+        ({'web_search': True}, 'auto'),
+        ({'web_search': False}, 'off'),
+        (None, 'off'),
+    ],
+    ids=['always', 'auto', 'off', 'no-features'],
+)
+def test_tools_maps_the_web_search_features_to_tool_states(features: dict | None, state: str) -> None:
+    assert agent_v2._tools({'features': features}, True, False) == {'tools': {**WEB_SEARCH_OFF, 'web_search': state}}
+
+
+@pytest.mark.parametrize('features', [{'web_search': True, 'web_search_required': True}, {'web_search': True}])
+def test_tools_sends_off_when_owui_does_not_allow_web_search(features: dict) -> None:
+    assert agent_v2._tools({'features': features}, False, False) == {
+        'tools': {'web_search': 'off', 'search_live_documents': 'off', 'attach_live_document': 'off'}
+    }
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('features', [{'web_search': False}, {}], ids=['off', 'absent'])
-async def test_the_web_search_toggle_off_leaves_web_search_to_the_deployment(chat: Chat, features: dict) -> None:
-    await chat.turn('question', 'a1', features=features)
-    assert 'tools' not in chat.mutations()[-1][1]['input']
+async def test_a_disallowed_turn_asks_the_agent_for_no_web_search(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
+    await chat.turn('question', 'a1', features={'web_search': True, 'web_search_required': True})
+    assert chat.mutations()[-1][1]['input']['tools'] == {
+        'web_search': 'off',
+        'search_live_documents': 'off',
+        'attach_live_document': 'off',
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('enabled', 'role', 'permitted', 'allowed'),
+    [
+        (False, 'admin', True, False),
+        (True, 'admin', False, True),
+        (True, 'user', True, True),
+        (True, 'user', False, False),
+        (True, None, True, False),
+    ],
+    ids=['tenant-off', 'admin', 'user-permitted', 'user-denied', 'unknown-user'],
+)
+async def test_web_search_allowed_needs_the_tenant_setting_and_the_users_permission(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool, role: str | None, permitted: bool, allowed: bool
+) -> None:
+    async def config_get(key: str, default=None):
+        return {'web.search.enable': enabled, 'user.permissions': {}}.get(key, default)
+
+    user = SimpleNamespace(id='u1', role=role) if role else None
+    monkeypatch.setattr(agent_v2.Config, 'get', config_get)
+    monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=user))
+    monkeypatch.setattr(agent_v2, 'has_permission', AsyncMock(return_value=permitted))
+    assert await agent_v2._web_search_allowed('u1') is allowed
 
 
 @pytest.mark.asyncio
@@ -387,6 +474,7 @@ async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
         'text': 'question',
         'knowledge': [],
         'attachment_collection': 'owui-attachments-alice',
+        'tools': {'web_search': 'off', 'search_live_documents': 'off', 'attach_live_document': 'off'},
     }
 
 
@@ -1235,7 +1323,12 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
         (
             '/v1/chat/threads',
             {
-                'input': {'text': 'last question', 'knowledge': [], 'attachment_collection': 'owui-attachments-alice'},
+                'input': {
+                    'text': 'last question',
+                    'knowledge': [],
+                    'attachment_collection': 'owui-attachments-alice',
+                    'tools': WEB_SEARCH_OFF,
+                },
                 'agent': 'test',
                 'model': 'llm',
             },
@@ -1363,6 +1456,7 @@ async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_ans
                     'text': 'what was I asking?',
                     'knowledge': [],
                     'attachment_collection': 'owui-attachments-alice',
+                    'tools': WEB_SEARCH_OFF,
                 },
                 'model': 'llm',
             },

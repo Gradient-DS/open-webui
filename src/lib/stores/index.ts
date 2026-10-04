@@ -436,6 +436,8 @@ type Config = {
 		enable_google_drive_integration: boolean;
 		enable_google_drive_sync?: boolean;
 		enable_onedrive_integration: boolean;
+		enable_onedrive_personal?: boolean;
+		enable_onedrive_business?: boolean;
 		enable_confluence_integration?: boolean;
 		enable_confluence_sync?: boolean;
 		confluence_kb_mode?: string;
@@ -480,6 +482,7 @@ type Config = {
 		feature_admin_settings?: boolean;
 		feature_admin_settings_tabs?: string[];
 		feature_agent_api_enabled?: boolean;
+		enable_live_documents?: boolean;
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
 		feature_skill_files?: boolean;
