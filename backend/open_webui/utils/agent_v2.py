@@ -69,15 +69,32 @@ def _duration(seconds: float, dutch: bool) -> str:
     return f' {words[4]} '.join(parts)
 
 
-def _marker(status: dict[str, Any]) -> dict[str, Any]:
+def _marker(status: dict[str, Any], elements: list[dict[str, Any]]) -> dict[str, Any]:
     """The v1 anchor for one shown tool call: the frontend hides it and places the call's status and the
     reasoning around it by its position in the content. The whitespace is what its details tokenizer needs."""
+    documents = [element for element in elements if element.get('type') == 'pdf-document']
+    if documents:
+        return _chunk({'content': ''.join(_document_marker(document) for document in documents)})
     text = _PLACEHOLDER.sub(lambda match: str(status.get(match[1], match[0])), status['description'])
     name = html.escape(status['action'], quote=True)
     return _chunk(
         {
             'content': f'\n\n<details type="tool_calls" done="true" name="{name}">\n<summary>{html.escape(text)}</summary>\n</details>\n\n'
         }
+    )
+
+
+def _document_marker(element: dict[str, Any]) -> str:
+    """Escape a generated document as a renderer marker; unsupported formats never enter message content."""
+    format = element.get('format')
+    if format not in ('markdown', 'html'):
+        log.warning('Skipping pdf-document with unsupported format', extra={'element_id': element.get('id')})
+        return ''
+    title = html.escape(element['title'], quote=True)
+    content = html.escape(element['content'], quote=True)
+    return (
+        f'<details type="document" format="{format}" title="{title}" done="true">'
+        f'<summary>Document</summary>\n{content}\n</details>'
     )
 
 
@@ -395,7 +412,11 @@ def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[st
 
 def _read(element: dict[str, Any]) -> bool:
     """[Claude] Whether the agent read this element's text, so an answer may cite it."""
-    return isinstance(element.get('text'), str) and isinstance(element.get('ref'), str)
+    return (
+        element.get('type') != 'pdf-document'
+        and isinstance(element.get('text'), str)
+        and isinstance(element.get('ref'), str)
+    )
 
 
 class Citations:
@@ -584,7 +605,7 @@ class AgentTurn:
         name, arguments = call
         status = self.tool_status(name, arguments, None if output.get('error') else output)
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
-        return [_marker(status)]
+        return [_marker(status, output.get('elements') or [])]
 
     async def settle(self) -> None:
         """[Claude] Show the held done lines: the model wrote answer text, called the next tool, or the turn ended."""

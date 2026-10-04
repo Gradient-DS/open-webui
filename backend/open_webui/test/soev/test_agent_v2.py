@@ -1844,3 +1844,76 @@ async def test_pdf_writer_allowed_needs_the_tenant_setting_and_the_users_permiss
         permission.assert_awaited_once_with('u1', 'features.document_writer', {})
     else:
         permission.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('format', ['markdown', 'html'])
+@pytest.mark.parametrize('close_after', [None, 4])
+async def test_pdf_documents_replace_the_tool_marker_and_survive_the_final_answer(
+    chat: Chat, format: str, close_after: int | None
+) -> None:
+    """Documents stay in output order, escaped exactly, across streamed and durable answer reconciliation."""
+    chat.api.chat.close_after = close_after
+    documents = [
+        {
+            'type': 'pdf-document',
+            'id': uuid4().hex,
+            'ref': None,
+            'properties': {},
+            'text': None,
+            'title': """Factuur <Advies> & "werk" '2026'""",
+            'format': format,
+            'content': """<h1 title="a">A & B's</h1>\n> "Quote" """,
+        },
+        {
+            'type': 'pdf-document',
+            'id': uuid4().hex,
+            'ref': 'must-not-be-cited',
+            'properties': {},
+            'text': 'must-not-be-cited',
+            'title': 'Second',
+            'format': format,
+            'content': 'Second body',
+        },
+    ]
+    chat.api.chat.turns = [
+        [
+            ('model_output', {'content': 'Before.', 'tool_calls': [{'id': 'c1', 'name': 'write_pdf'}]}),
+            found(*documents, call_id='c1'),
+            ('delta', {'text': 'After'}),
+            ('model_output', {'content': 'After.'}),
+        ]
+    ]
+    expected = (
+        f'<details type="document" format="{format}" '
+        'title="Factuur &lt;Advies&gt; &amp; &quot;werk&quot; &#x27;2026&#x27;" done="true">'
+        '<summary>Document</summary>\n'
+        '&lt;h1 title=&quot;a&quot;&gt;A &amp; B&#x27;s&lt;/h1&gt;\n&gt; &quot;Quote&quot; \n</details>'
+        f'<details type="document" format="{format}" title="Second" done="true">'
+        '<summary>Document</summary>\nSecond body\n</details>'
+    )
+    assert content(await chat.turn('write a document', 'a1')) == 'Before.' + expected + 'After.'
+    assert not any(event['type'] == 'source' for event in chat.socket)
+    assert [(status['action'], status['done']) for status in statuses(chat)] == [
+        ('write_pdf', False),
+        ('write_pdf', True),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('format', ['pdf', '', None])
+async def test_bad_pdf_document_formats_are_logged_and_skipped(
+    chat: Chat, caplog: pytest.LogCaptureFixture, format: str | None
+) -> None:
+    """An invalid document cannot crash the turn or leave its tool status running."""
+    chat.api.chat.turns = [
+        [
+            call('write_pdf'),
+            found({'type': 'pdf-document', 'id': 'bad', 'format': format}, call_id='c1'),
+            ('model_output', {'content': 'Answer'}),
+        ]
+    ]
+    assert content(await chat.turn('write a document', 'a1')) == 'Answer'
+    assert not any(event['type'] == 'source' for event in chat.socket)
+    assert [status['done'] for status in statuses(chat)] == [False, True]
+    assert any('unsupported format' in record.message and record.element_id == 'bad' for record in caplog.records)
