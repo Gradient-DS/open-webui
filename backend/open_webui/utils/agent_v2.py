@@ -94,7 +94,7 @@ def _document_marker(element: dict[str, Any]) -> str:
     content = html.escape(element['content'], quote=True)
     return (
         f'<details type="document" format="{format}" title="{title}" done="true">'
-        f'<summary>Document</summary>\n{content}\n</details>\n\n'
+        f'\n<summary>Document</summary>\n{content}\n</details>\n\n'
     )
 
 
