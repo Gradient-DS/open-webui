@@ -46,7 +46,7 @@
 		},
 		document_writer: {
 			label: $i18n.t('PDF writer'),
-			description: $i18n.t('Model can write and create downloadable documents')
+			description: $i18n.t('Model can write and create downloadable PDFs')
 		},
 		terminal: {
 			label: $i18n.t('Terminal'),
