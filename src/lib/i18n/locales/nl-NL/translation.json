@@ -3239,6 +3239,7 @@
   "The language of the input audio. Supplying the input language in ISO-639-1 (e.g. en) format will improve accuracy and latency. Leave blank to automatically detect the language.": "De taal van de audio-invoer. Het opgeven van de taal in ISO-639-1 formaat (bijv. en) verbetert nauwkeurigheid en snelheid. Laat leeg voor automatische taaldetectie.",
   "The maximum file size in MB. If the file size exceeds this limit, the file will not be uploaded.": "De maximale bestandsgrootte in MB. Als het bestand groter is dan deze limiet, wordt het bestand niet geüpload.",
   "The maximum number of files that can be used at once in chat. If the number of files exceeds this limit, the files will not be uploaded.": "Het maximum aantal bestanden dat in één keer kan worden gebruikt in de chat. Als het aantal bestanden deze limiet overschrijdt, worden de bestanden niet geüpload.",
+  "The model decides whether to search OneDrive": "Het model bepaalt of OneDrive wordt doorzocht",
   "The model decides whether to search the web": "Het model bepaalt zelf of het op het web zoekt",
   "The notify tool always sends to an enabled target, regardless of automatic event settings.": "",
   "The owner lost access to the cloud folder. This knowledge base will be permanently deleted in {{days}} days unless access is restored.": "",

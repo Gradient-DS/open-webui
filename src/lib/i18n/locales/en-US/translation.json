@@ -3239,6 +3239,7 @@
   "The language of the input audio. Supplying the input language in ISO-639-1 (e.g. en) format will improve accuracy and latency. Leave blank to automatically detect the language.": "",
   "The maximum file size in MB. If the file size exceeds this limit, the file will not be uploaded.": "",
   "The maximum number of files that can be used at once in chat. If the number of files exceeds this limit, the files will not be uploaded.": "",
+  "The model decides whether to search OneDrive": "",
   "The model decides whether to search the web": "",
   "The notify tool always sends to an enabled target, regardless of automatic event settings.": "",
   "The owner lost access to the cloud folder. This knowledge base will be permanently deleted in {{days}} days unless access is restored.": "",

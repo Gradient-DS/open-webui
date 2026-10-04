@@ -49,7 +49,7 @@ export const WEB_SEARCH_STATE_DESCRIPTIONS: Record<ToolState, string> = {
 /** i18n key for a two-state tool that is off; the on state uses the tool's own description. */
 export const TOOL_OFF_DESCRIPTION = 'Not used in this chat';
 
-export const LIVE_DOCUMENT_STATES: ToolState[] = ['off', 'auto', 'required'];
+export const LIVE_DOCUMENT_STATES: ToolState[] = ['off', 'auto'];
 
 export function liveDocumentState(value: unknown): ToolState {
 	return value === 'auto' || value === 'required' ? value : 'off';
