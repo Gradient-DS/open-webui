@@ -5,7 +5,7 @@
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
-	import { getContext, setContext, onDestroy, onMount, tick } from 'svelte';
+	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -177,18 +177,6 @@
 	$: messageInputDropzoneId = embedded ? 'note-chat-input-dropzone' : 'chat-pane';
 
 	const eventTarget = new EventTarget();
-	setContext('removeReferenceAttachment', async (id: string) => {
-		chatFiles = chatFiles.filter((file) => file.id !== id);
-		for (const message of Object.values(history.messages) as any[]) {
-			if (message.files?.some((file: ChatAttachment) => file.id === id)) {
-				message.removed_attachment_ids = [...(message.removed_attachment_ids ?? []), id];
-				message.files = message.files.filter((file: ChatAttachment) => file.id !== id);
-			}
-		}
-		history = history;
-		await saveChatHandler($chatId, history);
-	});
-
 	let messageInput: MessageInput | undefined;
 	let messagesRef: Messages | undefined;
 
@@ -1432,8 +1420,7 @@
 					message.content = data.content;
 				} else if (type === 'chat:message:files' || type === 'files') {
 					const previous = new Set((message.files ?? []).map((file: ChatAttachment) => file.id));
-					const removed = new Set(message.removed_attachment_ids ?? []);
-					message.files = data.files.filter((file: ChatAttachment) => !removed.has(file.id));
+					message.files = data.files;
 					chatFiles = mergeFiles(
 						chatFiles,
 						message.files.filter(
