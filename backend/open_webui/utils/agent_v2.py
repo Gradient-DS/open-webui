@@ -16,12 +16,16 @@ from urllib.parse import quote
 
 import anyio
 from open_webui.models.chats import Chats
+from open_webui.models.config import Config
 from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
+from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
 from open_webui.soev import acting, agent_threads, identity, ingest
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.chat_id import is_temporary_chat_id
+from open_webui.utils.web_search_state import web_search_state
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
@@ -31,10 +35,6 @@ _PLACEHOLDER = re.compile(r'{{(\w+)}}')
 _COMPACTION = 'compaction'
 # [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
 TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
-# [Claude] What the web search toggle asks of the agent's `web_search` tool when on; off asks nothing, so the
-# deployment's default for the tool applies. Configuration: `required` is refused by an agent whose deployment has
-# no web, so pair it with OWUI's web search setting.
-WEB_SEARCH_ON = 'required'
 
 
 async def _tool_statuses(client: SoevClient) -> dict[str, dict[str, Any]]:
@@ -208,11 +208,23 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
     return {field: text for field, key in fields.items() if isinstance(text := metadata.get(key), str) and text.strip()}
 
 
-def _tools(metadata: dict[str, Any]) -> dict[str, dict[str, str]]:
-    """[Claude] The tool states the chat's toggles ask, as the turn's `tools` field; none while every toggle is off."""
-    if not (metadata.get('features') or {}).get('web_search'):
-        return {}
-    return {'tools': {'web_search': WEB_SEARCH_ON}}
+def _tools(metadata: dict[str, Any], web_search_allowed: bool) -> dict[str, dict[str, str]]:
+    """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
+    default never decides for the user, and so is every turn where OWUI does not allow web search."""
+    state = web_search_state(metadata.get('features')) if web_search_allowed else 'off'
+    return {'tools': {'web_search': state}}
+
+
+async def _web_search_allowed(user_id: str) -> bool:
+    """[Gradient] `features` is client-supplied: web search must be on for the tenant and the user's to use."""
+    if not await Config.get('web.search.enable'):
+        return False
+    user = await Users.get_user_by_id(user_id)
+    if user is None:
+        return False
+    return user.role == 'admin' or await has_permission(
+        user.id, 'features.web_search', await Config.get('user.permissions')
+    )
 
 
 def _unavailable(count: int, language: str | None) -> dict[str, Any]:
@@ -874,9 +886,8 @@ async def _sent(
         return _refused(_unavailable(unavailable.count, metadata.get('user_language')))
     except AttachmentsUnavailable as unavailable:
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
-    body = {
-        'input': {'text': text, 'knowledge': knowledge, **attachments, **_instructions(metadata), **_tools(metadata)}
-    }
+    tools = _tools(metadata, await _web_search_allowed(metadata['user_id']))
+    body = {'input': {'text': text, 'knowledge': knowledge, **attachments, **_instructions(metadata), **tools}}
     if isinstance(model, str) and model:
         body['model'] = model
     return turn.run(body, agent)
