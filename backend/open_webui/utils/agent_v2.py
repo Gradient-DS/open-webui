@@ -586,7 +586,7 @@ class AgentTurn:
             return []
         return await self.end_tool({'call_id': _COMPACTION})
 
-    async def end_tool(self, output: dict[str, Any]) -> list[dict[str, Any]]:
+    async def end_tool(self, output: dict[str, Any], *, attached: bool = False) -> list[dict[str, Any]]:
         """[Claude] Anchor a call's done line in the content once its output lands, and show it once the model
         moves on (see `settle`): until then the model is still working with what the call returned.
 
@@ -595,6 +595,11 @@ class AgentTurn:
             return []
         name, arguments = call
         status = self.tool_status(name, arguments, None if output.get('error') else output)
+        if name == 'attach_live_document' and (
+            output.get('error')
+            or not (attached or any(element.get('type') == 'document' for element in output.get('elements') or []))
+        ):
+            status = {'action': name, 'description': 'Could not open document'}
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
         return [_marker(status)]
 
@@ -691,7 +696,7 @@ class AgentTurn:
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
             if _read(element):
                 await self.show_source(element['id'], 'current_turn')
-        return await self.end_tool(payload)
+        return await self.end_tool(payload, attached=attached)
 
     async def show_source(self, source_id: str, flag: str) -> None:
         """[Claude] Flag a source once per turn: `current_turn` when a tool read it now, `cited_this_turn` when the

@@ -765,6 +765,7 @@
   "Copy the latest assistant response when it completes.": "",
   "Copy to clipboard": "Kopieer naar klembord",
   "Copying to clipboard was successful!": "Kopiëren naar klembord was succesvol!",
+  "Could not open document": "Document kon niet worden geopend",
   "Could not connect OneDrive": "Kan OneDrive niet verbinden",
   "Could not connect account": "Account verbinden mislukt",
   "Could not connect to OneDrive to determine your location.": "Kon geen verbinding maken met OneDrive om je locatie te bepalen.",

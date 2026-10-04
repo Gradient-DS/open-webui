@@ -102,3 +102,6 @@ or a reauth error triggers authorization on the next explicit click, preserving 
 browser gesture. Provider family support is decided by the platform grant endpoint.
 If an older reference event lacks MIME metadata, successful job polling reads the
 completed document as its owning user and fills content_type before marking it ready.
+
+Attach tool summaries show "Could not open document" for refusals and failures.
+An attached event (including processing) or an existing document keeps the success label.
