@@ -23,8 +23,8 @@ from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
 
-# The turn's tools field while the web search control is Uit (or absent).
-WEB_SEARCH_OFF = {'web_search': 'off'}
+# The turn's tools field while both controls are Uit (or absent).
+TOOLS_OFF = {'web_search': 'off', 'write_pdf': 'off'}
 
 
 @dataclass
@@ -113,6 +113,7 @@ def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> Chat:
     )
     monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=emit))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=True))
+    monkeypatch.setattr(agent_v2, '_pdf_writer_allowed', AsyncMock(return_value=True))
     return result
 
 
@@ -127,15 +128,15 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
     assert chat.mutations() == [
         (
             '/v1/chat/threads',
-            {'input': {'text': 'turn 1', 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'agent': 'test', 'model': 'llm'},
+            {'input': {'text': 'turn 1', 'knowledge': [], 'tools': TOOLS_OFF}, 'agent': 'test', 'model': 'llm'},
         ),
         (
             '/v1/chat/threads/thr-1/inputs',
-            {'input': {'text': 'turn 2', 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'model': 'llm'},
+            {'input': {'text': 'turn 2', 'knowledge': [], 'tools': TOOLS_OFF}, 'model': 'llm'},
         ),
         (
             '/v1/chat/threads/thr-1/inputs',
-            {'input': {'text': 'turn 3', 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'model': 'llm'},
+            {'input': {'text': 'turn 3', 'knowledge': [], 'tools': TOOLS_OFF}, 'model': 'llm'},
         ),
     ]
     assert [chat.bookmark(f'a{i}') for i in range(1, 4)] == [
@@ -168,7 +169,7 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
         ('/v1/chat/threads/thr-1/fork', {'at': at}),
         (
             '/v1/chat/threads/thr-2/inputs',
-            {'input': {'text': text, 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'model': 'llm'},
+            {'input': {'text': text, 'knowledge': [], 'tools': TOOLS_OFF}, 'model': 'llm'},
         ),
     ]
     assert chat.api.chat.threads['thr-1']['events'] == original
@@ -233,7 +234,7 @@ async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(cha
                 {'key': 'kb-a', 'name': 'Contracten', 'description': 'Getekende contracten'},
                 {'key': 'kb-b', 'name': 'Notulen'},
             ],
-            'tools': WEB_SEARCH_OFF,
+            'tools': TOOLS_OFF,
         },
         'agent': 'test',
         'model': 'llm',
@@ -373,7 +374,7 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 )
 async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, features: dict, state: str) -> None:
     await chat.turn('question', 'a1', features=features)
-    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': state}
+    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': state, 'write_pdf': 'off'}
 
 
 @pytest.mark.parametrize(
@@ -387,19 +388,19 @@ async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, 
     ids=['always', 'auto', 'off', 'no-features'],
 )
 def test_tools_maps_the_web_search_features_to_tool_states(features: dict | None, state: str) -> None:
-    assert agent_v2._tools({'features': features}, True) == {'tools': {'web_search': state}}
+    assert agent_v2._tools({'features': features}, True, True) == {'tools': {'web_search': state, 'write_pdf': 'off'}}
 
 
 @pytest.mark.parametrize('features', [{'web_search': True, 'web_search_required': True}, {'web_search': True}])
 def test_tools_sends_off_when_owui_does_not_allow_web_search(features: dict) -> None:
-    assert agent_v2._tools({'features': features}, False) == {'tools': {'web_search': 'off'}}
+    assert agent_v2._tools({'features': features}, False, True) == {'tools': {'web_search': 'off', 'write_pdf': 'off'}}
 
 
 @pytest.mark.asyncio
 async def test_a_disallowed_turn_asks_the_agent_for_no_web_search(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
     await chat.turn('question', 'a1', features={'web_search': True, 'web_search_required': True})
-    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': 'off'}
+    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': 'off', 'write_pdf': 'off'}
 
 
 @pytest.mark.asyncio
@@ -433,7 +434,7 @@ async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
     assert chat.mutations()[-1][1]['input'] == {
         'text': 'question',
         'knowledge': [],
-        'tools': {'web_search': 'off'},
+        'tools': {'web_search': 'off', 'write_pdf': 'off'},
     }
 
 
@@ -1282,7 +1283,7 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
         (
             '/v1/chat/threads',
             {
-                'input': {'text': 'last question', 'knowledge': [], 'tools': WEB_SEARCH_OFF},
+                'input': {'text': 'last question', 'knowledge': [], 'tools': TOOLS_OFF},
                 'agent': 'test',
                 'model': 'llm',
             },
@@ -1405,7 +1406,7 @@ async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_ans
     assert chat.mutations()[stopped:] == [
         (
             '/v1/chat/threads/thr-1/inputs',
-            {'input': {'text': 'what was I asking?', 'knowledge': [], 'tools': WEB_SEARCH_OFF}, 'model': 'llm'},
+            {'input': {'text': 'what was I asking?', 'knowledge': [], 'tools': TOOLS_OFF}, 'model': 'llm'},
         ),
     ]
 
@@ -1785,3 +1786,61 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
 
     closing = [event['data'] for event in declared.socket if event['type'] == 'status'][-1]
     assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('state', ['off', 'auto', 'required'])
+async def test_the_document_writer_control_sends_both_tool_states(chat: Chat, state: str) -> None:
+    """The document writer and web search controls send independent states on every turn."""
+    features = {
+        'web_search': True,
+        'document_writer': state != 'off',
+        'document_writer_required': state == 'required',
+    }
+    assert agent_v2._tools({'features': features}, True, True) == {'tools': {'web_search': 'auto', 'write_pdf': state}}
+    await chat.turn('question', 'a1', features=features)
+    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': 'auto', 'write_pdf': state}
+
+
+@pytest.mark.asyncio
+async def test_a_disallowed_turn_asks_the_agent_for_no_pdf(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    """OWUI permission overrides a client's required document writer state."""
+    monkeypatch.setattr(agent_v2, '_pdf_writer_allowed', AsyncMock(return_value=False))
+    features = {'document_writer': True, 'document_writer_required': True}
+    assert agent_v2._tools({'features': features}, True, False) == {'tools': TOOLS_OFF}
+    await chat.turn('question', 'a1', features=features)
+    assert chat.mutations()[-1][1]['input']['tools'] == TOOLS_OFF
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('feature', 'enabled', 'role', 'permitted', 'allowed'),
+    [
+        (False, True, 'admin', True, False),
+        (True, False, 'admin', True, False),
+        (True, True, 'admin', False, True),
+        (True, True, 'user', True, True),
+        (True, True, 'user', False, False),
+        (True, True, None, True, False),
+    ],
+    ids=['tenant-off', 'setting-off', 'admin', 'user-permitted', 'user-denied', 'unknown-user'],
+)
+async def test_pdf_writer_allowed_needs_the_tenant_setting_and_the_users_permission(
+    monkeypatch: pytest.MonkeyPatch, feature: bool, enabled: bool, role: str | None, permitted: bool, allowed: bool
+) -> None:
+    """All users need the tenant flag and admin setting; ordinary users also need permission."""
+
+    async def config_get(key: str, default=None):
+        return {'document_writer.enable': enabled, 'user.permissions': {}}.get(key, default)
+
+    user = SimpleNamespace(id='u1', role=role) if role else None
+    monkeypatch.setattr(agent_v2, 'is_feature_enabled', lambda key: feature if key == 'document_writer' else False)
+    monkeypatch.setattr(agent_v2.Config, 'get', config_get)
+    monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=user))
+    permission = AsyncMock(return_value=permitted)
+    monkeypatch.setattr(agent_v2, 'has_permission', permission)
+    assert await agent_v2._pdf_writer_allowed('u1') is allowed
+    if feature and enabled and role == 'user':
+        permission.assert_awaited_once_with('u1', 'features.document_writer', {})
+    else:
+        permission.assert_not_awaited()

@@ -25,7 +25,8 @@ from open_webui.soev import acting, agent_threads, identity, ingest
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.chat_id import is_temporary_chat_id
-from open_webui.utils.web_search_state import web_search_state
+from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.tool_state import tool_state
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
@@ -208,11 +209,15 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
     return {field: text for field, key in fields.items() if isinstance(text := metadata.get(key), str) and text.strip()}
 
 
-def _tools(metadata: dict[str, Any], web_search_allowed: bool) -> dict[str, dict[str, str]]:
-    """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
-    default never decides for the user, and so is every turn where OWUI does not allow web search."""
-    state = web_search_state(metadata.get('features')) if web_search_allowed else 'off'
-    return {'tools': {'web_search': state}}
+def _tools(metadata: dict[str, Any], web_search_allowed: bool, pdf_writer_allowed: bool) -> dict[str, dict[str, str]]:
+    """Send each control's state explicitly, forced off where OWUI does not allow the tool."""
+    features = metadata.get('features')
+    return {
+        'tools': {
+            'web_search': tool_state(features, 'web_search') if web_search_allowed else 'off',
+            'write_pdf': tool_state(features, 'document_writer') if pdf_writer_allowed else 'off',
+        }
+    }
 
 
 async def _web_search_allowed(user_id: str) -> bool:
@@ -224,6 +229,18 @@ async def _web_search_allowed(user_id: str) -> bool:
         return False
     return user.role == 'admin' or await has_permission(
         user.id, 'features.web_search', await Config.get('user.permissions')
+    )
+
+
+async def _pdf_writer_allowed(user_id: str) -> bool:
+    """Client-supplied document writer flags require tenant access, the admin setting and user permission."""
+    if not is_feature_enabled('document_writer') or not await Config.get('document_writer.enable'):
+        return False
+    user = await Users.get_user_by_id(user_id)
+    if user is None:
+        return False
+    return user.role == 'admin' or await has_permission(
+        user.id, 'features.document_writer', await Config.get('user.permissions')
     )
 
 
@@ -886,7 +903,9 @@ async def _sent(
         return _refused(_unavailable(unavailable.count, metadata.get('user_language')))
     except AttachmentsUnavailable as unavailable:
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
-    tools = _tools(metadata, await _web_search_allowed(metadata['user_id']))
+    tools = _tools(
+        metadata, await _web_search_allowed(metadata['user_id']), await _pdf_writer_allowed(metadata['user_id'])
+    )
     body = {'input': {'text': text, 'knowledge': knowledge, **attachments, **_instructions(metadata), **tools}}
     if isinstance(model, str) and model:
         body['model'] = model
