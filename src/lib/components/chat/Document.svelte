@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { AgentDocument } from '$lib/utils/agentDocument';
+	import type { RawSource } from './Messages/Citations/reduceSources';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { toast } from 'svelte-sonner';
@@ -30,10 +31,10 @@
 
 	export let overlay = false;
 
-	let contents: Array<AgentDocument & { sources?: any[] }> = [];
+	let contents: Array<AgentDocument & { sources?: RawSource[] }> = [];
 	let copied = false;
 	let downloadOpen = false;
-	let citationsElement: any = null;
+	let citationsElement: Citations | null = null;
 
 	$: current = contents[$selectedDocumentIndex];
 
@@ -77,13 +78,7 @@
 	const downloadPdf = async () => {
 		if (!current) return;
 		try {
-			await printDocument(
-				current.title,
-				getExportMarkdown(),
-				current.format,
-				current.sources,
-				$i18n.t('Sources')
-			);
+			await printDocument(current.title, getExportMarkdown(), current.format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
@@ -290,8 +285,6 @@
 								content={current.content}
 								title={current.title}
 								done={current.done}
-								sources={current.sources ?? []}
-								onSourceClick={(id) => citationsElement?.showSourceModal(id)}
 							/>
 						{/key}
 					{:else}
@@ -305,17 +298,16 @@
 								editCodeBlock={false}
 								sources={current.sources}
 								floatingButtons={false}
-								onSourceClick={((id: any) => citationsElement?.showSourceModal(id)) as any}
+								onSourceClick={(id: string | number) => citationsElement?.showSourceModal(id)}
 							/>
 						</div>
 					{/if}
-					{#if (current.sources ?? []).length > 0}
+					{#if current.format === 'markdown' && (current.sources ?? []).length > 0}
 						<Citations
 							bind:this={citationsElement}
 							id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
 							chatId={$chatId ?? ''}
 							sources={current.sources}
-							listed={false}
 						/>
 					{/if}
 				{:else}

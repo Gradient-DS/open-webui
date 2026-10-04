@@ -1,5 +1,3 @@
-import type { RawSource } from '$lib/components/chat/Messages/Citations/reduceSources';
-import { transformDocumentCitations } from './documentCitations';
 import { Marked } from 'marked';
 import type { DocumentFormat } from './agentDocument';
 import { DOCUMENT_SANDBOX, sanitizeDocumentHtml } from './htmlDocument';
@@ -21,32 +19,21 @@ pre, code { font-family: 'Courier New', monospace; font-size: 9pt; }
 blockquote { border-left: 3px solid #ddd; padding-left: 4mm; color: #555; margin: 3mm 0; }
 `;
 
-export function buildPrintDocument(
-	title: string,
-	content: string,
-	format: DocumentFormat,
-	sources: RawSource[] = [],
-	sourcesHeading = 'Sources'
-): string {
+export function buildPrintDocument(title: string, content: string, format: DocumentFormat): string {
 	const html =
 		format === 'html'
 			? content
 			: `<html><head><style>${PRINT_STYLE}</style></head><body>${markdown.parse(content, { async: false })}</body></html>`;
-	const sanitized = sanitizeDocumentHtml(html, title);
-	return format === 'html'
-		? transformDocumentCitations(sanitized, sources, 'print', sourcesHeading)
-		: sanitized;
+	return sanitizeDocumentHtml(html, title, { stripCitations: format === 'html' });
 }
 
 // [Gradient] Browser printing keeps model-written documents away from server-side fetches.
 export function printDocument(
 	title: string,
 	content: string,
-	format: DocumentFormat,
-	sources: RawSource[] = [],
-	sourcesHeading = 'Sources'
+	format: DocumentFormat
 ): Promise<void> {
-	const srcdoc = buildPrintDocument(title, content, format, sources, sourcesHeading);
+	const srcdoc = buildPrintDocument(title, content, format);
 	return new Promise((resolve, reject) => {
 		const frame = document.createElement('iframe');
 		frame.title = title;

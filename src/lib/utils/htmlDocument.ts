@@ -67,7 +67,11 @@ const resourceCSS = (value: string): boolean => {
 
 // [Gradient] Drop resource-bearing CSS wholesale, including escaped/comment-obfuscated
 // url() and @import; ordinary styles and @page survive. CSP also blocks other load syntaxes.
-export function sanitizeDocumentHtml(content: string, title: string): string {
+export function sanitizeDocumentHtml(
+	content: string,
+	title: string,
+	{ stripCitations = false }: { stripCitations?: boolean } = {}
+): string {
 	const root = DOMPurify.sanitize(content, DOCUMENT_PURIFY_CONFIG) as unknown as HTMLElement;
 	for (const element of [root, ...Array.from(root.querySelectorAll('*'))]) {
 		for (const attribute of Array.from(element.attributes)) {
@@ -95,5 +99,14 @@ export function sanitizeDocumentHtml(content: string, title: string): string {
 	pageBoxes.dataset.pageBoxes = '';
 	pageBoxes.textContent = PAGE_MARGIN_BOXES;
 	head.append(pageBoxes);
+	if (stripCitations) {
+		const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+		while (walker.nextNode()) {
+			const node = walker.currentNode as Text;
+			if (!node.parentElement?.closest('style')) {
+				node.data = node.data.replace(/ ?\[\d+(?:\s*,\s*\d+)*\]/g, '');
+			}
+		}
+	}
 	return `<!doctype html>\n${root.outerHTML}`;
 }

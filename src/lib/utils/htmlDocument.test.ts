@@ -76,3 +76,52 @@ describe('print header and footer', () => {
 		expect(html).toContain('@bottom-left { content: ""; }');
 	});
 });
+
+describe('HTML citation stripping', () => {
+	const strip = (html: string, title = 'Report') =>
+		new DOMParser().parseFromString(
+			sanitizeDocumentHtml(html, title, { stripCitations: true }),
+			'text/html'
+		);
+
+	it('removes single, grouped, repeated and unknown markers with their leading space', () => {
+		const doc = strip('<p>Claim [2, 1] and <b>[3]</b>, again [2]. Unknown [99].</p>');
+		expect(doc.body.innerHTML).toBe('<p>Claim and <b></b>, again. Unknown.</p>');
+	});
+
+	it('strips decoded text after sanitising without creating active markup', () => {
+		const doc = strip(
+			'<p onclick="bad()">Claim&#32;&#91;1&#93;. &lt;script&gt; [2]</p><script>bad()</script>'
+		);
+		expect(doc.querySelector('p')?.textContent).toBe('Claim. <script>');
+		expect(doc.querySelector('p')?.attributes.length).toBe(0);
+		expect(doc.querySelector('script')).toBeNull();
+	});
+
+	it('preserves styles, attributes and CSP while stripping visible text', () => {
+		const css = 'p::after { content: " [1]" }';
+		const doc = strip(
+			`<style>${css}</style><p title="Label [2]" data-ref="[3, 4]" style="--label: ' [5]'">Text [6]</p><style>p::before { content: " [7]" }</style>`
+		);
+		expect(doc.querySelector('style')?.textContent).toBe(css);
+		expect(doc.body.querySelector('style')?.textContent).toContain('" [7]"');
+		expect(doc.querySelector('p')?.title).toBe('Label [2]');
+		expect(doc.querySelector('p')?.dataset.ref).toBe('[3, 4]');
+		expect(doc.querySelector('p')?.getAttribute('style')).toBe("--label: ' [5]'");
+		expect(doc.querySelector('p')?.textContent).toBe('Text');
+		expect(doc.querySelector('meta')?.content).toBe(DOCUMENT_CSP);
+	});
+
+	it('preserves other brackets and whitespace around the removed marker', () => {
+		const doc = strip('<pre>[note] [1a] [1, x]\nLine [1]\nNext [2,3] word</pre>');
+		expect(doc.querySelector('pre')?.textContent).toBe('[note] [1a] [1, x]\nLine\nNext word');
+	});
+
+	it('strips markers in the document title', () => {
+		expect(strip('<p>Text</p>', 'Report [1, 2]').title).toBe('Report');
+	});
+
+	it('keeps citation markers when stripping is not requested for Markdown printing', () => {
+		expect(parse('<p>Claim [2, 1]</p>').body.textContent).toBe('Claim [2, 1]');
+	});
+});

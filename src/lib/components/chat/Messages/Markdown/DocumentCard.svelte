@@ -84,7 +84,7 @@
 	const downloadPdf = async () => {
 		if (!content) return;
 		try {
-			await printDocument(displayTitle, exportContent, format, sources, $i18n.t('Sources'));
+			await printDocument(displayTitle, exportContent, format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
