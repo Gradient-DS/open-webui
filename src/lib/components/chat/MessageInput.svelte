@@ -2792,9 +2792,7 @@
 													>
 														<button
 															type="button"
-															aria-label={liveDocumentsState !== 'off'
-																? $i18n.t('OneDrive search')
-																: $i18n.t('OneDrive search')}
+															aria-label={`${$i18n.t('OneDrive search')}: ${$i18n.t(TOOL_STATE_LABELS[liveDocumentsState])}`}
 															aria-pressed={liveDocumentsState !== 'off'}
 															on:click|preventDefault={() => inputMenuRef?.cycleLiveDocuments()}
 															class={pinnedToggleClass(liveDocumentsState)}

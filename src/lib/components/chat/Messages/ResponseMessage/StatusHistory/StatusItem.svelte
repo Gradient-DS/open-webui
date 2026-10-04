@@ -178,6 +178,7 @@
 					<!-- $i18n.t("Looked back at earlier results") -->
 					<!-- $i18n.t("Searching the knowledge base…") -->
 					<!-- $i18n.t("Running {{tool}}…") -->
+					<!-- $i18n.t("Could not open document") -->
 					{#if status?.description}
 						{$i18n.t(
 							status.description,
