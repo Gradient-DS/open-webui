@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { AgentDocument } from '$lib/utils/agentDocument';
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
 	import fileSaver from 'file-saver';
@@ -22,11 +23,7 @@
 
 	export let overlay = false;
 
-	let contents: Array<{
-		title: string;
-		markdown: string;
-		sources?: any[];
-	}> = [];
+	let contents: Array<AgentDocument & { sources?: any[] }> = [];
 	let selectedContentIdx = 0;
 	let copied = false;
 	let downloadOpen = false;
@@ -52,10 +49,10 @@
 	const getExportMarkdown = () => {
 		if (!current) return '';
 		const sources = current.sources ?? [];
-		if (sources.length === 0) return current.markdown;
-		const { content, sourceList } = normalizeCitations(current.markdown, sources);
+		if (current.isAgentDocument || sources.length === 0) return current.content;
+		const { content, sourceList } = normalizeCitations(current.content, sources);
 		const appendix = sourceList.length > 0 ? sourceList : buildFullSourceList(sources);
-		if (appendix.length === 0) return current.markdown;
+		if (appendix.length === 0) return current.content;
 		return `${content}\n\n---\n\n${formatSourcesAsMarkdown(appendix)}\n`;
 	};
 
@@ -287,7 +284,7 @@
 					<div class="max-w-3xl w-full mx-auto px-6 py-6 prose dark:prose-invert">
 						<ContentRenderer
 							id={`document-${$chatId ?? 'preview'}-${selectedContentIdx}`}
-							content={current.markdown}
+							content={current.content}
 							done={true}
 							editCodeBlock={false}
 							sources={current.sources}

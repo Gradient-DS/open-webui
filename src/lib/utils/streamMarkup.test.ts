@@ -71,3 +71,14 @@ describe('markupSafeEnd', () => {
 		expect(markupSafeEnd('als x < 5 dan', 9)).toBe(9);
 	});
 });
+
+it('holds every partial agent document until its closing details arrives', () => {
+	const marker =
+		'<details type="document" format="html" title="Report" done="true"><summary>Document</summary>\n&lt;h1&gt;Report&lt;/h1&gt;\n</details>';
+	for (let end = 1; end < marker.length; end++) {
+		const partial = 'Before ' + marker.slice(0, end);
+		const masked = maskInFlightTag(partial);
+		expect(markupSafeEnd(masked, masked.length)).toBeLessThanOrEqual(7);
+	}
+	expect(markupSafeEnd('Before ' + marker, 20)).toBe(7 + marker.length);
+});
