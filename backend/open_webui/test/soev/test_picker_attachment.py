@@ -19,6 +19,7 @@ def picker(env, monkeypatch):  # noqa: F811
         send=AsyncMock(
             return_value={
                 'source_id': 'source',
+                'content_type': 'application/pdf',
                 'job_id': 'job',
                 'collection_key': 'owui-attachments-alice',
             }
@@ -65,12 +66,13 @@ async def test_picker_creates_pollable_file_and_replays_same_operation(picker, e
             'ref': {field: picker.form[field] for field in ('grant_id', 'drive_id', 'item_id', 'etag')},
         },
         as_user='owui:user:alice',
-        idempotency_key=key,
+        idempotency_key=f'picker:alice:{key}',
     )
     rows = await env.files.Files.get_files_with_soev_jobs()
     assert len(rows) == 1 and rows[0].id == 'source' and rows[0].path == ''
     assert rows[0].meta['source']['ref']['etag'] == 'v1'
     assert rows[0].meta['soev_job']['kind'] == 'reference'
+    assert rows[0].meta['content_type'] == 'application/pdf'
 
 
 @pytest.mark.asyncio
@@ -137,3 +139,19 @@ async def test_picker_honors_product_file_limit(picker, monkeypatch):
         )
     assert response.status_code == 403
     picker.client.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', [403, 409])
+async def test_picker_identity_mismatch_is_typed(picker, monkeypatch, status):
+    from open_webui.soev.live_documents import AttachmentMismatch
+
+    monkeypatch.setattr(
+        picker.routes, 'register_attachment', AsyncMock(side_effect=AttachmentMismatch(status, 'Mismatch'))
+    )
+    async with AsyncClient(transport=httpx.ASGITransport(picker.app), base_url='http://test') as browser:
+        response = await browser.post(
+            '/api/v1/files/onedrive/attach', json=picker.form, headers={'Idempotency-Key': str(uuid4())}
+        )
+    assert response.status_code == status
+    assert response.json()['detail']['code'] == 'attachment_mismatch'

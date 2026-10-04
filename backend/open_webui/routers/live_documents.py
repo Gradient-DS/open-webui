@@ -9,7 +9,7 @@ from open_webui.models.config import Config
 from open_webui.models.files import Files
 from open_webui.soev import identity, ingest
 from open_webui.soev.client import SoevApiError
-from open_webui.soev.live_documents import chat_file, register_attachment
+from open_webui.soev.live_documents import AttachmentMismatch, chat_file, register_attachment
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
@@ -55,7 +55,7 @@ async def attach_onedrive(
             '/v1/attach',
             {'collection_key': collection, 'ref': ref},
             as_user=subject,
-            idempotency_key=str(idempotency_key),
+            idempotency_key=f'picker:{user.id}:{idempotency_key}',
         )
     except SoevApiError as error:
         raise HTTPException(
@@ -67,15 +67,20 @@ async def attach_onedrive(
             },
             headers={'Retry-After': error.retry_after} if error.retry_after is not None else None,
         ) from None
-    file = await register_attachment(
-        user.id,
-        {
-            **result,
-            'name': body.name,
-            'web_url': str(body.web_url),
-            'provider': 'onedrive',
-            'provider_ref': ref,
-            'attached_by': 'user',
-        },
-    )
+    try:
+        file = await register_attachment(
+            user.id,
+            {
+                **result,
+                'name': body.name,
+                'web_url': str(body.web_url),
+                'provider': 'onedrive',
+                'provider_ref': ref,
+                'attached_by': 'user',
+            },
+        )
+    except AttachmentMismatch as error:
+        raise HTTPException(
+            status_code=error.status, detail={'code': 'attachment_mismatch', 'detail': str(error)}
+        ) from None
     return chat_file(file)
