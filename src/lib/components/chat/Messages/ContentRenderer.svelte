@@ -189,7 +189,7 @@
 
 			if (
 				isFeatureEnabled('artifacts') &&
-				($settings?.detectArtifacts ?? true) &&
+				($settings?.detectArtifacts ?? false) &&
 				!compactPreview &&
 				isArtifact &&
 				hasClosingCodeFence(raw) &&

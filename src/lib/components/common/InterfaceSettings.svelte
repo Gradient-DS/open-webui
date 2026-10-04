@@ -50,7 +50,7 @@
 
 	// [Gradient] Document Writer detection is independent of artifacts.
 	let detectDocuments = true;
-	let detectArtifacts = true;
+	let detectArtifacts = false;
 	let displayMultiModelResponsesInTabs = false;
 
 	let richTextInput = true;
@@ -323,7 +323,7 @@
 		highContrastMode = currentSettings?.highContrastMode ?? false;
 
 		detectDocuments = currentSettings?.detectDocuments ?? true;
-		detectArtifacts = currentSettings?.detectArtifacts ?? true;
+		detectArtifacts = currentSettings?.detectArtifacts ?? false;
 		responseAutoCopy = currentSettings?.responseAutoCopy ?? false;
 
 		showUsername = currentSettings?.showUsername ?? false;

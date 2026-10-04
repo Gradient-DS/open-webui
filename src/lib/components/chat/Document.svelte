@@ -310,14 +310,13 @@
 						</div>
 					{/if}
 					{#if (current.sources ?? []).length > 0}
-						<div class="max-w-3xl w-full mx-auto px-6 pb-6">
-							<Citations
-								bind:this={citationsElement}
-								id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
-								chatId={$chatId ?? ''}
-								sources={current.sources}
-							/>
-						</div>
+						<Citations
+							bind:this={citationsElement}
+							id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
+							chatId={$chatId ?? ''}
+							sources={current.sources}
+							listed={false}
+						/>
 					{/if}
 				{:else}
 					<div class="m-auto font-medium text-xs text-gray-900 dark:text-white">
