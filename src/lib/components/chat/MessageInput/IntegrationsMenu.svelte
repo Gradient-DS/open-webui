@@ -1,6 +1,8 @@
 <script lang="ts">
 	// [Gradient] Tenant tool gates and Document Writer capability.
 	import { isFeatureEnabled } from '$lib/utils/features';
+	import { connectLiveDocuments } from '$lib/utils/live-documents';
+	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import { getContext, onDestroy, tick } from 'svelte';
 	import { fly } from 'svelte/transition';
@@ -59,6 +61,9 @@
 	}[] = [];
 	export let selectedFilterIds: string[] = [];
 
+	export let showLiveDocumentsButton = false;
+	export let liveDocumentsEnabled = false;
+	let connectingDocuments = false;
 	export let showWebSearchButton = false;
 	export let webSearchEnabled = false;
 	export let showImageGenerationButton = false;
@@ -400,6 +405,35 @@
 						{/each}
 					{/if}
 
+					{#if showLiveDocumentsButton}
+						<button
+							type="button"
+							class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+							aria-pressed={liveDocumentsEnabled}
+							disabled={connectingDocuments}
+							on:click={async () => {
+								if (liveDocumentsEnabled) {
+									liveDocumentsEnabled = false;
+									return;
+								}
+								connectingDocuments = true;
+								try {
+									await connectLiveDocuments(localStorage.token);
+									liveDocumentsEnabled = true;
+								} catch {
+									toast.error($i18n.t('Could not connect OneDrive'));
+								} finally {
+									connectingDocuments = false;
+								}
+							}}
+						>
+							<OneDrive className="size-4" />
+							<span class="flex-1 text-left">{$i18n.t('OneDrive search')}</span>
+							{#if connectingDocuments}<Spinner />{:else}<Switch
+									state={liveDocumentsEnabled}
+								/>{/if}
+						</button>
+					{/if}
 					{#if showWebSearchButton}
 						<Tooltip
 							content={openInternetBlocked

@@ -83,6 +83,8 @@ async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
         cap = config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS
         return await _finish(file, job, f'did not complete within {cap}s') if age > cap else 0
     if status == 'SUCCEEDED':
+        if job.get('kind') == 'reference':
+            return await _finish(file, job)
         path = f'/v1/collections/{quote(job["collection_key"], safe="")}/documents/{quote(file.id, safe="")}'
         document = await client.get(path)
         if (document.get('path') or '') != (job['path'] or ''):

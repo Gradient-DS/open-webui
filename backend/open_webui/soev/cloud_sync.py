@@ -24,6 +24,29 @@ class CloudSync:
     async def connection(self, connection_id: str) -> dict:
         return await self._get(f'/v1/connections/{quote(connection_id, safe="")}')
 
+    async def live_document_grants(self, connection_id: str) -> list[dict]:
+        connection = await self.connection(connection_id)
+        if connection['source_kind'] != 'onedrive':
+            raise SoevApiError(400, 'unsupported_source', 'OneDrive connection required')
+        result = await self._get(f'/v1/connections/{quote(connection_id, safe="")}/live-grants')
+        return [grant for grant in result['data'] if 'live_documents' in grant['families']]
+
+    async def enable_live_documents(self, connection_id: str) -> dict:
+        grants = await self.live_document_grants(connection_id)
+        path = f'/v1/connections/{quote(connection_id, safe="")}/live-grants'
+        for grant in grants:
+            if grant['lifecycle'] == 'enabled':
+                return grant
+            if grant['lifecycle'] == 'suspended':
+                return await self._send('PATCH', f'{path}/{quote(grant["id"], safe="")}', {'enabled': True})
+        return await self.client.send(
+            'POST',
+            path,
+            {'families': ['live_documents']},
+            as_user=self.user_ref,
+            idempotency_key=f'live-documents:{connection_id}',
+        )
+
     async def connection_usage(self, connection_id: str) -> dict:
         await self.connection(connection_id)
         knowledge_ids: set[str] = set()

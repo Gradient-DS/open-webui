@@ -62,3 +62,17 @@ Set `down_revision` to the current head. `alembic heads` needs a live DB connect
 - `backend/open_webui/env.py` — environment variable handling
 - `src/routes/+layout.svelte` — root layout, app initialization
 - `src/lib/stores/` — global state (user, settings, models, chats)
+
+## Live document attachments
+
+`soev/live_documents.py` records agent `attached` events as Files whose id is the platform source id.
+Their `meta.source` contains the provider reference; bytes are never stored in OWUI. Reference
+jobs use the existing durable job poller, skipping upload commit and path moves. File content
+routes stream platform originals with the requesting user's assertion. Every v2 turn ensures
+and sends the user's chat attachments collection; stored reference metadata is sent next turn.
+
+The OneDrive search toggle enables `search_live_documents` and `attach_live_document` together
+with `auto` state; both remain off by default. `/cloud-sync/connections/{id}/live-documents`
+lists or enables owned OneDrive live grants. The toggle and Connect OneDrive card share the
+existing cloud consent popup and verify its origin, opener and connection before polling.
+No new OWUI environment variables are required. Platform live documents must be enabled.

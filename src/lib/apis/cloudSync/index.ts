@@ -137,3 +137,13 @@ export interface SyncPolicy {
 
 export const getPolicy = (token: string): Promise<SyncPolicy> =>
 	request<SyncPolicy>(token, '/policy');
+
+export interface LiveDocumentGrant {
+	id: string;
+	lifecycle: string;
+	families: string[];
+}
+export const listLiveDocumentGrants = (token: string, id: string) =>
+	request<LiveDocumentGrant[]>(token, `${connectionPath(id)}/live-documents`);
+export const enableLiveDocuments = (token: string, id: string) =>
+	request<LiveDocumentGrant>(token, `${connectionPath(id)}/live-documents`, 'POST');

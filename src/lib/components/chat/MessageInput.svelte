@@ -216,6 +216,7 @@
 	export let selectedFilterIds: string[] = [];
 
 	export let imageGenerationEnabled = false;
+	export let liveDocumentsEnabled = false;
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = false;
@@ -2474,15 +2475,19 @@
 										>
 									{/if}
 
-									{#if isFeatureEnabled('input_menu') && (showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
+									{#if isFeatureEnabled('input_menu') && ($config?.features?.feature_agent_api_enabled || showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
 										<div
 											class="flex self-center w-[0.0625rem] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
 										></div>
 									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
-										{#if isFeatureEnabled('input_menu') && (showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
+										{#if isFeatureEnabled('input_menu') && ($config?.features?.feature_agent_api_enabled || showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
 											<IntegrationsMenu
+												showLiveDocumentsButton={Boolean(
+													$config?.features?.feature_agent_api_enabled
+												)}
+												bind:liveDocumentsEnabled
 												{showDocumentWriterButton}
 												bind:documentWriterEnabled
 												{openInternetBlocked}

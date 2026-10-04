@@ -19,7 +19,7 @@ from open_webui.models.chats import Chats
 from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, identity, ingest
+from open_webui.soev import acting, agent_threads, identity, ingest, live_documents
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.utils.chat_id import is_temporary_chat_id
 from starlette.responses import StreamingResponse
@@ -194,8 +194,15 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str
         if file is None or status in ('processing', 'failed'):
             unavailable.append((name, status))
             continue
-        key = entry.get('collection_name') or ingest.attachments_collection_key(file.user_id)
-        attached.append({'collection_key': key, 'file_id': file_id, 'name': name})
+        key = (
+            (file.meta or {}).get('collection_name')
+            or entry.get('collection_name')
+            or ingest.attachments_collection_key(file.user_id)
+        )
+        item = {'collection_key': key, 'file_id': file_id, 'name': name}
+        if (file.meta or {}).get('source'):
+            item['document_ref'] = file.meta['source']['ref']
+        attached.append(item)
     if unavailable:
         raise AttachmentsUnavailable(unavailable)
     return {'attachments': attached} if attached else {}
@@ -210,9 +217,13 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
 
 def _tools(metadata: dict[str, Any]) -> dict[str, dict[str, str]]:
     """[Claude] The tool states the chat's toggles ask, as the turn's `tools` field; none while every toggle is off."""
-    if not (metadata.get('features') or {}).get('web_search'):
-        return {}
-    return {'tools': {'web_search': WEB_SEARCH_ON}}
+    features = metadata.get('features') or {}
+    states = {}
+    if features.get('web_search'):
+        states['web_search'] = WEB_SEARCH_ON
+    if features.get('live_documents'):
+        states.update(search_live_documents='auto', attach_live_document='auto')
+    return {'tools': states} if states else {}
 
 
 def _unavailable(count: int, language: str | None) -> dict[str, Any]:
@@ -445,6 +456,7 @@ class AgentTurn:
         # [Claude] Done lines of calls whose output landed, held until the model moves on.
         self.settling: list[dict[str, Any]] = []
         self.model: str | None = None
+        self.attached_files: dict[str, dict] = {}
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
     def path(self, operation: str = '') -> str:
@@ -471,7 +483,11 @@ class AgentTurn:
 
     def _seed_sources(self, events: list[dict], position: int) -> None:
         for event in events:
-            if event['position'] <= position and event['type'] == 'tool_output' and event.get('stream') == 'root':
+            if (
+                event['position'] <= position
+                and event['type'] in {'tool_output', 'attached'}
+                and event.get('stream') == 'root'
+            ):
                 self.keep(event['payload'])
 
     def keep(self, output: dict[str, Any]) -> list[dict[str, Any]]:
@@ -623,10 +639,27 @@ class AgentTurn:
         """Forget the calls still shown as running: a call that ended without an output shows no done line."""
         self.running.clear()
 
-    async def record_output(self, payload: dict) -> list[dict[str, Any]]:
+    async def attached(self, payload: dict) -> None:
+        file = await live_documents.register_attachment(self.metadata['user_id'], payload)
+        chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
+        stored = {}
+        if chat_id and message_id and not is_temporary_chat_id(chat_id):
+            stored = await Chats.get_message_by_id_and_message_id(chat_id, message_id) or {}
+        self.attached_files.update({item['id']: item for item in stored.get('files') or [] if item.get('id')})
+        self.attached_files[file.id] = live_documents.chat_file(file)
+        update = {'files': list(self.attached_files.values())}
+        if chat_id and message_id and not is_temporary_chat_id(chat_id):
+            await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, update)
+        await self.emit('files', update)
+
+    async def record_output(self, payload: dict, *, attached: bool = False) -> list[dict[str, Any]]:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
+        if attached:
+            await self.attached(payload)
         self.keep(payload)
         for element in payload.get('elements') or []:
+            if element.get('type') == 'action-required' and element.get('kind') == 'connect':
+                await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
             if _read(element):
                 await self.show_source(element['id'], 'current_turn')
         return await self.end_tool(payload)
@@ -660,7 +693,9 @@ class AgentTurn:
                     raise SoevApiError(503, event.data.get('code', 'service_unavailable'), 'Recovery failed')
                 if event.position is not None:
                     self.position = event.position
-                if event.event == 'tool_output' and event.data.get('stream') == 'root':
+                if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
+                    if event.event == 'attached':
+                        await self.attached(event.data['payload'])
                     for source in self.keep(event.data['payload']):
                         await self.emit('source', source)
                 if event.event == 'status' and event.data['state'] not in {'idle', 'waiting'}:
@@ -723,8 +758,8 @@ class AgentTurn:
             return [_chunk({'content': marker})] if marker else []
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
-        if event.event == 'tool_output' and event.data.get('stream') == 'root':
-            return await self.record_output(payload)
+        if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
+            return await self.record_output(payload, attached=event.event == 'attached')
         if event.event in {'compacting', 'compaction'}:
             return await self.summary(event)
         if event.event == 'budget_exceeded' and event.data.get('stream') == 'root':
@@ -875,7 +910,14 @@ async def _sent(
     except AttachmentsUnavailable as unavailable:
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
     body = {
-        'input': {'text': text, 'knowledge': knowledge, **attachments, **_instructions(metadata), **_tools(metadata)}
+        'input': {
+            'text': text,
+            'knowledge': knowledge,
+            'attachment_collection': await ingest.ensure_attachments_collection(metadata['user_id'], turn.client),
+            **attachments,
+            **_instructions(metadata),
+            **_tools(metadata),
+        }
     }
     if isinstance(model, str) and model:
         body['model'] = model

@@ -165,3 +165,13 @@ async def resume_schedule(knowledge_id: str, schedule_id: str, sync=Depends(clou
 @router.get('/knowledge/{knowledge_id}/schedules/{schedule_id}/skipped')
 async def skipped_items(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     return await sync.skipped_items(knowledge_id, schedule_id)
+
+
+@router.get('/connections/{connection_id}/live-documents')
+async def live_document_grants(connection_id: str, sync=Depends(cloud_sync)):
+    return await sync.live_document_grants(connection_id)
+
+
+@router.post('/connections/{connection_id}/live-documents')
+async def enable_live_documents(connection_id: str, sync=Depends(cloud_sync)):
+    return await sync.enable_live_documents(connection_id)

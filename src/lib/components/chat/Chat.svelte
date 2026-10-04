@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ChatAttachment } from '$lib/types/chatAttachment';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -358,6 +359,7 @@
 	let pendingOAuthTools = [];
 
 	let imageGenerationEnabled = false;
+	let liveDocumentsEnabled = false;
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = false;
@@ -453,7 +455,7 @@
 
 	// Chat Input
 	let prompt = '';
-	let chatFiles = [];
+	let chatFiles: ChatAttachment[] = [];
 	let files: any[] = [];
 	let params = {};
 	let chatVariables = {};
@@ -869,6 +871,7 @@
 		messageInput?.setText('');
 
 		files = [];
+		liveDocumentsEnabled = false;
 		selectedToolIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
@@ -949,6 +952,7 @@
 		chatVariables = {};
 		chatFiles = [];
 		files = [];
+		liveDocumentsEnabled = false;
 		selectedToolIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
@@ -988,6 +992,7 @@
 	$: if ($chatId && !loading && !$temporaryChatEnabled && history?.currentId) {
 		const current = JSON.stringify({
 			webSearchEnabled,
+			liveDocumentsEnabled,
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
 			documentWriterEnabled
@@ -1286,6 +1291,20 @@
 		error?: string;
 		collection_name?: string;
 	}) => {
+		const update = (file: ChatAttachment) =>
+			file.id === data.file_id
+				? {
+						...file,
+						status: data.status === 'completed' ? 'uploaded' : data.status,
+						...(data.collection_name ? { collection_name: data.collection_name } : {}),
+						error: data.error
+					}
+				: file;
+		chatFiles = chatFiles.map(update);
+		for (const message of Object.values(history.messages) as { files?: ChatAttachment[] }[]) {
+			if (message.files) message.files = message.files.map(update);
+		}
+		history = history;
 		const idx = files.findIndex((f) => f.id === data.file_id);
 		if (idx < 0) return;
 
@@ -1373,6 +1392,12 @@
 					message.content = data.content;
 				} else if (type === 'chat:message:files' || type === 'files') {
 					message.files = data.files;
+					chatFiles = mergeFiles(
+						chatFiles,
+						data.files.filter((file: ChatAttachment) => file.source)
+					);
+				} else if (type === 'action_required') {
+					message.action_required = data;
 				} else if (type === 'chat:message:tasks') {
 					chatTasks = data.tasks;
 				} else if (type === 'chat:message:embeds' || type === 'embeds') {
@@ -2609,6 +2634,7 @@
 				chatFiles = structuredClone(chatContent?.files ?? []);
 
 				const chatFeatures = chatContent?.features ?? {};
+				liveDocumentsEnabled = chatFeatures.live_documents ?? false;
 				webSearchEnabled = chatFeatures.web_search ?? false;
 				imageGenerationEnabled = chatFeatures.image_generation ?? false;
 				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
@@ -2619,6 +2645,7 @@
 				// redundant full-history save right after load. Key order must match that block.
 				lastSavedFeatures = JSON.stringify({
 					webSearchEnabled,
+					liveDocumentsEnabled,
 					imageGenerationEnabled,
 					codeInterpreterEnabled,
 					documentWriterEnabled
@@ -3862,6 +3889,7 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
 						: false,
+				live_documents: liveDocumentsEnabled,
 				web_search: webSearchActive
 			};
 
@@ -3911,6 +3939,11 @@
 		const chatMessageFiles = _messages
 			.filter((message) => message.files)
 			.flatMap((message) => message.files);
+
+		chatFiles = mergeFiles(
+			chatFiles,
+			chatMessageFiles.filter((file: ChatAttachment) => file.source)
+		);
 
 		// Filter chatFiles to only include files that are in the chatMessageFiles
 		chatFiles = chatFiles.filter((item) => {
@@ -4489,6 +4522,7 @@
 					params: params,
 					files: chatFiles,
 					features: {
+						live_documents: liveDocumentsEnabled,
 						web_search: webSearchEnabled,
 						image_generation: imageGenerationEnabled,
 						code_interpreter: codeInterpreterEnabled,
@@ -5026,6 +5060,7 @@
 										bind:documentWriterEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
+										bind:liveDocumentsEnabled
 										bind:webSearchEnabled
 										bind:atSelectedModel
 										bind:showCommands
@@ -5118,6 +5153,7 @@
 										bind:codeInterpreterEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
+										bind:liveDocumentsEnabled
 										bind:webSearchEnabled
 										bind:atSelectedModel
 										bind:showCommands
@@ -5177,6 +5213,7 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
+									bind:liveDocumentsEnabled
 									bind:webSearchEnabled
 									bind:atSelectedModel
 									bind:showCommands
