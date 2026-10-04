@@ -273,3 +273,19 @@ async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  
     sent = next_turn.run.call_args.args[0]['input']
     assert 'attachments' not in sent
     assert 'still processing: ' + payload['name'] in sent['text']
+
+
+@pytest.mark.asyncio
+async def test_completed_reference_recovers_missing_mime(env, monkeypatch):  # noqa: F811
+    """A legacy attachment event gets its MIME from the completed document."""
+    from open_webui.soev import live_documents
+
+    event = {**attachment(), 'content_type': None}
+    row = await live_documents.register_attachment('alice', event)
+    client = SimpleNamespace(get=AsyncMock(side_effect=[{'status': 'SUCCEEDED'}, {'content_type': 'application/pdf'}]))
+    monkeypatch.setattr(env.jobs.identity, 'ensure_link', AsyncMock())
+    assert await env.jobs.poll_once(client, now=row.meta['soev_job']['submitted_at']) == 1
+    updated = await env.files.Files.get_file_by_id(row.id)
+    assert updated.meta['content_type'] == 'application/pdf'
+    assert updated.meta['status'] == 'completed'
+    assert client.get.call_args.kwargs['as_user'] == 'owui:user:alice'

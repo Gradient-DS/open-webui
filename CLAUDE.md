@@ -99,3 +99,5 @@ Connection and grant status is prefetched when InputMenu opens. Connected users 
 their grant without opening a popup. Suspended:reauth (the broker's persisted lifecycle)
 or a reauth error triggers authorization on the next explicit click, preserving the
 browser gesture. Provider family support is decided by the platform grant endpoint.
+If an older reference event lacks MIME metadata, successful job polling reads the
+completed document as its owning user and fills content_type before marking it ready.
