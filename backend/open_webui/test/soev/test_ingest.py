@@ -336,6 +336,7 @@ async def test_the_attachments_collection_is_created_once_per_user(env):
         assert json.loads(request.content) == {
             'key': key,
             'name': 'Chat attachments',
+            'personal': True,
             'visibility': 'restricted',
             'principals': [SERVICE, f'owui:user:{user}'],
             'writers': [f'owui:user:{user}'],
