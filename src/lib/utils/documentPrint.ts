@@ -2,7 +2,8 @@ import { Marked } from 'marked';
 import type { DocumentFormat } from './agentDocument';
 import { DOCUMENT_SANDBOX, sanitizeDocumentHtml } from './htmlDocument';
 
-const markdown = new Marked({ gfm: true, breaks: false });
+// Line breaks as in the document panel, so a source list without list markers stays one line per source.
+const markdown = new Marked({ gfm: true, breaks: true });
 const PRINT_STYLE = `
 @page { size: A4; margin: 25mm 20mm; }
 body { font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1a1a1a; overflow-wrap: anywhere; }

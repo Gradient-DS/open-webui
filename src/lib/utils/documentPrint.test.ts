@@ -59,3 +59,10 @@ describe('browser PDF printing', () => {
 		expect(frame.isConnected).toBe(false);
 	});
 });
+
+describe('markdown line breaks', () => {
+	it('keeps one source per line like the document panel', () => {
+		const html = buildPrintDocument('Memo', 'Bronnen:\n[1] Een\n[2] Twee', 'markdown');
+		expect(html).toContain('[1] Een<br>');
+	});
+});
