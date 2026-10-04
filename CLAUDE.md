@@ -129,3 +129,5 @@ An attached event (including processing) or an existing document keeps the succe
 OneDrive search uses the cloud-and-magnifier icon in its menu row, pinned button
 and tooltip. The picker retains the plain cloud; pinned tooltip labels are
 "OneDrive files" and "OneDrive search", translated through i18n.
+
+Consent polling treats suspended:reauth with a cleared last_error as pending until exchange enables the reused connection. A stored failure still terminates polling, and the normal timeout applies.

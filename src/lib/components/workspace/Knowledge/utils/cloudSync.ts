@@ -114,7 +114,8 @@ export function connectionOutcome(
 ): { status: 'done' | 'waiting' | 'gave_up' } | { status: 'failed'; reason: string } {
 	if (
 		connection.last_error ||
-		connection.lifecycle.startsWith('suspended:') ||
+		(connection.lifecycle.startsWith('suspended:') &&
+			connection.lifecycle !== 'suspended:reauth') ||
 		connection.lifecycle === 'revoked'
 	)
 		return { status: 'failed', reason: connection.last_error ?? connection.lifecycle };
