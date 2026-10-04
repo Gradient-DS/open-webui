@@ -25,9 +25,7 @@ class CloudSync:
         return await self._get(f'/v1/connections/{quote(connection_id, safe="")}')
 
     async def live_document_grants(self, connection_id: str) -> list[dict]:
-        connection = await self.connection(connection_id)
-        if connection['source_kind'] != 'onedrive':
-            raise SoevApiError(400, 'unsupported_source', 'OneDrive connection required')
+        await self.connection(connection_id)
         result = await self._get(f'/v1/connections/{quote(connection_id, safe="")}/live-grants')
         return [grant for grant in result['data'] if 'live_documents' in grant['families']]
 

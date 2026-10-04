@@ -1,10 +1,18 @@
 <script lang="ts">
 	import type { Readable } from 'svelte/store';
 	import type { i18n as I18n } from 'i18next';
-	import { getContext } from 'svelte';
+	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { connectLiveDocuments } from '$lib/utils/live-documents';
+	import {
+		connectLiveDocuments,
+		prefetchLiveDocuments,
+		consentLabels
+	} from '$lib/utils/live-documents';
 	const i18n = getContext<Readable<I18n>>('i18n');
+	export let provider: string;
+	onMount(() => {
+		void prefetchLiveDocuments(localStorage.token, provider).catch(() => {});
+	});
 	let busy = false;
 	let connected = false;
 </script>
@@ -17,17 +25,17 @@
 		on:click={async () => {
 			busy = true;
 			try {
-				await connectLiveDocuments(localStorage.token);
+				await connectLiveDocuments(localStorage.token, provider);
 				connected = true;
 			} catch {
-				toast.error($i18n.t('Could not connect OneDrive'));
+				toast.error($i18n.t('Could not connect account'));
 			} finally {
 				busy = false;
 			}
 		}}
 	>
 		{$i18n.t(
-			connected ? 'OneDrive connected. Enable OneDrive search to continue.' : 'Connect OneDrive'
+			connected ? 'Account connected. Enable file search to continue.' : consentLabels[provider]
 		)}
 	</button>
 </div>

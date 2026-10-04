@@ -14,34 +14,85 @@ import {
 	connectionOutcome
 } from '$lib/components/workspace/Knowledge/utils/cloudSync';
 
-export async function connectLiveDocuments(token: string): Promise<string> {
-	const popup = window.open('about:blank', 'soev-live-documents', 'width=600,height=720');
-	if (!popup) throw new Error('Allow popups to connect OneDrive');
-	try {
-		const connections = await listConnections(token);
-		const connection = connections.find(
-			(c) => c.source_kind === 'onedrive' && c.lifecycle !== 'revoked'
-		);
-		if (connection?.lifecycle === 'enabled') {
-			const grants = await listLiveDocumentGrants(token, connection.id);
-			const enabled = grants.find((g) => g.lifecycle === 'enabled');
-			if (enabled) return enabled.id;
-			try {
-				return (await enableLiveDocuments(token, connection.id)).id;
-			} catch (error) {
-				if (
-					!(error instanceof CloudSyncError) ||
-					!(
-						error.code === 'reauth_required' ||
-						(error.code === 'policy_forbids' && error.message.includes('Missing provider scopes'))
-					)
-				)
-					throw error;
+export const consentLabels: Record<string, string> = {
+	onedrive: 'connect_provider_onedrive',
+	google_drive: 'connect_provider_google_drive',
+	confluence: 'connect_provider_confluence'
+};
+
+export type LiveDocumentConnection = {
+	connection: Awaited<ReturnType<typeof listConnections>>[number];
+	grantId?: string;
+};
+let snapshot:
+	| { token: string; provider: string; connections: LiveDocumentConnection[] }
+	| undefined;
+
+export async function prefetchLiveDocuments(
+	token: string,
+	provider = 'onedrive'
+): Promise<LiveDocumentConnection[]> {
+	const connections = (await listConnections(token)).filter(
+		(c) => c.source_kind === provider && c.lifecycle !== 'revoked'
+	);
+	const rows = await Promise.all(
+		connections.map(async (connection) => ({
+			connection,
+			grantId:
+				connection.lifecycle === 'enabled' && !connection.last_error
+					? (await listLiveDocumentGrants(token, connection.id)).find(
+							(g) => g.lifecycle === 'enabled'
+						)?.id
+					: undefined
+		}))
+	);
+	snapshot = { token, provider, connections: rows };
+	return rows;
+}
+
+export function liveDocumentConnections(
+	token: string,
+	provider = 'onedrive'
+): LiveDocumentConnection[] | undefined {
+	return snapshot?.token === token && snapshot.provider === provider
+		? snapshot.connections
+		: undefined;
+}
+
+export async function connectLiveDocuments(token: string, provider = 'onedrive'): Promise<string> {
+	if (!consentLabels[provider]) throw new Error('Unsupported connection provider');
+	const rows = liveDocumentConnections(token, provider);
+	if (!rows) {
+		void prefetchLiveDocuments(token, provider);
+		throw new Error('Connection status is loading. Try again.');
+	}
+	const selected =
+		rows.find((row) => row.connection.lifecycle === 'enabled' && !row.connection.last_error) ??
+		rows[0];
+	const connection = selected?.connection;
+	if (connection?.lifecycle === 'enabled' && !connection.last_error) {
+		if (selected.grantId) return selected.grantId;
+		try {
+			const grant = await enableLiveDocuments(token, connection.id);
+			selected.grantId = grant.id;
+			return grant.id;
+		} catch (error) {
+			if (
+				error instanceof CloudSyncError &&
+				(error.code === 'reauth_required' ||
+					(error.code === 'policy_forbids' && error.message.includes('Missing provider scopes')))
+			) {
+				connection.last_error = 'reauth_required';
 			}
+			throw error;
 		}
+	}
+	const popup = window.open('about:blank', 'soev-live-documents', 'width=600,height=720');
+	if (!popup) throw new Error('Allow popups to connect your account');
+	try {
 		const authorization = connection
 			? { ...(await authorizeConnection(token, connection.id)), connection_id: connection.id }
-			: await createConnection(token, 'onedrive');
+			: await createConnection(token, provider);
 		const id = authorization.connection_id;
 		const trusted = trustedConnectOrigins(window.location.origin, WEBUI_API_BASE_URL);
 		await new Promise<void>((resolve, reject) => {
@@ -54,12 +105,12 @@ export async function connectLiveDocuments(token: string): Promise<string> {
 			const received = (event: MessageEvent) => {
 				const result = connectResult(event, trusted, popup, id);
 				if (result)
-					finish(result === 'pending' ? undefined : new Error('OneDrive connection failed'));
+					finish(result === 'pending' ? undefined : new Error('Provider connection failed'));
 			};
 			const started = Date.now();
 			const timer = setInterval(() => {
 				if (popup.closed || Date.now() - started > 120000)
-					finish(new Error('OneDrive connection cancelled'));
+					finish(new Error('Provider connection cancelled'));
 			}, 500);
 			window.addEventListener('message', received);
 			popup.location.href = authorization.authorize_url;
@@ -67,11 +118,15 @@ export async function connectLiveDocuments(token: string): Promise<string> {
 		const started = Date.now();
 		while (Date.now() - started <= 120000) {
 			const outcome = connectionOutcome(await getConnection(token, id), Date.now() - started);
-			if (outcome.status === 'done') return (await enableLiveDocuments(token, id)).id;
-			if (outcome.status !== 'waiting') throw new Error('OneDrive connection failed');
+			if (outcome.status === 'done') {
+				const grant = await enableLiveDocuments(token, id);
+				await prefetchLiveDocuments(token, provider);
+				return grant.id;
+			}
+			if (outcome.status !== 'waiting') throw new Error('Provider connection failed');
 			await new Promise((resolve) => setTimeout(resolve, 1000));
 		}
-		throw new Error('OneDrive connection failed');
+		throw new Error('Provider connection failed');
 	} finally {
 		popup.close();
 	}

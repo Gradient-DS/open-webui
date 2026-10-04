@@ -67,6 +67,7 @@
 	import ContentRenderer from './ContentRenderer.svelte';
 	import PresentUIDispatcher from './Markdown/PresentUIDispatcher.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
+	import { consentLabels } from '$lib/utils/live-documents';
 	import ConnectOneDrive from './ConnectOneDrive.svelte';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
@@ -102,7 +103,7 @@
 		assistant_id?: string; // [Gradient]
 		content: string;
 		output?: OutputItem[];
-		files?: { type: string; url: string }[];
+		files?: { type: string; url: string; id?: string; attached_by?: string }[];
 		timestamp: number;
 		role: string;
 		statusHistory?: {
@@ -1126,8 +1127,8 @@
 							{/each}
 						{/if}
 
-						{#if message?.action_required?.kind === 'connect' && message.action_required.provider === 'onedrive'}
-							<ConnectOneDrive />
+						{#if message?.action_required?.kind === 'connect' && consentLabels[message.action_required.provider]}
+							<ConnectOneDrive provider={message.action_required.provider} />
 						{/if}
 						{#if message?.files && message.files?.filter( (f) => ['image', 'file'].includes(f.type) ).length > 0}
 							<div
@@ -1142,7 +1143,7 @@
 											<FileItem
 												item={file}
 												dismissible={!!file.attached_by && !!removeReferenceAttachment}
-												on:dismiss={() => removeReferenceAttachment?.(file.id)}
+												on:dismiss={() => file.id && removeReferenceAttachment?.(file.id)}
 												url={file.url}
 												name={file.name}
 												type={file.type}

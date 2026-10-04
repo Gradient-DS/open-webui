@@ -93,3 +93,9 @@ rows retain supplied content_type for inline original previews and never delete 
 storage paths. Mismatched streamed attachment identities are logged and skipped.
 Assistant attachment chips can be dismissed; chat files and message removal markers
 persist that choice and prevent historical files or replayed events from restoring it.
+
+Consent cards use provider-specific i18n labels for the configured consent routes.
+Connection and grant status is prefetched when InputMenu opens. Connected users reuse
+their grant without opening a popup. Suspended:reauth (the broker's persisted lifecycle)
+or a reauth error triggers authorization on the next explicit click, preserving the
+browser gesture. Provider family support is decided by the platform grant endpoint.
