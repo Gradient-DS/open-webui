@@ -86,3 +86,9 @@ schema rejects tokens and caller-selected collections. The platform rechecks gra
 readability and size, skipping only reach for the explicit user selection. Missing picker
 version metadata is refused; no browser-token or download fallback exists. Existing file
 count limits apply. Microsoft picker payload/version availability needs a tenant check.
+
+The consumer API credential needs both ingest and the dedicated attach capability for
+picker commissioning; provision attach only to consumer products. The platform budgets
+picker attach and inspect per subject and UTC minute (default 10), independently of
+idempotency keys. Picker refusals preserve provider and Retry-After, including
+connection_required (409), not_readable (422), and provider_throttled (503).

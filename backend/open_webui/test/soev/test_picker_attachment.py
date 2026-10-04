@@ -98,18 +98,31 @@ async def test_picker_rejects_tokens_untrusted_destination_and_incomplete_refere
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'code,status', [('connection_required', 403), ('not_readable', 422), ('too_large', 413), ('changed', 409)]
+    'code,status',
+    [
+        ('connection_required', 409),
+        ('not_readable', 422),
+        ('too_large', 413),
+        ('changed', 409),
+        ('provider_throttled', 503),
+        ('op_not_granted', 403),
+    ],
 )
 async def test_picker_preserves_typed_platform_refusals(picker, env, code, status):  # noqa: F811
     """The platform's grant, encryption, size and version refusals create no File."""
     from open_webui.soev.client import SoevApiError
 
-    picker.client.send.side_effect = SoevApiError(status, code, code)
+    picker.client.send.side_effect = SoevApiError(
+        status, code, code, provider='onedrive', retry_after='7' if code == 'provider_throttled' else None
+    )
     async with AsyncClient(transport=httpx.ASGITransport(picker.app), base_url='http://test') as browser:
         response = await browser.post(
             '/api/v1/files/onedrive/attach', json=picker.form, headers={'Idempotency-Key': str(uuid4())}
         )
     assert response.status_code == status and response.json()['detail']['code'] == code
+    assert response.json()['detail']['provider'] == 'onedrive'
+    if code == 'provider_throttled':
+        assert response.headers['Retry-After'] == '7'
     assert await env.files.Files.get_files_with_soev_jobs() == []
 
 

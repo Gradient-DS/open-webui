@@ -58,7 +58,15 @@ async def attach_onedrive(
             idempotency_key=str(idempotency_key),
         )
     except SoevApiError as error:
-        raise HTTPException(status_code=error.status, detail={'code': error.code, 'detail': error.detail}) from None
+        raise HTTPException(
+            status_code=error.status,
+            detail={
+                'code': error.code,
+                'detail': error.detail,
+                **({'provider': error.provider} if error.provider is not None else {}),
+            },
+            headers={'Retry-After': error.retry_after} if error.retry_after is not None else None,
+        ) from None
     file = await register_attachment(
         user.id,
         {
