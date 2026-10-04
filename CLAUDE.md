@@ -70,6 +70,9 @@ Their `meta.source` contains the provider reference; bytes are never stored in O
 jobs use the existing durable job poller, skipping upload commit and path moves. File content
 routes stream platform originals with the requesting user's assertion. Every v2 turn ensures
 and sends the user's chat attachments collection; stored reference metadata is sent next turn.
+The platform binds that collection into its live ticket; a missing or changed target
+refuses collection_mismatch. Provider identity and Retry-After remain structured client
+error fields. Unknown Graph readability is decided from downloaded bytes before staging.
 
 The OneDrive search toggle enables `search_live_documents` and `attach_live_document` together
 with `auto` state; both remain off by default. `/cloud-sync/connections/{id}/live-documents`
