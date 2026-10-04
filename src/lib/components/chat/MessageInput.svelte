@@ -2802,10 +2802,10 @@
 												{:else if itemId === 'document_writer' && showDocumentWriterButton}
 													<Tooltip
 														content={pinnedStateTooltip(
-															$i18n.t('Document Writer'),
+															$i18n.t('PDF writer'),
 															documentWriterEnabled ? 'required' : 'off',
 															documentWriterEnabled
-																? $i18n.t('Write a document')
+																? $i18n.t('Write a PDF')
 																: $i18n.t(TOOL_OFF_DESCRIPTION)
 														)}
 														placement="top"
@@ -2813,8 +2813,8 @@
 														<button
 															type="button"
 															aria-label={documentWriterEnabled
-																? $i18n.t('Disable Document Writer')
-																: $i18n.t('Enable Document Writer')}
+																? $i18n.t('Disable PDF writer')
+																: $i18n.t('Enable PDF writer')}
 															aria-pressed={documentWriterEnabled}
 															on:click|preventDefault={() =>
 																inputMenuRef?.cycleTool('document_writer')}
@@ -3072,11 +3072,11 @@
 
 											<!-- [Gradient] Echo the active Document Writer capability. -->
 											{#if documentWriterEnabled && showDocumentWriterButton && !pinnedInputItems.includes('document_writer')}
-												<Tooltip content={$i18n.t('Document Writer')} placement="top">
+												<Tooltip content={$i18n.t('PDF writer')} placement="top">
 													<button
 														aria-label={documentWriterEnabled
-															? $i18n.t('Disable Document Writer')
-															: $i18n.t('Enable Document Writer')}
+															? $i18n.t('Disable PDF writer')
+															: $i18n.t('Enable PDF writer')}
 														aria-pressed={documentWriterEnabled}
 														on:click|preventDefault={() =>
 															(documentWriterEnabled = !documentWriterEnabled)}

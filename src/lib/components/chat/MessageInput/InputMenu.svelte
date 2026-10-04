@@ -822,17 +822,17 @@
 
 					{#if showDocumentWriter}
 						<MenuItem
-							label={$i18n.t('Document Writer')}
+							label={$i18n.t('PDF writer')}
 							pinId="document_writer"
 							toolState={documentWriterState}
 							tooltipPlacement="top-start"
 							tooltip={documentWriterEnabled
-								? $i18n.t('Write a document')
+								? $i18n.t('Write a PDF')
 								: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
-								$i18n.t('Document Writer'),
+								$i18n.t('PDF writer'),
 								documentWriterState,
-								documentWriterEnabled ? $i18n.t('Write a document') : $i18n.t(TOOL_OFF_DESCRIPTION)
+								documentWriterEnabled ? $i18n.t('Write a PDF') : $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
 							onClick={() => cycleTool('document_writer')}
 						>

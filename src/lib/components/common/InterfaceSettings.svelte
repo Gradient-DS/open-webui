@@ -1787,7 +1787,7 @@
 	{/if}
 	<!-- [Gradient] Document Writer detection follows the shared settings inheritance. -->
 	{#if isFeatureEnabled('document_writer')}
-		<div class={sectionHeadingClass}>{$i18n.t('Document Writer')}</div>
+		<div class={sectionHeadingClass}>{$i18n.t('PDF writer')}</div>
 		<div>
 			<div class={settingRowClass}>
 				<div id="detect-documents-label" class={settingLabelClass}>
