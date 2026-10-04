@@ -629,8 +629,9 @@ def test_live_document_grant_enable_uses_owned_connection(api, lifecycle):
         assert json.loads(api.requests[-1].content) == {'enabled': True}
 
 
-def test_live_document_grant_refuses_other_provider(api):
-    """The product OneDrive control cannot grant another provider's documents."""
-    api.responses.append(response({'id': 'c', 'source_kind': 'google_drive'}))
+def test_live_document_grant_is_provider_neutral(api):
+    """The platform decides which providers can grant the document family."""
+    grant = {'id': 'g', 'families': ['live_documents'], 'lifecycle': 'enabled'}
+    api.responses.extend([response({'id': 'c', 'source_kind': 'google_drive'}), response({'data': [grant]})])
     result = api.browser.post('/api/v1/cloud-sync/connections/c/live-documents')
-    assert result.status_code == 400 and result.json()['detail']['code'] == 'unsupported_source'
+    assert result.status_code == 200 and result.json() == grant

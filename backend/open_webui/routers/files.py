@@ -1298,7 +1298,8 @@ async def delete_file_by_id(
         result = await Files.delete_file_by_id(id, db=db)
         if result:
             try:
-                await asyncio.to_thread(Storage.delete_file, file.path)
+                if file.path:
+                    await asyncio.to_thread(Storage.delete_file, file.path)
             except Exception as e:
                 log.exception(e)
                 log.error('Error deleting files')

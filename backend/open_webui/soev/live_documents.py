@@ -1,7 +1,9 @@
 """Persist reference attachments without receiving or storing provider bytes."""
 
+import asyncio
 import time
 from urllib.parse import quote, urlsplit
+from weakref import WeakValueDictionary
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -12,10 +14,29 @@ from open_webui.soev import identity, ingest
 from open_webui.soev.client import SoevApiError
 
 
+class AttachmentMismatch(Exception):
+    def __init__(self, status: int, detail: str):
+        self.status = status
+        super().__init__(detail)
+
+
+_collections: dict[str, str] = {}
+_collection_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+
+
+async def attachment_collection(user_id: str, client) -> str:
+    if user_id in _collections:
+        return _collections[user_id]
+    async with _collection_locks.setdefault(user_id, asyncio.Lock()):
+        if user_id not in _collections:
+            _collections[user_id] = await ingest.ensure_attachments_collection(user_id, client)
+        return _collections[user_id]
+
+
 async def register_attachment(user_id: str, event: dict) -> FileModel:
     collection = event['collection_key']
     if collection != ingest.attachments_collection_key(user_id):
-        raise ValueError('Unexpected attachment collection')
+        raise AttachmentMismatch(409, 'Unexpected attachment collection')
     existing = await Files.get_file_by_id(event['source_id'])
     if existing is None:
         url = event.get('web_url') or ''
@@ -30,6 +51,7 @@ async def register_attachment(user_id: str, event: dict) -> FileModel:
                 data={'status': 'processing'},
                 meta={
                     'name': event['name'],
+                    'content_type': event.get('content_type'),
                     'status': 'processing',
                     'collection_name': collection,
                     'soev_collection_key': collection,
@@ -50,7 +72,7 @@ async def register_attachment(user_id: str, event: dict) -> FileModel:
     if existing is None:
         raise RuntimeError('Attachment File write failed')
     if existing.user_id != user_id or (existing.meta or {}).get('collection_name') != collection:
-        raise ValueError('Attachment File identity mismatch')
+        raise AttachmentMismatch(403, 'Attachment File identity mismatch')
     return existing
 
 
@@ -80,7 +102,11 @@ async def stream_original(file: FileModel, user, *, attachment: bool):
         await stream.aclose()
         raise HTTPException(status_code=error.status, detail=error.detail) from None
     content_type = file.meta.get('content_type') or 'application/octet-stream'
-    disposition = 'inline' if not attachment and content_type == 'application/pdf' else 'attachment'
+    disposition = (
+        'inline'
+        if not attachment and (content_type == 'application/pdf' or content_type.startswith('image/'))
+        else 'attachment'
+    )
 
     async def chunks():
         try:

@@ -131,7 +131,6 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
                 'input': {
                     'text': 'turn 1',
                     'knowledge': [],
-                    'attachment_collection': 'owui-attachments-alice',
                     'tools': WEB_SEARCH_OFF,
                 },
                 'agent': 'test',
@@ -144,7 +143,6 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
                 'input': {
                     'text': 'turn 2',
                     'knowledge': [],
-                    'attachment_collection': 'owui-attachments-alice',
                     'tools': WEB_SEARCH_OFF,
                 },
                 'model': 'llm',
@@ -156,7 +154,6 @@ async def test_third_turn_sends_only_the_new_input(chat: Chat) -> None:
                 'input': {
                     'text': 'turn 3',
                     'knowledge': [],
-                    'attachment_collection': 'owui-attachments-alice',
                     'tools': WEB_SEARCH_OFF,
                 },
                 'model': 'llm',
@@ -197,7 +194,6 @@ async def test_branch_rule_covers_regenerate_edit_copy_and_switch(
                 'input': {
                     'text': text,
                     'knowledge': [],
-                    'attachment_collection': 'owui-attachments-alice',
                     'tools': WEB_SEARCH_OFF,
                 },
                 'model': 'llm',
@@ -261,7 +257,6 @@ async def test_one_text_input_and_the_selected_knowledge_by_its_current_name(cha
     )
     assert chat.mutations()[0][1] == {
         'input': {
-            'attachment_collection': 'owui-attachments-alice',
             'text': 'one\ntwo',
             'knowledge': [
                 {'key': 'kb-a', 'name': 'Contracten', 'description': 'Getekende contracten'},
@@ -473,7 +468,6 @@ async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
     assert chat.mutations()[-1][1]['input'] == {
         'text': 'question',
         'knowledge': [],
-        'attachment_collection': 'owui-attachments-alice',
         'tools': {'web_search': 'off', 'search_live_documents': 'off', 'attach_live_document': 'off'},
     }
 
@@ -1326,7 +1320,6 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
                 'input': {
                     'text': 'last question',
                     'knowledge': [],
-                    'attachment_collection': 'owui-attachments-alice',
                     'tools': WEB_SEARCH_OFF,
                 },
                 'agent': 'test',
@@ -1455,7 +1448,6 @@ async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_ans
                 'input': {
                     'text': 'what was I asking?',
                     'knowledge': [],
-                    'attachment_collection': 'owui-attachments-alice',
                     'tools': WEB_SEARCH_OFF,
                 },
                 'model': 'llm',

@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import * as api from '$lib/apis/cloudSync';
-import { connectLiveDocuments } from './live-documents';
+import { connectLiveDocuments, prefetchLiveDocuments } from './live-documents';
 vi.mock('$lib/apis/cloudSync', async (original) => ({
 	...(await original<typeof import('$lib/apis/cloudSync')>()),
 	listConnections: vi.fn(),
@@ -37,9 +37,10 @@ it('reuses an enabled grant without starting authorization', async () => {
 	vi.mocked(api.listLiveDocumentGrants).mockResolvedValue([
 		{ id: 'g', lifecycle: 'enabled', families: ['live_documents'] }
 	]);
+	await prefetchLiveDocuments('session');
 	expect(await connectLiveDocuments('session')).toBe('g');
 	expect(api.authorizeConnection).not.toHaveBeenCalled();
-	expect(popup.close).toHaveBeenCalled();
+	expect(window.open).not.toHaveBeenCalled();
 });
 it('ignores forged completion and grants only after the owned connection is enabled', async () => {
 	vi.mocked(api.listConnections).mockResolvedValue([]);
@@ -57,6 +58,7 @@ it('ignores forged completion and grants only after the owned connection is enab
 		lifecycle: 'enabled',
 		families: ['live_documents']
 	});
+	await prefetchLiveDocuments('session');
 	const pending = connectLiveDocuments('session');
 	await vi.advanceTimersByTimeAsync(0);
 	receive({
@@ -81,10 +83,12 @@ it('propagates policy denial without authorizing a disabled feature', async () =
 	vi.mocked(api.enableLiveDocuments).mockRejectedValue(
 		new api.CloudSyncError(403, 'policy_forbids', 'Live documents are disabled')
 	);
+	await prefetchLiveDocuments('session');
 	await expect(connectLiveDocuments('session')).rejects.toThrow('Live documents are disabled');
 	expect(api.authorizeConnection).not.toHaveBeenCalled();
 });
 
+<<<<<<< HEAD
 it('sends a picker reference to the consumer with session authorization and an operation id', async () => {
 	const { attachPickedDocument } = await import('./live-documents');
 	const fetchSpy = vi
@@ -112,3 +116,27 @@ it('sends a picker reference to the consumer with session authorization and an o
 	});
 	expect(JSON.parse(request.body)).toEqual({ grant_id: 'grant', ...ref });
 });
+=======
+it.each(['suspended:reauth', 'enabled'])(
+	'reauthorizes %s connections with a reauth error',
+	async (lifecycle) => {
+		vi.mocked(api.listConnections).mockResolvedValue([
+			{ id: 'c', source_kind: 'onedrive', lifecycle, last_error: 'reauth_required' }
+		]);
+		vi.mocked(api.authorizeConnection).mockResolvedValue({
+			authorize_url: 'https://provider.invalid/auth'
+		});
+		await prefetchLiveDocuments('session');
+		const pending = connectLiveDocuments('session');
+		expect(window.open).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.authorizeConnection).toHaveBeenCalledWith('session', 'c');
+		receive({
+			origin: 'https://app.invalid',
+			source: popup,
+			data: { type: 'soev_connect', connection: 'c', result: 'error' }
+		});
+		await expect(pending).rejects.toThrow('Provider connection failed');
+	}
+);
+>>>>>>> feat/live-documents-p6

@@ -96,3 +96,18 @@ Live documents use an explicit off/auto/required tool state in InputMenu (off by
 Set ENABLE_LIVE_DOCUMENTS=true (config key live_documents.enable, default false) alongside
 AGENT_API_ENABLED to offer the control. The server gates every requested document tool state
 with that setting; enable the matching platform live_documents setting as well.
+
+Reference attachments that are failed or gone are skipped on later turns; processing
+ones add a short status note. Ordinary upload admission is unchanged. Collection setup
+runs only for enabled document tools or reference-bearing turns, caches successful keys
+per user, and disables the document tools for that turn if setup fails. Reference File
+rows retain supplied content_type for inline original previews and never delete empty
+storage paths. Mismatched streamed attachment identities are logged and skipped.
+Assistant attachment chips can be dismissed; chat files and message removal markers
+persist that choice and prevent historical files or replayed events from restoring it.
+
+Consent cards use provider-specific i18n labels for the configured consent routes.
+Connection and grant status is prefetched when InputMenu opens. Connected users reuse
+their grant without opening a popup. Suspended:reauth (the broker's persisted lifecycle)
+or a reauth error triggers authorization on the next explicit click, preserving the
+browser gesture. Provider family support is decided by the platform grant endpoint.
