@@ -1677,7 +1677,8 @@ try:
 except Exception as e:
     log.exception(f'Error loading DEFAULT_PROMPT_SUGGESTIONS: {e}')
     default_prompt_suggestions = []
-if default_prompt_suggestions == []:
+# [Gradient] Stock suggestions only when the variable is unset; an explicit "[]" means none.
+if 'DEFAULT_PROMPT_SUGGESTIONS' not in os.environ:
     default_prompt_suggestions = [
         {
             'title': ['Help me study', 'vocabulary for a college entrance exam'],
