@@ -15,7 +15,8 @@
 		selectedDocumentIndex
 	} from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
-	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
+	import { exportDocumentAsDocx } from '$lib/apis/utils';
+	import { printDocument } from '$lib/utils/documentPrint';
 
 	import ContentRenderer from './Messages/ContentRenderer.svelte';
 	import HtmlDocumentFrame from './Messages/HtmlDocumentFrame.svelte';
@@ -84,12 +85,7 @@
 	const downloadPdf = async () => {
 		if (!current) return;
 		try {
-			const blob = await exportDocumentAsPdf(
-				localStorage.token,
-				current.title,
-				getExportMarkdown()
-			);
-			if (blob) saveAs(blob, `${sanitizeFilename(current.title)}.pdf`);
+			await printDocument(current.title, getExportMarkdown(), current.format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));

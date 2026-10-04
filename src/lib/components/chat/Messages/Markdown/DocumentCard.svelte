@@ -13,7 +13,8 @@
 		documentContents,
 		selectedDocumentIndex
 	} from '$lib/stores';
-	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
+	import { exportDocumentAsDocx } from '$lib/apis/utils';
+	import { printDocument } from '$lib/utils/documentPrint';
 
 	import type { DocumentFormat } from '$lib/utils/agentDocument';
 	import Document from '$lib/components/icons/Document.svelte';
@@ -71,8 +72,7 @@
 	const downloadPdf = async () => {
 		if (!content) return;
 		try {
-			const blob = await exportDocumentAsPdf(localStorage.token, displayTitle, content);
-			if (blob) saveAs(blob, `${sanitizeFilename(displayTitle)}.pdf`);
+			await printDocument(displayTitle, content, format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
