@@ -90,12 +90,10 @@ it('propagates policy denial without authorizing a disabled feature', async () =
 
 it('sends a picker reference to the consumer with session authorization and an operation id', async () => {
 	const { attachPickedDocument } = await import('./live-documents');
-	const fetchSpy = vi
-		.fn()
-		.mockResolvedValue({
-			ok: true,
-			json: async () => ({ id: 'source', type: 'file', status: 'processing' })
-		});
+	const fetchSpy = vi.fn().mockResolvedValue({
+		ok: true,
+		json: async () => ({ id: 'source', type: 'file', status: 'processing' })
+	});
 	vi.stubGlobal('fetch', fetchSpy);
 	const ref = {
 		drive_id: 'd',
@@ -137,3 +135,31 @@ it.each(['suspended:reauth', 'enabled'])(
 		await expect(pending).rejects.toThrow('Provider connection failed');
 	}
 );
+
+it('selects only the picker tenant and object identity, regardless of connection order', async () => {
+	const { matchingPickerConnection } = await import('./live-documents');
+	const rows = ['other', 'chosen'].map((id) => ({
+		connection: {
+			id,
+			source_kind: 'onedrive',
+			lifecycle: 'enabled',
+			provider_tenant_id: 'tenant',
+			provider_identity: `entra:user:${id}`
+		},
+		grantId: `grant-${id}`
+	}));
+	const account = { tenantId: 'tenant', localAccountId: 'chosen', username: 'user@example.test' };
+	expect(matchingPickerConnection(rows, account).grantId).toBe('grant-chosen');
+	expect(() => matchingPickerConnection(rows, { ...account, tenantId: 'other-tenant' })).toThrow(
+		'does not match'
+	);
+	expect(() => matchingPickerConnection(rows, { ...account, localAccountId: 'missing' })).toThrow(
+		'does not match'
+	);
+	expect(() =>
+		matchingPickerConnection(
+			[{ ...rows[1], connection: { ...rows[1].connection, lifecycle: 'suspended:reauth' } }],
+			account
+		)
+	).toThrow('does not match');
+});

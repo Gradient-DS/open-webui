@@ -78,13 +78,14 @@ The OneDrive search toggle enables `search_live_documents` and `attach_live_docu
 with `auto` state; both remain off by default. `/cloud-sync/connections/{id}/live-documents`
 lists or enables owned OneDrive live grants. The toggle and Connect OneDrive card share the
 existing cloud consent popup and verify its origin, opener and connection before polling.
-No new OWUI environment variables are required. Platform live documents must be enabled.
+Both the OWUI and platform live-document settings must be enabled.
 
 The chat OneDrive picker returns `DocumentReference` metadata (including eTag), then
 `POST /files/onedrive/attach` calls platform `/v1/attach` with the acting user. Its strict
 schema rejects tokens and caller-selected collections. The platform rechecks grant,
-readability and size, skipping only reach for the explicit user selection. Missing picker
-version metadata is refused; no browser-token or download fallback exists. Existing file
+readability and size, skipping only reach for the explicit user selection. Missing organisational picker
+version metadata is refused. Personal (MSA) accounts explicitly retain the previous
+browser download/upload path; this exception is REVIEW pending the product decision. Existing file
 count limits apply. Microsoft picker payload/version availability needs a tenant check.
 
 The consumer API credential needs both ingest and the dedicated attach capability for
@@ -111,3 +112,10 @@ Connection and grant status is prefetched when InputMenu opens. Connected users 
 their grant without opening a popup. Suspended:reauth (the broker's persisted lifecycle)
 or a reauth error triggers authorization on the next explicit click, preserving the
 browser gesture. Provider family support is decided by the platform grant endpoint.
+
+The input menu prefetches connection/grant state and warms business MSAL silently.
+A healthy connection never opens a consent popup. Any needed MSAL login starts in
+the click stack; a new resource requiring consent asks for another click rather
+than opening a delayed popup. Match the picker tenant and object ID against the
+connection's provider_tenant_id and provider_identity before choosing its grant.
+Picker keys are user-namespaced and identity conflicts return typed 403/409 responses.

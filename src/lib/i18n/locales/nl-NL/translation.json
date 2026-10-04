@@ -1,4 +1,10 @@
 {
+  "Connection status is loading. Try again.": "De verbindingsstatus wordt geladen. Probeer het opnieuw.",
+  "Sign in to OneDrive again to finish opening the picker.": "Meld je opnieuw aan bij OneDrive om de bestandskiezer te openen.",
+  "OneDrive is loading. Open the menu and try again.": "OneDrive wordt geladen. Open het menu en probeer het opnieuw.",
+  "The picker account changed. Open the picker again.": "Het account van de bestandskiezer is gewijzigd. Open de bestandskiezer opnieuw.",
+  "The picker account does not match a connected OneDrive account. Connect that account and try again.": "Het gekozen account komt niet overeen met een verbonden OneDrive-account. Verbind dat account en probeer het opnieuw.",
+  "OneDrive connected. Choose your files again.": "OneDrive is verbonden. Kies je bestanden opnieuw.",
   "'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "'s', 'm', 'h', 'd', 'w', of '-1' for geen vervaldatum.",
   "(latest)": "(nieuwste)",
   "(leave blank for to use commercial endpoint)": "(laat leeg voor een comercieel endpoint)",

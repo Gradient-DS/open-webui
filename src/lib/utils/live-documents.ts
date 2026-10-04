@@ -155,3 +155,30 @@ export async function attachPickedDocument(
 	}
 	return response.json();
 }
+
+export function matchingPickerConnection(
+	rows: LiveDocumentConnection[],
+	account: {
+		tenantId: string;
+		localAccountId: string;
+		username: string;
+		idTokenClaims?: { oid?: string };
+	}
+): LiveDocumentConnection {
+	const oid = account.idTokenClaims?.oid ?? account.localAccountId;
+	const matches = rows.filter(
+		({ connection }) =>
+			connection.source_kind === 'onedrive' &&
+			connection.lifecycle === 'enabled' &&
+			!connection.last_error &&
+			!!account.tenantId &&
+			connection.provider_tenant_id?.toLowerCase() === account.tenantId.toLowerCase() &&
+			!!oid &&
+			connection.provider_identity?.toLowerCase() === `entra:user:${oid}`.toLowerCase()
+	);
+	if (matches.length !== 1)
+		throw new Error(
+			'The picker account does not match a connected OneDrive account. Connect that account and try again.'
+		);
+	return matches[0];
+}

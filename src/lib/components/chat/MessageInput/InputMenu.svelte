@@ -19,6 +19,7 @@
 		webSearchState,
 		type ToolState
 	} from '$lib/utils/toolState';
+	import { prepareBusinessDocumentPicker } from '$lib/utils/onedrive-file-picker';
 	import { connectLiveDocuments, prefetchLiveDocuments } from '$lib/utils/live-documents';
 	import { LIVE_DOCUMENT_STATES } from '$lib/utils/toolState';
 	import { toast } from 'svelte-sonner';
@@ -149,8 +150,14 @@
 	export let closeOnOutsideClick = true;
 
 	let show = false;
-	$: if (show && $config?.features?.enable_live_documents) {
+	$: if (
+		show &&
+		($config?.features?.enable_live_documents || $config?.features?.enable_onedrive_business)
+	) {
 		void prefetchLiveDocuments(localStorage.token).catch(() => {});
+	}
+	$: if (show && $config?.features?.enable_onedrive_business) {
+		void prepareBusinessDocumentPicker().catch(() => {});
 	}
 	let tab = '';
 	// Opened straight into a submenu from a pinned composer button: no back row.

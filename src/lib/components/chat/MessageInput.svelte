@@ -33,8 +33,19 @@
 		createPicker,
 		initialize as initializeGooglePicker
 	} from '$lib/utils/google-drive-picker';
-	import { connectLiveDocuments, attachPickedDocument } from '$lib/utils/live-documents';
-	import { pickDocumentReferencesModal } from '$lib/utils/onedrive-file-picker';
+	import {
+		connectLiveDocuments,
+		attachPickedDocument,
+		liveDocumentConnections,
+		matchingPickerConnection,
+		prefetchLiveDocuments
+	} from '$lib/utils/live-documents';
+	import { enableLiveDocuments } from '$lib/apis/cloudSync';
+	import {
+		beginBusinessDocumentPicker,
+		prepareBusinessDocumentPicker,
+		pickAndDownloadFilesModal
+	} from '$lib/utils/onedrive-file-picker';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 	const dispatch = createEventDispatcher();
@@ -1060,10 +1071,82 @@
 		}
 	};
 
-	const oneDriveHandler = async (authorityType: 'personal' | 'organizations') => {
+	const personalOneDriveHandler = async (authorityType: 'personal') => {
+		const tempItemIds: string[] = [];
 		try {
-			const grantId = await connectLiveDocuments(localStorage.token);
-			const references = await pickDocumentReferencesModal(authorityType);
+			const filesData = await pickAndDownloadFilesModal(authorityType, {
+				onFilesSelected: (items) => {
+					for (const item of items) {
+						const tempItemId = uuidv4();
+						tempItemIds.push(tempItemId);
+						files = [
+							...files,
+							{
+								type: 'file',
+								file: '',
+								id: null,
+								url: '',
+								name: item.name,
+								collection_name: '',
+								status: 'uploading',
+								size: 0,
+								error: '',
+								itemId: tempItemId
+							}
+						];
+					}
+				}
+			});
+			if (filesData.length > 0) {
+				for (let i = 0; i < filesData.length; i++) {
+					const fileData = filesData[i];
+					const file = new File([fileData.blob], fileData.name, {
+						type: fileData.blob.type || 'application/octet-stream'
+					});
+					// Match placeholder by name since download order may differ
+					const matchingItemId = tempItemIds.find((id) => {
+						const item = files.find((f) => f.itemId === id);
+						return item && item.name === fileData.name;
+					});
+					await uploadFileHandler(file, true, {}, matchingItemId || null);
+				}
+				// Clean up any placeholders for files that failed to download
+				const downloadedNames = new Set(filesData.map((f) => f.name));
+				files = files.filter((f) => {
+					if (tempItemIds.includes(f.itemId ?? '') && !downloadedNames.has(f.name ?? '')) {
+						return false;
+					}
+					return true;
+				});
+			} else if (tempItemIds.length > 0) {
+				// All downloads failed
+				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
+			}
+		} catch (error) {
+			if (tempItemIds.length > 0) {
+				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
+			}
+			console.error('OneDrive Error:', error);
+		}
+	};
+
+	const oneDriveHandler = async (authorityType: 'personal' | 'organizations') => {
+		if (authorityType === 'personal') return personalOneDriveHandler(authorityType);
+		try {
+			const rows = liveDocumentConnections(localStorage.token);
+			if (!rows) throw new Error('Connection status is loading. Try again.');
+			if (
+				!rows.some((row) => row.connection.lifecycle === 'enabled' && !row.connection.last_error)
+			) {
+				await connectLiveDocuments(localStorage.token);
+				toast.info($i18n.t('OneDrive connected. Choose your files again.'));
+				return;
+			}
+			const { references, account } = await beginBusinessDocumentPicker();
+			if (!references.length) return;
+			const row = matchingPickerConnection(rows, account);
+			const grantId =
+				row.grantId ?? (await enableLiveDocuments(localStorage.token, row.connection.id)).id;
 			for (const reference of references) {
 				const itemId = uuidv4();
 				files = [
@@ -1092,8 +1175,10 @@
 					toast.error($i18n.t('Could not attach OneDrive file'));
 				}
 			}
-		} catch {
-			toast.error($i18n.t('Could not attach OneDrive file'));
+		} catch (error) {
+			toast.error(
+				$i18n.t(error instanceof Error ? error.message : 'Could not attach OneDrive file')
+			);
 		}
 	};
 
@@ -1638,6 +1723,10 @@
 	};
 
 	onMount(() => {
+		if ($config?.features?.enable_onedrive_business) {
+			void prefetchLiveDocuments(localStorage.token).catch(() => {});
+			void prepareBusinessDocumentPicker().catch(() => {});
+		}
 		if ($config?.features?.enable_google_drive_integration)
 			void initializeGooglePicker().catch(() => {});
 		suggestions = [

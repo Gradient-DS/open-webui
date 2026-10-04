@@ -2,14 +2,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock MSAL so getMsalInstance()/getGraphApiToken() resolve a fake token
 // without touching the network or a real browser.
+const auth = vi.hoisted(() => ({ silent: vi.fn(), popup: vi.fn() }));
+
 vi.mock('@azure/msal-browser', () => {
 	class PublicClientApplication {
 		async initialize() {}
 		async acquireTokenSilent() {
+			auth.silent();
 			return { accessToken: 'graph-token', account: {} };
 		}
 		setActiveAccount() {}
+		getActiveAccount() {
+			return { homeAccountId: 'account', tenantId: 'tenant', localAccountId: 'user' };
+		}
+		getAllAccounts() {
+			return [this.getActiveAccount()];
+		}
 		async loginPopup() {
+			auth.popup();
 			return { accessToken: 'graph-token', account: {}, idToken: 'id' };
 		}
 	}
@@ -134,4 +144,36 @@ describe('documentReference', () => {
 			);
 		}
 	);
+});
+
+describe('business picker user gesture', () => {
+	beforeEach(() => {
+		vi.resetModules();
+		auth.silent.mockReset();
+		auth.popup.mockReset();
+		vi.stubGlobal('window', { location: { origin: 'http://localhost' } });
+		vi.stubGlobal('fetch', stubFetch('https://static.sharepoint.com'));
+	});
+	it('prepares silently and invokes loginPopup before yielding the click stack', async () => {
+		const picker = await import('./onedrive-file-picker');
+		auth.silent.mockImplementation(() => {
+			throw new Error('interaction required');
+		});
+		await expect(picker.prepareBusinessDocumentPicker()).rejects.toThrow('Sign in');
+		expect(auth.popup).not.toHaveBeenCalled();
+		auth.popup.mockImplementation(() => {
+			throw new Error('cancelled');
+		});
+		const pending = picker.beginBusinessDocumentPicker();
+		expect(auth.popup).toHaveBeenCalledTimes(1);
+		await expect(pending).rejects.toThrow('cancelled');
+	});
+	it('a connected cached account needs no interactive login', async () => {
+		const picker = await import('./onedrive-file-picker');
+		await picker.prepareBusinessDocumentPicker();
+		const pending = picker.beginBusinessDocumentPicker();
+		// There is no DOM in this unit test; opening the iframe fails after auth.
+		await expect(pending).rejects.toThrow();
+		expect(auth.popup).not.toHaveBeenCalled();
+	});
 });

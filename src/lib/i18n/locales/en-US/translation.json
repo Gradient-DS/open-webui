@@ -1,4 +1,10 @@
 {
+  "Connection status is loading. Try again.": "Connection status is loading. Try again.",
+  "Sign in to OneDrive again to finish opening the picker.": "Sign in to OneDrive again to finish opening the picker.",
+  "OneDrive is loading. Open the menu and try again.": "OneDrive is loading. Open the menu and try again.",
+  "The picker account changed. Open the picker again.": "The picker account changed. Open the picker again.",
+  "The picker account does not match a connected OneDrive account. Connect that account and try again.": "The picker account does not match a connected OneDrive account. Connect that account and try again.",
+  "OneDrive connected. Choose your files again.": "OneDrive connected. Choose your files again.",
   "'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "",
   "(latest)": "",
   "(leave blank for to use commercial endpoint)": "",

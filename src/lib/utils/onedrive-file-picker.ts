@@ -1,4 +1,4 @@
-import type { PopupRequest, PublicClientApplication } from '@azure/msal-browser';
+import type { AccountInfo, PopupRequest, PublicClientApplication } from '@azure/msal-browser';
 import { v4 as uuidv4 } from 'uuid';
 import { WEBUI_BASE_URL } from '$lib/constants';
 import { fetchOneDriveHost } from './onedrive-host';
@@ -11,6 +11,8 @@ class OneDriveConfig {
 	private sharepointTenantId: string = '';
 	private credentialsLoaded = false;
 	private derivedHost: string | null = null;
+	private derivedAccount: string | undefined;
+	private msalInstances = new Map<string, PublicClientApplication>();
 	private msalInstance: PublicClientApplication | null = null;
 	private currentAuthorityType: 'personal' | 'organizations' = 'personal';
 
@@ -26,7 +28,7 @@ class OneDriveConfig {
 	public async initialize(authorityType?: 'personal' | 'organizations'): Promise<void> {
 		if (authorityType && this.currentAuthorityType !== authorityType) {
 			this.currentAuthorityType = authorityType;
-			this.msalInstance = null;
+			this.msalInstance = this.msalInstances.get(authorityType) ?? null;
 		}
 		await this.getCredentials();
 	}
@@ -102,6 +104,7 @@ class OneDriveConfig {
 			if (this.msalInstance.initialize) {
 				await this.msalInstance.initialize();
 			}
+			this.msalInstances.set(this.currentAuthorityType, this.msalInstance);
 		}
 
 		return this.msalInstance;
@@ -130,15 +133,21 @@ class OneDriveConfig {
 	 * use. The derived value is memoized on `derivedHost`, which deliberately
 	 * survives the per-call getCredentials() reset of `sharepointUrl`.
 	 */
-	public async resolveHost(authorityType?: 'personal' | 'organizations'): Promise<void> {
+	public async resolveHost(
+		authorityType?: 'personal' | 'organizations',
+		allowPopup = true
+	): Promise<void> {
 		await this.ensureInitialized(authorityType);
 
 		if (this.currentAuthorityType !== 'organizations') return; // personal unaffected
 		if (this.sharepointUrl && this.sharepointUrl !== '') return; // static mode
-		if (this.derivedHost) return; // memoized for the session
+		const msal = await this.getMsalInstance(authorityType);
+		const account = msal.getActiveAccount()?.homeAccountId;
+		if (this.derivedHost && this.derivedAccount === account) return;
 
-		const graphToken = await getGraphApiToken(authorityType); // host-independent
+		const graphToken = await getGraphApiToken(authorityType, allowPopup); // host-independent
 		this.derivedHost = await fetchOneDriveHost(graphToken);
+		this.derivedAccount = msal.getActiveAccount()?.homeAccountId;
 	}
 
 	public getBaseUrl(): string {
@@ -160,7 +169,8 @@ class OneDriveConfig {
 // Retrieve OneDrive access token
 async function getToken(
 	resource?: string,
-	authorityType?: 'personal' | 'organizations'
+	authorityType?: 'personal' | 'organizations',
+	allowPopup = true
 ): Promise<string> {
 	const config = OneDriveConfig.getInstance();
 	await config.ensureInitialized(authorityType);
@@ -180,6 +190,10 @@ async function getToken(
 		const resp = await msalInstance.acquireTokenSilent(authParams);
 		accessToken = resp.accessToken;
 	} catch {
+		if (!allowPopup) {
+			businessLogin = { scopes };
+			throw new Error('Sign in to OneDrive again to finish opening the picker.');
+		}
 		const msalInstance = await config.getMsalInstance(authorityType);
 		try {
 			const resp = await msalInstance.loginPopup(authParams);
@@ -643,14 +657,14 @@ export async function openOneDriveFilePickerModal(
 	// Initialize OneDrive config with the specified authority type
 	const config = OneDriveConfig.getInstance();
 	await config.initialize(authorityType);
-	await config.resolveHost(authorityType);
+	await config.resolveHost(authorityType, authorityType !== 'organizations');
 
 	const channelId = uuidv4();
 	const params = getFilePickerParams(channelId);
 	const baseUrl = config.getBaseUrl();
 
 	// Get auth token first (before creating UI)
-	const authToken = await getToken(undefined, authorityType);
+	const authToken = await getToken(undefined, authorityType, authorityType !== 'organizations');
 	if (!authToken) {
 		throw new Error('Failed to acquire access token');
 	}
@@ -1601,7 +1615,8 @@ export async function openOneDriveItemPicker(
  * This is different from the picker token which is scoped to SharePoint.
  */
 export async function getGraphApiToken(
-	authorityType?: 'personal' | 'organizations'
+	authorityType?: 'personal' | 'organizations',
+	allowPopup = true
 ): Promise<string> {
 	const config = OneDriveConfig.getInstance();
 	await config.ensureInitialized(authorityType);
@@ -1622,6 +1637,10 @@ export async function getGraphApiToken(
 		const resp = await msalInstance.acquireTokenSilent(authParams);
 		accessToken = resp.accessToken;
 	} catch {
+		if (!allowPopup) {
+			businessLogin = { scopes };
+			throw new Error('Sign in to OneDrive again to finish opening the picker.');
+		}
 		const msalInstance = await config.getMsalInstance(authorityType);
 		try {
 			const resp = await msalInstance.loginPopup(authParams);
@@ -1646,3 +1665,138 @@ export async function getGraphApiToken(
 }
 
 export { getToken, OneDriveConfig };
+
+// REVIEW: personal Microsoft accounts retain the existing browser upload path.
+async function downloadOneDriveFile(
+	fileInfo: OneDriveFileInfo,
+	authorityType: 'personal'
+): Promise<Blob> {
+	// Extract the base URL from the endpoint to use as the resource for token acquisition
+	// The endpoint might be different from the configured SharePoint URL (e.g., user's personal OneDrive)
+	const endpoint = fileInfo['@sharePoint.endpoint'];
+	const accessToken = await getToken(undefined, authorityType);
+	if (!accessToken) {
+		throw new Error('Unable to retrieve OneDrive access token.');
+	}
+
+	// The endpoint URL is provided in the file info
+	if (!fileInfo.parentReference?.driveId) {
+		throw new Error('File info missing parentReference.driveId');
+	}
+	const fileInfoUrl = `${endpoint}/drives/${fileInfo.parentReference.driveId}/items/${fileInfo.id}`;
+
+	const response = await fetch(fileInfoUrl, {
+		headers: {
+			Authorization: `Bearer ${accessToken}`
+		}
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to fetch file information: ${response.status} ${response.statusText}`);
+	}
+
+	const fileData = await response.json();
+	const downloadUrl = fileData['@content.downloadUrl'];
+
+	if (!downloadUrl) {
+		throw new Error('Download URL not found in file data');
+	}
+
+	const downloadResponse = await fetch(downloadUrl);
+
+	if (!downloadResponse.ok) {
+		throw new Error(
+			`Failed to download file: ${downloadResponse.status} ${downloadResponse.statusText}`
+		);
+	}
+
+	const blob = await downloadResponse.blob();
+
+	// Verify the blob has content - empty blobs indicate download failure
+	if (blob.size === 0) {
+		console.error('OneDrive download returned empty blob', {
+			fileId: fileInfo.id,
+			fileName: fileInfo.name,
+			endpoint: endpoint
+		});
+		throw new Error('Downloaded file is empty. This may be due to permission issues.');
+	}
+
+	return blob;
+}
+
+export async function pickAndDownloadFilesModal(
+	authorityType: 'personal',
+	options?: {
+		onFilesSelected?: (items: Array<{ name: string }>) => void;
+	}
+): Promise<Array<{ blob: Blob; name: string }>> {
+	const pickerResult = await openOneDriveFilePickerModal(authorityType);
+
+	if (!pickerResult || !pickerResult.items || pickerResult.items.length === 0) {
+		return [];
+	}
+
+	// Notify before downloads start (for instant placeholder feedback)
+	options?.onFilesSelected?.(pickerResult.items.map((item) => ({ name: item.name })));
+
+	// Download all selected files in parallel
+	const downloadPromises = pickerResult.items.map(async (item) => {
+		try {
+			const blob = await downloadOneDriveFile(item, authorityType);
+			return { blob, name: item.name };
+		} catch (error) {
+			console.error(`Failed to download file ${item.name}:`, error);
+			return null;
+		}
+	});
+
+	const results = await Promise.all(downloadPromises);
+
+	// Filter out failed downloads
+	return results.filter((result): result is { blob: Blob; name: string } => result !== null);
+}
+
+let businessMsal: PublicClientApplication | undefined;
+let businessLogin: PopupRequest | undefined;
+let preparingBusiness: Promise<void> | undefined;
+
+export function prepareBusinessDocumentPicker(): Promise<void> {
+	if (preparingBusiness) return preparingBusiness;
+	preparingBusiness = (async () => {
+		const config = OneDriveConfig.getInstance();
+		businessMsal = await config.getMsalInstance('organizations');
+		const account = businessMsal.getActiveAccount() ?? businessMsal.getAllAccounts()[0];
+		if (account) businessMsal.setActiveAccount(account);
+		businessLogin = undefined;
+		await config.resolveHost('organizations', false);
+		await getToken(undefined, 'organizations', false);
+	})().finally(() => {
+		preparingBusiness = undefined;
+	});
+	return preparingBusiness;
+}
+
+export function beginBusinessDocumentPicker(): Promise<{
+	references: DocumentReference[];
+	account: AccountInfo;
+}> {
+	if (!businessMsal || preparingBusiness) {
+		void prepareBusinessDocumentPicker().catch(() => {});
+		throw new Error('OneDrive is loading. Open the menu and try again.');
+	}
+	const msal = businessMsal;
+	// No await before loginPopup: Safari requires the original click gesture.
+	const login = businessLogin ? msal.loginPopup(businessLogin) : Promise.resolve(null);
+	return login.then(async (result) => {
+		if (result?.account) msal.setActiveAccount(result.account);
+		businessLogin = undefined;
+		const account = msal.getActiveAccount();
+		if (!account) throw new Error('Sign in to OneDrive again to finish opening the picker.');
+		const references = await pickDocumentReferencesModal('organizations');
+		if (msal.getActiveAccount()?.homeAccountId !== account.homeAccountId) {
+			throw new Error('The picker account changed. Open the picker again.');
+		}
+		return { references, account };
+	});
+}
