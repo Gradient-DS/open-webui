@@ -12,8 +12,7 @@ class OneDriveConfig {
 	private credentialsLoaded = false;
 	private derivedHost: string | null = null;
 	private derivedAccount: string | undefined;
-	private msalInstances = new Map<string, PublicClientApplication>();
-	private msalInstance: PublicClientApplication | null = null;
+	private msalInstances = new Map<string, Promise<PublicClientApplication>>();
 	private currentAuthorityType: 'personal' | 'organizations' = 'personal';
 
 	private constructor() {}
@@ -28,7 +27,6 @@ class OneDriveConfig {
 	public async initialize(authorityType?: 'personal' | 'organizations'): Promise<void> {
 		if (authorityType && this.currentAuthorityType !== authorityType) {
 			this.currentAuthorityType = authorityType;
-			this.msalInstance = this.msalInstances.get(authorityType) ?? null;
 		}
 		await this.getCredentials();
 	}
@@ -74,40 +72,38 @@ class OneDriveConfig {
 	public async getMsalInstance(
 		authorityType?: 'personal' | 'organizations'
 	): Promise<PublicClientApplication> {
-		await this.ensureInitialized(authorityType);
-
-		if (!this.msalInstance) {
-			const authorityEndpoint =
-				this.currentAuthorityType === 'organizations'
-					? this.sharepointTenantId || 'common'
-					: 'consumers';
-
-			const clientId =
-				this.currentAuthorityType === 'organizations'
-					? this.clientIdBusiness
-					: this.clientIdPersonal;
-
-			if (!clientId) {
-				throw new Error('OneDrive client ID not configured');
-			}
-
-			const msalParams = {
-				auth: {
-					authority: `https://login.microsoftonline.com/${authorityEndpoint}`,
-					clientId: clientId,
-					redirectUri: window.location.origin
-				}
-			};
-
-			const { PublicClientApplication } = await import('@azure/msal-browser');
-			this.msalInstance = new PublicClientApplication(msalParams);
-			if (this.msalInstance.initialize) {
-				await this.msalInstance.initialize();
-			}
-			this.msalInstances.set(this.currentAuthorityType, this.msalInstance);
+		const authority = authorityType ?? this.currentAuthorityType;
+		await this.getCredentials();
+		let pending = this.msalInstances.get(authority);
+		if (!pending) {
+			pending = this.createMsalInstance(authority);
+			this.msalInstances.set(authority, pending);
 		}
+		try {
+			return await pending;
+		} catch (error) {
+			this.msalInstances.delete(authority);
+			throw error;
+		}
+	}
 
-		return this.msalInstance;
+	private async createMsalInstance(
+		authority: 'personal' | 'organizations'
+	): Promise<PublicClientApplication> {
+		const authorityEndpoint =
+			authority === 'organizations' ? this.sharepointTenantId || 'common' : 'consumers';
+		const clientId = authority === 'organizations' ? this.clientIdBusiness : this.clientIdPersonal;
+		if (!clientId) throw new Error('OneDrive client ID not configured');
+		const { PublicClientApplication } = await import('@azure/msal-browser');
+		const instance = new PublicClientApplication({
+			auth: {
+				authority: `https://login.microsoftonline.com/${authorityEndpoint}`,
+				clientId,
+				redirectUri: window.location.origin
+			}
+		});
+		await instance.initialize();
+		return instance;
 	}
 
 	public getAuthorityType(): 'personal' | 'organizations' {
@@ -1769,8 +1765,19 @@ export function prepareBusinessDocumentPicker(): Promise<void> {
 		const account = businessMsal.getActiveAccount() ?? businessMsal.getAllAccounts()[0];
 		if (account) businessMsal.setActiveAccount(account);
 		businessLogin = undefined;
-		await config.resolveHost('organizations', false);
-		await getToken(undefined, 'organizations', false);
+		let scopes = ['https://graph.microsoft.com/Files.Read.All'];
+		let host = config.getSharepointUrl();
+		try {
+			if (!host) {
+				const token = await businessMsal.acquireTokenSilent({ scopes });
+				host = await fetchOneDriveHost(token.accessToken);
+			}
+			scopes = [`${host.replace(/\/$/, '')}/.default`];
+			await businessMsal.acquireTokenSilent({ scopes });
+		} catch (error) {
+			businessLogin = { scopes };
+			throw new Error('Sign in to OneDrive again to finish opening the picker.');
+		}
 	})().finally(() => {
 		preparingBusiness = undefined;
 	});

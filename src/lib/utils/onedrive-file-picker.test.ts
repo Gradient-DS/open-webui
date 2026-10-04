@@ -177,3 +177,22 @@ describe('business picker user gesture', () => {
 		expect(auth.popup).not.toHaveBeenCalled();
 	});
 });
+
+it('business prefetch preserves personal authority and caches separate MSAL clients', async () => {
+	vi.resetModules();
+	auth.silent.mockReset();
+	vi.stubGlobal('window', { location: { origin: 'http://localhost' } });
+	vi.stubGlobal('fetch', stubFetch('https://static.sharepoint.com'));
+	const picker = await import('./onedrive-file-picker');
+	const config = picker.OneDriveConfig.getInstance();
+	await config.initialize('personal');
+	await picker.prepareBusinessDocumentPicker();
+	expect(config.getAuthorityType()).toBe('personal');
+	const [business, personal, businessAgain] = await Promise.all([
+		config.getMsalInstance('organizations'),
+		config.getMsalInstance('personal'),
+		config.getMsalInstance('organizations')
+	]);
+	expect(business).not.toBe(personal);
+	expect(business).toBe(businessAgain);
+});

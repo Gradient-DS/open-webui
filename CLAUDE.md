@@ -121,3 +121,6 @@ connection's provider_tenant_id and provider_identity before choosing its grant.
 Picker keys are user-namespaced and identity conflicts return typed 403/409 responses.
 If an older reference event lacks MIME metadata, successful job polling reads the
 completed document as its owning user and fills content_type before marking it ready.
+Business prefetch does not change the active picker authority. MSAL initialization
+is cached per authority, including in-flight initialization, so warming a business
+account cannot replace the personal-account client during a user click.
