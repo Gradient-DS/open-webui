@@ -80,11 +80,10 @@ lists or enables owned OneDrive live grants. The toggle and Connect OneDrive car
 existing cloud consent popup and verify its origin, opener and connection before polling.
 Both the OWUI and platform live-document settings must be enabled.
 
-The chat OneDrive picker returns `DocumentReference` metadata (including eTag), then
+The chat OneDrive picker returns `DocumentReference` metadata (with optional eTag), then
 `POST /files/onedrive/attach` calls platform `/v1/attach` with the acting user. Its strict
 schema rejects tokens and caller-selected collections. The platform rechecks grant,
-readability and size, skipping only reach for the explicit user selection. Missing organisational picker
-version metadata is refused. The picker supports organisational accounts only and always
+readability and size, skipping only reach for the explicit user selection. Missing picker version metadata is resolved by platform inspection; the File stores the inspected reference returned by attach. The picker supports organisational accounts only and always
 attaches by reference. Existing file count limits apply. Microsoft picker payload/version availability needs a tenant check.
 
 The consumer API credential needs both ingest and the dedicated attach capability for

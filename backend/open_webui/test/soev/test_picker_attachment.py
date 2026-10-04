@@ -20,6 +20,7 @@ def picker(env, monkeypatch):  # noqa: F811
             return_value={
                 'source_id': 'source',
                 'content_type': 'application/pdf',
+                'ref': {'grant_id': 'grant', 'drive_id': 'drive', 'item_id': 'item', 'etag': 'v1'},
                 'job_id': 'job',
                 'collection_key': 'owui-attachments-alice',
             }
@@ -155,3 +156,19 @@ async def test_picker_identity_mismatch_is_typed(picker, monkeypatch, status):
         )
     assert response.status_code == status
     assert response.json()['detail']['code'] == 'attachment_mismatch'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('missing', [True, False])
+async def test_picker_without_version_retains_inspected_version(picker, missing):
+    """The File carries the platform's pinned version when the picker has none."""
+    form = {**picker.form, 'etag': None}
+    if missing:
+        del form['etag']
+    async with AsyncClient(transport=httpx.ASGITransport(picker.app), base_url='http://test') as browser:
+        response = await browser.post(
+            '/api/v1/files/onedrive/attach', json=form, headers={'Idempotency-Key': str(uuid4())}
+        )
+    assert response.status_code == 201
+    assert picker.client.send.call_args.args[2]['ref']['etag'] is None
+    assert response.json()['source']['ref']['etag'] == 'v1'

@@ -22,7 +22,7 @@ class PickerAttachment(BaseModel):
     grant_id: str = Field(min_length=1, max_length=256)
     drive_id: str = Field(min_length=1, max_length=1024)
     item_id: str = Field(min_length=1, max_length=1024)
-    etag: str = Field(min_length=1, max_length=1024)
+    etag: str | None = Field(default=None, min_length=1, max_length=1024)
     name: str = Field(min_length=1, max_length=1024)
     web_url: HttpUrl
     size: int = Field(ge=0, strict=True)
@@ -75,7 +75,7 @@ async def attach_onedrive(
                 'name': body.name,
                 'web_url': str(body.web_url),
                 'provider': 'onedrive',
-                'provider_ref': ref,
+                'provider_ref': result['ref'],
                 'attached_by': 'user',
             },
         )

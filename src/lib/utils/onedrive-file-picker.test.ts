@@ -136,7 +136,19 @@ describe('documentReference', () => {
 		});
 		expect(fetchSpy).not.toHaveBeenCalled();
 	});
-	it.each(['eTag', 'id', 'parentReference', 'webUrl', 'size'])(
+	it('accepts missing versions for platform inspection', async () => {
+		const { documentReference } = await import('./onedrive-file-picker');
+		expect(
+			documentReference({
+				id: 'i',
+				name: 'Plan.pdf',
+				parentReference: { driveId: 'd' },
+				webUrl: 'https://tenant.sharepoint.com/plan.pdf',
+				size: 123
+			}).etag
+		).toBeNull();
+	});
+	it.each(['id', 'parentReference', 'webUrl', 'size'])(
 		'refuses a picker item missing %s',
 		async (field) => {
 			const { documentReference } = await import('./onedrive-file-picker');

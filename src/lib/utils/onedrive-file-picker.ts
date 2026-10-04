@@ -350,7 +350,7 @@ export interface DocumentReference {
 	drive_id: string;
 	item_id: string;
 	name: string;
-	etag: string;
+	etag: string | null;
 	web_url: string;
 	size: number;
 }
@@ -361,8 +361,7 @@ export function documentReference(item: OneDriveFileInfo): DocumentReference {
 		!drive ||
 		!item.id ||
 		!item.name ||
-		typeof item.eTag !== 'string' ||
-		!item.eTag ||
+		(item.eTag != null && (typeof item.eTag !== 'string' || !item.eTag)) ||
 		typeof item.webUrl !== 'string' ||
 		!item.webUrl.startsWith('https://') ||
 		!Number.isSafeInteger(item.size) ||
@@ -375,7 +374,7 @@ export function documentReference(item: OneDriveFileInfo): DocumentReference {
 		drive_id: drive,
 		item_id: item.id,
 		name: item.name,
-		etag: item.eTag,
+		etag: item.eTag ?? null,
 		web_url: item.webUrl,
 		size: item.size
 	};
