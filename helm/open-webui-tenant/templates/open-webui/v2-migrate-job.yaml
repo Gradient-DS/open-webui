@@ -9,10 +9,15 @@
 {{- if and (eq $migrate.mode "apply") (not $migrate.config) }}
 {{- fail "soevApi.migrate.config must hold the v2 config key set" }}
 {{- end }}
-{{- $hash := printf "%s|%s" .Values.openWebui.image.tag (toJson $migrate) | sha256sum | trunc 10 }}
+{{- if not $migrate.image.tag }}
+{{- fail "soevApi.migrate.image.tag must pin the image the migration runs with" }}
+{{- end }}
+{{- $hash := printf "%s|%s" (toJson $migrate) (toJson .Values.extraEnv) | sha256sum | trunc 10 }}
 # [Gradient] Plain Job, not a Helm hook: Flux applies it beside the app and Kubernetes
-# retries it until soev-api answers and ingest settles. The name changes with the image
-# tag and the migrate values, because a Job's pod template is immutable.
+# retries it until soev-api answers and ingest settles. A Job's pod template is
+# immutable, so the name hashes everything the template takes from values (the migrate
+# block, with its own pinned image tag, and extraEnv) and nothing from the app image:
+# an app release leaves the finished Job alone, a migrate change starts a new one.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -22,7 +27,9 @@ metadata:
     app.kubernetes.io/component: v2-migrate
 spec:
   backoffLimit: {{ $migrate.backoffLimit }}
-  ttlSecondsAfterFinished: {{ $migrate.ttlSecondsAfterFinished }}
+  {{- with $migrate.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+  {{- end }}
   podFailurePolicy:
     rules:
       - action: FailJob
@@ -45,7 +52,7 @@ spec:
       {{- end }}
       containers:
         - name: migrate
-          image: "{{ .Values.openWebui.image.repository }}:{{ .Values.openWebui.image.tag }}"
+          image: "{{ .Values.openWebui.image.repository }}:{{ $migrate.image.tag }}"
           imagePullPolicy: {{ .Values.openWebui.image.pullPolicy }}
           {{- with .Values.openWebui.securityContext }}
           securityContext:
@@ -56,8 +63,9 @@ spec:
             - configMapRef:
                 name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
           env:
-            # Brings the schema (config_backup and friends) up first; the advisory
-            # lock serializes this with the app's init container on PostgreSQL.
+            # Brings the app schema up first; the advisory lock serializes this with
+            # the app's init container on PostgreSQL. The migration's own state lives
+            # outside Alembic, in schema owui_v2_migration.
             - name: ENABLE_DB_MIGRATIONS
               value: "true"
             {{- include "open-webui-tenant.openWebui.env" . | nindent 12 }}

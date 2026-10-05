@@ -8,6 +8,8 @@ soevApi:
   servicePrincipal: open-webui
   migrate:
     enabled: true
+    image:
+      tag: v2-migrate-test
     config:
       agent_api.selected_agent: soev
       document_writer.enable: true

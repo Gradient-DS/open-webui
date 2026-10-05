@@ -708,10 +708,13 @@ soevApi:
   audience: ""
   servicePrincipal: ""
   # One-shot v1 -> v2 migration (python -m open_webui.soev.migrate). A plain Job named
-  # <release>-v2-migrate-<hash of image tag + these values>, so a new image or new
-  # values start a new run; every step is idempotent. Needs soevApi.url and Redis.
+  # <release>-v2-migrate-<hash of these values and extraEnv>: changing them starts a new
+  # run (every step is idempotent); an app image bump does not. Needs soevApi.url and Redis.
   migrate:
     enabled: false
+    # Pinned separately from openWebui.image.tag: the Job's pod template is immutable.
+    image:
+      tag: ""
     mode: apply  # apply | restore (puts back the config snapshot and model ids)
     id: v2  # Snapshot, step markers and the one-time sign-out are kept per id.
     # SOEV_V2_CONFIG: exactly these keys (the migration refuses others).
@@ -734,7 +737,9 @@ soevApi:
     # Kubernetes retries exit 1 (soev-api unreachable) and 75 (ingest running) with
     # exponential backoff capped at 6 min; exit 2 (invalid input) fails the Job at once.
     backoffLimit: 60
-    ttlSecondsAfterFinished: 604800
+    # Unset keeps the finished Job; once a TTL removes it, the next Helm upgrade
+    # recreates it and the migration runs again (harmless, but not free).
+    ttlSecondsAfterFinished: null
     resources: {}
 agentApi:
   # Unset uses the application's v1 default; explicitly set v1 or v2.
