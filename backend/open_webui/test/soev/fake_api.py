@@ -38,6 +38,7 @@ class FakeSoevApi:
         self.seen_jtis = set()
         self.requests, self.failures = [], []
         self.chat = FakeChatApi()
+        self.models: list[dict] = []
 
     def handle(self, request):
         self.requests.append(request)
@@ -199,6 +200,9 @@ class FakeSoevApi:
 
     def _catalog_route(self, request, body, credential, subject):
         parts = [unquote(part) for part in request.url.raw_path.decode().split('?')[0].strip('/').split('/')]
+        if parts == ['v1', 'models'] and request.method == 'GET':
+            self._require(credential, 'read')
+            return httpx.Response(200, json={'data': copy.deepcopy(self.models)})
         if parts[:2] == ['v1', 'identity'] or parts[:2] == ['v1', 'directory']:
             return self._identity(request.method, parts, body)
         if parts[:2] == ['v1', 'jobs']:

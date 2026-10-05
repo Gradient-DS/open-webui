@@ -20,6 +20,7 @@ from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.models.users import UserModel
 from open_webui.routers import ollama, openai
 from open_webui.socket.utils import RedisDict
+from open_webui.soev import model_catalog
 from open_webui.utils.access_control import has_access, has_base_model_access
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.plugin import (
@@ -57,6 +58,9 @@ async def fetch_openai_models(request: Request, user: UserModel = None):
 
 
 async def get_all_base_models(request: Request, user: UserModel = None):
+    # [Gradient] In v2 mode the soev-api catalog is the only source of base models.
+    if model_catalog.is_v2():
+        return await model_catalog.base_models()
     config = await Config.get_many('openai.enable', 'ollama.enable')
     openai_task = fetch_openai_models(request, user) if config.get('openai.enable') else asyncio.sleep(0, result=[])
     ollama_task = fetch_ollama_models(request, user) if config.get('ollama.enable') else asyncio.sleep(0, result=[])
@@ -267,6 +271,9 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
             model['filter_ids'] = filter_ids
 
             models.append(model)
+
+    # [Gradient] Catalog meta survives an admin's model row; each model gets its own copy.
+    model_catalog.apply_catalog(models, base_models)
 
     # Process action_ids to get the actions
     def get_action_items_from_module(function, module):
@@ -519,7 +526,8 @@ async def get_filtered_models(models, user, db=None):
             if model.get('arena'):
                 continue
             info = model.get('info')
-            if info:
+            # [Gradient] Catalog meta is not an admin's model row; access rules stay as for any base model.
+            if info and not model_catalog.is_unconfigured(model):
                 model_infos[model['id']] = info
 
         user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}

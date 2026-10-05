@@ -1,6 +1,5 @@
 """Adapt one OWUI turn to a server-owned thread and the existing chat renderer.
-Feed the model picker with an OpenAI-type connection whose base URL is
-<SOEV_API_URL>/v1/chat and whose API key is the soev-api key."""
+The model picker, its default and task completions come from soev-api (soev/model_catalog.py)."""
 
 import asyncio
 import base64
