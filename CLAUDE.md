@@ -151,3 +151,7 @@ ui.composerTools user settings for new chats. Model defaults seed only unsaved c
 loading a chat or changing models never overwrites explicit preferences. Feature gates
 control request availability without rewriting saved choices; unavailable selected
 features remain disabled in the + menu. Tool/skill/filter selections use the same snapshot.
+
+Mail shares ui.composerTools/chat.features persistence with every composer feature,
+including the initial message. Search statuses retain structured order/from/to/cc
+options for English/Dutch rendering, including zero-result searches.

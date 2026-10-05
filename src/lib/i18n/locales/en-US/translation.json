@@ -1,4 +1,12 @@
 {
+  "To": "To",
+  "From": "From",
+  "Searched your mail for \"{{keywords}}\" ({{options}}): no emails": "Searched your mail for \"{{keywords}}\" ({{options}}): no emails",
+  "Searched your mail for \"{{keywords}}\" ({{options}}): {{matches}} emails": "Searched your mail for \"{{keywords}}\" ({{options}}): {{matches}} emails",
+  "Searching your mail for \"{{keywords}}\" ({{options}})...": "Searching your mail for \"{{keywords}}\" ({{options}})...",
+  "Cc": "Cc",
+  "relevance": "relevance",
+  "newest first": "newest first",
   "Searched your mail for \"{{keywords}}\": {{matches}} emails": "Searched your mail for \"{{keywords}}\": {{matches}} emails",
   "Searched your mail for \"{{keywords}}\": no emails": "Searched your mail for \"{{keywords}}\": no emails",
   "Searching your mail for \"{{keywords}}\"...": "Searching your mail for \"{{keywords}}\"...",

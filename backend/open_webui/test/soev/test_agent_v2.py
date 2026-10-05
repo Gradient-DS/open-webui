@@ -1962,3 +1962,39 @@ async def test_a_call_shows_running_only_after_the_reasoning_that_led_to_it() ->
     assert not turn.emitter.call_args_list
     await turn.start_pending_tools()
     assert turn.emitter.call_args_list[0].args[0]['data']['done'] is False
+
+
+@pytest.mark.parametrize('matches', [None, 143])
+def test_search_mail_status_keeps_order_and_filters(matches):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {
+        'search_mail': {
+            'done': {
+                'template': 'Searched your mail for "{{keywords}}": {{matches}} emails',
+                'fallback': 'Searched your mail for "{{keywords}}": no emails',
+                'params': {'keywords': 'argument.keywords', 'matches': 'output.first.mail-reference.matches'},
+            }
+        }
+    }
+    status = turn.tool_status(
+        'search_mail',
+        {
+            'keywords': ['KNB'],
+            'order': 'newest',
+            'from_addresses': ['@knb.nl'],
+            'to_addresses': ['a@example.test'],
+            'cc_addresses': ['b@example.test'],
+        },
+        {'elements': [{'type': 'mail-reference', 'matches': matches}] if matches else []},
+    )
+    assert '({{options}})' in status['description']
+    assert status['options'] == 'newest first; From: @knb.nl; To: a@example.test; Cc: b@example.test'
+    assert len(status['mail_options']) == 4
+    assert ('no emails' in status['description']) == (matches is None)
+
+
+def test_plain_mail_status_is_unchanged():
+    from open_webui.utils.mail_status import mail_search_status
+
+    status = {'description': 'Searched your mail for "{{keywords}}": no emails', 'keywords': 'KNB'}
+    assert mail_search_status(status, {'keywords': ['KNB']}) == status

@@ -25,6 +25,7 @@ from open_webui.soev import acting, agent_threads, identity, ingest, live_docume
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.chat_id import is_temporary_chat_id
+from open_webui.utils.mail_status import mail_search_status
 from open_webui.utils.web_search_state import web_search_state
 from starlette.responses import StreamingResponse
 
@@ -652,6 +653,8 @@ class AgentTurn:
             _filled(declared, self.tool_params(declared, arguments, output)) if isinstance(declared, dict) else None
         )
         status = {'action': name, **filled} if filled else generic
+        if name == 'search_mail':
+            status = mail_search_status(status, arguments)
         if items := _web_items(self.touched(arguments, output)):
             status['items'] = items
         return status

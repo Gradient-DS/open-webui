@@ -1,4 +1,12 @@
 {
+  "To": "Aan",
+  "From": "Van",
+  "Searched your mail for \"{{keywords}}\" ({{options}}): no emails": "Je mail doorzocht naar \"{{keywords}}\" ({{options}}): geen e-mails",
+  "Searched your mail for \"{{keywords}}\" ({{options}}): {{matches}} emails": "Je mail doorzocht naar \"{{keywords}}\" ({{options}}): {{matches}} e-mails",
+  "Searching your mail for \"{{keywords}}\" ({{options}})...": "Je mail doorzoeken naar \"{{keywords}}\" ({{options}})...",
+  "Cc": "Cc",
+  "relevance": "relevantie",
+  "newest first": "nieuwste eerst",
   "Searched your mail for \"{{keywords}}\": {{matches}} emails": "Je mail doorzocht naar \"{{keywords}}\": {{matches}} e-mails",
   "Searched your mail for \"{{keywords}}\": no emails": "Je mail doorzocht naar \"{{keywords}}\": geen e-mails",
   "Searching your mail for \"{{keywords}}\"...": "Je mail doorzoeken naar \"{{keywords}}\"...",
