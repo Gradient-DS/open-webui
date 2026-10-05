@@ -34,11 +34,17 @@ async def env(identity_config, fake_api, monkeypatch):
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     users = importlib.import_module('open_webui.models.users')
+    config = importlib.import_module('open_webui.models.config')
+    state = importlib.import_module('open_webui.models.soev_migration')
     async with engine.begin() as connection:
         await connection.run_sync(
             lambda sync: database.Base.metadata.create_all(
                 sync,
                 tables=[
+                    config.Config.__table__,
+                    state.ConfigBackup.__table__,
+                    state.ModelIdBackup.__table__,
+                    state.MigrationMarker.__table__,
                     users.User.__table__,
                     groups.Group.__table__,
                     groups.GroupMember.__table__,
@@ -305,6 +311,19 @@ async def test_module_dry_run_preserves_sql_tables(env, tmp_path):
         'VECTOR_DB': 'weaviate',
         'SOEV_API_URL': 'https://soev.invalid',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
+        'SOEV_V2_MIGRATION_ID': 'v2-test',
+        'SOEV_V2_CONFIG': json.dumps(
+            {
+                'agent_api.selected_agent': 'soev',
+                'document_writer.enable': True,
+                'live_documents.enable': False,
+                'live_mail.enable': False,
+                'notes.enable': True,
+                'web.search.enable': True,
+                'webui.url': 'https://client.soev.ai',
+                'user.permissions.features': {},
+            }
+        ),
     }
     for name in ('TYPE', 'USER', 'PASSWORD', 'HOST', 'PORT', 'NAME'):
         environment[f'DATABASE_{name}'] = ''

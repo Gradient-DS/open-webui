@@ -1,6 +1,7 @@
-"""Copy OWUI identities, groups, collections and folders to soev-api, then reconcile.
+"""Move an Open WebUI v1 tenant to the v2 shape in one idempotent, reversible run.
 
-Run with python -m open_webui.soev.migrate [--dry-run]; OWUI tables are read only.
+python -m open_webui.soev.migrate --apply | --restore | --dry-run. The directory copy
+(identities, groups, collections, folders, cloud schedules) only reads OWUI tables.
 """
 
 import argparse
@@ -9,7 +10,10 @@ import hashlib
 import json
 import os
 import sys
+from dataclasses import dataclass, field
 from urllib.parse import quote
+
+EXIT_OK, EXIT_FAILED = 0, 1
 
 
 async def _knowledge_rows(table, db):
@@ -276,22 +280,105 @@ async def migrate(*, dry_run=False, db=None):
     return await reconcile(file_counts, client, conflicts=conflicts, dry_run=dry_run, cloud_owners=cloud_owners)
 
 
+@dataclass
+class Options:
+    migration_id: str
+    v2_config: dict = field(default_factory=dict)
+
+
+def options_from_env(environ=os.environ, *, migration_id: str | None = None) -> Options:
+    from open_webui.soev.migrate_config import parse_v2_config
+    from open_webui.soev.migrate_state import MigrationError
+
+    migration_id = migration_id or environ.get('SOEV_V2_MIGRATION_ID')
+    if not migration_id:
+        raise MigrationError('Set SOEV_V2_MIGRATION_ID or pass --migration-id')
+    return Options(migration_id=migration_id, v2_config=parse_v2_config(environ.get('SOEV_V2_CONFIG')))
+
+
+async def apply(options: Options, *, db=None) -> int:
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.soev import migrate_config, migrate_state
+
+    async with get_async_db_context(db) as session:
+        taken = await migrate_state.snapshot(session, options.migration_id, migrate_config.SNAPSHOT_KEYS)
+        print(f'1 snapshot: {"taken" if taken else "kept"} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
+        if await migrate_state.has_marker(session, options.migration_id, 'config'):
+            print('2 config switch: already done')
+        else:
+            values = await migrate_config.switch(session, options.v2_config)
+            migrate_state.add_marker(session, options.migration_id, 'config')
+            await session.commit()
+            print(f'2 config switch: {len(values)} keys written')
+    return EXIT_OK
+
+
+async def restore(migration_id: str, *, db=None) -> int:
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.soev import migrate_state
+
+    async with get_async_db_context(db) as session:
+        restored = await migrate_state.restore_config(session, migration_id)
+        # The snapshot stays: it is the v1 state, and a later --apply switches again from it.
+        await migrate_state.drop_marker(session, migration_id, 'config')
+        await session.commit()
+        print(f'config rows restored: {restored}')
+    return EXIT_OK
+
+
+async def plan(options: Options, *, db=None) -> int:
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.models.config import Config
+    from open_webui.soev import migrate_config, migrate_state
+
+    async with get_async_db_context(db) as session:
+        try:
+            snapshotted = await migrate_state.has_marker(session, options.migration_id, 'snapshot')
+        except Exception:
+            # The state tables arrive with the schema migration the app or Job runs first.
+            await session.rollback()
+            snapshotted = None
+        state = {True: 'exists, kept', False: 'would be taken', None: 'state tables missing'}[snapshotted]
+        print(f'1 snapshot: {state} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
+        row = await session.get(Config, migrate_config.PERMISSIONS)
+        values = migrate_config.planned(options.v2_config, row.value if row else {})
+        for key, value in sorted(values.items()):
+            print(f'2 config switch: {key} = {json.dumps(value, sort_keys=True)}')
+    return await migrate(dry_run=True, db=db)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dry-run', action='store_true', help='Print planned requests without sending HTTP requests')
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--apply', action='store_true', help='Run every step; safe to rerun')
+    mode.add_argument('--restore', action='store_true', help='Put back the config snapshot and model ids')
+    mode.add_argument('--dry-run', action='store_true', help='Print the plan; no writes and no HTTP requests')
+    parser.add_argument('--migration-id', help='Defaults to SOEV_V2_MIGRATION_ID')
     args = parser.parse_args()
-    # Config otherwise runs schema migrations on import, which would write OWUI tables.
-    os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
+    if args.dry_run:
+        # Config otherwise runs schema migrations on import, which would write OWUI tables.
+        os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
 
     import httpx
 
     from open_webui.soev.client import SoevApiError
+    from open_webui.soev.migrate_state import MigrationError
 
     try:
-        status = asyncio.run(migrate(dry_run=args.dry_run))
+        if args.restore:
+            migration_id = args.migration_id or os.environ.get('SOEV_V2_MIGRATION_ID')
+            if not migration_id:
+                raise MigrationError('Set SOEV_V2_MIGRATION_ID or pass --migration-id')
+            status = asyncio.run(restore(migration_id))
+        else:
+            options = options_from_env(migration_id=args.migration_id)
+            status = asyncio.run(plan(options) if args.dry_run else apply(options))
+    except MigrationError as error:
+        print(f'Migration aborted: {error}', file=sys.stderr)
+        raise SystemExit(EXIT_FAILED) from None
     except (SoevApiError, httpx.TransportError, ValueError):
         print('Migration aborted; reconciliation could not complete.', file=sys.stderr)
-        raise SystemExit(1) from None
+        raise SystemExit(EXIT_FAILED) from None
     raise SystemExit(status)
 
 
