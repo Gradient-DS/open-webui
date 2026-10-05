@@ -11,19 +11,23 @@
   "elements": [],
   "citations": [],
   "error": null,
-  "source_id": "slow-source",
-  "collection_key": "owui-attachments-alice",
-  "job_id": "slow-job",
-  "name": "Q3 plan.txt",
-  "web_url": "https://documents.example.test/q3",
-  "provider": "stub_documents",
-  "attached_by": "agent",
-  "provider_ref": {
-    "grant_id": "grant",
-    "drive_id": "fixture",
-    "item_id": "q3",
-    "etag": "v1"
-  },
-  "status": "processing",
-  "content_type": "text/plain"
+  "attachments": [
+    {
+      "source_id": "slow-source",
+      "collection_key": "owui-attachments-alice",
+      "job_id": "slow-job",
+      "name": "Q3 plan.txt",
+      "web_url": "https://documents.example.test/q3",
+      "provider": "stub_documents",
+      "attached_by": "agent",
+      "provider_ref": {
+        "grant_id": "grant",
+        "drive_id": "fixture",
+        "item_id": "q3",
+        "etag": "v1"
+      },
+      "status": "processing",
+      "content_type": "text/plain"
+    }
+  ]
 }

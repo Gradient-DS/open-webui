@@ -2219,8 +2219,8 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
         ({'elements': [{'type': 'action_required', 'id': 'connect'}]}, False, 'Could not open document'),
         ({'error': 'tool_failed'}, False, 'Could not open document'),
         ({'elements': [{'type': 'document', 'id': 'doc'}]}, False, 'Opened document'),
-        ({'status': 'processing'}, True, 'Opened document'),
-        ({'status': 'ready'}, True, 'Opened document'),
+        ({'attachments': [{'status': 'processing'}]}, True, 'Opened document'),
+        ({'attachments': [{'status': 'ready'}]}, True, 'Opened document'),
         ({'error': 'one_hit_failed', 'elements': [{'type': 'document', 'id': 'doc'}]}, False, 'Opened document'),
         ({'error': 'one_hit_failed'}, True, 'Opened document'),
         (
@@ -2239,6 +2239,78 @@ async def test_attach_summary_reflects_the_outcome(output: dict, attached: bool,
     assert turn.settling == [
         {'action': 'attach_live_document', 'description': expected, 'call_id': 'attach', 'done': True}
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('resume', [False, True])
+async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(monkeypatch, resume):
+    records = [
+        {
+            'source_id': source,
+            'collection_key': 'owui-attachments-alice',
+            'job_id': 'job-' + source,
+            'name': source + '.pdf',
+            'web_url': 'https://files.test/' + source,
+            'provider': 'onedrive',
+            'attached_by': 'agent',
+            'provider_ref': {'grant_id': 'g', 'drive_id': 'd', 'item_id': source, 'etag': 'v1'},
+            'status': status,
+            'content_type': 'application/pdf',
+        }
+        for source, status in [('ready', 'ready'), ('mismatch', 'ready'), ('pending', 'processing')]
+    ]
+
+    async def register(user_id, record):
+        if record['source_id'] == 'mismatch':
+            raise agent_v2.live_documents.AttachmentMismatch(403, 'Wrong owner')
+        return SimpleNamespace(
+            id=record['source_id'],
+            filename=record['name'],
+            meta={
+                'collection_name': record['collection_key'],
+                'status': 'completed' if record['status'] == 'ready' else 'processing',
+                'source': {'provider': record['provider'], 'ref': record['provider_ref']},
+                'web_url': record['web_url'],
+                'attached_by': record['attached_by'],
+            },
+        )
+
+    registration = AsyncMock(side_effect=register)
+    monkeypatch.setattr(agent_v2.live_documents, 'register_attachment', registration)
+    stored = {'files': [{'id': 'existing', 'name': 'Existing upload'}]}
+    get_message = AsyncMock(return_value=stored)
+    upsert = AsyncMock()
+    monkeypatch.setattr(Chats, 'get_message_by_id_and_message_id', get_message)
+    monkeypatch.setattr(Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
+    payload = {'call_id': 'attach', 'attachments': records, 'elements': [], 'text': 'Attached two files.'}
+    event = ChatEvent('attached', {'stream': 'root', 'payload': payload})
+
+    async def stream(*args, **kwargs):
+        yield event
+
+    turn = agent_v2.AgentTurn(
+        SimpleNamespace(chat_stream=stream),
+        {'user_id': 'alice', 'chat_id': 'chat', 'message_id': 'message'},
+        'owui:user:alice',
+    )
+    turn.emitter = AsyncMock()
+    turn.thread_id = 'thread'
+    turn.running['attach'] = ('attach_live_document', {})
+    for replay in range(2):
+        if resume:
+            await turn.resume()
+        else:
+            await turn.render_event(event)
+        update = upsert.await_args.args[2]
+        assert [file['id'] for file in update['files']] == ['existing', 'ready', 'pending']
+        assert [file.get('status') for file in update['files'][1:]] == ['uploaded', 'processing']
+        assert upsert.await_count == get_message.await_count == turn.emitter.await_count == replay + 1
+        turn.emitter.assert_awaited_with({'type': 'chat:message:files', 'data': update})
+        stored.update(update)
+    assert [call.args for call in registration.await_args_list] == [('alice', record) for record in records] * 2
+    if not resume:
+        assert len(turn.settling) == 1
+        assert turn.settling[0]['description'] != 'Could not open document'
 
 
 @pytest.mark.parametrize(

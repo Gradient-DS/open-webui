@@ -65,7 +65,10 @@ Set `down_revision` to the current head. `alembic heads` needs a live DB connect
 
 ## Live document attachments
 
-`soev/live_documents.py` records agent `attached` events as Files whose id is the platform source id.
+`soev/live_documents.py` registers every record in an agent `attached` event's
+`attachments` array as a File whose id is the platform source id. A call with accepted
+documents produces one event carrying all document elements and text; the consumer
+merges its attachment chips into message files and emits `chat:message:files` once.
 Their `meta.source` contains the provider reference; bytes are never stored in OWUI. Reference
 jobs use the existing durable job poller, skipping upload commit and path moves. File content
 routes stream platform originals with the requesting user's assertion. Every v2 turn ensures
@@ -124,7 +127,7 @@ MSAL uses one organisational client and caches in-flight initialization across p
 preparation and clicks. Personal Microsoft accounts and browser byte downloads are unsupported.
 
 Attach tool summaries show "Could not open document" for refusals and failures.
-An attached event (including processing) or an existing document keeps the success label.
+An attached event with accepted attachments (including processing) or an existing document keeps the success label.
 
 OneDrive search uses the cloud-and-magnifier icon in its menu row, pinned button
 and tooltip. The picker retains the plain cloud; pinned tooltip labels are

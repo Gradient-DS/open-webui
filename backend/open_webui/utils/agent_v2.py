@@ -972,17 +972,22 @@ class AgentTurn:
         self.running.clear()
 
     async def attached(self, payload: dict) -> None:
-        try:
-            file = await live_documents.register_attachment(self.metadata['user_id'], payload)
-        except live_documents.AttachmentMismatch as error:
-            log.warning('Skipping mismatched attachment event (%s)', error.status)
+        files = {}
+        for attachment in payload['attachments']:
+            try:
+                file = await live_documents.register_attachment(self.metadata['user_id'], attachment)
+            except live_documents.AttachmentMismatch as error:
+                log.warning('Skipping mismatched attachment event (%s)', error.status)
+                continue
+            files[file.id] = live_documents.chat_file(file)
+        if not files:
             return
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
         stored = {}
         if chat_id and message_id and not is_temporary_chat_id(chat_id):
             stored = await Chats.get_message_by_id_and_message_id(chat_id, message_id) or {}
         self.attached_files.update({item['id']: item for item in stored.get('files') or [] if item.get('id')})
-        self.attached_files[file.id] = live_documents.chat_file(file)
+        self.attached_files.update(files)
         update = {'files': list(self.attached_files.values())}
         if chat_id and message_id and not is_temporary_chat_id(chat_id):
             await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, update)
