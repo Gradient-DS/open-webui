@@ -2623,3 +2623,18 @@ async def test_a_turn_on_a_thread_sends_no_earlier_conversation(chat: Chat, monk
     await chat.turn('second', 'a2', 'a1')
     assert sent_text(chat) == 'second'
     stored.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_answered_model_is_stored_and_announced_when_reported(chat: Chat) -> None:
+    chat.api.chat.turns = [[('model_output', {'content': 'Hi', 'answered_model': 'fallback-llm'})]]
+    await chat.turn('first', 'a1')
+    assert chat.messages['chat', 'a1']['meta']['answered_model'] == 'fallback-llm'
+    assert {'type': 'chat:completion', 'data': {'answered_model': 'fallback-llm'}} in chat.socket
+
+
+@pytest.mark.asyncio
+async def test_no_answered_model_without_a_report(chat: Chat) -> None:
+    await chat.turn('first', 'a1')
+    assert 'answered_model' not in chat.messages['chat', 'a1']['meta']
+    assert not [event for event in chat.socket if event['type'] == 'chat:completion']
