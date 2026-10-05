@@ -120,7 +120,7 @@
 	export let liveDocumentsState: ToolState = 'off';
 	let connectingDocuments = false;
 	export const cycleLiveDocuments = async () => {
-		if (connectingDocuments) return;
+		if (connectingDocuments || !$config?.features?.enable_live_documents) return;
 		const next = nextToolState(liveDocumentsState, LIVE_DOCUMENT_STATES);
 		connectingDocuments = true;
 		try {
@@ -229,11 +229,15 @@
 		itemAllowed('skills') && isFeatureEnabled('skills') && Object.keys(skills ?? {}).length > 0;
 	$: showFilters = itemAllowed('filters') && (toggleFilters ?? []).length > 0;
 	$: showLiveDocuments =
-		itemAllowed('live_documents') && !!$config?.features?.enable_live_documents;
-	$: showWebSearch = itemAllowed('web_search') && showWebSearchButton;
-	$: showImageGeneration = itemAllowed('image_generation') && showImageGenerationButton;
-	$: showCodeInterpreter = itemAllowed('code_interpreter') && showCodeInterpreterButton;
-	$: showDocumentWriter = itemAllowed('document_writer') && showDocumentWriterButton;
+		itemAllowed('live_documents') &&
+		(!!$config?.features?.enable_live_documents || liveDocumentsState !== 'off');
+	$: showWebSearch = itemAllowed('web_search') && (showWebSearchButton || webSearchEnabled);
+	$: showImageGeneration =
+		itemAllowed('image_generation') && (showImageGenerationButton || imageGenerationEnabled);
+	$: showCodeInterpreter =
+		itemAllowed('code_interpreter') && (showCodeInterpreterButton || codeInterpreterEnabled);
+	$: showDocumentWriter =
+		itemAllowed('document_writer') && (showDocumentWriterButton || documentWriterEnabled);
 	$: showToolPermissions =
 		toolPermissionsEnabled && itemAllowed('tools') && isFeatureEnabled('tools');
 
@@ -359,10 +363,6 @@
 		}
 
 		tools = items;
-
-		if (!q) {
-			selectedToolIds = selectedToolIds.filter((id) => Object.keys(tools ?? {}).includes(id));
-		}
 	};
 
 	const setSkills = (skillItems: IntegrationItem[] | null, query = '') => {
@@ -376,10 +376,6 @@
 				};
 				return a;
 			}, {});
-
-		if (!query.trim()) {
-			selectedSkillIds = selectedSkillIds.filter((id) => Object.keys(skills ?? {}).includes(id));
-		}
 	};
 
 	const loadTools = async (query = toolQuery) => {
@@ -786,15 +782,17 @@
 									? $i18n.t(TOOL_OFF_DESCRIPTION)
 									: $i18n.t('The model decides whether to search OneDrive')
 							)}
-							tooltip={stateAriaLabel(
-								$i18n.t('OneDrive search'),
-								liveDocumentsState,
-								liveDocumentsState === 'off'
-									? $i18n.t(TOOL_OFF_DESCRIPTION)
-									: $i18n.t('The model decides whether to search OneDrive')
-							)}
+							tooltip={!$config?.features?.enable_live_documents
+								? $i18n.t('Unavailable')
+								: stateAriaLabel(
+										$i18n.t('OneDrive search'),
+										liveDocumentsState,
+										liveDocumentsState === 'off'
+											? $i18n.t(TOOL_OFF_DESCRIPTION)
+											: $i18n.t('The model decides whether to search OneDrive')
+									)}
 							toolState={liveDocumentsState}
-							disabled={connectingDocuments}
+							disabled={connectingDocuments || !$config?.features?.enable_live_documents}
 							onClick={cycleLiveDocuments}
 						>
 							<OneDriveSearch slot="icon" className="size-3.5" />
@@ -807,18 +805,20 @@
 							pinId="web_search"
 							toolState={webSearchToolState}
 							tooltipPlacement="top-start"
-							tooltip={openInternetBlocked
-								? dataSeparationMessage
-								: imageGenerationEnabled
-									? $i18n.t('Web search and image generation cannot run in the same turn')
-									: $i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])}
+							tooltip={!showWebSearchButton
+								? $i18n.t('Unavailable')
+								: openInternetBlocked
+									? dataSeparationMessage
+									: imageGenerationEnabled
+										? $i18n.t('Web search and image generation cannot run in the same turn')
+										: $i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Search the web'),
 								webSearchToolState,
 								$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
 							)}
-							disabled={openInternetBlocked}
-							onClick={cycleWebSearch}
+							disabled={!showWebSearchButton || openInternetBlocked}
+							onClick={() => showWebSearchButton && cycleWebSearch()}
 						>
 							<GlobeAlt slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -831,11 +831,13 @@
 							pinId="image_generation"
 							toolState={imageGenerationState}
 							tooltipPlacement="top-start"
-							tooltip={webSearchEnabled
-								? $i18n.t('Web search and image generation cannot run in the same turn')
-								: imageGenerationEnabled
-									? $i18n.t('Generate an image')
-									: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							tooltip={!showImageGenerationButton
+								? $i18n.t('Unavailable')
+								: webSearchEnabled
+									? $i18n.t('Web search and image generation cannot run in the same turn')
+									: imageGenerationEnabled
+										? $i18n.t('Generate an image')
+										: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Image'),
 								imageGenerationState,
@@ -843,7 +845,8 @@
 									? $i18n.t('Generate an image')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
-							onClick={() => cycleTool('image_generation')}
+							disabled={!showImageGenerationButton}
+							onClick={() => showImageGenerationButton && cycleTool('image_generation')}
 						>
 							<Photo slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -855,9 +858,11 @@
 							pinId="code_interpreter"
 							toolState={codeInterpreterState}
 							tooltipPlacement="top-start"
-							tooltip={codeInterpreterEnabled
-								? $i18n.t('Execute code for analysis')
-								: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							tooltip={!showCodeInterpreterButton
+								? $i18n.t('Unavailable')
+								: codeInterpreterEnabled
+									? $i18n.t('Execute code for analysis')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Code Interpreter'),
 								codeInterpreterState,
@@ -865,7 +870,8 @@
 									? $i18n.t('Execute code for analysis')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
-							onClick={() => cycleTool('code_interpreter')}
+							disabled={!showCodeInterpreterButton}
+							onClick={() => showCodeInterpreterButton && cycleTool('code_interpreter')}
 						>
 							<Terminal slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
@@ -877,15 +883,18 @@
 							pinId="document_writer"
 							toolState={documentWriterState}
 							tooltipPlacement="top-start"
-							tooltip={documentWriterEnabled
-								? $i18n.t('Write a document')
-								: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							tooltip={!showDocumentWriterButton
+								? $i18n.t('Unavailable')
+								: documentWriterEnabled
+									? $i18n.t('Write a document')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Document Writer'),
 								documentWriterState,
 								documentWriterEnabled ? $i18n.t('Write a document') : $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
-							onClick={() => cycleTool('document_writer')}
+							disabled={!showDocumentWriterButton}
+							onClick={() => showDocumentWriterButton && cycleTool('document_writer')}
 						>
 							<Document slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>

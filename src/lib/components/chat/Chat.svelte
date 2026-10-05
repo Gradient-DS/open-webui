@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { liveDocumentState, type ToolState } from '$lib/utils/toolState';
+	import {
+		composerPreferences,
+		composerFeatures,
+		composerFromFeatures,
+		type ComposerPreferences
+	} from '$lib/utils/composerPreferences';
+	import { type ToolState } from '$lib/utils/toolState';
+	import { getHistorySide } from '$lib/utils/dataSeparation';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
@@ -367,6 +374,33 @@
 	let webSearchFromDraft = false;
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = false;
+	let composerInitialized = false;
+	let composerSettingsSave = Promise.resolve();
+	const currentComposerPreferences = (): ComposerPreferences => ({
+		webSearchEnabled,
+		webSearchRequired,
+		liveDocumentsState,
+		imageGenerationEnabled,
+		codeInterpreterEnabled,
+		documentWriterEnabled,
+		selectedToolIds,
+		selectedSkillIds,
+		selectedFilterIds
+	});
+	const restoreComposerPreferences = (value: ComposerPreferences) => {
+		({
+			webSearchEnabled,
+			webSearchRequired,
+			liveDocumentsState,
+			imageGenerationEnabled,
+			codeInterpreterEnabled,
+			documentWriterEnabled,
+			selectedToolIds,
+			selectedSkillIds,
+			selectedFilterIds
+		} = value);
+		composerInitialized = true;
+	};
 	let webSearchActive = false;
 	let showWebSearchConfirm = false;
 	let pendingWebSearchPrompt: string | null = null;
@@ -385,6 +419,10 @@
 			$config?.features?.enable_web_search &&
 			($user?.role === 'admin' || $user?.permissions?.features?.web_search) &&
 			allModelsSupportWebSearch &&
+			!(
+				$config?.features?.feature_strict_data_separation &&
+				getHistorySide(createMessagesList(history, history.currentId)) === 'internal'
+			) &&
 			webSearchEnabled
 		);
 	}
@@ -799,7 +837,10 @@
 		(!chat?.id || Boolean(chat?.meta?.agent_id));
 	$: agentBinding = !embedded && $pendingAgentId ? { agent_id: $pendingAgentId } : null;
 
-	const restoreChatInput = async (storageChatInput: string | null) => {
+	const restoreChatInput = async (
+		storageChatInput: string | null,
+		restorePreferences = !history?.currentId
+	) => {
 		if (!storageChatInput || $temporaryChatEnabled) {
 			return false;
 		}
@@ -809,17 +850,11 @@
 			prompt = input.prompt ?? '';
 			messageInput?.setText(prompt);
 			files = input.files ?? [];
-			selectedToolIds = input.selectedToolIds ?? [];
-			selectedSkillIds = input.selectedSkillIds ?? [];
-			selectedFilterIds = input.selectedFilterIds ?? [];
-			webSearchEnabled = input.webSearchEnabled ?? false;
-			webSearchRequired = input.webSearchRequired ?? false;
-			liveDocumentsState = liveDocumentState(input.liveDocumentsState);
-			webSearchFromDraft = input.webSearchEnabled !== undefined;
-			imageGenerationEnabled = input.imageGenerationEnabled ?? false;
-			codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
-			// [Gradient] Preserve Document Writer across draft and OAuth restoration.
-			documentWriterEnabled = input.documentWriterEnabled ?? false;
+			// Stored chat features are authoritative once the first message exists.
+			if (restorePreferences) {
+				restoreComposerPreferences(composerPreferences(input, $settings.composerTools));
+				webSearchFromDraft = input.webSearchEnabled !== undefined;
+			}
 			if (input.toolApprovalMode) {
 				await handleToolApprovalModeChange(input.toolApprovalMode);
 			}
@@ -874,18 +909,14 @@
 
 		clearTimeout(saveControlsTimer);
 		await saveControls();
+		await chatSaveQueue;
 		loading = true;
 
 		prompt = '';
 		messageInput?.setText('');
 
 		files = [];
-		liveDocumentsState = 'off';
-		selectedToolIds = [];
-		selectedSkillIds = [];
-		selectedFilterIds = [];
-		webSearchEnabled = false;
-		imageGenerationEnabled = false;
+		composerInitialized = false;
 		acceptedDataWarnings = new Set();
 		contextUsage = null;
 
@@ -961,13 +992,8 @@
 		chatVariables = {};
 		chatFiles = [];
 		files = [];
-		liveDocumentsState = 'off';
-		selectedToolIds = [];
-		selectedSkillIds = [];
-		selectedFilterIds = [];
-		webSearchEnabled = false;
-		imageGenerationEnabled = false;
-		codeInterpreterEnabled = false;
+		composerInitialized = false;
+		restoreComposerPreferences(composerPreferences($settings.composerTools));
 		prompt = '';
 		messageInput?.setText('');
 		await chatId.set('');
@@ -998,18 +1024,30 @@
 	}
 
 	let lastSavedFeatures = '';
-	$: if ($chatId && !loading && !$temporaryChatEnabled && history?.currentId) {
-		const current = JSON.stringify({
-			webSearchEnabled,
-			liveDocumentsState,
-			webSearchRequired,
-			imageGenerationEnabled,
-			codeInterpreterEnabled,
-			documentWriterEnabled
-		});
+	$: composerSnapshot = composerPreferences({
+		webSearchEnabled,
+		webSearchRequired,
+		liveDocumentsState,
+		imageGenerationEnabled,
+		codeInterpreterEnabled,
+		documentWriterEnabled,
+		selectedToolIds,
+		selectedSkillIds,
+		selectedFilterIds
+	});
+	$: if (composerInitialized && !loading && !settingDefaults) {
+		const current = JSON.stringify(composerSnapshot);
 		if (current !== lastSavedFeatures) {
 			lastSavedFeatures = current;
-			saveChatHandler($chatId, history);
+			settings.update((value) => ({ ...value, composerTools: composerSnapshot }));
+			composerSettingsSave = composerSettingsSave.then(async () => {
+				await updateUserSettings(localStorage.token, { ui: $settings }).catch(() => {
+					toast.error($i18n.t('Failed to save settings'));
+				});
+			});
+			if ($chatId && !$temporaryChatEnabled && history?.currentId) {
+				saveChatHandler($chatId, history);
+			}
 		}
 	}
 
@@ -1051,11 +1089,6 @@
 		if (!history?.currentId) resetInput();
 	}
 	const resetInput = async () => {
-		selectedToolIds = [];
-		selectedSkillIds = [];
-		selectedFilterIds = [];
-		pendingOAuthTools = [];
-
 		if (selectedModelIds.filter((id) => id).length > 0) {
 			await setDefaults();
 		}
@@ -1078,8 +1111,12 @@
 	}
 
 	let settingDefaults = false;
-	const setDefaults = async () => {
-		if (settingDefaults) return;
+	const setDefaults = async (newChat = false) => {
+		if (settingDefaults || composerInitialized || (chatIdProp && !newChat)) return;
+		if ($settings.composerTools) {
+			restoreComposerPreferences(composerPreferences($settings.composerTools));
+			return;
+		}
 		settingDefaults = true;
 
 		try {
@@ -1214,6 +1251,11 @@
 				}
 			}
 		} finally {
+			if (!composerInitialized) {
+				restoreComposerPreferences(
+					composerPreferences($settings.composerTools, currentComposerPreferences())
+				);
+			}
 			settingDefaults = false;
 		}
 	};
@@ -1835,13 +1877,6 @@
 				messageInput?.setText('');
 
 				files = [];
-				selectedToolIds = [];
-				selectedSkillIds = [];
-				selectedFilterIds = [];
-				webSearchEnabled = false;
-				imageGenerationEnabled = false;
-				codeInterpreterEnabled = false;
-				documentWriterEnabled = false;
 				acceptedDataWarnings = new Set();
 
 				await restoreChatInput(storageChatInput);
@@ -2448,10 +2483,10 @@
 
 		autoScroll = true;
 
-		// resetInput() must stay last: the selected model's defaults override the draft's selection.
+		composerInitialized = false;
 		webSearchFromDraft = false;
-		await restoreChatInput(sessionStorage.getItem('chat-input'));
-		await resetInput();
+		await setDefaults(true);
+		await restoreChatInput(sessionStorage.getItem('chat-input'), true);
 		await chatId.set('');
 		await chatTitle.set('');
 
@@ -2668,26 +2703,8 @@
 				delete params.note_id;
 				chatFiles = structuredClone(chatContent?.files ?? []);
 
-				const chatFeatures = chatContent?.features ?? {};
-				liveDocumentsState = liveDocumentState(chatFeatures.live_documents);
-				webSearchEnabled = chatFeatures.web_search ?? false;
-				// Chats saved before Altijd existed carry only web_search and read as Auto.
-				webSearchRequired = chatFeatures.web_search_required ?? false;
-				imageGenerationEnabled = chatFeatures.image_generation ?? false;
-				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
-				documentWriterEnabled = chatFeatures.document_writer ?? false;
-
-				// [Gradient] Keep the feature-autosave baseline in sync with the chat we just
-				// loaded, so the reactive at the feature-persist block does not emit a
-				// redundant full-history save right after load. Key order must match that block.
-				lastSavedFeatures = JSON.stringify({
-					webSearchEnabled,
-					liveDocumentsState,
-					webSearchRequired,
-					imageGenerationEnabled,
-					codeInterpreterEnabled,
-					documentWriterEnabled
-				});
+				restoreComposerPreferences(composerFromFeatures(chatContent?.features));
+				lastSavedFeatures = JSON.stringify(currentComposerPreferences());
 
 				// Load tasks from chat-level DB field
 				chatTasks = chat?.tasks ?? [];
@@ -3906,6 +3923,17 @@
 		}
 	};
 
+	const supportsComposerFeature = (feature: string) =>
+		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).every(
+			(id) =>
+				(
+					($models.find((model) => model.id === id)?.info?.meta?.capabilities ?? {}) as Record<
+						string,
+						boolean
+					>
+				)[feature] ?? true
+		);
+
 	const getFeatures = () => {
 		let features = {};
 
@@ -3913,21 +3941,25 @@
 			features = {
 				voice: $showCallOverlay,
 				image_generation:
+					supportsComposerFeature('image_generation') &&
 					$config?.features?.enable_image_generation &&
 					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
 						? imageGenerationEnabled
 						: false,
 				code_interpreter:
+					supportsComposerFeature('code_interpreter') &&
+					!$selectedTerminalId &&
 					$config?.features?.enable_code_interpreter &&
 					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
 						? codeInterpreterEnabled
 						: false,
 				document_writer:
+					supportsComposerFeature('document_writer') &&
 					$config?.features?.enable_document_writer &&
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
 						: false,
-				live_documents: liveDocumentsState,
+				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
 				web_search: webSearchActive,
 				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
 				web_search_required: webSearchActive && webSearchRequired
@@ -4127,6 +4159,7 @@
 				rag_filter: getRagFilterForRequest(),
 				terminal_id:
 					terminalEnabled &&
+					supportsComposerFeature('terminal') &&
 					($terminalServers ?? []).some((t) => t.id && t.id === $selectedTerminalId)
 						? $selectedTerminalId
 						: undefined,
@@ -4506,6 +4539,7 @@
 				{
 					id: _chatId,
 					title: $i18n.t('New Chat'),
+					features: composerFeatures(currentComposerPreferences()),
 					models: selectedModels,
 					system: $settings.system ?? undefined,
 					params: params,
@@ -4547,26 +4581,26 @@
 		return _chatId;
 	};
 
-	const saveChatHandler = async (_chatId, history) => {
-		if ($chatId == _chatId) {
-			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, _chatId, {
-					models: selectedModels,
-					history: history,
-					messages: createMessagesList(history, history.currentId),
-					params: params,
-					files: chatFiles,
-					features: {
-						live_documents: liveDocumentsState,
-						web_search: webSearchEnabled,
-						web_search_required: webSearchEnabled && webSearchRequired,
-						image_generation: imageGenerationEnabled,
-						code_interpreter: codeInterpreterEnabled,
-						document_writer: documentWriterEnabled
-					}
-				});
-			}
-		}
+	let chatSaveQueue = Promise.resolve();
+	const saveChatHandler = (_chatId, history) => {
+		const payload = {
+			models: selectedModels,
+			history: structuredClone(history),
+			messages: createMessagesList(history, history.currentId),
+			params: structuredClone(params),
+			files: structuredClone(chatFiles),
+			features: composerFeatures(currentComposerPreferences())
+		};
+		if ($chatId !== _chatId || $temporaryChatEnabled) return chatSaveQueue;
+		chatSaveQueue = chatSaveQueue
+			.then(async () => {
+				const saved = await updateChatById(localStorage.token, _chatId, payload);
+				if ($chatId === _chatId) chat = saved;
+			})
+			.catch(() => {
+				toast.error($i18n.t('Failed to save settings'));
+			});
+		return chatSaveQueue;
 	};
 
 	const saveControls = async () => {
@@ -4598,14 +4632,7 @@
 				user: undefined,
 				access_grants: undefined
 			})),
-		selectedToolIds,
-		selectedSkillIds,
-		selectedFilterIds,
-		imageGenerationEnabled,
-		webSearchEnabled,
-		webSearchRequired,
-		liveDocumentsState,
-		codeInterpreterEnabled,
+		...currentComposerPreferences(),
 		toolApprovalMode
 	});
 
