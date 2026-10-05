@@ -2221,6 +2221,13 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
         ({'elements': [{'type': 'document', 'id': 'doc'}]}, False, 'Opened document'),
         ({'status': 'processing'}, True, 'Opened document'),
         ({'status': 'ready'}, True, 'Opened document'),
+        ({'error': 'one_hit_failed', 'elements': [{'type': 'document', 'id': 'doc'}]}, False, 'Opened document'),
+        ({'error': 'one_hit_failed'}, True, 'Opened document'),
+        (
+            {'elements': [{'type': 'document', 'id': 'first'}, {'type': 'document', 'id': 'second'}]},
+            False,
+            'Opened document',
+        ),
     ],
 )
 async def test_attach_summary_reflects_the_outcome(output: dict, attached: bool, expected: str) -> None:
@@ -2231,6 +2238,59 @@ async def test_attach_summary_reflects_the_outcome(output: dict, attached: bool,
     turn.end_tool({'call_id': 'attach', **output}, attached=attached)
     assert turn.settling == [
         {'action': 'attach_live_document', 'description': expected, 'call_id': 'attach', 'done': True}
+    ]
+
+
+@pytest.mark.parametrize(
+    'hits,titles',
+    [
+        ('first', 'Budget'),
+        (['first', 'unknown', 'second'], 'Budget, Minutes'),
+        (['second', 'first'], 'Minutes, Budget'),
+        (['unknown', None, {}, 'empty', 'missing'], None),
+        ([], None),
+        (None, None),
+    ],
+)
+def test_attach_status_binds_titles_from_hit_lists(hits, titles) -> None:
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.elements = {
+        'first': {'title': 'Budget'},
+        'second': {'title': 'Minutes'},
+        'empty': {'title': ' '},
+        'missing': {},
+    }
+    turn.tool_statuses = {
+        'attach_live_document': {
+            'running': {
+                'template': 'Opening {{titles}}...',
+                'fallback': 'Opening documents...',
+                'params': {'titles': 'element.hits.title'},
+            },
+            'done': {
+                'template': 'Opened {{titles}}',
+                'fallback': 'Opened documents',
+                'params': {'titles': 'element.hits.title'},
+            },
+        }
+    }
+    arguments = {'hits': hits}
+    params = {'titles': titles} if titles else {}
+    assert turn.tool_status('attach_live_document', arguments) == {
+        'action': 'attach_live_document',
+        'description': 'Opening {{titles}}...' if titles else 'Opening documents...',
+        **params,
+    }
+    turn.running['attach'] = ('attach_live_document', arguments)
+    turn.end_tool({'call_id': 'attach', 'elements': [{'type': 'document', 'id': 'opened'}]})
+    assert turn.settling == [
+        {
+            'action': 'attach_live_document',
+            'description': 'Opened {{titles}}' if titles else 'Opened documents',
+            **params,
+            'call_id': 'attach',
+            'done': True,
+        }
     ]
 
 

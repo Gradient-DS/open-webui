@@ -886,11 +886,11 @@ class AgentTurn:
         if (call := self.running.pop(output.get('call_id') or '', None)) is None:
             return
         name, arguments = call
-        status = self.tool_status(name, arguments, None if output.get('error') else output)
-        if name == 'attach_live_document' and (
-            output.get('error')
-            or not (attached or any(element.get('type') == 'document' for element in output.get('elements') or []))
-        ):
+        opened = name == 'attach_live_document' and (
+            attached or any(element.get('type') == 'document' for element in output.get('elements') or [])
+        )
+        status = self.tool_status(name, arguments, None if output.get('error') and not opened else output)
+        if name == 'attach_live_document' and not opened:
             status = {'action': name, 'description': 'Could not open document'}
         if name == 'read_mail' and (
             output.get('error') or not any(e.get('type') == 'mail-text' for e in output.get('elements') or [])
@@ -950,7 +950,11 @@ class AgentTurn:
             elif kind == 'element':
                 argument, _, field = rest.partition('.')
                 named = arguments.get(argument)
-                value = (self.elements.get(named) or {}).get(field) if isinstance(named, str) else None
+                names = named if isinstance(named, list) else [named]
+                values = [(self.elements.get(name) or {}).get(field) for name in names if isinstance(name, str)]
+                value = ', '.join(
+                    str(item) for item in values if isinstance(item, str | int | float) and str(item).strip()
+                )
             elif kind == 'output' and output is not None:
                 value = _from_output(rest, output.get('elements') or [])
             if isinstance(value, str | int | float) and str(value).strip():
