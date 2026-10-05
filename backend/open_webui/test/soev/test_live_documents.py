@@ -122,7 +122,7 @@ async def test_every_turn_supplies_collection_and_separate_tool_states(env, monk
 
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    turn = SimpleNamespace(client=env.client, run=Mock(return_value='stream'))
+    turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
     result = await agent_v2._sent(
         turn, 'hello', {'user_id': 'alice', 'features': {'live_documents': 'auto'}}, agent=None, model=None
     )
@@ -178,7 +178,7 @@ async def test_unavailable_reference_does_not_block_next_turn(env, monkeypatch, 
         await env.files.Files.set_status(row.id, status)
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    turn = SimpleNamespace(client=env.client, run=Mock(return_value='stream'))
+    turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
     assert (
         await agent_v2._sent(
             turn, 'next', {'user_id': 'alice', 'files': [live_documents.chat_file(row)]}, agent=None, model=None
@@ -205,7 +205,7 @@ async def test_collection_cache_and_setup_failure(env, monkeypatch):  # noqa: F8
     setup.side_effect = RuntimeError('unavailable')
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    turn = SimpleNamespace(client=env.client, run=Mock(return_value='stream'))
+    turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
     await agent_v2._sent(
         turn, 'hello', {'user_id': 'alice', 'features': {'live_documents': 'auto'}}, agent=None, model=None
     )
@@ -269,7 +269,7 @@ async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  
     assert row.meta['content_type'] == payload['content_type']
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
-    next_turn = SimpleNamespace(client=env.client, run=Mock(return_value='stream'))
+    next_turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
     assert (
         await agent_v2._sent(
             next_turn, 'Read it', {'user_id': 'alice', 'files': message['files']}, agent=None, model=None

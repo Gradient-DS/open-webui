@@ -138,7 +138,7 @@ Consent polling treats suspended:reauth with a cleared last_error as pending unt
 exposed as `features.enable_live_mail` only with `AGENT_API_ENABLED`. The `/api/config`
 config read includes the key. `features.live_mail` maps to `search_mail` and `read_mail`;
 both stay off unless the gate allows them. The Mail search menu/pin has independent
-chat and draft state, defaults off, and consents to `outlook_mail` on first enable.
+saved composer state, defaults off, and consents to `outlook_mail` on first enable.
 
 `utils/live-connections.ts` shares consent/prefetch across provider and family pairs.
 The proxy uses `/cloud-sync/connections/{id}/live/{family}` for `mail` or
