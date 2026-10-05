@@ -45,6 +45,7 @@ export interface RawSourceObject {
 	name?: string;
 	type?: string;
 	url?: string;
+	provider?: string;
 	[key: string]: unknown;
 }
 
@@ -131,6 +132,7 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 			// on every dispatch so the latest (post-answer) flags win:
 			// `current_turn` / `cited_this_turn` flip as a turn progresses.
 			if (source.n !== undefined) entry.n = source.n;
+			if (_source.provider) entry.source = { ...entry.source, provider: _source.provider };
 			if (source.current_turn !== undefined) entry.current_turn = source.current_turn;
 			if (source.cited_this_turn !== undefined) entry.cited_this_turn = source.cited_this_turn;
 

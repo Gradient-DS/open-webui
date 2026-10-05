@@ -72,7 +72,10 @@ model settings are not used. Details: `docs/agent-api-deployment.md`.
 
 ## Live document attachments
 
-`soev/live_documents.py` records agent `attached` events as Files whose id is the platform source id.
+`soev/live_documents.py` registers every record in an agent `attached` event's
+`attachments` array as a File whose id is the platform source id. A call with accepted
+documents produces one event carrying all document elements and text; the consumer
+merges its attachment chips into message files and emits `chat:message:files` once.
 Their `meta.source` contains the provider reference; bytes are never stored in OWUI. Reference
 jobs use the existing durable job poller, skipping upload commit and path moves. File content
 routes stream platform originals with the requesting user's assertion. Every v2 turn ensures
@@ -81,8 +84,8 @@ The platform binds that collection into its live ticket; a missing or changed ta
 refuses collection_mismatch. Provider identity and Retry-After remain structured client
 error fields. Unknown Graph readability is decided from downloaded bytes before staging.
 
-The OneDrive search toggle enables `search_live_documents` and `attach_live_document` together
-with `auto` state; both remain off by default. `/cloud-sync/connections/{id}/live-documents`
+The OneDrive search toggle enables `search_live_documents`, `list_live_folder` and `attach_live_document` together
+with `auto` state; all remain off by default. `/cloud-sync/connections/{id}/live-documents`
 lists or enables owned OneDrive live grants. The toggle and Connect OneDrive card share the
 existing cloud consent popup and verify its origin, opener and connection before polling.
 Both the OWUI and platform live-document settings must be enabled.
@@ -130,8 +133,7 @@ completed document as its owning user and fills content_type before marking it r
 MSAL uses one organisational client and caches in-flight initialization across picker
 preparation and clicks. Personal Microsoft accounts and browser byte downloads are unsupported.
 
-Attach tool summaries show "Could not open document" for refusals and failures.
-An attached event (including processing) or an existing document keeps the success label.
+Tool summaries use the agent's declared failed status when ToolOutput.error is set (fallback "Could not run {{tool}}"), otherwise done, including partial successes and already-attached documents.
 
 OneDrive search uses the cloud-and-magnifier icon in its menu row, pinned button
 and tooltip. The picker retains the plain cloud; pinned tooltip labels are
@@ -152,6 +154,17 @@ The proxy uses `/cloud-sync/connections/{id}/live/{family}` for `mail` or
 `live_documents`; grants and snapshots stay separate. `consentLabels` includes
 Outlook for ActionRequired cards. Mail sources keep Outlook links and render in the
 citation panel; they never create File rows or ingestion jobs.
+
+Citation icons use the explicit `source.provider` field, built in
+`utils/agent_v2.py` (`_as_source` and `Citations.add`). The live-mail element
+types `mail-reference` and `mail-text` identify `outlook_mail`. Document elements
+join their `source_id` to File `meta.source.provider`, covering both agent-opened
+OneDrive documents and picker attachments, including thread replay. The frontend
+reducer preserves this field; `Citations/sourceIcon.ts` maps it to the plain
+OneDrive and Outlook logos (`icons/OneDrive.svelte`, `icons/Outlook.svelte`) through `SourceIcon.svelte`. Missing or unknown providers retain the web
+favicon/document fallback; names and URLs never identify providers. Previously
+saved source payloads without provider metadata are not retroactively classified.
+Document-text sources from open_document or attach_live_document carry metadata.granularity=document for whole-document citations; chunk citations remain passage-level.
 
 Composer choices persist in chat.features, including the initial chat creation, and
 ui.composerTools user settings for new chats. Model defaults seed only unsaved choices;

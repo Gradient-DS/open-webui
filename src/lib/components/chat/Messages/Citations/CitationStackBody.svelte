@@ -5,6 +5,7 @@
 	import type { Readable } from 'svelte/store';
 	import type { DisplayCitation } from './reduceSources';
 	import type { CitationDocument } from './citationDocuments';
+	import { isDocumentSnippet } from './useCitationDocument';
 	import CitationSnippetList from './CitationSnippetList.svelte';
 	import CitationViewer from './CitationViewer.svelte';
 	import CitationContent from './CitationContent.svelte';
@@ -38,14 +39,18 @@
 		<div
 			class="flex items-center justify-between gap-2 px-3 py-2 shrink-0 text-xs text-gray-500 dark:text-gray-400"
 		>
-			<span
-				>{expanded || !mergedDocuments.length
-					? $i18n.t('{{count}} passages', { count: mergedDocuments.length })
-					: $i18n.t('Passage {{n}} of {{count}}', {
-							n: activeSnippetIdx + 1,
-							count: mergedDocuments.length
-						})}</span
-			>
+			<span>
+				{#if mergedDocuments.length > 0 && mergedDocuments.every(isDocumentSnippet)}
+					{$i18n.t('Whole-document citation')}
+				{:else}
+					{expanded || !mergedDocuments.length
+						? $i18n.t('{{count}} passages', { count: mergedDocuments.length })
+						: $i18n.t('Passage {{n}} of {{count}}', {
+								n: activeSnippetIdx + 1,
+								count: mergedDocuments.length
+							})}
+				{/if}
+			</span>
 			<div class="flex items-center gap-1">
 				{#if !expanded}
 					<button

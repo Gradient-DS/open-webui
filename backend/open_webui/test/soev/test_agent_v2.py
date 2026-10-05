@@ -31,6 +31,7 @@ WEB_SEARCH_OFF = {
     'web_search': 'off',
     'fetch': 'off',
     'search_live_documents': 'off',
+    'list_live_folder': 'off',
     'attach_live_document': 'off',
     'search_mail': 'off',
     'read_mail': 'off',
@@ -662,6 +663,50 @@ def test_tools_maps_the_web_search_features_to_tool_states(features: dict | None
     }
 
 
+@pytest.mark.parametrize('state', ['off', 'auto', 'required', 'unexpected', True, None])
+@pytest.mark.parametrize('allowed', [False, True])
+def test_live_document_states_are_gated_on_the_server(state, allowed):
+    tools = agent_v2._tools({'features': {'live_documents': state}}, False, allowed, False)['tools']
+    expected = state if allowed and state in ('auto', 'required') else 'off'
+    assert tools == {
+        **WEB_SEARCH_OFF,
+        'search_live_documents': expected,
+        'list_live_folder': expected,
+        'attach_live_document': expected,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('state', ['auto', 'required'])
+@pytest.mark.parametrize('setup_fails', [False, True])
+async def test_live_document_tools_follow_collection_setup(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, state: str, setup_fails: bool
+) -> None:
+    monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
+    collection = AsyncMock(
+        return_value='owui-attachments-alice',
+        side_effect=RuntimeError('collection unavailable') if setup_fails else None,
+    )
+    monkeypatch.setattr(agent_v2.live_documents, 'attachment_collection', collection)
+    await chat.turn('question', 'a1', features={'live_documents': state, 'web_search': True})
+    collection.assert_awaited_once()
+    sent = chat.mutations()[-1][1]['input']
+    expected = 'off' if setup_fails else state
+    assert sent['tools'] == {
+        **WEB_SEARCH_OFF,
+        'web_search': 'auto',
+        'fetch': 'auto',
+        'search_live_documents': expected,
+        'list_live_folder': expected,
+        'attach_live_document': expected,
+    }
+    if setup_fails:
+        assert 'attachment_collection' not in sent
+        assert 'live documents unavailable this turn' in sent['text']
+    else:
+        assert sent['attachment_collection'] == 'owui-attachments-alice'
+
+
 @pytest.mark.parametrize('features', [{'web_search': True, 'web_search_required': True}, {'web_search': True}])
 def test_tools_sends_off_when_owui_does_not_allow_web_search(features: dict) -> None:
     assert agent_v2._tools({'features': features}, False, False, False) == {'tools': WEB_SEARCH_OFF}
@@ -852,10 +897,11 @@ async def test_attached_text_citations_are_seeded_from_root_inputs_at_the_parent
         assert chat.mutations()[-2][0] == '/v1/chat/threads/thr-1/fork'
 
 
-def test_attached_text_seeding_ignores_child_streams_and_future_inputs() -> None:
+@pytest.mark.asyncio
+async def test_attached_text_seeding_ignores_child_streams_and_future_inputs() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     text = {'id': 'note:n1', 'kind': 'note', 'title': 'Note', 'text': 'body', 'length': 4}
-    turn._seed_sources(
+    await turn._seed_sources(
         [
             {'position': 1, 'type': 'input', 'stream': 'child', 'payload': {'payload': {'texts': [text]}}},
             {'position': 3, 'type': 'input', 'stream': 'root', 'payload': {'payload': {'texts': [text]}}},
@@ -1472,6 +1518,8 @@ async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_
         await render(turn, ChatEvent('delta', {'text': 'Answer'}))
     answered_call = kind == 'tool_output'
     ended_status = {'type': 'status', 'data': {**status['data'], 'done': True}}
+    if answered_call and payload.get('error'):
+        ended_status['data'].update(description='Could not run {{tool}}', tool=name)
     shown = [call.args[0] for call in turn.emitter.call_args_list if call.args[0]['data'].get('action') != 'summary']
     assert shown == [status] + [ended_status] * answered_call
     assert '<details type="tool_calls"' in content(started)
@@ -2165,27 +2213,156 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
     assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'output,attached,expected',
+    'output,expected',
     [
-        ({'text': 'Document request refused: not_readable'}, False, 'Could not open document'),
-        ({'text': 'Attachment failed: processing_failed'}, False, 'Could not open document'),
-        ({'elements': [{'type': 'action_required', 'id': 'connect'}]}, False, 'Could not open document'),
-        ({'error': 'tool_failed'}, False, 'Could not open document'),
-        ({'elements': [{'type': 'document', 'id': 'doc'}]}, False, 'Opened document'),
-        ({'status': 'processing'}, True, 'Opened document'),
-        ({'status': 'ready'}, True, 'Opened document'),
+        ({'error': 'not_readable'}, 'Could not open document'),
+        ({'error': 'processing_failed'}, 'Could not open document'),
+        ({'error': 'connection_required', 'elements': [{'type': 'action-required'}]}, 'Could not open document'),
+        ({'elements': [{'type': 'document', 'id': 'doc'}]}, 'Opened document'),
+        ({'attachments': [{'status': 'processing'}]}, 'Opened document'),
+        ({'attachments': [{'status': 'ready'}], 'text': 'Another hit failed'}, 'Opened document'),
+        ({'text': 'Already attached; still processing.'}, 'Opened document'),
+        ({'error': 'failed', 'elements': [{'type': 'document'}]}, 'Could not open document'),
     ],
 )
-async def test_attach_summary_reflects_the_outcome(output: dict, attached: bool, expected: str) -> None:
-    """Refusals and errors cannot claim success; accepted and existing attachments can."""
+def test_attach_summary_reflects_the_agent_outcome(output: dict, expected: str) -> None:
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
-    turn.tool_statuses = {'attach_live_document': {'done': {'template': 'Opened document', 'params': {}}}}
+    turn.tool_statuses = {
+        'attach_live_document': {
+            'done': {'template': 'Opened document'},
+            'failed': {'template': 'Could not open document'},
+        }
+    }
     turn.running['attach'] = ('attach_live_document', {})
-    turn.end_tool({'call_id': 'attach', **output}, attached=attached)
+    turn.end_tool({'call_id': 'attach', **output})
     assert turn.settling == [
         {'action': 'attach_live_document', 'description': expected, 'call_id': 'attach', 'done': True}
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('resume', [False, True])
+async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(monkeypatch, resume):
+    records = [
+        {
+            'source_id': source,
+            'collection_key': 'owui-attachments-alice',
+            'job_id': 'job-' + source,
+            'name': source + '.pdf',
+            'web_url': 'https://files.test/' + source,
+            'provider': 'onedrive',
+            'attached_by': 'agent',
+            'provider_ref': {'grant_id': 'g', 'drive_id': 'd', 'item_id': source, 'etag': 'v1'},
+            'status': status,
+            'content_type': 'application/pdf',
+        }
+        for source, status in [('ready', 'ready'), ('mismatch', 'ready'), ('pending', 'processing')]
+    ]
+
+    async def register(user_id, record):
+        if record['source_id'] == 'mismatch':
+            raise agent_v2.live_documents.AttachmentMismatch(403, 'Wrong owner')
+        return SimpleNamespace(
+            id=record['source_id'],
+            filename=record['name'],
+            meta={
+                'collection_name': record['collection_key'],
+                'status': 'completed' if record['status'] == 'ready' else 'processing',
+                'source': {'provider': record['provider'], 'ref': record['provider_ref']},
+                'web_url': record['web_url'],
+                'attached_by': record['attached_by'],
+            },
+        )
+
+    registration = AsyncMock(side_effect=register)
+    monkeypatch.setattr(agent_v2.live_documents, 'register_attachment', registration)
+    stored = {'files': [{'id': 'existing', 'name': 'Existing upload'}]}
+    get_message = AsyncMock(return_value=stored)
+    upsert = AsyncMock()
+    monkeypatch.setattr(Chats, 'get_message_by_id_and_message_id', get_message)
+    monkeypatch.setattr(Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
+    payload = {'call_id': 'attach', 'attachments': records, 'elements': [], 'text': 'Attached two files.'}
+    event = ChatEvent('attached', {'stream': 'root', 'payload': payload})
+
+    async def stream(*args, **kwargs):
+        yield event
+
+    turn = agent_v2.AgentTurn(
+        SimpleNamespace(chat_stream=stream),
+        {'user_id': 'alice', 'chat_id': 'chat', 'message_id': 'message'},
+        'owui:user:alice',
+    )
+    turn.emitter = AsyncMock()
+    turn.thread_id = 'thread'
+    turn.running['attach'] = ('attach_live_document', {})
+    for replay in range(2):
+        if resume:
+            await turn.resume()
+        else:
+            await turn.render_event(event)
+        update = upsert.await_args.args[2]
+        assert [file['id'] for file in update['files']] == ['existing', 'ready', 'pending']
+        assert [file.get('status') for file in update['files'][1:]] == ['uploaded', 'processing']
+        assert upsert.await_count == get_message.await_count == turn.emitter.await_count == replay + 1
+        turn.emitter.assert_awaited_with({'type': 'chat:message:files', 'data': update})
+        stored.update(update)
+    assert [call.args for call in registration.await_args_list] == [('alice', record) for record in records] * 2
+    if not resume:
+        assert len(turn.settling) == 1
+        assert turn.settling[0]['description'] != 'Could not open document'
+
+
+@pytest.mark.parametrize(
+    'hits,titles',
+    [
+        ('first', 'Budget'),
+        (['first', 'unknown', 'second'], 'Budget, Minutes'),
+        (['second', 'first'], 'Minutes, Budget'),
+        (['unknown', None, {}, 'empty', 'missing'], None),
+        ([], None),
+        (None, None),
+    ],
+)
+def test_attach_status_binds_titles_from_hit_lists(hits, titles) -> None:
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.elements = {
+        'first': {'title': 'Budget'},
+        'second': {'title': 'Minutes'},
+        'empty': {'title': ' '},
+        'missing': {},
+    }
+    turn.tool_statuses = {
+        'attach_live_document': {
+            'running': {
+                'template': 'Opening {{titles}}...',
+                'fallback': 'Opening documents...',
+                'params': {'titles': 'element.hits.title'},
+            },
+            'done': {
+                'template': 'Opened {{titles}}',
+                'fallback': 'Opened documents',
+                'params': {'titles': 'element.hits.title'},
+            },
+        }
+    }
+    arguments = {'hits': hits}
+    params = {'titles': titles} if titles else {}
+    assert turn.tool_status('attach_live_document', arguments) == {
+        'action': 'attach_live_document',
+        'description': 'Opening {{titles}}...' if titles else 'Opening documents...',
+        **params,
+    }
+    turn.running['attach'] = ('attach_live_document', arguments)
+    turn.end_tool({'call_id': 'attach', 'elements': [{'type': 'document', 'id': 'opened'}]})
+    assert turn.settling == [
+        {
+            'action': 'attach_live_document',
+            'description': 'Opened {{titles}}' if titles else 'Opened documents',
+            **params,
+            'call_id': 'attach',
+            'done': True,
+        }
     ]
 
 
@@ -2211,6 +2388,7 @@ async def test_mail_sources_link_to_outlook_without_creating_files(chat: Chat):
     assert content(await chat.turn('What was approved?', 'a1')) == 'Approved [1]'
     source = next(event['data'] for event in chat.socket if event['type'] == 'source')
     assert source['source']['url'] == card['source_url']
+    assert source['source']['provider'] == 'outlook_mail'
     assert 'file_id' not in source['metadata'][0]
     assert not any(event['type'] in ('files', 'chat:message:files') for event in chat.socket)
     assert not chat.messages['chat', 'a1'].get('files')
@@ -2220,9 +2398,15 @@ async def test_mail_sources_link_to_outlook_without_creating_files(chat: Chat):
 @pytest.mark.parametrize('success', [True, False])
 async def test_read_mail_status_reports_refusals(success):
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
-    turn.tool_statuses = {'read_mail': {'done': {'template': 'Read email', 'params': {}}}}
+    turn.tool_statuses = {
+        'read_mail': {'done': {'template': 'Read email'}, 'failed': {'template': 'Could not read email'}}
+    }
     turn.running['read'] = ('read_mail', {})
-    output = {'elements': [{'type': 'mail-text'}]} if success else {'text': 'Mail request refused: not_found'}
+    output = (
+        {'elements': [{'type': 'mail-text'}]}
+        if success
+        else {'error': 'not_found', 'text': 'Mail request refused: not_found'}
+    )
     turn.end_tool({'call_id': 'read', **output})
     assert turn.settling[0]['description'] == ('Read email' if success else 'Could not read email')
 
@@ -2638,3 +2822,99 @@ async def test_no_answered_model_without_a_report(chat: Chat) -> None:
     await chat.turn('first', 'a1')
     assert 'answered_model' not in chat.messages['chat', 'a1']['meta']
     assert not [event for event in chat.socket if event['type'] == 'chat:completion']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['mail-text', 'mail-reference'])
+async def test_mail_provider_comes_from_element_type(kind, monkeypatch):
+    lookup = AsyncMock()
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', lookup)
+    element = {'id': 'mail', 'ref': 'mail', 'type': kind, 'text': 'Mail body'}
+    whole = {'title': 'Unrelated title', 'source_url': 'https://example.test/message'}
+    source = agent_v2.Citations().add(await agent_v2._as_source(element, whole))
+    assert source['source']['provider'] == 'outlook_mail'
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', [None, 'onedrive', 'another_provider'])
+async def test_document_provider_comes_only_from_file_metadata(provider, monkeypatch):
+    file = SimpleNamespace(meta={'source': {'provider': provider}}) if provider else None
+    lookup = AsyncMock(return_value=file)
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', lookup)
+    whole = {
+        'source_id': 'file-id',
+        'title': 'Outlook OneDrive',
+        'source_url': 'https://outlook.office.com/mail/id/looks-like-mail',
+    }
+    source = agent_v2.Citations().add(await agent_v2._as_source(CHUNK, whole))
+    assert source['source'].get('provider') == provider
+    lookup.assert_awaited_once_with('file-id')
+
+
+@pytest.mark.asyncio
+async def test_web_sources_do_not_infer_provider_from_urls_or_names(monkeypatch):
+    lookup = AsyncMock()
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', lookup)
+    whole = {'title': 'OneDrive', 'source_url': 'https://tenant.sharepoint.com/document'}
+    source = agent_v2.Citations().add(await agent_v2._as_source(CHUNK, whole))
+    assert 'provider' not in source['source']
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.parametrize('declared', [True, False])
+def test_list_failure_uses_declared_status_or_generic_fallback(declared):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {
+        'list_live_folder': {
+            'running': {'template': 'Browsing your files...'},
+            'done': {'template': 'Browsed your files'},
+            **({'failed': {'template': 'Could not browse your files'}} if declared else {}),
+        }
+    }
+    turn.running['browse'] = ('list_live_folder', {})
+    turn.end_tool({'call_id': 'browse', 'error': 'invalid arguments'})
+    assert turn.settling == [
+        {
+            'action': 'list_live_folder',
+            'call_id': 'browse',
+            'done': True,
+            'description': 'Could not browse your files' if declared else 'Could not run {{tool}}',
+            **({} if declared else {'tool': 'list_live_folder'}),
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    'arguments,expected', [({'folder': 'Plans'}, 'Could not browse {{folder}}'), ({}, 'Could not browse your files')]
+)
+def test_failed_status_parameters_use_the_declared_fallback(arguments, expected):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {
+        'list_live_folder': {
+            'failed': {
+                'template': 'Could not browse {{folder}}',
+                'fallback': 'Could not browse your files',
+                'params': {'folder': 'argument.folder'},
+            }
+        }
+    }
+    turn.running['browse'] = ('list_live_folder', arguments)
+    turn.end_tool({'call_id': 'browse', 'error': 'not_found'})
+    assert turn.settling[0]['description'] == expected
+    if arguments:
+        assert turn.settling[0]['folder'] == 'Plans'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind,attached', [('document-text', False), ('document-text', True), ('chunk', False)])
+async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind, attached):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    turn.attached = AsyncMock()
+    element = {'type': kind, 'id': 'text', 'ref': 'doc', 'text': 'Body', 'pages': [2]}
+    await turn.record_output({'elements': [document('doc', 'Plan'), element]}, attached=attached)
+    source = turn.citations.sources['text']
+    metadata = source['metadata'][0]
+    assert metadata.get('granularity') == ('document' if kind == 'document-text' else None)
+    assert metadata['page'] == 1
