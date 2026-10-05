@@ -10,10 +10,17 @@ import hashlib
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
-EXIT_OK, EXIT_FAILED = 0, 1
+# EX_TEMPFAIL: ingest jobs are still running; the Job retries with backoff.
+EXIT_OK, EXIT_FAILED, EXIT_RUNNING = 0, 1, 75
+WAIT_POLL_SECONDS = 30
+
+
+async def _pause(seconds: float) -> None:
+    await asyncio.sleep(seconds)
 
 
 async def _knowledge_rows(table, db):
@@ -233,7 +240,7 @@ async def reconcile(file_counts, client, *, conflicts, dry_run=False, cloud_owne
         else:
             documents = collections[key]['document_count']
             print(f'{key} | {count} | {documents} | {count - documents} | {coverage.get(key, "0 / 0")}')
-    print('Document gaps are informational until ingest lands.')
+    print('Document gaps are reconciled per file by the re-ingest step.')
     return int(bool(missing or conflicts))
 
 
@@ -308,6 +315,7 @@ class Options:
     v2_config: dict = field(default_factory=dict)
     model_map: dict = field(default_factory=dict)
     ingest_concurrency: int = 4
+    wait_seconds: int = 0
 
 
 def options_from_env(environ=os.environ, *, migration_id: str | None = None) -> Options:
@@ -323,15 +331,16 @@ def options_from_env(environ=os.environ, *, migration_id: str | None = None) -> 
         v2_config=parse_v2_config(environ.get('SOEV_V2_CONFIG')),
         model_map=parse_model_map(environ.get('SOEV_V2_MODEL_MAP')),
         ingest_concurrency=_positive_int(environ, 'SOEV_V2_INGEST_CONCURRENCY', 4),
+        wait_seconds=_positive_int(environ, 'SOEV_V2_WAIT_SECONDS', 0, minimum=0),
     )
 
 
-def _positive_int(environ, name: str, default: int) -> int:
+def _positive_int(environ, name: str, default: int, *, minimum: int = 1) -> int:
     from open_webui.soev.migrate_state import MigrationError
 
     raw = environ.get(name) or str(default)
-    if not raw.isdigit() or int(raw) < 1:
-        raise MigrationError(f'{name} must be a positive integer')
+    if not raw.isdigit() or int(raw) < minimum:
+        raise MigrationError(f'{name} must be an integer of at least {minimum}')
     return int(raw)
 
 
@@ -355,6 +364,20 @@ def _print_model_report(report, *, prefix: str) -> None:
         print(f'{prefix}: skipped {line}')
     for model_id, count in sorted(report.unmapped.items()):
         print(f'{prefix}: unmapped {model_id} ({count} references left as they are)')
+
+
+def verdict(collections: int, ingest_state, memory_state) -> int:
+    """Step 7: 0 when every file is ingested or terminally failed, 75 while jobs run, 1 otherwise."""
+    from open_webui.soev.migrate_ingest import RUNNING, SUBMITTED
+
+    running = ingest_state.total(RUNNING) + ingest_state.total(SUBMITTED)
+    print(
+        f'7 reconcile: collections {"ok" if not collections else "MISMATCH"} | ingest running {running}'
+        f' | ingest failed {len(ingest_state.failures)} | memory vectors missing {memory_state.missing}'
+    )
+    if collections or memory_state.missing:
+        return EXIT_FAILED
+    return EXIT_RUNNING if running else EXIT_OK
 
 
 async def apply(options: Options, *, db=None) -> int:
@@ -384,9 +407,19 @@ async def apply(options: Options, *, db=None) -> int:
     _print_ingest(ingest_state, prefix='5 re-ingest')
     memory_state = await migrate_memories.reembed(db=db)
     _print_memories(memory_state, prefix='6 memories')
-    return await reconcile(
-        directory.file_counts, directory.client, conflicts=directory.conflicts, cloud_owners=directory.cloud_owners
-    )
+    deadline = time.monotonic() + options.wait_seconds
+    while True:
+        collections = await reconcile(
+            directory.file_counts, directory.client, conflicts=directory.conflicts, cloud_owners=directory.cloud_owners
+        )
+        status = verdict(collections, ingest_state, memory_state)
+        if status != EXIT_RUNNING or time.monotonic() >= deadline:
+            return status
+        print(f'7 reconcile: checking again in {WAIT_POLL_SECONDS}s')
+        await _pause(WAIT_POLL_SECONDS)
+        # Re-checking also submits files that were busy in another collection last time.
+        ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
+        _print_ingest(ingest_state, prefix='5 re-ingest')
 
 
 async def restore(migration_id: str, *, db=None) -> int:

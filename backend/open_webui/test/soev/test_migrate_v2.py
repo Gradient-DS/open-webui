@@ -58,8 +58,19 @@ class FakeVectors:
         return SimpleNamespace(ids=[ids]) if ids else None
 
 
+@pytest.fixture
+def fake_vector_modules(monkeypatch):
+    """The real clients connect to the configured vector store on import."""
+    vectors = FakeVectors()
+    monkeypatch.setitem(
+        sys.modules, 'open_webui.retrieval.vector.async_client', SimpleNamespace(ASYNC_VECTOR_DB_CLIENT=vectors)
+    )
+    monkeypatch.setitem(sys.modules, 'open_webui.retrieval.vector.factory', SimpleNamespace(VECTOR_DB_CLIENT=None))
+    return vectors
+
+
 @pytest_asyncio.fixture
-async def env(identity_config, fake_api, monkeypatch, tmp_path):
+async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modules):
     """A file-backed SQLite database behind every session, and soev-api behind the shared fake."""
     identity, _ = identity_config
     database = importlib.import_module('open_webui.internal.db')
@@ -121,11 +132,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
                 sa.text('INSERT INTO config (key, value, updated_at) VALUES (:key, :value, :at)'),
                 {'key': key, 'value': json.dumps(value, indent=1), 'at': 1000},
             )
-    vectors = FakeVectors()
-    # The real client connects to the configured vector store on import.
-    monkeypatch.setitem(
-        sys.modules, 'open_webui.retrieval.vector.async_client', SimpleNamespace(ASYNC_VECTOR_DB_CLIENT=vectors)
-    )
+    vectors = fake_vector_modules
     monkeypatch.setattr(importlib.import_module('open_webui.routers.memories'), 'ASYNC_VECTOR_DB_CLIENT', vectors)
     embedded = []
 
@@ -568,7 +575,7 @@ async def test_memories_are_reembedded_once_per_row_and_reruns_embed_nothing(env
 
 
 @pytest.mark.asyncio
-async def test_the_embedding_function_is_built_from_the_rag_config_rows(monkeypatch):
+async def test_the_embedding_function_is_built_from_the_rag_config_rows(monkeypatch, fake_vector_modules):
     """The Job builds what main.py puts on app.state, from the same persistent keys."""
     memories = importlib.import_module('open_webui.soev.migrate_memories')
     rag = {
@@ -592,3 +599,79 @@ async def test_the_embedding_function_is_built_from_the_rag_config_rows(monkeypa
     assert built['args'] == ('openai', 'bge-m3')
     assert (built['kwargs']['url'], built['kwargs']['key']) == ('https://litellm.invalid/v1', 'sk-embed')
     assert built['kwargs']['embedding_batch_size'] == 8
+
+
+async def finish_jobs(env, monkeypatch, status='SUCCEEDED'):
+    for job_id in list(env.api.jobs):
+        if env.api.jobs[job_id]['status'] not in {'SUCCEEDED', 'COMPLETED_WITH_ERRORS'}:
+            env.api.advance(job_id, status, item_code='unsupported_media_type', item_detail='no text')
+    jobs = importlib.import_module('open_webui.soev.jobs')
+    monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
+    await jobs.poll_once(env.identity.build_client(), now=10**10)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_exits_75_while_ingest_runs_and_0_once_terminal(env, monkeypatch, capsys):
+    """Terminal ingest failures are listed and do not block success."""
+    local, _ = await seed_knowledge(env, monkeypatch)
+    assert await env.module.apply(options(env)) == 75
+    await finish_jobs(env, monkeypatch, status='COMPLETED_WITH_ERRORS')
+    capsys.readouterr()
+    assert await env.module.apply(options(env)) == 0
+    output = capsys.readouterr().out
+    assert f'{local.id}: failed 7' in output
+    assert f'{local.id}/file-0: unsupported_media_type: no text' in output
+    assert 'ingest running 0 | ingest failed 7' in output
+
+
+@pytest.mark.asyncio
+async def test_a_missing_memory_vector_exits_1(env, monkeypatch):
+    local, _ = await seed_knowledge(env, monkeypatch)
+    await env.module.apply(options(env))
+    await finish_jobs(env, monkeypatch)
+    assert await env.module.apply(options(env)) == 0
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO memory (id, user_id, type, content, created_at, updated_at)'
+                " VALUES ('m1', 'alice', 'context', 'x', 1, 1)"
+            )
+        )
+    monkeypatch.setattr(env.vectors, 'upsert', AsyncMock())
+    assert await env.module.apply(options(env)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_missing_collection_exits_1(env, monkeypatch):
+    local, _ = await seed_knowledge(env, monkeypatch)
+    await env.module.apply(options(env))
+    await finish_jobs(env, monkeypatch)
+    env.api.failures.clear()
+    original = env.api._collections
+
+    def hide(request, body, credential, subject):
+        response = original(request, body, credential, subject)
+        if request.method != 'GET':
+            return response
+        data = json.loads(response.content)
+        data['data'] = [row for row in data['data'] if row['key'] != local.id]
+        return httpx.Response(200, json=data)
+
+    monkeypatch.setattr(env.api, '_collections', hide)
+    assert await env.module.apply(options(env)) == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_waits_for_running_ingest_when_asked(env, monkeypatch):
+    """With SOEV_V2_WAIT_SECONDS the run polls until the jobs finish instead of exiting 75."""
+    await seed_knowledge(env, monkeypatch)
+    pauses = []
+
+    async def pause(seconds):
+        pauses.append(seconds)
+        await finish_jobs(env, monkeypatch)
+
+    monkeypatch.setattr(env.module, '_pause', pause)
+    monkeypatch.setenv('SOEV_V2_WAIT_SECONDS', '600')
+    assert await env.module.apply(options(env)) == 0
+    assert pauses == [env.module.WAIT_POLL_SECONDS]
