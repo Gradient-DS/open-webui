@@ -3,12 +3,15 @@
 import asyncio
 import base64
 import datetime as dt
+import hashlib
 import json
 import logging
+from functools import lru_cache
 from uuid import UUID, uuid4, uuid5
 from weakref import WeakValueDictionary
 
 import jwt
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -41,10 +44,23 @@ async def user_of(ref: str) -> UserModel | None:
     return await Users.get_user_by_id(user_id)
 
 
+@lru_cache(maxsize=1)
+def credential_id_from_key(key: str) -> str:
+    segments = key.split('_', 3)
+    if len(segments) != 4 or segments[0] != 'soev' or not all(segments[1:]) or not segments[2].startswith('cred-'):
+        raise ValueError('SOEV_API_KEY must have the form soev_<env>_<cred-id>_<secret> with non-empty segments')
+    return segments[2]
+
+
 def signing_key() -> Ed25519PrivateKey:
+    return _load_signing_key(config.SOEV_API_SIGNING_KEY)
+
+
+@lru_cache(maxsize=1)
+def _load_signing_key(pem: str) -> Ed25519PrivateKey:
     try:
-        key = serialization.load_pem_private_key(config.SOEV_API_SIGNING_KEY.encode(), password=None)
-    except (ValueError, TypeError):
+        key = serialization.load_pem_private_key(pem.encode(), password=None)
+    except (ValueError, TypeError, UnsupportedAlgorithm):
         raise ValueError('SOEV_API_SIGNING_KEY must be an unencrypted Ed25519 PEM private key') from None
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError('SOEV_API_SIGNING_KEY must be an Ed25519 private key')
@@ -55,14 +71,28 @@ def _base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode().rstrip('=')
 
 
+@lru_cache(maxsize=1)
+def jwk_thumbprint(private_key: Ed25519PrivateKey) -> str:
+    raw = private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    jwk = {'crv': 'Ed25519', 'kty': 'OKP', 'x': _base64url(raw)}
+    canonical = json.dumps(jwk, sort_keys=True, separators=(',', ':')).encode()
+    return _base64url(hashlib.sha256(canonical).digest())
+
+
+def validate_config() -> None:
+    if config.SOEV_API_URL:
+        credential_id_from_key(config.SOEV_API_KEY)
+        jwk_thumbprint(signing_key())
+
+
 def mint_assertion(user_ref: str, *, now: dt.datetime) -> str:
     if now.utcoffset() is None:
         raise ValueError('Assertion time must include a timezone')
     issued_at = int(now.timestamp())
-    # SOEV_API_SIGNING_KID holds the API-assigned kid printed by bootstrap.
-    header = {'alg': 'Ed25519', 'kid': config.SOEV_API_SIGNING_KID, 'typ': 'subject+jwt'}
+    key = signing_key()
+    header = {'alg': 'Ed25519', 'kid': jwk_thumbprint(key), 'typ': 'subject+jwt'}
     payload = {
-        'iss': config.SOEV_API_CREDENTIAL_ID,
+        'iss': credential_id_from_key(config.SOEV_API_KEY),
         'sub': user_ref,
         'aud': config.SOEV_API_AUDIENCE,
         'iat': issued_at,
@@ -70,7 +100,7 @@ def mint_assertion(user_ref: str, *, now: dt.datetime) -> str:
         'jti': str(uuid4()),
     }
     message = '.'.join(_base64url(json.dumps(value, separators=(',', ':')).encode()) for value in (header, payload))
-    return f'{message}.{_base64url(signing_key().sign(message.encode()))}'
+    return f'{message}.{_base64url(key.sign(message.encode()))}'
 
 
 async def ensure_link(user_ref: str, client: SoevClient) -> None:
