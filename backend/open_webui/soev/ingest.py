@@ -78,6 +78,7 @@ async def ensure_attachments_collection(user_id: str, client: SoevClient) -> str
             {
                 'key': key,
                 'name': 'Chat attachments',
+                'personal': True,
                 'visibility': 'restricted',
                 'principals': [config.SOEV_API_SERVICE_PRINCIPAL, ref],
                 'writers': [ref],

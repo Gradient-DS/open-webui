@@ -272,26 +272,15 @@
 					</AdminSettingField>
 				{/if}
 			</AdminSettingSection>
-			<!-- [Gradient] Document Writer remains tenant gated. -->
+			<!-- [Gradient] PDF writer remains tenant gated. -->
 			{#if isFeatureEnabled('document_writer')}
-				<AdminSettingSection title={$i18n.t('Document Writer')}>
-					<AdminSettingRow label={$i18n.t('Enable Document Writer')} let:labelId
+				<AdminSettingSection title={$i18n.t('PDF writer')}>
+					<AdminSettingRow label={$i18n.t('Enable PDF writer')} let:labelId
 						><Switch
 							bind:state={config.ENABLE_DOCUMENT_WRITER}
 							ariaLabelledbyId={labelId}
 						/></AdminSettingRow
 					>
-					{#if config.ENABLE_DOCUMENT_WRITER}
-						<AdminSettingField label={$i18n.t('Document Writer Prompt Template')}>
-							<Textarea
-								className={textareaClass}
-								bind:value={config.DOCUMENT_WRITER_PROMPT_TEMPLATE}
-								placeholder={$i18n.t(
-									'Leave empty to use the default prompt, or enter a custom prompt'
-								)}
-							/>
-						</AdminSettingField>
-					{/if}
 				</AdminSettingSection>
 			{/if}
 		{/if}

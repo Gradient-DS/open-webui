@@ -19,6 +19,8 @@
 
 	export let sources: RawSource[] = [];
 	export let readOnly = false;
+	// [Gradient] False keeps only pill clicks: the document panel shows sources in the sources panel.
+	export let listed = true;
 	/**
 	 * [Gradient] Whether the parent message has finished streaming. Used to
 	 * suppress the bottom pill until the agent's final source dispatch is
@@ -73,8 +75,8 @@
 </script>
 
 {#if readOnly}
-	<Citations {id} {chatId} {sources} {readOnly} {messageDone} bind:this={inner} />
-{:else if visibleCitations.length > 0 && messageDone}
+	<Citations {id} {chatId} {sources} {readOnly} {messageDone} {listed} bind:this={inner} />
+{:else if listed && visibleCitations.length > 0 && messageDone}
 	{@const urlCitations = visibleCitations.filter((c) => c?.source?.name?.startsWith('http'))}
 	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
 		<button
