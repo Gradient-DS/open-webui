@@ -1,11 +1,11 @@
 import Document from '$lib/components/icons/Document.svelte';
-import MailSearch from '$lib/components/icons/MailSearch.svelte';
-import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
+import Outlook from '$lib/components/icons/Outlook.svelte';
+import OneDrive from '$lib/components/icons/OneDrive.svelte';
 import type { RawSourceObject } from './reduceSources';
 
 const providerIcons = new Map([
-	['outlook_mail', MailSearch],
-	['onedrive', OneDriveSearch]
+	['outlook_mail', Outlook],
+	['onedrive', OneDrive]
 ]);
 
 export function sourceIcon(

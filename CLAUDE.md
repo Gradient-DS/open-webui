@@ -154,8 +154,8 @@ Citation icons use the explicit `source.provider` field, built in
 types `mail-reference` and `mail-text` identify `outlook_mail`. Document elements
 join their `source_id` to File `meta.source.provider`, covering both agent-opened
 OneDrive documents and picker attachments, including thread replay. The frontend
-reducer preserves this field; `Citations/sourceIcon.ts` maps it to the composer
-icons through `SourceIcon.svelte`. Missing or unknown providers retain the web
+reducer preserves this field; `Citations/sourceIcon.ts` maps it to the plain
+OneDrive and Outlook logos (`icons/OneDrive.svelte`, `icons/Outlook.svelte`) through `SourceIcon.svelte`. Missing or unknown providers retain the web
 favicon/document fallback; names and URLs never identify providers. Previously
 saved source payloads without provider metadata are not retroactively classified.
 

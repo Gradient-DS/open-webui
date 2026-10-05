@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import Document from '$lib/components/icons/Document.svelte';
-import MailSearch from '$lib/components/icons/MailSearch.svelte';
-import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
+import Outlook from '$lib/components/icons/Outlook.svelte';
+import OneDrive from '$lib/components/icons/OneDrive.svelte';
 import SourceIcon from './SourceIcon.svelte';
 import { sourceIcon } from './sourceIcon';
 import { reduceSources } from './reduceSources';
 
 describe('source icons', () => {
 	it.each([
-		['outlook_mail', MailSearch],
-		['onedrive', OneDriveSearch]
+		['outlook_mail', Outlook],
+		['onedrive', OneDrive]
 	])('uses the composer icon for %s regardless of name or URL', (provider, component) => {
 		for (const url of [undefined, 'https://unrelated.example/document']) {
 			const source = { provider, name: 'A source', url };
