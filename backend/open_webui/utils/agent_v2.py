@@ -478,6 +478,9 @@ class AgentTurn:
         self.elements: dict[str, dict[str, Any]] = {}
         # [Claude] The calls shown as running, by call id: their tool's name and arguments.
         self.running: dict[str, tuple[str, dict[str, Any]]] = {}
+        # [Claude] Calls of the last model output, shown as running once its reasoning and text are out, so a
+        # call's status never lands above the thoughts that led to it.
+        self.pending_calls: list[dict] = []
         # [Claude] Done lines of calls whose output landed, held until the model moves on.
         self.settling: list[dict[str, Any]] = []
         self.model: str | None = None
@@ -565,6 +568,11 @@ class AgentTurn:
     async def emit(self, kind: str, data: dict) -> None:
         if self.emitter:
             await self.emitter({'type': kind, 'data': data})
+
+    async def start_pending_tools(self) -> None:
+        """[Claude] Show the last model output's calls as running, after its chunks went out."""
+        calls, self.pending_calls = self.pending_calls, []
+        await self.start_tools(calls)
 
     async def start_tools(self, calls: list[dict]) -> None:
         """Show each call as running. It stays a passing status until its output lands; the frontend replaces a
@@ -806,7 +814,7 @@ class AgentTurn:
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
         await self.settle()
-        await self.start_tools(payload.get('tool_calls', []))
+        self.pending_calls = list(payload.get('tool_calls', []))
         reasoning = self.remaining_reasoning(payload.get('reasoning') or '')
         content, partial = payload['content'], self.partial
         citations = (payload.get('citations') or [])[self.streamed_citations :]
@@ -895,6 +903,7 @@ class AgentTurn:
                 async for event in events:
                     for chunk in await self.render(event):
                         yield chunk
+                    await self.start_pending_tools()
         except (asyncio.CancelledError, GeneratorExit):
             await self.cancel()
             raise
