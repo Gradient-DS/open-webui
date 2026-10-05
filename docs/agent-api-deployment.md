@@ -167,17 +167,22 @@ Inputs (environment):
 
 `--apply` runs these steps in order; each is safe to rerun after a partial failure:
 
-1. **Snapshot.** The config rows the next steps change go to `config_backup` as stored text, once per migration id.
+1. **Snapshot.** The config rows the next steps change are kept as stored text, once per migration id. The migration's state (snapshot, model id records, step markers) lives outside Alembic, in schema `owui_v2_migration` on PostgreSQL (`owui_v2_migration_*` tables on SQLite), so the database stays at the v1 Alembic head.
 2. **Config switch** (once per id). The OpenAI and Ollama connections, `ui.default_models` and the task models are retired; the `SOEV_V2_CONFIG` values are written.
-3. **Model ids** (once per id). LiteLLM names become catalog ids in message model ids, chat JSON, assistant base models, base-model override rows and their grants, user default and pinned models, automations, `ui.default_pinned_models` and `ui.model_order_list`. Every change is recorded in `model_id_backup`. Unmapped ids are listed and left as they are.
+3. **Model ids** (once per id). LiteLLM names become catalog ids in message model ids, chat JSON, assistant base models, base-model override rows and their grants, user default and pinned models, automations, `ui.default_pinned_models` and `ui.model_order_list`. Every change is recorded with its path. Unmapped ids are listed and left as they are.
 4. **Directory and KB copy.** Identity links, groups, collections with grants, folders and cloud schedules.
-5. **Re-ingest.** Each file of a local KB without a soev document is submitted through `ingest.submit`. Cloud KBs re-sync from their schedules.
+5. **Re-ingest.** Each file of a local KB without a soev document is submitted through `ingest.submit`. Cloud KBs re-sync from their schedules. The job outcome is written to the file row (processing, then completed or failed), which v1 shares: after a rollback, v1 shows the v2 outcome on re-ingested files, e.g. failed for a file v2 could not ingest, while its own v1 vectors are intact.
 6. **Memories.** Users whose vectors do not match their memory rows are re-embedded with the app's embedding function.
 7. **Reconcile.** Exit 0 when every file is ingested or terminally failed (listed); 75 while ingest jobs still run; 1 on a missing or conflicting collection, missing memory vectors or an unreachable soev-api; 2 on invalid input.
-8. **Sign-out** (once per id, after exit 0). Every user's tokens are revoked through the Redis `revoked_at` marker, so each first Microsoft login creates the proven Entra link soev-connect requires. `WEBUI_SECRET_KEY` is not rotated. When soev-api answers `subject_not_linked`, the UI asks the user to log in again with Microsoft.
+8. **Sign-out** (once per id, after exit 0). Every user's tokens are revoked through the Redis `revoked_at` marker, so each first Microsoft login creates the proven Entra link soev-connect requires. `WEBUI_SECRET_KEY` is not rotated. The sign-out is best-effort: if Redis loses its state, a user keeps their session, gets "Log in again with Microsoft to connect" (shown whenever soev-api answers `subject_not_linked`) on their first consent, and the link forms at that login. Being signed out is a convenience, not a security control.
 
-`--dry-run` prints the plan without writes or HTTP requests: the snapshot state, every switched key, the model mapping with counts and unmapped ids, per-KB files to check, memory rows and the sign-out.
+`--dry-run` prints the plan without writes or HTTP requests (it does not create the state tables either), and needs the same `SOEV_V2_*` inputs as `--apply`. The CLI requires one of `--apply`, `--restore` or `--dry-run`; it no longer runs the directory copy alone. The plan shows the snapshot state, every switched key, the model mapping with counts and unmapped ids, per-KB files to check, memory rows and the sign-out.
 
-`--restore` puts the snapshotted config rows back byte for byte (and removes keys that had no row), and puts back every recorded model id that still holds the value written; references changed since are listed and left. Messages added after the cutover stay. soev-api data is not touched. Run it before reverting the cutover; a later `--apply` with the same id switches again from the kept snapshot but does not sign users out again.
+`--restore` puts the snapshotted config rows back byte for byte (and removes keys that had no row), and puts back every recorded model id that still holds the value written; references changed since are listed and left. Messages added after the cutover stay. soev-api data and the `owui_v2_migration` state are not touched; the state stays for audit until the cleanup PR drops it. A later `--apply` with the same id switches again from the kept snapshot but does not sign users out again.
+
+Rollback procedure:
+
+1. Set `soevApi.migrate.mode: restore`. The new Job restores the config rows and model ids.
+2. Then revert the image and values to v1. The database is still at the v1 Alembic head, so the v1 image's schema upgrade runs as before.
 
 Not migrated: Confluence KBs (Confluence is out of scope), web-search result collections (transient), Weaviate vectors (re-embedded from the originals), and model ids in feedback records. Proven Entra links are never backfilled; they form at login.
