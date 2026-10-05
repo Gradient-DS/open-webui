@@ -33,6 +33,13 @@ WEB_SEARCH_OFF = {
 }
 
 
+async def render(turn: agent_v2.AgentTurn, event: ChatEvent) -> list[dict]:
+    """Render one event as the stream does: its chunks, then the calls it started."""
+    chunks = await turn.render(event)
+    await turn.start_pending_tools()
+    return chunks
+
+
 @dataclass
 class Chat:
     api: FakeSoevApi
@@ -1166,17 +1173,18 @@ async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_
     turn.emitter = AsyncMock()
     status = {'type': 'status', 'data': {'action': name, **generic, 'call_id': 'c1', 'done': False}}
     async with asyncio.timeout(2):
-        started = await turn.render(
+        started = await render(
+            turn,
             ChatEvent(
                 'model_output',
                 {'stream': 'root', 'payload': {'content': '', 'tool_calls': [{'id': 'c1', 'name': name}]}},
-            )
+            ),
         )
         assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
         data = payload if kind.endswith('delta') else {'stream': 'root', 'payload': payload}
-        ended = await turn.render(ChatEvent(kind, data))
+        ended = await render(turn, ChatEvent(kind, data))
         assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
-        await turn.render(ChatEvent('delta', {'text': 'Answer'}))
+        await render(turn, ChatEvent('delta', {'text': 'Answer'}))
     answered_call = kind == 'tool_output'
     ended_status = {'type': 'status', 'data': {**status['data'], 'done': True}}
     shown = [call.args[0] for call in turn.emitter.call_args_list if call.args[0]['data'].get('action') != 'summary']
@@ -1196,10 +1204,10 @@ async def test_a_summary_of_the_conversation_shows_running_then_done_when_it_lan
         }
     }
     async with asyncio.timeout(2):
-        started = await turn.render(ChatEvent('compacting', {}))
-        ended = await turn.render(ChatEvent('compaction', {'stream': 'root', 'payload': {'summary': 'kort'}}))
+        started = await render(turn, ChatEvent('compacting', {}))
+        ended = await render(turn, ChatEvent('compaction', {'stream': 'root', 'payload': {'summary': 'kort'}}))
         # A finished call shows done once the model moves on.
-        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     shown = [call.args[0]['data'] for call in turn.emitter.call_args_list]
     assert [(status['action'], status['description'], status['done']) for status in shown] == [
         ('compaction', 'Summarising...', False),
@@ -1217,12 +1225,14 @@ async def test_calls_the_budget_stopped_end_before_the_answer() -> None:
     turn.emitter = AsyncMock()
     calls = [{'id': 'c1', 'name': 'search'}, {'id': 'c2', 'name': 'calculate'}]
     async with asyncio.timeout(2):
-        await turn.render(
-            ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': calls}})
+        await render(
+            turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': calls}})
         )
-        await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
-        stopped = await turn.render(ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {'count': 3, 'cap': 3}}))
-        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
+        await render(turn, ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
+        stopped = await render(
+            turn, ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {'count': 3, 'cap': 3}})
+        )
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     assert '<details type="tool_calls" done="true" name="calculate">' in content(stopped)
     shown = [call.args[0]['data'] for call in turn.emitter.call_args_list]
     assert [(status['call_id'], status['done']) for status in shown] == [
@@ -1239,7 +1249,8 @@ async def test_parallel_tools_each_show_once() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
     async with asyncio.timeout(2):
-        await turn.render(
+        await render(
+            turn,
             ChatEvent(
                 'model_output',
                 {
@@ -1249,11 +1260,11 @@ async def test_parallel_tools_each_show_once() -> None:
                         'tool_calls': [{'id': 'c1', 'name': 'search'}, {'id': 'c2', 'name': 'calculate'}],
                     },
                 },
-            )
+            ),
         )
         for call_id in ['c2', 'c1']:
-            await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id}}))
-        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
+            await render(turn, ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id}}))
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     search = {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False}
     calculate = {
         'action': 'calculate',
@@ -1276,14 +1287,16 @@ async def test_web_calls_carry_the_addresses_they_found_and_read() -> None:
     async with asyncio.timeout(2):
         for call_id, name, arguments, elements in calls:
             tool_call = {'id': call_id, 'name': name, 'arguments': arguments}
-            await turn.render(
-                ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': [tool_call]}})
+            await render(
+                turn,
+                ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': [tool_call]}}),
             )
-            await turn.render(
-                ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id, 'elements': elements}})
+            await render(
+                turn,
+                ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id, 'elements': elements}}),
             )
         # A finished call shows done once the model moves on.
-        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     shown = [call.args[0]['data'].get('items') for call in turn.emitter.call_args_list]
     found = [
         {'link': 'https://soev.ai/', 'title': 'soev.ai'},
@@ -1926,3 +1939,26 @@ def test_status_params_join_list_arguments():
     assert turn.tool_params(declared, {'keywords': ['begroting', ' ', 'fietspad']}, None) == {
         'keywords': 'begroting, fietspad'
     }
+
+
+@pytest.mark.asyncio
+async def test_a_call_shows_running_only_after_the_reasoning_that_led_to_it() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    chunks = await turn.render(
+        ChatEvent(
+            'model_output',
+            {
+                'stream': 'root',
+                'payload': {
+                    'content': '',
+                    'reasoning': 'Search the files.',
+                    'tool_calls': [{'id': 'c1', 'name': 'search_live_documents'}],
+                },
+            },
+        )
+    )
+    assert any('reasoning_content' in str(chunk) for chunk in chunks)
+    assert not turn.emitter.call_args_list
+    await turn.start_pending_tools()
+    assert turn.emitter.call_args_list[0].args[0]['data']['done'] is False
