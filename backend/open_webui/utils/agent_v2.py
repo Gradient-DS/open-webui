@@ -30,7 +30,8 @@ from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.chat_id import is_temporary_chat_id
-from open_webui.utils.web_search_state import web_search_state
+from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.tool_state import tool_state
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
@@ -80,7 +81,10 @@ def _marker(status: dict[str, Any]) -> dict[str, Any]:
     name = html.escape(status['action'], quote=True)
     return _chunk(
         {
-            'content': f'\n\n<details type="tool_calls" done="true" name="{name}">\n<summary>{html.escape(text)}</summary>\n</details>\n\n'
+            'content': (
+                f'\n\n<details type="tool_calls" done="true" name="{name}">\n'
+                f'<summary>{html.escape(text)}</summary>\n</details>\n\n'
+            )
         }
     )
 
@@ -313,9 +317,8 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
 
 
 def _tools(metadata: dict[str, Any], web_search_allowed: bool) -> dict[str, dict[str, str]]:
-    """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
-    default never decides for the user, and so is every turn where OWUI does not allow web search."""
-    state = web_search_state(metadata.get('features')) if web_search_allowed else 'off'
+    """Send the web search control explicitly, forced off where OWUI does not allow it."""
+    state = tool_state(metadata.get('features'), 'web_search') if web_search_allowed else 'off'
     return {'tools': {'web_search': state}}
 
 
@@ -328,6 +331,18 @@ async def _web_search_allowed(user_id: str) -> bool:
         return False
     return user.role == 'admin' or await has_permission(
         user.id, 'features.web_search', await Config.get('user.permissions')
+    )
+
+
+async def _documents_allowed(user_id: str) -> bool:
+    """Client-supplied document writer flags require tenant access, the admin setting and user permission."""
+    if not is_feature_enabled('document_writer') or not await Config.get('document_writer.enable'):
+        return False
+    user = await Users.get_user_by_id(user_id)
+    if user is None:
+        return False
+    return user.role == 'admin' or await has_permission(
+        user.id, 'features.document_writer', await Config.get('user.permissions')
     )
 
 
@@ -994,7 +1009,21 @@ async def _sent(
     except ImagesUnavailable as unavailable:
         return _refused(_unimaged(unavailable, metadata.get('user_language')))
     tools = _tools(metadata, await _web_search_allowed(metadata['user_id']))
-    body = {'input': {'text': text, 'knowledge': knowledge, **attachments, **_instructions(metadata), **tools}}
+    documents = (
+        tool_state(metadata.get('features'), 'document_writer')
+        if await _documents_allowed(metadata['user_id'])
+        else 'off'
+    )
+    body = {
+        'input': {
+            'text': text,
+            'knowledge': knowledge,
+            **attachments,
+            **_instructions(metadata),
+            **tools,
+            'documents': documents,
+        }
+    }
     if images:
         body['input']['images'] = images
     if isinstance(model, str) and model:

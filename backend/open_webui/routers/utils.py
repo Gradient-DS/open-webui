@@ -161,28 +161,6 @@ class DocumentExportForm(BaseModel):
     markdown: str
 
 
-@router.post('/document/pdf')
-async def export_document_as_pdf(
-    form_data: DocumentExportForm,
-    user=Depends(get_verified_user),
-):
-    """Export a single markdown document as a PDF."""
-    from open_webui.services.document_export import generate_document_pdf
-
-    try:
-        pdf_bytes = generate_document_pdf(form_data.title, form_data.markdown)
-        return Response(
-            content=pdf_bytes,
-            media_type='application/pdf',
-            headers={
-                'Content-Disposition': _safe_filename(form_data.title, 'pdf', prefix='document'),
-            },
-        )
-    except Exception as e:
-        log.exception(f'Error generating document PDF: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post('/document/docx')
 async def export_document_as_docx(
     form_data: DocumentExportForm,

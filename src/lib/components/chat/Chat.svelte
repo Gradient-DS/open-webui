@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -364,7 +365,9 @@
 	// A restored draft keeps its web search state over the new-chat default.
 	let webSearchFromDraft = false;
 	let codeInterpreterEnabled = false;
-	let documentWriterEnabled = false;
+	let documentWriterEnabled = true;
+	let documentWriterRequired = false;
+	let documentWriterFromDraft = false;
 	let webSearchActive = false;
 	let showWebSearchConfirm = false;
 	let pendingWebSearchPrompt: string | null = null;
@@ -816,7 +819,9 @@
 			imageGenerationEnabled = input.imageGenerationEnabled ?? false;
 			codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
 			// [Gradient] Preserve Document Writer across draft and OAuth restoration.
-			documentWriterEnabled = input.documentWriterEnabled ?? false;
+			documentWriterEnabled = input.documentWriterEnabled ?? true;
+			documentWriterRequired = input.documentWriterRequired ?? false;
+			documentWriterFromDraft = input.documentWriterEnabled !== undefined;
 			if (input.toolApprovalMode) {
 				await handleToolApprovalModeChange(input.toolApprovalMode);
 			}
@@ -999,7 +1004,8 @@
 			webSearchRequired,
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
-			documentWriterEnabled
+			documentWriterEnabled,
+			documentWriterRequired
 		});
 		if (current !== lastSavedFeatures) {
 			lastSavedFeatures = current;
@@ -1099,6 +1105,12 @@
 				webSearchRequired = Boolean(webSearchAllowed && always);
 			}
 
+			// [Gradient] PDF writer reads no external data, including under strict separation.
+			if (!history?.currentId && !documentWriterFromDraft) {
+				documentWriterEnabled = true;
+				documentWriterRequired = false;
+			}
+
 			if (selectedModels.length !== 1 && !atSelectedModel) {
 				return;
 			}
@@ -1195,7 +1207,13 @@
 						$config?.features?.enable_document_writer &&
 						($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 					) {
-						documentWriterEnabled = model.info.meta.defaultFeatureIds.includes('document_writer');
+						if (
+							!documentWriterFromDraft &&
+							model.info.meta.defaultFeatureIds.includes('document_writer')
+						) {
+							documentWriterEnabled = true;
+							documentWriterRequired = true;
+						}
 					}
 				}
 
@@ -1810,7 +1828,8 @@
 				webSearchEnabled = false;
 				imageGenerationEnabled = false;
 				codeInterpreterEnabled = false;
-				documentWriterEnabled = false;
+				documentWriterEnabled = true;
+				documentWriterRequired = false;
 				acceptedDataWarnings = new Set();
 
 				await restoreChatInput(storageChatInput);
@@ -2193,59 +2212,6 @@
 		artifactContents.set(contents);
 	};
 
-	const decodeHtmlEntities = (str) => {
-		if (!str) return '';
-		return str
-			.replace(/&quot;/g, '"')
-			.replace(/&#x27;/g, "'")
-			.replace(/&#39;/g, "'")
-			.replace(/&lt;/g, '<')
-			.replace(/&gt;/g, '>')
-			.replace(/&amp;/g, '&');
-	};
-
-	const extractDocumentsFromMessage = (content) => {
-		const docs = [];
-		if (!content || typeof content !== 'string') return docs;
-
-		// 1. XML-fallback path: <details type="document" ... title="..." ...>...markdown...</details>
-		const detailsRegex = /<details\b([^>]*\btype="document"[^>]*)>([\s\S]*?)<\/details>/g;
-		let match;
-		while ((match = detailsRegex.exec(content)) !== null) {
-			const attrs = match[1] ?? '';
-			const inner = match[2] ?? '';
-			const titleMatch = /\btitle="([^"]*)"/.exec(attrs);
-			const title = titleMatch ? decodeHtmlEntities(titleMatch[1]) : '';
-			const markdown = inner.replace(/^\s*<summary>[\s\S]*?<\/summary>\s*/i, '').trim();
-			if (markdown.length > 0) {
-				docs.push({ title, markdown });
-			}
-		}
-
-		// 2. Native tool-call path: <details type="tool_calls" ... name="write_document" arguments="...">
-		const toolCallRegex = /<details\b([^>]*\btype="tool_calls"[^>]*)>[\s\S]*?<\/details>/g;
-		while ((match = toolCallRegex.exec(content)) !== null) {
-			const attrs = match[1] ?? '';
-			const nameMatch = /\bname="([^"]*)"/.exec(attrs);
-			if (!nameMatch || nameMatch[1] !== 'write_document') continue;
-			const argsMatch = /\barguments="([^"]*)"/.exec(attrs);
-			if (!argsMatch) continue;
-			try {
-				const argsJson = decodeHtmlEntities(argsMatch[1]);
-				const args = JSON.parse(argsJson);
-				const title = args?.title ?? '';
-				const markdown = args?.markdown ?? '';
-				if (markdown.length > 0) {
-					docs.push({ title, markdown });
-				}
-			} catch (e) {
-				console.warn('Failed to parse write_document arguments', e);
-			}
-		}
-
-		return docs;
-	};
-
 	const getDocuments = () => {
 		const messages = history ? createMessagesList(history, history.currentId) : [];
 		let docs = [];
@@ -2261,7 +2227,14 @@
 					: extractDocumentsFromMessage(getOutputText(message?.output));
 				if (documents.length > 0) {
 					const sources = message?.sources ?? [];
-					docs = [...docs, ...documents.map((doc) => ({ ...doc, sources }))];
+					docs = [
+						...docs,
+						...documents.map((doc) => ({
+							...doc,
+							sources,
+							messageId: message.id
+						}))
+					];
 				}
 			}
 		});
@@ -2419,6 +2392,7 @@
 
 		// resetInput() must stay last: the selected model's defaults override the draft's selection.
 		webSearchFromDraft = false;
+		documentWriterFromDraft = false;
 		await restoreChatInput(sessionStorage.getItem('chat-input'));
 		await resetInput();
 		await chatId.set('');
@@ -2456,8 +2430,10 @@
 			codeInterpreterEnabled = true;
 		}
 
-		if ($page.url.searchParams.get('document-writer') === 'true') {
-			documentWriterEnabled = true;
+		const writerParam = $page.url.searchParams.get('document-writer');
+		if (writerParam !== null) {
+			documentWriterEnabled = ['true', 'auto', 'required'].includes(writerParam);
+			documentWriterRequired = ['true', 'required'].includes(writerParam);
 		}
 
 		if ($page.url.searchParams.get('tools')) {
@@ -2644,6 +2620,8 @@
 				imageGenerationEnabled = chatFeatures.image_generation ?? false;
 				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
 				documentWriterEnabled = chatFeatures.document_writer ?? false;
+				documentWriterRequired =
+					documentWriterEnabled && (chatFeatures.document_writer_required ?? false);
 
 				// [Gradient] Keep the feature-autosave baseline in sync with the chat we just
 				// loaded, so the reactive at the feature-persist block does not emit a
@@ -2653,7 +2631,8 @@
 					webSearchRequired,
 					imageGenerationEnabled,
 					codeInterpreterEnabled,
-					documentWriterEnabled
+					documentWriterEnabled,
+					documentWriterRequired
 				});
 
 				// Load tasks from chat-level DB field
@@ -3306,7 +3285,7 @@
 					knowledge_external: $i18n.t('External Knowledge Base'),
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
-					document_writer: $i18n.t('Document Writer'),
+					document_writer: $i18n.t('PDF writer'),
 					image_generation: $i18n.t('Image Generation')
 				};
 				const capabilityLabels = warning.capabilities.map(
@@ -3894,6 +3873,12 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
 						: false,
+				document_writer_required: Boolean(
+					$config?.features?.enable_document_writer &&
+					($user?.role === 'admin' || $user?.permissions?.features?.document_writer) &&
+					documentWriterEnabled &&
+					documentWriterRequired
+				),
 				web_search: webSearchActive,
 				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
 				web_search_required: webSearchActive && webSearchRequired
@@ -4527,7 +4512,8 @@
 						web_search_required: webSearchEnabled && webSearchRequired,
 						image_generation: imageGenerationEnabled,
 						code_interpreter: codeInterpreterEnabled,
-						document_writer: documentWriterEnabled
+						document_writer: documentWriterEnabled,
+						document_writer_required: documentWriterEnabled && documentWriterRequired
 					}
 				});
 			}
@@ -5060,6 +5046,7 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
+										bind:documentWriterRequired
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:webSearchEnabled
@@ -5215,6 +5202,7 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
+									bind:documentWriterRequired
 									bind:webSearchEnabled
 									bind:webSearchRequired
 									bind:atSelectedModel

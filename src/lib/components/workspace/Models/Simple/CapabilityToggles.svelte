@@ -22,7 +22,7 @@
 		{ key: 'web_search', icon: '🌐', label: 'Search the web' },
 		{ key: 'image_generation', icon: '🎨', label: 'Generate images' },
 		{ key: 'code_interpreter', icon: '💻', label: 'Run code & analyze data' },
-		{ key: 'document_writer', icon: '📝', label: 'Write documents' },
+		{ key: 'document_writer', icon: '📝', label: 'Write PDFs' },
 		{ key: 'vision', icon: '👁️', label: 'Understand images' },
 		{ key: 'file_upload', icon: '📎', label: 'Read uploaded files' },
 		{ key: 'citations', icon: '🔗', label: 'Show sources' }

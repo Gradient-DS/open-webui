@@ -57,7 +57,6 @@ from open_webui.tools.builtin import (
     delete_memory,
     edit_image,
     execute_code,
-    write_document,
     fetch_url,
     generate_image,
     get_current_timestamp,
@@ -549,7 +548,6 @@ async def get_builtin_tools(
         'image_generation.enable',
         'images.edit.enable',
         'code_interpreter.enable',
-        'document_writer.enable',
         'notes.enable',
         'channels.enable',
         'automations.enable',
@@ -715,15 +713,6 @@ async def get_builtin_tools(
         and await has_user_permission('code_interpreter')
     ):
         builtin_functions.append(execute_code)
-
-    # Add document writer tool if builtin category enabled AND enabled globally AND model has document_writer capability
-    if (
-        is_builtin_tool_enabled('document_writer')
-        and config.get('document_writer.enable')
-        and get_model_capability('document_writer')
-        and features.get('document_writer')
-    ):
-        builtin_functions.append(write_document)
 
     # Notes tools - search, view, create, and update user's notes
     if is_note_chat or (

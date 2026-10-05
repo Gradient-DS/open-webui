@@ -1,3 +1,4 @@
+import type { AgentDocument } from '$lib/utils/agentDocument';
 import { APP_NAME } from '$lib/constants';
 import { type Writable, derived, writable } from 'svelte/store';
 import type { ComponentType, SvelteComponent } from 'svelte';
@@ -176,11 +177,10 @@ export type ChoiceRegistration = {
 };
 export const choiceBlockRegistry: Writable<Record<string, Record<string, ChoiceRegistration>>> =
 	writable({});
-export const documentContents: Writable<Array<{
-	title: string;
-	markdown: string;
-	sources?: any[];
-}> | null> = writable(null);
+export const selectedDocumentIndex = writable(0);
+export const documentContents: Writable<Array<
+	AgentDocument & { sources?: any[]; messageId?: string }
+> | null> = writable(null);
 
 export const embed = writable(null);
 
@@ -493,6 +493,8 @@ type Config = {
 		enable_channels?: boolean;
 		enable_notes?: boolean;
 		enable_code_interpreter?: boolean;
+		enable_document_writer?: boolean;
+		enable_docx_export?: boolean;
 		enable_code_execution?: boolean;
 		enable_data_warnings?: boolean;
 		enable_feedback_report?: boolean;

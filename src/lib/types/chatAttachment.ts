@@ -28,6 +28,7 @@ export interface ChatDraft {
 	webSearchRequired: boolean;
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
+	documentWriterRequired: boolean;
 	toolApprovalMode: string;
 }
 

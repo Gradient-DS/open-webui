@@ -2,7 +2,7 @@
  * [Gradient] Per-chat state of a composer tool, mirroring the soev agent's tool contract
  * (`off` = not offered, `auto` = offered for the model to decide, `required` = must use).
  *
- * Web search has all three. Image generation, Code Interpreter and Document Writer have
+ * Web search and PDF writer have all three. Image generation and Code Interpreter have
  * no real auto path, so they cycle between `off` and `required` only.
  *
  * Web search travels as two booleans: `webSearchEnabled` (auto or required, i.e. web
@@ -48,3 +48,13 @@ export const WEB_SEARCH_STATE_DESCRIPTIONS: Record<ToolState, string> = {
 
 /** i18n key for a two-state tool that is off; the on state uses the tool's own description. */
 export const TOOL_OFF_DESCRIPTION = 'Not used in this chat';
+
+// [Gradient] PDF writer shares web search's state contract, without its data restrictions.
+export const DOCUMENT_WRITER_STATES: ToolState[] = ['auto', 'required', 'off'];
+export const documentWriterState = webSearchState;
+export const documentWriterFlags = webSearchFlags;
+export const DOCUMENT_WRITER_STATE_DESCRIPTIONS: Record<ToolState, string> = {
+	off: 'Does not write PDFs',
+	auto: 'The model decides whether to write a PDF',
+	required: 'Writes a PDF for every message'
+};
