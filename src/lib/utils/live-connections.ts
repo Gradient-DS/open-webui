@@ -23,6 +23,16 @@ export const consentLabels: Record<string, string> = {
 	confluence: 'connect_provider_confluence'
 };
 
+// soev-api refuses a subject without a proven identity link; a fresh Microsoft login creates it.
+export const SUBJECT_NOT_LINKED_PROMPT = 'Log in again with Microsoft to connect';
+
+/** The i18n key to show instead of a generic error when the account needs a new login. */
+export function relinkPrompt(error: unknown): string | null {
+	const code =
+		error instanceof CloudSyncError ? error.code : error instanceof Error ? error.message : null;
+	return code === 'subject_not_linked' ? SUBJECT_NOT_LINKED_PROMPT : null;
+}
+
 export type LiveConnection = {
 	connection: Awaited<ReturnType<typeof listConnections>>[number];
 	grantId?: string;

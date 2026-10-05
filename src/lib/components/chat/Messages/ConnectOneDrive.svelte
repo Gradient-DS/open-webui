@@ -6,7 +6,8 @@
 	import {
 		connectLiveSource,
 		prefetchLiveConnections,
-		consentLabels
+		consentLabels,
+		relinkPrompt
 	} from '$lib/utils/live-connections';
 	const i18n = getContext<Readable<I18n>>('i18n');
 	export let provider: string;
@@ -35,8 +36,8 @@
 					provider === 'outlook_mail' ? 'mail' : 'live_documents'
 				);
 				connected = true;
-			} catch {
-				toast.error($i18n.t('Could not connect account'));
+			} catch (error) {
+				toast.error($i18n.t(relinkPrompt(error) ?? 'Could not connect account'));
 			} finally {
 				busy = false;
 			}

@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import * as api from '$lib/apis/cloudSync';
-import { connectLiveSource, prefetchLiveConnections } from './live-connections';
+import { connectLiveSource, prefetchLiveConnections, relinkPrompt } from './live-connections';
 vi.mock('$lib/apis/cloudSync', async (original) => ({
 	...(await original<typeof import('$lib/apis/cloudSync')>()),
 	listConnections: vi.fn(),
@@ -179,4 +179,13 @@ it('keeps mail consent separate from document consent', async () => {
 	expect(await connectLiveSource('mail-session', 'outlook_mail', 'mail')).toBe('m-grant');
 	expect(await connectLiveSource('mail-session', 'onedrive', 'live_documents')).toBe('c-grant');
 	expect(window.open).not.toHaveBeenCalled();
+});
+it('maps subject_not_linked to the log-in-again prompt, not a generic error', () => {
+	const unlinked = new api.CloudSyncError(403, 'subject_not_linked', 'Subject is not linked');
+	expect(relinkPrompt(unlinked)).toBe('Log in again with Microsoft to connect');
+	expect(relinkPrompt(new Error('subject_not_linked'))).toBe(
+		'Log in again with Microsoft to connect'
+	);
+	expect(relinkPrompt(new api.CloudSyncError(403, 'policy_forbids', 'Disabled'))).toBeNull();
+	expect(relinkPrompt('subject_not_linked')).toBeNull();
 });

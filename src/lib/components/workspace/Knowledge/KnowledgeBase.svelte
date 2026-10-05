@@ -36,6 +36,7 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import * as cloudSync from '$lib/apis/cloudSync';
 	import type { Connection, Schedule, ScheduleAction, SkippedItem } from '$lib/apis/cloudSync';
+	import { relinkPrompt } from '$lib/utils/live-connections';
 
 	import { blobToFile, copyToClipboard } from '$lib/utils';
 	import { computeFileHash } from '$lib/utils/hash';
@@ -916,10 +917,13 @@
 	};
 
 	const reportCloudError = (error: unknown) => {
+		const prompt = relinkPrompt(error);
 		toast.error(
-			error instanceof Error && error.message
-				? error.message
-				: $i18n.t('Cloud sync request failed.')
+			prompt
+				? $i18n.t(prompt)
+				: error instanceof Error && error.message
+					? error.message
+					: $i18n.t('Cloud sync request failed.')
 		);
 	};
 
