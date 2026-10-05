@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import json
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -35,6 +36,26 @@ V1_CONFIG = {
     'user.permissions': {'chat': {'edit': True}, 'features': {'web_search': False, 'memories': True}},
     'web.search.enable': False,
 }
+
+
+class FakeVectors:
+    """The async vector client surface the memory reindex uses, kept in memory."""
+
+    def __init__(self):
+        self.collections: dict[str, dict] = {}
+
+    async def has_collection(self, collection_name):
+        return collection_name in self.collections
+
+    async def delete_collection(self, collection_name):
+        self.collections.pop(collection_name, None)
+
+    async def upsert(self, collection_name, items):
+        self.collections.setdefault(collection_name, {}).update({item['id']: item for item in items})
+
+    async def get(self, collection_name):
+        ids = list(self.collections.get(collection_name, {}))
+        return SimpleNamespace(ids=[ids]) if ids else None
 
 
 @pytest_asyncio.fixture
@@ -100,9 +121,33 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
                 sa.text('INSERT INTO config (key, value, updated_at) VALUES (:key, :value, :at)'),
                 {'key': key, 'value': json.dumps(value, indent=1), 'at': 1000},
             )
+    vectors = FakeVectors()
+    # The real client connects to the configured vector store on import.
+    monkeypatch.setitem(
+        sys.modules, 'open_webui.retrieval.vector.async_client', SimpleNamespace(ASYNC_VECTOR_DB_CLIENT=vectors)
+    )
+    monkeypatch.setattr(importlib.import_module('open_webui.routers.memories'), 'ASYNC_VECTOR_DB_CLIENT', vectors)
+    embedded = []
+
+    async def embed(text, prefix=None, user=None):
+        embedded.append(text)
+        return [float(len(text)), 1.0]
+
+    monkeypatch.setattr(
+        importlib.import_module('open_webui.soev.migrate_memories'),
+        'build_embedding_function',
+        AsyncMock(return_value=embed),
+    )
     module = importlib.import_module('open_webui.soev.migrate')
     yield SimpleNamespace(
-        engine=engine, api=fake_api, identity=identity, module=module, models=modules, tmp_path=tmp_path
+        engine=engine,
+        api=fake_api,
+        identity=identity,
+        module=module,
+        models=modules,
+        tmp_path=tmp_path,
+        vectors=vectors,
+        embedded=embedded,
     )
     await engine.dispose()
 
@@ -499,3 +544,51 @@ async def test_finished_jobs_count_as_ingested_on_the_next_run(env, monkeypatch,
     await env.module.apply(options(env))
     assert job_posts(env) == []
     assert f'{local.id}: failed 2, ingested 5' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_memories_are_reembedded_once_per_row_and_reruns_embed_nothing(env, capsys):
+    """Users whose vectors already match their rows are skipped, so a rerun calls no embedding."""
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO memory (id, user_id, type, content, created_at, updated_at) VALUES'
+                " ('m1', 'alice', 'context', 'likes tea', 1, 1), ('m2', 'alice', 'context', 'works in Utrecht', 1, 1),"
+                " ('m3', 'bob', 'context', 'prefers Dutch', 1, 1)"
+            )
+        )
+    env.vectors.collections['user-memory-bob'] = {'m3': {'id': 'm3'}}
+    env.vectors.collections['user-memory-alice'] = {'stale': {'id': 'stale'}}
+    await env.module.apply(options(env))
+    assert len(env.embedded) == 2 and all('Utrecht' in t or 'tea' in t for t in env.embedded)
+    assert set(env.vectors.collections['user-memory-alice']) == {'m1', 'm2'}
+    assert '6 memories: 3 rows for 2 users, re-embedded 1 users' in capsys.readouterr().out
+    await env.module.apply(options(env))
+    assert len(env.embedded) == 2
+
+
+@pytest.mark.asyncio
+async def test_the_embedding_function_is_built_from_the_rag_config_rows(monkeypatch):
+    """The Job builds what main.py puts on app.state, from the same persistent keys."""
+    memories = importlib.import_module('open_webui.soev.migrate_memories')
+    rag = {
+        'rag.embedding_engine': 'openai',
+        'rag.embedding_model': 'bge-m3',
+        'rag.openai.api_base_url': 'https://litellm.invalid/v1',
+        'rag.openai.api_key': 'sk-embed',
+        'rag.embedding_batch_size': 8,
+    }
+    monkeypatch.setattr(
+        importlib.import_module('open_webui.models.config').Config, 'get_many', AsyncMock(return_value=rag)
+    )
+    built = {}
+    monkeypatch.setattr(
+        importlib.import_module('open_webui.retrieval.utils'),
+        'get_embedding_function',
+        lambda *args, **kwargs: built.update(args=args, kwargs=kwargs) or 'function',
+    )
+    monkeypatch.setattr(importlib.import_module('open_webui.routers.retrieval'), 'get_ef', lambda engine, model: None)
+    assert await memories.build_embedding_function() == 'function'
+    assert built['args'] == ('openai', 'bge-m3')
+    assert (built['kwargs']['url'], built['kwargs']['key']) == ('https://litellm.invalid/v1', 'sk-embed')
+    assert built['kwargs']['embedding_batch_size'] == 8

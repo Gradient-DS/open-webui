@@ -335,6 +335,11 @@ def _positive_int(environ, name: str, default: int) -> int:
     return int(raw)
 
 
+def _print_memories(state, *, prefix: str) -> None:
+    rows = sum(count for count, _ in state.per_user.values())
+    print(f'{prefix}: {rows} rows for {len(state.per_user)} users, re-embedded {len(state.reembedded)} users')
+
+
 def _print_ingest(state, *, prefix: str) -> None:
     for key, counts in sorted(state.per_kb.items()):
         summary = ', '.join(f'{status} {count}' for status, count in sorted(counts.items())) or 'no files'
@@ -354,7 +359,7 @@ def _print_model_report(report, *, prefix: str) -> None:
 
 async def apply(options: Options, *, db=None) -> int:
     from open_webui.internal.db import get_async_db_context
-    from open_webui.soev import migrate_config, migrate_ingest, migrate_models, migrate_state
+    from open_webui.soev import migrate_config, migrate_ingest, migrate_memories, migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
         taken = await migrate_state.snapshot(session, options.migration_id, migrate_config.SNAPSHOT_KEYS)
@@ -377,6 +382,8 @@ async def apply(options: Options, *, db=None) -> int:
     print(f'4 directory: {len(directory.rows)} KBs, {len(directory.conflicts)} conflicts')
     ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
     _print_ingest(ingest_state, prefix='5 re-ingest')
+    memory_state = await migrate_memories.reembed(db=db)
+    _print_memories(memory_state, prefix='6 memories')
     return await reconcile(
         directory.file_counts, directory.client, conflicts=directory.conflicts, cloud_owners=directory.cloud_owners
     )
@@ -401,7 +408,7 @@ async def restore(migration_id: str, *, db=None) -> int:
 async def plan(options: Options, *, db=None) -> int:
     from open_webui.internal.db import get_async_db_context
     from open_webui.models.config import Config
-    from open_webui.soev import migrate_config, migrate_ingest, migrate_models, migrate_state
+    from open_webui.soev import migrate_config, migrate_ingest, migrate_memories, migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
         try:
@@ -425,6 +432,7 @@ async def plan(options: Options, *, db=None) -> int:
     directory = await copy_directory(dry_run=True, db=db)
     state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, dry_run=True, db=db)
     _print_ingest(state, prefix='5 re-ingest')
+    _print_memories(await migrate_memories.reembed(dry_run=True, db=db), prefix='6 memories')
     return await reconcile(
         directory.file_counts,
         directory.client,

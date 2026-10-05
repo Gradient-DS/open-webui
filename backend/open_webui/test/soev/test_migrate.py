@@ -41,6 +41,7 @@ async def env(identity_config, fake_api, monkeypatch):
         for name, cls in (('chats', 'Chat'), ('chat_messages', 'ChatMessage'), ('models', 'Model'))
     ]
     referencing.append(importlib.import_module('open_webui.models.automations').Automation.__table__)
+    referencing.append(importlib.import_module('open_webui.models.memories').Memory.__table__)
     async with engine.begin() as connection:
         await connection.run_sync(
             lambda sync: database.Base.metadata.create_all(
