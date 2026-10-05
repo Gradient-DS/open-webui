@@ -1,3 +1,5 @@
+import type { DocumentReference } from './onedrive-file-picker';
+import type { ChatAttachment } from '$lib/types/chatAttachment';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import {
 	listConnections,
@@ -130,4 +132,53 @@ export async function connectLiveDocuments(token: string, provider = 'onedrive')
 	} finally {
 		popup.close();
 	}
+}
+
+export async function attachPickedDocument(
+	token: string,
+	grantId: string,
+	reference: DocumentReference,
+	requestId: string
+): Promise<ChatAttachment> {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/files/onedrive/attach`, {
+		method: 'POST',
+		headers: {
+			Authorization: `Bearer ${token}`,
+			'Content-Type': 'application/json',
+			'Idempotency-Key': requestId
+		},
+		body: JSON.stringify({ grant_id: grantId, ...reference })
+	});
+	if (!response.ok) {
+		const problem = await response.json();
+		throw new Error(problem.detail?.code ?? 'request_failed');
+	}
+	return response.json();
+}
+
+export function matchingPickerConnection(
+	rows: LiveDocumentConnection[],
+	account: {
+		tenantId: string;
+		localAccountId: string;
+		username: string;
+		idTokenClaims?: { oid?: string };
+	}
+): LiveDocumentConnection {
+	const oid = account.idTokenClaims?.oid ?? account.localAccountId;
+	const matches = rows.filter(
+		({ connection }) =>
+			connection.source_kind === 'onedrive' &&
+			connection.lifecycle === 'enabled' &&
+			!connection.last_error &&
+			!!account.tenantId &&
+			connection.provider_tenant_id?.toLowerCase() === account.tenantId.toLowerCase() &&
+			!!oid &&
+			connection.provider_identity?.toLowerCase() === `entra:user:${oid}`.toLowerCase()
+	);
+	if (matches.length !== 1)
+		throw new Error(
+			'The picker account does not match a connected OneDrive account. Connect that account and try again.'
+		);
+	return matches[0];
 }

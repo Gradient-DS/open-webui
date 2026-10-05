@@ -90,7 +90,7 @@ describe('vendor adapters', () => {
 	it('invokes the OneDrive picker without an import delay', async () => {
 		vi.mocked(openOneDriveItemPicker).mockResolvedValue([]);
 		const picked = providers.onedrive.pick();
-		expect(openOneDriveItemPicker).toHaveBeenCalledExactlyOnceWith('organizations');
+		expect(openOneDriveItemPicker).toHaveBeenCalledExactlyOnceWith();
 		await expect(picked).resolves.toEqual([]);
 	});
 	it('invokes the Google picker without an import delay', async () => {

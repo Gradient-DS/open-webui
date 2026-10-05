@@ -33,7 +33,18 @@
 		createPicker,
 		initialize as initializeGooglePicker
 	} from '$lib/utils/google-drive-picker';
-	import { pickAndDownloadFilesModal } from '$lib/utils/onedrive-file-picker';
+	import {
+		connectLiveDocuments,
+		attachPickedDocument,
+		liveDocumentConnections,
+		matchingPickerConnection,
+		prefetchLiveDocuments
+	} from '$lib/utils/live-documents';
+	import { enableLiveDocuments } from '$lib/apis/cloudSync';
+	import {
+		beginBusinessDocumentPicker,
+		prepareBusinessDocumentPicker
+	} from '$lib/utils/onedrive-file-picker';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 	const dispatch = createEventDispatcher();
@@ -1043,62 +1054,54 @@
 		}
 	};
 
-	const oneDriveHandler = async (authorityType) => {
-		const tempItemIds: string[] = [];
+	const oneDriveHandler = async () => {
 		try {
-			const filesData = await pickAndDownloadFilesModal(authorityType, {
-				onFilesSelected: (items) => {
-					for (const item of items) {
-						const tempItemId = uuidv4();
-						tempItemIds.push(tempItemId);
-						files = [
-							...files,
-							{
-								type: 'file',
-								file: '',
-								id: null,
-								url: '',
-								name: item.name,
-								collection_name: '',
-								status: 'uploading',
-								size: 0,
-								error: '',
-								itemId: tempItemId
-							}
-						];
+			const rows = liveDocumentConnections(localStorage.token);
+			if (!rows) throw new Error('Connection status is loading. Try again.');
+			if (
+				!rows.some((row) => row.connection.lifecycle === 'enabled' && !row.connection.last_error)
+			) {
+				await connectLiveDocuments(localStorage.token);
+				toast.info($i18n.t('OneDrive connected. Choose your files again.'));
+				return;
+			}
+			const { references, account } = await beginBusinessDocumentPicker();
+			if (!references.length) return;
+			const row = matchingPickerConnection(rows, account);
+			const grantId =
+				row.grantId ?? (await enableLiveDocuments(localStorage.token, row.connection.id)).id;
+			for (const reference of references) {
+				const itemId = uuidv4();
+				files = [
+					...files,
+					{
+						type: 'file',
+						id: null,
+						itemId,
+						name: reference.name,
+						status: 'uploading',
+						size: reference.size
 					}
+				];
+				try {
+					const attached = await attachPickedDocument(
+						localStorage.token,
+						grantId,
+						reference,
+						itemId
+					);
+					files = files.map((file) =>
+						file.itemId === itemId ? { ...attached, itemId, size: reference.size } : file
+					);
+				} catch {
+					files = files.filter((file) => file.itemId !== itemId);
+					toast.error($i18n.t('Could not attach OneDrive file'));
 				}
-			});
-			if (filesData.length > 0) {
-				for (let i = 0; i < filesData.length; i++) {
-					const fileData = filesData[i];
-					const file = new File([fileData.blob], fileData.name, {
-						type: fileData.blob.type || 'application/octet-stream'
-					});
-					// Match placeholder by name since download order may differ
-					const matchingItemId = tempItemIds.find((id) => {
-						const item = files.find((f) => f.itemId === id);
-						return item && item.name === fileData.name;
-					});
-					await uploadFileHandler(file, true, {}, matchingItemId || null);
-				}
-				// Clean up any placeholders for files that failed to download
-				const downloadedNames = new Set(filesData.map((f) => f.name));
-				files = files.filter((f) => {
-					if (tempItemIds.includes(f.itemId ?? '') && !downloadedNames.has(f.name ?? '')) {
-						return false;
-					}
-					return true;
-				});
-			} else if (tempItemIds.length > 0) {
-				// All downloads failed
-				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
 			}
 		} catch (error) {
-			if (tempItemIds.length > 0) {
-				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
-			}
-			console.error('OneDrive Error:', error);
+			toast.error(
+				$i18n.t(error instanceof Error ? error.message : 'Could not attach OneDrive file')
+			);
 		}
 	};
 
@@ -1643,6 +1646,10 @@
 	};
 
 	onMount(() => {
+		if ($config?.features?.enable_onedrive_business) {
+			void prefetchLiveDocuments(localStorage.token).catch(() => {});
+			void prepareBusinessDocumentPicker().catch(() => {});
+		}
 		if ($config?.features?.enable_google_drive_integration)
 			void initializeGooglePicker().catch(() => {});
 		suggestions = [
@@ -2658,25 +2665,14 @@
 															<GoogleDrive className="size-4" />
 														</button>
 													</Tooltip>
-												{:else if itemId === 'onedrive' && inputMenuFileUploadEnabled && $config?.features?.enable_onedrive_integration && ($config?.features?.enable_onedrive_personal || $config?.features?.enable_onedrive_business)}
+												{:else if itemId === 'onedrive' && inputMenuFileUploadEnabled && $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
 													<Tooltip content={$i18n.t('OneDrive files')} placement="top">
 														<button
 															class={pinnedButtonClass}
 															type="button"
 															aria-label={$i18n.t('OneDrive files')}
 															on:click={() => {
-																if (
-																	$config?.features?.enable_onedrive_personal &&
-																	$config?.features?.enable_onedrive_business
-																) {
-																	inputMenuRef?.openTab('microsoft_onedrive');
-																} else {
-																	oneDriveHandler(
-																		$config?.features?.enable_onedrive_business
-																			? 'organizations'
-																			: 'personal'
-																	);
-																}
+																oneDriveHandler();
 															}}
 														>
 															<OneDrive className="size-4" />

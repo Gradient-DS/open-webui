@@ -88,6 +88,31 @@ it('propagates policy denial without authorizing a disabled feature', async () =
 	expect(api.authorizeConnection).not.toHaveBeenCalled();
 });
 
+it('sends a picker reference to the consumer with session authorization and an operation id', async () => {
+	const { attachPickedDocument } = await import('./live-documents');
+	const fetchSpy = vi.fn().mockResolvedValue({
+		ok: true,
+		json: async () => ({ id: 'source', type: 'file', status: 'processing' })
+	});
+	vi.stubGlobal('fetch', fetchSpy);
+	const ref = {
+		drive_id: 'd',
+		item_id: 'i',
+		etag: 'v1',
+		name: 'Plan.pdf',
+		web_url: 'https://tenant.sharepoint.com/plan.pdf',
+		size: 123
+	};
+	expect((await attachPickedDocument('session', 'grant', ref, 'operation')).id).toBe('source');
+	const [url, request] = fetchSpy.mock.calls[0];
+	expect(url).toMatch(/\/files\/onedrive\/attach$/);
+	expect(request.headers).toEqual({
+		Authorization: 'Bearer session',
+		'Content-Type': 'application/json',
+		'Idempotency-Key': 'operation'
+	});
+	expect(JSON.parse(request.body)).toEqual({ grant_id: 'grant', ...ref });
+});
 it.each(['suspended:reauth', 'enabled'])(
 	'reauthorizes %s connections with a reauth error',
 	async (lifecycle) => {
@@ -110,3 +135,31 @@ it.each(['suspended:reauth', 'enabled'])(
 		await expect(pending).rejects.toThrow('Provider connection failed');
 	}
 );
+
+it('selects only the picker tenant and object identity, regardless of connection order', async () => {
+	const { matchingPickerConnection } = await import('./live-documents');
+	const rows = ['other', 'chosen'].map((id) => ({
+		connection: {
+			id,
+			source_kind: 'onedrive',
+			lifecycle: 'enabled',
+			provider_tenant_id: 'tenant',
+			provider_identity: `entra:user:${id}`
+		},
+		grantId: `grant-${id}`
+	}));
+	const account = { tenantId: 'tenant', localAccountId: 'chosen', username: 'user@example.test' };
+	expect(matchingPickerConnection(rows, account).grantId).toBe('grant-chosen');
+	expect(() => matchingPickerConnection(rows, { ...account, tenantId: 'other-tenant' })).toThrow(
+		'does not match'
+	);
+	expect(() => matchingPickerConnection(rows, { ...account, localAccountId: 'missing' })).toThrow(
+		'does not match'
+	);
+	expect(() =>
+		matchingPickerConnection(
+			[{ ...rows[1], connection: { ...rows[1].connection, lifecycle: 'suspended:reauth' } }],
+			account
+		)
+	).toThrow('does not match');
+});

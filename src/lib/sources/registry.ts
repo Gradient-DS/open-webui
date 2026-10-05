@@ -41,7 +41,7 @@ export const providers: Record<string, SourceProvider> = {
 		startParam: 'start_onedrive_sync',
 		needsReconnectOn: DEFAULT_RECONNECT_CODES,
 		async pick() {
-			const items = await openOneDriveItemPicker('organizations');
+			const items = await openOneDriveItemPicker();
 			return items?.map(oneDriveScope) ?? null;
 		}
 	},

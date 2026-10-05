@@ -7,6 +7,8 @@ export type ScheduleAction = 'run' | 'cancel' | 'suspend' | 'resume';
 export interface Connection {
 	id: string;
 	source_kind: string;
+	provider_identity?: string | null;
+	provider_tenant_id?: string | null;
 	lifecycle: string;
 	last_error?: string | null;
 }

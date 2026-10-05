@@ -78,8 +78,19 @@ The OneDrive search toggle enables `search_live_documents` and `attach_live_docu
 with `auto` state; both remain off by default. `/cloud-sync/connections/{id}/live-documents`
 lists or enables owned OneDrive live grants. The toggle and Connect OneDrive card share the
 existing cloud consent popup and verify its origin, opener and connection before polling.
-No new OWUI environment variables are required. Platform live documents must be enabled.
+Both the OWUI and platform live-document settings must be enabled.
 
+The chat OneDrive picker returns `DocumentReference` metadata (with optional eTag), then
+`POST /files/onedrive/attach` calls platform `/v1/attach` with the acting user. Its strict
+schema rejects tokens and caller-selected collections. The platform rechecks grant,
+readability and size, skipping only reach for the explicit user selection. Missing picker version metadata is resolved by platform inspection; the File stores the inspected reference returned by attach. The picker supports organisational accounts only and always
+attaches by reference. Existing file count limits apply. Microsoft picker payload/version availability needs a tenant check.
+
+The consumer API credential needs both ingest and the dedicated attach capability for
+picker commissioning; provision attach only to consumer products. The platform budgets
+picker attach and inspect per subject and UTC minute (default 10), independently of
+idempotency keys. Picker refusals preserve provider and Retry-After, including
+connection_required (409), not_readable (422), and provider_throttled (503).
 OneDrive search can be pinned to the composer; both controls cycle off/auto (off by default)
 and share the same consent flow.
 Set ENABLE_LIVE_DOCUMENTS=true (config key live_documents.enable, default false) alongside
@@ -100,8 +111,17 @@ Connection and grant status is prefetched when InputMenu opens. Connected users 
 their grant without opening a popup. Suspended:reauth (the broker's persisted lifecycle)
 or a reauth error triggers authorization on the next explicit click, preserving the
 browser gesture. Provider family support is decided by the platform grant endpoint.
+
+The input menu prefetches connection/grant state and warms business MSAL silently.
+A healthy connection never opens a consent popup. Any needed MSAL login starts in
+the click stack; a new resource requiring consent asks for another click rather
+than opening a delayed popup. Match the picker tenant and object ID against the
+connection's provider_tenant_id and provider_identity before choosing its grant.
+Picker keys are user-namespaced and identity conflicts return typed 403/409 responses.
 If an older reference event lacks MIME metadata, successful job polling reads the
 completed document as its owning user and fills content_type before marking it ready.
+MSAL uses one organisational client and caches in-flight initialization across picker
+preparation and clicks. Personal Microsoft accounts and browser byte downloads are unsupported.
 
 Attach tool summaries show "Could not open document" for refusals and failures.
 An attached event (including processing) or an existing document keeps the success label.
