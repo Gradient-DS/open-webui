@@ -15,13 +15,16 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import anyio
+from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
 from open_webui.models.files import FileModel, Files
+from open_webui.models.folders import Folders
 from open_webui.models.knowledge import Knowledges
+from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
 from open_webui.soev import acting, agent_threads, identity, ingest
@@ -29,8 +32,10 @@ from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.files import has_access_to_file
+from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
 from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
 from starlette.responses import StreamingResponse
 
@@ -210,6 +215,90 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str
     return {'attachments': attached} if attached else {}
 
 
+# [Gradient] The most characters of a note or chat the agent takes (its `MAX_CHARACTERS`); `length` says how much
+# there was.
+TEXT_CHARACTERS = 50_000
+# [Gradient] Match quoted attributes too: document titles and tool arguments may contain `>`.
+_ATTRIBUTES = r"""((?:[^>"']|"[^"]*"|'[^']*')*)"""
+_DETAILS = re.compile(r'<details\b' + _ATTRIBUTES + r'>.*?</details>', re.DOTALL)
+_DOCUMENT = re.compile(r'<document\b' + _ATTRIBUTES + r'>.*?</document>', re.DOTALL)
+_ATTRIBUTE = re.compile(r"""([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+
+
+def _document_label(match: re.Match[str]) -> str:
+    attributes = {key: double or single for key, double, single in _ATTRIBUTE.findall(match[1])}
+    return f'[document: {html.unescape(attributes.get("title", ""))}]'
+
+
+def _chat_text(chat: Any) -> str:
+    history = chat.chat.get('history', {})
+    blocks = []
+    for message in get_message_list(history.get('messages', {}), history.get('currentId')):
+        text = _DETAILS.sub('', get_content_from_message(message) or '')
+        text = _DOCUMENT.sub(_document_label, text).strip()
+        if text:
+            blocks.append(f'{message.get("role", "user")}: {text}')
+    return '\n\n'.join(blocks)
+
+
+async def _texts(entries: list[dict[str, Any]], user_id: str) -> list[dict[str, Any]]:
+    """[Gradient] Read attached notes and chats with the same grants as upstream retrieval."""
+    if not entries:
+        return []
+    user = await Users.get_user_by_id(user_id)
+    texts, unavailable = [], []
+    for entry in {(entry['type'], entry.get('id')): entry for entry in entries}.values():
+        kind, item_id = entry['type'], entry.get('id')
+        item = await (Notes.get_note_by_id(item_id) if kind == 'note' else Chats.get_chat_by_id(item_id))
+        allowed = bool(item and user and (user.role == 'admin' or item.user_id == user.id))
+        if item and user and not allowed:
+            allowed = await AccessGrants.has_access(
+                user_id=user.id,
+                resource_type='note' if kind == 'note' else 'shared_chat',
+                resource_id=item.id,
+                permission='read',
+            )
+        if item and user and not allowed and kind == 'chat' and item.folder_id:
+            folder = await Folders.get_folder_by_id(item.folder_id)
+            allowed = folder and await has_folder_access(user.id, folder, 'read', db=None)
+        if not allowed:
+            unavailable.append((entry.get('name') or item_id or kind, 'gone'))
+            continue
+        text = item.data.get('content', {}).get('md', '') if kind == 'note' else _chat_text(item)
+        title = item.title or entry.get('name') or ('Notitie' if kind == 'note' else 'Chat')
+        texts.append(
+            {
+                'id': f'{kind}:{item.id}',
+                'kind': kind,
+                'title': title,
+                'text': text[:TEXT_CHARACTERS],
+                'length': len(text),
+            }
+        )
+    if unavailable:
+        raise AttachmentsUnavailable(unavailable)
+    return texts
+
+
+def _urls(metadata: dict[str, Any]) -> dict[str, list[str]]:
+    """[Gradient] Attached pages reach the agent even when the web search control is off."""
+    urls = []
+    for entry in metadata.get('files') or []:
+        url = entry.get('url')
+        if entry.get('type') != 'url' or not isinstance(url, str) or len(url) > 2000 or url in urls:
+            continue
+        try:
+            parsed = urlsplit(url)
+            valid = parsed.scheme in ('http', 'https') and parsed.hostname
+        except ValueError:
+            continue
+        if valid:
+            urls.append(url)
+            if len(urls) == 20:
+                break
+    return {'urls': urls} if urls else {}
+
+
 class ImagesUnavailable(Exception):
     def __init__(self, reason: str, name: str = '') -> None:
         super().__init__(reason)
@@ -319,7 +408,7 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
 def _tools(metadata: dict[str, Any], web_search_allowed: bool) -> dict[str, dict[str, str]]:
     """Send the web search control explicitly, forced off where OWUI does not allow it."""
     state = tool_state(metadata.get('features'), 'web_search') if web_search_allowed else 'off'
-    return {'tools': {'web_search': state}}
+    return {'tools': {'web_search': state, 'fetch': 'off' if state == 'off' else 'auto'}}
 
 
 async def _web_search_allowed(user_id: str) -> bool:
@@ -602,8 +691,26 @@ class AgentTurn:
 
     def _seed_sources(self, events: list[dict], position: int) -> None:
         for event in events:
-            if event['position'] <= position and event['type'] == 'tool_output' and event.get('stream') == 'root':
+            if event['position'] > position or event.get('stream') != 'root':
+                continue
+            if event['type'] == 'tool_output':
                 self.keep(event['payload'])
+            elif event['type'] == 'input':
+                self.keep_texts((event['payload'].get('payload') or {}).get('texts') or [])
+
+    def keep_texts(self, texts: list[dict[str, Any]]) -> None:
+        # [Gradient] The agent exposes these as DocumentText without a root tool output.
+        for entry in texts:
+            text_id, text = entry['id'], entry['text']
+            route = 'notes' if entry['kind'] == 'note' else 'c'
+            self.citations.add(
+                {
+                    'id': f'{text_id}#0-{len(text)}',
+                    'ref': text_id,
+                    'text': text,
+                    'properties': {'title': entry['title'], 'source_url': f'/{route}/{text_id.split(":", 1)[1]}'},
+                }
+            )
 
     def keep(self, output: dict[str, Any]) -> list[dict[str, Any]]:
         """[Claude] Remember a tool output's elements, and number each text the agent read; the panel entries of
@@ -950,6 +1057,7 @@ class AgentTurn:
             # Earlier turns' sources, so their numbers resolve; flagged so the panel leaves them out.
             for source in self.citations.sources.values():
                 await self.emit('source', {**source, 'current_turn': False, 'cited_this_turn': False})
+            self.keep_texts(body['input'].get('texts') or [])
             if not self.thread_id:
                 body = {**body, 'agent': agent}
             events = self.events(body)
@@ -998,9 +1106,18 @@ async def _sent(
     turn: AgentTurn, text: str, metadata: dict[str, Any], *, agent: str | None, model: str | None
 ) -> AsyncIterator[dict[str, Any]]:
     """[Claude] The turn's chunks: run with its input, or refused before anything is sent."""
+    entries = [entry for entry in metadata.get('files') or [] if entry.get('type') in ('note', 'chat')]
+    if len(entries) > 10:
+        message = (
+            'Voeg maximaal 10 notities of chats toe.'
+            if (metadata.get('user_language') or '').lower().startswith('nl')
+            else 'Attach at most 10 notes or chats.'
+        )
+        return _refused({'error': {'code': 'attachments_unavailable', 'message': message}})
     try:
         knowledge = await _knowledge(metadata)
         attachments = await _attachments(metadata)
+        texts = await _texts(entries, metadata['user_id'])
         images = await _images(metadata, turn.as_user)
     except KnowledgeUnavailable as unavailable:
         return _refused(_unavailable(unavailable.count, metadata.get('user_language')))
@@ -1019,6 +1136,7 @@ async def _sent(
             'text': text,
             'knowledge': knowledge,
             **attachments,
+            **_urls(metadata),
             **_instructions(metadata),
             **tools,
             'documents': documents,
@@ -1026,6 +1144,8 @@ async def _sent(
     }
     if images:
         body['input']['images'] = images
+    if texts:
+        body['input']['texts'] = texts
     if isinstance(model, str) and model:
         body['model'] = model
     return turn.run(body, agent)
