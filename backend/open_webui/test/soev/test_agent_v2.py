@@ -38,10 +38,8 @@ WEB_SEARCH_OFF = {
 
 
 async def render(turn: agent_v2.AgentTurn, event: ChatEvent) -> list[dict]:
-    """Render one event as the stream does: its chunks, then the calls it started."""
-    chunks = await turn.render(event)
-    await turn.start_pending_tools()
-    return chunks
+    """Render one event as the stream does: its chunks, then the anchors of the calls it started."""
+    return await turn.render(event) + await turn.start_pending_tools()
 
 
 @dataclass
@@ -1476,8 +1474,25 @@ async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_
     ended_status = {'type': 'status', 'data': {**status['data'], 'done': True}}
     shown = [call.args[0] for call in turn.emitter.call_args_list if call.args[0]['data'].get('action') != 'summary']
     assert shown == [status] + [ended_status] * answered_call
-    assert '<details type="tool_calls"' not in content(started)
-    assert ('<details type="tool_calls"' in content(ended)) == answered_call
+    assert '<details type="tool_calls"' in content(started)
+    assert '<details type="tool_calls"' not in content(ended)
+
+
+@pytest.mark.asyncio
+async def test_a_call_shows_done_once_the_model_thinks_again() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    calls = {'content': '', 'tool_calls': [{'id': 'c1', 'name': 'search'}]}
+    async with asyncio.timeout(2):
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': calls}))
+        await render(turn, ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
+        await render(turn, ChatEvent('reasoning_delta', {'text': 'Think'}))
+    assert [
+        (call.args[0]['data']['call_id'], call.args[0]['data']['done']) for call in turn.emitter.call_args_list
+    ] == [
+        ('c1', False),
+        ('c1', True),
+    ]
 
 
 @pytest.mark.asyncio
@@ -1501,8 +1516,8 @@ async def test_a_summary_of_the_conversation_shows_running_then_done_when_it_lan
         ('compaction', 'Summarised', True),
     ]
     assert shown[0]['call_id'] == shown[1]['call_id']
-    assert '<details type="tool_calls"' not in content(started)
-    assert '<details type="tool_calls"' in content(ended)
+    assert '<details type="tool_calls"' in content(started)
+    assert '<details type="tool_calls"' not in content(ended)
     assert 'kort' not in content(ended)
 
 
@@ -1512,7 +1527,7 @@ async def test_calls_the_budget_stopped_end_before_the_answer() -> None:
     turn.emitter = AsyncMock()
     calls = [{'id': 'c1', 'name': 'search'}, {'id': 'c2', 'name': 'calculate'}]
     async with asyncio.timeout(2):
-        await render(
+        started = await render(
             turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': calls}})
         )
         await render(turn, ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
@@ -1520,7 +1535,8 @@ async def test_calls_the_budget_stopped_end_before_the_answer() -> None:
             turn, ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {'count': 3, 'cap': 3}})
         )
         await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
-    assert '<details type="tool_calls" done="true" name="calculate">' in content(stopped)
+    assert '<details type="tool_calls" done="true" name="calculate">' in content(started)
+    assert not stopped
     shown = [call.args[0]['data'] for call in turn.emitter.call_args_list]
     assert [(status['call_id'], status['done']) for status in shown] == [
         ('c1', False),
@@ -2049,7 +2065,7 @@ async def test_a_search_shows_running_from_the_call_and_done_from_its_output(
         {**status, **running, 'query': 'opzegtermijn'},
         {**status, **done, **counted, 'done': True},
     ]
-    summary = done['description'].replace('{{passages}}', '3').replace('{{documents}}', '2')
+    summary = running['description'].replace('{{query}}', 'opzegtermijn')
     summary = summary.replace('{{collection_name}}', named.get('collection_name', ''))
     assert content(chunks).count('<details type="tool_calls"') == 1
     assert f'<summary>{html.escape(summary)}</summary>' in content(chunks)
@@ -2075,7 +2091,7 @@ async def test_opening_a_document_names_it_by_the_title_already_received(declare
         {**opening, 'description': 'Reading {{doc_title}}...'},
         {**opening, 'description': 'Read {{doc_title}}', 'done': True},
     ]
-    assert '<summary>Read Leave policy</summary>' in content(chunks)
+    assert '<summary>Reading Leave policy...</summary>' in content(chunks)
 
 
 @pytest.mark.asyncio
@@ -2167,8 +2183,7 @@ async def test_attach_summary_reflects_the_outcome(output: dict, attached: bool,
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
     turn.tool_statuses = {'attach_live_document': {'done': {'template': 'Opened document', 'params': {}}}}
     turn.running['attach'] = ('attach_live_document', {})
-    chunks = await turn.end_tool({'call_id': 'attach', **output}, attached=attached)
-    assert f'<summary>{expected}</summary>' in content(chunks)
+    turn.end_tool({'call_id': 'attach', **output}, attached=attached)
     assert turn.settling == [
         {'action': 'attach_live_document', 'description': expected, 'call_id': 'attach', 'done': True}
     ]
@@ -2197,7 +2212,7 @@ async def test_mail_sources_link_to_outlook_without_creating_files(chat: Chat):
     source = next(event['data'] for event in chat.socket if event['type'] == 'source')
     assert source['source']['url'] == card['source_url']
     assert 'file_id' not in source['metadata'][0]
-    assert not any(event['type'] == 'files' for event in chat.socket)
+    assert not any(event['type'] in ('files', 'chat:message:files') for event in chat.socket)
     assert not chat.messages['chat', 'a1'].get('files')
 
 
@@ -2208,7 +2223,7 @@ async def test_read_mail_status_reports_refusals(success):
     turn.tool_statuses = {'read_mail': {'done': {'template': 'Read email', 'params': {}}}}
     turn.running['read'] = ('read_mail', {})
     output = {'elements': [{'type': 'mail-text'}]} if success else {'text': 'Mail request refused: not_found'}
-    await turn.end_tool({'call_id': 'read', **output})
+    turn.end_tool({'call_id': 'read', **output})
     assert turn.settling[0]['description'] == ('Read email' if success else 'Could not read email')
 
 

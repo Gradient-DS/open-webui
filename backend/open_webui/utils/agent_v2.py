@@ -744,7 +744,7 @@ class AgentTurn:
         # [Claude] Calls of the last model output, shown as running once its reasoning and text are out, so a
         # call's status never lands above the thoughts that led to it.
         self.pending_calls: list[dict] = []
-        # [Claude] Done lines of calls whose output landed, held until the model moves on.
+        # [Claude] Done lines of calls whose output landed, held until the model thinks again or moves on.
         self.settling: list[dict[str, Any]] = []
         self.model: str | None = None
         self.attached_files: dict[str, dict] = {}
@@ -846,38 +846,44 @@ class AgentTurn:
         if self.emitter:
             await self.emitter({'type': kind, 'data': data})
 
-    async def start_pending_tools(self) -> None:
+    async def start_pending_tools(self) -> list[dict[str, Any]]:
         """[Claude] Show the last model output's calls as running, after its chunks went out."""
         calls, self.pending_calls = self.pending_calls, []
-        await self.start_tools(calls)
+        return await self.start_tools(calls)
 
-    async def start_tools(self, calls: list[dict]) -> None:
-        """Show each call as running. It stays a passing status until its output lands; the frontend replaces a
-        status by a later one with the same `call_id`."""
+    async def start_tools(self, calls: list[dict]) -> list[dict[str, Any]]:
+        """Show each call as running and anchor it in the content where it starts: the anchor ends the reasoning
+        before it, so the call shows as the latest step while it runs. The frontend replaces a status by a later
+        one with the same `call_id`."""
+        anchors = []
         for call in calls:
             self.tool_calls += 1
             name, arguments = call['name'], call.get('arguments') or {}
             self.running[call['id']] = (name, arguments)
-            await self.emit('status', {**self.tool_status(name, arguments), 'call_id': call['id'], 'done': False})
+            status = self.tool_status(name, arguments)
+            await self.emit('status', {**status, 'call_id': call['id'], 'done': False})
+            anchors.append(_marker(status))
+        return anchors
 
     async def summary(self, event: ChatEvent) -> list[dict[str, Any]]:
         """[Claude] Show the agent summarising the conversation as a call named `compaction`: running on
         `compacting`, done when the root stream's `compaction` event lands. It is not counted as a tool call."""
         if event.event == 'compacting':
             self.running[_COMPACTION] = (_COMPACTION, {})
-            await self.emit('status', {**self.tool_status(_COMPACTION, {}), 'call_id': _COMPACTION, 'done': False})
-            return []
-        if event.data.get('stream') != 'root':
-            return []
-        return await self.end_tool({'call_id': _COMPACTION})
+            status = self.tool_status(_COMPACTION, {})
+            await self.emit('status', {**status, 'call_id': _COMPACTION, 'done': False})
+            return [_marker(status)]
+        if event.data.get('stream') == 'root':
+            self.end_tool({'call_id': _COMPACTION})
+        return []
 
-    async def end_tool(self, output: dict[str, Any], *, attached: bool = False) -> list[dict[str, Any]]:
-        """[Claude] Anchor a call's done line in the content once its output lands, and show it once the model
-        moves on (see `settle`): until then the model is still working with what the call returned.
+    def end_tool(self, output: dict[str, Any], *, attached: bool = False) -> None:
+        """[Claude] Hold a call's done line once its output lands, until the model thinks again or moves on (see
+        `settle`): until then the model is still working with what the call returned.
 
         A call whose output is an error shows what it tried, as it did while running."""
         if (call := self.running.pop(output.get('call_id') or '', None)) is None:
-            return []
+            return
         name, arguments = call
         status = self.tool_status(name, arguments, None if output.get('error') else output)
         if name == 'attach_live_document' and (
@@ -890,10 +896,10 @@ class AgentTurn:
         ):
             status = {'action': name, 'description': 'Could not read email'}
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
-        return [_marker(status)]
 
     async def settle(self) -> None:
-        """[Claude] Show the held done lines: the model wrote answer text, called the next tool, or the turn ended."""
+        """[Claude] Show the held done lines: the model thinks again, wrote answer text, called the next tool, or the
+        turn ended."""
         settling, self.settling = self.settling, []
         for status in settling:
             await self.emit('status', status)
@@ -950,13 +956,11 @@ class AgentTurn:
                 params[param] = str(value)
         return params
 
-    async def stop_tools(self) -> list[dict[str, Any]]:
+    def stop_tools(self) -> None:
         """[Claude] End the calls the tool budget stopped: they never get an output, and the model answers next,
-        so each shows what it tried, anchored before that answer, as a call whose output is an error does."""
-        chunks = []
+        so each shows what it tried, as a call whose output is an error does."""
         for call_id in [call_id for call_id in self.running if call_id != _COMPACTION]:
-            chunks += await self.end_tool({'call_id': call_id, 'error': 'budget_exceeded'})
-        return chunks
+            self.end_tool({'call_id': call_id, 'error': 'budget_exceeded'})
 
     async def clear_tools(self) -> None:
         """Forget the calls still shown as running: a call that ended without an output shows no done line."""
@@ -977,9 +981,10 @@ class AgentTurn:
         update = {'files': list(self.attached_files.values())}
         if chat_id and message_id and not is_temporary_chat_id(chat_id):
             await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, update)
-        await self.emit('files', update)
+        # The full list, stored above: a `files` event would be appended to the stored files again.
+        await self.emit('chat:message:files', update)
 
-    async def record_output(self, payload: dict, *, attached: bool = False) -> list[dict[str, Any]]:
+    async def record_output(self, payload: dict, *, attached: bool = False) -> None:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
         if attached:
             await self.attached(payload)
@@ -989,7 +994,7 @@ class AgentTurn:
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
             if _read(element):
                 await self.show_source(element['id'], 'current_turn')
-        return await self.end_tool(payload, attached=attached)
+        self.end_tool(payload, attached=attached)
 
     async def show_source(self, source_id: str, flag: str) -> None:
         """[Claude] Flag a source once per turn: `current_turn` when a tool read it now, `cited_this_turn` when the
@@ -1071,6 +1076,7 @@ class AgentTurn:
             self.input_position = self.position
             await self.persist()
         if event.event == 'reasoning_delta':
+            await self.settle()
             self.partial_reasoning += event.data['text']
             return [_chunk({'reasoning_content': event.data['text']})]
         if event.event == 'delta':
@@ -1086,11 +1092,13 @@ class AgentTurn:
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
         if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
-            return await self.record_output(payload, attached=event.event == 'attached')
+            await self.record_output(payload, attached=event.event == 'attached')
+            return []
         if event.event in {'compacting', 'compaction'}:
             return await self.summary(event)
         if event.event == 'budget_exceeded' and event.data.get('stream') == 'root':
-            return await self.stop_tools()
+            self.stop_tools()
+            return []
         if event.event == 'failure' and event.data.get('stream') == 'root':
             await self.clear_tools()
         if event.event in {'status', 'error'}:
@@ -1191,7 +1199,8 @@ class AgentTurn:
                 async for event in events:
                     for chunk in await self.render(event):
                         yield chunk
-                    await self.start_pending_tools()
+                    for chunk in await self.start_pending_tools():
+                        yield chunk
         except (asyncio.CancelledError, GeneratorExit):
             await self.cancel()
             raise
