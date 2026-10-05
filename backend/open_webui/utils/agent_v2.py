@@ -27,7 +27,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, identity, ingest
+from open_webui.soev import acting, agent_threads, identity, ingest, live_documents
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
@@ -184,7 +184,7 @@ class AttachmentsUnavailable(Exception):
         self.files = files
 
 
-async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     """[Claude] The files attached in the chat, as the turn's `attachments` field; none while nothing is attached.
 
     The collection is the one the finished upload reported, else where chat uploads go; the agent checks access.
@@ -194,6 +194,7 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str
     """
     attached: list[dict[str, str]] = []
     unavailable: list[tuple[str, str]] = []
+    notes: list[str] = []
     entries = {
         entry['id']: entry
         for entry in metadata.get('files') or []
@@ -206,13 +207,25 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str
         name = entry.get('name') or (file.filename if file is not None else file_id)
         status = 'gone' if file is None else (file.meta or {}).get('status')
         if file is None or status in ('processing', 'failed'):
-            unavailable.append((name, status))
+            if entry.get('attached_by') or (file is not None and (file.meta or {}).get('attached_by')):
+                log.info('Skipping reference attachment %s (%s)', file_id, status)
+                if status == 'processing':
+                    notes.append(f'still processing: {name}')
+            else:
+                unavailable.append((name, status))
             continue
-        key = entry.get('collection_name') or ingest.attachments_collection_key(file.user_id)
-        attached.append({'collection_key': key, 'file_id': file_id, 'name': name})
+        key = (
+            (file.meta or {}).get('collection_name')
+            or entry.get('collection_name')
+            or ingest.attachments_collection_key(file.user_id)
+        )
+        item = {'collection_key': key, 'file_id': file_id, 'name': name}
+        if (file.meta or {}).get('source'):
+            item['document_ref'] = file.meta['source']['ref']
+        attached.append(item)
     if unavailable:
         raise AttachmentsUnavailable(unavailable)
-    return {'attachments': attached} if attached else {}
+    return {**({'attachments': attached} if attached else {}), **({'attachment_notes': notes} if notes else {})}
 
 
 # [Gradient] The most characters of a note or chat the agent takes (its `MAX_CHARACTERS`); `length` says how much
@@ -439,10 +452,29 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
     return {field: text for field, key in fields.items() if isinstance(text := metadata.get(key), str) and text.strip()}
 
 
-def _tools(metadata: dict[str, Any], web_search_allowed: bool) -> dict[str, dict[str, str]]:
-    """Send the web search control explicitly, forced off where OWUI does not allow it."""
+def _tools(
+    metadata: dict[str, Any], web_search_allowed: bool, live_documents_allowed: bool
+) -> dict[str, dict[str, str]]:
+    """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
+    default never decides for the user, and so is every turn where OWUI does not allow web search."""
     state = tool_state(metadata.get('features'), 'web_search') if web_search_allowed else 'off'
-    return {'tools': {'web_search': state, 'fetch': 'off' if state == 'off' else 'auto'}}
+    documents = (metadata.get('features') or {}).get('live_documents') if live_documents_allowed else 'off'
+    if documents not in ('auto', 'required'):
+        documents = 'off'
+    return {
+        'tools': {
+            'web_search': state,
+            'fetch': 'off' if state == 'off' else 'auto',
+            'search_live_documents': documents,
+            'attach_live_document': documents,
+        }
+    }
+
+
+async def _live_documents_allowed() -> bool:
+    from open_webui.env import AGENT_API_ENABLED
+
+    return AGENT_API_ENABLED and bool(await Config.get('live_documents.enable'))
 
 
 async def _web_search_allowed(user_id: str) -> bool:
@@ -696,9 +728,13 @@ class AgentTurn:
         self.elements: dict[str, dict[str, Any]] = {}
         # [Claude] The calls shown as running, by call id: their tool's name and arguments.
         self.running: dict[str, tuple[str, dict[str, Any]]] = {}
+        # [Claude] Calls of the last model output, shown as running once its reasoning and text are out, so a
+        # call's status never lands above the thoughts that led to it.
+        self.pending_calls: list[dict] = []
         # [Claude] Done lines of calls whose output landed, held until the model moves on.
         self.settling: list[dict[str, Any]] = []
         self.model: str | None = None
+        self.attached_files: dict[str, dict] = {}
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
     def path(self, operation: str = '') -> str:
@@ -727,7 +763,7 @@ class AgentTurn:
         for event in events:
             if event['position'] > position or event.get('stream') != 'root':
                 continue
-            if event['type'] == 'tool_output':
+            if event['type'] in {'tool_output', 'attached'}:
                 self.keep(event['payload'])
             elif event['type'] == 'input':
                 self.keep_texts((event['payload'].get('payload') or {}).get('texts') or [])
@@ -797,6 +833,11 @@ class AgentTurn:
         if self.emitter:
             await self.emitter({'type': kind, 'data': data})
 
+    async def start_pending_tools(self) -> None:
+        """[Claude] Show the last model output's calls as running, after its chunks went out."""
+        calls, self.pending_calls = self.pending_calls, []
+        await self.start_tools(calls)
+
     async def start_tools(self, calls: list[dict]) -> None:
         """Show each call as running. It stays a passing status until its output lands; the frontend replaces a
         status by a later one with the same `call_id`."""
@@ -817,7 +858,7 @@ class AgentTurn:
             return []
         return await self.end_tool({'call_id': _COMPACTION})
 
-    async def end_tool(self, output: dict[str, Any]) -> list[dict[str, Any]]:
+    async def end_tool(self, output: dict[str, Any], *, attached: bool = False) -> list[dict[str, Any]]:
         """[Claude] Anchor a call's done line in the content once its output lands, and show it once the model
         moves on (see `settle`): until then the model is still working with what the call returned.
 
@@ -826,6 +867,11 @@ class AgentTurn:
             return []
         name, arguments = call
         status = self.tool_status(name, arguments, None if output.get('error') else output)
+        if name == 'attach_live_document' and (
+            output.get('error')
+            or not (attached or any(element.get('type') == 'document' for element in output.get('elements') or []))
+        ):
+            status = {'action': name, 'description': 'Could not open document'}
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
         return [_marker(status)]
 
@@ -895,13 +941,34 @@ class AgentTurn:
         """Forget the calls still shown as running: a call that ended without an output shows no done line."""
         self.running.clear()
 
-    async def record_output(self, payload: dict) -> list[dict[str, Any]]:
+    async def attached(self, payload: dict) -> None:
+        try:
+            file = await live_documents.register_attachment(self.metadata['user_id'], payload)
+        except live_documents.AttachmentMismatch as error:
+            log.warning('Skipping mismatched attachment event (%s)', error.status)
+            return
+        chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
+        stored = {}
+        if chat_id and message_id and not is_temporary_chat_id(chat_id):
+            stored = await Chats.get_message_by_id_and_message_id(chat_id, message_id) or {}
+        self.attached_files.update({item['id']: item for item in stored.get('files') or [] if item.get('id')})
+        self.attached_files[file.id] = live_documents.chat_file(file)
+        update = {'files': list(self.attached_files.values())}
+        if chat_id and message_id and not is_temporary_chat_id(chat_id):
+            await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, update)
+        await self.emit('files', update)
+
+    async def record_output(self, payload: dict, *, attached: bool = False) -> list[dict[str, Any]]:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
+        if attached:
+            await self.attached(payload)
         self.keep(payload)
         for element in payload.get('elements') or []:
+            if element.get('type') == 'action-required' and element.get('kind') == 'connect':
+                await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
             if _read(element):
                 await self.show_source(element['id'], 'current_turn')
-        return await self.end_tool(payload)
+        return await self.end_tool(payload, attached=attached)
 
     async def show_source(self, source_id: str, flag: str) -> None:
         """[Claude] Flag a source once per turn: `current_turn` when a tool read it now, `cited_this_turn` when the
@@ -932,7 +999,9 @@ class AgentTurn:
                     raise SoevApiError(503, event.data.get('code', 'service_unavailable'), 'Recovery failed')
                 if event.position is not None:
                     self.position = event.position
-                if event.event == 'tool_output' and event.data.get('stream') == 'root':
+                if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
+                    if event.event == 'attached':
+                        await self.attached(event.data['payload'])
                     for source in self.keep(event.data['payload']):
                         await self.emit('source', source)
                 if event.event == 'status' and event.data['state'] not in {'idle', 'waiting'}:
@@ -995,8 +1064,8 @@ class AgentTurn:
             return [_chunk({'content': marker})] if marker else []
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
-        if event.event == 'tool_output' and event.data.get('stream') == 'root':
-            return await self.record_output(payload)
+        if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
+            return await self.record_output(payload, attached=event.event == 'attached')
         if event.event in {'compacting', 'compaction'}:
             return await self.summary(event)
         if event.event == 'budget_exceeded' and event.data.get('stream') == 'root':
@@ -1009,7 +1078,7 @@ class AgentTurn:
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
         await self.settle()
-        await self.start_tools(payload.get('tool_calls', []))
+        self.pending_calls = list(payload.get('tool_calls', []))
         reasoning = self.remaining_reasoning(payload.get('reasoning') or '')
         content, partial = payload['content'], self.partial
         citations = (payload.get('citations') or [])[self.streamed_citations :]
@@ -1101,6 +1170,7 @@ class AgentTurn:
                 async for event in events:
                     for chunk in await self.render(event):
                         yield chunk
+                    await self.start_pending_tools()
         except (asyncio.CancelledError, GeneratorExit):
             await self.cancel()
             raise
@@ -1161,7 +1231,21 @@ async def _sent(
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
     except ImagesUnavailable as unavailable:
         return _refused(_unimaged(unavailable, metadata.get('user_language')))
-    tools = _tools(metadata, await _web_search_allowed(metadata['user_id']))
+    tools = _tools(metadata, await _web_search_allowed(metadata['user_id']), await _live_documents_allowed())
+    notes = attachments.pop('attachment_notes', [])
+    collection = {}
+    references = any(entry.get('attached_by') or entry.get('source') for entry in metadata.get('files') or [])
+    if tools['tools']['search_live_documents'] != 'off' or references:
+        try:
+            collection['attachment_collection'] = await live_documents.attachment_collection(
+                metadata['user_id'], turn.client
+            )
+        except Exception:
+            log.warning('Live document collection unavailable this turn', exc_info=False)
+            notes.append('live documents unavailable this turn')
+            tools['tools'].update(search_live_documents='off', attach_live_document='off')
+    if notes:
+        text += '\n\nAttachment status:\n' + '\n'.join(notes)
     documents = (
         tool_state(metadata.get('features'), 'document_writer')
         if await _documents_allowed(metadata['user_id'])
@@ -1171,6 +1255,7 @@ async def _sent(
         'input': {
             'text': text,
             'knowledge': knowledge,
+            **collection,
             **attachments,
             **_urls(metadata),
             **_instructions(metadata),

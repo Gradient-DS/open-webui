@@ -23,6 +23,7 @@ export interface ChatDraft {
 	selectedSkillIds: string[];
 	selectedFilterIds: string[];
 	imageGenerationEnabled: boolean;
+	liveDocumentsState: import('$lib/utils/toolState').ToolState;
 	webSearchEnabled: boolean;
 	/** [Gradient] Web search Altijd; webSearchEnabled alone is Auto. */
 	webSearchRequired: boolean;

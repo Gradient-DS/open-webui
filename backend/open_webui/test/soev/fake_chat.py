@@ -127,7 +127,8 @@ class FakeChatApi:
         turn = body.get('input')
         if (
             not isinstance(turn, dict)
-            or set(turn) - {'text', 'knowledge', 'tools', 'context', 'documents'}
+            or set(turn)
+            - {'text', 'knowledge', 'tools', 'context', 'attachments', 'attachment_collection', 'documents'}
             or not isinstance(turn.get('text'), str)
             or turn.get('documents', 'off') not in ('off', 'auto', 'required')
             or not all(isinstance(entry, dict) and entry.get('key') for entry in turn.get('knowledge', []))

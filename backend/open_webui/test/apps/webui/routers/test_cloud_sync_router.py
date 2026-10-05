@@ -604,3 +604,34 @@ def test_policy_requires_a_verified_user(api) -> None:
     api.app.dependency_overrides[cloud_sync.get_verified_user] = deny
     assert api.browser.get('/api/v1/cloud-sync/policy').status_code == 401
     cloud_sync.identity.build_client.assert_not_called()
+
+
+@pytest.mark.parametrize('lifecycle', ['enabled', 'suspended', 'missing'])
+def test_live_document_grant_enable_uses_owned_connection(api, lifecycle):
+    """Only a user's OneDrive grant is reused, resumed or created with the document family."""
+    grant = {'id': 'g', 'families': ['live_documents'], 'lifecycle': lifecycle}
+    api.responses.extend(
+        [
+            response({'id': 'c', 'source_kind': 'onedrive'}),
+            response({'data': [] if lifecycle == 'missing' else [grant]}),
+        ]
+    )
+    if lifecycle != 'enabled':
+        api.responses.append(response({**grant, 'lifecycle': 'enabled'}))
+    result = api.browser.post('/api/v1/cloud-sync/connections/c/live-documents')
+    assert result.status_code == 200 and result.json()['lifecycle'] == 'enabled'
+    assert all(r.headers.get('X-Soev-Subject') for r in api.requests)
+    if lifecycle == 'missing':
+        assert json.loads(api.requests[-1].content) == {'families': ['live_documents']}
+        assert api.requests[-1].headers['Idempotency-Key'] == 'live-documents:c'
+    elif lifecycle == 'suspended':
+        assert api.requests[-1].method == 'PATCH'
+        assert json.loads(api.requests[-1].content) == {'enabled': True}
+
+
+def test_live_document_grant_is_provider_neutral(api):
+    """The platform decides which providers can grant the document family."""
+    grant = {'id': 'g', 'families': ['live_documents'], 'lifecycle': 'enabled'}
+    api.responses.extend([response({'id': 'c', 'source_kind': 'google_drive'}), response({'data': [grant]})])
+    result = api.browser.post('/api/v1/cloud-sync/connections/c/live-documents')
+    assert result.status_code == 200 and result.json() == grant

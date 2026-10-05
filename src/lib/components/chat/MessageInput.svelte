@@ -135,6 +135,7 @@
 	import DocumentArrowUp from '../icons/DocumentArrowUp.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
+	import OneDriveSearch from '../icons/OneDriveSearch.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import Knobs from '../icons/Knobs.svelte';
@@ -233,6 +234,7 @@
 	export let selectedFilterIds: string[] = [];
 
 	export let imageGenerationEnabled = false;
+	export let liveDocumentsState: ToolState = 'off';
 	export let webSearchEnabled = false;
 	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
 	export let webSearchRequired = false;
@@ -295,6 +297,7 @@
 		imageGenerationEnabled,
 		webSearchEnabled,
 		webSearchRequired,
+		liveDocumentsState,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
 		documentWriterRequired,
@@ -891,35 +894,6 @@
 		$config?.features?.enable_document_writer &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.document_writer);
 
-	// Disable code interpreter when terminal is active (mutually exclusive)
-	$: if ($selectedTerminalId && codeInterpreterEnabled) {
-		codeInterpreterEnabled = false;
-	}
-
-	// Auto-disable capability toggles when the selected model(s) no longer support them
-	// (e.g. switching from a web-search-capable model to one without). Mirrors the terminal
-	// guard above and keeps both the active-capability badge and the getFeatures() payload
-	// from carrying a stale capability. A feature stays on only if every selected model
-	// supports it; the `?? true` fallback in the *CapableModels derivations means models that
-	// are still loading (or omit the capability) are treated as capable, so we never flicker.
-	$: selectedModelCount = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length;
-	$: if (webSearchEnabled && webSearchCapableModels.length !== selectedModelCount) {
-		webSearchEnabled = false;
-	}
-	// Clear selected terminal when model doesn't support terminal
-	$: if ($selectedTerminalId && selectedModelIds.length > 0 && terminalCapableModels.length === 0) {
-		selectedTerminalId.set(null);
-	}
-	$: if (imageGenerationEnabled && imageGenerationCapableModels.length !== selectedModelCount) {
-		imageGenerationEnabled = false;
-	}
-	$: if (codeInterpreterEnabled && codeInterpreterCapableModels.length !== selectedModelCount) {
-		codeInterpreterEnabled = false;
-	}
-	$: if (documentWriterEnabled && documentWriterCapableModels.length !== selectedModelCount) {
-		documentWriterEnabled = false;
-	}
-
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
 	// The first side used locks the conversation; the unavailable side is grayed out with a
@@ -933,18 +907,17 @@
 		? getHistorySide(dataSeparationMessages)
 		: null;
 	$: dataSeparationSide = strictDataSeparation
-		? getActiveSide({ messages: dataSeparationMessages, files, webSearchEnabled })
+		? getActiveSide({
+				messages: dataSeparationMessages,
+				files,
+				webSearchEnabled: webSearchEnabled && showWebSearchButton
+			})
 		: null;
 	$: openInternetBlocked = strictDataSeparation && dataSeparationSide === 'internal';
 	$: internalBlocked = strictDataSeparation && dataSeparationSide === 'open_internet';
 	$: dataSeparationMessage = $i18n.t(
 		'Internal documents and the open internet cannot be used in the same conversation.'
 	);
-	// Defensive: a model's defaultFeatureIds could re-enable web search in a conversation already
-	// locked to internal documents. Keyed on the history-only side to avoid a reactive cycle.
-	$: if (dataSeparationHistorySide === 'internal' && webSearchEnabled) {
-		webSearchEnabled = false;
-	}
 	// [Gradient] Pinned-bar buttons for the blocked side are hidden; the "+" menu still
 	// shows them grayed out with the explanatory tooltip.
 	$: dataSeparationBlockedItems = new Set(
@@ -1007,9 +980,11 @@
 				openTab: (tab: string) => void;
 				openWebpageModal: () => void;
 				cycleWebSearch: () => void;
+				cycleLiveDocuments: () => Promise<void>;
 				cycleTool: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
 		  }
 		| undefined;
+	const liveDocumentsTooltipId = `onedrive-search-${uuidv4()}`;
 	const pinnedStateTooltip = (label: string, state: ToolState, description: string) =>
 		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
 	const pinnedButtonClass =
@@ -2461,13 +2436,6 @@
 														if (e.key === 'Escape') {
 															console.log('Escape');
 															atSelectedModel = undefined;
-															selectedToolIds = [];
-															selectedFilterIds = [];
-
-															webSearchEnabled = false;
-															imageGenerationEnabled = false;
-															codeInterpreterEnabled = false;
-															documentWriterEnabled = false;
 														}
 													}}
 													on:paste={async (e) => {
@@ -2519,6 +2487,7 @@
 									{#if isFeatureEnabled('input_menu')}
 										<InputMenu
 											bind:this={inputMenuRef}
+											bind:liveDocumentsState
 											restrictTo={inputMenuRestrictTo}
 											{openInternetBlocked}
 											{internalBlocked}
@@ -2690,11 +2659,11 @@
 														</button>
 													</Tooltip>
 												{:else if itemId === 'onedrive' && inputMenuFileUploadEnabled && $config?.features?.enable_onedrive_integration && ($config?.features?.enable_onedrive_personal || $config?.features?.enable_onedrive_business)}
-													<Tooltip content={$i18n.t('OneDrive Files')} placement="top">
+													<Tooltip content={$i18n.t('OneDrive files')} placement="top">
 														<button
 															class={pinnedButtonClass}
 															type="button"
-															aria-label={$i18n.t('OneDrive Files')}
+															aria-label={$i18n.t('OneDrive files')}
 															on:click={() => {
 																if (
 																	$config?.features?.enable_onedrive_personal &&
@@ -2786,6 +2755,42 @@
 														>
 															<Photo className="size-4" strokeWidth="1.75" />
 														</button>
+													</Tooltip>
+												{:else if itemId === 'live_documents' && $config?.features?.enable_live_documents}
+													<Tooltip
+														elementId={liveDocumentsTooltipId}
+														content={pinnedStateTooltip(
+															$i18n.t('OneDrive search'),
+															liveDocumentsState,
+															liveDocumentsState !== 'off'
+																? $i18n.t('The model decides whether to search OneDrive')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={`${$i18n.t('OneDrive search')}: ${$i18n.t(TOOL_STATE_LABELS[liveDocumentsState])}`}
+															aria-pressed={liveDocumentsState !== 'off'}
+															on:click|preventDefault={() => inputMenuRef?.cycleLiveDocuments()}
+															class={pinnedToggleClass(liveDocumentsState)}
+														>
+															<OneDriveSearch className="size-4" />
+														</button>
+														<div slot="tooltip" class="hidden">
+															<div id={liveDocumentsTooltipId} class="flex items-center gap-2">
+																<OneDriveSearch className="size-4 shrink-0" />
+																<span
+																	>{pinnedStateTooltip(
+																		$i18n.t('OneDrive search'),
+																		liveDocumentsState,
+																		liveDocumentsState !== 'off'
+																			? $i18n.t('The model decides whether to search OneDrive')
+																			: $i18n.t(TOOL_OFF_DESCRIPTION)
+																	)}</span
+																>
+															</div>
+														</div>
 													</Tooltip>
 												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
 													<Tooltip

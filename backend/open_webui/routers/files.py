@@ -44,6 +44,7 @@ from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
 from open_webui.soev import ingest
 from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
+from open_webui.soev.live_documents import stream_original
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.content_types import content_type_for  # [Gradient]
@@ -994,6 +995,8 @@ async def get_file_content_by_id_inline(
         )
 
     if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+        if (file.meta or {}).get('source'):
+            return await stream_original(file, user, attachment=attachment)
         try:
             file_path = await asyncio.to_thread(Storage.get_file, file.path)
             file_path = Path(file_path)
@@ -1174,6 +1177,8 @@ async def get_file_content_by_id(
         )
 
     if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+        if (file.meta or {}).get('source'):
+            return await stream_original(file, user, attachment=True)
         file_path = file.path
 
         # Handle Unicode filenames
@@ -1291,7 +1296,8 @@ async def delete_file_by_id(
         result = await Files.delete_file_by_id(id, db=db)
         if result:
             try:
-                await asyncio.to_thread(Storage.delete_file, file.path)
+                if file.path:
+                    await asyncio.to_thread(Storage.delete_file, file.path)
             except Exception as e:
                 log.exception(e)
                 log.error('Error deleting files')

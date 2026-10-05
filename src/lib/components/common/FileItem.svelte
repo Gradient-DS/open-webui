@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Readable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
 	import { createEventDispatcher, getContext } from 'svelte';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -11,7 +13,9 @@
 	import Tooltip from './Tooltip.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Readable<I18n>>('i18n');
+	$: originalUrl =
+		typeof item?.web_url === 'string' && item.web_url.startsWith('https://') ? item.web_url : null;
 	const dispatch = createEventDispatcher();
 
 	export let className = 'w-60';
@@ -228,5 +232,15 @@
 				<XMark className={'size-4'} />
 			</button>
 		</div>
+	{/if}
+	{#if item?.attached_by === 'agent' && originalUrl}
+		<a
+			href={originalUrl}
+			target="_blank"
+			rel="noopener noreferrer"
+			class="block px-2 py-1 text-xs text-blue-600 dark:text-blue-400"
+		>
+			{$i18n.t('Opened by the assistant from OneDrive')}
+		</a>
 	{/if}
 </div>

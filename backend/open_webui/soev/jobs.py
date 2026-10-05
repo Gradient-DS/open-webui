@@ -67,6 +67,17 @@ async def _commit_upload(client: SoevClient, file: FileModel, job: dict) -> int:
     return 1
 
 
+async def _reference_ready(client: SoevClient, file: FileModel, job: dict) -> int:
+    if not file.meta.get('content_type'):
+        path = f'/v1/collections/{quote(job["collection_key"], safe="")}/documents/{quote(file.id, safe="")}'
+        ref = f'owui:user:{file.user_id}'
+        await identity.ensure_link(ref, client)
+        document = await client.get(path, as_user=ref)
+        if document.get('content_type'):
+            await Files.update_file_metadata_by_id(file.id, {'content_type': document['content_type']})
+    return await _finish(file, job)
+
+
 async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
     job = file.meta['soev_job']
     try:
@@ -83,6 +94,8 @@ async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
         cap = config.SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS
         return await _finish(file, job, f'did not complete within {cap}s') if age > cap else 0
     if status == 'SUCCEEDED':
+        if job.get('kind') == 'reference':
+            return await _reference_ready(client, file, job)
         path = f'/v1/collections/{quote(job["collection_key"], safe="")}/documents/{quote(file.id, safe="")}'
         document = await client.get(path)
         if (document.get('path') or '') != (job['path'] or ''):

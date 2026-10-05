@@ -64,6 +64,8 @@
 	import ContentRenderer from './ContentRenderer.svelte';
 	import PresentUIDispatcher from './Markdown/PresentUIDispatcher.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
+	import { consentLabels } from '$lib/utils/live-documents';
+	import ConnectOneDrive from './ConnectOneDrive.svelte';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
 	import { fade } from 'svelte/transition';
@@ -92,12 +94,21 @@
 	} from './structuredOutput';
 
 	interface MessageType {
+		action_required?: { kind: string; provider: string };
 		id: string;
 		model: string;
 		assistant_id?: string; // [Gradient]
 		content: string;
 		output?: OutputItem[];
-		files?: { type: string; url: string }[];
+		files?: {
+			type: string;
+			url: string;
+			id?: string;
+			attached_by?: string;
+			name?: string;
+			content_type?: string;
+			size?: number;
+		}[];
 		timestamp: number;
 		role: string;
 		statusHistory?: {
@@ -1124,6 +1135,9 @@
 							{/each}
 						{/if}
 
+						{#if message?.action_required?.kind === 'connect' && consentLabels[message.action_required.provider]}
+							<ConnectOneDrive provider={message.action_required.provider} />
+						{/if}
 						{#if message?.files && message.files?.filter( (f) => ['image', 'file'].includes(f.type) ).length > 0}
 							<div
 								class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap"

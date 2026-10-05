@@ -27,7 +27,14 @@ from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
 
 # The turn's tools field while the web search control is Uit (or absent).
-WEB_SEARCH_OFF = {'web_search': 'off', 'fetch': 'off'}
+WEB_SEARCH_OFF = {'web_search': 'off', 'fetch': 'off', 'search_live_documents': 'off', 'attach_live_document': 'off'}
+
+
+async def render(turn: agent_v2.AgentTurn, event: ChatEvent) -> list[dict]:
+    """Render one event as the stream does: its chunks, then the calls it started."""
+    chunks = await turn.render(event)
+    await turn.start_pending_tools()
+    return chunks
 
 
 @dataclass
@@ -380,7 +387,7 @@ async def test_attached_urls_are_filtered_and_sent_even_without_web_search(
     assert not any('error' in chunk for chunk in chunks)
     sent = chat.mutations()[-1][1]['input']
     assert sent['urls'] == urls
-    expected = {'web_search': 'auto', 'fetch': 'auto'} if allowed and enabled else WEB_SEARCH_OFF
+    expected = {**WEB_SEARCH_OFF, 'web_search': 'auto', 'fetch': 'auto'} if allowed and enabled else WEB_SEARCH_OFF
     assert sent['tools'] == expected
 
 
@@ -628,6 +635,7 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, features: dict, state: str) -> None:
     await chat.turn('question', 'a1', features=features)
     assert chat.mutations()[-1][1]['input']['tools'] == {
+        **WEB_SEARCH_OFF,
         'web_search': state,
         'fetch': 'off' if state == 'off' else 'auto',
     }
@@ -644,21 +652,21 @@ async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, 
     ids=['always', 'auto', 'off', 'no-features'],
 )
 def test_tools_maps_the_web_search_features_to_tool_states(features: dict | None, state: str) -> None:
-    assert agent_v2._tools({'features': features}, True) == {
-        'tools': {'web_search': state, 'fetch': 'off' if state == 'off' else 'auto'}
+    assert agent_v2._tools({'features': features}, True, False) == {
+        'tools': {**WEB_SEARCH_OFF, 'web_search': state, 'fetch': 'off' if state == 'off' else 'auto'}
     }
 
 
 @pytest.mark.parametrize('features', [{'web_search': True, 'web_search_required': True}, {'web_search': True}])
 def test_tools_sends_off_when_owui_does_not_allow_web_search(features: dict) -> None:
-    assert agent_v2._tools({'features': features}, False) == {'tools': {'web_search': 'off', 'fetch': 'off'}}
+    assert agent_v2._tools({'features': features}, False, False) == {'tools': WEB_SEARCH_OFF}
 
 
 @pytest.mark.asyncio
 async def test_a_disallowed_turn_asks_the_agent_for_no_web_search(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
     await chat.turn('question', 'a1', features={'web_search': True, 'web_search_required': True})
-    assert chat.mutations()[-1][1]['input']['tools'] == {'web_search': 'off', 'fetch': 'off'}
+    assert chat.mutations()[-1][1]['input']['tools'] == WEB_SEARCH_OFF
 
 
 @pytest.mark.asyncio
@@ -693,7 +701,7 @@ async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
         'text': 'question',
         'knowledge': [],
         'documents': 'off',
-        'tools': {'web_search': 'off', 'fetch': 'off'},
+        'tools': WEB_SEARCH_OFF,
     }
 
 
@@ -1445,17 +1453,18 @@ async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_
     turn.emitter = AsyncMock()
     status = {'type': 'status', 'data': {'action': name, **generic, 'call_id': 'c1', 'done': False}}
     async with asyncio.timeout(2):
-        started = await turn.render(
+        started = await render(
+            turn,
             ChatEvent(
                 'model_output',
                 {'stream': 'root', 'payload': {'content': '', 'tool_calls': [{'id': 'c1', 'name': name}]}},
-            )
+            ),
         )
         assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
         data = payload if kind.endswith('delta') else {'stream': 'root', 'payload': payload}
-        ended = await turn.render(ChatEvent(kind, data))
+        ended = await render(turn, ChatEvent(kind, data))
         assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
-        await turn.render(ChatEvent('delta', {'text': 'Answer'}))
+        await render(turn, ChatEvent('delta', {'text': 'Answer'}))
     answered_call = kind == 'tool_output'
     ended_status = {'type': 'status', 'data': {**status['data'], 'done': True}}
     shown = [call.args[0] for call in turn.emitter.call_args_list if call.args[0]['data'].get('action') != 'summary']
@@ -1475,10 +1484,10 @@ async def test_a_summary_of_the_conversation_shows_running_then_done_when_it_lan
         }
     }
     async with asyncio.timeout(2):
-        started = await turn.render(ChatEvent('compacting', {}))
-        ended = await turn.render(ChatEvent('compaction', {'stream': 'root', 'payload': {'summary': 'kort'}}))
+        started = await render(turn, ChatEvent('compacting', {}))
+        ended = await render(turn, ChatEvent('compaction', {'stream': 'root', 'payload': {'summary': 'kort'}}))
         # A finished call shows done once the model moves on.
-        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     shown = [call.args[0]['data'] for call in turn.emitter.call_args_list]
     assert [(status['action'], status['description'], status['done']) for status in shown] == [
         ('compaction', 'Summarising...', False),
@@ -1496,12 +1505,14 @@ async def test_calls_the_budget_stopped_end_before_the_answer() -> None:
     turn.emitter = AsyncMock()
     calls = [{'id': 'c1', 'name': 'search'}, {'id': 'c2', 'name': 'calculate'}]
     async with asyncio.timeout(2):
-        await turn.render(
-            ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': calls}})
+        await render(
+            turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': calls}})
         )
-        await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
-        stopped = await turn.render(ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {'count': 3, 'cap': 3}}))
-        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
+        await render(turn, ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
+        stopped = await render(
+            turn, ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {'count': 3, 'cap': 3}})
+        )
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     assert '<details type="tool_calls" done="true" name="calculate">' in content(stopped)
     shown = [call.args[0]['data'] for call in turn.emitter.call_args_list]
     assert [(status['call_id'], status['done']) for status in shown] == [
@@ -1518,7 +1529,8 @@ async def test_parallel_tools_each_show_once() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
     async with asyncio.timeout(2):
-        await turn.render(
+        await render(
+            turn,
             ChatEvent(
                 'model_output',
                 {
@@ -1528,11 +1540,11 @@ async def test_parallel_tools_each_show_once() -> None:
                         'tool_calls': [{'id': 'c1', 'name': 'search'}, {'id': 'c2', 'name': 'calculate'}],
                     },
                 },
-            )
+            ),
         )
         for call_id in ['c2', 'c1']:
-            await turn.render(ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id}}))
-        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
+            await render(turn, ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id}}))
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     search = {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False}
     calculate = {
         'action': 'calculate',
@@ -1555,14 +1567,16 @@ async def test_web_calls_carry_the_addresses_they_found_and_read() -> None:
     async with asyncio.timeout(2):
         for call_id, name, arguments, elements in calls:
             tool_call = {'id': call_id, 'name': name, 'arguments': arguments}
-            await turn.render(
-                ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': [tool_call]}})
+            await render(
+                turn,
+                ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': [tool_call]}}),
             )
-            await turn.render(
-                ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id, 'elements': elements}})
+            await render(
+                turn,
+                ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': call_id, 'elements': elements}}),
             )
         # A finished call shows done once the model moves on.
-        await turn.render(ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     shown = [call.args[0]['data'].get('items') for call in turn.emitter.call_args_list]
     found = [
         {'link': 'https://soev.ai/', 'title': 'soev.ai'},
@@ -2126,6 +2140,54 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
     assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'output,attached,expected',
+    [
+        ({'text': 'Document request refused: not_readable'}, False, 'Could not open document'),
+        ({'text': 'Attachment failed: processing_failed'}, False, 'Could not open document'),
+        ({'elements': [{'type': 'action_required', 'id': 'connect'}]}, False, 'Could not open document'),
+        ({'error': 'tool_failed'}, False, 'Could not open document'),
+        ({'elements': [{'type': 'document', 'id': 'doc'}]}, False, 'Opened document'),
+        ({'status': 'processing'}, True, 'Opened document'),
+        ({'status': 'ready'}, True, 'Opened document'),
+    ],
+)
+async def test_attach_summary_reflects_the_outcome(output: dict, attached: bool, expected: str) -> None:
+    """Refusals and errors cannot claim success; accepted and existing attachments can."""
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {'attach_live_document': {'done': {'template': 'Opened document', 'params': {}}}}
+    turn.running['attach'] = ('attach_live_document', {})
+    chunks = await turn.end_tool({'call_id': 'attach', **output}, attached=attached)
+    assert f'<summary>{expected}</summary>' in content(chunks)
+    assert turn.settling == [
+        {'action': 'attach_live_document', 'description': expected, 'call_id': 'attach', 'done': True}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_call_shows_running_only_after_the_reasoning_that_led_to_it() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    chunks = await turn.render(
+        ChatEvent(
+            'model_output',
+            {
+                'stream': 'root',
+                'payload': {
+                    'content': '',
+                    'reasoning': 'Search the files.',
+                    'tool_calls': [{'id': 'c1', 'name': 'search_live_documents'}],
+                },
+            },
+        )
+    )
+    assert any('reasoning_content' in str(chunk) for chunk in chunks)
+    assert not turn.emitter.call_args_list
+    await turn.start_pending_tools()
+    assert turn.emitter.call_args_list[0].args[0]['data']['done'] is False
+
+
 IMAGE_BYTES = base64.b64decode(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='
 )
@@ -2342,7 +2404,7 @@ async def test_documents_sends_its_state_on_every_turn(
         await chat.turn('question', f'a{index}', 'a0' if index else None, features=features)
         sent = chat.mutations()[-1][1]['input']
         assert sent['documents'] == (state if allowed else 'off')
-        assert sent['tools'] == {'web_search': 'off', 'fetch': 'off'}
+        assert sent['tools'] == WEB_SEARCH_OFF
 
 
 @pytest.mark.asyncio

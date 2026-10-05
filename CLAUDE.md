@@ -62,3 +62,60 @@ Set `down_revision` to the current head. `alembic heads` needs a live DB connect
 - `backend/open_webui/env.py` — environment variable handling
 - `src/routes/+layout.svelte` — root layout, app initialization
 - `src/lib/stores/` — global state (user, settings, models, chats)
+
+## Live document attachments
+
+`soev/live_documents.py` records agent `attached` events as Files whose id is the platform source id.
+Their `meta.source` contains the provider reference; bytes are never stored in OWUI. Reference
+jobs use the existing durable job poller, skipping upload commit and path moves. File content
+routes stream platform originals with the requesting user's assertion. Every v2 turn ensures
+and sends the user's chat attachments collection; stored reference metadata is sent next turn.
+The platform binds that collection into its live ticket; a missing or changed target
+refuses collection_mismatch. Provider identity and Retry-After remain structured client
+error fields. Unknown Graph readability is decided from downloaded bytes before staging.
+
+The OneDrive search toggle enables `search_live_documents` and `attach_live_document` together
+with `auto` state; both remain off by default. `/cloud-sync/connections/{id}/live-documents`
+lists or enables owned OneDrive live grants. The toggle and Connect OneDrive card share the
+existing cloud consent popup and verify its origin, opener and connection before polling.
+No new OWUI environment variables are required. Platform live documents must be enabled.
+
+OneDrive search can be pinned to the composer; both controls cycle off/auto (off by default)
+and share the same consent flow.
+Set ENABLE_LIVE_DOCUMENTS=true (config key live_documents.enable, default false) alongside
+AGENT_API_ENABLED to offer the control. The server gates every requested document tool state
+with that setting; enable the matching platform live_documents setting as well.
+
+Reference attachments that are failed or gone are skipped on later turns; processing
+ones add a short status note. Ordinary upload admission is unchanged. Collection setup
+runs only for enabled document tools or reference-bearing turns, caches successful keys
+per user, and disables the document tools for that turn if setup fails. Reference File
+rows retain supplied content_type for inline original previews and never delete empty
+storage paths. Mismatched streamed attachment identities are logged and skipped.
+Assistant attachment chips can be dismissed; chat files and message removal markers
+persist that choice and prevent historical files or replayed events from restoring it.
+
+Consent cards use provider-specific i18n labels for the configured consent routes.
+Connection and grant status is prefetched when InputMenu opens. Connected users reuse
+their grant without opening a popup. Suspended:reauth (the broker's persisted lifecycle)
+or a reauth error triggers authorization on the next explicit click, preserving the
+browser gesture. Provider family support is decided by the platform grant endpoint.
+If an older reference event lacks MIME metadata, successful job polling reads the
+completed document as its owning user and fills content_type before marking it ready.
+
+Attach tool summaries show "Could not open document" for refusals and failures.
+An attached event (including processing) or an existing document keeps the success label.
+
+OneDrive search uses the cloud-and-magnifier icon in its menu row, pinned button
+and tooltip. The picker retains the plain cloud; pinned tooltip labels are
+"OneDrive files" and "OneDrive search", translated through i18n.
+
+Consent polling treats suspended:reauth with a cleared last_error as pending until exchange enables the reused connection. A stored failure still terminates polling, and the normal timeout applies.
+
+Composer choices persist in chat.features, including the initial chat creation, and
+ui.composerTools user settings for new chats. Model defaults seed only unsaved choices;
+loading a chat or changing models never overwrites explicit preferences. Feature gates
+control request availability without rewriting saved choices; unavailable selected
+features remain disabled in the + menu. Tool/skill/filter selections use the same snapshot.
+
+PDF writer auto/required/off choices persist with composerPreferences in user settings and chat.features. Draft restoration restores text and files only; model defaults seed unsaved preferences.

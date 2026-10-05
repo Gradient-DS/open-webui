@@ -619,6 +619,26 @@ def test_each_event_loop_gets_its_own_transport():
 
 
 @pytest.mark.asyncio
+async def test_live_refusal_preserves_provider_and_retry_after(recorded_http):
+    """Structured refusal context survives without exposing upstream server details."""
+    _, responses = recorded_http
+    responses.append(
+        httpx.Response(
+            503,
+            json={'code': 'provider_throttled', 'detail': 'private upstream detail', 'provider': 'onedrive'},
+            headers={'Content-Type': 'application/problem+json', 'Retry-After': '7'},
+        )
+    )
+    with pytest.raises(SoevApiError) as caught:
+        await SoevClient('https://soev.invalid', 'test-key').get('/v1/live/attach/job')
+    assert caught.value.status == 503
+    assert caught.value.code == 'provider_throttled'
+    assert caught.value.provider == 'onedrive'
+    assert caught.value.retry_after == '7'
+    assert 'private upstream' not in caught.value.detail
+
+
+@pytest.mark.asyncio
 async def test_post_bytes_uploads_as_user_without_content_type(recorded_http):
     requests, responses = recorded_http
     reference = {'id': 'a' * 32, 'sha256': 'b' * 64, 'size': 5, 'media_type': 'image/png', 'name': 'photo +#.png'}
