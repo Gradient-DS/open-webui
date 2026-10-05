@@ -168,21 +168,6 @@ export const exportChatAsDocx = async (
 	return blob;
 };
 
-export const exportDocumentAsPdf = async (token: string, title: string, markdown: string) => {
-	const blob = await fetch(`${WEBUI_API_BASE_URL}/utils/document/pdf`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify({ title, markdown })
-	}).then((res) => {
-		if (!res.ok) throw new Error('Document PDF export failed');
-		return res.blob();
-	});
-	return blob;
-};
-
 export const exportDocumentAsDocx = async (token: string, title: string, markdown: string) => {
 	const blob = await fetch(`${WEBUI_API_BASE_URL}/utils/document/docx`, {
 		method: 'POST',

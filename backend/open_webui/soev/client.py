@@ -187,6 +187,12 @@ class SoevClient:
             result['thread_id'] = _chat_thread_id(response)
         return result
 
+    async def post_bytes(self, path: str, body: bytes, *, as_user: str, params: dict | None = None) -> dict:
+        if not as_user:
+            raise ValueError('Uploading bytes requires an acting user')
+        response = await self._request('POST', path, content=body, as_user=as_user, params=params)
+        return self._json_object(response)
+
     async def chat_delete(self, path: str, *, as_user: str) -> None:
         """Delete a thread once; the chat contract has no mutation replay key."""
         if not as_user:
@@ -339,6 +345,7 @@ class SoevClient:
         path: str,
         *,
         body: dict | None = None,
+        content: bytes | None = None,
         as_user: str | None = None,
         params: dict | None = None,
         idempotency_key: str | None = None,
@@ -356,7 +363,13 @@ class SoevClient:
         status = None
         try:
             response = await _shared_client().request(
-                method, f'{self._base_url}{path}', headers=headers, params=params, json=body, timeout=self._timeout
+                method,
+                f'{self._base_url}{path}',
+                headers=headers,
+                params=params,
+                json=body,
+                content=content,
+                timeout=self._timeout,
             )
             status = response.status_code
         except httpx.TransportError as error:

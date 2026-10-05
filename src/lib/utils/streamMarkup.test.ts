@@ -71,3 +71,17 @@ describe('markupSafeEnd', () => {
 		expect(markupSafeEnd('als x < 5 dan', 9)).toBe(9);
 	});
 });
+
+it('reveals an open document as soon as its opening tag is complete', () => {
+	const text = 'Before <document title="Report"># Draft';
+	expect(markupSafeEnd(text, 10)).toBe(text.length);
+	expect(maskInFlightTag('Before <document title="Report')).toBe('Before ');
+	expect(maskInFlightTag('Before <document title="Report">Body</doc')).toBe(
+		'Before <document title="Report">Body'
+	);
+});
+
+it('does not let HTML details inside a completed document hold back following text', () => {
+	const text = '<document format="html"><details>Body</details></document> After';
+	expect(markupSafeEnd(text, text.length)).toBe(text.length);
+});

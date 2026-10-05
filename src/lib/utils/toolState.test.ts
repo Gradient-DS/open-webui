@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
 	BINARY_TOOL_STATES,
 	LIVE_DOCUMENT_STATES,
+	DOCUMENT_WRITER_STATES,
+	documentWriterFlags,
+	documentWriterState,
 	WEB_SEARCH_STATES,
 	nextToolState,
 	webSearchFlags,
@@ -39,5 +42,24 @@ describe('web search flags', () => {
 	});
 	it('ignores required while web search is off', () => {
 		expect(webSearchState(false, true)).toBe('off');
+	});
+});
+
+describe('PDF writer flags', () => {
+	it('cycles Auto, Always, Off and round-trips the request flags', () => {
+		expect(DOCUMENT_WRITER_STATES).toEqual(['auto', 'required', 'off']);
+		for (const [index, state] of DOCUMENT_WRITER_STATES.entries()) {
+			expect(nextToolState(state, DOCUMENT_WRITER_STATES)).toBe(
+				DOCUMENT_WRITER_STATES[(index + 1) % 3]
+			);
+			const { enabled, required } = documentWriterFlags(state);
+			expect(enabled).toBe(state !== 'off');
+			expect(required).toBe(state === 'required');
+			expect(documentWriterState(enabled, required)).toBe(state);
+		}
+	});
+	it('reads enabled-only saved state as Auto and ignores required when off', () => {
+		expect(documentWriterState(true, false)).toBe('auto');
+		expect(documentWriterState(false, true)).toBe('off');
 	});
 });

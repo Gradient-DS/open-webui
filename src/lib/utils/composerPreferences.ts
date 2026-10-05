@@ -7,6 +7,7 @@ const featureKeys = {
 	imageGenerationEnabled: 'image_generation',
 	codeInterpreterEnabled: 'code_interpreter',
 	documentWriterEnabled: 'document_writer',
+	documentWriterRequired: 'document_writer_required',
 	selectedToolIds: 'tool_ids',
 	selectedSkillIds: 'skill_ids',
 	selectedFilterIds: 'filter_ids'
@@ -19,6 +20,7 @@ export type ComposerPreferences = {
 	imageGenerationEnabled: boolean;
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
+	documentWriterRequired: boolean;
 	selectedToolIds: string[];
 	selectedSkillIds: string[];
 	selectedFilterIds: string[];
@@ -36,6 +38,7 @@ export function composerPreferences(
 		imageGenerationEnabled: values.imageGenerationEnabled ?? false,
 		codeInterpreterEnabled: values.codeInterpreterEnabled ?? false,
 		documentWriterEnabled: values.documentWriterEnabled ?? false,
+		documentWriterRequired: values.documentWriterRequired ?? false,
 		selectedToolIds: [...(values.selectedToolIds ?? [])],
 		selectedSkillIds: [...(values.selectedSkillIds ?? [])],
 		selectedFilterIds: [...(values.selectedFilterIds ?? [])]
