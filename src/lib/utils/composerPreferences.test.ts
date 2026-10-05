@@ -9,6 +9,7 @@ const chosen = composerPreferences({
 	imageGenerationEnabled: true,
 	codeInterpreterEnabled: true,
 	documentWriterEnabled: true,
+	documentWriterRequired: true,
 	selectedToolIds: ['tool'],
 	selectedSkillIds: ['skill'],
 	selectedFilterIds: ['filter']
@@ -34,7 +35,7 @@ describe('composer preferences', () => {
 		expect(restored.liveMailState).toBe('off');
 		expect(chosen.webSearchRequired).toBe(true);
 	});
-	it('partial drafts inherit missing choices and do not share selection arrays', () => {
+	it('partial preferences inherit missing choices and do not share selection arrays', () => {
 		const restored = composerPreferences({ webSearchEnabled: false }, chosen);
 		expect(restored.codeInterpreterEnabled).toBe(true);
 		expect(restored.webSearchEnabled).toBe(false);

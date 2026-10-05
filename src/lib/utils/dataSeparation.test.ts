@@ -84,3 +84,15 @@ describe('getActiveSide', () => {
 		).toBe('internal');
 	});
 });
+
+it('PDF writer does not select either data side', () => {
+	expect(classifyFileItem({ type: 'document_writer' })).toBeNull();
+	expect(
+		getActiveSide({
+			messages: [{ features: { document_writer: true, document_writer_required: true } }],
+			files: [],
+			webSearchEnabled: false
+		})
+	).toBeNull();
+	expect(getLiveSide([{ type: 'file' }], false)).toBe('internal');
+});

@@ -8,6 +8,7 @@
 	import { type ToolState } from '$lib/utils/toolState';
 	import { getHistorySide } from '$lib/utils/dataSeparation';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
+	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -372,7 +373,8 @@
 	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
 	let webSearchRequired = false;
 	let codeInterpreterEnabled = false;
-	let documentWriterEnabled = false;
+	let documentWriterEnabled = true;
+	let documentWriterRequired = false;
 	let composerInitialized = false;
 	let composerSettingsSave = Promise.resolve();
 	const rememberComposerPreferences = (preferences: ComposerPreferences) => {
@@ -392,6 +394,7 @@
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
+		documentWriterRequired,
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds
@@ -405,6 +408,7 @@
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
 			documentWriterEnabled,
+			documentWriterRequired,
 			selectedToolIds,
 			selectedSkillIds,
 			selectedFilterIds
@@ -1037,6 +1041,7 @@
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
+		documentWriterRequired,
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds
@@ -1143,6 +1148,12 @@
 				webSearchRequired = Boolean(webSearchAllowed && always);
 			}
 
+			// [Gradient] PDF writer reads no external data, including under strict separation.
+			if (!history?.currentId) {
+				documentWriterEnabled = true;
+				documentWriterRequired = false;
+			}
+
 			if (selectedModels.length !== 1 && !atSelectedModel) {
 				return;
 			}
@@ -1239,7 +1250,10 @@
 						$config?.features?.enable_document_writer &&
 						($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 					) {
-						documentWriterEnabled = model.info.meta.defaultFeatureIds.includes('document_writer');
+						if (model.info.meta.defaultFeatureIds.includes('document_writer')) {
+							documentWriterEnabled = true;
+							documentWriterRequired = true;
+						}
 					}
 				}
 
@@ -2260,59 +2274,6 @@
 		artifactContents.set(contents);
 	};
 
-	const decodeHtmlEntities = (str) => {
-		if (!str) return '';
-		return str
-			.replace(/&quot;/g, '"')
-			.replace(/&#x27;/g, "'")
-			.replace(/&#39;/g, "'")
-			.replace(/&lt;/g, '<')
-			.replace(/&gt;/g, '>')
-			.replace(/&amp;/g, '&');
-	};
-
-	const extractDocumentsFromMessage = (content) => {
-		const docs = [];
-		if (!content || typeof content !== 'string') return docs;
-
-		// 1. XML-fallback path: <details type="document" ... title="..." ...>...markdown...</details>
-		const detailsRegex = /<details\b([^>]*\btype="document"[^>]*)>([\s\S]*?)<\/details>/g;
-		let match;
-		while ((match = detailsRegex.exec(content)) !== null) {
-			const attrs = match[1] ?? '';
-			const inner = match[2] ?? '';
-			const titleMatch = /\btitle="([^"]*)"/.exec(attrs);
-			const title = titleMatch ? decodeHtmlEntities(titleMatch[1]) : '';
-			const markdown = inner.replace(/^\s*<summary>[\s\S]*?<\/summary>\s*/i, '').trim();
-			if (markdown.length > 0) {
-				docs.push({ title, markdown });
-			}
-		}
-
-		// 2. Native tool-call path: <details type="tool_calls" ... name="write_document" arguments="...">
-		const toolCallRegex = /<details\b([^>]*\btype="tool_calls"[^>]*)>[\s\S]*?<\/details>/g;
-		while ((match = toolCallRegex.exec(content)) !== null) {
-			const attrs = match[1] ?? '';
-			const nameMatch = /\bname="([^"]*)"/.exec(attrs);
-			if (!nameMatch || nameMatch[1] !== 'write_document') continue;
-			const argsMatch = /\barguments="([^"]*)"/.exec(attrs);
-			if (!argsMatch) continue;
-			try {
-				const argsJson = decodeHtmlEntities(argsMatch[1]);
-				const args = JSON.parse(argsJson);
-				const title = args?.title ?? '';
-				const markdown = args?.markdown ?? '';
-				if (markdown.length > 0) {
-					docs.push({ title, markdown });
-				}
-			} catch (e) {
-				console.warn('Failed to parse write_document arguments', e);
-			}
-		}
-
-		return docs;
-	};
-
 	const getDocuments = () => {
 		const messages = history ? createMessagesList(history, history.currentId) : [];
 		let docs = [];
@@ -2328,7 +2289,14 @@
 					: extractDocumentsFromMessage(getOutputText(message?.output));
 				if (documents.length > 0) {
 					const sources = message?.sources ?? [];
-					docs = [...docs, ...documents.map((doc) => ({ ...doc, sources }))];
+					docs = [
+						...docs,
+						...documents.map((doc) => ({
+							...doc,
+							sources,
+							messageId: message.id
+						}))
+					];
 				}
 			}
 		});
@@ -2522,8 +2490,10 @@
 			codeInterpreterEnabled = true;
 		}
 
-		if ($page.url.searchParams.get('document-writer') === 'true') {
-			documentWriterEnabled = true;
+		const writerParam = $page.url.searchParams.get('document-writer');
+		if (writerParam !== null) {
+			documentWriterEnabled = ['true', 'auto', 'required'].includes(writerParam);
+			documentWriterRequired = ['true', 'required'].includes(writerParam);
 		}
 
 		if ($page.url.searchParams.get('tools')) {
@@ -3356,7 +3326,7 @@
 					knowledge_external: $i18n.t('External Knowledge Base'),
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
-					document_writer: $i18n.t('Document Writer'),
+					document_writer: $i18n.t('PDF writer'),
 					image_generation: $i18n.t('Image Generation')
 				};
 				const capabilityLabels = warning.capabilities.map(
@@ -3962,6 +3932,13 @@
 						: false,
 				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
 				live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
+
+				document_writer_required: Boolean(
+					$config?.features?.enable_document_writer &&
+					($user?.role === 'admin' || $user?.permissions?.features?.document_writer) &&
+					documentWriterEnabled &&
+					documentWriterRequired
+				),
 				web_search: webSearchActive,
 				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
 				web_search_required: webSearchActive && webSearchRequired
@@ -5125,6 +5102,7 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
+										bind:documentWriterRequired
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
@@ -5286,6 +5264,7 @@
 									bind:documentWriterEnabled
 									bind:liveDocumentsState
 									bind:liveMailState
+									bind:documentWriterRequired
 									bind:webSearchEnabled
 									bind:webSearchRequired
 									bind:atSelectedModel

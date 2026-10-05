@@ -155,3 +155,5 @@ features remain disabled in the + menu. Tool/skill/filter selections use the sam
 Mail shares ui.composerTools/chat.features persistence with every composer feature,
 including the initial message. Search statuses retain structured order/from/to/cc
 options for English/Dutch rendering, including zero-result searches.
+
+PDF writer auto/required/off choices persist with composerPreferences in user settings and chat.features. Draft restoration restores text and files only; model defaults seed unsaved preferences.

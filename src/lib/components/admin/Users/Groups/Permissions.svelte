@@ -1115,7 +1115,7 @@
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
 				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Document Writer')}
+					{$i18n.t('PDF writer')}
 				</div>
 				<Switch bind:state={permissions.features.document_writer} />
 			</div>

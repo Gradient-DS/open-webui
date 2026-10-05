@@ -91,6 +91,8 @@
 		TOOL_OFF_DESCRIPTION,
 		TOOL_STATE_LABELS,
 		WEB_SEARCH_STATE_DESCRIPTIONS,
+		DOCUMENT_WRITER_STATE_DESCRIPTIONS,
+		documentWriterState,
 		webSearchState,
 		type ToolState
 	} from '$lib/utils/toolState';
@@ -250,7 +252,8 @@
 	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
 	export let webSearchRequired = false;
 	export let codeInterpreterEnabled = false;
-	export let documentWriterEnabled = false;
+	export let documentWriterEnabled = true;
+	export let documentWriterRequired = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 
@@ -311,6 +314,7 @@
 		liveMailState,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
+		documentWriterRequired,
 		toolApprovalMode
 	};
 
@@ -976,6 +980,13 @@
 	$: if (!webSearchEnabled && webSearchRequired) {
 		webSearchRequired = false;
 	}
+	$: if (!documentWriterEnabled) documentWriterRequired = false;
+	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
+	$: documentWriterTooltip = pinnedStateTooltip(
+		$i18n.t('PDF writer'),
+		documentWriterToolState,
+		$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
+	);
 	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
 
 	let inputMenuRef:
@@ -2522,6 +2533,7 @@
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
 											bind:documentWriterEnabled
+											bind:documentWriterRequired
 											oauthRedirectHandler={(tool: {
 												id: string;
 												serverId: string;
@@ -2845,25 +2857,14 @@
 														</button>
 													</Tooltip>
 												{:else if itemId === 'document_writer' && showDocumentWriterButton}
-													<Tooltip
-														content={pinnedStateTooltip(
-															$i18n.t('Document Writer'),
-															documentWriterEnabled ? 'required' : 'off',
-															documentWriterEnabled
-																? $i18n.t('Write a document')
-																: $i18n.t(TOOL_OFF_DESCRIPTION)
-														)}
-														placement="top"
-													>
+													<Tooltip content={documentWriterTooltip} placement="top">
 														<button
 															type="button"
-															aria-label={documentWriterEnabled
-																? $i18n.t('Disable Document Writer')
-																: $i18n.t('Enable Document Writer')}
+															aria-label={documentWriterTooltip}
 															aria-pressed={documentWriterEnabled}
 															on:click|preventDefault={() =>
 																inputMenuRef?.cycleTool('document_writer')}
-															class={pinnedToggleClass(documentWriterEnabled)}
+															class={pinnedToggleClass(documentWriterToolState)}
 														>
 															<Document className="size-4" strokeWidth="1.75" />
 														</button>
@@ -3115,23 +3116,15 @@
 												</Tooltip>
 											{/if}
 
-											<!-- [Gradient] Echo the active Document Writer capability. -->
-											{#if documentWriterEnabled && showDocumentWriterButton && !pinnedInputItems.includes('document_writer')}
-												<Tooltip content={$i18n.t('Document Writer')} placement="top">
+											<!-- [Gradient] Echo the required PDF writer capability. -->
+											{#if documentWriterRequired && showDocumentWriterButton && !pinnedInputItems.includes('document_writer')}
+												<Tooltip content={documentWriterTooltip} placement="top">
 													<button
-														aria-label={documentWriterEnabled
-															? $i18n.t('Disable Document Writer')
-															: $i18n.t('Enable Document Writer')}
+														aria-label={documentWriterTooltip}
 														aria-pressed={documentWriterEnabled}
-														on:click|preventDefault={() =>
-															(documentWriterEnabled = !documentWriterEnabled)}
+														on:click|preventDefault={() => (documentWriterRequired = false)}
 														type="button"
-														class=" group p-[0.375rem] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {documentWriterEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
-														false)
-															? 'm-1'
-															: 'focus:outline-hidden rounded-full'}"
+														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20"
 													>
 														<Document className="size-3.5" strokeWidth="2" />
 

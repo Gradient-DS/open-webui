@@ -10,9 +10,13 @@
 	import { fly } from 'svelte/transition';
 	import {
 		BINARY_TOOL_STATES,
+		DOCUMENT_WRITER_STATES,
+		documentWriterFlags,
 		TOOL_OFF_DESCRIPTION,
 		TOOL_STATE_LABELS,
 		WEB_SEARCH_STATE_DESCRIPTIONS,
+		DOCUMENT_WRITER_STATE_DESCRIPTIONS,
+		documentWriterState,
 		WEB_SEARCH_STATES,
 		nextToolState,
 		webSearchFlags,
@@ -153,7 +157,8 @@
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 	export let showDocumentWriterButton = false;
-	export let documentWriterEnabled = false;
+	export let documentWriterEnabled = true;
+	export let documentWriterRequired = false;
 	export let oauthRedirectHandler: (tool: {
 		id: string;
 		serverId: string;
@@ -504,7 +509,7 @@
 	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
 	$: imageGenerationState = (imageGenerationEnabled ? 'required' : 'off') as ToolState;
 	$: codeInterpreterState = (codeInterpreterEnabled ? 'required' : 'off') as ToolState;
-	$: documentWriterState = (documentWriterEnabled ? 'required' : 'off') as ToolState;
+	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
 
 	const stateAriaLabel = (label: string, state: ToolState, description: string) =>
 		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
@@ -527,7 +532,7 @@
 		if (wasOff !== !webSearchEnabled) onWebSearchToggle(webSearchEnabled);
 	};
 
-	// [Gradient] Two-state tools cycle Uit and Altijd. Exported for the pinned composer buttons.
+	// [Gradient] PDF writer cycles Auto, Altijd, Uit; the other tools use Uit and Altijd. Exported for the pinned composer buttons.
 	export const cycleTool = (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => {
 		if (tool === 'image_generation') {
 			imageGenerationEnabled =
@@ -543,7 +548,11 @@
 			codeInterpreterEnabled =
 				nextToolState(codeInterpreterState, BINARY_TOOL_STATES) === 'required';
 		} else {
-			documentWriterEnabled = nextToolState(documentWriterState, BINARY_TOOL_STATES) === 'required';
+			const { enabled, required } = documentWriterFlags(
+				nextToolState(documentWriterToolState, DOCUMENT_WRITER_STATES)
+			);
+			documentWriterEnabled = enabled;
+			documentWriterRequired = required;
 		}
 	};
 
@@ -925,19 +934,17 @@
 
 					{#if showDocumentWriter}
 						<MenuItem
-							label={$i18n.t('Document Writer')}
+							label={$i18n.t('PDF writer')}
 							pinId="document_writer"
-							toolState={documentWriterState}
+							toolState={documentWriterToolState}
 							tooltipPlacement="top-start"
 							tooltip={!showDocumentWriterButton
 								? $i18n.t('Unavailable')
-								: documentWriterEnabled
-									? $i18n.t('Write a document')
-									: $i18n.t(TOOL_OFF_DESCRIPTION)}
+								: $i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])}
 							ariaLabel={stateAriaLabel(
-								$i18n.t('Document Writer'),
-								documentWriterState,
-								documentWriterEnabled ? $i18n.t('Write a document') : $i18n.t(TOOL_OFF_DESCRIPTION)
+								$i18n.t('PDF writer'),
+								documentWriterToolState,
+								$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
 							)}
 							disabled={!showDocumentWriterButton}
 							onClick={() => showDocumentWriterButton && cycleTool('document_writer')}

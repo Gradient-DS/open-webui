@@ -3041,22 +3041,7 @@ ENABLE_CITATION_TEXT_HIGHLIGHT = os.environ.get('ENABLE_CITATION_TEXT_HIGHLIGHT'
 
 SOEV_LOGIN_FOOTER = os.environ.get('SOEV_LOGIN_FOOTER', 'Powered by [soev.ai](https://soev.ai)')
 
-ENABLE_DOCUMENT_WRITER = os.environ.get('ENABLE_DOCUMENT_WRITER', 'False').lower() == 'true'
-
-DOCUMENT_WRITER_PROMPT_TEMPLATE = os.environ.get('DOCUMENT_WRITER_PROMPT_TEMPLATE', '')
-
-DEFAULT_DOCUMENT_WRITER_PROMPT = """
-#### Document Writer
-
-You can produce a structured markdown document that renders in a side panel and can be downloaded by the user as Markdown, Plain Text, PDF, or Word.
-
-- Wrap the document in `<document title="…">…</document>` XML tags. The `title` attribute is required.
-- Inside the tags, write the full document body as well-structured **Markdown**: headings (`#`, `##`, `###`), paragraphs, lists, tables, code blocks, quotes, emphasis.
-- Write in a document style — proper paragraphs, complete sentences, clear section headings. Not chat-style.
-- Do **not** wrap the document in triple backticks — the tags contain raw markdown, not a code block.
-- You may write explanatory text before and after the `<document>` block in your reply; the document itself only contains the document body.
-- Respond in the chat's primary language. Default to English if multilingual.
-"""
+ENABLE_DOCUMENT_WRITER = os.environ.get('ENABLE_DOCUMENT_WRITER', 'True').lower() == 'true'
 
 WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get('WEAVIATE_WEB_SEARCH_TTL_MINUTES', '1440'))
 
@@ -3540,7 +3525,6 @@ DEFAULT_CONFIG = {
     'auth.enable_2fa': ENABLE_2FA,
     'auth.require_2fa': REQUIRE_2FA,
     'document_writer.enable': ENABLE_DOCUMENT_WRITER,
-    'document_writer.prompt_template': DOCUMENT_WRITER_PROMPT_TEMPLATE,
     'email.enable_forgot_password': ENABLE_FORGOT_PASSWORD,
     'email.enable_invites': ENABLE_EMAIL_INVITES,
     'email.from_address': EMAIL_FROM_ADDRESS,

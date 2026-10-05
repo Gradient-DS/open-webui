@@ -3,6 +3,8 @@ Feed the model picker with an OpenAI-type connection whose base URL is
 <SOEV_API_URL>/v1/chat and whose API key is the soev-api key."""
 
 import asyncio
+import base64
+import hashlib
 import html
 import json
 import logging
@@ -11,22 +13,27 @@ import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import anyio
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
-from open_webui.models.files import Files
+from open_webui.models.files import FileModel, Files
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
 from open_webui.soev import acting, agent_threads, identity, ingest, live_documents
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
+from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.chat_id import is_temporary_chat_id
 from open_webui.utils.mail_status import mail_search_status
-from open_webui.utils.web_search_state import web_search_state
+
+from open_webui.utils.features import is_feature_enabled
+from open_webui.utils.tool_state import tool_state
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
@@ -76,7 +83,10 @@ def _marker(status: dict[str, Any]) -> dict[str, Any]:
     name = html.escape(status['action'], quote=True)
     return _chunk(
         {
-            'content': f'\n\n<details type="tool_calls" done="true" name="{name}">\n<summary>{html.escape(text)}</summary>\n</details>\n\n'
+            'content': (
+                f'\n\n<details type="tool_calls" done="true" name="{name}">\n'
+                f'<summary>{html.escape(text)}</summary>\n</details>\n\n'
+            )
         }
     )
 
@@ -215,6 +225,105 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     return {**({'attachments': attached} if attached else {}), **({'attachment_notes': notes} if notes else {})}
 
 
+class ImagesUnavailable(Exception):
+    def __init__(self, reason: str, name: str = '') -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.name = name
+
+
+def _image_data(url: str, name: str) -> bytes:
+    match = re.fullmatch(r'data:image/[^;,]+;base64,(.+)', url, re.IGNORECASE)
+    if match is None:
+        raise ImagesUnavailable('invalid', name)
+    try:
+        return base64.b64decode(match[1], validate=True)
+    except ValueError:
+        raise ImagesUnavailable('invalid', name) from None
+
+
+async def _image_bytes(entry: dict, user: str) -> tuple[bytes, FileModel | None, str]:
+    name = entry.get('name') or 'image'
+    url = entry.get('url') or ''
+    file_id = entry.get('id') or (url if not url.startswith('data:') else None)
+    if not file_id:
+        return _image_data(url, name), None, name
+    file = await Files.get_file_by_id(file_id)
+    reader = await identity.user_of(user)
+    if file is None or reader is None:
+        raise ImagesUnavailable('gone', name)
+    if file.user_id != reader.id and reader.role != 'admin' and not await has_access_to_file(file.id, 'read', reader):
+        raise ImagesUnavailable('gone', name)
+    name = entry.get('name') or (file.meta or {}).get('name') or file.filename
+    try:
+        path = await asyncio.to_thread(Storage.get_file, file.path)
+        body = await asyncio.to_thread(Path(path).read_bytes)
+    except OSError:
+        raise ImagesUnavailable('gone', name) from None
+    return body, file, name
+
+
+async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
+    entries = [
+        entry
+        for entry in (metadata.get('user_message') or {}).get('files') or []
+        if entry.get('type') == 'image' or (entry.get('content_type') or '').startswith('image/')
+    ]
+    if len(entries) > 4:
+        raise ImagesUnavailable('limit')
+    images = []
+    client = identity.build_client() if entries else None
+    for entry in entries:
+        body, file, name = await _image_bytes(entry, user)
+        meta = (file.meta or {}) if file is not None else {}
+        cached = meta.get('soev_image')
+        # A shared OWUI file can have an image reference owned by a different caller.
+        if (
+            isinstance(cached, dict)
+            and cached.get('sha256') == hashlib.sha256(body).hexdigest()
+            and meta.get('soev_image_user') == user
+        ):
+            images.append(cached)
+            continue
+        await identity.ensure_link(user, client)
+        try:
+            uploaded = await client.post_bytes('/v1/chat/images', body, as_user=user, params={'name': name})
+        except SoevApiError as error:
+            if error.status in (413, 415):
+                raise ImagesUnavailable('size' if error.status == 413 else 'type', name) from None
+            raise
+        if file is not None:
+            await Files.update_file_metadata_by_id(file.id, {'soev_image': uploaded, 'soev_image_user': user})
+        images.append(uploaded)
+    return images
+
+
+def _unimaged(error: ImagesUnavailable, language: str | None) -> dict[str, Any]:
+    dutch = (language or '').lower().startswith('nl')
+    if error.reason == 'limit':
+        message = (
+            'Je kunt maximaal 4 afbeeldingen per bericht toevoegen. Verwijder afbeeldingen en probeer het opnieuw.'
+            if dutch
+            else 'You can attach at most 4 images per message. Remove images and try again.'
+        )
+    else:
+        reasons = {
+            'size': ('groter dan 10 MiB', 'larger than 10 MiB'),
+            'type': ('alleen PNG, JPEG, WebP en GIF zijn toegestaan', 'only PNG, JPEG, WebP and GIF are allowed'),
+            'invalid': ('ongeldige afbeeldingsgegevens', 'invalid image data'),
+            'gone': ('niet beschikbaar of geen toegang', 'unavailable or access denied'),
+        }
+        reason = reasons[error.reason][0 if dutch else 1]
+        message = (
+            f'De assistent kan deze afbeelding niet lezen: {error.name} ({reason}). '
+            'Verwijder de afbeelding of vervang deze en verstuur je bericht opnieuw.'
+            if dutch
+            else f"The assistant can't read this image: {error.name} ({reason}). "
+            'Remove or replace it and send your message again.'
+        )
+    return {'error': {'code': 'images_unavailable', 'message': message}}
+
+
 def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
     """[Claude] The custom model's prompt and the chat's prompt (Chat Controls or the user's own, plus the folder's),
     each sent only when it says something."""
@@ -227,7 +336,7 @@ def _tools(
 ) -> dict[str, dict[str, str]]:
     """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
     default never decides for the user, and so is every turn where OWUI does not allow web search."""
-    state = web_search_state(metadata.get('features')) if web_search_allowed else 'off'
+    state = tool_state(metadata.get('features'), 'web_search') if web_search_allowed else 'off'
     documents = (metadata.get('features') or {}).get('live_documents') if live_documents_allowed else 'off'
     if documents not in ('auto', 'required'):
         documents = 'off'
@@ -266,6 +375,18 @@ async def _web_search_allowed(user_id: str) -> bool:
         return False
     return user.role == 'admin' or await has_permission(
         user.id, 'features.web_search', await Config.get('user.permissions')
+    )
+
+
+async def _documents_allowed(user_id: str) -> bool:
+    """Client-supplied document writer flags require tenant access, the admin setting and user permission."""
+    if not is_feature_enabled('document_writer') or not await Config.get('document_writer.enable'):
+        return False
+    user = await Users.get_user_by_id(user_id)
+    if user is None:
+        return False
+    return user.role == 'admin' or await has_permission(
+        user.id, 'features.document_writer', await Config.get('user.permissions')
     )
 
 
@@ -974,10 +1095,13 @@ async def _sent(
     try:
         knowledge = await _knowledge(metadata)
         attachments = await _attachments(metadata)
+        images = await _images(metadata, turn.as_user)
     except KnowledgeUnavailable as unavailable:
         return _refused(_unavailable(unavailable.count, metadata.get('user_language')))
     except AttachmentsUnavailable as unavailable:
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
+    except ImagesUnavailable as unavailable:
+        return _refused(_unimaged(unavailable, metadata.get('user_language')))
     tools = _tools(
         metadata,
         await _web_search_allowed(metadata['user_id']),
@@ -998,6 +1122,11 @@ async def _sent(
             tools['tools'].update(search_live_documents='off', attach_live_document='off')
     if notes:
         text += '\n\nAttachment status:\n' + '\n'.join(notes)
+    documents = (
+        tool_state(metadata.get('features'), 'document_writer')
+        if await _documents_allowed(metadata['user_id'])
+        else 'off'
+    )
     body = {
         'input': {
             'text': text,
@@ -1006,8 +1135,11 @@ async def _sent(
             **attachments,
             **_instructions(metadata),
             **tools,
+            'documents': documents,
         }
     }
+    if images:
+        body['input']['images'] = images
     if isinstance(model, str) and model:
         body['model'] = model
     return turn.run(body, agent)
