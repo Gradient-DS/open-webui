@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { parse } from 'svelte/compiler';
 import { composerPreferences, composerFeatures, composerFromFeatures } from './composerPreferences';
 
 const chosen = composerPreferences({
@@ -16,6 +18,42 @@ const chosen = composerPreferences({
 });
 
 describe('composer preferences', () => {
+	it.each(['Chat', 'Placeholder', 'MessageInput'])(
+		'%s forwards every saved preference in both directions on every composer surface',
+		(component) => {
+			const source = readFileSync(`src/lib/components/chat/${component}.svelte`, 'utf8');
+			const ast = parse(source);
+			const composers: any[] = [];
+			const visit = (node: any) => {
+				if (!node || typeof node !== 'object') return;
+				if (
+					node.type === 'InlineComponent' &&
+					['Placeholder', 'MessageInput', 'InputMenu'].includes(node.name)
+				)
+					composers.push(node);
+				Object.values(node).forEach((value) => {
+					if (Array.isArray(value)) value.forEach(visit);
+					else visit(value);
+				});
+			};
+			visit(ast.html);
+			expect(composers.length).toBeGreaterThan(0);
+			for (const composer of composers) {
+				for (const key of Object.keys(chosen)) {
+					expect(
+						composer.attributes.find((attribute: any) => attribute.name === key),
+						`${component} -> ${composer.name}: ${key}`
+					).toMatchObject({ type: 'Binding', expression: { type: 'Identifier', name: key } });
+				}
+			}
+			if (component !== 'Chat') {
+				const exports = ast.instance?.content.body
+					.filter((node: any) => node.type === 'ExportNamedDeclaration')
+					.flatMap((node: any) => node.declaration?.declarations?.map((d: any) => d.id.name) ?? []);
+				expect(exports).toEqual(expect.arrayContaining(Object.keys(chosen)));
+			}
+		}
+	);
 	it('round trips every setting through chat creation, another turn and reload', () => {
 		const created = JSON.parse(JSON.stringify({ features: composerFeatures(chosen) }));
 		const nextTurn = composerFromFeatures(created.features);
