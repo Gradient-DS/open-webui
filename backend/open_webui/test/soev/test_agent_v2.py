@@ -29,6 +29,7 @@ from starlette.responses import StreamingResponse
 # The turn's tools field while the web search control is Uit (or absent).
 WEB_SEARCH_OFF = {
     'web_search': 'off',
+    'fetch': 'off',
     'search_live_documents': 'off',
     'attach_live_document': 'off',
     'search_mail': 'off',
@@ -130,6 +131,16 @@ def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> Chat:
     monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=emit))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=True))
     monkeypatch.setattr(agent_v2, '_documents_allowed', AsyncMock(return_value=True))
+    # [Gradient] Let this suite exercise the attached-text/page contract without changing the shared relay fake.
+    refusal = result.api.chat._refusal
+
+    def with_attachments(body: dict, *, opening: bool) -> httpx.Response | None:
+        turn = body.get('input')
+        if isinstance(turn, dict):
+            body = {**body, 'input': {key: value for key, value in turn.items() if key not in ('texts', 'urls')}}
+        return refusal(body, opening=opening)
+
+    monkeypatch.setattr(result.api.chat, '_refusal', with_attachments)
     return result
 
 
@@ -350,6 +361,240 @@ async def test_attached_images_are_not_attachments(chat: Chat, monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('allowed', [True, False])
+@pytest.mark.parametrize('enabled', [True, False])
+async def test_attached_urls_are_filtered_and_sent_even_without_web_search(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, allowed: bool, enabled: bool
+) -> None:
+    monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=allowed))
+    longest = 'https://example.org/' + 'a' * 1980
+    assert len(longest) == 2000
+    urls = ['https://example.org/page', 'http://example.org/other', longest]
+    chunks = await chat.turn(
+        'read these',
+        'a1',
+        features={'web_search': enabled},
+        files=[
+            {'type': 'url', 'url': url, 'name': 'Page'}
+            for url in [
+                None,
+                '',
+                'ftp://example.org',
+                'javascript:alert(1)',
+                '/relative',
+                'https://',
+                'https://[invalid',
+                longest + 'a',
+                *urls,
+                urls[0],
+            ]
+        ]
+        + [{'type': 'text', 'url': 'https://example.org/ingested'}],
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['urls'] == urls
+    expected = {**WEB_SEARCH_OFF, 'web_search': 'auto', 'fetch': 'auto'} if allowed and enabled else WEB_SEARCH_OFF
+    assert sent['tools'] == expected
+
+
+@pytest.mark.asyncio
+async def test_attached_urls_stop_at_twenty_distinct_pages(chat: Chat) -> None:
+    urls = [f'https://example.org/{index}' for index in range(21)]
+    await chat.turn('read', 'a1', files=[{'type': 'url', 'url': url} for url in [urls[0], *urls]])
+    assert chat.mutations()[-1][1]['input']['urls'] == urls[:20]
+
+
+@pytest.mark.asyncio
+async def test_empty_attachment_fields_are_omitted(chat: Chat) -> None:
+    await chat.turn('read', 'a1', files=[{'type': 'url', 'url': 'file:///tmp/private'}])
+    sent = chat.mutations()[-1][1]['input']
+    assert 'urls' not in sent
+    assert 'texts' not in sent
+
+
+@pytest.fixture
+def stored_texts(monkeypatch: pytest.MonkeyPatch) -> dict[str, SimpleNamespace]:
+    records = {
+        'n1': SimpleNamespace(id='n1', user_id='alice', title='My note', data={'content': {'md': 'Note body'}}),
+        'c1': SimpleNamespace(
+            id='c1',
+            user_id='alice',
+            title='My chat',
+            folder_id=None,
+            chat={
+                'history': {
+                    'currentId': 'a',
+                    'messages': {
+                        'u': {'role': 'user', 'content': 'Question', 'parentId': None},
+                        'a': {'role': 'assistant', 'content': 'Answer', 'parentId': 'u'},
+                        'other': {'role': 'assistant', 'content': 'Other branch', 'parentId': 'u'},
+                    },
+                }
+            },
+        ),
+    }
+    monkeypatch.setattr(
+        agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='alice', role='user'))
+    )
+    monkeypatch.setattr(agent_v2.Notes, 'get_note_by_id', AsyncMock(side_effect=records.get))
+    monkeypatch.setattr(agent_v2.Chats, 'get_chat_by_id', AsyncMock(side_effect=records.get))
+    monkeypatch.setattr(agent_v2.AccessGrants, 'has_access', AsyncMock(return_value=False))
+    monkeypatch.setattr(agent_v2.Folders, 'get_folder_by_id', AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_v2, 'has_folder_access', AsyncMock(return_value=False))
+    return records
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'kind,item_id,text', [('note', 'n1', 'Note body'), ('chat', 'c1', 'user: Question\n\nassistant: Answer')]
+)
+@pytest.mark.parametrize('access', ['owner', 'admin', 'grant'])
+async def test_attached_texts_use_upstream_access_and_stored_titles(
+    chat: Chat, stored_texts: dict, monkeypatch: pytest.MonkeyPatch, kind: str, item_id: str, text: str, access: str
+) -> None:
+    item = stored_texts[item_id]
+    if access != 'owner':
+        item.user_id = 'bob'
+    if access == 'admin':
+        monkeypatch.setattr(
+            agent_v2.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='alice', role='admin'))
+        )
+    agent_v2.AccessGrants.has_access.return_value = access == 'grant'
+    chunks = await chat.turn('read', 'a1', files=[{'type': kind, 'id': item_id, 'name': 'Stale title'}])
+    assert not any('error' in chunk for chunk in chunks)
+    assert chat.mutations()[-1][1]['input']['texts'] == [
+        {'id': f'{kind}:{item_id}', 'kind': kind, 'title': item.title, 'text': text, 'length': len(text)}
+    ]
+    agent_v2.Users.get_user_by_id.assert_awaited_once_with('alice')
+    if access == 'grant':
+        agent_v2.AccessGrants.has_access.assert_awaited_once_with(
+            user_id='alice',
+            resource_type='note' if kind == 'note' else 'shared_chat',
+            resource_id=item_id,
+            permission='read',
+        )
+    else:
+        agent_v2.AccessGrants.has_access.assert_not_awaited()
+    assert not [event for event in chat.socket if event['type'] == 'source']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('folder_exists,allowed', [(True, True), (True, False), (False, False)])
+async def test_attached_chat_uses_folder_read_access(
+    chat: Chat, stored_texts: dict, folder_exists: bool, allowed: bool
+) -> None:
+    stored_texts['c1'].user_id, stored_texts['c1'].folder_id = 'bob', 'folder'
+    folder = SimpleNamespace(id='folder') if folder_exists else None
+    agent_v2.Folders.get_folder_by_id.return_value = folder
+    agent_v2.has_folder_access.return_value = allowed
+    chunks = await chat.turn('read', 'a1', files=[{'type': 'chat', 'id': 'c1', 'name': 'Shared chat'}])
+    agent_v2.AccessGrants.has_access.assert_awaited_once_with(
+        user_id='alice',
+        resource_type='shared_chat',
+        resource_id='c1',
+        permission='read',
+    )
+    agent_v2.Folders.get_folder_by_id.assert_awaited_once_with('folder')
+    if folder_exists:
+        agent_v2.has_folder_access.assert_awaited_once_with('alice', folder, 'read', db=None)
+    else:
+        agent_v2.has_folder_access.assert_not_awaited()
+    if allowed:
+        assert chat.mutations()[-1][1]['input']['texts'][0]['id'] == 'chat:c1'
+        assert not any('error' in chunk for chunk in chunks)
+    else:
+        assert chunks[0]['error']['code'] == 'attachments_unavailable'
+        assert 'Shared chat (no longer available)' in chunks[0]['error']['message']
+        assert chat.mutations() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind,item_id', [('note', 'n1'), ('chat', 'c1')])
+@pytest.mark.parametrize('reason', ['missing', 'denied', 'unknown-user'])
+async def test_unreadable_text_attachment_refuses_the_whole_turn(
+    chat: Chat, stored_texts: dict, kind: str, item_id: str, reason: str
+) -> None:
+    if reason == 'missing':
+        del stored_texts[item_id]
+    elif reason == 'denied':
+        stored_texts[item_id].user_id = 'bob'
+    else:
+        agent_v2.Users.get_user_by_id.return_value = None
+    chunks = await chat.turn('read', 'a1', files=[{'type': kind, 'id': item_id, 'name': 'Attached title'}])
+    assert chunks[0]['error']['code'] == 'attachments_unavailable'
+    assert 'Attached title (no longer available)' in chunks[0]['error']['message']
+    assert chat.mutations() == []
+
+
+@pytest.mark.asyncio
+async def test_attached_chat_strips_details_and_replaces_documents(chat: Chat, stored_texts: dict) -> None:
+    history = stored_texts['c1'].chat['history']
+    history['messages']['a']['content'] = (
+        '<details type="reasoning"><summary>Thoughts</summary>private\nthought</details>'
+        'Here is the report.\n'
+        '<document format="html" title="A &amp; B > C"><p>PDF body</p></document>\n'
+        "<document title='Second' format='markdown'># Other body</document>"
+        '<details type="tool_calls" arguments="a > b">hidden output</details>'
+    )
+    history['messages']['empty'] = {'role': 'assistant', 'parentId': 'a', 'content': '<details>only tools</details>  '}
+    history['currentId'] = 'empty'
+    await chat.turn('read', 'a1', files=[{'type': 'chat', 'id': 'c1'}])
+    text = chat.mutations()[-1][1]['input']['texts'][0]['text']
+    assert text == 'user: Question\n\nassistant: Here is the report.\n[document: A & B > C]\n[document: Second]'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind,item_id', [('note', 'n1'), ('chat', 'c1')])
+@pytest.mark.parametrize('size', [49_999, 50_000, 50_001])
+async def test_attached_text_is_cut_in_characters_and_keeps_its_full_length(
+    chat: Chat, stored_texts: dict, kind: str, item_id: str, size: int
+) -> None:
+    text = 'é🙂' * size
+    text = text[:size]
+    if kind == 'note':
+        stored_texts[item_id].data['content']['md'] = text
+    else:
+        stored_texts[item_id].chat['history'] = {'currentId': 'a', 'messages': {'a': {'role': 'user', 'content': text}}}
+        text = 'user: ' + text
+    await chat.turn('read', 'a1', files=[{'type': kind, 'id': item_id}])
+    sent = chat.mutations()[-1][1]['input']['texts'][0]
+    assert sent['text'] == text[:50_000]
+    assert sent['length'] == len(text)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'language,message',
+    [
+        ('en-US', 'Attach at most 10 notes or chats.'),
+        ('nl-NL', 'Voeg maximaal 10 notities of chats toe.'),
+    ],
+)
+async def test_more_than_ten_notes_and_chats_refuses_before_sending(chat: Chat, language: str, message: str) -> None:
+    files = [{'type': 'note' if index % 2 else 'chat', 'id': str(index)} for index in range(11)]
+    chunks = await chat.turn('read', 'a1', files=files, user_language=language)
+    assert chunks == [{'error': {'code': 'attachments_unavailable', 'message': message}}]
+    assert chat.mutations() == []
+
+
+@pytest.mark.asyncio
+async def test_ten_notes_and_chats_are_allowed_together(chat: Chat, stored_texts: dict) -> None:
+    files = []
+    for index in range(10):
+        kind, original = ('note', 'n1') if index % 2 else ('chat', 'c1')
+        item = copy.deepcopy(stored_texts[original])
+        item.id = f'item-{index}'
+        stored_texts[item.id] = item
+        files.append({'type': kind, 'id': item.id})
+    chunks = await chat.turn('read', 'a1', files=files)
+    assert not any('error' in chunk for chunk in chunks)
+    assert [text['id'] for text in chat.mutations()[-1][1]['input']['texts']] == [
+        f'{entry["type"]}:{entry["id"]}' for entry in files
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
 async def test_attached_files_the_agent_cannot_read_refuse_the_turn_by_name(
     chat: Chat, monkeypatch: pytest.MonkeyPatch, language: str
@@ -396,7 +641,11 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 )
 async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, features: dict, state: str) -> None:
     await chat.turn('question', 'a1', features=features)
-    assert chat.mutations()[-1][1]['input']['tools'] == {**WEB_SEARCH_OFF, 'web_search': state}
+    assert chat.mutations()[-1][1]['input']['tools'] == {
+        **WEB_SEARCH_OFF,
+        'web_search': state,
+        'fetch': 'off' if state == 'off' else 'auto',
+    }
 
 
 @pytest.mark.parametrize(
@@ -411,34 +660,20 @@ async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, 
 )
 def test_tools_maps_the_web_search_features_to_tool_states(features: dict | None, state: str) -> None:
     assert agent_v2._tools({'features': features}, True, False, False) == {
-        'tools': {**WEB_SEARCH_OFF, 'web_search': state}
+        'tools': {**WEB_SEARCH_OFF, 'web_search': state, 'fetch': 'off' if state == 'off' else 'auto'}
     }
 
 
 @pytest.mark.parametrize('features', [{'web_search': True, 'web_search_required': True}, {'web_search': True}])
 def test_tools_sends_off_when_owui_does_not_allow_web_search(features: dict) -> None:
-    assert agent_v2._tools({'features': features}, False, False, False) == {
-        'tools': {
-            'web_search': 'off',
-            'search_live_documents': 'off',
-            'attach_live_document': 'off',
-            'search_mail': 'off',
-            'read_mail': 'off',
-        }
-    }
+    assert agent_v2._tools({'features': features}, False, False, False) == {'tools': WEB_SEARCH_OFF}
 
 
 @pytest.mark.asyncio
 async def test_a_disallowed_turn_asks_the_agent_for_no_web_search(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
     await chat.turn('question', 'a1', features={'web_search': True, 'web_search_required': True})
-    assert chat.mutations()[-1][1]['input']['tools'] == {
-        'web_search': 'off',
-        'search_live_documents': 'off',
-        'attach_live_document': 'off',
-        'search_mail': 'off',
-        'read_mail': 'off',
-    }
+    assert chat.mutations()[-1][1]['input']['tools'] == WEB_SEARCH_OFF
 
 
 @pytest.mark.asyncio
@@ -473,13 +708,7 @@ async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
         'text': 'question',
         'knowledge': [],
         'documents': 'off',
-        'tools': {
-            'web_search': 'off',
-            'search_live_documents': 'off',
-            'attach_live_document': 'off',
-            'search_mail': 'off',
-            'read_mail': 'off',
-        },
+        'tools': WEB_SEARCH_OFF,
     }
 
 
@@ -574,6 +803,82 @@ def panel(socket: list[dict]) -> list[int]:
         if any(key in entry for entry in shown):
             return sorted(entry['n'] for entry in shown if entry.get(key))
     return sorted(entry['n'] for entry in shown)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('streamed', [False, True])
+@pytest.mark.parametrize('kind,item_id,route', [('note', 'n1', 'notes'), ('chat', 'c1', 'c')])
+async def test_attached_text_citations_emit_numbered_markers_and_local_source_links(
+    chat: Chat, stored_texts: dict, streamed: bool, kind: str, item_id: str, route: str
+) -> None:
+    text = 'Note body' if kind == 'note' else 'user: Question\n\nassistant: Answer'
+    text_id = f'{kind}:{item_id}'
+    citation = cited(6, f'{text_id}#0-{len(text)}', text_id)
+    chat.api.chat.turns = [
+        [
+            *([('delta', {'text': 'Answer'}), ('citation', citation)] if streamed else []),
+            answered('Answer.', citation),
+        ]
+    ]
+    chunks = await chat.turn('read', 'a1', files=[{'type': kind, 'id': item_id}])
+    assert content(chunks) == 'Answer [1].'
+    (source,) = [event['data'] for event in chat.socket if event['type'] == 'source']
+    assert source['source'] == {'id': text_id, 'name': stored_texts[item_id].title, 'url': f'/{route}/{item_id}'}
+    assert source['document'] == [text]
+    assert source['metadata'][0]['chunk_id'] == citation['source']
+    assert source['n'] == 1
+    assert source['cited_this_turn'] is True
+    assert panel(chat.socket) == [1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('branch', [False, True])
+async def test_attached_text_citations_are_seeded_from_root_inputs_at_the_parent(
+    chat: Chat, stored_texts: dict, branch: bool
+) -> None:
+    chat.api.chat.turns = [[found(DOCUMENT, CHUNK), answered('First.')]]
+    await chat.turn('read', 'a1', files=[{'type': 'note', 'id': 'n1'}])
+    if branch:
+        await chat.turn('later', 'a2', 'a1', files=[{'type': 'chat', 'id': 'c1'}])
+    chat.socket.clear()
+    chat.api.chat.turns = [[answered('Answer.', cited(6, 'note:n1#0-9', 'note:n1'), cited(6, 'source-a'))]]
+    chunks = await chat.turn('again', 'regenerated', 'a1')
+    assert content(chunks) == 'Answer [1] [2].'
+    sources = [event['data'] for event in chat.socket if event['type'] == 'source']
+    assert {source['source']['id'] for source in sources} == {'note:n1', 'document'}
+    note = next(source for source in sources if source['source']['id'] == 'note:n1' and source['cited_this_turn'])
+    assert note['source']['url'] == '/notes/n1'
+    assert note['document'] == ['Note body']
+    assert panel(chat.socket) == [1, 2]
+    if branch:
+        assert chat.mutations()[-2][0] == '/v1/chat/threads/thr-1/fork'
+
+
+def test_attached_text_seeding_ignores_child_streams_and_future_inputs() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    text = {'id': 'note:n1', 'kind': 'note', 'title': 'Note', 'text': 'body', 'length': 4}
+    turn._seed_sources(
+        [
+            {'position': 1, 'type': 'input', 'stream': 'child', 'payload': {'payload': {'texts': [text]}}},
+            {'position': 3, 'type': 'input', 'stream': 'root', 'payload': {'payload': {'texts': [text]}}},
+        ],
+        2,
+    )
+    assert turn.citations.sources == {}
+
+
+@pytest.mark.asyncio
+async def test_new_text_attachments_follow_previously_numbered_sources(chat: Chat, stored_texts: dict) -> None:
+    chat.api.chat.turns = [[found(DOCUMENT, CHUNK), answered('First.', cited(5, 'source-a'))]]
+    await chat.turn('first', 'a1')
+    chat.socket.clear()
+    stored_texts['n1'].data['content']['md'] = 'n' * 50_001
+    chat.api.chat.turns = [[answered('Note.', cited(4, 'note:n1#0-50000', 'note:n1'))]]
+    chunks = await chat.turn('read', 'a2', 'a1', files=[{'type': 'note', 'id': 'n1'}])
+    assert content(chunks) == 'Note [2].'
+    sources = [event['data'] for event in chat.socket if event['type'] == 'source']
+    assert [(source['source']['id'], source['n']) for source in sources] == [('document', 1), ('note:n1', 2)]
+    assert sources[-1]['document'] == ['n' * 50_000]
 
 
 @pytest.mark.asyncio

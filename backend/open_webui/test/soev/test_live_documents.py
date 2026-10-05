@@ -131,6 +131,7 @@ async def test_every_turn_supplies_collection_and_separate_tool_states(env, monk
     assert body['attachment_collection'] == 'owui-attachments-alice'
     assert body['tools'] == {
         'web_search': 'off',
+        'fetch': 'off',
         'search_live_documents': 'auto',
         'attach_live_document': 'auto',
         'search_mail': 'off',
