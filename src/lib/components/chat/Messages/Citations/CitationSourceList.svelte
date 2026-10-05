@@ -5,7 +5,7 @@
 	import type { Readable } from 'svelte/store';
 	import type { DisplayCitation } from './reduceSources';
 	import { mergeCitationDocuments } from './citationDocuments';
-	import { decodeString } from './useCitationDocument';
+	import { decodeString, isDocumentSnippet } from './useCitationDocument';
 	import SourceIcon from './SourceIcon.svelte';
 	const i18n = getContext<Readable<I18n>>('i18n');
 	// [Gradient] Groups own scrolling and header positioning when this list is embedded.
@@ -15,7 +15,10 @@
 	$: rows = visibleCitations.map((citation) => {
 		// [Gradient] No relevance in the list: a per-source maximum over its passages
 		// misrepresents how the scores work. Relevance stays on the passages.
-		return { citation, count: mergeCitationDocuments(citation).length };
+		const documents = mergeCitationDocuments(citation);
+		// A whole document's text is one citation, not a passage.
+		const whole = documents.length > 0 && documents.every(isDocumentSnippet);
+		return { citation, count: documents.length, whole };
 	});
 </script>
 
@@ -31,7 +34,11 @@
 			<div class="min-w-0 flex-1">
 				<div class="line-clamp-1 text-sm">{name}</div>
 				<div class="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-					<span>{$i18n.t('{{count}} passages', { count: row.count })}</span>
+					<span
+						>{row.whole
+							? $i18n.t('Whole-document citation')
+							: $i18n.t('{{count}} passages', { count: row.count })}</span
+					>
 				</div>
 			</div>
 		</button>
