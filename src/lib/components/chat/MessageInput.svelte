@@ -904,35 +904,6 @@
 		$config?.features?.enable_document_writer &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.document_writer);
 
-	// Disable code interpreter when terminal is active (mutually exclusive)
-	$: if ($selectedTerminalId && codeInterpreterEnabled) {
-		codeInterpreterEnabled = false;
-	}
-
-	// Auto-disable capability toggles when the selected model(s) no longer support them
-	// (e.g. switching from a web-search-capable model to one without). Mirrors the terminal
-	// guard above and keeps both the active-capability badge and the getFeatures() payload
-	// from carrying a stale capability. A feature stays on only if every selected model
-	// supports it; the `?? true` fallback in the *CapableModels derivations means models that
-	// are still loading (or omit the capability) are treated as capable, so we never flicker.
-	$: selectedModelCount = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length;
-	$: if (webSearchEnabled && webSearchCapableModels.length !== selectedModelCount) {
-		webSearchEnabled = false;
-	}
-	// Clear selected terminal when model doesn't support terminal
-	$: if ($selectedTerminalId && selectedModelIds.length > 0 && terminalCapableModels.length === 0) {
-		selectedTerminalId.set(null);
-	}
-	$: if (imageGenerationEnabled && imageGenerationCapableModels.length !== selectedModelCount) {
-		imageGenerationEnabled = false;
-	}
-	$: if (codeInterpreterEnabled && codeInterpreterCapableModels.length !== selectedModelCount) {
-		codeInterpreterEnabled = false;
-	}
-	$: if (documentWriterEnabled && documentWriterCapableModels.length !== selectedModelCount) {
-		documentWriterEnabled = false;
-	}
-
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
 	// The first side used locks the conversation; the unavailable side is grayed out with a
@@ -953,11 +924,6 @@
 	$: dataSeparationMessage = $i18n.t(
 		'Internal documents and the open internet cannot be used in the same conversation.'
 	);
-	// Defensive: a model's defaultFeatureIds could re-enable web search in a conversation already
-	// locked to internal documents. Keyed on the history-only side to avoid a reactive cycle.
-	$: if (dataSeparationHistorySide === 'internal' && webSearchEnabled) {
-		webSearchEnabled = false;
-	}
 	// [Gradient] Pinned-bar buttons for the blocked side are hidden; the "+" menu still
 	// shows them grayed out with the explanatory tooltip.
 	$: dataSeparationBlockedItems = new Set(
@@ -2469,13 +2435,6 @@
 														if (e.key === 'Escape') {
 															console.log('Escape');
 															atSelectedModel = undefined;
-															selectedToolIds = [];
-															selectedFilterIds = [];
-
-															webSearchEnabled = false;
-															imageGenerationEnabled = false;
-															codeInterpreterEnabled = false;
-															documentWriterEnabled = false;
 														}
 													}}
 													on:paste={async (e) => {

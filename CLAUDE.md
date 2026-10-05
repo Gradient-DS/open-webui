@@ -145,3 +145,9 @@ The proxy uses `/cloud-sync/connections/{id}/live/{family}` for `mail` or
 `live_documents`; grants and snapshots stay separate. `consentLabels` includes
 Outlook for ActionRequired cards. Mail sources keep Outlook links and render in the
 citation panel; they never create File rows or ingestion jobs.
+
+Composer choices persist in chat.features, including the initial chat creation, and
+ui.composerTools user settings for new chats. Model defaults seed only unsaved choices;
+loading a chat or changing models never overwrites explicit preferences. Feature gates
+control request availability without rewriting saved choices; unavailable selected
+features remain disabled in the + menu. Tool/skill/filter selections use the same snapshot.

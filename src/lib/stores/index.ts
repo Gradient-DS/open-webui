@@ -283,6 +283,7 @@ type OllamaModelDetails = {
 };
 
 type Settings = {
+	composerTools?: import('$lib/utils/composerPreferences').ComposerPreferences;
 	pinnedModels?: string[];
 	pinnedInputItems?: string[];
 	toolServers?: never[];
