@@ -14,8 +14,9 @@ import time
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
-# EX_TEMPFAIL: ingest jobs are still running; the Job retries with backoff.
-EXIT_OK, EXIT_FAILED, EXIT_RUNNING = 0, 1, 75
+# 1 is retried (soev-api unreachable, collection mismatch); 2 is bad input a retry cannot fix;
+# 75 (EX_TEMPFAIL) means ingest jobs are still running. The chart's Job fails fast only on 2.
+EXIT_OK, EXIT_FAILED, EXIT_INVALID, EXIT_RUNNING = 0, 1, 2, 75
 WAIT_POLL_SECONDS = 30
 
 
@@ -525,7 +526,7 @@ def main():
             status = asyncio.run(plan(options) if args.dry_run else apply(options))
     except MigrationError as error:
         print(f'Migration aborted: {error}', file=sys.stderr)
-        raise SystemExit(EXIT_FAILED) from None
+        raise SystemExit(EXIT_INVALID) from None
     except (SoevApiError, httpx.TransportError, ValueError):
         print('Migration aborted; reconciliation could not complete.', file=sys.stderr)
         raise SystemExit(EXIT_FAILED) from None

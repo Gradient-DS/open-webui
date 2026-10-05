@@ -741,3 +741,13 @@ async def test_dry_run_prints_every_step_and_writes_nothing(env, monkeypatch, ca
     assert '3 model ids: unmapped unknown/model' in output
     assert f'5 re-ingest: {local.id}: failed 1, to check 6' in output
     assert '8 sign-out: every user' in output
+
+
+def test_invalid_input_exits_2_so_the_job_stops_retrying(monkeypatch, capsys):
+    module = importlib.import_module('open_webui.soev.migrate')
+    monkeypatch.setattr(sys, 'argv', ['migrate', '--apply', '--migration-id', 'v2'])
+    monkeypatch.delenv('SOEV_V2_CONFIG', raising=False)
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+    assert exited.value.code == 2
+    assert 'SOEV_V2_CONFIG is not set' in capsys.readouterr().err
