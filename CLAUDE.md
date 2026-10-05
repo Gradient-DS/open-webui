@@ -131,3 +131,9 @@ and tooltip. The picker retains the plain cloud; pinned tooltip labels are
 "OneDrive files" and "OneDrive search", translated through i18n.
 
 Consent polling treats suspended:reauth with a cleared last_error as pending until exchange enables the reused connection. A stored failure still terminates polling, and the normal timeout applies.
+
+Composer choices persist in chat.features, including the initial chat creation, and
+ui.composerTools user settings for new chats. Model defaults seed only unsaved choices;
+loading a chat or changing models never overwrites explicit preferences. Feature gates
+control request availability without rewriting saved choices; unavailable selected
+features remain disabled in the + menu. Tool/skill/filter selections use the same snapshot.
