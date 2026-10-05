@@ -165,6 +165,19 @@ describe('reduceSources', () => {
 		expect(out[0].metadata[0].granularity).toBe('document');
 	});
 
+	it('preserves agent document granularity alongside search passages', () => {
+		const readSource: RawSource = {
+			source: { name: 'A.pdf', id: 'doc-A' },
+			document: ['the full body'],
+			metadata: [{ source: 'A.pdf', file_id: 'doc-A', granularity: 'document' }]
+		};
+		const out = reduceSources([readSource, sourceA('chunk1', 2)]);
+		expect(out).toHaveLength(1);
+		expect(out[0].metadata[0].granularity).toBe('document');
+		expect(out[0].metadata[1].granularity).toBeUndefined();
+		expect(out[0].metadata[1].page).toBe(2);
+	});
+
 	it('keeps parallel arrays aligned when a document-level source merges into a searched doc (no metadata/distances desync)', () => {
 		const readSource: RawSource = {
 			source: { name: 'A.pdf', type: 'file', id: 'doc-A' },

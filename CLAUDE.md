@@ -126,8 +126,7 @@ completed document as its owning user and fills content_type before marking it r
 MSAL uses one organisational client and caches in-flight initialization across picker
 preparation and clicks. Personal Microsoft accounts and browser byte downloads are unsupported.
 
-Attach tool summaries show "Could not open document" for refusals and failures.
-An attached event with accepted attachments (including processing) or an existing document keeps the success label.
+Tool summaries use the agent's declared failed status when ToolOutput.error is set (fallback "Could not run {{tool}}"), otherwise done, including partial successes and already-attached documents.
 
 OneDrive search uses the cloud-and-magnifier icon in its menu row, pinned button
 and tooltip. The picker retains the plain cloud; pinned tooltip labels are
@@ -158,6 +157,7 @@ reducer preserves this field; `Citations/sourceIcon.ts` maps it to the plain
 OneDrive and Outlook logos (`icons/OneDrive.svelte`, `icons/Outlook.svelte`) through `SourceIcon.svelte`. Missing or unknown providers retain the web
 favicon/document fallback; names and URLs never identify providers. Previously
 saved source payloads without provider metadata are not retroactively classified.
+Document-text sources from open_document or attach_live_document carry metadata.granularity=document for whole-document citations; chunk citations remain passage-level.
 
 Composer choices persist in chat.features, including the initial chat creation, and
 ui.composerTools user settings for new chats. Model defaults seed only unsaved choices;

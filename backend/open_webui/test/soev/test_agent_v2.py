@@ -1518,6 +1518,8 @@ async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_
         await render(turn, ChatEvent('delta', {'text': 'Answer'}))
     answered_call = kind == 'tool_output'
     ended_status = {'type': 'status', 'data': {**status['data'], 'done': True}}
+    if answered_call and payload.get('error'):
+        ended_status['data'].update(description='Could not run {{tool}}', tool=name)
     shown = [call.args[0] for call in turn.emitter.call_args_list if call.args[0]['data'].get('action') != 'summary']
     assert shown == [status] + [ended_status] * answered_call
     assert '<details type="tool_calls"' in content(started)
@@ -2211,32 +2213,29 @@ async def test_a_turn_that_called_tools_closes_with_a_summary_in_the_ui_language
     assert closing == {'action': 'summary', 'description': '1 tool aangeroepen in minder dan een seconde', 'done': True}
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'output,attached,expected',
+    'output,expected',
     [
-        ({'text': 'Document request refused: not_readable'}, False, 'Could not open document'),
-        ({'text': 'Attachment failed: processing_failed'}, False, 'Could not open document'),
-        ({'elements': [{'type': 'action_required', 'id': 'connect'}]}, False, 'Could not open document'),
-        ({'error': 'tool_failed'}, False, 'Could not open document'),
-        ({'elements': [{'type': 'document', 'id': 'doc'}]}, False, 'Opened document'),
-        ({'attachments': [{'status': 'processing'}]}, True, 'Opened document'),
-        ({'attachments': [{'status': 'ready'}]}, True, 'Opened document'),
-        ({'error': 'one_hit_failed', 'elements': [{'type': 'document', 'id': 'doc'}]}, False, 'Opened document'),
-        ({'error': 'one_hit_failed'}, True, 'Opened document'),
-        (
-            {'elements': [{'type': 'document', 'id': 'first'}, {'type': 'document', 'id': 'second'}]},
-            False,
-            'Opened document',
-        ),
+        ({'error': 'not_readable'}, 'Could not open document'),
+        ({'error': 'processing_failed'}, 'Could not open document'),
+        ({'error': 'connection_required', 'elements': [{'type': 'action-required'}]}, 'Could not open document'),
+        ({'elements': [{'type': 'document', 'id': 'doc'}]}, 'Opened document'),
+        ({'attachments': [{'status': 'processing'}]}, 'Opened document'),
+        ({'attachments': [{'status': 'ready'}], 'text': 'Another hit failed'}, 'Opened document'),
+        ({'text': 'Already attached; still processing.'}, 'Opened document'),
+        ({'error': 'failed', 'elements': [{'type': 'document'}]}, 'Could not open document'),
     ],
 )
-async def test_attach_summary_reflects_the_outcome(output: dict, attached: bool, expected: str) -> None:
-    """Refusals and errors cannot claim success; accepted and existing attachments can."""
+def test_attach_summary_reflects_the_agent_outcome(output: dict, expected: str) -> None:
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
-    turn.tool_statuses = {'attach_live_document': {'done': {'template': 'Opened document', 'params': {}}}}
+    turn.tool_statuses = {
+        'attach_live_document': {
+            'done': {'template': 'Opened document'},
+            'failed': {'template': 'Could not open document'},
+        }
+    }
     turn.running['attach'] = ('attach_live_document', {})
-    turn.end_tool({'call_id': 'attach', **output}, attached=attached)
+    turn.end_tool({'call_id': 'attach', **output})
     assert turn.settling == [
         {'action': 'attach_live_document', 'description': expected, 'call_id': 'attach', 'done': True}
     ]
@@ -2399,9 +2398,15 @@ async def test_mail_sources_link_to_outlook_without_creating_files(chat: Chat):
 @pytest.mark.parametrize('success', [True, False])
 async def test_read_mail_status_reports_refusals(success):
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
-    turn.tool_statuses = {'read_mail': {'done': {'template': 'Read email', 'params': {}}}}
+    turn.tool_statuses = {
+        'read_mail': {'done': {'template': 'Read email'}, 'failed': {'template': 'Could not read email'}}
+    }
     turn.running['read'] = ('read_mail', {})
-    output = {'elements': [{'type': 'mail-text'}]} if success else {'text': 'Mail request refused: not_found'}
+    output = (
+        {'elements': [{'type': 'mail-text'}]}
+        if success
+        else {'error': 'not_found', 'text': 'Mail request refused: not_found'}
+    )
     turn.end_tool({'call_id': 'read', **output})
     assert turn.settling[0]['description'] == ('Read email' if success else 'Could not read email')
 
@@ -2840,3 +2845,61 @@ async def test_web_sources_do_not_infer_provider_from_urls_or_names(monkeypatch)
     source = agent_v2.Citations().add(await agent_v2._as_source(CHUNK, whole))
     assert 'provider' not in source['source']
     lookup.assert_not_awaited()
+
+
+@pytest.mark.parametrize('declared', [True, False])
+def test_list_failure_uses_declared_status_or_generic_fallback(declared):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {
+        'list_live_folder': {
+            'running': {'template': 'Browsing your files...'},
+            'done': {'template': 'Browsed your files'},
+            **({'failed': {'template': 'Could not browse your files'}} if declared else {}),
+        }
+    }
+    turn.running['browse'] = ('list_live_folder', {})
+    turn.end_tool({'call_id': 'browse', 'error': 'invalid arguments'})
+    assert turn.settling == [
+        {
+            'action': 'list_live_folder',
+            'call_id': 'browse',
+            'done': True,
+            'description': 'Could not browse your files' if declared else 'Could not run {{tool}}',
+            **({} if declared else {'tool': 'list_live_folder'}),
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    'arguments,expected', [({'folder': 'Plans'}, 'Could not browse {{folder}}'), ({}, 'Could not browse your files')]
+)
+def test_failed_status_parameters_use_the_declared_fallback(arguments, expected):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {
+        'list_live_folder': {
+            'failed': {
+                'template': 'Could not browse {{folder}}',
+                'fallback': 'Could not browse your files',
+                'params': {'folder': 'argument.folder'},
+            }
+        }
+    }
+    turn.running['browse'] = ('list_live_folder', arguments)
+    turn.end_tool({'call_id': 'browse', 'error': 'not_found'})
+    assert turn.settling[0]['description'] == expected
+    if arguments:
+        assert turn.settling[0]['folder'] == 'Plans'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind,attached', [('document-text', False), ('document-text', True), ('chunk', False)])
+async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind, attached):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    turn.attached = AsyncMock()
+    element = {'type': kind, 'id': 'text', 'ref': 'doc', 'text': 'Body', 'pages': [2]}
+    await turn.record_output({'elements': [document('doc', 'Plan'), element]}, attached=attached)
+    source = turn.citations.sources['text']
+    metadata = source['metadata'][0]
+    assert metadata.get('granularity') == ('document' if kind == 'document-text' else None)
+    assert metadata['page'] == 1

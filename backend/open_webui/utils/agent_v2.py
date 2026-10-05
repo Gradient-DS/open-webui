@@ -647,7 +647,7 @@ def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
 
 async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
     """[Claude] A text the agent read (a chunk, an opened document's text) with what its document says about it,
-    in the shape `Citations.add` takes."""
+    in the shape `Citations.add` takes. A whole document's text is a document-granularity source."""
     whole = whole or {}
     properties = {
         'title': whole.get('title') or whole.get('filename'),
@@ -655,6 +655,7 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
         'source_url': whole.get('source_url'),
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
+        'granularity': 'document' if element.get('type') == 'document-text' else None,
     }
     provider = None
     if element.get('type') in {'mail-text', 'mail-reference'}:
@@ -891,24 +892,15 @@ class AgentTurn:
             self.end_tool({'call_id': _COMPACTION})
         return []
 
-    def end_tool(self, output: dict[str, Any], *, attached: bool = False) -> None:
+    def end_tool(self, output: dict[str, Any]) -> None:
         """[Claude] Hold a call's done line once its output lands, until the model thinks again or moves on (see
         `settle`): until then the model is still working with what the call returned.
 
-        A call whose output is an error shows what it tried, as it did while running."""
+        An output with an `error` shows the tool's `failed` line: the agent decides what failed."""
         if (call := self.running.pop(output.get('call_id') or '', None)) is None:
             return
         name, arguments = call
-        opened = name == 'attach_live_document' and (
-            attached or any(element.get('type') == 'document' for element in output.get('elements') or [])
-        )
-        status = self.tool_status(name, arguments, None if output.get('error') and not opened else output)
-        if name == 'attach_live_document' and not opened:
-            status = {'action': name, 'description': 'Could not open document'}
-        if name == 'read_mail' and (
-            output.get('error') or not any(e.get('type') == 'mail-text' for e in output.get('elements') or [])
-        ):
-            status = {'action': name, 'description': 'Could not read email'}
+        status = self.tool_status(name, arguments, output)
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
 
     async def settle(self) -> None:
@@ -919,7 +911,8 @@ class AgentTurn:
             await self.emit('status', status)
 
     def tool_status(self, name: str, arguments: dict, output: dict | None = None) -> dict[str, Any]:
-        """The tool's declared `running` status, or `done` once there is an `output`, else a generic line."""
+        """The tool's declared `running` status, `done` once there is an `output`, or `failed` when that output is
+        an error; else a generic line."""
         # The action names the tool: the frontend lays a turn out as tool activity only for statuses with one.
         # A template like the declared ones, so the frontend translates it.
         generic = (
@@ -927,7 +920,11 @@ class AgentTurn:
             if name == 'search'
             else {'action': name, 'description': 'Running {{tool}}…', 'tool': name}
         )
-        declared = (self.tool_statuses.get(name) or {}).get('running' if output is None else 'done')
+        phase = 'running' if output is None else 'done'
+        if output is not None and output.get('error') is not None:
+            phase = 'failed'
+            generic = {'action': name, 'description': 'Could not run {{tool}}', 'tool': name}
+        declared = (self.tool_statuses.get(name) or {}).get(phase)
         filled = (
             _filled(declared, self.tool_params(declared, arguments, output)) if isinstance(declared, dict) else None
         )
@@ -976,7 +973,7 @@ class AgentTurn:
 
     def stop_tools(self) -> None:
         """[Claude] End the calls the tool budget stopped: they never get an output, and the model answers next,
-        so each shows what it tried, as a call whose output is an error does."""
+        so each shows its failed line."""
         for call_id in [call_id for call_id in self.running if call_id != _COMPACTION]:
             self.end_tool({'call_id': call_id, 'error': 'budget_exceeded'})
 
@@ -1017,7 +1014,7 @@ class AgentTurn:
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
             if _read(element):
                 await self.show_source(element['id'], 'current_turn')
-        self.end_tool(payload, attached=attached)
+        self.end_tool(payload)
 
     async def show_source(self, source_id: str, flag: str) -> None:
         """[Claude] Flag a source once per turn: `current_turn` when a tool read it now, `cited_this_turn` when the
