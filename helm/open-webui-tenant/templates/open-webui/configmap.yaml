@@ -112,10 +112,10 @@ data:
 
   # Database (PostgreSQL) - local to tenant namespace
   DATABASE_TYPE: {{ .Values.openWebui.config.databaseType | quote }}
-  DATABASE_USER: {{ ternary .Values.postgres.user .Values.openWebui.config.databaseUser (eq .Values.openWebui.config.vectorDb "pgvector") | quote }}
+  DATABASE_USER: {{ .Values.openWebui.config.databaseUser | quote }}
   DATABASE_HOST: {{ include "open-webui-tenant.postgres.host" . }}
   DATABASE_PORT: {{ include "open-webui-tenant.postgres.port" . | quote }}
-  DATABASE_NAME: {{ ternary .Values.postgres.database .Values.openWebui.config.databaseName (eq .Values.openWebui.config.vectorDb "pgvector") | quote }}
+  DATABASE_NAME: {{ .Values.openWebui.config.databaseName | quote }}
 
   # RAG Embeddings
   RAG_EMBEDDING_ENGINE: {{ .Values.openWebui.config.ragEmbeddingEngine | quote }}

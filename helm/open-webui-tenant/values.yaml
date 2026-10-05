@@ -717,7 +717,8 @@ liveMail:
 webuiUrl: ""  # Public URL used for callbacks, e.g. https://client.soev.ai.
 
 # Only rendered when openWebui.config.vectorDb is pgvector. PGVECTOR_DB_URL
-# inherits DATABASE_URL; postgres.user/database also supply DATABASE_USER/NAME.
+# inherits DATABASE_URL. Set openWebui.config.databaseUser/databaseName to match
+# postgres.user/database; a mismatch fails rendering instead of overriding values.
 # CNPG must declare the vector extension; its owner role cannot create it.
 pgvector:
   maxVectorLength: 1024  # bge-m3 dimensions; match ragEmbeddingModel.
@@ -779,7 +780,7 @@ postgres:
 # Weaviate (Vector Database)
 # -----------------------------------------------------------------------------
 weaviate:
-  # Ignored for pgvector: neither the bundled service nor its wait container renders.
+  # Must be false when openWebui.config.vectorDb is pgvector; otherwise rendering fails.
   enabled: true
 
   image:

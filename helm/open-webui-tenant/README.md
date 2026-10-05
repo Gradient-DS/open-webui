@@ -38,17 +38,20 @@ values as strings. It does not modify the migration init container.
 Set `openWebui.config.vectorDb: pgvector` and configure `postgres.host`,
 `postgres.port`, `postgres.user`, and `postgres.database` for CNPG, with
 `postgres.enabled: false`. `PGVECTOR_DB_URL` inherits the application's
-`DATABASE_URL`. In pgvector mode, the chart also uses `postgres.user` and
-`postgres.database` for `DATABASE_USER` and `DATABASE_NAME`, because the app
-can reconstruct its URL from those environment variables.
+`DATABASE_URL`. `DATABASE_USER` and `DATABASE_NAME` always come from
+`openWebui.config.databaseUser` and `openWebui.config.databaseName`. The app can
+reconstruct its URL from these variables, so for pgvector set them to match
+`postgres.user` and `postgres.database`, respectively. Rendering fails on a
+mismatch; the chart does not override either value.
 
 `pgvector.maxVectorLength` defaults to `1024` (bge-m3 dimensions) and sets
 `PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH`; choose a matching embedding model.
 `pgvector.createExtension` defaults to `false` and sets
 `PGVECTOR_CREATE_EXTENSION`. CNPG must declare the `vector` extension before
 Open WebUI starts; the owner role cannot create extensions. Both settings are
-emitted only in pgvector mode. That mode suppresses the bundled Weaviate
-StatefulSet, Service, and wait container even when `weaviate.enabled` is true.
+emitted only in pgvector mode. Set `weaviate.enabled: false` for pgvector;
+rendering fails if it is true. The bundled Weaviate StatefulSet, Service, and
+wait container follow `weaviate.enabled`.
 
 ## Secret stores and policy scope
 

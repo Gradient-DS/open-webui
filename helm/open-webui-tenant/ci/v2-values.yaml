@@ -24,6 +24,8 @@ openWebui:
       maxUnavailable: 0
   config:
     vectorDb: pgvector
+    databaseUser: soev_v2
+    databaseName: soev_v2
     ragEmbeddingModel: bge-m3
     agentApiEnabled: "true"
 pgvector:
@@ -35,7 +37,8 @@ postgres:
   port: 5433
   user: soev_v2
   database: soev_v2
-# Intentionally leave weaviate.enabled at its default true to exercise pgvector's suppression.
+weaviate:
+  enabled: false
 redis:
   enabled: true
 externalSecrets:
