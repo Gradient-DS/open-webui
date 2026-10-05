@@ -371,8 +371,6 @@
 	let webSearchEnabled = false;
 	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
 	let webSearchRequired = false;
-	// A restored draft keeps its web search state over the new-chat default.
-	let webSearchFromDraft = false;
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = false;
 	let composerInitialized = false;
@@ -849,10 +847,10 @@
 		(!chat?.id || Boolean(chat?.meta?.agent_id));
 	$: agentBinding = !embedded && $pendingAgentId ? { agent_id: $pendingAgentId } : null;
 
-	const restoreChatInput = async (
-		storageChatInput: string | null,
-		restorePreferences = !history?.currentId
-	) => {
+	// [Gradient] A draft restores text and files only. Tool states come from the chat's saved
+	// features or the user's last choice: a remounted composer writes its defaults into the
+	// draft, so restoring states from it turned the user's choices back off.
+	const restoreChatInput = async (storageChatInput: string | null) => {
 		if (!storageChatInput || $temporaryChatEnabled) {
 			return false;
 		}
@@ -862,11 +860,6 @@
 			prompt = input.prompt ?? '';
 			messageInput?.setText(prompt);
 			files = input.files ?? [];
-			// Stored chat features are authoritative once the first message exists.
-			if (restorePreferences) {
-				restoreComposerPreferences(composerPreferences(input, $settings.composerTools));
-				webSearchFromDraft = input.webSearchEnabled !== undefined;
-			}
 			if (input.toolApprovalMode) {
 				await handleToolApprovalModeChange(input.toolApprovalMode);
 			}
@@ -1140,7 +1133,7 @@
 			// [Gradient] A new chat starts web search on Auto, or Altijd when the user asks for
 			// it always. Strict data separation starts on Uit: Auto may reach the open internet,
 			// which would lock a fresh chat away from internal documents before anything is sent.
-			if (!history?.currentId && !webSearchFromDraft) {
+			if (!history?.currentId) {
 				const webSearchAllowed =
 					$config?.features?.enable_web_search &&
 					($user?.role === 'admin' || $user?.permissions?.features?.web_search);
@@ -2492,9 +2485,8 @@
 		autoScroll = true;
 
 		composerInitialized = false;
-		webSearchFromDraft = false;
 		await setDefaults(true);
-		await restoreChatInput(sessionStorage.getItem('chat-input'), true);
+		await restoreChatInput(sessionStorage.getItem('chat-input'));
 		await chatId.set('');
 		await chatTitle.set('');
 
