@@ -5,6 +5,7 @@ const chosen = composerPreferences({
 	webSearchEnabled: true,
 	webSearchRequired: true,
 	liveDocumentsState: 'auto',
+	liveMailState: 'auto',
 	imageGenerationEnabled: true,
 	codeInterpreterEnabled: true,
 	documentWriterEnabled: true,
@@ -30,6 +31,7 @@ describe('composer preferences', () => {
 		expect(restored.webSearchEnabled).toBe(true);
 		expect(restored.webSearchRequired).toBe(false);
 		expect(restored.liveDocumentsState).toBe('off');
+		expect(restored.liveMailState).toBe('off');
 		expect(chosen.webSearchRequired).toBe(true);
 	});
 	it('partial drafts inherit missing choices and do not share selection arrays', () => {

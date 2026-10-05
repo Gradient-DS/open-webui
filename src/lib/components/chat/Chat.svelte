@@ -3964,7 +3964,7 @@
 						? documentWriterEnabled
 						: false,
 				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
-                live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
+				live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
 				web_search: webSearchActive,
 				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
 				web_search_required: webSearchActive && webSearchRequired

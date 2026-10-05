@@ -125,7 +125,8 @@
 	let connectingMail = false;
 	async function cycleLive(family: 'live_documents' | 'mail') {
 		const mail = family === 'mail';
-        if (!(mail ? $config?.features?.enable_live_mail : $config?.features?.enable_live_documents)) return;
+		if (!(mail ? $config?.features?.enable_live_mail : $config?.features?.enable_live_documents))
+			return;
 		if (mail ? connectingMail : connectingDocuments) return;
 		const state = mail ? liveMailState : liveDocumentsState;
 		const next = nextToolState(state, LIVE_DOCUMENT_STATES);
@@ -248,7 +249,8 @@
 	$: showSkills =
 		itemAllowed('skills') && isFeatureEnabled('skills') && Object.keys(skills ?? {}).length > 0;
 	$: showFilters = itemAllowed('filters') && (toggleFilters ?? []).length > 0;
-	$: showLiveMail = itemAllowed('live_mail') && !!$config?.features?.enable_live_mail;
+	$: showLiveMail =
+		itemAllowed('live_mail') && (!!$config?.features?.enable_live_mail || liveMailState !== 'off');
 	$: showLiveDocuments =
 		itemAllowed('live_documents') &&
 		(!!$config?.features?.enable_live_documents || liveDocumentsState !== 'off');
@@ -798,15 +800,17 @@
 									? $i18n.t(TOOL_OFF_DESCRIPTION)
 									: $i18n.t('The model decides whether to search your mail')
 							)}
-							tooltip={stateAriaLabel(
-								$i18n.t('Mail search'),
-								liveMailState,
-								liveMailState === 'off'
-									? $i18n.t(TOOL_OFF_DESCRIPTION)
-									: $i18n.t('The model decides whether to search your mail')
-							)}
+							tooltip={!$config?.features?.enable_live_mail
+								? $i18n.t('Unavailable')
+								: stateAriaLabel(
+										$i18n.t('Mail search'),
+										liveMailState,
+										liveMailState === 'off'
+											? $i18n.t(TOOL_OFF_DESCRIPTION)
+											: $i18n.t('The model decides whether to search your mail')
+									)}
 							toolState={liveMailState}
-							disabled={connectingMail}
+							disabled={connectingMail || !$config?.features?.enable_live_mail}
 							onClick={cycleLiveMail}
 						>
 							<MailSearch slot="icon" className="size-3.5" />
