@@ -1,4 +1,4 @@
-"""v2 mode takes its models from soev-api; v1 mode is unchanged."""
+"""v2 mode takes its models and default from soev-api; v1 mode is unchanged."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -192,3 +192,16 @@ async def test_unconfigured_catalog_models_follow_base_model_access(v2: FakeSoev
     user = SimpleNamespace(id='alice', role='user')
     assert [m['id'] for m in await models_utils.get_filtered_models(models, admin)] == ['glm-5-3', 'gemma-4-31b']
     assert await models_utils.get_filtered_models(models, user) == []
+
+
+@pytest.mark.asyncio
+async def test_v2_default_comes_from_the_catalog_and_ignores_ui_default_models(v2: FakeSoevApi) -> None:
+    assert await model_catalog.default_models('zai-org/GLM-5.3') == 'glm-5-3'
+    v2.models = [{**GLM, 'default': False}, GEMMA]
+    model_catalog.CATALOG_CACHE['expires_at'] = 0.0
+    assert await model_catalog.default_models('zai-org/GLM-5.3') is None
+
+
+@pytest.mark.asyncio
+async def test_v1_default_is_ui_default_models(v1) -> None:
+    assert await model_catalog.default_models('zai-org/GLM-5.3') == 'zai-org/GLM-5.3'

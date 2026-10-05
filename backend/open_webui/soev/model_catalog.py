@@ -1,4 +1,4 @@
-"""[Gradient] In v2 mode soev-api's catalog is the only source of chat models."""
+"""[Gradient] In v2 mode soev-api's catalog is the only source of chat models and the default."""
 
 import copy
 import logging
@@ -102,3 +102,10 @@ def apply_catalog(models: list[dict], base: list[dict]) -> None:
 def is_unconfigured(model: dict) -> bool:
     """A catalog model whose info comes from the catalog alone, without an admin's model row."""
     return model.get('owned_by') == OWNER and not (model.get('info') or {}).get('id')
+
+
+async def default_models(configured: str | None) -> str | None:
+    """The catalog default replaces ui.default_models in v2 mode."""
+    if not is_v2():
+        return configured
+    return next((entry['id'] for entry in await catalog() if entry.get('default')), None)
