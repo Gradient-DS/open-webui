@@ -44,20 +44,15 @@ By default the agent (persona) is selected server-side via `default_agent` in th
 
 **Unchanged:** streaming to UI, DB persistence, title generation, WebSocket transport, system prompts, memory retrieval, voice mode.
 
-## Title and tag generation under the v2 runtime
+## Models, default and tasks under the v2 runtime
 
-Titles, tags and follow-ups are Open WebUI tasks: a plain chat completion on the task model, outside the agent. Under the v2 runtime (`AGENT_API_RUNTIME=v2`), the model connection is soev-api's `/v1/chat`. It lists the models but serves only threads, so a task sent there returns `404 route_not_found` and the chat keeps the first words of the prompt as its title.
+v2 mode is on when `AGENT_API_ENABLED=true`, `AGENT_API_RUNTIME=v2` and `SOEV_API_URL` is set. soev-api then decides which models exist, which one is the default, and which model runs tasks:
 
-When no task model is set, or the one set is not on any connection, the task falls back to the chat model, which is on soev-api. Give Open WebUI a second connection straight to inference (LiteLLM in a cluster) and point the external task model at a model on it:
+- **Models.** The picker lists only soev-api's catalog (`GET /v1/models`, cached per process for 60 s). OpenAI and Ollama connections, function models and direct user connections are not offered, so `OPENAI_API_BASE_URLS` and connection `model_ids` have no effect. Access is unchanged: as with any base model, users see a catalog model only once an admin grants it under Admin > Models.
+- **Default.** `/api/config` serves the catalog entry marked `default` as `default_models`. `ui.default_models` (`DEFAULT_MODELS`) is ignored. A model the user saved or picked still wins.
+- **Tasks.** Titles, tags, follow-ups, emoji, queries, autocomplete, image prompts, MoA, context compaction, memory review and tool selection all go to `POST /v1/completions/task` as the acting user. soev-api runs them on the client's `task` model, so `TASK_MODEL`, `TASK_MODEL_EXTERNAL` and a direct LiteLLM connection are not needed. The prompt templates still come from Open WebUI.
 
-```env
-OPENAI_API_BASE_URLS=http://soev-api/v1/chat;http://litellm-proxy.shared-services.svc:4000/v1
-OPENAI_API_KEYS=<soev-api key>;<litellm key>
-OPENAI_API_CONFIGS={"0": {"enable": true}, "1": {"enable": true, "model_ids": ["google/gemma-4-31B-it"]}}
-TASK_MODEL_EXTERNAL=google/gemma-4-31B-it
-```
-
-The task model then also appears in the model picker. Hide it under Admin > Models; a hidden model still serves tasks. Hiding is stored on the model in the database and has no environment variable.
+Each catalog model carries its facts (vendor, origin, hosting, tri-state capabilities, lifecycle) under `info.meta.soev`. Vision counts as on only when the catalog says `supported`.
 
 ## Request Payload
 

@@ -63,6 +63,13 @@ Set `down_revision` to the current head. `alembic heads` needs a live DB connect
 - `src/routes/+layout.svelte` — root layout, app initialization
 - `src/lib/stores/` — global state (user, settings, models, chats)
 
+## Models under the v2 runtime
+
+With `AGENT_API_ENABLED`, `AGENT_API_RUNTIME=v2` and `SOEV_API_URL` set, `soev/model_catalog.py` makes soev-api
+the only source of models (`GET /v1/models`), the default (served as `default_models`) and task completions
+(`POST /v1/completions/task`, called from `generate_chat_completion`). Connections, `ui.default_models` and the task
+model settings are not used. Details: `docs/agent-api-deployment.md`.
+
 ## Live document attachments
 
 `soev/live_documents.py` records agent `attached` events as Files whose id is the platform source id.
