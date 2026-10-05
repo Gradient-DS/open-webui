@@ -35,6 +35,11 @@
 	export let edit = false;
 
 	let loading = false;
+	let fetchedFile: { id: string; file: Awaited<ReturnType<typeof getFileById>> } | null = null;
+	let contentRequest = 0;
+	$: contentId = item?.id;
+	// Streamed message snapshots replace item; keep fetched content owned by the modal.
+	$: previewFile = fetchedFile && fetchedFile.id === contentId ? fetchedFile.file : item?.file;
 
 	let isPDF = false;
 	let isAudio = false;
@@ -211,7 +216,8 @@
 		}
 	};
 
-	const loadContent = async () => {
+	const loadContent = async (id: string) => {
+		const request = ++contentRequest;
 		// Default to the Preview tab whenever a preview exists, regardless of how
 		// the viewer was opened; '' (Content) is the default only for files with
 		// no preview pane. (Images render without tabs.)
@@ -221,10 +227,11 @@
 		if (item?.type === 'collection') {
 			loading = true;
 
-			const knowledge = await getKnowledgeById(localStorage.token, item.id).catch((e) => {
+			const knowledge = await getKnowledgeById(localStorage.token, id).catch((e) => {
 				console.error('Error fetching knowledge base:', e);
 				return null;
 			});
+			if (request !== contentRequest || id !== item?.id) return;
 
 			if (knowledge) {
 				item.files = knowledge.files || [];
@@ -233,17 +240,18 @@
 		} else if (item?.type === 'file') {
 			loading = true;
 
-			const content = isExcel || isDocx || isPptx ? getFileContentById(item.id) : undefined;
+			const content = isExcel || isDocx || isPptx ? getFileContentById(id) : undefined;
 			// Observe early rejection while metadata is pending; the preview loader still handles it.
 			void content?.catch(() => {});
 
-			const file = await getFileById(localStorage.token, item.id).catch((e) => {
+			const file = await getFileById(localStorage.token, id).catch((e) => {
 				console.error('Error fetching file:', e);
 				return null;
 			});
+			if (request !== contentRequest || id !== item?.id) return;
 
 			if (file) {
-				item.file = file || {};
+				fetchedFile = { id, file };
 			}
 
 			// Load Excel content if it's an Excel file
@@ -257,14 +265,14 @@
 				await loadPptxContent(content);
 			}
 
-			loading = false;
+			if (request === contentRequest && id === item?.id) loading = false;
 		}
 
 		await tick();
 	};
 
-	$: if (show) {
-		loadContent();
+	$: if (show && contentId) {
+		loadContent(contentId);
 	}
 
 	onMount(() => {
@@ -349,7 +357,7 @@
 							•
 						{/if}
 
-						{#if item?.file?.data?.content}
+						{#if previewFile?.data?.content}
 							<div class="capitalize shrink-0">
 								{#if isExcel && rowCount > 0 && selectedTab === 'preview'}
 									{$i18n.t('{{COUNT}} Rows', {
@@ -357,7 +365,7 @@
 									})}
 								{:else}
 									{$i18n.t('{{COUNT}} extracted lines', {
-										COUNT: getLineCount(item?.file?.data?.content ?? '')
+										COUNT: getLineCount(previewFile?.data?.content ?? '')
 									})}
 								{/if}
 							</div>
@@ -455,8 +463,8 @@
 						</PanzoomContainer>
 					</div>
 				{:else if selectedTab === ''}
-					{#if item?.file?.data}
-						{@const rawContent = (item?.file?.data?.content ?? '').trim() || 'No content'}
+					{#if previewFile?.data}
+						{@const rawContent = (previewFile?.data?.content ?? '').trim() || 'No content'}
 						{@const isTruncated =
 							($settings?.renderMarkdownInPreviews ?? true) &&
 							rawContent.length > CONTENT_PREVIEW_LIMIT &&
@@ -568,7 +576,7 @@
 					{:else if isCode}
 						<div class="max-h-[60vh] overflow-scroll scrollbar-hidden text-sm relative">
 							<CodeBlock
-								code={item.file.data.content}
+								code={previewFile?.data?.content ?? ''}
 								lang={item.name.split('.').pop()}
 								token={null}
 								edit={false}
@@ -580,7 +588,7 @@
 						<div
 							class="max-h-[60vh] overflow-scroll scrollbar-hidden text-sm prose dark:prose-invert max-w-full"
 						>
-							<Markdown content={item.file.data.content} id="markdown-viewer" />
+							<Markdown content={previewFile?.data?.content ?? ''} id="markdown-viewer" />
 						</div>
 					{:else if isDocx}
 						{#if docxError}
@@ -604,7 +612,7 @@
 						{/if}
 					{:else}
 						<div class="max-h-96 overflow-scroll scrollbar-hidden text-xs whitespace-pre-wrap">
-							{(item?.file?.data?.content ?? '').trim() || 'No content'}
+							{(previewFile?.data?.content ?? '').trim() || 'No content'}
 						</div>
 					{/if}
 				{:else if selectedTab === 'attachments'}
