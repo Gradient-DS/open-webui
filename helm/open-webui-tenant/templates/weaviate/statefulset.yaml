@@ -1,4 +1,4 @@
-{{- if .Values.weaviate.enabled }}
+{{- if and .Values.weaviate.enabled (ne .Values.openWebui.config.vectorDb "pgvector") }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

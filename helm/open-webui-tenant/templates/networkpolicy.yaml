@@ -6,7 +6,16 @@ metadata:
   labels:
     {{- include "open-webui-tenant.labels" . | nindent 4 }}
 spec:
+  {{- if not (has .Values.networkPolicy.scope (list "namespace" "release")) }}
+  {{- fail "networkPolicy.scope must be namespace or release" }}
+  {{- end }}
+  {{- if eq .Values.networkPolicy.scope "release" }}
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- else }}
   podSelector: {}
+  {{- end }}
   policyTypes:
     - Ingress
     - Egress

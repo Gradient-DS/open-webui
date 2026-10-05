@@ -1,4 +1,4 @@
-{{- if .Values.weaviate.enabled }}
+{{- if and .Values.weaviate.enabled (ne .Values.openWebui.config.vectorDb "pgvector") }}
 apiVersion: v1
 kind: Service
 metadata:

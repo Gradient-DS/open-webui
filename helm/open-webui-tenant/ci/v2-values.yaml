@@ -1,0 +1,60 @@
+# Shared soev namespace, CNPG with its vector extension already declared.
+tenant:
+  name: v2
+  domain: v2.soev.ai
+soevApi:
+  url: http://soev-api:8000
+  audience: soev-api
+  servicePrincipal: open-webui
+agentApi:
+  runtime: v2
+liveDocuments:
+  enabled: true
+liveMail:
+  enabled: true
+webuiUrl: https://v2.soev.ai
+openWebui:
+  replicaCount: 2
+  persistence:
+    enabled: false
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  config:
+    vectorDb: pgvector
+    ragEmbeddingModel: bge-m3
+    agentApiEnabled: "true"
+pgvector:
+  maxVectorLength: 1024
+  createExtension: false
+postgres:
+  enabled: false
+  host: pg-v2-rw.database-v2.svc.cluster.local
+  port: 5433
+  user: soev_v2
+  database: soev_v2
+# Intentionally leave weaviate.enabled at its default true to exercise pgvector's suppression.
+redis:
+  enabled: true
+externalSecrets:
+  enabled: true
+  onepassword:
+    itemName: soev-v2
+secretStoreRef:
+  kind: ClusterSecretStore
+  name: soev-staging
+networkPolicy:
+  scope: release
+  extraEgressNamespaces:
+    - database-v2
+ciliumNetworkPolicy:
+  enabled: true
+extraEnv:
+  - name: SOEV_API_JOB_POLL_SECONDS
+    value: "3"
+  - name: POD_NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
