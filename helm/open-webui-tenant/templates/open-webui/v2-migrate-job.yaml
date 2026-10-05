@@ -1,0 +1,99 @@
+{{- if and .Values.openWebui.enabled .Values.soevApi.migrate.enabled }}
+{{- $migrate := .Values.soevApi.migrate }}
+{{- if not .Values.soevApi.url }}
+{{- fail "soevApi.migrate.enabled needs soevApi.url" }}
+{{- end }}
+{{- if not (has $migrate.mode (list "apply" "restore")) }}
+{{- fail "soevApi.migrate.mode must be apply or restore" }}
+{{- end }}
+{{- if and (eq $migrate.mode "apply") (not $migrate.config) }}
+{{- fail "soevApi.migrate.config must hold the v2 config key set" }}
+{{- end }}
+{{- $hash := printf "%s|%s" .Values.openWebui.image.tag (toJson $migrate) | sha256sum | trunc 10 }}
+# [Gradient] Plain Job, not a Helm hook: Flux applies it beside the app and Kubernetes
+# retries it until soev-api answers and ingest settles. The name changes with the image
+# tag and the migrate values, because a Job's pod template is immutable.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-v2-migrate-%s" (include "open-webui-tenant.fullname" . | trunc 40 | trimSuffix "-") $hash }}
+  labels:
+    {{- include "open-webui-tenant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: v2-migrate
+spec:
+  backoffLimit: {{ $migrate.backoffLimit }}
+  ttlSecondsAfterFinished: {{ $migrate.ttlSecondsAfterFinished }}
+  podFailurePolicy:
+    rules:
+      - action: FailJob
+        onExitCodes:
+          containerName: migrate
+          operator: In
+          values: [2]
+  template:
+    metadata:
+      labels:
+        {{- include "open-webui-tenant.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: v2-migrate
+    spec:
+      restartPolicy: Never
+      {{- include "open-webui-tenant.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "open-webui-tenant.serviceAccountName" . }}
+      {{- with .Values.openWebui.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.openWebui.image.repository }}:{{ .Values.openWebui.image.tag }}"
+          imagePullPolicy: {{ .Values.openWebui.image.pullPolicy }}
+          {{- with .Values.openWebui.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["python", "-m", "open_webui.soev.migrate", "--{{ $migrate.mode }}"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
+          env:
+            # Brings the schema (config_backup and friends) up first; the advisory
+            # lock serializes this with the app's init container on PostgreSQL.
+            - name: ENABLE_DB_MIGRATIONS
+              value: "true"
+            {{- include "open-webui-tenant.openWebui.env" . | nindent 12 }}
+            - name: SOEV_V2_MIGRATION_ID
+              value: {{ $migrate.id | quote }}
+            - name: SOEV_V2_CONFIG
+              value: {{ $migrate.config | toJson | quote }}
+            - name: SOEV_V2_MODEL_MAP
+              value: {{ $migrate.modelMap | default dict | toJson | quote }}
+            - name: SOEV_V2_INGEST_CONCURRENCY
+              value: {{ $migrate.ingestConcurrency | quote }}
+            - name: SOEV_V2_WAIT_SECONDS
+              value: {{ $migrate.waitSeconds | quote }}
+          resources:
+            {{- toYaml ($migrate.resources | default .Values.openWebui.resources) | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+      volumes:
+        - name: data
+          {{- if .Values.openWebui.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.openWebui.persistence.existingClaim | default (printf "%s-pvc" (include "open-webui-tenant.openWebui.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
