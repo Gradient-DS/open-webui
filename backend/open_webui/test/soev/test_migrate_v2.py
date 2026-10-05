@@ -719,3 +719,25 @@ async def test_sign_out_without_redis_fails_loudly(env, monkeypatch):
 
     with pytest.raises(MigrationError, match='needs Redis'):
         await env.module.apply(options(env))
+
+
+@pytest.mark.asyncio
+async def test_dry_run_prints_every_step_and_writes_nothing(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        await connection.execute(sa.text("DELETE FROM user WHERE id = 'alice'"))
+    local, _ = await seed_knowledge(env, monkeypatch)
+    before = (await config_rows(env), await dumps(env), await rows(env, 'SELECT * FROM file ORDER BY id'))
+    assert await env.module.plan(options(env)) == 0
+    after = (await config_rows(env), await dumps(env), await rows(env, 'SELECT * FROM file ORDER BY id'))
+    assert after == before
+    assert env.api.requests == [] and env.redis.sets == [] and env.embedded == []
+    assert await rows(env, 'SELECT * FROM config_backup') == []
+    output = capsys.readouterr().out
+    assert '1 snapshot: would be taken' in output
+    assert '2 config switch: openai.enable = false' in output
+    assert '3 model ids: map zai-org/GLM-5.3 -> glm-5-3' in output
+    assert '3 model ids: chat.chat 3' in output
+    assert '3 model ids: unmapped unknown/model' in output
+    assert f'5 re-ingest: {local.id}: failed 1, to check 6' in output
+    assert '8 sign-out: every user' in output
