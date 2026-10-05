@@ -981,7 +981,8 @@ class AgentTurn:
         update = {'files': list(self.attached_files.values())}
         if chat_id and message_id and not is_temporary_chat_id(chat_id):
             await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, update)
-        await self.emit('files', update)
+        # The full list, stored above: a `files` event would be appended to the stored files again.
+        await self.emit('chat:message:files', update)
 
     async def record_output(self, payload: dict, *, attached: bool = False) -> None:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""

@@ -2212,7 +2212,7 @@ async def test_mail_sources_link_to_outlook_without_creating_files(chat: Chat):
     source = next(event['data'] for event in chat.socket if event['type'] == 'source')
     assert source['source']['url'] == card['source_url']
     assert 'file_id' not in source['metadata'][0]
-    assert not any(event['type'] == 'files' for event in chat.socket)
+    assert not any(event['type'] in ('files', 'chat:message:files') for event in chat.socket)
     assert not chat.messages['chat', 'a1'].get('files')
 
 
