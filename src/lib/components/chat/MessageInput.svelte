@@ -914,7 +914,11 @@
 		? getHistorySide(dataSeparationMessages)
 		: null;
 	$: dataSeparationSide = strictDataSeparation
-		? getActiveSide({ messages: dataSeparationMessages, files, webSearchEnabled })
+		? getActiveSide({
+				messages: dataSeparationMessages,
+				files,
+				webSearchEnabled: webSearchEnabled && showWebSearchButton
+			})
 		: null;
 	$: openInternetBlocked = strictDataSeparation && dataSeparationSide === 'internal';
 	$: internalBlocked = strictDataSeparation && dataSeparationSide === 'open_internet';
