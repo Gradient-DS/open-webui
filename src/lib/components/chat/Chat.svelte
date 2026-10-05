@@ -3154,6 +3154,8 @@
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
 		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
+		// [Gradient] The model soev-api reports as having answered (a fallback), kept with the message meta.
+		const answeredModel = data.answered_model;
 
 		// Store raw OR-aligned output items from backend
 		if (output) {
@@ -3208,6 +3210,10 @@
 
 		if (usage) {
 			message.usage = usage;
+		}
+
+		if (answeredModel) {
+			message.meta = { ...(message.meta ?? {}), answered_model: answeredModel };
 		}
 
 		history.messages[message.id] = message;

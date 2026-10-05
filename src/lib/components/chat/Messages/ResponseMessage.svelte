@@ -43,6 +43,7 @@
 		removeAllDetails
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
+	import { answeredByLabel } from '$lib/utils/models/catalog';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
 
@@ -98,6 +99,7 @@
 		id: string;
 		model: string;
 		assistant_id?: string; // [Gradient]
+		meta?: { answered_model?: string }; // [Gradient] Set when a fallback answered a v2 turn.
 		content: string;
 		output?: OutputItem[];
 		files?: {
@@ -231,6 +233,8 @@
 		assistant
 	);
 	$: headerModel = assistant ?? model;
+	// [Gradient] soev-api reports the model that answered when a fallback replaced the requested one.
+	$: answeredBy = answeredByLabel(message?.meta?.answered_model, message.model, $models);
 
 	$: statusEntries = (() => {
 		const raw = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
@@ -1079,6 +1083,11 @@
 							{headerModel?.name ?? message.model}
 						</span>
 					</Tooltip>
+					{#if answeredBy}
+						<span class="text-xs font-normal text-gray-400 dark:text-gray-500 line-clamp-1">
+							{$i18n.t('Answered by {{model}}', { model: answeredBy })}
+						</span>
+					{/if}
 				</Name>
 			{/if}
 
