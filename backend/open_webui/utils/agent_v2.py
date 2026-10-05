@@ -215,6 +215,9 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, list[dict[str, str
     return {'attachments': attached} if attached else {}
 
 
+# [Gradient] The most characters of a note or chat the agent takes (its `MAX_CHARACTERS`); `length` says how much
+# there was.
+TEXT_CHARACTERS = 50_000
 # [Gradient] Match quoted attributes too: document titles and tool arguments may contain `>`.
 _ATTRIBUTES = r"""((?:[^>"']|"[^"]*"|'[^']*')*)"""
 _DETAILS = re.compile(r'<details\b' + _ATTRIBUTES + r'>.*?</details>', re.DOTALL)
@@ -244,7 +247,7 @@ async def _texts(entries: list[dict[str, Any]], user_id: str) -> list[dict[str, 
         return []
     user = await Users.get_user_by_id(user_id)
     texts, unavailable = [], []
-    for entry in entries:
+    for entry in {(entry['type'], entry.get('id')): entry for entry in entries}.values():
         kind, item_id = entry['type'], entry.get('id')
         item = await (Notes.get_note_by_id(item_id) if kind == 'note' else Chats.get_chat_by_id(item_id))
         allowed = bool(item and user and (user.role == 'admin' or item.user_id == user.id))
@@ -262,8 +265,15 @@ async def _texts(entries: list[dict[str, Any]], user_id: str) -> list[dict[str, 
             unavailable.append((entry.get('name') or item_id or kind, 'gone'))
             continue
         text = item.data.get('content', {}).get('md', '') if kind == 'note' else _chat_text(item)
+        title = item.title or entry.get('name') or ('Notitie' if kind == 'note' else 'Chat')
         texts.append(
-            {'id': f'{kind}:{item.id}', 'kind': kind, 'title': item.title, 'text': text[:50_000], 'length': len(text)}
+            {
+                'id': f'{kind}:{item.id}',
+                'kind': kind,
+                'title': title,
+                'text': text[:TEXT_CHARACTERS],
+                'length': len(text),
+            }
         )
     if unavailable:
         raise AttachmentsUnavailable(unavailable)
