@@ -58,6 +58,18 @@ class FakeVectors:
         return SimpleNamespace(ids=[ids]) if ids else None
 
 
+class FakeRedis:
+    def __init__(self):
+        self.values, self.sets = {}, []
+
+    async def set(self, key, value, ex=None):
+        self.values[key] = value
+        self.sets.append(key)
+
+    async def get(self, key):
+        return self.values.get(key)
+
+
 @pytest.fixture
 def fake_vector_modules(monkeypatch):
     """The real clients connect to the configured vector store on import."""
@@ -133,6 +145,8 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
                 {'key': key, 'value': json.dumps(value, indent=1), 'at': 1000},
             )
     vectors = fake_vector_modules
+    redis = FakeRedis()
+    monkeypatch.setattr(importlib.import_module('open_webui.utils.redis'), 'get_redis_client', lambda **_: redis)
     monkeypatch.setattr(importlib.import_module('open_webui.routers.memories'), 'ASYNC_VECTOR_DB_CLIENT', vectors)
     embedded = []
 
@@ -155,6 +169,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
         tmp_path=tmp_path,
         vectors=vectors,
         embedded=embedded,
+        redis=redis,
     )
     await engine.dispose()
 
@@ -675,3 +690,32 @@ async def test_apply_waits_for_running_ingest_when_asked(env, monkeypatch):
     monkeypatch.setenv('SOEV_V2_WAIT_SECONDS', '600')
     assert await env.module.apply(options(env)) == 0
     assert pauses == [env.module.WAIT_POLL_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_users_are_signed_out_once_per_migration_after_success(env, monkeypatch, capsys):
+    """Tokens issued before cutover fail the real revocation check; later runs revoke nothing."""
+    await seed_knowledge(env, monkeypatch)
+    redis = env.redis
+    auth = importlib.import_module('open_webui.utils.auth')
+    issued = {'id': 'alice', 'iat': 1}
+    assert await env.module.apply(options(env)) == 75
+    assert redis.sets == []
+    await finish_jobs(env, monkeypatch)
+    assert await env.module.apply(options(env)) == 0
+    assert sorted(redis.sets) == sorted(f'open-webui:auth:user:{u}:revoked_at' for u in ('alice', 'bob'))
+    assert not await auth.is_valid_token(issued, redis)
+    assert await auth.is_valid_token({'id': 'alice', 'iat': 10**12}, redis)
+    assert '8 sign-out: sessions of 2 users revoked' in capsys.readouterr().out
+    assert await env.module.apply(options(env)) == 0
+    assert len(redis.sets) == 2
+    assert '8 sign-out: already done' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_sign_out_without_redis_fails_loudly(env, monkeypatch):
+    monkeypatch.setattr(importlib.import_module('open_webui.utils.redis'), 'get_redis_client', lambda **_: None)
+    from open_webui.soev.migrate_state import MigrationError
+
+    with pytest.raises(MigrationError, match='needs Redis'):
+        await env.module.apply(options(env))

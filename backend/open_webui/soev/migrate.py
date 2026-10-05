@@ -380,6 +380,22 @@ def verdict(collections: int, ingest_state, memory_state) -> int:
     return EXIT_RUNNING if running else EXIT_OK
 
 
+async def _sign_out_once(migration_id: str, *, db=None) -> None:
+    """Step 8, after a successful apply only, and once per migration id."""
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.soev import migrate_signout, migrate_state
+
+    async with get_async_db_context(db) as session:
+        if await migrate_state.has_marker(session, migration_id, 'signout'):
+            print('8 sign-out: already done')
+            return
+        await session.commit()
+        count = await migrate_signout.sign_out_all(db=db)
+        migrate_state.add_marker(session, migration_id, 'signout')
+        await session.commit()
+    print(f'8 sign-out: sessions of {count} users revoked')
+
+
 async def apply(options: Options, *, db=None) -> int:
     from open_webui.internal.db import get_async_db_context
     from open_webui.soev import migrate_config, migrate_ingest, migrate_memories, migrate_models, migrate_state
@@ -413,6 +429,8 @@ async def apply(options: Options, *, db=None) -> int:
             directory.file_counts, directory.client, conflicts=directory.conflicts, cloud_owners=directory.cloud_owners
         )
         status = verdict(collections, ingest_state, memory_state)
+        if status == EXIT_OK:
+            await _sign_out_once(options.migration_id, db=db)
         if status != EXIT_RUNNING or time.monotonic() >= deadline:
             return status
         print(f'7 reconcile: checking again in {WAIT_POLL_SECONDS}s')
@@ -452,6 +470,9 @@ async def plan(options: Options, *, db=None) -> int:
             snapshotted = None
         state = {True: 'exists, kept', False: 'would be taken', None: 'state tables missing'}[snapshotted]
         print(f'1 snapshot: {state} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
+        signed_out = snapshotted is not None and await migrate_state.has_marker(
+            session, options.migration_id, 'signout'
+        )
         row = await session.get(Config, migrate_config.PERMISSIONS)
         values = migrate_config.planned(options.v2_config, row.value if row else {})
         for key, value in sorted(values.items()):
@@ -466,6 +487,7 @@ async def plan(options: Options, *, db=None) -> int:
     state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, dry_run=True, db=db)
     _print_ingest(state, prefix='5 re-ingest')
     _print_memories(await migrate_memories.reembed(dry_run=True, db=db), prefix='6 memories')
+    print(f'8 sign-out: {"already done" if signed_out else "every user, after a successful apply"}')
     return await reconcile(
         directory.file_counts,
         directory.client,
