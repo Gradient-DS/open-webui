@@ -1,4 +1,5 @@
 {
+  "Searched your files for \"{{query}}\": {{files}} files": "Searched your files for \"{{query}}\": {{files}} files",
   "Searching your files for \"{{query}}\"...": "Searching your files for \"{{query}}\"...",
   "Searched your files for \"{{query}}\"": "Searched your files for \"{{query}}\"",
   "Searching your files...": "Searching your files...",
