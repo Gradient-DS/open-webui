@@ -27,6 +27,10 @@ export type ReasoningItem = {
 export type TaggedStatus = StatusEntry & { kind: 'status' };
 export type MergedItem = TaggedStatus | ReasoningItem;
 
+// The turn's closing line: it heads the timeline and has no tool marker.
+const isSummary = (item: StatusEntry | MergedItem) =>
+	item.kind !== 'reasoning' && item.action === 'summary';
+
 // Which merge strategy applies to the current turn. The decision is the
 // single source of truth for "how do we render this": the dispatcher in
 // ``mergeStatusAndReasoning`` selects a strategy off this enum, and (after
@@ -98,9 +102,15 @@ function mergePositional(
 	// order).
 	const merged: MergedItem[] = [];
 	let reasoningIdx = 0;
+	let markerIdx = 0;
 	for (let i = 0; i < status.length; i++) {
-		const toolOffset = toolOffsets[i];
+		// A summary has no marker, so it never takes the next call's slot. One
+		// between calls holds its place; the closing one follows the last thought.
+		const summary = isSummary(status[i]);
+		const midTurn = summary && status.slice(i + 1).some((entry) => !isSummary(entry));
+		const toolOffset = summary ? undefined : toolOffsets[markerIdx++];
 		while (
+			!midTurn &&
 			reasoningIdx < reasoning.length &&
 			(toolOffset === undefined || reasoning[reasoningIdx].contentOffset < toolOffset)
 		) {
@@ -219,7 +229,11 @@ export function buildResponseBlocks(
 	let previous = lastToolOffset;
 	const positioned = merged.map((item) => {
 		const offset =
-			item.kind === 'reasoning' ? item.contentOffset : (toolOffsets[toolIdx++] ?? previous);
+			item.kind === 'reasoning'
+				? item.contentOffset
+				: isSummary(item)
+					? previous
+					: (toolOffsets[toolIdx++] ?? previous);
 		previous = offset;
 		return { item, offset };
 	});

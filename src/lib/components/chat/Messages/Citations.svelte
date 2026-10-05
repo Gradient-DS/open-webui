@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SourceIcon from './Citations/SourceIcon.svelte';
 	import { getContext } from 'svelte';
 	import { config, embed, showControls, showEmbeds } from '$lib/stores';
 
@@ -133,7 +134,6 @@
 />
 
 {#if listed && visibleCitations.length > 0 && messageDone}
-	{@const urlCitations = visibleCitations.filter((c) => c?.source?.name?.startsWith('http'))}
 	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
 		<button
 			class="text-xs font-normal text-gray-600 dark:text-gray-300 px-3.5 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-1 border border-gray-50 dark:border-gray-850/30"
@@ -145,27 +145,20 @@
 				showCitations = !showCitations;
 			}}
 		>
-			{#if urlCitations.length > 0}
+			{#if visibleCitations.length > 0}
 				<div class="flex -space-x-1 items-center">
-					{#each urlCitations.slice(0, 3) as citation, idx}
-						<img
-							src="https://www.google.com/s2/favicons?sz=32&domain={citation.source.name}"
-							alt="favicon"
-							class="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-white dark:bg-gray-900"
-							on:error={(e) => {
-								// LICENSE covers this Open WebUI fallback logo.
-								// Do not alter, remove, obscure, or replace it except as LICENSE permits:
-								// https://docs.openwebui.com/license.
-								e.target.src = '/favicon.png';
-							}}
+					{#each visibleCitations.slice(0, 3) as citation, idx}
+						<SourceIcon
+							source={citation.source}
+							className="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-white dark:bg-gray-900"
 						/>
 					{/each}
-					{#if citations.length > 3}
+					{#if visibleCitations.length > 3}
 						<div
 							class="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[0.5rem] font-normal text-gray-500 dark:text-gray-400 whitespace-nowrap tracking-tighter"
 							aria-hidden="true"
 						>
-							+{citations.length - Math.min(urlCitations.length, 3)}
+							+{visibleCitations.length - 3}
 						</div>
 					{/if}
 				</div>
@@ -198,6 +191,7 @@
 						selectedCitation = citation;
 					}}
 				>
+					<SourceIcon source={citation.source} />
 					<div class=" font-normal bg-gray-50 dark:bg-gray-850 rounded-md px-1">
 						{idx + 1}
 					</div>

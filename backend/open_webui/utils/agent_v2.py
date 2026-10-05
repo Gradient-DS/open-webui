@@ -471,6 +471,7 @@ def _tools(
             'web_search': state,
             'fetch': 'off' if state == 'off' else 'auto',
             'search_live_documents': documents,
+            'list_live_folder': documents,
             'attach_live_document': documents,
             'search_mail': mail,
             'read_mail': mail,
@@ -644,9 +645,9 @@ def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
-def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
+async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
     """[Claude] A text the agent read (a chunk, an opened document's text) with what its document says about it,
-    in the shape `Citations.add` takes."""
+    in the shape `Citations.add` takes. A whole document's text is a document-granularity source."""
     whole = whole or {}
     properties = {
         'title': whole.get('title') or whole.get('filename'),
@@ -654,11 +655,20 @@ def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[st
         'source_url': whole.get('source_url'),
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
+        'granularity': 'document' if element.get('type') == 'document-text' else None,
     }
+    provider = None
+    if element.get('type') in {'mail-text', 'mail-reference'}:
+        provider = 'outlook_mail'
+    elif isinstance(properties['source_id'], str) and properties['source_id']:
+        file = await Files.get_file_by_id(properties['source_id'])
+        if file is not None:
+            provider = ((file.meta or {}).get('source') or {}).get('provider')
     return {
         'id': element['id'],
         'ref': element['ref'],
         'text': element.get('text') or '',
+        **({'provider': provider} if isinstance(provider, str) and provider else {}),
         'properties': {key: value for key, value in properties.items() if value is not None},
     }
 
@@ -684,7 +694,12 @@ class Citations:
         number = self.document_numbers.setdefault(ref, len(self.document_numbers) + 1)
         name = properties.get('title') or properties.get('name') or source['ref']
         result = {
-            'source': {'id': ref, 'name': name, 'url': properties.get('source_url') or ref},
+            'source': {
+                'id': ref,
+                'name': name,
+                'url': properties.get('source_url') or ref,
+                **({'provider': source['provider']} if source.get('provider') else {}),
+            },
             'document': [source['text']],
             'metadata': [
                 {**_source_metadata(properties), 'source': ref, 'name': name, 'chunk_id': source_id, 'ref': ref}
@@ -767,17 +782,17 @@ class AgentTurn:
             return
         self.thread_id, self.position = bookmark['thread_id'], bookmark['position']
         thread = await self.client.get(self.path(), as_user=self.as_user)
-        self._seed_sources(thread['events'], self.position)
+        await self._seed_sources(thread['events'], self.position)
         if thread['status']['position'] != self.position:
             branch = await self.client.chat_post(self.path('fork'), {'at': self.position}, as_user=self.as_user)
             self.thread_id = branch['thread_id']
 
-    def _seed_sources(self, events: list[dict], position: int) -> None:
+    async def _seed_sources(self, events: list[dict], position: int) -> None:
         for event in events:
             if event['position'] > position or event.get('stream') != 'root':
                 continue
             if event['type'] in {'tool_output', 'attached'}:
-                self.keep(event['payload'])
+                await self.keep(event['payload'])
             elif event['type'] == 'input':
                 self.keep_texts((event['payload'].get('payload') or {}).get('texts') or [])
 
@@ -795,15 +810,15 @@ class AgentTurn:
                 }
             )
 
-    def keep(self, output: dict[str, Any]) -> list[dict[str, Any]]:
+    async def keep(self, output: dict[str, Any]) -> list[dict[str, Any]]:
         """[Claude] Remember a tool output's elements, and number each text the agent read; the panel entries of
         the ones not seen before."""
         elements = output.get('elements') or []
         self.elements.update({element['id']: element for element in elements if isinstance(element.get('id'), str)})
         added = []
         for element in elements:
-            if _read(element):
-                source = self.citations.add(_as_source(element, self.elements.get(element['ref'])))
+            if _read(element) and element['id'] not in self.citations.sources:
+                source = self.citations.add(await _as_source(element, self.elements.get(element['ref'])))
                 if source:
                     added.append(source)
         return added
@@ -877,24 +892,15 @@ class AgentTurn:
             self.end_tool({'call_id': _COMPACTION})
         return []
 
-    def end_tool(self, output: dict[str, Any], *, attached: bool = False) -> None:
+    def end_tool(self, output: dict[str, Any]) -> None:
         """[Claude] Hold a call's done line once its output lands, until the model thinks again or moves on (see
         `settle`): until then the model is still working with what the call returned.
 
-        A call whose output is an error shows what it tried, as it did while running."""
+        An output with an `error` shows the tool's `failed` line: the agent decides what failed."""
         if (call := self.running.pop(output.get('call_id') or '', None)) is None:
             return
         name, arguments = call
-        status = self.tool_status(name, arguments, None if output.get('error') else output)
-        if name == 'attach_live_document' and (
-            output.get('error')
-            or not (attached or any(element.get('type') == 'document' for element in output.get('elements') or []))
-        ):
-            status = {'action': name, 'description': 'Could not open document'}
-        if name == 'read_mail' and (
-            output.get('error') or not any(e.get('type') == 'mail-text' for e in output.get('elements') or [])
-        ):
-            status = {'action': name, 'description': 'Could not read email'}
+        status = self.tool_status(name, arguments, output)
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
 
     async def settle(self) -> None:
@@ -905,7 +911,8 @@ class AgentTurn:
             await self.emit('status', status)
 
     def tool_status(self, name: str, arguments: dict, output: dict | None = None) -> dict[str, Any]:
-        """The tool's declared `running` status, or `done` once there is an `output`, else a generic line."""
+        """The tool's declared `running` status, `done` once there is an `output`, or `failed` when that output is
+        an error; else a generic line."""
         # The action names the tool: the frontend lays a turn out as tool activity only for statuses with one.
         # A template like the declared ones, so the frontend translates it.
         generic = (
@@ -913,7 +920,11 @@ class AgentTurn:
             if name == 'search'
             else {'action': name, 'description': 'Running {{tool}}…', 'tool': name}
         )
-        declared = (self.tool_statuses.get(name) or {}).get('running' if output is None else 'done')
+        phase = 'running' if output is None else 'done'
+        if output is not None and output.get('error') is not None:
+            phase = 'failed'
+            generic = {'action': name, 'description': 'Could not run {{tool}}', 'tool': name}
+        declared = (self.tool_statuses.get(name) or {}).get(phase)
         filled = (
             _filled(declared, self.tool_params(declared, arguments, output)) if isinstance(declared, dict) else None
         )
@@ -949,7 +960,11 @@ class AgentTurn:
             elif kind == 'element':
                 argument, _, field = rest.partition('.')
                 named = arguments.get(argument)
-                value = (self.elements.get(named) or {}).get(field) if isinstance(named, str) else None
+                names = named if isinstance(named, list) else [named]
+                values = [(self.elements.get(name) or {}).get(field) for name in names if isinstance(name, str)]
+                value = ', '.join(
+                    str(item) for item in values if isinstance(item, str | int | float) and str(item).strip()
+                )
             elif kind == 'output' and output is not None:
                 value = _from_output(rest, output.get('elements') or [])
             if isinstance(value, str | int | float) and str(value).strip():
@@ -958,7 +973,7 @@ class AgentTurn:
 
     def stop_tools(self) -> None:
         """[Claude] End the calls the tool budget stopped: they never get an output, and the model answers next,
-        so each shows what it tried, as a call whose output is an error does."""
+        so each shows its failed line."""
         for call_id in [call_id for call_id in self.running if call_id != _COMPACTION]:
             self.end_tool({'call_id': call_id, 'error': 'budget_exceeded'})
 
@@ -967,17 +982,22 @@ class AgentTurn:
         self.running.clear()
 
     async def attached(self, payload: dict) -> None:
-        try:
-            file = await live_documents.register_attachment(self.metadata['user_id'], payload)
-        except live_documents.AttachmentMismatch as error:
-            log.warning('Skipping mismatched attachment event (%s)', error.status)
+        files = {}
+        for attachment in payload['attachments']:
+            try:
+                file = await live_documents.register_attachment(self.metadata['user_id'], attachment)
+            except live_documents.AttachmentMismatch as error:
+                log.warning('Skipping mismatched attachment event (%s)', error.status)
+                continue
+            files[file.id] = live_documents.chat_file(file)
+        if not files:
             return
         chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
         stored = {}
         if chat_id and message_id and not is_temporary_chat_id(chat_id):
             stored = await Chats.get_message_by_id_and_message_id(chat_id, message_id) or {}
         self.attached_files.update({item['id']: item for item in stored.get('files') or [] if item.get('id')})
-        self.attached_files[file.id] = live_documents.chat_file(file)
+        self.attached_files.update(files)
         update = {'files': list(self.attached_files.values())}
         if chat_id and message_id and not is_temporary_chat_id(chat_id):
             await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, update)
@@ -988,13 +1008,13 @@ class AgentTurn:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
         if attached:
             await self.attached(payload)
-        self.keep(payload)
+        await self.keep(payload)
         for element in payload.get('elements') or []:
             if element.get('type') == 'action-required' and element.get('kind') == 'connect':
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
             if _read(element):
                 await self.show_source(element['id'], 'current_turn')
-        self.end_tool(payload, attached=attached)
+        self.end_tool(payload)
 
     async def show_source(self, source_id: str, flag: str) -> None:
         """[Claude] Flag a source once per turn: `current_turn` when a tool read it now, `cited_this_turn` when the
@@ -1028,7 +1048,7 @@ class AgentTurn:
                 if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
                     if event.event == 'attached':
                         await self.attached(event.data['payload'])
-                    for source in self.keep(event.data['payload']):
+                    for source in await self.keep(event.data['payload']):
                         await self.emit('source', source)
                 if event.event == 'status' and event.data['state'] not in {'idle', 'waiting'}:
                     raise SoevApiError(409, 'thread_active', 'Recovery did not finish')
@@ -1278,7 +1298,7 @@ async def _sent(
         except Exception:
             log.warning('Live document collection unavailable this turn', exc_info=False)
             notes.append('live documents unavailable this turn')
-            tools['tools'].update(search_live_documents='off', attach_live_document='off')
+            tools['tools'].update(search_live_documents='off', list_live_folder='off', attach_live_document='off')
     if notes:
         text += '\n\nAttachment status:\n' + '\n'.join(notes)
     documents = (

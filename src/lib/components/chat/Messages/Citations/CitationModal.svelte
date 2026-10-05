@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SourceIcon from './SourceIcon.svelte';
 	import { getContext, tick } from 'svelte';
 	import type { WorkBook } from 'xlsx';
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -341,6 +342,7 @@
 				{#if citation?.source?.name}
 					{@const document = mergedDocuments?.[0]}
 					{@const docFileId = document?.metadata?.file_id}
+					<SourceIcon source={citation.source} />
 					{#if docFileId || externalUrl}
 						{@const isFileMissing = !!docFileId && !previewAvailable}
 						{@const linksToFile = !!docFileId && !isFileMissing}

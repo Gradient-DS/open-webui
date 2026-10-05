@@ -20,8 +20,6 @@ def attachment():
         'attached_by': 'agent',
         'status': 'ready',
         'content_type': 'application/pdf',
-        'call_id': 'call',
-        'elements': [],
     }
 
 
@@ -41,7 +39,7 @@ async def test_event_poll_and_next_turn(env, monkeypatch):  # noqa: F811
     monkeypatch.setattr(agent_v2.Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
     turn = agent_v2.AgentTurn(env.client, {'user_id': 'alice', 'chat_id': 'chat', 'message_id': 'm'}, 'owui:user:alice')
     turn.emitter = AsyncMock()
-    event = ChatEvent('attached', {'stream': 'root', 'payload': attachment()})
+    event = ChatEvent('attached', {'stream': 'root', 'payload': {'attachments': [attachment()]}})
     await turn.render_event(event)
     await turn.render_event(event)
     rows = await env.files.Files.get_files_with_soev_jobs()
@@ -133,6 +131,7 @@ async def test_every_turn_supplies_collection_and_separate_tool_states(env, monk
         'web_search': 'off',
         'fetch': 'off',
         'search_live_documents': 'auto',
+        'list_live_folder': 'auto',
         'attach_live_document': 'auto',
         'search_mail': 'off',
         'read_mail': 'off',
@@ -241,7 +240,7 @@ async def test_mismatched_agent_event_is_skipped(env):  # noqa: F811
 
     turn = AgentTurn(env.client, {'user_id': 'alice'}, 'owui:user:alice')
     turn.emitter = AsyncMock()
-    await turn.attached({**attachment(), 'collection_key': 'foreign'})
+    await turn.attached({'attachments': [{**attachment(), 'collection_key': 'foreign'}]})
     turn.emitter.assert_not_awaited()
 
 
@@ -265,9 +264,9 @@ async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  
     turn = agent_v2.AgentTurn(env.client, {'user_id': 'alice', 'chat_id': 'slow', 'message_id': 'm'}, 'owui:user:alice')
     turn.emitter = AsyncMock()
     await turn.render_event(ChatEvent('attached', {'stream': 'root', 'payload': payload}))
-    row = await env.files.Files.get_file_by_id(payload['source_id'])
+    row = await env.files.Files.get_file_by_id(payload['attachments'][0]['source_id'])
     assert row.meta['status'] == 'processing'
-    assert row.meta['content_type'] == payload['content_type']
+    assert row.meta['content_type'] == payload['attachments'][0]['content_type']
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
     next_turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
@@ -279,7 +278,7 @@ async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  
     )
     sent = next_turn.run.call_args.args[0]['input']
     assert 'attachments' not in sent
-    assert 'still processing: ' + payload['name'] in sent['text']
+    assert 'still processing: ' + payload['attachments'][0]['name'] in sent['text']
 
 
 @pytest.mark.asyncio
@@ -296,3 +295,37 @@ async def test_completed_reference_recovers_missing_mime(env, monkeypatch):  # n
     assert updated.meta['content_type'] == 'application/pdf'
     assert updated.meta['status'] == 'completed'
     assert client.get.call_args.kwargs['as_user'] == 'owui:user:alice'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('attached_by', ['agent', 'user'])
+async def test_reference_citation_provider_survives_thread_replay(env, monkeypatch, attached_by):  # noqa: F811
+    from open_webui.soev import live_documents
+    from open_webui.utils import agent_v2
+
+    record = {**attachment(), 'attached_by': attached_by}
+    elements = [
+        {
+            'id': 'document',
+            'type': 'document',
+            'source_id': record['source_id'],
+            'filename': record['name'],
+            'source_url': 'https://unrelated.example.test/document',
+        },
+        {'id': 'passage', 'type': 'document-text', 'ref': 'document', 'text': 'Quarterly plan'},
+    ]
+    turn = agent_v2.AgentTurn(env.client, {'user_id': 'alice'}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    if attached_by == 'user':
+        # Picker attachment File exists before the agent reads it.
+        await live_documents.register_attachment('alice', record)
+        payload = {'elements': elements}
+    else:
+        payload = {'elements': elements, 'attachments': [record]}
+    await turn.record_output(payload, attached=attached_by == 'agent')
+    assert turn.citations.sources['passage']['source']['provider'] == 'onedrive'
+    assert turn.citations.sources['passage']['metadata'][0]['file_id'] == record['source_id']
+
+    replay = agent_v2.AgentTurn(env.client, {'user_id': 'alice'}, 'owui:user:alice')
+    await replay._seed_sources([{'position': 1, 'stream': 'root', 'type': 'tool_output', 'payload': payload}], 1)
+    assert replay.citations.sources == turn.citations.sources

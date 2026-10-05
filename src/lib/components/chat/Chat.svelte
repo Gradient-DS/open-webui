@@ -5199,6 +5199,8 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										{pendingOAuthTools}
+										bind:documentWriterEnabled
+										bind:documentWriterRequired
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
 										bind:liveMailState
