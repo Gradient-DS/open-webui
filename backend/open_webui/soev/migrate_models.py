@@ -19,9 +19,8 @@ from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.chats import Chat
 from open_webui.models.config import Config
 from open_webui.models.models import Model
-from open_webui.models.soev_migration import ModelIdBackup
 from open_webui.models.users import User
-from open_webui.soev.migrate_state import MigrationError
+from open_webui.soev.migrate_state import MigrationError, state
 
 BATCH = 200
 USER_SETTING_LISTS = (('ui', 'models'), ('ui', 'pinnedModels'))
@@ -59,6 +58,7 @@ class _Rewrite:
         self.known = known | set(mapping.values())
         self.report = Report()
         self.now = int(time.time())
+        self.records: list[dict] = []
 
     def map(self, site: str, row_id: str, path: list, value, *, record: bool = True) -> object:
         if not isinstance(value, str) or not value:
@@ -71,16 +71,16 @@ class _Rewrite:
         self.report.changed[site] += 1
         if record and not self.dry_run:
             # Written in the transaction that rewrites the row, so a rerun never finds one without the other.
-            self.db.add(
-                ModelIdBackup(
-                    migration_id=self.migration_id,
-                    site=site,
-                    row_id=row_id,
-                    path=json.dumps(path),
-                    old_value=value,
-                    new_value=new,
-                    created_at=self.now,
-                )
+            self.records.append(
+                {
+                    'migration_id': self.migration_id,
+                    'site': site,
+                    'row_id': row_id,
+                    'path': json.dumps(path),
+                    'old_value': value,
+                    'new_value': new,
+                    'created_at': self.now,
+                }
             )
         return new
 
@@ -195,6 +195,9 @@ class _Rewrite:
     async def _flush(self) -> None:
         if self.dry_run:
             return
+        if self.records:
+            await self.db.execute(sa.insert((await state(self.db)).model_id_backup), self.records)
+            self.records = []
         await self.db.commit()
 
 
@@ -284,10 +287,9 @@ async def _restore_json(db: AsyncSession, site: str, row_id: str, entries, repor
 async def restore(db: AsyncSession, migration_id: str) -> Report:
     """Put back each recorded reference that still holds the value written; then forget the records."""
     report = Report()
-    records = (
-        (await db.execute(sa.select(ModelIdBackup).where(ModelIdBackup.migration_id == migration_id))).scalars().all()
-    )
-    by_row: dict[tuple[str, str], list[ModelIdBackup]] = {}
+    backup = (await state(db)).model_id_backup
+    records = (await db.execute(sa.select(backup).where(backup.c.migration_id == migration_id))).all()
+    by_row: dict[tuple[str, str], list] = {}
     for record in records:
         by_row.setdefault((record.site, record.row_id), []).append(record)
     for (site, row_id), entries in sorted(by_row.items()):
@@ -297,6 +299,6 @@ async def restore(db: AsyncSession, migration_id: str) -> Report:
             await _restore_column(db, site, row_id, entries, report)
         else:
             await _restore_json(db, site, row_id, entries, report)
-    await db.execute(sa.delete(ModelIdBackup).where(ModelIdBackup.migration_id == migration_id))
+    await db.execute(sa.delete(backup).where(backup.c.migration_id == migration_id))
     await db.commit()
     return report

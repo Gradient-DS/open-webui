@@ -392,7 +392,7 @@ async def _sign_out_once(migration_id: str, *, db=None) -> None:
             return
         await session.commit()
         count = await migrate_signout.sign_out_all(db=db)
-        migrate_state.add_marker(session, migration_id, 'signout')
+        await migrate_state.add_marker(session, migration_id, 'signout')
         await session.commit()
     print(f'8 sign-out: sessions of {count} users revoked')
 
@@ -402,20 +402,21 @@ async def apply(options: Options, *, db=None) -> int:
     from open_webui.soev import migrate_config, migrate_ingest, migrate_memories, migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
+        await migrate_state.ensure_tables(session)
         taken = await migrate_state.snapshot(session, options.migration_id, migrate_config.SNAPSHOT_KEYS)
         print(f'1 snapshot: {"taken" if taken else "kept"} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
         if await migrate_state.has_marker(session, options.migration_id, 'config'):
             print('2 config switch: already done')
         else:
             values = await migrate_config.switch(session, options.v2_config)
-            migrate_state.add_marker(session, options.migration_id, 'config')
+            await migrate_state.add_marker(session, options.migration_id, 'config')
             await session.commit()
             print(f'2 config switch: {len(values)} keys written')
         if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
             print('3 model ids: already done')
         else:
             report = await migrate_models.rewrite(session, options.model_map, options.migration_id)
-            migrate_state.add_marker(session, options.migration_id, 'model_ids')
+            await migrate_state.add_marker(session, options.migration_id, 'model_ids')
             await session.commit()
             _print_model_report(report, prefix='3 model ids')
     directory = await copy_directory(db=db)
@@ -463,13 +464,11 @@ async def plan(options: Options, *, db=None) -> int:
     from open_webui.soev import migrate_config, migrate_ingest, migrate_memories, migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
-        try:
+        # A preview creates nothing, not even the state tables the first --apply creates.
+        snapshotted = None
+        if await migrate_state.tables_exist(session):
             snapshotted = await migrate_state.has_marker(session, options.migration_id, 'snapshot')
-        except Exception:
-            # The state tables arrive with the schema migration the app or Job runs first.
-            await session.rollback()
-            snapshotted = None
-        state = {True: 'exists, kept', False: 'would be taken', None: 'state tables missing'}[snapshotted]
+        state = {True: 'exists, kept', False: 'would be taken', None: 'would be taken (no state yet)'}[snapshotted]
         print(f'1 snapshot: {state} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
         signed_out = snapshotted is not None and await migrate_state.has_marker(
             session, options.migration_id, 'signout'

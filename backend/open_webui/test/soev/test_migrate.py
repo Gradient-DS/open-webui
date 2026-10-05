@@ -35,7 +35,6 @@ async def env(identity_config, fake_api, monkeypatch):
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     users = importlib.import_module('open_webui.models.users')
     config = importlib.import_module('open_webui.models.config')
-    state = importlib.import_module('open_webui.models.soev_migration')
     referencing = [
         importlib.import_module(f'open_webui.models.{name}').__dict__[cls].__table__
         for name, cls in (('chats', 'Chat'), ('chat_messages', 'ChatMessage'), ('models', 'Model'))
@@ -48,9 +47,6 @@ async def env(identity_config, fake_api, monkeypatch):
                 sync,
                 tables=[
                     config.Config.__table__,
-                    state.ConfigBackup.__table__,
-                    state.ModelIdBackup.__table__,
-                    state.MigrationMarker.__table__,
                     *referencing,
                     users.User.__table__,
                     groups.Group.__table__,

@@ -90,7 +90,6 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
         name: importlib.import_module(f'open_webui.models.{name}')
         for name in (
             'config',
-            'soev_migration',
             'users',
             'groups',
             'knowledge',
@@ -106,9 +105,6 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/owui.db')
     tables = [
         modules['config'].Config,
-        modules['soev_migration'].ConfigBackup,
-        modules['soev_migration'].ModelIdBackup,
-        modules['soev_migration'].MigrationMarker,
         modules['users'].User,
         modules['groups'].Group,
         modules['groups'].GroupMember,
@@ -193,7 +189,7 @@ async def test_the_snapshot_is_taken_once_with_absent_keys_recorded(env):
     module = env.module
     before = await config_rows(env)
     await module.apply(options(env))
-    snapshot = await rows(env, 'SELECT key, value, updated_at FROM config_backup ORDER BY key')
+    snapshot = await rows(env, 'SELECT key, value, updated_at FROM owui_v2_migration_config_backup ORDER BY key')
     stored = {key: (value, at) for key, value, at in before}
     from open_webui.soev.migrate_config import SNAPSHOT_KEYS
 
@@ -203,10 +199,12 @@ async def test_the_snapshot_is_taken_once_with_absent_keys_recorded(env):
     async with env.engine.begin() as connection:
         await connection.execute(sa.text("UPDATE config SET value = '\"changed\"' WHERE key = 'webui.url'"))
     await module.apply(options(env))
-    assert await rows(env, 'SELECT key, value, updated_at FROM config_backup ORDER BY key') == snapshot
-    assert await rows(env, 'SELECT migration_id, step FROM migration_marker WHERE step = :s', s='snapshot') == [
-        (MIGRATION, 'snapshot')
-    ]
+    assert (
+        await rows(env, 'SELECT key, value, updated_at FROM owui_v2_migration_config_backup ORDER BY key') == snapshot
+    )
+    assert await rows(
+        env, 'SELECT migration_id, step FROM owui_v2_migration_migration_marker WHERE step = :s', s='snapshot'
+    ) == [(MIGRATION, 'snapshot')]
 
 
 @pytest.mark.asyncio
@@ -233,23 +231,32 @@ async def test_restore_without_a_snapshot_fails_loudly(env):
         await env.module.restore('never-applied')
 
 
+V1_HEAD = 'e24b7c9d1f63'
+
+
 @pytest.mark.asyncio
-async def test_restore_is_byte_for_byte_on_postgres(env):
-    """PostgreSQL json keeps the stored text, so restore must write it back uncast."""
+async def test_restore_is_byte_for_byte_on_postgres_and_state_stays_outside_alembic(env):
+    """PostgreSQL json keeps the stored text; the state lives in its own schema and public is untouched."""
     import os
 
     url = os.environ.get('SOEV_MIGRATE_TEST_DATABASE_URL')
     if not url:
         pytest.skip('Set SOEV_MIGRATE_TEST_DATABASE_URL to an isolated PostgreSQL test database')
-    from open_webui.soev import migrate_state
+    from open_webui.soev import migrate_config, migrate_state
 
-    config, state = env.models['config'].Config, env.models['soev_migration']
+    config = env.models['config'].Config.__table__
     engine = create_async_engine(url)
-    tables = [config.__table__, state.ConfigBackup.__table__, state.MigrationMarker.__table__]
+
+    async def reset(connection):
+        await connection.execute(sa.text(f'DROP SCHEMA IF EXISTS {migrate_state.SCHEMA} CASCADE'))
+        await connection.execute(sa.text('DROP TABLE IF EXISTS config, alembic_version'))
+
     try:
         async with engine.begin() as connection:
-            await connection.run_sync(lambda sync: sa.MetaData().drop_all(sync, tables=tables))
-            await connection.run_sync(lambda sync: tables[0].metadata.create_all(sync, tables=tables))
+            await reset(connection)
+            await connection.run_sync(lambda sync: config.metadata.create_all(sync, tables=[config]))
+            await connection.execute(sa.text('CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)'))
+            await connection.execute(sa.text(f"INSERT INTO alembic_version VALUES ('{V1_HEAD}')"))
             for key, value in V1_CONFIG.items():
                 await connection.execute(
                     sa.text('INSERT INTO config (key, value, updated_at) VALUES (:key, CAST(:value AS JSON), 1000)'),
@@ -259,18 +266,51 @@ async def test_restore_is_byte_for_byte_on_postgres(env):
         async with engine.connect() as connection:
             before = (await connection.execute(sa.text(select))).all()
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-            from open_webui.soev import migrate_config
-
+            for _ in range(2):
+                await migrate_state.ensure_tables(db)
             assert await migrate_state.snapshot(db, MIGRATION, migrate_config.SNAPSHOT_KEYS)
             await migrate_config.switch(db, migrate_config.parse_v2_config(json.dumps(V2_CONFIG)))
             await migrate_state.restore_config(db, MIGRATION)
         async with engine.connect() as connection:
             after = (await connection.execute(sa.text(select))).all()
+            public = await connection.run_sync(lambda sync: sorted(sa.inspect(sync).get_table_names()))
+            state = await connection.run_sync(
+                lambda sync: sorted(sa.inspect(sync).get_table_names(schema=migrate_state.SCHEMA))
+            )
+            version = (await connection.execute(sa.text('SELECT version_num FROM alembic_version'))).all()
         assert [tuple(row) for row in after] == [tuple(row) for row in before]
+        assert public == ['alembic_version', 'config']
+        assert state == ['config_backup', 'migration_marker', 'model_id_backup']
+        assert [tuple(row) for row in version] == [(V1_HEAD,)]
     finally:
         async with engine.begin() as connection:
-            await connection.run_sync(lambda sync: sa.MetaData().drop_all(sync, tables=tables))
+            await reset(connection)
         await engine.dispose()
+
+
+def test_the_alembic_head_is_still_the_v1_head():
+    """The migration adds no revision, so a v1 image can still run its schema upgrade."""
+    from pathlib import Path
+
+    from alembic.config import Config as AlembicConfig
+    from alembic.script import ScriptDirectory
+
+    config = AlembicConfig()
+    config.set_main_option('script_location', str(Path(__file__).resolve().parents[2] / 'migrations'))
+    assert ScriptDirectory.from_config(config).get_heads() == [V1_HEAD]
+
+
+@pytest.mark.asyncio
+async def test_apply_leaves_the_alembic_version_and_adds_only_prefixed_tables(env):
+    async with env.engine.begin() as connection:
+        await connection.execute(sa.text('CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)'))
+        await connection.execute(sa.text(f"INSERT INTO alembic_version VALUES ('{V1_HEAD}')"))
+    names = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+    before = {name for (name,) in await rows(env, names)}
+    await env.module.apply(options(env))
+    added = {name for (name,) in await rows(env, names)} - before
+    assert added == {f'owui_v2_migration_{t}' for t in ('config_backup', 'migration_marker', 'model_id_backup')}
+    assert await rows(env, 'SELECT version_num FROM alembic_version') == [(V1_HEAD,)]
 
 
 async def config_value(env, key):
@@ -436,11 +476,17 @@ async def test_a_model_id_rerun_rewrites_and_records_nothing(env, monkeypatch):
     """Even with the step marker gone, rewritten rows hold catalog ids and are left alone."""
     await seed_models(env, monkeypatch)
     await env.module.apply(options(env))
-    before = (await dumps(env), await rows(env, 'SELECT * FROM model_id_backup ORDER BY site, row_id, path'))
+    before = (
+        await dumps(env),
+        await rows(env, 'SELECT * FROM owui_v2_migration_model_id_backup ORDER BY site, row_id, path'),
+    )
     async with env.engine.begin() as connection:
-        await connection.execute(sa.text("DELETE FROM migration_marker WHERE step = 'model_ids'"))
+        await connection.execute(sa.text("DELETE FROM owui_v2_migration_migration_marker WHERE step = 'model_ids'"))
     await env.module.apply(options(env))
-    assert (await dumps(env), await rows(env, 'SELECT * FROM model_id_backup ORDER BY site, row_id, path')) == before
+    assert (
+        await dumps(env),
+        await rows(env, 'SELECT * FROM owui_v2_migration_model_id_backup ORDER BY site, row_id, path'),
+    ) == before
 
 
 @pytest.mark.asyncio
@@ -458,7 +504,7 @@ async def test_restore_gives_back_the_original_model_ids_and_keeps_later_message
     dict_chat = dict(restored['chat'])['c1']
     assert dict_chat['history']['messages'].pop('m.4') == {'role': 'assistant', 'model': 'glm-5-3'}
     assert json.loads(json.dumps(restored)) == expected
-    assert await rows(env, 'SELECT * FROM model_id_backup') == []
+    assert await rows(env, 'SELECT * FROM owui_v2_migration_model_id_backup') == []
 
 
 @pytest.mark.parametrize(
@@ -732,7 +778,8 @@ async def test_dry_run_prints_every_step_and_writes_nothing(env, monkeypatch, ca
     after = (await config_rows(env), await dumps(env), await rows(env, 'SELECT * FROM file ORDER BY id'))
     assert after == before
     assert env.api.requests == [] and env.redis.sets == [] and env.embedded == []
-    assert await rows(env, 'SELECT * FROM config_backup') == []
+    tables = await rows(env, "SELECT name FROM sqlite_master WHERE name LIKE 'owui_v2_migration%'")
+    assert tables == []
     output = capsys.readouterr().out
     assert '1 snapshot: would be taken' in output
     assert '2 config switch: openai.enable = false' in output
