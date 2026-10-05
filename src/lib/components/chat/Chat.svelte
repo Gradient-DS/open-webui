@@ -376,6 +376,15 @@
 	let documentWriterEnabled = false;
 	let composerInitialized = false;
 	let composerSettingsSave = Promise.resolve();
+	const rememberComposerPreferences = (preferences: ComposerPreferences) => {
+		if (equal($settings.composerTools, preferences)) return;
+		settings.update((value) => ({ ...value, composerTools: preferences }));
+		composerSettingsSave = composerSettingsSave.then(async () => {
+			await updateUserSettings(localStorage.token, { ui: $settings }).catch(() => {
+				toast.error($i18n.t('Failed to save settings'));
+			});
+		});
+	};
 	const currentComposerPreferences = (): ComposerPreferences => ({
 		webSearchEnabled,
 		webSearchRequired,
@@ -1039,12 +1048,7 @@
 		const current = JSON.stringify(composerSnapshot);
 		if (current !== lastSavedFeatures) {
 			lastSavedFeatures = current;
-			settings.update((value) => ({ ...value, composerTools: composerSnapshot }));
-			composerSettingsSave = composerSettingsSave.then(async () => {
-				await updateUserSettings(localStorage.token, { ui: $settings }).catch(() => {
-					toast.error($i18n.t('Failed to save settings'));
-				});
-			});
+			rememberComposerPreferences(composerSnapshot);
 			if ($chatId && !$temporaryChatEnabled && history?.currentId) {
 				saveChatHandler($chatId, history);
 			}
@@ -3682,6 +3686,7 @@
 
 		const warningAccepted = await checkDataWarnings(selectedModels, activeCapabilities);
 		if (!warningAccepted) return;
+		rememberComposerPreferences(currentComposerPreferences());
 
 		messageInput?.setText('');
 		prompt = '';
