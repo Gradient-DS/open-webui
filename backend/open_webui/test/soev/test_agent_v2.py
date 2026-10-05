@@ -2393,3 +2393,65 @@ async def test_documents_stream_as_answer_text_with_ordinary_citations(chat: Cha
     chunks = await chat.turn('write a report', 'a1', features={'document_writer': True})
     assert content(chunks).endswith(before + ' [1]' + after)
     assert panel(chat.socket) == [1]
+
+
+def stored_chat(count: int, *, size: int = 10) -> SimpleNamespace:
+    """A pre-cutover chat of `count` messages m1..mN, alternating user and assistant."""
+    messages = {
+        f'm{index}': {
+            'id': f'm{index}',
+            'parentId': f'm{index - 1}' if index > 1 else None,
+            'role': 'user' if index % 2 else 'assistant',
+            'content': f'message {index} ' + 'x' * size,
+        }
+        for index in range(1, count + 1)
+    }
+    return SimpleNamespace(chat={'history': {'messages': messages, 'currentId': f'm{count}'}})
+
+
+def sent_text(chat: Chat) -> str:
+    return chat.mutations()[-1][1]['input']['text']
+
+
+@pytest.mark.asyncio
+async def test_a_pre_cutover_chat_starts_its_thread_with_the_conversation(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Chats, 'get_chat_by_id', AsyncMock(return_value=stored_chat(4)))
+    await chat.turn('and now?', 'a5', 'm4')
+    assert sent_text(chat) == (
+        'Earlier in this conversation:\n\nuser: message 1 xxxxxxxxxx\n\nassistant: message 2 xxxxxxxxxx'
+        '\n\nuser: message 3 xxxxxxxxxx\n\nassistant: message 4 xxxxxxxxxx\n\n---\n\nand now?'
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_long_pre_cutover_chat_sends_its_first_and_last_three_exchanges(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Chats, 'get_chat_by_id', AsyncMock(return_value=stored_chat(20)))
+    await chat.turn('and now?', 'a21', 'm20')
+    text = sent_text(chat)
+    kept = [int(line.split()[2]) for line in text.split('\n\n') if line.startswith(('user:', 'assistant:'))]
+    assert kept == [1, 2, 3, 4, 5, 6, 15, 16, 17, 18, 19, 20]
+    assert '(... 8 messages left out ...)' in text
+
+
+@pytest.mark.asyncio
+async def test_the_conversation_is_cut_evenly_to_the_text_limit(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Chats, 'get_chat_by_id', AsyncMock(return_value=stored_chat(12, size=20_000)))
+    await chat.turn('and now?', 'a13', 'm12')
+    text = sent_text(chat)
+    assert len(text) <= agent_v2.TEXT_CHARACTERS
+    assert text.endswith('\n\n---\n\nand now?')
+    assert text.count('...') == 12
+
+
+@pytest.mark.asyncio
+async def test_a_turn_on_a_thread_sends_no_earlier_conversation(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    stored = AsyncMock(return_value=stored_chat(4))
+    monkeypatch.setattr(Chats, 'get_chat_by_id', stored)
+    await chat.turn('first', 'a1')
+    await chat.turn('second', 'a2', 'a1')
+    assert sent_text(chat) == 'second'
+    stored.assert_not_awaited()

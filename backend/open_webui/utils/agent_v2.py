@@ -230,15 +230,49 @@ def _document_label(match: re.Match[str]) -> str:
     return f'[document: {html.unescape(attributes.get("title", ""))}]'
 
 
-def _chat_text(chat: Any) -> str:
-    history = chat.chat.get('history', {})
+def _conversation(chat: Any, message_id: str | None) -> list[str]:
+    """[Gradient] A chat's branch up to a message as `role: content` blocks, without tool, reasoning and document
+    bodies."""
     blocks = []
-    for message in get_message_list(history.get('messages', {}), history.get('currentId')):
+    for message in get_message_list(chat.chat.get('history', {}).get('messages', {}), message_id):
         text = _DETAILS.sub('', get_content_from_message(message) or '')
         text = _DOCUMENT.sub(_document_label, text).strip()
         if text:
             blocks.append(f'{message.get("role", "user")}: {text}')
-    return '\n\n'.join(blocks)
+    return blocks
+
+
+def _chat_text(chat: Any) -> str:
+    return '\n\n'.join(_conversation(chat, chat.chat.get('history', {}).get('currentId')))
+
+
+# [Gradient] A chat from before the agent cutover has no thread: its first agent turn carries the start and the end
+# of the conversation so far, as messages kept at each end, inside the message text so the agent needs nothing for it.
+EARLIER_KEPT = 6
+EARLIER_HEADER = 'Earlier in this conversation:'
+EARLIER_FOOTER = '\n\n---\n\n'
+
+
+def _with_earlier(text: str, blocks: list[str]) -> str:
+    """[Gradient] `text` after the first and last `EARLIER_KEPT` blocks, each cut evenly to fit `TEXT_CHARACTERS`."""
+    if len(blocks) > 2 * EARLIER_KEPT:
+        left_out = f'(... {len(blocks) - 2 * EARLIER_KEPT} messages left out ...)'
+        blocks = [*blocks[:EARLIER_KEPT], left_out, *blocks[-EARLIER_KEPT:]]
+    overhead = len(EARLIER_HEADER) + len(EARLIER_FOOTER) + 2 * len(blocks)
+    share = (TEXT_CHARACTERS - len(text) - overhead) // max(len(blocks), 1)
+    if not blocks or share < 200:
+        return text
+    kept = [block if len(block) <= share else block[: share - 3] + '...' for block in blocks]
+    return '\n\n'.join([EARLIER_HEADER, *kept]) + EARLIER_FOOTER + text
+
+
+async def _earlier(metadata: dict[str, Any]) -> list[str]:
+    """[Gradient] The stored conversation up to the message this turn answers; none in a temporary chat."""
+    chat_id, parent_id = metadata.get('chat_id'), metadata.get('parent_message_id')
+    if not chat_id or not parent_id or is_temporary_chat_id(chat_id):
+        return []
+    chat = await Chats.get_chat_by_id(chat_id)
+    return _conversation(chat, parent_id) if chat is not None else []
 
 
 async def _texts(entries: list[dict[str, Any]], user_id: str) -> list[dict[str, Any]]:
@@ -1053,6 +1087,8 @@ class AgentTurn:
             self.tool_statuses = await _tool_statuses(self.client)
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()
+            if not self.thread_id and (earlier := await _earlier(self.metadata)):
+                body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
             self.emitter = await get_event_emitter(self.metadata)
             # Earlier turns' sources, so their numbers resolve; flagged so the panel leaves them out.
             for source in self.citations.sources.values():
