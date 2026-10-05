@@ -1,4 +1,6 @@
 {
+  "Searched your mail for \"{{keywords}}\": {{matches}} emails": "Searched your mail for \"{{keywords}}\": {{matches}} emails",
+  "Searched your mail for \"{{keywords}}\": no emails": "Searched your mail for \"{{keywords}}\": no emails",
   "Searching your mail for \"{{keywords}}\"...": "Searching your mail for \"{{keywords}}\"...",
   "Searched your mail for \"{{keywords}}\"": "Searched your mail for \"{{keywords}}\"",
   "Connection status is loading. Try again.": "Connection status is loading. Try again.",

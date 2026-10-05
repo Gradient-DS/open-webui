@@ -1,4 +1,6 @@
 {
+  "Searched your mail for \"{{keywords}}\": {{matches}} emails": "Je mail doorzocht naar \"{{keywords}}\": {{matches}} e-mails",
+  "Searched your mail for \"{{keywords}}\": no emails": "Je mail doorzocht naar \"{{keywords}}\": geen e-mails",
   "Searching your mail for \"{{keywords}}\"...": "Je mail doorzoeken naar \"{{keywords}}\"...",
   "Searched your mail for \"{{keywords}}\"": "Je mail doorzocht naar \"{{keywords}}\"",
   "Connection status is loading. Try again.": "De verbindingsstatus wordt geladen. Probeer het opnieuw.",
