@@ -153,3 +153,31 @@ After deploying, verify the integration is working:
 2. Send a chat message — it should hit `{AGENT_API_BASE_URL}/v1/chat/completions` instead of the model provider
 3. Confirm status spinners and citation chips render in the UI
 4. Confirm that setting `AGENT_API_ENABLED=false` (or removing it) restores stock behavior
+
+## Migrating a v1 tenant to v2
+
+`python -m open_webui.soev.migrate` moves an existing tenant (own Weaviate, a direct LiteLLM connection, local KBs) to v2 (soev-api KBs in pgvector, models from the soev-api catalog, the agent through soev-api). The chart runs it as a Job when `soevApi.migrate.enabled` (see `helm/open-webui-tenant/README.md`). It needs the v2 image with O4: the switch retires the OpenAI connection, so models must come from soev-api's catalog.
+
+Inputs (environment):
+
+- `SOEV_V2_MIGRATION_ID`: names the run. The snapshot, the once-only steps and the sign-out are recorded per id.
+- `SOEV_V2_CONFIG`: JSON with exactly `agent_api.selected_agent`, `document_writer.enable`, `live_documents.enable`, `live_mail.enable`, `notes.enable`, `web.search.enable`, `webui.url` and `user.permissions.features` (merged into `user.permissions`).
+- `SOEV_V2_MODEL_MAP`: JSON of LiteLLM model name to catalog id, e.g. `{"zai-org/GLM-5.3": "glm-5-3"}`. soev-api serves no `/v1/models` with the registry `model_string` yet, so the pairs come from the catalog by hand.
+- `SOEV_V2_INGEST_CONCURRENCY` (default 4) and `SOEV_V2_WAIT_SECONDS` (default 0; the chart sets 600).
+
+`--apply` runs these steps in order; each is safe to rerun after a partial failure:
+
+1. **Snapshot.** The config rows the next steps change go to `config_backup` as stored text, once per migration id.
+2. **Config switch** (once per id). The OpenAI and Ollama connections, `ui.default_models` and the task models are retired; the `SOEV_V2_CONFIG` values are written.
+3. **Model ids** (once per id). LiteLLM names become catalog ids in message model ids, chat JSON, assistant base models, base-model override rows and their grants, user default and pinned models, automations, `ui.default_pinned_models` and `ui.model_order_list`. Every change is recorded in `model_id_backup`. Unmapped ids are listed and left as they are.
+4. **Directory and KB copy.** Identity links, groups, collections with grants, folders and cloud schedules.
+5. **Re-ingest.** Each file of a local KB without a soev document is submitted through `ingest.submit`. Cloud KBs re-sync from their schedules.
+6. **Memories.** Users whose vectors do not match their memory rows are re-embedded with the app's embedding function.
+7. **Reconcile.** Exit 0 when every file is ingested or terminally failed (listed); 75 while ingest jobs still run; 1 on a missing or conflicting collection, missing memory vectors or an unreachable soev-api; 2 on invalid input.
+8. **Sign-out** (once per id, after exit 0). Every user's tokens are revoked through the Redis `revoked_at` marker, so each first Microsoft login creates the proven Entra link soev-connect requires. `WEBUI_SECRET_KEY` is not rotated. When soev-api answers `subject_not_linked`, the UI asks the user to log in again with Microsoft.
+
+`--dry-run` prints the plan without writes or HTTP requests: the snapshot state, every switched key, the model mapping with counts and unmapped ids, per-KB files to check, memory rows and the sign-out.
+
+`--restore` puts the snapshotted config rows back byte for byte (and removes keys that had no row), and puts back every recorded model id that still holds the value written; references changed since are listed and left. Messages added after the cutover stay. soev-api data is not touched. Run it before reverting the cutover; a later `--apply` with the same id switches again from the kept snapshot but does not sign users out again.
+
+Not migrated: Confluence KBs (Confluence is out of scope), web-search result collections (transient), Weaviate vectors (re-embedded from the originals), and model ids in feedback records. Proven Entra links are never backfilled; they form at login.

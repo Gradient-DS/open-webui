@@ -107,7 +107,7 @@ at once. Redis must be enabled for the final sign-out. With an RWO data PVC the
 Job pod must land on the app's node; v2 tenants run without one.
 
 Set `mode: restore` to put back the config snapshot and model ids before
-reverting a cutover. See `docs/v2-migration.md` for the steps.
+reverting a cutover. The steps are in `docs/agent-api-deployment.md`.
 
 ## Render checks
 
