@@ -74,8 +74,8 @@ The platform binds that collection into its live ticket; a missing or changed ta
 refuses collection_mismatch. Provider identity and Retry-After remain structured client
 error fields. Unknown Graph readability is decided from downloaded bytes before staging.
 
-The OneDrive search toggle enables `search_live_documents` and `attach_live_document` together
-with `auto` state; both remain off by default. `/cloud-sync/connections/{id}/live-documents`
+The OneDrive search toggle enables `search_live_documents`, `list_live_folder` and `attach_live_document` together
+with `auto` state; all remain off by default. `/cloud-sync/connections/{id}/live-documents`
 lists or enables owned OneDrive live grants. The toggle and Connect OneDrive card share the
 existing cloud consent popup and verify its origin, opener and connection before polling.
 Both the OWUI and platform live-document settings must be enabled.

@@ -471,6 +471,7 @@ def _tools(
             'web_search': state,
             'fetch': 'off' if state == 'off' else 'auto',
             'search_live_documents': documents,
+            'list_live_folder': documents,
             'attach_live_document': documents,
             'search_mail': mail,
             'read_mail': mail,
@@ -1278,7 +1279,7 @@ async def _sent(
         except Exception:
             log.warning('Live document collection unavailable this turn', exc_info=False)
             notes.append('live documents unavailable this turn')
-            tools['tools'].update(search_live_documents='off', attach_live_document='off')
+            tools['tools'].update(search_live_documents='off', list_live_folder='off', attach_live_document='off')
     if notes:
         text += '\n\nAttachment status:\n' + '\n'.join(notes)
     documents = (

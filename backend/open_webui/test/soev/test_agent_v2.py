@@ -31,6 +31,7 @@ WEB_SEARCH_OFF = {
     'web_search': 'off',
     'fetch': 'off',
     'search_live_documents': 'off',
+    'list_live_folder': 'off',
     'attach_live_document': 'off',
     'search_mail': 'off',
     'read_mail': 'off',
@@ -660,6 +661,50 @@ def test_tools_maps_the_web_search_features_to_tool_states(features: dict | None
     assert agent_v2._tools({'features': features}, True, False, False) == {
         'tools': {**WEB_SEARCH_OFF, 'web_search': state, 'fetch': 'off' if state == 'off' else 'auto'}
     }
+
+
+@pytest.mark.parametrize('state', ['off', 'auto', 'required', 'unexpected', True, None])
+@pytest.mark.parametrize('allowed', [False, True])
+def test_live_document_states_are_gated_on_the_server(state, allowed):
+    tools = agent_v2._tools({'features': {'live_documents': state}}, False, allowed, False)['tools']
+    expected = state if allowed and state in ('auto', 'required') else 'off'
+    assert tools == {
+        **WEB_SEARCH_OFF,
+        'search_live_documents': expected,
+        'list_live_folder': expected,
+        'attach_live_document': expected,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('state', ['auto', 'required'])
+@pytest.mark.parametrize('setup_fails', [False, True])
+async def test_live_document_tools_follow_collection_setup(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, state: str, setup_fails: bool
+) -> None:
+    monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=True))
+    collection = AsyncMock(
+        return_value='owui-attachments-alice',
+        side_effect=RuntimeError('collection unavailable') if setup_fails else None,
+    )
+    monkeypatch.setattr(agent_v2.live_documents, 'attachment_collection', collection)
+    await chat.turn('question', 'a1', features={'live_documents': state, 'web_search': True})
+    collection.assert_awaited_once()
+    sent = chat.mutations()[-1][1]['input']
+    expected = 'off' if setup_fails else state
+    assert sent['tools'] == {
+        **WEB_SEARCH_OFF,
+        'web_search': 'auto',
+        'fetch': 'auto',
+        'search_live_documents': expected,
+        'list_live_folder': expected,
+        'attach_live_document': expected,
+    }
+    if setup_fails:
+        assert 'attachment_collection' not in sent
+        assert 'live documents unavailable this turn' in sent['text']
+    else:
+        assert sent['attachment_collection'] == 'owui-attachments-alice'
 
 
 @pytest.mark.parametrize('features', [{'web_search': True, 'web_search_required': True}, {'web_search': True}])
