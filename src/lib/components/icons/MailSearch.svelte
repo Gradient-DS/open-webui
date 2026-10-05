@@ -13,9 +13,10 @@
 	<path d="m8 10 10 8 10-8" stroke="#B9E1FF" stroke-width="2" />
 	<rect x="1" y="9" width="14" height="17" rx="1" fill="#0A4F91" />
 	<ellipse cx="8" cy="17.5" rx="3.2" ry="4.4" stroke="white" stroke-width="2" />
-	<circle cx="23" cy="23" r="6" fill="white" />
-	<g stroke="#0A4F91" stroke-width="2.5" stroke-linecap="round">
-		<circle cx="23" cy="23" r="4.5" />
-		<path d="m26.5 26.5 4 4" />
+	<path d="m26 25 4 4" stroke="white" stroke-width="6" stroke-linecap="round" />
+	<circle cx="22" cy="21" r="6" fill="white" />
+	<g stroke="#0D3D78" stroke-width="2.5" stroke-linecap="round">
+		<circle cx="22" cy="21" r="4.5" />
+		<path d="m25.5 24.5 4.5 4.5" />
 	</g>
 </svg>
