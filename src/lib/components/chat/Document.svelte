@@ -31,12 +31,14 @@
 
 	export let overlay = false;
 
-	let contents: Array<AgentDocument & { sources?: RawSource[] }> = [];
+	let contents: Array<AgentDocument & { sources?: RawSource[]; messageId?: string }> = [];
 	let copied = false;
 	let downloadOpen = false;
 	let citationsElement: Citations | null = null;
 
 	$: current = contents[$selectedDocumentIndex];
+	// [Gradient] A version switch closes the download menu; its options depend on the format.
+	$: ($selectedDocumentIndex, (downloadOpen = false));
 
 	function navigateContent(direction: 'prev' | 'next') {
 		$selectedDocumentIndex =
@@ -77,13 +79,14 @@
 
 	const downloadPdf = async () => {
 		if (!current) return;
+		// Close first: the print dialog blocks the page, and the menu must not outlive it.
+		downloadOpen = false;
 		try {
 			await printDocument(current.title, getExportMarkdown(true), current.format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
 		}
-		downloadOpen = false;
 	};
 
 	const downloadDocx = async () => {
@@ -214,59 +217,61 @@
 							}}>{copied ? $i18n.t('Copied') : $i18n.t('Copy')}</button
 						>
 
-						<Dropdown
-							bind:show={downloadOpen}
-							align="end"
-							contentClass="select-none min-w-[180px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-						>
-							<Tooltip content={$i18n.t('Download')}>
-								<button
-									class="bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md p-0.5"
-									aria-label={$i18n.t('Download')}
-								>
-									<Download className="size-3.5" />
-								</button>
-							</Tooltip>
+						{#key `${$selectedDocumentIndex}-${current.format}`}
+							<Dropdown
+								bind:show={downloadOpen}
+								align="end"
+								contentClass="select-none min-w-[180px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+							>
+								<Tooltip content={$i18n.t('Download')}>
+									<button
+										class="bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md p-0.5"
+										aria-label={$i18n.t('Download')}
+									>
+										<Download className="size-3.5" />
+									</button>
+								</Tooltip>
 
-							<div slot="content">
-								{#if current.format === 'markdown'}
+								<div slot="content">
+									{#if current.format === 'markdown'}
+										<button
+											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+											on:click={downloadMd}
+										>
+											<div class="flex items-center line-clamp-1">
+												{$i18n.t('Markdown (.md)')}
+											</div>
+										</button>
+										<button
+											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+											on:click={downloadTxt}
+										>
+											<div class="flex items-center line-clamp-1">
+												{$i18n.t('Plain text (.txt)')}
+											</div>
+										</button>
+									{/if}
 									<button
 										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-										on:click={downloadMd}
+										on:click={downloadPdf}
 									>
 										<div class="flex items-center line-clamp-1">
-											{$i18n.t('Markdown (.md)')}
+											{$i18n.t('PDF document (.pdf)')}
 										</div>
 									</button>
-									<button
-										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-										on:click={downloadTxt}
-									>
-										<div class="flex items-center line-clamp-1">
-											{$i18n.t('Plain text (.txt)')}
-										</div>
-									</button>
-								{/if}
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadPdf}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('PDF document (.pdf)')}
-									</div>
-								</button>
-								{#if current.format === 'markdown' && ($config?.features?.enable_docx_export ?? true)}
-									<button
-										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-										on:click={downloadDocx}
-									>
-										<div class="flex items-center line-clamp-1">
-											{$i18n.t('Word document (.docx)')}
-										</div>
-									</button>
-								{/if}
-							</div>
-						</Dropdown>
+									{#if current.format === 'markdown' && ($config?.features?.enable_docx_export ?? true)}
+										<button
+											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+											on:click={downloadDocx}
+										>
+											<div class="flex items-center line-clamp-1">
+												{$i18n.t('Word document (.docx)')}
+											</div>
+										</button>
+									{/if}
+								</div>
+							</Dropdown>
+						{/key}
 					</div>
 				</div>
 			</div>
