@@ -199,7 +199,10 @@
 	export let readOnly = false;
 	export let allowDelete = true;
 	export let compactPreview = false;
-	export let editCodeBlock = true;
+	// [Gradient] Answers are read-only: an agent's thread keeps what it answered, so an edit here would diverge
+	// from what the model knows. No edit button, and code blocks show without their editor.
+	const ANSWERS_EDITABLE = false;
+	export let editCodeBlock = ANSWERS_EDITABLE;
 	export let topPadding = false;
 	export let onInsertToNote: ((content: string) => void) | null = null;
 
@@ -1481,7 +1484,7 @@
 							{/if}
 
 							{#if message.done}
-								{#if !readOnly}
+								{#if !readOnly && ANSWERS_EDITABLE}
 									{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
 										<Tooltip content={$i18n.t('Edit')} placement="bottom">
 											<button
