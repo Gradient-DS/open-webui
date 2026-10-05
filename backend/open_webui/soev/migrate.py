@@ -237,7 +237,18 @@ async def reconcile(file_counts, client, *, conflicts, dry_run=False, cloud_owne
     return int(bool(missing or conflicts))
 
 
-async def migrate(*, dry_run=False, db=None):
+@dataclass
+class Directory:
+    rows: list
+    file_counts: dict
+    conflicts: set
+    cloud_owners: dict
+    user_ids: set
+    client: object
+
+
+async def copy_directory(*, dry_run=False, db=None) -> Directory:
+    """Step 4: links, groups, collections, cloud schedules and folders; OWUI tables are only read."""
     from open_webui.models.access_grants import AccessGrantsTable
     from open_webui.models.groups import GroupTable
     from open_webui.models.knowledge import KnowledgeTable
@@ -277,7 +288,18 @@ async def migrate(*, dry_run=False, db=None):
                 key=f'folder:{key}:{digest}',
                 dry_run=dry_run,
             )
-    return await reconcile(file_counts, client, conflicts=conflicts, dry_run=dry_run, cloud_owners=cloud_owners)
+    return Directory(rows, file_counts, conflicts, cloud_owners, user_ids, client)
+
+
+async def migrate(*, dry_run=False, db=None):
+    directory = await copy_directory(dry_run=dry_run, db=db)
+    return await reconcile(
+        directory.file_counts,
+        directory.client,
+        conflicts=directory.conflicts,
+        dry_run=dry_run,
+        cloud_owners=directory.cloud_owners,
+    )
 
 
 @dataclass
@@ -285,6 +307,7 @@ class Options:
     migration_id: str
     v2_config: dict = field(default_factory=dict)
     model_map: dict = field(default_factory=dict)
+    ingest_concurrency: int = 4
 
 
 def options_from_env(environ=os.environ, *, migration_id: str | None = None) -> Options:
@@ -299,7 +322,25 @@ def options_from_env(environ=os.environ, *, migration_id: str | None = None) -> 
         migration_id=migration_id,
         v2_config=parse_v2_config(environ.get('SOEV_V2_CONFIG')),
         model_map=parse_model_map(environ.get('SOEV_V2_MODEL_MAP')),
+        ingest_concurrency=_positive_int(environ, 'SOEV_V2_INGEST_CONCURRENCY', 4),
     )
+
+
+def _positive_int(environ, name: str, default: int) -> int:
+    from open_webui.soev.migrate_state import MigrationError
+
+    raw = environ.get(name) or str(default)
+    if not raw.isdigit() or int(raw) < 1:
+        raise MigrationError(f'{name} must be a positive integer')
+    return int(raw)
+
+
+def _print_ingest(state, *, prefix: str) -> None:
+    for key, counts in sorted(state.per_kb.items()):
+        summary = ', '.join(f'{status} {count}' for status, count in sorted(counts.items())) or 'no files'
+        print(f'{prefix}: {key}: {summary}')
+    for line in state.failures:
+        print(f'{prefix}: failed {line}')
 
 
 def _print_model_report(report, *, prefix: str) -> None:
@@ -313,7 +354,7 @@ def _print_model_report(report, *, prefix: str) -> None:
 
 async def apply(options: Options, *, db=None) -> int:
     from open_webui.internal.db import get_async_db_context
-    from open_webui.soev import migrate_config, migrate_models, migrate_state
+    from open_webui.soev import migrate_config, migrate_ingest, migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
         taken = await migrate_state.snapshot(session, options.migration_id, migrate_config.SNAPSHOT_KEYS)
@@ -332,7 +373,13 @@ async def apply(options: Options, *, db=None) -> int:
             migrate_state.add_marker(session, options.migration_id, 'model_ids')
             await session.commit()
             _print_model_report(report, prefix='3 model ids')
-    return EXIT_OK
+    directory = await copy_directory(db=db)
+    print(f'4 directory: {len(directory.rows)} KBs, {len(directory.conflicts)} conflicts')
+    ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
+    _print_ingest(ingest_state, prefix='5 re-ingest')
+    return await reconcile(
+        directory.file_counts, directory.client, conflicts=directory.conflicts, cloud_owners=directory.cloud_owners
+    )
 
 
 async def restore(migration_id: str, *, db=None) -> int:
@@ -354,7 +401,7 @@ async def restore(migration_id: str, *, db=None) -> int:
 async def plan(options: Options, *, db=None) -> int:
     from open_webui.internal.db import get_async_db_context
     from open_webui.models.config import Config
-    from open_webui.soev import migrate_config, migrate_models, migrate_state
+    from open_webui.soev import migrate_config, migrate_ingest, migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
         try:
@@ -375,7 +422,16 @@ async def plan(options: Options, *, db=None) -> int:
             await migrate_models.rewrite(session, options.model_map, options.migration_id, dry_run=True),
             prefix='3 model ids',
         )
-    return await migrate(dry_run=True, db=db)
+    directory = await copy_directory(dry_run=True, db=db)
+    state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, dry_run=True, db=db)
+    _print_ingest(state, prefix='5 re-ingest')
+    return await reconcile(
+        directory.file_counts,
+        directory.client,
+        conflicts=directory.conflicts,
+        dry_run=True,
+        cloud_owners=directory.cloud_owners,
+    )
 
 
 def main():

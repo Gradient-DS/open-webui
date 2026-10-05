@@ -1,8 +1,10 @@
 """The v2 migration steps against real SQLite rows and the recorded soev-api contract."""
 
+import asyncio
 import importlib
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -406,3 +408,94 @@ def test_an_invalid_model_map_is_refused(raw, message):
 
     with pytest.raises(MigrationError, match=message):
         parse_model_map(raw)
+
+
+async def seed_knowledge(env, monkeypatch):
+    """Alice's local KB with new, missing, failed and blank files, plus a OneDrive KB."""
+    users = env.models['users'].Users
+    knowledge, files = env.models['knowledge'], env.models['files']
+    storage = importlib.import_module('open_webui.storage.provider')
+    monkeypatch.setattr(importlib.import_module('open_webui.soev.ingest'), 'Storage', storage.LocalStorageProvider())
+    monkeypatch.setattr(knowledge, 'AccessGrants', env.models['access_grants'].AccessGrantsTable())
+    for user_id in ('alice', 'bob'):
+        assert await users.insert_new_user(user_id, user_id, f'{user_id}@example.test', role='user')
+    table = knowledge.KnowledgeTable()
+    local = await table.insert_new_knowledge(
+        'alice', knowledge.KnowledgeForm(name='Research', description='', type='local', access_grants=[])
+    )
+    cloud = await table.insert_new_knowledge(
+        'alice', knowledge.KnowledgeForm(name='Drive', description='', type='onedrive', access_grants=[])
+    )
+    names = []
+    for index in range(5):
+        path = env.tmp_path / f'file-{index}.txt'
+        path.write_bytes(f'original {index}'.encode())
+        names.append(f'file-{index}')
+    names += ['missing', 'failed']
+    for name in names:
+        meta = {'name': f'{name}.txt', 'content_type': 'text/plain'}
+        if name == 'failed':
+            meta.update(status='failed', soev_collection_key=local.id, error='unsupported_media_type: no text')
+        await files.Files.insert_new_file(
+            'alice',
+            files.FileForm(id=name, filename=f'{name}.txt', path=str(env.tmp_path / f'{name}.txt'), meta=meta),
+        )
+        assert await table.add_file_to_knowledge_by_id(local.id, name, 'alice')
+    path = env.tmp_path / 'cloud.txt'
+    path.write_bytes(b'cloud')
+    await files.Files.insert_new_file('alice', files.FileForm(id='cloud', filename='cloud.txt', path=str(path)))
+    assert await table.add_file_to_knowledge_by_id(cloud.id, 'cloud', 'alice')
+    return local, cloud
+
+
+def job_posts(env):
+    return [r for r in env.api.requests if r.method == 'POST' and r.url.path == '/v1/jobs']
+
+
+@pytest.mark.asyncio
+async def test_reingest_submits_only_missing_local_files_within_the_concurrency(env, monkeypatch, capsys):
+    """Missing originals and terminal failures are reported; the cloud KB is left to its schedules."""
+    local, _ = await seed_knowledge(env, monkeypatch)
+    ingest = importlib.import_module('open_webui.soev.ingest')
+    original, active, peak = ingest.submit, set(), []
+
+    async def tracked(file, **kwargs):
+        active.add(file.id)
+        peak.append(len(active))
+        try:
+            await asyncio.sleep(0.01)
+            return await original(file, **kwargs)
+        finally:
+            active.discard(file.id)
+
+    monkeypatch.setattr(ingest, 'submit', tracked)
+    monkeypatch.setenv('SOEV_V2_INGEST_CONCURRENCY', '2')
+    await env.module.apply(options(env))
+    submitted = sorted(json.loads(r.content)['documents'][0]['source_id'] for r in job_posts(env))
+    assert submitted == [f'file-{index}' for index in range(5)]
+    assert max(peak) == 2
+    output = capsys.readouterr().out
+    assert f'5 re-ingest: {local.id}: failed 2, submitted 5' in output
+    assert f'{local.id}/missing: original missing from storage' in output
+    assert f'{local.id}/failed: unsupported_media_type: no text' in output
+
+    env.api.requests.clear()
+    await env.module.apply(options(env))
+    assert job_posts(env) == []
+    assert f'{local.id}: failed 2, running 5' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_finished_jobs_count_as_ingested_on_the_next_run(env, monkeypatch, capsys):
+    local, _ = await seed_knowledge(env, monkeypatch)
+    await env.module.apply(options(env))
+    for job_id in list(env.api.jobs):
+        env.api.advance(job_id, 'SUCCEEDED')
+    jobs = importlib.import_module('open_webui.soev.jobs')
+    monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
+    await jobs.poll_once(env.identity.build_client(), now=10**10)
+    capsys.readouterr()
+    env.api.requests.clear()
+    await env.module.apply(options(env))
+    assert job_posts(env) == []
+    assert f'{local.id}: failed 2, ingested 5' in capsys.readouterr().out
