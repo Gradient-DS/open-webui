@@ -90,6 +90,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path):
     )
     monkeypatch.setenv('SOEV_V2_MIGRATION_ID', MIGRATION)
     monkeypatch.setenv('SOEV_V2_CONFIG', json.dumps(V2_CONFIG))
+    monkeypatch.setenv('SOEV_V2_MODEL_MAP', '{}')
     async with engine.begin() as connection:
         for key, value in V1_CONFIG.items():
             # Hand-written text, so a byte-for-byte restore cannot pass by re-serializing.
@@ -257,3 +258,151 @@ def test_an_invalid_v2_config_is_refused(raw, message):
 
     with pytest.raises(MigrationError, match=message):
         parse_v2_config(raw)
+
+
+MODEL_MAP = {'zai-org/GLM-5.3': 'glm-5-3', 'google/gemma-4-31b': 'gemma-4-31b'}
+CHAT = {
+    'models': ['zai-org/GLM-5.3', 'helper'],
+    'history': {
+        'currentId': 'm.2',
+        'messages': {
+            'm.1': {'role': 'user', 'models': ['zai-org/GLM-5.3']},
+            'm.2': {'role': 'assistant', 'model': 'zai-org/GLM-5.3', 'content': 'model: zai-org/GLM-5.3'},
+            'm.3': {'role': 'assistant', 'model': 'helper'},
+        },
+    },
+    'messages': [{'model': 'unknown/model'}],
+}
+TABLE_DUMPS = {
+    'chat': 'SELECT id, chat FROM chat ORDER BY id',
+    'chat_message': 'SELECT id, model_id FROM chat_message ORDER BY id',
+    'model': 'SELECT id, base_model_id FROM model ORDER BY id',
+    'access_grant': 'SELECT id, resource_id FROM access_grant ORDER BY id',
+    'user': 'SELECT id, settings FROM user ORDER BY id',
+    'automation': 'SELECT id, data FROM automation ORDER BY id',
+}
+
+
+async def seed_models(env, monkeypatch):
+    monkeypatch.setenv('SOEV_V2_MODEL_MAP', json.dumps(MODEL_MAP))
+    statements = [
+        (
+            'INSERT INTO user (id, email, role, name, settings, created_at, updated_at, last_active_at)'
+            " VALUES ('alice', 'alice@example.test', 'user', 'Alice', :settings, 1, 1, 1)",
+            {
+                'settings': json.dumps(
+                    {'ui': {'models': ['zai-org/GLM-5.3'], 'pinnedModels': ['helper', 'unknown/model']}}
+                )
+            },
+        ),
+        (
+            'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
+            " VALUES ('zai-org/GLM-5.3', 'alice', NULL, 'GLM', '{}', '{}', 1, 1, 1),"
+            " ('helper', 'alice', 'zai-org/GLM-5.3', 'Helper', '{}', '{}', 1, 1, 1),"
+            " ('legacy', 'alice', 'unknown/model', 'Legacy', '{}', '{}', 1, 1, 1)",
+            {},
+        ),
+        (
+            'INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission,'
+            " created_at) VALUES ('g1', 'model', 'zai-org/GLM-5.3', 'user', '*', 'read', 1),"
+            " ('g2', 'knowledge', 'zai-org/GLM-5.3', 'user', '*', 'read', 1)",
+            {},
+        ),
+        (
+            "INSERT INTO chat (id, user_id, title, chat, created_at, updated_at, meta) VALUES ('c1', 'alice', 'T',"
+            " :chat, 1, 1, '{}'), ('c2', 'alice', 'Empty', '{}', 1, 1, '{}')",
+            {'chat': json.dumps(CHAT)},
+        ),
+        (
+            'INSERT INTO chat_message (id, chat_id, role, model_id, created_at, updated_at) VALUES'
+            " ('m.1', 'c1', 'user', NULL, 1, 1), ('m.2', 'c1', 'assistant', 'zai-org/GLM-5.3', 1, 1),"
+            " ('m.3', 'c1', 'assistant', 'unknown/model', 1, 1)",
+            {},
+        ),
+        (
+            'INSERT INTO automation (id, user_id, name, data, is_active, created_at, updated_at)'
+            " VALUES ('a1', 'alice', 'Daily', :data, 1, 1, 1)",
+            {'data': json.dumps({'prompt': 'p', 'model_id': 'zai-org/GLM-5.3', 'rrule': 'FREQ=DAILY'})},
+        ),
+    ]
+    async with env.engine.begin() as connection:
+        for statement, params in statements:
+            await connection.execute(sa.text(statement), params)
+
+
+async def dumps(env):
+    result = {}
+    for name, sql in TABLE_DUMPS.items():
+        result[name] = [
+            tuple(json.loads(v) if isinstance(v, str) and v[:1] in '{[' else v for v in row)
+            for row in await rows(env, sql)
+        ]
+    return result
+
+
+@pytest.mark.asyncio
+async def test_model_ids_are_rewritten_everywhere_and_unmapped_ids_reported(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    await env.module.apply(options(env))
+    data = await dumps(env)
+    chat = dict(data['chat'])['c1']
+    assert chat['models'] == ['glm-5-3', 'helper']
+    assert chat['history']['messages']['m.1']['models'] == ['glm-5-3']
+    assert chat['history']['messages']['m.2']['model'] == 'glm-5-3'
+    assert chat['history']['messages']['m.2']['content'] == 'model: zai-org/GLM-5.3'
+    assert chat['messages'] == [{'model': 'unknown/model'}]
+    assert data['chat_message'] == [('m.1', None), ('m.2', 'glm-5-3'), ('m.3', 'unknown/model')]
+    assert data['model'] == [('glm-5-3', None), ('helper', 'glm-5-3'), ('legacy', 'unknown/model')]
+    assert data['access_grant'] == [('g1', 'glm-5-3'), ('g2', 'zai-org/GLM-5.3')]
+    assert data['user'] == [('alice', {'ui': {'models': ['glm-5-3'], 'pinnedModels': ['helper', 'unknown/model']}})]
+    assert data['automation'][0][1]['model_id'] == 'glm-5-3'
+    assert await config_value(env, 'ui.default_pinned_models') == 'glm-5-3,unknown/model'
+    output = capsys.readouterr().out
+    assert '3 model ids: unmapped unknown/model' in output
+    assert 'unmapped helper' not in output
+
+
+@pytest.mark.asyncio
+async def test_a_model_id_rerun_rewrites_and_records_nothing(env, monkeypatch):
+    """Even with the step marker gone, rewritten rows hold catalog ids and are left alone."""
+    await seed_models(env, monkeypatch)
+    await env.module.apply(options(env))
+    before = (await dumps(env), await rows(env, 'SELECT * FROM model_id_backup ORDER BY site, row_id, path'))
+    async with env.engine.begin() as connection:
+        await connection.execute(sa.text("DELETE FROM migration_marker WHERE step = 'model_ids'"))
+    await env.module.apply(options(env))
+    assert (await dumps(env), await rows(env, 'SELECT * FROM model_id_backup ORDER BY site, row_id, path')) == before
+
+
+@pytest.mark.asyncio
+async def test_restore_gives_back_the_original_model_ids_and_keeps_later_messages(env, monkeypatch):
+    await seed_models(env, monkeypatch)
+    original = await dumps(env)
+    await env.module.apply(options(env))
+    async with env.engine.begin() as connection:
+        chat = json.loads((await connection.execute(sa.text("SELECT chat FROM chat WHERE id = 'c1'"))).scalar())
+        chat['history']['messages']['m.4'] = {'role': 'assistant', 'model': 'glm-5-3'}
+        await connection.execute(sa.text("UPDATE chat SET chat = :chat WHERE id = 'c1'"), {'chat': json.dumps(chat)})
+    await env.module.restore(MIGRATION)
+    restored = await dumps(env)
+    expected = json.loads(json.dumps(original))
+    dict_chat = dict(restored['chat'])['c1']
+    assert dict_chat['history']['messages'].pop('m.4') == {'role': 'assistant', 'model': 'glm-5-3'}
+    assert json.loads(json.dumps(restored)) == expected
+    assert await rows(env, 'SELECT * FROM model_id_backup') == []
+
+
+@pytest.mark.parametrize(
+    ('raw', 'message'),
+    [
+        (None, 'not set'),
+        ('{"a": ""}', 'catalog ids'),
+        ('{"a": "b", "b": "c"}', 'also rewrites: b'),
+    ],
+)
+def test_an_invalid_model_map_is_refused(raw, message):
+    from open_webui.soev.migrate_models import parse_model_map
+    from open_webui.soev.migrate_state import MigrationError
+
+    with pytest.raises(MigrationError, match=message):
+        parse_model_map(raw)

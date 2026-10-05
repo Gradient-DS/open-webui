@@ -284,21 +284,36 @@ async def migrate(*, dry_run=False, db=None):
 class Options:
     migration_id: str
     v2_config: dict = field(default_factory=dict)
+    model_map: dict = field(default_factory=dict)
 
 
 def options_from_env(environ=os.environ, *, migration_id: str | None = None) -> Options:
     from open_webui.soev.migrate_config import parse_v2_config
+    from open_webui.soev.migrate_models import parse_model_map
     from open_webui.soev.migrate_state import MigrationError
 
     migration_id = migration_id or environ.get('SOEV_V2_MIGRATION_ID')
     if not migration_id:
         raise MigrationError('Set SOEV_V2_MIGRATION_ID or pass --migration-id')
-    return Options(migration_id=migration_id, v2_config=parse_v2_config(environ.get('SOEV_V2_CONFIG')))
+    return Options(
+        migration_id=migration_id,
+        v2_config=parse_v2_config(environ.get('SOEV_V2_CONFIG')),
+        model_map=parse_model_map(environ.get('SOEV_V2_MODEL_MAP')),
+    )
+
+
+def _print_model_report(report, *, prefix: str) -> None:
+    for site, count in sorted(report.changed.items()):
+        print(f'{prefix}: {site} {count}')
+    for line in report.skipped:
+        print(f'{prefix}: skipped {line}')
+    for model_id, count in sorted(report.unmapped.items()):
+        print(f'{prefix}: unmapped {model_id} ({count} references left as they are)')
 
 
 async def apply(options: Options, *, db=None) -> int:
     from open_webui.internal.db import get_async_db_context
-    from open_webui.soev import migrate_config, migrate_state
+    from open_webui.soev import migrate_config, migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
         taken = await migrate_state.snapshot(session, options.migration_id, migrate_config.SNAPSHOT_KEYS)
@@ -310,26 +325,36 @@ async def apply(options: Options, *, db=None) -> int:
             migrate_state.add_marker(session, options.migration_id, 'config')
             await session.commit()
             print(f'2 config switch: {len(values)} keys written')
+        if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
+            print('3 model ids: already done')
+        else:
+            report = await migrate_models.rewrite(session, options.model_map, options.migration_id)
+            migrate_state.add_marker(session, options.migration_id, 'model_ids')
+            await session.commit()
+            _print_model_report(report, prefix='3 model ids')
     return EXIT_OK
 
 
 async def restore(migration_id: str, *, db=None) -> int:
     from open_webui.internal.db import get_async_db_context
-    from open_webui.soev import migrate_state
+    from open_webui.soev import migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
         restored = await migrate_state.restore_config(session, migration_id)
+        report = await migrate_models.restore(session, migration_id)
         # The snapshot stays: it is the v1 state, and a later --apply switches again from it.
-        await migrate_state.drop_marker(session, migration_id, 'config')
+        for step in ('config', 'model_ids'):
+            await migrate_state.drop_marker(session, migration_id, step)
         await session.commit()
         print(f'config rows restored: {restored}')
+        _print_model_report(report, prefix='model ids restored')
     return EXIT_OK
 
 
 async def plan(options: Options, *, db=None) -> int:
     from open_webui.internal.db import get_async_db_context
     from open_webui.models.config import Config
-    from open_webui.soev import migrate_config, migrate_state
+    from open_webui.soev import migrate_config, migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
         try:
@@ -344,6 +369,12 @@ async def plan(options: Options, *, db=None) -> int:
         values = migrate_config.planned(options.v2_config, row.value if row else {})
         for key, value in sorted(values.items()):
             print(f'2 config switch: {key} = {json.dumps(value, sort_keys=True)}')
+        for source, target in sorted(options.model_map.items()):
+            print(f'3 model ids: map {source} -> {target}')
+        _print_model_report(
+            await migrate_models.rewrite(session, options.model_map, options.migration_id, dry_run=True),
+            prefix='3 model ids',
+        )
     return await migrate(dry_run=True, db=db)
 
 

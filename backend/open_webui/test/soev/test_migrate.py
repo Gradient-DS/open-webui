@@ -36,6 +36,11 @@ async def env(identity_config, fake_api, monkeypatch):
     users = importlib.import_module('open_webui.models.users')
     config = importlib.import_module('open_webui.models.config')
     state = importlib.import_module('open_webui.models.soev_migration')
+    referencing = [
+        importlib.import_module(f'open_webui.models.{name}').__dict__[cls].__table__
+        for name, cls in (('chats', 'Chat'), ('chat_messages', 'ChatMessage'), ('models', 'Model'))
+    ]
+    referencing.append(importlib.import_module('open_webui.models.automations').Automation.__table__)
     async with engine.begin() as connection:
         await connection.run_sync(
             lambda sync: database.Base.metadata.create_all(
@@ -45,6 +50,7 @@ async def env(identity_config, fake_api, monkeypatch):
                     state.ConfigBackup.__table__,
                     state.ModelIdBackup.__table__,
                     state.MigrationMarker.__table__,
+                    *referencing,
                     users.User.__table__,
                     groups.Group.__table__,
                     groups.GroupMember.__table__,
@@ -312,6 +318,7 @@ async def test_module_dry_run_preserves_sql_tables(env, tmp_path):
         'SOEV_API_URL': 'https://soev.invalid',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
         'SOEV_V2_MIGRATION_ID': 'v2-test',
+        'SOEV_V2_MODEL_MAP': json.dumps({'zai-org/GLM-5.3': 'glm-5-3'}),
         'SOEV_V2_CONFIG': json.dumps(
             {
                 'agent_api.selected_agent': 'soev',
