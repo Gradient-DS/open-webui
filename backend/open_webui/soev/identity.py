@@ -124,9 +124,10 @@ async def link_proven(user: UserModel, *, source: str, id_token: str | None, cli
         log.warning('Proven identity link failed', extra={'user_id': user.id, 'code': code})
 
 
-def build_client() -> SoevClient:
+def build_client(*, timeout: float = 30.0) -> SoevClient:
     return SoevClient(
         config.SOEV_API_URL,
         config.SOEV_API_KEY,
         subject_minter=lambda ref: mint_assertion(ref, now=dt.datetime.now(dt.UTC)),
+        timeout=timeout,
     )

@@ -1,9 +1,13 @@
-"""[Gradient] In v2 mode soev-api's catalog is the only source of chat models and the default."""
+"""[Gradient] In v2 mode soev-api's catalog is the only source of chat models, the default and task completions."""
 
 import copy
 import logging
 import time
+from collections.abc import AsyncIterator
 from typing import Any
+
+from fastapi import HTTPException
+from starlette.responses import StreamingResponse
 
 from open_webui import config, env
 from open_webui.soev import identity
@@ -13,7 +17,9 @@ log = logging.getLogger(__name__)
 
 OWNER = 'soev'
 CATALOG_TTL = 60.0
+TASK_TIMEOUT = 120.0
 CATALOG_CACHE: dict[str, Any] = {'expires_at': 0.0, 'entries': []}
+_TASK_FIELDS = ('temperature', 'top_p', 'response_format', 'stop')
 
 
 def is_v2() -> bool:
@@ -109,3 +115,68 @@ async def default_models(configured: str | None) -> str | None:
     if not is_v2():
         return configured
     return next((entry['id'] for entry in await catalog() if entry.get('default')), None)
+
+
+def _content(content: Any) -> Any:
+    if not isinstance(content, list):
+        return content
+    parts = []
+    for part in content:
+        if part.get('type') == 'text':
+            parts.append({'type': 'text', 'text': part.get('text', '')})
+        elif part.get('type') == 'image_url':
+            parts.append({'type': 'image_url', 'image_url': {'url': (part.get('image_url') or {}).get('url', '')}})
+    return parts
+
+
+def _message(message: dict) -> dict:
+    result = {'role': message['role'], 'content': _content(message.get('content'))}
+    if message.get('tool_call_id'):
+        result['tool_call_id'] = message['tool_call_id']
+    if message.get('tool_calls'):
+        result['tool_calls'] = [
+            {
+                'id': call['id'],
+                'type': 'function',
+                'function': {'name': call['function']['name'], 'arguments': call['function']['arguments']},
+            }
+            for call in message['tool_calls']
+        ]
+    return result
+
+
+def task_body(form_data: dict) -> dict:
+    """The task subset soev-api accepts; it picks the model, so `model` is never sent."""
+    body = {'messages': [_message(message) for message in form_data['messages']]}
+    body['stream'] = bool(form_data.get('stream'))
+    body.update({key: form_data[key] for key in _TASK_FIELDS if form_data.get(key) is not None})
+    max_tokens = form_data.get('max_tokens') or form_data.get('max_completion_tokens')
+    if max_tokens:
+        body['max_tokens'] = max_tokens
+    return body
+
+
+async def task_completion(form_data: dict, user) -> dict | StreamingResponse:
+    """Run an Open WebUI task (title, tags, follow-ups, queries, ...) as the acting user."""
+    client = identity.build_client(timeout=TASK_TIMEOUT)
+    body = task_body(form_data)
+    try:
+        user_ref = await identity.acting_ref(user, client)
+        if not body['stream']:
+            return await client.complete_task(body, as_user=user_ref)
+        stream = client.stream_task(body, as_user=user_ref)
+        # Resolve refusals before StreamingResponse sends its success headers.
+        first = await anext(stream, b'')
+    except SoevApiError as error:
+        raise HTTPException(status_code=error.status, detail=error.detail) from None
+
+    async def passthrough() -> AsyncIterator[bytes]:
+        try:
+            if first:
+                yield first
+            async for chunk in stream:
+                yield chunk
+        finally:
+            await stream.aclose()
+
+    return StreamingResponse(passthrough(), media_type='text/event-stream')

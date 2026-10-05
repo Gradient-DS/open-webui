@@ -39,6 +39,8 @@ class FakeSoevApi:
         self.requests, self.failures = [], []
         self.chat = FakeChatApi()
         self.models: list[dict] = []
+        self.task_bodies: list[tuple[str | None, dict]] = []
+        self.task_model = 'task-model'
 
     def handle(self, request):
         self.requests.append(request)
@@ -62,7 +64,11 @@ class FakeSoevApi:
         if subject and subject not in self.links:
             raise Problem(401, 'identity_not_linked')
         body = json.loads(request.content) if request.content else None
-        if request.method == 'GET' or request.url.path.startswith('/v1/chat/threads'):
+        if (
+            request.method == 'GET'
+            or request.url.path.startswith('/v1/chat/threads')
+            or request.url.path == '/v1/completions/task'
+        ):
             return self._route(request, body, credential, subject)
         operation = request.headers.get('Idempotency-Key', '')
         if not 8 <= len(operation) <= 255:
@@ -203,6 +209,8 @@ class FakeSoevApi:
         if parts == ['v1', 'models'] and request.method == 'GET':
             self._require(credential, 'read')
             return httpx.Response(200, json={'data': copy.deepcopy(self.models)})
+        if parts == ['v1', 'completions', 'task'] and request.method == 'POST':
+            return self._task(request, body, credential, subject)
         if parts[:2] == ['v1', 'identity'] or parts[:2] == ['v1', 'directory']:
             return self._identity(request.method, parts, body)
         if parts[:2] == ['v1', 'jobs']:
@@ -225,6 +233,42 @@ class FakeSoevApi:
         if parts[3] == 'folders':
             return self._folders(request, parts, body, credential, subject)
         raise Problem(404, 'route_not_found')
+
+    def _task(self, request, body, credential, subject):
+        """The task route: `read` plus a subject; it picks the model and refuses unknown fields."""
+        self._require(credential, 'read')
+        if subject is None:
+            raise Problem(401, 'credential_invalid')
+        allowed = {'messages', 'stream', 'temperature', 'max_tokens', 'top_p', 'response_format', 'stop'}
+        if not isinstance(body, dict) or set(body) - allowed or not body.get('messages'):
+            raise Problem(422, 'invalid_field')
+        for message in body['messages']:
+            if set(message) - {'role', 'content', 'tool_call_id', 'tool_calls'}:
+                raise Problem(422, 'invalid_field')
+        self.task_bodies.append((subject, copy.deepcopy(body)))
+        answer = f'Task answer {len(self.task_bodies)}'
+        if not body.get('stream'):
+            return httpx.Response(
+                200,
+                json={
+                    'id': 'chatcmpl-task',
+                    'object': 'chat.completion',
+                    'model': self.task_model,
+                    'choices': [
+                        {'index': 0, 'message': {'role': 'assistant', 'content': answer}, 'finish_reason': 'stop'}
+                    ],
+                },
+            )
+        chunks = [{'role': 'assistant', 'content': ''}, {'content': answer}]
+        content = ''.join(
+            'data: '
+            + json.dumps({'object': 'chat.completion.chunk', 'model': self.task_model, 'choices': [{'delta': delta}]})
+            + '\n\n'
+            for delta in chunks
+        )
+        return httpx.Response(
+            200, content=(content + 'data: [DONE]\n\n').encode(), headers={'Content-Type': 'text/event-stream'}
+        )
 
     def _collections(self, request, body, credential, subject):
         if request.method == 'POST':
