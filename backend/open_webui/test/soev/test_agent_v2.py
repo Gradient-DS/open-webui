@@ -27,7 +27,14 @@ from open_webui.utils import agent, agent_v2
 from starlette.responses import StreamingResponse
 
 # The turn's tools field while the web search control is Uit (or absent).
-WEB_SEARCH_OFF = {'web_search': 'off', 'fetch': 'off', 'search_live_documents': 'off', 'attach_live_document': 'off'}
+WEB_SEARCH_OFF = {
+    'web_search': 'off',
+    'fetch': 'off',
+    'search_live_documents': 'off',
+    'attach_live_document': 'off',
+    'search_mail': 'off',
+    'read_mail': 'off',
+}
 
 
 async def render(turn: agent_v2.AgentTurn, event: ChatEvent) -> list[dict]:
@@ -652,14 +659,14 @@ async def test_the_web_search_control_sends_its_state_on_every_turn(chat: Chat, 
     ids=['always', 'auto', 'off', 'no-features'],
 )
 def test_tools_maps_the_web_search_features_to_tool_states(features: dict | None, state: str) -> None:
-    assert agent_v2._tools({'features': features}, True, False) == {
+    assert agent_v2._tools({'features': features}, True, False, False) == {
         'tools': {**WEB_SEARCH_OFF, 'web_search': state, 'fetch': 'off' if state == 'off' else 'auto'}
     }
 
 
 @pytest.mark.parametrize('features', [{'web_search': True, 'web_search_required': True}, {'web_search': True}])
 def test_tools_sends_off_when_owui_does_not_allow_web_search(features: dict) -> None:
-    assert agent_v2._tools({'features': features}, False, False) == {'tools': WEB_SEARCH_OFF}
+    assert agent_v2._tools({'features': features}, False, False, False) == {'tools': WEB_SEARCH_OFF}
 
 
 @pytest.mark.asyncio
@@ -1598,9 +1605,11 @@ async def test_turn_end_closes_with_the_summary_or_the_failure(chat: Chat, failu
     assert any('error' in chunk for chunk in chunks) == failure
     assert [event['data'] for event in chat.socket if event['type'] == 'status'] == [
         {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False},
-        {'description': 'error', 'done': True}
-        if failure
-        else {'action': 'summary', 'description': '1 tool called in less than a second', 'done': True},
+        (
+            {'description': 'error', 'done': True}
+            if failure
+            else {'action': 'summary', 'description': '1 tool called in less than a second', 'done': True}
+        ),
     ]
 
 
@@ -2165,6 +2174,52 @@ async def test_attach_summary_reflects_the_outcome(output: dict, attached: bool,
     ]
 
 
+@pytest.mark.parametrize('state', ['off', 'auto', 'required', 'unexpected', True, None])
+@pytest.mark.parametrize('allowed', [False, True])
+def test_mail_states_are_gated_on_the_server(state, allowed):
+    tools = agent_v2._tools({'features': {'live_mail': state}}, False, False, allowed)['tools']
+    expected = state if allowed and state in ('auto', 'required') else 'off'
+    assert tools['search_mail'] == tools['read_mail'] == expected
+    assert tools['search_live_documents'] == 'off'
+
+
+@pytest.mark.asyncio
+async def test_mail_sources_link_to_outlook_without_creating_files(chat: Chat):
+    card = {
+        'id': 'mail-ref',
+        'type': 'mail-reference',
+        'title': 'Budget approved',
+        'source_url': 'https://outlook.office.com/mail/id/example',
+    }
+    text = {'id': 'mail-text', 'type': 'mail-text', 'ref': 'mail-ref', 'text': 'Approved: 42000.'}
+    chat.api.chat.turns = [[found(card, text), answered('Approved', cited(8, 'mail-text', 'mail-ref'))]]
+    assert content(await chat.turn('What was approved?', 'a1')) == 'Approved [1]'
+    source = next(event['data'] for event in chat.socket if event['type'] == 'source')
+    assert source['source']['url'] == card['source_url']
+    assert 'file_id' not in source['metadata'][0]
+    assert not any(event['type'] == 'files' for event in chat.socket)
+    assert not chat.messages['chat', 'a1'].get('files')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('success', [True, False])
+async def test_read_mail_status_reports_refusals(success):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {'read_mail': {'done': {'template': 'Read email', 'params': {}}}}
+    turn.running['read'] = ('read_mail', {})
+    output = {'elements': [{'type': 'mail-text'}]} if success else {'text': 'Mail request refused: not_found'}
+    await turn.end_tool({'call_id': 'read', **output})
+    assert turn.settling[0]['description'] == ('Read email' if success else 'Could not read email')
+
+
+def test_status_params_join_list_arguments():
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    declared = {'params': {'keywords': 'argument.keywords'}}
+    assert turn.tool_params(declared, {'keywords': ['begroting', ' ', 'fietspad']}, None) == {
+        'keywords': 'begroting, fietspad'
+    }
+
+
 @pytest.mark.asyncio
 async def test_a_call_shows_running_only_after_the_reasoning_that_led_to_it() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
@@ -2186,6 +2241,42 @@ async def test_a_call_shows_running_only_after_the_reasoning_that_led_to_it() ->
     assert not turn.emitter.call_args_list
     await turn.start_pending_tools()
     assert turn.emitter.call_args_list[0].args[0]['data']['done'] is False
+
+
+@pytest.mark.parametrize('matches', [None, 143])
+def test_search_mail_status_keeps_order_and_filters(matches):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {
+        'search_mail': {
+            'done': {
+                'template': 'Searched your mail for "{{keywords}}": {{matches}} emails',
+                'fallback': 'Searched your mail for "{{keywords}}": no emails',
+                'params': {'keywords': 'argument.keywords', 'matches': 'output.first.mail-reference.matches'},
+            }
+        }
+    }
+    status = turn.tool_status(
+        'search_mail',
+        {
+            'keywords': ['KNB'],
+            'order': 'newest',
+            'from_addresses': ['@knb.nl'],
+            'to_addresses': ['a@example.test'],
+            'cc_addresses': ['b@example.test'],
+        },
+        {'elements': [{'type': 'mail-reference', 'matches': matches}] if matches else []},
+    )
+    assert '({{options}})' in status['description']
+    assert status['options'] == 'newest first; From: @knb.nl; To: a@example.test; Cc: b@example.test'
+    assert len(status['mail_options']) == 4
+    assert ('no emails' in status['description']) == (matches is None)
+
+
+def test_plain_mail_status_is_unchanged():
+    from open_webui.utils.mail_status import mail_search_status
+
+    status = {'description': 'Searched your mail for "{{keywords}}": no emails', 'keywords': 'KNB'}
+    assert mail_search_status(status, {'keywords': ['KNB']}) == status
 
 
 IMAGE_BYTES = base64.b64decode(

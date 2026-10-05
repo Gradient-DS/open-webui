@@ -34,6 +34,8 @@ from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
+from open_webui.utils.mail_status import mail_search_status
+
 from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
@@ -453,7 +455,7 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
 
 
 def _tools(
-    metadata: dict[str, Any], web_search_allowed: bool, live_documents_allowed: bool
+    metadata: dict[str, Any], web_search_allowed: bool, live_documents_allowed: bool, live_mail_allowed: bool
 ) -> dict[str, dict[str, str]]:
     """[Gradient] The turn's `tools` field, from the web search control. Uit is sent too, so the deployment's
     default never decides for the user, and so is every turn where OWUI does not allow web search."""
@@ -461,14 +463,25 @@ def _tools(
     documents = (metadata.get('features') or {}).get('live_documents') if live_documents_allowed else 'off'
     if documents not in ('auto', 'required'):
         documents = 'off'
+    mail = (metadata.get('features') or {}).get('live_mail') if live_mail_allowed else 'off'
+    if mail not in ('auto', 'required'):
+        mail = 'off'
     return {
         'tools': {
             'web_search': state,
             'fetch': 'off' if state == 'off' else 'auto',
             'search_live_documents': documents,
             'attach_live_document': documents,
+            'search_mail': mail,
+            'read_mail': mail,
         }
     }
+
+
+async def _live_mail_allowed() -> bool:
+    from open_webui.env import AGENT_API_ENABLED
+
+    return AGENT_API_ENABLED and bool(await Config.get('live_mail.enable'))
 
 
 async def _live_documents_allowed() -> bool:
@@ -872,6 +885,10 @@ class AgentTurn:
             or not (attached or any(element.get('type') == 'document' for element in output.get('elements') or []))
         ):
             status = {'action': name, 'description': 'Could not open document'}
+        if name == 'read_mail' and (
+            output.get('error') or not any(e.get('type') == 'mail-text' for e in output.get('elements') or [])
+        ):
+            status = {'action': name, 'description': 'Could not read email'}
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
         return [_marker(status)]
 
@@ -895,6 +912,8 @@ class AgentTurn:
             _filled(declared, self.tool_params(declared, arguments, output)) if isinstance(declared, dict) else None
         )
         status = {'action': name, **filled} if filled else generic
+        if name == 'search_mail':
+            status = mail_search_status(status, arguments)
         if items := _web_items(self.touched(arguments, output)):
             status['items'] = items
         return status
@@ -915,6 +934,8 @@ class AgentTurn:
             value = None
             if kind == 'argument':
                 value = arguments.get(rest)
+                if isinstance(value, list) and all(isinstance(item, str) for item in value):
+                    value = ', '.join(item for item in value if item.strip())
             elif kind == 'knowledge':
                 key = arguments.get(rest)
                 only = list(self.knowledge_names.values()) if len(self.knowledge_names) == 1 else [None]
@@ -1231,7 +1252,12 @@ async def _sent(
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
     except ImagesUnavailable as unavailable:
         return _refused(_unimaged(unavailable, metadata.get('user_language')))
-    tools = _tools(metadata, await _web_search_allowed(metadata['user_id']), await _live_documents_allowed())
+    tools = _tools(
+        metadata,
+        await _web_search_allowed(metadata['user_id']),
+        await _live_documents_allowed(),
+        await _live_mail_allowed(),
+    )
     notes = attachments.pop('attachment_notes', [])
     collection = {}
     references = any(entry.get('attached_by') or entry.get('source') for entry in metadata.get('files') or [])

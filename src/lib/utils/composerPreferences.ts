@@ -4,6 +4,7 @@ const featureKeys = {
 	webSearchEnabled: 'web_search',
 	webSearchRequired: 'web_search_required',
 	liveDocumentsState: 'live_documents',
+	liveMailState: 'live_mail',
 	imageGenerationEnabled: 'image_generation',
 	codeInterpreterEnabled: 'code_interpreter',
 	documentWriterEnabled: 'document_writer',
@@ -17,6 +18,7 @@ export type ComposerPreferences = {
 	webSearchEnabled: boolean;
 	webSearchRequired: boolean;
 	liveDocumentsState: ReturnType<typeof liveDocumentState>;
+	liveMailState: ReturnType<typeof liveDocumentState>;
 	imageGenerationEnabled: boolean;
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
@@ -35,6 +37,7 @@ export function composerPreferences(
 		webSearchEnabled: values.webSearchEnabled ?? false,
 		webSearchRequired: values.webSearchRequired ?? false,
 		liveDocumentsState: liveDocumentState(values.liveDocumentsState),
+		liveMailState: liveDocumentState(values.liveMailState),
 		imageGenerationEnabled: values.imageGenerationEnabled ?? false,
 		codeInterpreterEnabled: values.codeInterpreterEnabled ?? false,
 		documentWriterEnabled: values.documentWriterEnabled ?? false,

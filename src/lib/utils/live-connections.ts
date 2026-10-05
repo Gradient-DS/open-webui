@@ -3,8 +3,8 @@ import type { ChatAttachment } from '$lib/types/chatAttachment';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import {
 	listConnections,
-	listLiveDocumentGrants,
-	enableLiveDocuments,
+	listLiveGrants,
+	enableLiveFamily,
 	createConnection,
 	authorizeConnection,
 	getConnection,
@@ -18,22 +18,32 @@ import {
 
 export const consentLabels: Record<string, string> = {
 	onedrive: 'connect_provider_onedrive',
+	outlook_mail: 'connect_provider_outlook_mail',
 	google_drive: 'connect_provider_google_drive',
 	confluence: 'connect_provider_confluence'
 };
 
-export type LiveDocumentConnection = {
+export type LiveConnection = {
 	connection: Awaited<ReturnType<typeof listConnections>>[number];
 	grantId?: string;
 };
-let snapshot:
-	| { token: string; provider: string; connections: LiveDocumentConnection[] }
-	| undefined;
+export type LiveFamily = 'live_documents' | 'mail';
+let session: string | undefined;
+const snapshots = new Map<string, LiveConnection[]>();
+function snapshotKey(token: string, provider: string, family: LiveFamily): string {
+	if (session !== token) {
+		snapshots.clear();
+		session = token;
+	}
+	return `${provider}:${family}`;
+}
 
-export async function prefetchLiveDocuments(
+export async function prefetchLiveConnections(
 	token: string,
-	provider = 'onedrive'
-): Promise<LiveDocumentConnection[]> {
+	provider = 'onedrive',
+	family: LiveFamily = 'live_documents'
+): Promise<LiveConnection[]> {
+	const key = snapshotKey(token, provider, family);
 	const connections = (await listConnections(token)).filter(
 		(c) => c.source_kind === provider && c.lifecycle !== 'revoked'
 	);
@@ -42,30 +52,33 @@ export async function prefetchLiveDocuments(
 			connection,
 			grantId:
 				connection.lifecycle === 'enabled' && !connection.last_error
-					? (await listLiveDocumentGrants(token, connection.id)).find(
+					? (await listLiveGrants(token, connection.id, family)).find(
 							(g) => g.lifecycle === 'enabled'
 						)?.id
 					: undefined
 		}))
 	);
-	snapshot = { token, provider, connections: rows };
+	if (session === token) snapshots.set(key, rows);
 	return rows;
 }
 
-export function liveDocumentConnections(
+export function liveConnections(
 	token: string,
-	provider = 'onedrive'
-): LiveDocumentConnection[] | undefined {
-	return snapshot?.token === token && snapshot.provider === provider
-		? snapshot.connections
-		: undefined;
+	provider = 'onedrive',
+	family: LiveFamily = 'live_documents'
+): LiveConnection[] | undefined {
+	return snapshots.get(snapshotKey(token, provider, family));
 }
 
-export async function connectLiveDocuments(token: string, provider = 'onedrive'): Promise<string> {
+export async function connectLiveSource(
+	token: string,
+	provider = 'onedrive',
+	family: LiveFamily = 'live_documents'
+): Promise<string> {
 	if (!consentLabels[provider]) throw new Error('Unsupported connection provider');
-	const rows = liveDocumentConnections(token, provider);
+	const rows = liveConnections(token, provider, family);
 	if (!rows) {
-		void prefetchLiveDocuments(token, provider);
+		void prefetchLiveConnections(token, provider, family);
 		throw new Error('Connection status is loading. Try again.');
 	}
 	const selected =
@@ -75,7 +88,7 @@ export async function connectLiveDocuments(token: string, provider = 'onedrive')
 	if (connection?.lifecycle === 'enabled' && !connection.last_error) {
 		if (selected.grantId) return selected.grantId;
 		try {
-			const grant = await enableLiveDocuments(token, connection.id);
+			const grant = await enableLiveFamily(token, connection.id, family);
 			selected.grantId = grant.id;
 			return grant.id;
 		} catch (error) {
@@ -89,7 +102,7 @@ export async function connectLiveDocuments(token: string, provider = 'onedrive')
 			throw error;
 		}
 	}
-	const popup = window.open('about:blank', 'soev-live-documents', 'width=600,height=720');
+	const popup = window.open('about:blank', `soev-live-${family}`, 'width=600,height=720');
 	if (!popup) throw new Error('Allow popups to connect your account');
 	try {
 		const authorization = connection
@@ -121,8 +134,8 @@ export async function connectLiveDocuments(token: string, provider = 'onedrive')
 		while (Date.now() - started <= 120000) {
 			const outcome = connectionOutcome(await getConnection(token, id), Date.now() - started);
 			if (outcome.status === 'done') {
-				const grant = await enableLiveDocuments(token, id);
-				await prefetchLiveDocuments(token, provider);
+				const grant = await enableLiveFamily(token, id, family);
+				await prefetchLiveConnections(token, provider, family);
 				return grant.id;
 			}
 			if (outcome.status !== 'waiting') throw new Error('Provider connection failed');
@@ -157,14 +170,14 @@ export async function attachPickedDocument(
 }
 
 export function matchingPickerConnection(
-	rows: LiveDocumentConnection[],
+	rows: LiveConnection[],
 	account: {
 		tenantId: string;
 		localAccountId: string;
 		username: string;
 		idTokenClaims?: { oid?: string };
 	}
-): LiveDocumentConnection {
+): LiveConnection {
 	const oid = account.idTokenClaims?.oid ?? account.localAccountId;
 	const matches = rows.filter(
 		({ connection }) =>

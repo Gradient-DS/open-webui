@@ -35,12 +35,12 @@
 						{#if status?.description?.includes('{{count}}')}
 							{$i18n.t(status?.description, {
 								count: (status?.urls || status?.items).length,
-								...statusI18nParams(status),
+								...statusI18nParams(status, (key) => $i18n.t(key)),
 								query: status?.query
 							})}
 						{:else if status?.description}
 							{$i18n.t(status.description, {
-								...statusI18nParams(status),
+								...statusI18nParams(status, (key) => $i18n.t(key)),
 								query: status?.query
 							})}
 						{/if}
@@ -185,7 +185,11 @@
 							/* statusI18nParams strips `query` and `count` (both reserved for
 							   per-action branches). Re-add them here for templates in the
 							   generic branch that use them as placeholders. */
-							{ ...statusI18nParams(status), query: status?.query, count: status?.count }
+							{
+								...statusI18nParams(status, (key) => $i18n.t(key)),
+								query: status?.query,
+								count: status?.count
+							}
 						)}
 					{/if}
 				</div>

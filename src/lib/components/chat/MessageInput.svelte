@@ -1,4 +1,5 @@
 <script lang="ts">
+	import MailSearch from '$lib/components/icons/MailSearch.svelte';
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
 	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
@@ -34,13 +35,13 @@
 		initialize as initializeGooglePicker
 	} from '$lib/utils/google-drive-picker';
 	import {
-		connectLiveDocuments,
+		connectLiveSource,
 		attachPickedDocument,
-		liveDocumentConnections,
+		liveConnections,
 		matchingPickerConnection,
-		prefetchLiveDocuments
-	} from '$lib/utils/live-documents';
-	import { enableLiveDocuments } from '$lib/apis/cloudSync';
+		prefetchLiveConnections
+	} from '$lib/utils/live-connections';
+	import { enableLiveFamily } from '$lib/apis/cloudSync';
 	import {
 		beginBusinessDocumentPicker,
 		prepareBusinessDocumentPicker
@@ -246,6 +247,7 @@
 
 	export let imageGenerationEnabled = false;
 	export let liveDocumentsState: ToolState = 'off';
+	export let liveMailState: ToolState = 'off';
 	export let webSearchEnabled = false;
 	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
 	export let webSearchRequired = false;
@@ -309,6 +311,7 @@
 		webSearchEnabled,
 		webSearchRequired,
 		liveDocumentsState,
+		liveMailState,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
 		documentWriterRequired,
@@ -992,9 +995,11 @@
 				openWebpageModal: () => void;
 				cycleWebSearch: () => void;
 				cycleLiveDocuments: () => Promise<void>;
+				cycleLiveMail: () => Promise<void>;
 				cycleTool: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
 		  }
 		| undefined;
+	const liveMailTooltipId = `mail-search-${uuidv4()}`;
 	const liveDocumentsTooltipId = `onedrive-search-${uuidv4()}`;
 	const pinnedStateTooltip = (label: string, state: ToolState, description: string) =>
 		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
@@ -1056,12 +1061,12 @@
 
 	const oneDriveHandler = async () => {
 		try {
-			const rows = liveDocumentConnections(localStorage.token);
+			const rows = liveConnections(localStorage.token);
 			if (!rows) throw new Error('Connection status is loading. Try again.');
 			if (
 				!rows.some((row) => row.connection.lifecycle === 'enabled' && !row.connection.last_error)
 			) {
-				await connectLiveDocuments(localStorage.token);
+				await connectLiveSource(localStorage.token);
 				toast.info($i18n.t('OneDrive connected. Choose your files again.'));
 				return;
 			}
@@ -1069,7 +1074,7 @@
 			if (!references.length) return;
 			const row = matchingPickerConnection(rows, account);
 			const grantId =
-				row.grantId ?? (await enableLiveDocuments(localStorage.token, row.connection.id)).id;
+				row.grantId ?? (await enableLiveFamily(localStorage.token, row.connection.id)).id;
 			for (const reference of references) {
 				const itemId = uuidv4();
 				files = [
@@ -1646,8 +1651,10 @@
 	};
 
 	onMount(() => {
+		if ($config?.features?.enable_live_mail)
+			void prefetchLiveConnections(localStorage.token, 'outlook_mail', 'mail').catch(() => {});
 		if ($config?.features?.enable_onedrive_business) {
-			void prefetchLiveDocuments(localStorage.token).catch(() => {});
+			void prefetchLiveConnections(localStorage.token).catch(() => {});
 			void prepareBusinessDocumentPicker().catch(() => {});
 		}
 		if ($config?.features?.enable_google_drive_integration)
@@ -2495,6 +2502,7 @@
 										<InputMenu
 											bind:this={inputMenuRef}
 											bind:liveDocumentsState
+											bind:liveMailState
 											restrictTo={inputMenuRestrictTo}
 											{openInternetBlocked}
 											{internalBlocked}
@@ -2751,6 +2759,42 @@
 														>
 															<Photo className="size-4" strokeWidth="1.75" />
 														</button>
+													</Tooltip>
+												{:else if itemId === 'live_mail' && $config?.features?.enable_live_mail}
+													<Tooltip
+														elementId={liveMailTooltipId}
+														content={pinnedStateTooltip(
+															$i18n.t('Mail search'),
+															liveMailState,
+															liveMailState !== 'off'
+																? $i18n.t('The model decides whether to search your mail')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={`${$i18n.t('Mail search')}: ${$i18n.t(TOOL_STATE_LABELS[liveMailState])}`}
+															aria-pressed={liveMailState !== 'off'}
+															on:click|preventDefault={() => inputMenuRef?.cycleLiveMail()}
+															class={pinnedToggleClass(liveMailState)}
+														>
+															<MailSearch className="size-4" />
+														</button>
+														<div slot="tooltip" class="hidden">
+															<div id={liveMailTooltipId} class="flex items-center gap-2">
+																<MailSearch className="size-4 shrink-0" />
+																<span
+																	>{pinnedStateTooltip(
+																		$i18n.t('Mail search'),
+																		liveMailState,
+																		liveMailState !== 'off'
+																			? $i18n.t('The model decides whether to search your mail')
+																			: $i18n.t(TOOL_OFF_DESCRIPTION)
+																	)}</span
+																>
+															</div>
+														</div>
 													</Tooltip>
 												{:else if itemId === 'live_documents' && $config?.features?.enable_live_documents}
 													<Tooltip

@@ -368,6 +368,7 @@
 
 	let imageGenerationEnabled = false;
 	let liveDocumentsState: ToolState = 'off';
+	let liveMailState: ToolState = 'off';
 	let webSearchEnabled = false;
 	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
 	let webSearchRequired = false;
@@ -389,6 +390,7 @@
 		webSearchEnabled,
 		webSearchRequired,
 		liveDocumentsState,
+		liveMailState,
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
@@ -402,6 +404,7 @@
 			webSearchEnabled,
 			webSearchRequired,
 			liveDocumentsState,
+			liveMailState,
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
 			documentWriterEnabled,
@@ -1034,6 +1037,7 @@
 		webSearchEnabled,
 		webSearchRequired,
 		liveDocumentsState,
+		liveMailState,
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
@@ -3927,6 +3931,8 @@
 						? documentWriterEnabled
 						: false,
 				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
+				live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
+
 				document_writer_required: Boolean(
 					$config?.features?.enable_document_writer &&
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer) &&
@@ -5100,6 +5106,7 @@
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
+										bind:liveMailState
 										bind:webSearchEnabled
 										bind:webSearchRequired
 										bind:atSelectedModel
@@ -5194,6 +5201,7 @@
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
+										bind:liveMailState
 										bind:webSearchEnabled
 										bind:webSearchRequired
 										bind:atSelectedModel
@@ -5255,6 +5263,7 @@
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
 									bind:liveDocumentsState
+									bind:liveMailState
 									bind:documentWriterRequired
 									bind:webSearchEnabled
 									bind:webSearchRequired
