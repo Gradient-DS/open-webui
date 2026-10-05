@@ -149,6 +149,16 @@ The proxy uses `/cloud-sync/connections/{id}/live/{family}` for `mail` or
 Outlook for ActionRequired cards. Mail sources keep Outlook links and render in the
 citation panel; they never create File rows or ingestion jobs.
 
+Citation icons use the explicit `source.provider` field, built in
+`utils/agent_v2.py` (`_as_source` and `Citations.add`). The live-mail element
+types `mail-reference` and `mail-text` identify `outlook_mail`. Document elements
+join their `source_id` to File `meta.source.provider`, covering both agent-opened
+OneDrive documents and picker attachments, including thread replay. The frontend
+reducer preserves this field; `Citations/sourceIcon.ts` maps it to the composer
+icons through `SourceIcon.svelte`. Missing or unknown providers retain the web
+favicon/document fallback; names and URLs never identify providers. Previously
+saved source payloads without provider metadata are not retroactively classified.
+
 Composer choices persist in chat.features, including the initial chat creation, and
 ui.composerTools user settings for new chats. Model defaults seed only unsaved choices;
 loading a chat or changing models never overwrites explicit preferences. Feature gates

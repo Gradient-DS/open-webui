@@ -645,7 +645,7 @@ def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
-def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
+async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
     """[Claude] A text the agent read (a chunk, an opened document's text) with what its document says about it,
     in the shape `Citations.add` takes."""
     whole = whole or {}
@@ -656,10 +656,18 @@ def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[st
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
     }
+    provider = None
+    if element.get('type') in {'mail-text', 'mail-reference'}:
+        provider = 'outlook_mail'
+    elif isinstance(properties['source_id'], str) and properties['source_id']:
+        file = await Files.get_file_by_id(properties['source_id'])
+        if file is not None:
+            provider = ((file.meta or {}).get('source') or {}).get('provider')
     return {
         'id': element['id'],
         'ref': element['ref'],
         'text': element.get('text') or '',
+        **({'provider': provider} if isinstance(provider, str) and provider else {}),
         'properties': {key: value for key, value in properties.items() if value is not None},
     }
 
@@ -685,7 +693,12 @@ class Citations:
         number = self.document_numbers.setdefault(ref, len(self.document_numbers) + 1)
         name = properties.get('title') or properties.get('name') or source['ref']
         result = {
-            'source': {'id': ref, 'name': name, 'url': properties.get('source_url') or ref},
+            'source': {
+                'id': ref,
+                'name': name,
+                'url': properties.get('source_url') or ref,
+                **({'provider': source['provider']} if source.get('provider') else {}),
+            },
             'document': [source['text']],
             'metadata': [
                 {**_source_metadata(properties), 'source': ref, 'name': name, 'chunk_id': source_id, 'ref': ref}
@@ -768,17 +781,17 @@ class AgentTurn:
             return
         self.thread_id, self.position = bookmark['thread_id'], bookmark['position']
         thread = await self.client.get(self.path(), as_user=self.as_user)
-        self._seed_sources(thread['events'], self.position)
+        await self._seed_sources(thread['events'], self.position)
         if thread['status']['position'] != self.position:
             branch = await self.client.chat_post(self.path('fork'), {'at': self.position}, as_user=self.as_user)
             self.thread_id = branch['thread_id']
 
-    def _seed_sources(self, events: list[dict], position: int) -> None:
+    async def _seed_sources(self, events: list[dict], position: int) -> None:
         for event in events:
             if event['position'] > position or event.get('stream') != 'root':
                 continue
             if event['type'] in {'tool_output', 'attached'}:
-                self.keep(event['payload'])
+                await self.keep(event['payload'])
             elif event['type'] == 'input':
                 self.keep_texts((event['payload'].get('payload') or {}).get('texts') or [])
 
@@ -796,15 +809,15 @@ class AgentTurn:
                 }
             )
 
-    def keep(self, output: dict[str, Any]) -> list[dict[str, Any]]:
+    async def keep(self, output: dict[str, Any]) -> list[dict[str, Any]]:
         """[Claude] Remember a tool output's elements, and number each text the agent read; the panel entries of
         the ones not seen before."""
         elements = output.get('elements') or []
         self.elements.update({element['id']: element for element in elements if isinstance(element.get('id'), str)})
         added = []
         for element in elements:
-            if _read(element):
-                source = self.citations.add(_as_source(element, self.elements.get(element['ref'])))
+            if _read(element) and element['id'] not in self.citations.sources:
+                source = self.citations.add(await _as_source(element, self.elements.get(element['ref'])))
                 if source:
                     added.append(source)
         return added
@@ -998,7 +1011,7 @@ class AgentTurn:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
         if attached:
             await self.attached(payload)
-        self.keep(payload)
+        await self.keep(payload)
         for element in payload.get('elements') or []:
             if element.get('type') == 'action-required' and element.get('kind') == 'connect':
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
@@ -1038,7 +1051,7 @@ class AgentTurn:
                 if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
                     if event.event == 'attached':
                         await self.attached(event.data['payload'])
-                    for source in self.keep(event.data['payload']):
+                    for source in await self.keep(event.data['payload']):
                         await self.emit('source', source)
                 if event.event == 'status' and event.data['state'] not in {'idle', 'waiting'}:
                     raise SoevApiError(409, 'thread_active', 'Recovery did not finish')

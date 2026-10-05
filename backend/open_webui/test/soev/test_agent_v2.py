@@ -897,10 +897,11 @@ async def test_attached_text_citations_are_seeded_from_root_inputs_at_the_parent
         assert chat.mutations()[-2][0] == '/v1/chat/threads/thr-1/fork'
 
 
-def test_attached_text_seeding_ignores_child_streams_and_future_inputs() -> None:
+@pytest.mark.asyncio
+async def test_attached_text_seeding_ignores_child_streams_and_future_inputs() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     text = {'id': 'note:n1', 'kind': 'note', 'title': 'Note', 'text': 'body', 'length': 4}
-    turn._seed_sources(
+    await turn._seed_sources(
         [
             {'position': 1, 'type': 'input', 'stream': 'child', 'payload': {'payload': {'texts': [text]}}},
             {'position': 3, 'type': 'input', 'stream': 'root', 'payload': {'payload': {'texts': [text]}}},
@@ -2388,6 +2389,7 @@ async def test_mail_sources_link_to_outlook_without_creating_files(chat: Chat):
     assert content(await chat.turn('What was approved?', 'a1')) == 'Approved [1]'
     source = next(event['data'] for event in chat.socket if event['type'] == 'source')
     assert source['source']['url'] == card['source_url']
+    assert source['source']['provider'] == 'outlook_mail'
     assert 'file_id' not in source['metadata'][0]
     assert not any(event['type'] in ('files', 'chat:message:files') for event in chat.socket)
     assert not chat.messages['chat', 'a1'].get('files')
@@ -2800,3 +2802,41 @@ async def test_a_turn_on_a_thread_sends_no_earlier_conversation(chat: Chat, monk
     await chat.turn('second', 'a2', 'a1')
     assert sent_text(chat) == 'second'
     stored.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['mail-text', 'mail-reference'])
+async def test_mail_provider_comes_from_element_type(kind, monkeypatch):
+    lookup = AsyncMock()
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', lookup)
+    element = {'id': 'mail', 'ref': 'mail', 'type': kind, 'text': 'Mail body'}
+    whole = {'title': 'Unrelated title', 'source_url': 'https://example.test/message'}
+    source = agent_v2.Citations().add(await agent_v2._as_source(element, whole))
+    assert source['source']['provider'] == 'outlook_mail'
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', [None, 'onedrive', 'another_provider'])
+async def test_document_provider_comes_only_from_file_metadata(provider, monkeypatch):
+    file = SimpleNamespace(meta={'source': {'provider': provider}}) if provider else None
+    lookup = AsyncMock(return_value=file)
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', lookup)
+    whole = {
+        'source_id': 'file-id',
+        'title': 'Outlook OneDrive',
+        'source_url': 'https://outlook.office.com/mail/id/looks-like-mail',
+    }
+    source = agent_v2.Citations().add(await agent_v2._as_source(CHUNK, whole))
+    assert source['source'].get('provider') == provider
+    lookup.assert_awaited_once_with('file-id')
+
+
+@pytest.mark.asyncio
+async def test_web_sources_do_not_infer_provider_from_urls_or_names(monkeypatch):
+    lookup = AsyncMock()
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', lookup)
+    whole = {'title': 'OneDrive', 'source_url': 'https://tenant.sharepoint.com/document'}
+    source = agent_v2.Citations().add(await agent_v2._as_source(CHUNK, whole))
+    assert 'provider' not in source['source']
+    lookup.assert_not_awaited()

@@ -6,7 +6,7 @@
 	import type { DisplayCitation } from './reduceSources';
 	import { mergeCitationDocuments } from './citationDocuments';
 	import { decodeString } from './useCitationDocument';
-	import Document from '$lib/components/icons/Document.svelte';
+	import SourceIcon from './SourceIcon.svelte';
 	const i18n = getContext<Readable<I18n>>('i18n');
 	// [Gradient] Groups own scrolling and header positioning when this list is embedded.
 	export let embedded = false;
@@ -27,19 +27,7 @@
 			aria-label={$i18n.t('View source: {{name}}', { name })}
 			on:click={() => onSelect(row.citation)}
 		>
-			{#if row.citation.source.name?.startsWith('http')}
-				<img
-					src="https://www.google.com/s2/favicons?sz=32&domain={row.citation.source.name}"
-					alt=""
-					class="size-4 mt-0.5 shrink-0 rounded-full"
-					on:error={(event) => {
-						// LICENSE covers this Open WebUI fallback logo.
-						// Do not alter, remove, obscure, or replace it except as LICENSE permits:
-						// https://docs.openwebui.com/license.
-						(event.currentTarget as HTMLImageElement).src = '/favicon.png';
-					}}
-				/>
-			{:else}<Document className="size-4 mt-0.5 shrink-0 text-gray-500" />{/if}
+			<SourceIcon source={row.citation.source} className="size-4 mt-0.5 shrink-0" />
 			<div class="min-w-0 flex-1">
 				<div class="line-clamp-1 text-sm">{name}</div>
 				<div class="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
