@@ -323,7 +323,7 @@ exceptions:
       in sharp 0.35.5, published 2026-09-27; lockfile-age refuses it until
       2026-10-11. On or after that date raise the existing
       overrides["@huggingface/transformers"].sharp in package.json to ^0.35.5,
-      relock, and delete this entry and the kokoro-js entry below.
+      relock, and delete this entry.
     replacement_considered: >-
       No replacement is needed; this is a deferred upgrade. Every sharp release
       before 0.35.5 is affected, so no older pin helps. Taking 0.35.5 early
@@ -338,27 +338,6 @@ exceptions:
       runtime image copies only the built frontend (/app/build), not
       node_modules, so neither sharp nor libvips/librsvg is installed in any
       published image. No SVG we render is ever passed to sharp.
-    approved_by: "PENDING second review by @Gradient-DS/security"
-    recheck: 2026-10-20
-
-  # The same finding as GHSA-wq5f-xc86-pv6w, reported again at kokoro-js
-  # because npm audit propagates sharp's severity up the dependency chain
-  # without an advisory id. Clears when sharp is bumped.
-  - id: kokoro-js
-    package: kokoro-js
-    scanner: npm
-    reason: >-
-      Package-level npm audit finding with no advisory of its own: kokoro-js
-      depends on @huggingface/transformers, which depends on sharp, affected by
-      GHSA-wq5f-xc86-pv6w. kokoro-js itself has no published advisory.
-    replacement_considered: >-
-      Deferred upgrade, identical to GHSA-wq5f-xc86-pv6w: the sharp bump on or
-      after 2026-10-11 removes this finding. kokoro-js 1.2.1 is its newest
-      release and still requires @huggingface/transformers 3.x.
-    usage_analysis: >-
-      kokoro-js runs only in the browser TTS worker
-      (src/lib/workers/kokoro.worker.ts); the web build of transformers ignores
-      sharp. See GHSA-wq5f-xc86-pv6w.
     approved_by: "PENDING second review by @Gradient-DS/security"
     recheck: 2026-10-20
 
