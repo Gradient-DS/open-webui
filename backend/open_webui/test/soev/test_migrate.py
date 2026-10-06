@@ -277,7 +277,7 @@ async def test_dry_run_sends_nothing(env, capsys):
     assert '/v1/identity/links' in output and '/v1/directory/groups/' in output
     assert '/v1/collections' in output and 'reports/2026' in output
     assert 'OWUI files' in output and 'document_count' in output and 'not read' in output
-    assert 'test-runtime-key' not in output and 'PRIVATE KEY' not in output and 'eyJ' not in output
+    assert 'soev_test_cred-runtime_test-secret' not in output and 'PRIVATE KEY' not in output and 'eyJ' not in output
     assert env.kbs[3].id not in output and env.kbs[4].id not in output
     assert (
         (await env.db.execute(select(importlib.import_module('open_webui.models.knowledge').Knowledge))).scalars().all()

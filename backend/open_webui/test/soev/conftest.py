@@ -1,9 +1,7 @@
-"""Isolated signing configuration and recorded HTTP for identity and bootstrap."""
+"""Isolated signing configuration and recorded HTTP for identity assertions."""
 
 import base64
-import hashlib
 import importlib
-import json
 
 import httpx
 import pytest
@@ -49,10 +47,8 @@ def identity_config(monkeypatch, tmp_path):
     ).decode()
     for name, value in {
         'URL': 'https://soev.invalid',
-        'KEY': 'test-runtime-key',
-        'CREDENTIAL_ID': 'runtime-credential',
+        'KEY': 'soev_test_cred-runtime_test-secret',
         'SIGNING_KEY': pem,
-        'SIGNING_KID': 'owui-test-key',
         'AUDIENCE': 'test-tenant',
         'SERVICE_PRINCIPAL': 'owui:service:webui',
     }.items():
@@ -63,15 +59,15 @@ def identity_config(monkeypatch, tmp_path):
 
 @pytest.fixture
 def fake_api(identity_config):
-    """Register the configured public key as a completed bootstrap would."""
+    """Register the declared credential and its public key under the JWK thumbprint."""
     from open_webui.test.soev.fake_api import FakeSoevApi
 
     identity, key = identity_config
     fake = FakeSoevApi()
-    fake.credential_id = 'runtime-credential'
+    fake.credential_id = 'cred-runtime'
     fake.audience = identity.config.SOEV_API_AUDIENCE
     public_bytes = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    fake.signing_keys['owui-test-key'] = {
+    fake.signing_keys[identity.jwk_thumbprint(key)] = {
         'kty': 'OKP',
         'crv': 'Ed25519',
         'x': base64.urlsafe_b64encode(public_bytes).decode().rstrip('='),
@@ -95,38 +91,3 @@ def identity_http(monkeypatch):
         lambda **kwargs: original_client(transport=httpx.MockTransport(handle), **kwargs),
     )
     return requests, responses
-
-
-@pytest.fixture
-def bootstrap_http(identity_http):
-    """Model credential replay and signing-key creation, replay, and conflict."""
-    requests, responses = identity_http
-    credentials, signing_keys = {}, {}
-
-    async def handle(request):
-        body = json.loads(request.content)
-        if request.url.path == '/v1/credentials':
-            operation = request.headers['Idempotency-Key']
-            if operation not in credentials:
-                credential_id = 'new-credential' if not credentials else f'new-credential-{len(credentials) + 1}'
-                credentials[operation] = {'id': credential_id, **body}
-                return httpx.Response(201, json={**credentials[operation], 'secret': 'test-new-runtime-key'})
-            return httpx.Response(200, json={**credentials[operation], 'secret': ''})
-        credential = next(
-            row for row in credentials.values() if request.url.path == f'/v1/credentials/{row["id"]}/signing-keys'
-        )
-        kid = hashlib.sha256(
-            json.dumps([credential['principal'], credential['id'], request.headers['Idempotency-Key']]).encode()
-        ).hexdigest()
-        jwk = body['public_jwk']
-        previous = signing_keys.get(kid)
-        if previous is not None and previous != jwk:
-            return httpx.Response(409, json={'code': 'idempotency_key_reused'})
-        signing_keys[kid] = jwk
-        return httpx.Response(
-            200 if previous is not None else 201,
-            json={'kid': kid, 'public_jwk': jwk, 'created_at': '2026-09-16T12:00:00Z', 'retired_at': None},
-        )
-
-    responses.extend([handle] * 4)
-    return requests, credentials, signing_keys

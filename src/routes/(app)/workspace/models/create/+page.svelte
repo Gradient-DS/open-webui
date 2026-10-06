@@ -18,7 +18,7 @@
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
-	import AssistantWizard from '$lib/components/workspace/Models/AssistantWizard.svelte';
+	import SimpleModelEditor from '$lib/components/workspace/Models/SimpleModelEditor.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -84,14 +84,9 @@
 						? $i18n.t('Assistant created successfully!')
 						: $i18n.t('Model created successfully!')
 				);
-				// Land on the edit page for the just-created assistant
-				// rather than the models list. Pairs with the simple
-				// builder's auto-save on entry — the wizard auto-saves
-				// then we transition into a saved/edit view where the
-				// Share button is visible and the Save button only
-				// reappears after real edits. The "+ Add knowledge" flow
-				// passes skipNavigate so it can route to the KB-create flow
-				// itself (the model is saved either way).
+				// Land on the edit page for the just-created assistant, where
+				// Sharing is available. The "+ Add knowledge" flow passes
+				// skipNavigate so it can route to the KB-create flow itself.
 				if (!skipNavigate) {
 					await goto(`/workspace/models/edit?id=${encodeURIComponent(modelInfo.id)}`);
 				}
@@ -141,7 +136,7 @@
 </script>
 
 {#if useSimpleBuilder}
-	<AssistantWizard {onSubmit} onAdvanced={goToAdvanced} />
+	<SimpleModelEditor model={null} edit={false} {onSubmit} onAdvanced={goToAdvanced} />
 {:else}
 	{#key model}
 		<ModelEditor onBack={() => goto('/workspace/models')} {model} {onSubmit} />

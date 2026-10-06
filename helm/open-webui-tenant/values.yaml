@@ -107,29 +107,9 @@ openWebui:
     failureThreshold: 30
     periodSeconds: 10
 
-  # ---------------------------------------------------------------------------
-  # Alembic migration Job (Helm pre-upgrade hook)
-  # ---------------------------------------------------------------------------
-  # When enabled, a one-shot Job runs `import open_webui.config` before each
-  # helm upgrade. That triggers run_migrations() at import time against
-  # Postgres, then exits. Helm only proceeds to roll the new Deployment if
-  # the Job succeeds — so the new pods start against an already-migrated
-  # schema and don't race each other.
-  #
-  # The main Deployment sets ENABLE_DB_MIGRATIONS=false when this is on,
-  # so no replica attempts its own migration at startup.
-  #
-  # Required for replicaCount > 1. Leave off for single-replica tenants that
-  # rely on the default "first pod migrates" behavior.
-  migrationJob:
-    enabled: false
-    activeDeadlineSeconds: 600
-    resources:
-      requests:
-        memory: "256Mi"
-        cpu: "100m"
-      limits:
-        memory: "512Mi"
+  # Every pod runs migrations in an init container, on installs and upgrades.
+  # PostgreSQL migrations serialize with an advisory lock. The main container
+  # always has ENABLE_DB_MIGRATIONS=false; init uses this image and resources.
 
   # ---------------------------------------------------------------------------
   # PodDisruptionBudget
@@ -213,7 +193,7 @@ openWebui:
     enableForwardUserInfoHeaders: "false"
     forwardUserInfoHeaderUserId: "X-OpenWebUI-User-Id"  # Header name for user UUID forwarding
 
-    # Vector Database (Weaviate) - uses local Weaviate in tenant namespace
+    # Vector database: weaviate (default) or pgvector (uses postgres below).
     vectorDb: "weaviate"
     # Host of the Weaviate to talk to. Empty means this release's own Weaviate
     # (the `weaviate:` block below). Set both to a Service name reachable from
@@ -719,6 +699,40 @@ openWebui:
         tenantId: "soev"  # X-Scope-OrgID for observability backends
 
 # -----------------------------------------------------------------------------
+# v2 platform wiring (opt-in; unset values render no environment variables)
+# -----------------------------------------------------------------------------
+# In a shared soev-<client> namespace, set networkPolicy.scope: release and
+# secretStoreRef to the platform's existing SecretStore/ClusterSecretStore.
+soevApi:
+  url: ""
+  audience: ""
+  servicePrincipal: ""
+agentApi:
+  # Unset uses the application's v1 default; explicitly set v1 or v2.
+  runtime: ""
+liveDocuments:
+  enabled: null  # Application default false; explicit false is rendered too.
+liveMail:
+  enabled: null  # Application default false; explicit false is rendered too.
+webuiUrl: ""  # Public URL used for callbacks, e.g. https://client.soev.ai.
+
+# Only rendered when openWebui.config.vectorDb is pgvector. PGVECTOR_DB_URL
+# inherits DATABASE_URL. Set openWebui.config.databaseUser/databaseName to match
+# postgres.user/database; a mismatch fails rendering instead of overriding values.
+# CNPG must declare the vector extension; its owner role cannot create it.
+pgvector:
+  maxVectorLength: 1024  # bge-m3 dimensions; match ragEmbeddingModel.
+  createExtension: false
+
+# Appended to the open-webui container env. Supports value and valueFrom.
+extraEnv: []
+# - name: EXAMPLE_SETTING
+#   value: "true"
+# - name: EXAMPLE_SECRET
+#   valueFrom:
+#     secretKeyRef: {name: existing-secret, key: example}
+
+# -----------------------------------------------------------------------------
 # PostgreSQL
 # -----------------------------------------------------------------------------
 postgres:
@@ -727,7 +741,7 @@ postgres:
 
   # External server, e.g. a CloudNativePG `<cluster>-rw` Service such as
   # pg-staging-rw.database-staging.svc.cluster.local. Leave empty for the
-  # bundled StatefulSet. When set, every consumer (Open WebUI, migration job,
+  # bundled StatefulSet. When set, every consumer (Open WebUI, migration init container,
   # loader-worker) connects here and you normally also set `enabled: false`.
   # Cross-namespace hosts need the target namespace in
   # networkPolicy.extraEgressNamespaces. The loader-worker bootstrap Job needs
@@ -766,6 +780,7 @@ postgres:
 # Weaviate (Vector Database)
 # -----------------------------------------------------------------------------
 weaviate:
+  # Must be false when openWebui.config.vectorDb is pgvector; otherwise rendering fails.
   enabled: true
 
   image:
@@ -971,6 +986,9 @@ secrets:
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
   openaiApiKey: ""
   ragOpenaiApiKey: ""
+  # Required when soevApi.url is set and externalSecrets.enabled is false.
+  soevApiKey: ""
+  soevApiSigningKey: ""  # Literal multi-line Ed25519 PEM; use a YAML | block.
 
   # Google Drive / OAuth (leave empty to disable)
   googleClientSecret: ""
@@ -1056,6 +1074,10 @@ serviceAccount:
 # External Secrets Operator
 # -----------------------------------------------------------------------------
 # When enabled, secrets are fetched from 1Password via ESO SDK provider
+# Use an existing store instead of rendering the chart's own SecretStore.
+# Example: {kind: ClusterSecretStore, name: soev-staging}
+secretStoreRef: {}
+
 externalSecrets:
   enabled: false
   refreshInterval: "1h"
@@ -1067,6 +1089,7 @@ externalSecrets:
     cache: true                                  # Set to false if ESO version doesn't support cache
     cacheTTL: "5m"
     cacheMaxSize: 100
+    # soevApiKey and soevApiSigningKey are always fetched when soevApi.url is set.
     # Toggle optional fields (set to true if the 1P item contains these)
     fields:
       s3AccessKeyId: false
@@ -1092,6 +1115,9 @@ externalSecrets:
 # -----------------------------------------------------------------------------
 networkPolicy:
   enabled: true
+  # namespace (legacy isolation) or release (only pods with this release instance label).
+  # Applies to both Kubernetes and Cilium policies; rules are unchanged.
+  scope: namespace
   # Additional namespaces this tenant is allowed to egress to (in addition to
   # sharedServices.namespace). Useful when sharedServices.namespace is set to
   # a per-env value like staging-shared-services but the tenant also needs to

@@ -41,7 +41,8 @@ image:
 
 install:
 	@kubectl --context kind-$(CLUSTER) create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl --context kind-$(CLUSTER) apply -f -
-	@if helm --kube-context kind-$(CLUSTER) -n $(NAMESPACE) status $(RELEASE) >/dev/null 2>&1; then echo "==> helm upgrade (release exists)"; helm --kube-context kind-$(CLUSTER) upgrade $(RELEASE) $(REPO_ROOT)/helm/open-webui-tenant -f $(CURDIR)/values-local.yaml --namespace $(NAMESPACE); else echo "==> First install: bootstrap with replicaCount=1 + ENABLE_DB_MIGRATIONS=true (chart's migrate Job is pre-upgrade only)"; helm --kube-context kind-$(CLUSTER) install $(RELEASE) $(REPO_ROOT)/helm/open-webui-tenant -f $(CURDIR)/values-local.yaml --namespace $(NAMESPACE) --set openWebui.replicaCount=1 --set openWebui.migrationJob.enabled=false --wait --timeout 8m; echo "==> Upgrading to HA topology (replicaCount=2 + migrate Job)"; helm --kube-context kind-$(CLUSTER) upgrade $(RELEASE) $(REPO_ROOT)/helm/open-webui-tenant -f $(CURDIR)/values-local.yaml --namespace $(NAMESPACE); fi
+	@helm --kube-context kind-$(CLUSTER) upgrade --install $(RELEASE) $(REPO_ROOT)/helm/open-webui-tenant \
+		-f $(CURDIR)/values-local.yaml --namespace $(NAMESPACE) --wait --timeout 8m
 
 upgrade:
 	@helm --kube-context kind-$(CLUSTER) upgrade $(RELEASE) $(REPO_ROOT)/helm/open-webui-tenant -f $(CURDIR)/values-local.yaml --namespace $(NAMESPACE)

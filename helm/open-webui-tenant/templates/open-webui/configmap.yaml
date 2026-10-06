@@ -20,6 +20,31 @@ data:
   # httpx.UnsupportedProtocol on POST /api/v1/integrations/ingest.
   OPENWEBUI_BASE_URL: "http://{{ include "open-webui-tenant.openWebui.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.openWebui.service.port | default 8080 }}"
 
+  {{- with .Values.soevApi.url }}
+  SOEV_API_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.soevApi.audience }}
+  SOEV_API_AUDIENCE: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.soevApi.servicePrincipal }}
+  SOEV_API_SERVICE_PRINCIPAL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.agentApi.runtime }}
+  {{- if not (has . (list "v1" "v2")) }}
+  {{- fail "agentApi.runtime must be v1 or v2" }}
+  {{- end }}
+  AGENT_API_RUNTIME: {{ . | quote }}
+  {{- end }}
+  {{- if and (ne .Values.liveDocuments.enabled nil) (ne (toString .Values.liveDocuments.enabled) "") }}
+  ENABLE_LIVE_DOCUMENTS: {{ .Values.liveDocuments.enabled | quote }}
+  {{- end }}
+  {{- if and (ne .Values.liveMail.enabled nil) (ne (toString .Values.liveMail.enabled) "") }}
+  ENABLE_LIVE_MAIL: {{ .Values.liveMail.enabled | quote }}
+  {{- end }}
+  {{- with .Values.webuiUrl }}
+  WEBUI_URL: {{ . | quote }}
+  {{- end }}
+
   # Locale
   DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
 
@@ -60,6 +85,10 @@ data:
 
   # Vector Database (Weaviate) - local to tenant namespace
   VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}
+  {{- if eq .Values.openWebui.config.vectorDb "pgvector" }}
+  PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH: {{ .Values.pgvector.maxVectorLength | quote }}
+  PGVECTOR_CREATE_EXTENSION: {{ .Values.pgvector.createExtension | quote }}
+  {{- end }}
   {{- /*
   Hosts default to this release's own Weaviate, rendering exactly the string the
   hard-coded template produced before, so every existing tenant's ConfigMap —
@@ -531,11 +560,8 @@ data:
   REDIS_URL: "redis://{{ include "open-webui-tenant.redis.fullname" . }}:6379/0"
   {{- end }}
 
-  # Alembic migrations — set to false when the pre-upgrade Job handles them
-  # (see templates/open-webui/migration-job.yaml). Default is true so the
-  # first pod of a single-replica tenant migrates on startup (import-time
-  # trigger in backend/open_webui/config.py:75-76).
-  ENABLE_DB_MIGRATIONS: {{ ternary "false" "true" .Values.openWebui.migrationJob.enabled | quote }}
+  # Migrations run in each pod's init container, serialized on PostgreSQL.
+  ENABLE_DB_MIGRATIONS: "false"
 
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}
