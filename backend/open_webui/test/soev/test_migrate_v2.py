@@ -351,6 +351,56 @@ async def test_apply_after_restore_switches_again(env):
     assert [row[:2] for row in await config_rows(env)] == [row[:2] for row in switched]
 
 
+async def seed_renamed_model(env):
+    """A legacy override row whose catalog id already has a row, as gemma and gemini had on staging."""
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
+                " VALUES ('google/gemma-4-31b', 'alice', NULL, 'Gemma', '{}', '{}', 1, 1, 1),"
+                " ('gemma-4-31b', 'alice', NULL, 'Gemma', '{}', '{}', 1, 1, 1)"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission,'
+                " created_at) VALUES ('g3', 'model', 'google/gemma-4-31b', 'group', 'eng', 'read', 1),"
+                " ('g4', 'model', 'google/gemma-4-31b', 'user', '*', 'read', 1),"
+                " ('g5', 'model', 'gemma-4-31b', 'user', '*', 'read', 1)"
+            )
+        )
+
+
+GEMMA = (
+    "SELECT id, resource_id, NULL FROM access_grant WHERE id IN ('g3', 'g4', 'g5')"
+    " UNION ALL SELECT id, base_model_id, is_active FROM model WHERE id LIKE '%gemma%' ORDER BY 1"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_renamed_model_whose_target_exists_is_merged_and_restored(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    await seed_renamed_model(env)
+    original = await rows(env, GEMMA)
+    await env.module.apply(options(env))
+    assert await rows(env, GEMMA) == [
+        ('g3', 'gemma-4-31b', None),
+        ('g4', 'google/gemma-4-31b', None),
+        ('g5', 'gemma-4-31b', None),
+        ('gemma-4-31b', None, 1),
+        ('google/gemma-4-31b', None, 0),
+    ]
+    output = capsys.readouterr().out
+    expected = '3 model ids: merged model google/gemma-4-31b: gemma-4-31b exists; 1 grants moved to it'
+    assert f'{expected}, google/gemma-4-31b deactivated' in output
+    async with env.engine.begin() as connection:
+        await connection.execute(sa.text("DELETE FROM owui_v2_migration_migration_marker WHERE step = 'model_ids'"))
+    await env.module.apply(options(env))
+    assert 'google/gemma-4-31b already inactive' in capsys.readouterr().out
+    await env.module.restore(MIGRATION)
+    assert await rows(env, GEMMA) == original
+
+
 @pytest.mark.parametrize(
     ('raw', 'message'),
     [

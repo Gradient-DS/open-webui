@@ -360,6 +360,8 @@ def _print_ingest(state, *, prefix: str) -> None:
 def _print_model_report(report, *, prefix: str) -> None:
     for site, count in sorted(report.changed.items()):
         print(f'{prefix}: {site} {count}')
+    for line in report.merged:
+        print(f'{prefix}: merged {line}')
     for line in report.skipped:
         print(f'{prefix}: skipped {line}')
     for model_id, count in sorted(report.unmapped.items()):
