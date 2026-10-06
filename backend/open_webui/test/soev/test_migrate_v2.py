@@ -798,3 +798,34 @@ def test_invalid_input_exits_2_so_the_job_stops_retrying(monkeypatch, capsys):
         module.main()
     assert exited.value.code == 2
     assert 'SOEV_V2_CONFIG is not set' in capsys.readouterr().err
+
+
+def test_an_abort_names_the_failing_call_and_problem_without_secrets(monkeypatch, capsys, caplog):
+    module = importlib.import_module('open_webui.soev.migrate')
+    from open_webui.soev.client import SoevClient
+
+    problem = {'status': 403, 'code': 'policy_forbids', 'detail': 'Schedule scope is disallowed', 'constraint': None}
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            403, json=problem, headers={'Content-Type': 'application/problem+json', 'X-Request-ID': 'req-1'}
+        )
+    )
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        'open_webui.soev.client.httpx.AsyncClient', lambda **kwargs: original(transport=transport, **kwargs)
+    )
+
+    async def apply(_options):
+        client = SoevClient('https://soev.invalid', 'sk-secret')
+        await client.send('POST', '/v1/schedules?x=1', {'scope': {'item_id': 'private'}}, idempotency_key='key-12345')
+
+    monkeypatch.setattr(module, 'options_from_env', lambda **_: None)
+    monkeypatch.setattr(module, 'apply', apply)
+    monkeypatch.setattr(sys, 'argv', ['migrate', '--apply'])
+    with caplog.at_level('WARNING', logger='open_webui.soev.client'), pytest.raises(SystemExit) as exited:
+        module.main()
+    assert exited.value.code == 1
+    err = capsys.readouterr().err
+    assert 'POST /v1/schedules -> 403 policy_forbids: Schedule scope is disallowed (constraint: None)' in err
+    assert 'soev-api response POST /v1/schedules 403 request_id=req-1' in caplog.messages
+    assert not any(secret in err + ' '.join(caplog.messages) for secret in ('sk-secret', 'private', 'x=1'))

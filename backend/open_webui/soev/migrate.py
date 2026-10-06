@@ -497,6 +497,16 @@ async def plan(options: Options, *, db=None) -> int:
     )
 
 
+def _failure(error: Exception) -> str:
+    """The failing call and soev-api's problem fields; never tokens, bodies or assertions."""
+    from open_webui.soev.client import SoevApiError
+
+    if not isinstance(error, SoevApiError):
+        return type(error).__name__
+    call = f'{error.method} {error.path} -> ' if error.method else ''
+    return f'{call}{error.status} {error.code}: {error.detail} (constraint: {error.constraint})'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -526,8 +536,8 @@ def main():
     except MigrationError as error:
         print(f'Migration aborted: {error}', file=sys.stderr)
         raise SystemExit(EXIT_INVALID) from None
-    except (SoevApiError, httpx.TransportError, ValueError):
-        print('Migration aborted; reconciliation could not complete.', file=sys.stderr)
+    except (SoevApiError, httpx.TransportError, ValueError) as error:
+        print(f'Migration aborted; reconciliation could not complete: {_failure(error)}', file=sys.stderr)
         raise SystemExit(EXIT_FAILED) from None
     raise SystemExit(status)
 
