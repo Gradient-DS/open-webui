@@ -1,6 +1,5 @@
 """Adapt one OWUI turn to a server-owned thread and the existing chat renderer.
-Feed the model picker with an OpenAI-type connection whose base URL is
-<SOEV_API_URL>/v1/chat and whose API key is the soev-api key."""
+The model picker, its default and task completions come from soev-api (soev/model_catalog.py)."""
 
 import asyncio
 import base64
@@ -762,6 +761,8 @@ class AgentTurn:
         # [Claude] Done lines of calls whose output landed, held until the model thinks again or moves on.
         self.settling: list[dict[str, Any]] = []
         self.model: str | None = None
+        # [Claude] The catalog id that answered, once soev-api reports one (a fallback may differ from self.model).
+        self.answered_model: str | None = None
         self.attached_files: dict[str, dict] = {}
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -835,6 +836,7 @@ class AgentTurn:
             meta = {
                 **((stored or {}).get('meta') or {}),
                 'agent_v2': {'thread_id': self.thread_id, 'position': self.position},
+                **({'answered_model': self.answered_model} if self.answered_model else {}),
             }
             await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, {'meta': meta})
 
@@ -1090,8 +1092,18 @@ class AgentTurn:
             self.position = position
         return await self.render_event(event)
 
+    async def answered(self, event: ChatEvent, payload: dict) -> None:
+        """[Claude] Note the answering model wherever soev-api reports it; not every relay sends it yet."""
+        answered = (payload.get('answered_model') if isinstance(payload, dict) else None) or event.data.get(
+            'answered_model'
+        )
+        if isinstance(answered, str) and answered and answered != self.answered_model:
+            self.answered_model = answered
+            await self.emit('chat:completion', {'answered_model': answered})
+
     async def render_event(self, event: ChatEvent) -> list[dict[str, Any]]:
         payload = event.data.get('payload') or {}
+        await self.answered(event, payload)
         if event.event == 'input' and event.data.get('stream') == 'root' and self.input_position is None:
             self.input_position = self.position
             await self.persist()

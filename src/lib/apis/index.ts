@@ -2,6 +2,9 @@ import { WEBUI_BASE_URL } from '$lib/constants';
 import { convertOpenApiToToolPayload } from '$lib/utils';
 import { normalizeTags } from '$lib/utils/tags';
 import { getOpenAIModelsDirect } from './openai';
+import { get } from 'svelte/store';
+import i18n from '$lib/i18n';
+import { localizeCatalogDescriptions } from '$lib/utils/models/catalog';
 
 const TOOL_SERVER_FETCH_TIMEOUT = 10000;
 
@@ -177,7 +180,8 @@ export const getModels = async (
 		models = Object.values(modelsMap);
 	}
 
-	return models;
+	// [Gradient] Catalog descriptions arrive in nl and en; show the UI language.
+	return localizeCatalogDescriptions(models, get(i18n)?.language) as typeof models;
 };
 
 export const unloadModel = async (token: string, model: string) => {

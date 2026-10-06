@@ -27,6 +27,7 @@ from open_webui.socket.main import (
     get_event_emitter,
     sio,
 )
+from open_webui.soev import model_catalog
 from open_webui.utils.filter import (
     get_filter_functions,
     process_filter_functions,
@@ -279,6 +280,9 @@ async def generate_chat_completion(
                     'selected_model_id': selected_model_id,
                 }
 
+        # [Gradient] Agent turns never reach here; in v2 mode every other completion is a task for soev-api.
+        if model_catalog.is_v2():
+            return await model_catalog.task_completion(form_data, user)
         if model.get('pipe'):
             # Below does not require bypass_filter because this is the only route the uses this function and it is already bypassing the filter
             return await generate_function_chat_completion(request, form_data, user=user, models=models)

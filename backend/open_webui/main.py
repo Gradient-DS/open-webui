@@ -119,6 +119,7 @@ from open_webui.config import (
 from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
+from open_webui.soev import model_catalog
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -1391,7 +1392,9 @@ async def chat_completion(
                 fallback_model_id = next(
                     (
                         model_id.strip()
-                        for model_id in ((await Config.get('ui.default_models')) or '').split(',')
+                        for model_id in (
+                            (await model_catalog.default_models(await Config.get('ui.default_models'))) or ''
+                        ).split(',')
                         if model_id.strip()
                     ),
                     None,
@@ -2864,7 +2867,8 @@ async def get_app_config(request: Request):
                     'enable_pyodide_file_persistence': ENABLE_PYODIDE_FILE_PERSISTENCE,
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
-                    'enable_direct_connections': config.get('direct.enable'),
+                    # [Gradient] v2 mode keeps the picker to the soev-api catalog.
+                    'enable_direct_connections': config.get('direct.enable') and not model_catalog.is_v2(),
                     'enable_plugins': ENABLE_PLUGINS,
                     'enable_folders': config.get('folders.enable'),
                     'folder_max_file_count': config.get('folders.max_file_count'),
@@ -2989,7 +2993,8 @@ async def get_app_config(request: Request):
         'model_profiles': _parse_model_profiles(MODEL_PROFILES),
         **(
             {
-                'default_models': config.get('ui.default_models'),
+                # [Gradient] The catalog default replaces ui.default_models in v2 mode.
+                'default_models': await model_catalog.default_models(config.get('ui.default_models')),
                 'default_pinned_models': config.get('ui.default_pinned_models'),
                 'default_prompt_suggestions': config.get('ui.prompt_suggestions'),
                 **({'user_count': user_count} if user_count is not None else {}),

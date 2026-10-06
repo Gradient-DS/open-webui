@@ -193,6 +193,39 @@ class SoevClient:
         response = await self._request('POST', path, content=body, as_user=as_user, params=params)
         return self._json_object(response)
 
+    async def complete_task(self, body: dict, *, as_user: str) -> dict:
+        """Run one task completion on the client's task model; tasks carry no replay key."""
+        if not as_user:
+            raise ValueError('A task completion requires an acting user')
+        response = await self._request('POST', '/v1/completions/task', body=body, as_user=as_user)
+        return self._json_object(response)
+
+    async def stream_task(self, body: dict, *, as_user: str) -> AsyncIterator[bytes]:
+        """Pass a streamed task completion's SSE bytes through unchanged."""
+        if not as_user or self._subject_minter is None:
+            raise ValueError('A task completion requires an acting user and subject minter')
+        headers = {
+            'Authorization': f'Bearer {self._api_key}',
+            'X-Soev-Subject': self._subject_minter(as_user),
+            'Accept': 'text/event-stream',
+        }
+        try:
+            async with _shared_client().stream(
+                'POST',
+                f'{self._base_url}/v1/completions/task',
+                headers=headers,
+                json=body,
+                timeout=httpx.Timeout(self._timeout, read=660.0),
+            ) as response:
+                if not response.is_success:
+                    await response.aread()
+                    raise _response_error(response)
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+        except httpx.TransportError as error:
+            status = 504 if isinstance(error, httpx.TimeoutException) else 502
+            raise SoevApiError(status, 'upstream_error', 'Task completion stream failed') from None
+
     async def chat_delete(self, path: str, *, as_user: str) -> None:
         """Delete a thread once; the chat contract has no mutation replay key."""
         if not as_user:
