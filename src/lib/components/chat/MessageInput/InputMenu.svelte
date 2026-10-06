@@ -24,7 +24,11 @@
 		type ToolState
 	} from '$lib/utils/toolState';
 	import { prepareBusinessDocumentPicker } from '$lib/utils/onedrive-file-picker';
-	import { connectLiveSource, prefetchLiveConnections } from '$lib/utils/live-connections';
+	import {
+		connectLiveSource,
+		prefetchLiveConnections,
+		relinkPrompt
+	} from '$lib/utils/live-connections';
 	import { LIVE_DOCUMENT_STATES } from '$lib/utils/toolState';
 	import { toast } from 'svelte-sonner';
 
@@ -142,7 +146,8 @@
 			if (mail) liveMailState = next;
 			else liveDocumentsState = next;
 		} catch (error) {
-			toast.error(String(error));
+			const prompt = relinkPrompt(error);
+			toast.error(prompt ? $i18n.t(prompt) : String(error));
 		} finally {
 			if (mail) connectingMail = false;
 			else connectingDocuments = false;

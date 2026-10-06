@@ -1,6 +1,7 @@
-"""Copy OWUI identities, groups, collections and folders to soev-api, then reconcile.
+"""Move an Open WebUI v1 tenant to the v2 shape in one idempotent, reversible run.
 
-Run with python -m open_webui.soev.migrate [--dry-run]; OWUI tables are read only.
+python -m open_webui.soev.migrate --apply | --restore | --dry-run. The directory copy
+(identities, groups, collections, folders, cloud schedules) only reads OWUI tables.
 """
 
 import argparse
@@ -9,7 +10,18 @@ import hashlib
 import json
 import os
 import sys
+import time
+from dataclasses import dataclass, field
 from urllib.parse import quote
+
+# 1 is retried (soev-api unreachable, collection mismatch); 2 is bad input a retry cannot fix;
+# 75 (EX_TEMPFAIL) means ingest jobs are still running. The chart's Job fails fast only on 2.
+EXIT_OK, EXIT_FAILED, EXIT_INVALID, EXIT_RUNNING = 0, 1, 2, 75
+WAIT_POLL_SECONDS = 30
+
+
+async def _pause(seconds: float) -> None:
+    await asyncio.sleep(seconds)
 
 
 async def _knowledge_rows(table, db):
@@ -229,11 +241,22 @@ async def reconcile(file_counts, client, *, conflicts, dry_run=False, cloud_owne
         else:
             documents = collections[key]['document_count']
             print(f'{key} | {count} | {documents} | {count - documents} | {coverage.get(key, "0 / 0")}')
-    print('Document gaps are informational until ingest lands.')
+    print('Document gaps are reconciled per file by the re-ingest step.')
     return int(bool(missing or conflicts))
 
 
-async def migrate(*, dry_run=False, db=None):
+@dataclass
+class Directory:
+    rows: list
+    file_counts: dict
+    conflicts: set
+    cloud_owners: dict
+    user_ids: set
+    client: object
+
+
+async def copy_directory(*, dry_run=False, db=None) -> Directory:
+    """Step 4: links, groups, collections, cloud schedules and folders; OWUI tables are only read."""
     from open_webui.models.access_grants import AccessGrantsTable
     from open_webui.models.groups import GroupTable
     from open_webui.models.knowledge import KnowledgeTable
@@ -273,25 +296,239 @@ async def migrate(*, dry_run=False, db=None):
                 key=f'folder:{key}:{digest}',
                 dry_run=dry_run,
             )
-    return await reconcile(file_counts, client, conflicts=conflicts, dry_run=dry_run, cloud_owners=cloud_owners)
+    return Directory(rows, file_counts, conflicts, cloud_owners, user_ids, client)
+
+
+async def migrate(*, dry_run=False, db=None):
+    directory = await copy_directory(dry_run=dry_run, db=db)
+    return await reconcile(
+        directory.file_counts,
+        directory.client,
+        conflicts=directory.conflicts,
+        dry_run=dry_run,
+        cloud_owners=directory.cloud_owners,
+    )
+
+
+@dataclass
+class Options:
+    migration_id: str
+    v2_config: dict = field(default_factory=dict)
+    model_map: dict = field(default_factory=dict)
+    ingest_concurrency: int = 4
+    wait_seconds: int = 0
+
+
+def options_from_env(environ=os.environ, *, migration_id: str | None = None) -> Options:
+    from open_webui.soev.migrate_config import parse_v2_config
+    from open_webui.soev.migrate_models import parse_model_map
+    from open_webui.soev.migrate_state import MigrationError
+
+    migration_id = migration_id or environ.get('SOEV_V2_MIGRATION_ID')
+    if not migration_id:
+        raise MigrationError('Set SOEV_V2_MIGRATION_ID or pass --migration-id')
+    return Options(
+        migration_id=migration_id,
+        v2_config=parse_v2_config(environ.get('SOEV_V2_CONFIG')),
+        model_map=parse_model_map(environ.get('SOEV_V2_MODEL_MAP')),
+        ingest_concurrency=_positive_int(environ, 'SOEV_V2_INGEST_CONCURRENCY', 4),
+        wait_seconds=_positive_int(environ, 'SOEV_V2_WAIT_SECONDS', 0, minimum=0),
+    )
+
+
+def _positive_int(environ, name: str, default: int, *, minimum: int = 1) -> int:
+    from open_webui.soev.migrate_state import MigrationError
+
+    raw = environ.get(name) or str(default)
+    if not raw.isdigit() or int(raw) < minimum:
+        raise MigrationError(f'{name} must be an integer of at least {minimum}')
+    return int(raw)
+
+
+def _print_memories(state, *, prefix: str) -> None:
+    rows = sum(count for count, _ in state.per_user.values())
+    print(f'{prefix}: {rows} rows for {len(state.per_user)} users, re-embedded {len(state.reembedded)} users')
+
+
+def _print_ingest(state, *, prefix: str) -> None:
+    for key, counts in sorted(state.per_kb.items()):
+        summary = ', '.join(f'{status} {count}' for status, count in sorted(counts.items())) or 'no files'
+        print(f'{prefix}: {key}: {summary}')
+    for line in state.failures:
+        print(f'{prefix}: failed {line}')
+
+
+def _print_model_report(report, *, prefix: str) -> None:
+    for site, count in sorted(report.changed.items()):
+        print(f'{prefix}: {site} {count}')
+    for line in report.skipped:
+        print(f'{prefix}: skipped {line}')
+    for model_id, count in sorted(report.unmapped.items()):
+        print(f'{prefix}: unmapped {model_id} ({count} references left as they are)')
+
+
+def verdict(collections: int, ingest_state, memory_state) -> int:
+    """Step 7: 0 when every file is ingested or terminally failed, 75 while jobs run, 1 otherwise."""
+    from open_webui.soev.migrate_ingest import RUNNING, SUBMITTED
+
+    running = ingest_state.total(RUNNING) + ingest_state.total(SUBMITTED)
+    print(
+        f'7 reconcile: collections {"ok" if not collections else "MISMATCH"} | ingest running {running}'
+        f' | ingest failed {len(ingest_state.failures)} | memory vectors missing {memory_state.missing}'
+    )
+    if collections or memory_state.missing:
+        return EXIT_FAILED
+    return EXIT_RUNNING if running else EXIT_OK
+
+
+async def _sign_out_once(migration_id: str, *, db=None) -> None:
+    """Step 8, after a successful apply only, and once per migration id."""
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.soev import migrate_signout, migrate_state
+
+    async with get_async_db_context(db) as session:
+        if await migrate_state.has_marker(session, migration_id, 'signout'):
+            print('8 sign-out: already done')
+            return
+        await session.commit()
+        count = await migrate_signout.sign_out_all(db=db)
+        await migrate_state.add_marker(session, migration_id, 'signout')
+        await session.commit()
+    print(f'8 sign-out: sessions of {count} users revoked')
+
+
+async def apply(options: Options, *, db=None) -> int:
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.soev import migrate_config, migrate_ingest, migrate_memories, migrate_models, migrate_state
+
+    async with get_async_db_context(db) as session:
+        await migrate_state.ensure_tables(session)
+        taken = await migrate_state.snapshot(session, options.migration_id, migrate_config.SNAPSHOT_KEYS)
+        print(f'1 snapshot: {"taken" if taken else "kept"} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
+        if await migrate_state.has_marker(session, options.migration_id, 'config'):
+            print('2 config switch: already done')
+        else:
+            values = await migrate_config.switch(session, options.v2_config)
+            await migrate_state.add_marker(session, options.migration_id, 'config')
+            await session.commit()
+            print(f'2 config switch: {len(values)} keys written')
+        if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
+            print('3 model ids: already done')
+        else:
+            report = await migrate_models.rewrite(session, options.model_map, options.migration_id)
+            await migrate_state.add_marker(session, options.migration_id, 'model_ids')
+            await session.commit()
+            _print_model_report(report, prefix='3 model ids')
+    directory = await copy_directory(db=db)
+    print(f'4 directory: {len(directory.rows)} KBs, {len(directory.conflicts)} conflicts')
+    ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
+    _print_ingest(ingest_state, prefix='5 re-ingest')
+    memory_state = await migrate_memories.reembed(db=db)
+    _print_memories(memory_state, prefix='6 memories')
+    deadline = time.monotonic() + options.wait_seconds
+    while True:
+        collections = await reconcile(
+            directory.file_counts, directory.client, conflicts=directory.conflicts, cloud_owners=directory.cloud_owners
+        )
+        status = verdict(collections, ingest_state, memory_state)
+        if status == EXIT_OK:
+            await _sign_out_once(options.migration_id, db=db)
+        if status != EXIT_RUNNING or time.monotonic() >= deadline:
+            return status
+        print(f'7 reconcile: checking again in {WAIT_POLL_SECONDS}s')
+        await _pause(WAIT_POLL_SECONDS)
+        # Re-checking also submits files that were busy in another collection last time.
+        ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
+        _print_ingest(ingest_state, prefix='5 re-ingest')
+
+
+async def restore(migration_id: str, *, db=None) -> int:
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.soev import migrate_models, migrate_state
+
+    async with get_async_db_context(db) as session:
+        restored = await migrate_state.restore_config(session, migration_id)
+        report = await migrate_models.restore(session, migration_id)
+        # The snapshot stays: it is the v1 state, and a later --apply switches again from it.
+        for step in ('config', 'model_ids'):
+            await migrate_state.drop_marker(session, migration_id, step)
+        await session.commit()
+        print(f'config rows restored: {restored}')
+        _print_model_report(report, prefix='model ids restored')
+    return EXIT_OK
+
+
+async def plan(options: Options, *, db=None) -> int:
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.models.config import Config
+    from open_webui.soev import migrate_config, migrate_ingest, migrate_memories, migrate_models, migrate_state
+
+    async with get_async_db_context(db) as session:
+        # A preview creates nothing, not even the state tables the first --apply creates.
+        snapshotted = None
+        if await migrate_state.tables_exist(session):
+            snapshotted = await migrate_state.has_marker(session, options.migration_id, 'snapshot')
+        state = {True: 'exists, kept', False: 'would be taken', None: 'would be taken (no state yet)'}[snapshotted]
+        print(f'1 snapshot: {state} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
+        signed_out = snapshotted is not None and await migrate_state.has_marker(
+            session, options.migration_id, 'signout'
+        )
+        row = await session.get(Config, migrate_config.PERMISSIONS)
+        values = migrate_config.planned(options.v2_config, row.value if row else {})
+        for key, value in sorted(values.items()):
+            print(f'2 config switch: {key} = {json.dumps(value, sort_keys=True)}')
+        for source, target in sorted(options.model_map.items()):
+            print(f'3 model ids: map {source} -> {target}')
+        _print_model_report(
+            await migrate_models.rewrite(session, options.model_map, options.migration_id, dry_run=True),
+            prefix='3 model ids',
+        )
+    directory = await copy_directory(dry_run=True, db=db)
+    state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, dry_run=True, db=db)
+    _print_ingest(state, prefix='5 re-ingest')
+    _print_memories(await migrate_memories.reembed(dry_run=True, db=db), prefix='6 memories')
+    print(f'8 sign-out: {"already done" if signed_out else "every user, after a successful apply"}')
+    return await reconcile(
+        directory.file_counts,
+        directory.client,
+        conflicts=directory.conflicts,
+        dry_run=True,
+        cloud_owners=directory.cloud_owners,
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dry-run', action='store_true', help='Print planned requests without sending HTTP requests')
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--apply', action='store_true', help='Run every step; safe to rerun')
+    mode.add_argument('--restore', action='store_true', help='Put back the config snapshot and model ids')
+    mode.add_argument('--dry-run', action='store_true', help='Print the plan; no writes and no HTTP requests')
+    parser.add_argument('--migration-id', help='Defaults to SOEV_V2_MIGRATION_ID')
     args = parser.parse_args()
-    # Config otherwise runs schema migrations on import, which would write OWUI tables.
-    os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
+    if args.dry_run:
+        # Config otherwise runs schema migrations on import, which would write OWUI tables.
+        os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
 
     import httpx
 
     from open_webui.soev.client import SoevApiError
+    from open_webui.soev.migrate_state import MigrationError
 
     try:
-        status = asyncio.run(migrate(dry_run=args.dry_run))
+        if args.restore:
+            migration_id = args.migration_id or os.environ.get('SOEV_V2_MIGRATION_ID')
+            if not migration_id:
+                raise MigrationError('Set SOEV_V2_MIGRATION_ID or pass --migration-id')
+            status = asyncio.run(restore(migration_id))
+        else:
+            options = options_from_env(migration_id=args.migration_id)
+            status = asyncio.run(plan(options) if args.dry_run else apply(options))
+    except MigrationError as error:
+        print(f'Migration aborted: {error}', file=sys.stderr)
+        raise SystemExit(EXIT_INVALID) from None
     except (SoevApiError, httpx.TransportError, ValueError):
         print('Migration aborted; reconciliation could not complete.', file=sys.stderr)
-        raise SystemExit(1) from None
+        raise SystemExit(EXIT_FAILED) from None
     raise SystemExit(status)
 
 

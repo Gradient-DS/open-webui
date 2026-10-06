@@ -33,6 +33,7 @@ class FakeSoevApi:
         self.inherited_access = set()
         self.jobs, self.job_owners, self.job_effects = {}, {}, {}
         self.schedules, self.schedule_owners = {}, {}
+        self.connections, self.min_cadence_minutes = {}, 60
         self.uploads = {}
         self.links, self.groups, self.replays, self.creation_bodies = {}, {}, {}, {}
         self.seen_jtis = set()
@@ -203,6 +204,10 @@ class FakeSoevApi:
     def _route(self, request: httpx.Request, body: dict | None, credential: str, subject: str | None) -> httpx.Response:
         if request.url.path.startswith('/v1/chat/threads'):
             return self.chat.handle(request, body, (credential, subject))
+        if request.url.path == '/v1/sync-policy' and request.method == 'GET':
+            return httpx.Response(200, json={'min_cadence_minutes': self.min_cadence_minutes})
+        if request.url.path in ('/v1/connections', '/v1/schedules') and request.method == 'POST':
+            return self._cloud_create(request.url.path.rpartition('/')[2], body, subject)
         return self._catalog_route(request, body, credential, subject)
 
     def _catalog_route(self, request, body, credential, subject):
@@ -292,6 +297,25 @@ class FakeSoevApi:
         if 'kind' in request.url.params:
             rows = [row for row in rows if row['kind'] == request.url.params['kind']]
         return self._page(rows, request)
+
+    def _cloud_create(self, kind, body, subject):
+        """Pending user-owned connections and enabled schedules, as the migration creates them."""
+        if subject is None:
+            raise Problem(403, 'subject_required')
+        if kind == 'connections':
+            row = {'id': f'connection-{len(self.connections)}', **body, 'lifecycle': 'pending', 'owner': subject}
+            self.connections[row['id']] = row
+        else:
+            row = {
+                'id': f'schedule-{len(self.schedules)}',
+                **body,
+                'source_kind': self.connections[body['connection_id']]['source_kind'],
+                'lifecycle': 'enabled',
+                'subscribers': [body['collection_key']],
+            }
+            self.schedules[row['id']] = row
+            self.schedule_owners[row['id']] = subject
+        return httpx.Response(201, json=row)
 
     def _lookup_documents(self, request, credential, subject):
         source_id = request.url.params.get('source_id')

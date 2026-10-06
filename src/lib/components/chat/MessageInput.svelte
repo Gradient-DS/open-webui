@@ -39,7 +39,8 @@
 		attachPickedDocument,
 		liveConnections,
 		matchingPickerConnection,
-		prefetchLiveConnections
+		prefetchLiveConnections,
+		relinkPrompt
 	} from '$lib/utils/live-connections';
 	import { enableLiveFamily } from '$lib/apis/cloudSync';
 	import {
@@ -1098,14 +1099,17 @@
 					files = files.map((file) =>
 						file.itemId === itemId ? { ...attached, itemId, size: reference.size } : file
 					);
-				} catch {
+				} catch (error) {
 					files = files.filter((file) => file.itemId !== itemId);
-					toast.error($i18n.t('Could not attach OneDrive file'));
+					toast.error($i18n.t(relinkPrompt(error) ?? 'Could not attach OneDrive file'));
 				}
 			}
 		} catch (error) {
 			toast.error(
-				$i18n.t(error instanceof Error ? error.message : 'Could not attach OneDrive file')
+				$i18n.t(
+					relinkPrompt(error) ??
+						(error instanceof Error ? error.message : 'Could not attach OneDrive file')
+				)
 			);
 		}
 	};

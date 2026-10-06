@@ -89,6 +89,34 @@ retry under the pod's restart policy and use `openWebui.resources`; there is no
 separate hook deadline or resource configuration. For multiple replicas, also
 enable Redis and disable the default RWO data PVC, as in the v2 example.
 
+## v1 to v2 migration Job
+
+`soevApi.migrate.enabled` renders a plain `batch/v1` Job (not a Helm hook)
+named `<release>-v2-migrate-<hash>`. The hash covers the whole `soevApi.migrate`
+block (config, model map, migration id, mode, tuning and the pinned
+`soevApi.migrate.image.tag`) and `extraEnv`, which is everything the immutable
+pod template takes from values. An app image bump therefore leaves the
+finished Job alone; a migrate change starts a new run. Every step is
+idempotent, and the once-only steps (config switch, model ids, sign-out) are
+skipped on later runs with the same `soevApi.migrate.id`.
+
+The Job runs `python -m open_webui.soev.migrate --<mode>` with the app's
+ConfigMap, secrets, `extraEnv` and data volume, plus `ENABLE_DB_MIGRATIONS=true`
+so the app schema is current. The migration keeps its own state outside
+Alembic (schema `owui_v2_migration`), so the database stays at the v1 Alembic
+head. `soevApi.migrate.config` becomes `SOEV_V2_CONFIG` and `modelMap` becomes
+`SOEV_V2_MODEL_MAP`. Exit 1 (soev-api unreachable, collection mismatch) and 75
+(ingest still running) are retried with Kubernetes' capped exponential backoff
+up to `backoffLimit`; exit 2 (invalid input) fails the Job at once. The
+finished Job is kept by default: with `ttlSecondsAfterFinished` set, the next
+Helm upgrade recreates it and the migration runs again. Redis must be enabled
+for the final sign-out. With an RWO data PVC the Job pod must land on the
+app's node; v2 tenants run without one.
+
+Rollback: set `mode: restore` first (the Job puts back the config snapshot and
+model ids), then revert the image and values to v1. The steps are in
+`docs/agent-api-deployment.md`.
+
 ## Render checks
 
 ```sh

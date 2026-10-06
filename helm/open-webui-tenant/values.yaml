@@ -707,6 +707,40 @@ soevApi:
   url: ""
   audience: ""
   servicePrincipal: ""
+  # One-shot v1 -> v2 migration (python -m open_webui.soev.migrate). A plain Job named
+  # <release>-v2-migrate-<hash of these values and extraEnv>: changing them starts a new
+  # run (every step is idempotent); an app image bump does not. Needs soevApi.url and Redis.
+  migrate:
+    enabled: false
+    # Pinned separately from openWebui.image.tag: the Job's pod template is immutable.
+    image:
+      tag: ""
+    mode: apply  # apply | restore (puts back the config snapshot and model ids)
+    id: v2  # Snapshot, step markers and the one-time sign-out are kept per id.
+    # SOEV_V2_CONFIG: exactly these keys (the migration refuses others).
+    config: {}
+    #   agent_api.selected_agent: soev
+    #   document_writer.enable: true
+    #   live_documents.enable: true
+    #   live_mail.enable: false
+    #   notes.enable: true
+    #   web.search.enable: true
+    #   webui.url: https://client.soev.ai
+    #   user.permissions.features: {web_search: true, notes: true}
+    # SOEV_V2_MODEL_MAP: LiteLLM model name -> soev-api catalog id. soev-api has no
+    # /v1/models with the registry model_string yet; take the pairs from the catalog.
+    modelMap: {}
+    #   zai-org/GLM-5.3: glm-5-3
+    ingestConcurrency: 4
+    # Keep polling running ingest this long before exiting 75 (retry).
+    waitSeconds: 600
+    # Kubernetes retries exit 1 (soev-api unreachable) and 75 (ingest running) with
+    # exponential backoff capped at 6 min; exit 2 (invalid input) fails the Job at once.
+    backoffLimit: 60
+    # Unset keeps the finished Job; once a TTL removes it, the next Helm upgrade
+    # recreates it and the migration runs again (harmless, but not free).
+    ttlSecondsAfterFinished: null
+    resources: {}
 agentApi:
   # Unset uses the application's v1 default; explicitly set v1 or v2.
   runtime: ""

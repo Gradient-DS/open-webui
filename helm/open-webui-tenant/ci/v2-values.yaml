@@ -6,6 +6,21 @@ soevApi:
   url: http://soev-api:8000
   audience: soev-api
   servicePrincipal: open-webui
+  migrate:
+    enabled: true
+    image:
+      tag: v2-migrate-test
+    config:
+      agent_api.selected_agent: soev
+      document_writer.enable: true
+      live_documents.enable: true
+      live_mail.enable: true
+      notes.enable: true
+      web.search.enable: true
+      webui.url: https://v2.soev.ai
+      user.permissions.features: {web_search: true, notes: true}
+    modelMap:
+      zai-org/GLM-5.3: glm-5-3
 agentApi:
   runtime: v2
 liveDocuments:

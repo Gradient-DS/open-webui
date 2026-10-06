@@ -1,0 +1,107 @@
+{{- if and .Values.openWebui.enabled .Values.soevApi.migrate.enabled }}
+{{- $migrate := .Values.soevApi.migrate }}
+{{- if not .Values.soevApi.url }}
+{{- fail "soevApi.migrate.enabled needs soevApi.url" }}
+{{- end }}
+{{- if not (has $migrate.mode (list "apply" "restore")) }}
+{{- fail "soevApi.migrate.mode must be apply or restore" }}
+{{- end }}
+{{- if and (eq $migrate.mode "apply") (not $migrate.config) }}
+{{- fail "soevApi.migrate.config must hold the v2 config key set" }}
+{{- end }}
+{{- if not $migrate.image.tag }}
+{{- fail "soevApi.migrate.image.tag must pin the image the migration runs with" }}
+{{- end }}
+{{- $hash := printf "%s|%s" (toJson $migrate) (toJson .Values.extraEnv) | sha256sum | trunc 10 }}
+# [Gradient] Plain Job, not a Helm hook: Flux applies it beside the app and Kubernetes
+# retries it until soev-api answers and ingest settles. A Job's pod template is
+# immutable, so the name hashes everything the template takes from values (the migrate
+# block, with its own pinned image tag, and extraEnv) and nothing from the app image:
+# an app release leaves the finished Job alone, a migrate change starts a new one.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-v2-migrate-%s" (include "open-webui-tenant.fullname" . | trunc 40 | trimSuffix "-") $hash }}
+  labels:
+    {{- include "open-webui-tenant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: v2-migrate
+spec:
+  backoffLimit: {{ $migrate.backoffLimit }}
+  {{- with $migrate.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+  {{- end }}
+  podFailurePolicy:
+    rules:
+      - action: FailJob
+        onExitCodes:
+          containerName: migrate
+          operator: In
+          values: [2]
+  template:
+    metadata:
+      labels:
+        {{- include "open-webui-tenant.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: v2-migrate
+    spec:
+      restartPolicy: Never
+      {{- include "open-webui-tenant.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "open-webui-tenant.serviceAccountName" . }}
+      {{- with .Values.openWebui.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.openWebui.image.repository }}:{{ $migrate.image.tag }}"
+          imagePullPolicy: {{ .Values.openWebui.image.pullPolicy }}
+          {{- with .Values.openWebui.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["python", "-m", "open_webui.soev.migrate", "--{{ $migrate.mode }}"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
+          env:
+            # Brings the app schema up first; the advisory lock serializes this with
+            # the app's init container on PostgreSQL. The migration's own state lives
+            # outside Alembic, in schema owui_v2_migration.
+            - name: ENABLE_DB_MIGRATIONS
+              value: "true"
+            {{- include "open-webui-tenant.openWebui.env" . | nindent 12 }}
+            - name: SOEV_V2_MIGRATION_ID
+              value: {{ $migrate.id | quote }}
+            - name: SOEV_V2_CONFIG
+              value: {{ $migrate.config | toJson | quote }}
+            - name: SOEV_V2_MODEL_MAP
+              value: {{ $migrate.modelMap | default dict | toJson | quote }}
+            - name: SOEV_V2_INGEST_CONCURRENCY
+              value: {{ $migrate.ingestConcurrency | quote }}
+            - name: SOEV_V2_WAIT_SECONDS
+              value: {{ $migrate.waitSeconds | quote }}
+          resources:
+            {{- toYaml ($migrate.resources | default .Values.openWebui.resources) | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+      volumes:
+        - name: data
+          {{- if .Values.openWebui.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.openWebui.persistence.existingClaim | default (printf "%s-pvc" (include "open-webui-tenant.openWebui.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
