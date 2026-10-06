@@ -155,6 +155,12 @@ def _cloud_scope(provider, source):
     }
 
 
+def _picked(source):
+    """The legacy picker's name and path as the schedule's label and path; soev-api caps both at 512."""
+    names = {'label': source.get('name'), 'path': source.get('item_path')}
+    return {key: value for key, value in names.items() if isinstance(value, str) and 0 < len(value) <= 512}
+
+
 async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
     cadence = None
     for kb in rows:
@@ -169,7 +175,7 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
             print(f'{kb.id}: {reason}, cloud sync skipped')
             continue
         sources = (kb.meta or {}).get(f'{kb.type}_sync', {}).get('sources', [])
-        scopes = [_cloud_scope(kb.type, source) for source in sources]
+        scopes = [(_cloud_scope(kb.type, source), _picked(source)) for source in sources]
         if cadence is None:
             # W3 removed the old tenant interval settings; preview must not fetch policy.
             cadence = (
@@ -189,7 +195,7 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
         connection_id = f'<connection:{kb.id}>' if dry_run else connection['id']
         if not scopes:
             print(f'{kb.id}: no cloud sources, no schedules created')
-        for index, scope in enumerate(scopes):
+        for index, (scope, picked) in enumerate(scopes):
             for offset, kind in enumerate(('content', 'acl_refresh')):
                 await _send(
                     client,
@@ -199,6 +205,7 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
                         'connection_id': connection_id,
                         'kind': kind,
                         'scope': scope,
+                        **picked,
                         'cadence_minutes': cadence,
                         'collection_key': kb.id,
                     },

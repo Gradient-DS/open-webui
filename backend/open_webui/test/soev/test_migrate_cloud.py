@@ -38,7 +38,8 @@ class CloudApi(FakeSoevApi):
             self.connections[connection_id] = row
             self.connection_owners[connection_id] = subject
         else:
-            assert set(body) == {'connection_id', 'kind', 'scope', 'cadence_minutes', 'collection_key'}
+            assert {'connection_id', 'kind', 'scope', 'cadence_minutes', 'collection_key'} <= set(body)
+            assert set(body) <= {'connection_id', 'kind', 'scope', 'label', 'path', 'cadence_minutes', 'collection_key'}
             connection_id = body['connection_id']
             assert self.connection_owners[connection_id] == subject
             self._collection(body['collection_key'], credential, subject, write=True)
@@ -161,6 +162,7 @@ async def test_a_onedrive_kb_becomes_a_pending_connection_and_two_schedules(env,
         assert row['connection_id'] == 'connection-0'
         assert row['subscribers'] == [kb.id]
         assert row['cadence_minutes'] == 37
+        assert (row['label'], row['path']) == ('Source', '/Source')
         assert row['scope'] == {
             'drive_id': 'drive-1',
             'item_id': 'item-1',
@@ -257,6 +259,7 @@ async def test_rerun_creates_nothing_new(env, capsys):
         None,
         None,
     ]
+    assert not any('label' in row or 'path' in row for row in list(env.api.schedules.values())[:4])
     for clear_links in (False, True):
         if clear_links:
             env.identity._linked_refs.clear()
