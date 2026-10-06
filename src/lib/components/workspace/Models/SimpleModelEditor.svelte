@@ -24,8 +24,6 @@
 
 	// model = existing model when editing; null when creating fresh.
 	export let model: any = null;
-	// draft = AssistantDraft from the onboarding agent; null when not from the wizard.
-	export let draft: any = null;
 	export let edit = false;
 	// options.skipNavigate lets callers persist without the parent route
 	// navigating away — used by the "+ Add knowledge" flow, which saves
@@ -36,7 +34,7 @@
 	let loaded = false;
 	let loading = false;
 	// Snapshot of the field values at "saved" baseline. After onMount
-	// it's the just-loaded edit / draft values; after a successful save
+	// it's the just-loaded values; after a successful save
 	// it's the values that were just persisted. isDirty diffs the live
 	// snapshot against this baseline to drive the Save button.
 	let savedSnapshot: string | null = null;
@@ -44,9 +42,6 @@
 	// session — drives Share button visibility (we don't want Share to
 	// appear before there's anything to share).
 	let hasBeenSaved = false;
-	// True from the moment we kick off the auto-save until the parent
-	// navigates away. Prevents the auto-save from firing twice.
-	let autoSaving = false;
 
 	// Edited-in-the-simple-view fields:
 	let id = '';
@@ -57,7 +52,6 @@
 	let knowledge: any[] = [];
 	let toggles: AssistantToggles = togglesFromMeta({});
 	let accessGrants: any[] = [];
-	let knowledgeHint = '';
 
 	// [Gradient] Sidebar pin, right here in the assistant editor: the
 	// model selector (upstream's pin surface) is hidden behind the agent
@@ -78,10 +72,6 @@
 		settings.set({ ...$settings, pinnedModels: nextPinnedModels });
 		await updateUserSettings(localStorage.token, { ui: $settings });
 	};
-	// The selected base model id. Bound to the Model picker; seeded at
-	// mount from DEFAULT_MODELS (create) or the saved base model (edit).
-	let baseModelId = '';
-
 	// The full original model — the merge base. Advanced-only fields
 	// (params, base_model_id, toolIds, data_warnings, ...) live here
 	// untouched and are carried through on save.
@@ -99,9 +89,7 @@
 	/**
 	 * Slugify the name and avoid colliding with an existing model id.
 	 * Appends a short random suffix only when a clean slug would clash —
-	 * keeps the URL pretty for first-of-its-kind names. Belt-and-
-	 * suspenders for the wizard auto-save path where the LLM may
-	 * regenerate the same draft name across users.
+	 * keeps the URL pretty for first-of-its-kind names.
 	 */
 	const uniqueSlug = (base: string): string => {
 		const slug = slugify(base);
@@ -128,51 +116,11 @@
 			knowledge = model?.meta?.knowledge ?? [];
 			toggles = togglesFromMeta(model?.meta ?? {});
 			accessGrants = model?.access_grants ?? [];
-		} else if (draft) {
-			// Fresh assistant pre-filled by the onboarding agent.
-			name = draft.name ?? '';
-			id = uniqueSlug(name);
-			description = draft.description ?? '';
-			system = draft.system_prompt ?? '';
-			// Interview-time attachments (KBs picked + files uploaded
-			// in the InterviewChat) ride along on draft.knowledge.
-			knowledge = draft.knowledge ?? [];
-			knowledgeHint = draft.knowledge_hint ?? '';
-			toggles = {
-				web_search: !!draft.capabilities?.web_search,
-				image_generation: !!draft.capabilities?.image_generation,
-				code_interpreter: !!draft.capabilities?.code_interpreter,
-				document_writer: !!draft.capabilities?.document_writer,
-				vision: !!draft.capabilities?.vision,
-				file_upload: !!draft.capabilities?.file_upload,
-				citations: !!draft.capabilities?.citations
-			};
-			mergeBase = {
-				meta: {
-					suggestion_prompts: (draft.conversation_starters ?? []).map((c: string) => ({
-						content: c
-					}))
-				},
-				params: {}
-			};
 		}
-		// Seed the Model picker: the saved base model when editing, the
-		// DEFAULT_MODELS default when creating (fresh or from a draft).
-		baseModelId = model ? (model.base_model_id ?? '') : computeDefaultBaseModelId();
 		await tick();
 		savedSnapshot = _snapshot();
 		hasBeenSaved = !!model;
 		loaded = true;
-
-		// Auto-save when entering with a fresh interview draft so the
-		// assistant exists immediately. Manual saves only appear after
-		// real edits — see ``isDirty`` and the Save-button conditional
-		// below. The parent's onSubmit handles navigation to the edit
-		// page on success.
-		if (draft && !edit && !model) {
-			autoSaving = true;
-			submitHandler();
-		}
 	});
 
 	/** Serialise the editable fields for dirty-state diffing. */
@@ -182,7 +130,6 @@
 			name,
 			description,
 			system,
-			baseModelId,
 			profileImageUrl,
 			knowledge,
 			toggles,
@@ -197,7 +144,6 @@
 		name,
 		description,
 		system,
-		baseModelId,
 		profileImageUrl,
 		knowledge,
 		toggles,
@@ -227,7 +173,9 @@
 		info.meta = info.meta ?? {};
 		info.params = info.params ?? {};
 
-		info.base_model_id = baseModelId || computeDefaultBaseModelId();
+		// The chat's model picker chooses the LLM; base_model_id only marks
+		// the row as an assistant (see isAssistant).
+		info.base_model_id ||= computeDefaultBaseModelId();
 		if (!info.base_model_id) {
 			toast.error($i18n.t('Base Model is required.'));
 			loading = false;
@@ -252,12 +200,8 @@
 		await onSubmit(info, options);
 		// Reset the dirty baseline to the values we just persisted, so
 		// the Save button disappears until the user makes a new edit.
-		// The parent's onSubmit typically navigates after creating, so
-		// this often won't be observed for the auto-save path — but it
-		// keeps the dirty model consistent for the manual-save path too.
 		savedSnapshot = _snapshot();
 		hasBeenSaved = true;
-		autoSaving = false;
 		loading = false;
 		return true;
 	};
@@ -367,9 +311,6 @@
 
 		<div>
 			<div class="text-xs font-medium text-gray-500 mb-1">{$i18n.t('Knowledge')}</div>
-			{#if knowledgeHint}
-				<div class="text-xs text-gray-400 mb-2">💡 {knowledgeHint}</div>
-			{/if}
 			<Knowledge
 				bind:selectedItems={knowledge}
 				allowCreate
@@ -384,14 +325,14 @@
 			<CapabilityToggles bind:toggles />
 		</div>
 
-		{#if isDirty || loading || autoSaving}
+		{#if isDirty || loading}
 			<div class="flex justify-end">
 				<button
 					class="px-4 py-2 text-sm rounded-lg bg-black text-white dark:bg-white dark:text-black disabled:opacity-50"
-					disabled={loading || autoSaving}
+					disabled={loading}
 					on:click={() => submitHandler()}
 				>
-					{loading || autoSaving ? $i18n.t('Saving...') : $i18n.t('Save')}
+					{loading ? $i18n.t('Saving...') : $i18n.t('Save')}
 				</button>
 			</div>
 		{/if}
