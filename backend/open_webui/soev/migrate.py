@@ -155,8 +155,15 @@ def _cloud_scope(provider, source):
     }
 
 
+def _cloud_label(source):
+    """The legacy picked name; soev-sync replaces it with the provider's on each run."""
+    name = source.get('name') or (source.get('item_path') or '').rstrip('/').rpartition('/')[2]
+    return name[:512] or None
+
+
 async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
     cadence = None
+    connections = {}
     for kb in rows:
         if kb.id not in cloud_owners:
             continue
@@ -169,7 +176,6 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
             print(f'{kb.id}: {reason}, cloud sync skipped')
             continue
         sources = (kb.meta or {}).get(f'{kb.type}_sync', {}).get('sources', [])
-        scopes = [_cloud_scope(kb.type, source) for source in sources]
         if cadence is None:
             # W3 removed the old tenant interval settings; preview must not fetch policy.
             cadence = (
@@ -177,19 +183,24 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
                 if dry_run
                 else (await client.get('/v1/sync-policy'))['min_cadence_minutes']
             )
-        connection = await _send(
-            client,
-            'POST',
-            '/v1/connections',
-            {'source_kind': kb.type, 'credential_kind': 'user_oauth'},
-            key=f'migrate:connection:{kb.id}',
-            dry_run=dry_run,
-            as_user=owner,
-        )
-        connection_id = f'<connection:{kb.id}>' if dry_run else connection['id']
-        if not scopes:
+        # One connection per owner and provider: one reconnect restores all their KBs.
+        account = (owner, kb.type)
+        if account not in connections:
+            connection = await _send(
+                client,
+                'POST',
+                '/v1/connections',
+                {'source_kind': kb.type, 'credential_kind': 'user_oauth'},
+                key=f'migrate:connection:{owner}:{kb.type}',
+                dry_run=dry_run,
+                as_user=owner,
+            )
+            connections[account] = f'<connection:{owner}:{kb.type}>' if dry_run else connection['id']
+        connection_id = connections[account]
+        if not sources:
             print(f'{kb.id}: no cloud sources, no schedules created')
-        for index, scope in enumerate(scopes):
+        for index, source in enumerate(sources):
+            label = _cloud_label(source)
             for offset, kind in enumerate(('content', 'acl_refresh')):
                 await _send(
                     client,
@@ -198,9 +209,10 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
                     {
                         'connection_id': connection_id,
                         'kind': kind,
-                        'scope': scope,
+                        'scope': _cloud_scope(kb.type, source),
                         'cadence_minutes': cadence,
                         'collection_key': kb.id,
+                        **({'label': label} if label else {}),
                     },
                     key=f'migrate:schedule:{kb.id}:{2 * index + offset}',
                     dry_run=dry_run,
@@ -284,7 +296,8 @@ async def copy_directory(*, dry_run=False, db=None) -> Directory:
     }
     await _create_cloud_sync(rows, cloud_owners, client, conflicts=conflicts, dry_run=dry_run)
     for key in keys:
-        if key in conflicts:
+        # A cloud KB's tree comes from its sync; legacy folders would sit beside it empty.
+        if key in conflicts or key in cloud_owners:
             continue
         for path in sorted(paths[key]):
             digest = hashlib.sha256(path.encode()).hexdigest()

@@ -38,7 +38,7 @@ class CloudApi(FakeSoevApi):
             self.connections[connection_id] = row
             self.connection_owners[connection_id] = subject
         else:
-            assert set(body) == {'connection_id', 'kind', 'scope', 'cadence_minutes', 'collection_key'}
+            assert set(body) - {'label'} == {'connection_id', 'kind', 'scope', 'cadence_minutes', 'collection_key'}
             connection_id = body['connection_id']
             assert self.connection_owners[connection_id] == subject
             self._collection(body['collection_key'], credential, subject, write=True)
@@ -95,12 +95,12 @@ async def env(identity_config, fake_api, monkeypatch):
         for user_id in ('alice', 'bob'):
             await users.Users.insert_new_user(user_id, user_id, f'{user_id}@example.test', db=db)
 
-        async def seed(provider='onedrive', *, source_type='folder', owner='alice', sources=None):
+        async def seed(provider='onedrive', *, source_type='folder', owner='alice', sources=None, kb_id=None):
             source = {'type': source_type, 'item_id': 'item-1', 'name': 'Source', 'item_path': '/Source'}
             if provider == 'onedrive':
                 source['drive_id'] = 'drive-1'
             kb = knowledge.Knowledge(
-                id=f'{provider}-{owner}',
+                id=kb_id or f'{provider}-{owner}',
                 user_id=owner,
                 type=provider,
                 name='Cloud',
@@ -128,7 +128,22 @@ async def env(identity_config, fake_api, monkeypatch):
             finally:
                 event.remove(engine.sync_engine, 'before_cursor_execute', read_only)
 
-        yield SimpleNamespace(api=api, identity=identity, seed=seed, run=run)
+        async def link_file(kb, relative_path):
+            db.add(files.File(id=f'file-{kb.id}', user_id=kb.user_id, filename='a.pdf', created_at=1, updated_at=1))
+            db.add(
+                knowledge.KnowledgeFile(
+                    id=f'link-{kb.id}',
+                    knowledge_id=kb.id,
+                    file_id=f'file-{kb.id}',
+                    user_id=kb.user_id,
+                    relative_path=relative_path,
+                    created_at=1,
+                    updated_at=1,
+                )
+            )
+            await db.commit()
+
+        yield SimpleNamespace(api=api, identity=identity, seed=seed, run=run, link_file=link_file)
     await engine.dispose()
 
 
@@ -147,6 +162,7 @@ async def test_a_onedrive_kb_becomes_a_pending_connection_and_two_schedules(env,
         assert row['connection_id'] == 'connection-0'
         assert row['collection_key'] == kb.id
         assert row['cadence_minutes'] == 37
+        assert row['label'] == 'Source'
         assert row['scope'] == {
             'drive_id': 'drive-1',
             'item_id': 'item-1',
@@ -155,7 +171,7 @@ async def test_a_onedrive_kb_becomes_a_pending_connection_and_two_schedules(env,
         }
     writes = [r for r in env.api.requests if r.url.path in {'/v1/connections', '/v1/schedules'} and r.method == 'POST']
     assert [r.headers['Idempotency-Key'] for r in writes] == [
-        f'migrate:connection:{kb.id}',
+        'migrate:connection:owui:user:alice:onedrive',
         f'migrate:schedule:{kb.id}:0',
         f'migrate:schedule:{kb.id}:1',
     ]
@@ -252,3 +268,19 @@ async def test_rerun_creates_nothing_new(env, capsys):
     schedule_reads = [r for r in env.api.requests if r.url.path == '/v1/schedules' and r.method == 'GET']
     assert all('X-Soev-Subject' in r.headers for r in schedule_reads)
     assert any('cursor' in r.url.params for r in schedule_reads)
+
+
+@pytest.mark.asyncio
+async def test_an_owners_cloud_kbs_share_one_connection_and_no_legacy_folders(env):
+    """One reconnect restores every KB of an owner; sync, not legacy folders, shapes the tree."""
+    first = await env.seed()
+    second = await env.seed(
+        sources=[{'type': 'folder', 'item_id': 'item-2', 'drive_id': 'drive-1', 'item_path': '/drive/root:/Team/Q3/'}],
+        kb_id='onedrive-second',
+    )
+    await env.link_file(first, 'Source/Sub/a.pdf')
+    assert await env.run() == 0
+    assert list(env.api.connection_owners.values()) == ['owui:user:alice']
+    labels = {row['collection_key']: row['label'] for row in env.api.schedules.values()}
+    assert labels == {first.id: 'Source', second.id: 'Q3'}
+    assert not any(r.url.path.endswith('/folders') for r in env.api.requests)
