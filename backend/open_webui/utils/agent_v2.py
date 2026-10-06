@@ -46,6 +46,8 @@ _ROOT = '/v1/chat/threads'
 _PLACEHOLDER = re.compile(r'{{(\w+)}}')
 # [Claude] The name and call id a summary of the conversation is shown under, as the agents' tool statuses name it.
 _COMPACTION = 'compaction'
+# [Claude] The thread states in which the last turn is over: the agent finished it, or the user cancelled it.
+_ENDED = frozenset({'finished', 'cancelled'})
 # [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
 TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
 
@@ -581,8 +583,8 @@ def _error(code: str, *, constraint: str | None = None, model: str | None = None
         'thread_active': 'The agent thread is already running or needs recovery.',
         'invalid_field': 'The agent could not accept this input or collection selection.',
         'service_unavailable': 'The agent service is unavailable. Please try again.',
-        'halted': 'The agent stopped because a step failed.',
-        'orphaned': 'The agent turn was interrupted and needs recovery.',
+        'failed': 'The agent stopped because a step failed.',
+        'interrupted': 'The agent turn was interrupted and needs recovery.',
     }
     message = messages.get(code, 'The agent request failed.')
     if code == 'invalid_field' and constraint == 'chat:model':
@@ -1055,7 +1057,7 @@ class AgentTurn:
                         await self.attached(event.data['payload'])
                     for source in await self.keep(event.data['payload']):
                         await self.emit('source', source)
-                if event.event == 'status' and event.data['state'] not in {'idle', 'waiting'}:
+                if event.event == 'status' and event.data['state'] not in {*_ENDED, 'waiting'}:
                     raise SoevApiError(409, 'thread_active', 'Recovery did not finish')
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
@@ -1073,7 +1075,7 @@ class AgentTurn:
                 or self.input_position is not None
                 or error.status != 409
                 or error.code != 'thread_active'
-                or 'orphaned' not in error.detail
+                or 'interrupted' not in error.detail
             ):
                 raise
             await self.resume()
@@ -1178,7 +1180,7 @@ class AgentTurn:
         await self.persist()
         chunks: list[dict[str, Any]] = []
         state = event.data.get('state')
-        if state != 'idle':
+        if state not in _ENDED:
             await self.emit('status', {'description': state or 'error', 'done': True})
         else:
             await self.summarize()
@@ -1190,7 +1192,7 @@ class AgentTurn:
                     model=self.model,
                 )
             )
-        elif state not in {'idle', 'waiting'}:
+        elif state not in {*_ENDED, 'waiting'}:
             chunks.append(_error(state or 'service_unavailable'))
         return chunks
 
