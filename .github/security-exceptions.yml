@@ -219,14 +219,18 @@ exceptions:
   # 2026-10-08 bump pymongo to 4.18.2 in pyproject.toml, uv.lock and both
   # requirements files and delete these three entries. recheck 2026-10-20 is
   # the deadline for that.
-  - id: CVE-2026-96747
+  # Keyed by GHSA alias (pip-audit matches aliases) because ids must be unique
+  # across scanners and the image scan reports the CVE ids; see the trivy
+  # entries below.
+  - id: GHSA-qx36-8mw2-4r3x
     package: pymongo
     scanner: pip-audit
     reason: >-
-      PyMongo passed a client-side-encryption data key's KMS endpoint verbatim
-      into parse_host(), which accepts any string ending in .sock as a Unix
-      socket path instead of validating it as a hostname. Fixed in 4.18.2,
-      which is inside the 14-day package cooldown until 2026-10-08.
+      CVE-2026-96747. PyMongo passed a client-side-encryption data key's KMS
+      endpoint verbatim into parse_host(), which accepts any string ending in
+      .sock as a Unix socket path instead of validating it as a hostname.
+      Fixed in 4.18.2, which is inside the 14-day package cooldown until
+      2026-10-08.
     replacement_considered: >-
       No replacement is needed; this is a deferred upgrade. 4.18.1, the newest
       release outside the cooldown, is pinned now. Exempting pymongo from the
@@ -240,14 +244,15 @@ exceptions:
     approved_by: "PENDING second review by @Gradient-DS/security"
     recheck: 2026-10-20
 
-  - id: CVE-2026-96748
+  - id: GHSA-vp6j-j7w5-5xjj
     package: pymongo
     scanner: pip-audit
     reason: >-
-      PyMongo percent-decoded the whole host section of a connection string
-      before splitting it into host:port entries, so an encoded comma or colon
-      in a hostname could redirect the connection. Fixed in 4.18.2, which is
-      inside the 14-day package cooldown until 2026-10-08.
+      CVE-2026-96748. PyMongo percent-decoded the whole host section of a
+      connection string before splitting it into host:port entries, so an
+      encoded comma or colon in a hostname could redirect the connection.
+      Fixed in 4.18.2, which is inside the 14-day package cooldown until
+      2026-10-08.
     replacement_considered: >-
       Same deferred upgrade as CVE-2026-96747: 4.18.1 is pinned now, 4.18.2
       replaces it once it clears the cooldown.
@@ -257,19 +262,52 @@ exceptions:
     approved_by: "PENDING second review by @Gradient-DS/security"
     recheck: 2026-10-20
 
-  - id: CVE-2026-96749
+  - id: GHSA-v4x9-3549-crwv
     package: pymongo
     scanner: pip-audit
     reason: >-
-      Integer overflow in the BSON encoder of PyMongo's bundled C extension
-      when a single document is built from an unusually large input. Fixed in
-      4.18.2, which is inside the 14-day package cooldown until 2026-10-08.
+      CVE-2026-96749. Integer overflow in the BSON encoder of PyMongo's
+      bundled C extension when a single document is built from an unusually
+      large input. Fixed in 4.18.2, which is inside the 14-day package
+      cooldown until 2026-10-08.
     replacement_considered: >-
       Same deferred upgrade as CVE-2026-96747: 4.18.1 is pinned now, 4.18.2
       replaces it once it clears the cooldown.
     usage_analysis: >-
       Unreachable. Nothing under backend/ imports bson or pymongo, so the C
       encoder is never invoked on any input, attacker-controlled or otherwise.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  # The image installs backend/requirements.txt, so the image scan reports
+  # the same two pymongo findings at HIGH. Cleared by the same 4.18.2 bump.
+  - id: CVE-2026-96748
+    package: pymongo (open-webui image)
+    scanner: trivy
+    reason: >-
+      Same finding as GHSA-vp6j-j7w5-5xjj, reported by the image scan. Fixed
+      only in pymongo 4.18.2, inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as GHSA-vp6j-j7w5-5xjj.
+    usage_analysis: >-
+      See GHSA-vp6j-j7w5-5xjj: nothing under backend/ imports pymongo, so no
+      connection string is ever parsed.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  - id: CVE-2026-96749
+    package: pymongo (open-webui image)
+    scanner: trivy
+    reason: >-
+      Same finding as GHSA-v4x9-3549-crwv, reported by the image scan. Fixed
+      only in pymongo 4.18.2, inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as GHSA-v4x9-3549-crwv.
+    usage_analysis: >-
+      See GHSA-v4x9-3549-crwv: nothing under backend/ imports bson or pymongo,
+      so the C encoder is never invoked.
     approved_by: "PENDING second review by @Gradient-DS/security"
     recheck: 2026-10-20
 
