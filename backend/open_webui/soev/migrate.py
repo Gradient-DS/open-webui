@@ -213,9 +213,8 @@ async def _cloud_coverage(cloud_owners, client, *, dry_run):
     if not dry_run:
         for owner in sorted({owner for owner in cloud_owners.values() if owner is not None}):
             async for schedule in client.pages('/v1/schedules', as_user=owner):
-                key = schedule['collection_key']
-                if key in cloud_owners and cloud_owners[key] == owner:
-                    scheduled.add(key)
+                # collection_key is the schedule's private corpus; the subscribing KBs are in subscribers.
+                scheduled.update(key for key in schedule['subscribers'] if cloud_owners.get(key) == owner)
     count = 'not read (dry-run)' if dry_run else len(scheduled)
     print(f'KBs with a schedule: {count} | KBs of a cloud type: {len(cloud_owners)}')
     return {key: f'{"not read" if dry_run else int(key in scheduled)} / 1' for key in cloud_owners}

@@ -43,16 +43,30 @@ class CloudApi(FakeSoevApi):
             assert self.connection_owners[connection_id] == subject
             self._collection(body['collection_key'], credential, subject, write=True)
             assert body['cadence_minutes'] >= self.min_cadence_minutes
-            schedule_id = f'schedule-{len(self.schedules)}'
-            row = {
-                'id': schedule_id,
-                **body,
-                'source_kind': self.connections[connection_id]['source_kind'],
-                'lifecycle': 'enabled',
-                'subscribers': [body['collection_key']],
-            }
-            self.schedules[schedule_id] = row
-            self.schedule_owners[schedule_id] = subject
+            # Like soev-api: one schedule per connection, kind and scope, stored under its corpus key.
+            row = next(
+                (
+                    row
+                    for row in self.schedules.values()
+                    if (row['connection_id'], row['kind'], row['scope']) == (connection_id, body['kind'], body['scope'])
+                ),
+                None,
+            )
+            if row is None:
+                schedule_id = f'schedule-{len(self.schedules)}'
+                row = {
+                    'id': schedule_id,
+                    **body,
+                    'collection_key': f'corpus-{connection_id}-{len(self.schedules)}',
+                    'source_kind': self.connections[connection_id]['source_kind'],
+                    'lifecycle': 'enabled',
+                    'subscribers': [],
+                }
+                self.schedules[schedule_id] = row
+                self.schedule_owners[schedule_id] = subject
+            elif body['collection_key'] in row['subscribers']:
+                raise Problem(409, 'schedule_exists')
+            row['subscribers'].append(body['collection_key'])
         return httpx.Response(201, json=row)
 
 
@@ -145,7 +159,7 @@ async def test_a_onedrive_kb_becomes_a_pending_connection_and_two_schedules(env,
     assert [row['kind'] for row in schedules] == ['content', 'acl_refresh']
     for row in schedules:
         assert row['connection_id'] == 'connection-0'
-        assert row['collection_key'] == kb.id
+        assert row['subscribers'] == [kb.id]
         assert row['cadence_minutes'] == 37
         assert row['scope'] == {
             'drive_id': 'drive-1',
@@ -252,3 +266,12 @@ async def test_rerun_creates_nothing_new(env, capsys):
     schedule_reads = [r for r in env.api.requests if r.url.path == '/v1/schedules' and r.method == 'GET']
     assert all('X-Soev-Subject' in r.headers for r in schedule_reads)
     assert any('cursor' in r.url.params for r in schedule_reads)
+
+
+@pytest.mark.asyncio
+async def test_coverage_counts_subscribers_not_the_corpus_key(env, capsys):
+    """Staging printed 0 schedules: soev-api stores the corpus key and lists the KB under subscribers."""
+    kb = await env.seed()
+    assert await env.run() == 0
+    assert all(row['collection_key'] != kb.id for row in env.api.schedules.values())
+    assert 'KBs with a schedule: 1 | KBs of a cloud type: 1' in capsys.readouterr().out
