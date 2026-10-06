@@ -416,7 +416,6 @@ def test_settings_are_environment_only_and_secrets_are_not_registered_or_logged(
         'SOEV_API_URL': 'https://soev.invalid',
         'SOEV_API_KEY': 'test-api-key-never-persist',
         'SOEV_API_SIGNING_KEY': '-----BEGIN PRIVATE KEY-----\ntest-signing-key\n-----END PRIVATE KEY-----\n',
-        'SOEV_API_SIGNING_KID': 'key-1',
         'SOEV_API_AUDIENCE': 'tenant-1',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
     }

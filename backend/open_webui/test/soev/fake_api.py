@@ -24,9 +24,9 @@ class FakeSoevApi:
     def __init__(self, *, page_size=200):
         self.page_size = page_size
         self.now = '2026-09-11T12:00:00Z'
-        self.credentials = {'test-runtime-key': 'owui:service:webui'}
-        self.capabilities = {'test-runtime-key': {'*'}}
-        self.credential_id = 'runtime-credential'
+        self.credentials = {'soev_test_cred-runtime_test-secret': 'owui:service:webui'}
+        self.capabilities = {'soev_test_cred-runtime_test-secret': {'*'}}
+        self.credential_id = 'cred-runtime'
         self.audience = None
         self.signing_keys: dict[str, dict] = {}
         self.collections, self.documents, self.folders = {}, {}, {}
@@ -171,7 +171,8 @@ class FakeSoevApi:
                 }
             ),
             'document_count': sum(
-                key == row['key'] and self._readable(document, subject or self.credentials['test-runtime-key'])
+                key == row['key']
+                and self._readable(document, subject or self.credentials['soev_test_cred-runtime_test-secret'])
                 for (key, _), document in self.documents.items()
             ),
             'caller_may_write': bool(self._closure(subject).intersection(row['writers'])) if subject else None,

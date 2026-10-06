@@ -277,7 +277,7 @@ async def test_the_poller_never_carries_a_subject(env):
     assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 62) == 1
     assert len(env.api.requests) == 5
     assert all('X-Soev-Subject' not in r.headers for r in env.api.requests)
-    assert all(r.headers['Authorization'] == 'Bearer test-runtime-key' for r in env.api.requests)
+    assert all(r.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret' for r in env.api.requests)
 
 
 @pytest.mark.asyncio
@@ -306,7 +306,7 @@ async def test_one_rows_failure_does_not_stop_the_tick(env, monkeypatch, caplog,
     env.events.assert_awaited_once()
     assert first.id in caplog.text
     assert ('injected_failure' if failure == 'api' else 'ValueError') in caplog.text
-    for secret in ('secret-assertion', 'secret-key', 'private.invalid', 'test-runtime-key'):
+    for secret in ('secret-assertion', 'secret-key', 'private.invalid', 'soev_test_cred-runtime_test-secret'):
         assert secret not in caplog.text
 
 

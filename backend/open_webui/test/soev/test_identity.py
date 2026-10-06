@@ -5,9 +5,6 @@ import base64
 import datetime as dt
 import json
 import logging
-import os
-import subprocess
-import sys
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid5
 
@@ -81,7 +78,7 @@ def test_the_assertion_has_the_subject_jwt_protected_header(identity_config):
     token = identity.mint_assertion('owui:user:alice', now=NOW)
     assert json.loads(decode_segment(token.split('.')[0])) == {
         'alg': 'Ed25519',
-        'kid': 'owui-test-key',
+        'kid': identity.jwk_thumbprint(identity.signing_key()),
         'typ': 'subject+jwt',
     }
 
@@ -92,7 +89,7 @@ def test_the_assertion_carries_iss_sub_aud_and_a_single_use_jti(identity_config)
     first, second = [identity.mint_assertion('owui:user:alice', now=NOW) for _ in range(2)]
     payload = claims(first)
     assert payload == {
-        'iss': 'runtime-credential',
+        'iss': 'cred-runtime',
         'sub': 'owui:user:alice',
         'aud': 'test-tenant',
         'iat': int(NOW.timestamp()),
@@ -132,7 +129,7 @@ async def test_ensure_link_is_idempotent(identity_config, identity_http):
     assert request.method == 'POST'
     assert request.url.path == '/v1/identity/links'
     assert request.headers['Idempotency-Key'] == 'link:owui:user:alice'
-    assert request.headers['Authorization'] == 'Bearer test-runtime-key'
+    assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
     assert 'X-Soev-Subject' not in request.headers
     body = json.loads(request.content)
     assert set(body) == {'platform_user_id', 'assertion'}
@@ -213,23 +210,71 @@ async def test_the_private_key_never_reaches_a_log_record(identity_config, ident
     exposed = caplog.text + repr([vars(record) for record in caplog.records])
     for secret in (
         identity.config.SOEV_API_SIGNING_KEY,
-        'test-runtime-key',
+        'soev_test_cred-runtime_test-secret',
         json.loads(requests[0].content)['assertion'],
     ):
         assert secret not in exposed
 
 
-@pytest.mark.parametrize('credential_id', ['', 'deployment-credential'])
-def test_the_credential_id_setting_is_deployment_only(tmp_path, credential_id):
-    """The issuer setting comes from the environment without database registration."""
-    environment = dict(os.environ, DATABASE_URL=f'sqlite:///{tmp_path}/config.db', VECTOR_DB='weaviate')
-    for name in ('TYPE', 'USER', 'PASSWORD', 'HOST', 'PORT', 'NAME'):
-        environment[f'DATABASE_{name}'] = ''
-    environment['SOEV_API_CREDENTIAL_ID'] = credential_id
-    code = (
-        'import os; from open_webui import config; '
-        'assert config.SOEV_API_CREDENTIAL_ID == os.environ["SOEV_API_CREDENTIAL_ID"]; '
-        'assert not any(key.startswith("soev_api.") for key in config.DEFAULT_CONFIG)'
-    )
-    result = subprocess.run([sys.executable, '-c', code], env=environment, capture_output=True, text=True, check=False)
-    assert result.returncode == 0, result.stderr
+@pytest.mark.parametrize('secret', ['secret', 'secret_with_underscores'])
+def test_credential_id_from_key(identity_config, secret):
+    identity, _ = identity_config
+    assert identity.credential_id_from_key(f'soev_test_cred-example_{secret}') == 'cred-example'
+
+
+@pytest.mark.parametrize(
+    'key',
+    [
+        '',
+        'soev',
+        'soev_test_cred-example',
+        'other_test_cred-example_secret',
+        '_test_cred-example_secret',
+        'soev__cred-example_secret',
+        'soev_test__secret',
+        'soev_test_cred-example_',
+        'soev_test_example_secret',
+    ],
+)
+def test_malformed_credential_keys_are_rejected(identity_config, key):
+    identity, _ = identity_config
+    with pytest.raises(ValueError, match='SOEV_API_KEY must have the form'):
+        identity.credential_id_from_key(key)
+
+
+def test_rfc_8037_thumbprint_vector(identity_config, monkeypatch):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    identity, _ = identity_config
+    private_key = Ed25519PrivateKey.from_private_bytes(decode_segment('nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A'))
+    public = private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    assert base64.urlsafe_b64encode(public).decode().rstrip('=') == '11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo'
+    kid = 'kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k'
+    assert identity.jwk_thumbprint(private_key) == kid
+    pem = private_key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    ).decode()
+    monkeypatch.setattr(identity.config, 'SOEV_API_SIGNING_KEY', pem)
+    monkeypatch.setattr(identity.config, 'SOEV_API_KEY', 'soev_test_cred-vector_secret_with_underscores')
+    header, payload, signature = identity.mint_assertion('owui:user:alice', now=NOW).split('.')
+    assert json.loads(decode_segment(header)) == {'alg': 'Ed25519', 'kid': kid, 'typ': 'subject+jwt'}
+    assert json.loads(decode_segment(payload))['iss'] == 'cred-vector'
+    private_key.public_key().verify(decode_segment(signature), f'{header}.{payload}'.encode())
+
+
+def test_startup_warms_the_assertion_caches(identity_config, monkeypatch):
+    from unittest.mock import Mock
+
+    identity, _ = identity_config
+    identity.credential_id_from_key.cache_clear()
+    identity._load_signing_key.cache_clear()
+    identity.jwk_thumbprint.cache_clear()
+    load = Mock(wraps=identity.serialization.load_pem_private_key)
+    monkeypatch.setattr(identity.serialization, 'load_pem_private_key', load)
+    identity.validate_config()
+    for _ in range(2):
+        identity.mint_assertion('owui:user:alice', now=NOW)
+    assert load.call_count == 1
+    assert identity.credential_id_from_key.cache_info().misses == 1
+    assert identity.jwk_thumbprint.cache_info().misses == 1

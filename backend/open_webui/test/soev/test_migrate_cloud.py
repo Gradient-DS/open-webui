@@ -63,7 +63,7 @@ async def env(identity_config, fake_api, monkeypatch):
     api = CloudApi()
     api.signing_keys = fake_api.signing_keys
     api.audience = fake_api.audience
-    api.capabilities['test-runtime-key'] = {'connect', 'directory', 'read', 'write'}
+    api.capabilities['soev_test_cred-runtime_test-secret'] = {'connect', 'directory', 'read', 'write'}
     original_client = httpx.AsyncClient
     monkeypatch.setattr(
         'open_webui.soev.client.httpx.AsyncClient',
@@ -218,7 +218,7 @@ async def test_dry_run_sends_nothing(env, capsys):
     assert all(row['body']['cadence_minutes'] == '<sync-policy.min_cadence_minutes>' for row in schedules)
     assert all(row['body']['connection_id'].startswith('<connection:') for row in schedules)
     assert 'KBs with a schedule: not read (dry-run) | KBs of a cloud type: 3' in output
-    assert 'test-runtime-key' not in output and 'PRIVATE KEY' not in output and 'eyJ' not in output
+    assert 'soev_test_cred-runtime_test-secret' not in output and 'PRIVATE KEY' not in output and 'eyJ' not in output
 
 
 @pytest.mark.asyncio

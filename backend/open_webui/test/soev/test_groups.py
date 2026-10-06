@@ -92,7 +92,7 @@ def directory_http(monkeypatch):
         group_ref = request.url.path[len(prefix) : -len('/members')]
         assert group_ref.startswith('owui:group:')
         assert request.url.raw_path == f'{prefix}{quote(group_ref, safe="")}/members'.encode()
-        assert request.headers['Authorization'] == 'Bearer test-runtime-key'
+        assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
         assert 'X-Soev-Subject' not in request.headers
         operation = request.headers['Idempotency-Key']
         assert 8 <= len(operation) <= 255
@@ -107,7 +107,7 @@ def directory_http(monkeypatch):
                 raise failure
             return httpx.Response(
                 failure,
-                json={'code': 'test_failure', 'detail': 'test-runtime-key reflected-secret'},
+                json={'code': 'test_failure', 'detail': 'soev_test_cred-runtime_test-secret reflected-secret'},
                 headers={'Content-Type': 'application/problem+json'},
             )
         if operation in state.operations:
@@ -298,7 +298,7 @@ async def test_a_failed_push_is_logged_and_never_fails_the_owui_write(group_stor
     assert records[0].exc_info is None
     exposed = caplog.text + repr([vars(record) for record in records])
     assert 'reflected-secret' not in exposed
-    assert 'test-runtime-key' not in exposed
+    assert 'soev_test_cred-runtime_test-secret' not in exposed
     assert 'owui:user:' not in exposed
 
 

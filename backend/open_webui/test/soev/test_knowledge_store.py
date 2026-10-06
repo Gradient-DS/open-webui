@@ -348,7 +348,7 @@ async def test_a_listing_reads_schedules_once(env, monkeypatch, method, args, ex
     await env.identity.ensure_link('owui:user:bob', env.client)
     schedule(env, 'foreign', 'kb', 'onedrive', owner='bob')
     monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:bob' if explicit_user else 'owui:user:alice')
-    env.api.capabilities['test-runtime-key'] = {'connect'}
+    env.api.capabilities['soev_test_cred-runtime_test-secret'] = {'connect'}
     env.api.page_size = page_size
     env.api.requests.clear()
     result = await getattr(env.store, method)(*args)

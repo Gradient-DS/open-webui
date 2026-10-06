@@ -33,6 +33,24 @@ AGENT_API_AGENTS=agent-one,agent-two
 
 By default the agent (persona) is selected server-side via `default_agent` in the agent service config. Deployments that expose multiple agents behind one `AGENT_API_KEY` can optionally use `AGENT_API_AGENTS` + the "External Agents" admin tab to let admins switch without a redeploy.
 
+## soev-api caller identity (v2)
+
+soev-api declares the credential at startup; Open WebUI derives the credential id from `SOEV_API_KEY` and the signing kid from `SOEV_API_SIGNING_KEY` (RFC 7638 JWK thumbprint).
+
+Deployment generates the soev key and an Ed25519 key pair. Configure soev-api with
+`SOEV_API_BOOTSTRAP__OWUI__KEY`, `SOEV_API_BOOTSTRAP__OWUI__PUBLIC_KEY`, and
+`SOEV_API_BOOTSTRAP__OWUI__PRINCIPAL`, and configure Open WebUI with:
+
+| Variable | Value |
+| --- | --- |
+| `SOEV_API_URL` | soev-api base URL |
+| `SOEV_API_KEY` | The same `soev_<env>_<cred-id>_<secret>` caller key |
+| `SOEV_API_SIGNING_KEY` | Unencrypted Ed25519 private key PEM, preserving newlines |
+| `SOEV_API_AUDIENCE` | The deployment's assertion audience |
+| `SOEV_API_SERVICE_PRINCIPAL` | The declared Open WebUI service principal |
+
+When `SOEV_API_URL` is set, Open WebUI validates both keys during startup and refuses to start if either is malformed.
+
 ## What Changes When Enabled
 
 | Capability                | Stock OpenWebUI                                    | With Agent API                                           |
