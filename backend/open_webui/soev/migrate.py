@@ -155,10 +155,42 @@ def _cloud_scope(provider, source):
     }
 
 
-def _cloud_label(source):
-    """The legacy picked name; soev-sync replaces it with the provider's on each run."""
-    name = source.get('name') or (source.get('item_path') or '').rstrip('/').rpartition('/')[2]
-    return name[:512] or None
+def _picked(source):
+    """The legacy picker's name and path as the schedule's label and path; soev-api caps both at 512."""
+    names = {'label': source.get('name'), 'path': source.get('item_path')}
+    return {key: value for key, value in names.items() if isinstance(value, str) and 0 < len(value) <= 512}
+
+
+async def _subscribe(client, key, connection_id, scope, picked, cadence, *, owner, dry_run):
+    from open_webui.soev.client import SoevApiError
+
+    # [Gradient] Keyed by scope, not position: soev-api derives the schedule id from the key,
+    # so a key that names another scope after the sources change is refused as reused.
+    digest = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
+    for kind in ('content', 'acl_refresh'):
+        body = {
+            'connection_id': connection_id,
+            'kind': kind,
+            'scope': scope,
+            **picked,
+            'cadence_minutes': cadence,
+            'collection_key': key,
+        }
+        try:
+            await _send(
+                client,
+                'POST',
+                '/v1/schedules',
+                body,
+                key=f'migrate:schedule:{key}:{kind}:{digest}',
+                dry_run=dry_run,
+                as_user=owner,
+            )
+        except SoevApiError as error:
+            # The KB already subscribes this scope under another key (an earlier run or the UI).
+            if (error.status, error.code) != (409, 'schedule_exists'):
+                raise
+            print(f'{key}: {kind} schedule exists for this scope; kept')
 
 
 async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
@@ -176,6 +208,7 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
             print(f'{kb.id}: {reason}, cloud sync skipped')
             continue
         sources = (kb.meta or {}).get(f'{kb.type}_sync', {}).get('sources', [])
+        scopes = [(_cloud_scope(kb.type, source), _picked(source)) for source in sources]
         if cadence is None:
             # W3 removed the old tenant interval settings; preview must not fetch policy.
             cadence = (
@@ -197,27 +230,10 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
             )
             connections[account] = f'<connection:{owner}:{kb.type}>' if dry_run else connection['id']
         connection_id = connections[account]
-        if not sources:
+        if not scopes:
             print(f'{kb.id}: no cloud sources, no schedules created')
-        for index, source in enumerate(sources):
-            label = _cloud_label(source)
-            for offset, kind in enumerate(('content', 'acl_refresh')):
-                await _send(
-                    client,
-                    'POST',
-                    '/v1/schedules',
-                    {
-                        'connection_id': connection_id,
-                        'kind': kind,
-                        'scope': _cloud_scope(kb.type, source),
-                        'cadence_minutes': cadence,
-                        'collection_key': kb.id,
-                        **({'label': label} if label else {}),
-                    },
-                    key=f'migrate:schedule:{kb.id}:{2 * index + offset}',
-                    dry_run=dry_run,
-                    as_user=owner,
-                )
+        for scope, picked in scopes:
+            await _subscribe(client, kb.id, connection_id, scope, picked, cadence, owner=owner, dry_run=dry_run)
 
 
 async def _cloud_coverage(cloud_owners, client, *, dry_run):
@@ -225,9 +241,8 @@ async def _cloud_coverage(cloud_owners, client, *, dry_run):
     if not dry_run:
         for owner in sorted({owner for owner in cloud_owners.values() if owner is not None}):
             async for schedule in client.pages('/v1/schedules', as_user=owner):
-                key = schedule['collection_key']
-                if key in cloud_owners and cloud_owners[key] == owner:
-                    scheduled.add(key)
+                # collection_key is the schedule's private corpus; the subscribing KBs are in subscribers.
+                scheduled.update(key for key in schedule['subscribers'] if cloud_owners.get(key) == owner)
     count = 'not read (dry-run)' if dry_run else len(scheduled)
     print(f'KBs with a schedule: {count} | KBs of a cloud type: {len(cloud_owners)}')
     return {key: f'{"not read" if dry_run else int(key in scheduled)} / 1' for key in cloud_owners}
@@ -374,6 +389,8 @@ def _print_ingest(state, *, prefix: str) -> None:
 def _print_model_report(report, *, prefix: str) -> None:
     for site, count in sorted(report.changed.items()):
         print(f'{prefix}: {site} {count}')
+    for line in report.merged:
+        print(f'{prefix}: merged {line}')
     for line in report.skipped:
         print(f'{prefix}: skipped {line}')
     for model_id, count in sorted(report.unmapped.items()):
@@ -510,6 +527,16 @@ async def plan(options: Options, *, db=None) -> int:
     )
 
 
+def _failure(error: Exception) -> str:
+    """The failing call and soev-api's problem fields; never tokens, bodies or assertions."""
+    from open_webui.soev.client import SoevApiError
+
+    if not isinstance(error, SoevApiError):
+        return type(error).__name__
+    call = f'{error.method} {error.path} -> ' if error.method else ''
+    return f'{call}{error.status} {error.code}: {error.detail} (constraint: {error.constraint})'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -539,8 +566,8 @@ def main():
     except MigrationError as error:
         print(f'Migration aborted: {error}', file=sys.stderr)
         raise SystemExit(EXIT_INVALID) from None
-    except (SoevApiError, httpx.TransportError, ValueError):
-        print('Migration aborted; reconciliation could not complete.', file=sys.stderr)
+    except (SoevApiError, httpx.TransportError, ValueError) as error:
+        print(f'Migration aborted; reconciliation could not complete: {_failure(error)}', file=sys.stderr)
         raise SystemExit(EXIT_FAILED) from None
     raise SystemExit(status)
 

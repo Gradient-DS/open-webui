@@ -49,6 +49,7 @@ class Report:
     changed: Counter = field(default_factory=Counter)
     unmapped: Counter = field(default_factory=Counter)
     skipped: list[str] = field(default_factory=list)
+    merged: list[str] = field(default_factory=list)
 
 
 class _Rewrite:
@@ -128,19 +129,54 @@ class _Rewrite:
                 continue
             new = self.mapping[model_id]
             if new in existing:
-                self.report.skipped.append(f'model {model_id}: a model {new} already exists')
+                await self.merge_model(model_id, new)
                 continue
             self.map(site, new, [], model_id)
             if self.dry_run:
                 continue
             await self.db.execute(sa.update(Model).where(Model.id == model_id).values(id=new))
-            grants = sa.select(AccessGrant.id).where(
-                AccessGrant.resource_type == 'model', AccessGrant.resource_id == model_id
-            )
-            for grant_id in (await self.db.execute(grants)).scalars().all():
-                self.map('access_grant.resource_id', grant_id, [], model_id)
-                await self.db.execute(sa.update(AccessGrant).where(AccessGrant.id == grant_id).values(resource_id=new))
+            await self.move_grants(model_id, new)
         await self._flush()
+
+    async def move_grants(self, model_id: str, new: str) -> int:
+        """Point the model's grants at the new id, leaving any the target already holds."""
+        target = sa.select(AccessGrant.principal_type, AccessGrant.principal_id, AccessGrant.permission).where(
+            AccessGrant.resource_type == 'model', AccessGrant.resource_id == new
+        )
+        held = set((await self.db.execute(target)).all())
+        grants = sa.select(AccessGrant.id, AccessGrant.principal_type, AccessGrant.principal_id, AccessGrant.permission)
+        grants = grants.where(AccessGrant.resource_type == 'model', AccessGrant.resource_id == model_id)
+        moved = 0
+        for grant_id, *principal in (await self.db.execute(grants.order_by(AccessGrant.id))).all():
+            if tuple(principal) in held:
+                continue
+            moved += 1
+            self.map('access_grant.resource_id', grant_id, [], model_id)
+            if not self.dry_run:
+                await self.db.execute(sa.update(AccessGrant).where(AccessGrant.id == grant_id).values(resource_id=new))
+        return moved
+
+    async def merge_model(self, model_id: str, new: str) -> None:
+        """[Gradient] The catalog row exists: keep it, give it the legacy grants, deactivate the legacy row."""
+        moved = await self.move_grants(model_id, new)
+        active = (await self.db.execute(sa.select(Model.is_active).where(Model.id == model_id))).scalar()
+        if active is not False:
+            self.report.changed['model.is_active'] += 1
+            if not self.dry_run:
+                self.records.append(
+                    {
+                        'migration_id': self.migration_id,
+                        'site': 'model.is_active',
+                        'row_id': model_id,
+                        'path': '[]',
+                        'old_value': json.dumps(active),
+                        'new_value': 'false',
+                        'created_at': self.now,
+                    }
+                )
+                await self.db.execute(sa.update(Model).where(Model.id == model_id).values(is_active=False))
+        state = 'deactivated' if active is not False else 'already inactive'
+        self.report.merged.append(f'model {model_id}: {new} exists; {moved} grants moved to it, {model_id} {state}')
 
     async def json_rows(self, site: str, table, column: str, rewrite) -> None:
         attribute, last = getattr(table, column), None
@@ -252,6 +288,19 @@ async def _restore_rename(db: AsyncSession, row_id: str, entries, report: Report
     report.changed['model.id'] += 1
 
 
+async def _restore_active(db: AsyncSession, row_id: str, entries, report: Report) -> None:
+    (entry,) = entries
+    result = await db.execute(
+        sa.update(Model)
+        .where(Model.id == row_id, Model.is_active.is_(False))
+        .values(is_active=json.loads(entry.old_value))
+    )
+    if result.rowcount:
+        report.changed['model.is_active'] += 1
+    else:
+        report.skipped.append(f'model.is_active {row_id}: changed since')
+
+
 async def _restore_column(db: AsyncSession, site: str, row_id: str, entries, report: Report) -> None:
     table, column = _COLUMN_SITES[site]
     (entry,) = entries
@@ -295,6 +344,8 @@ async def restore(db: AsyncSession, migration_id: str) -> Report:
     for (site, row_id), entries in sorted(by_row.items()):
         if site == 'model.id':
             await _restore_rename(db, row_id, entries, report)
+        elif site == 'model.is_active':
+            await _restore_active(db, row_id, entries, report)
         elif site in _COLUMN_SITES:
             await _restore_column(db, site, row_id, entries, report)
         else:

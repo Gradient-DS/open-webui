@@ -132,6 +132,9 @@ class SoevApiError(Exception):
         self.constraint = constraint
         self.provider = provider
         self.retry_after = retry_after
+        # [Gradient] The failing call, without query, body or credentials; set where _request raises.
+        self.method: str | None = None
+        self.path: str | None = None
 
 
 def _response_error(response: httpx.Response) -> SoevApiError:
@@ -394,6 +397,7 @@ class SoevClient:
             headers['Idempotency-Key'] = idempotency_key
         started = time.perf_counter()
         status = None
+        route = path.split('?', 1)[0]
         try:
             response = await _shared_client().request(
                 method,
@@ -407,24 +411,40 @@ class SoevClient:
             status = response.status_code
         except httpx.TransportError as error:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502
-            log.warning('soev-api transport failure', extra={'status': status, 'request_id': None})
-            raise SoevApiError(status, 'upstream_error', 'soev-api request failed') from None
+            log.warning(
+                'soev-api transport failure %s %s %s',
+                method,
+                route,
+                status,
+                extra={'status': status, 'request_id': None},
+            )
+            failure = SoevApiError(status, 'upstream_error', 'soev-api request failed')
+            failure.method, failure.path = method, route
+            raise failure from None
         finally:
             # [Gradient] The deployed formatter renders the message only, so the timing rides in it.
             log.debug(
                 'soev-api request %s %s %s %.1fms',
                 method,
-                path.split('?', 1)[0],
+                route,
                 status,
                 (time.perf_counter() - started) * 1000,
             )
+        request_id = response.headers.get('X-Request-ID')
+        # [Gradient] Status and request id ride in the message; the deployed formatter drops extra.
         log.log(
             logging.INFO if response.is_success else logging.WARNING,
-            'soev-api response',
-            extra={'status': response.status_code, 'request_id': response.headers.get('X-Request-ID')},
+            'soev-api response %s %s %s request_id=%s',
+            method,
+            route,
+            response.status_code,
+            request_id,
+            extra={'status': response.status_code, 'request_id': request_id},
         )
         if not response.is_success:
-            raise _response_error(response)
+            error = _response_error(response)
+            error.method, error.path = method, route
+            raise error
         return response
 
     @staticmethod
