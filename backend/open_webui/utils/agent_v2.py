@@ -881,9 +881,14 @@ class AgentTurn:
         return anchors
 
     async def summary(self, event: ChatEvent) -> list[dict[str, Any]]:
-        """[Claude] Show the agent summarising the conversation as a call named `compaction`: running on
-        `compacting`, done when the root stream's `compaction` event lands. It is not counted as a tool call."""
-        if event.event == 'compacting':
+        """[Claude] Show the agent summarising the conversation as a call named `compaction`: running from a
+        `calling` that produces a `compaction`, done at the next `calling`, when the answer written from the summary
+        starts, or when the root stream's `compaction` event lands, whichever comes first. It is not counted as a
+        tool call."""
+        if event.event == 'calling':
+            if event.data.get('produces') != _COMPACTION:
+                self.end_tool({'call_id': _COMPACTION})
+                return []
             self.running[_COMPACTION] = (_COMPACTION, {})
             status = self.tool_status(_COMPACTION, {})
             await self.emit('status', {**status, 'call_id': _COMPACTION, 'done': False})
@@ -1114,7 +1119,7 @@ class AgentTurn:
         if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
             await self.record_output(payload, attached=event.event == 'attached')
             return []
-        if event.event in {'compacting', 'compaction'}:
+        if event.event in {'calling', 'compaction'}:
             return await self.summary(event)
         if event.event == 'budget_exceeded' and event.data.get('stream') == 'root':
             self.stop_tools()

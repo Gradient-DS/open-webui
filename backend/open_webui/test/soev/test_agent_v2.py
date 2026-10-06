@@ -1543,18 +1543,25 @@ async def test_a_call_shows_done_once_the_model_thinks_again() -> None:
     ]
 
 
+SUMMARY_STATUSES = {
+    'compaction': {
+        'running': {'template': 'Summarising...', 'params': {}},
+        'done': {'template': 'Summarised', 'params': {}},
+    }
+}
+
+
+def calling(produces: str) -> ChatEvent:
+    return ChatEvent('calling', {'model': 'm', 'node': 'llm', 'produces': produces})
+
+
 @pytest.mark.asyncio
 async def test_a_summary_of_the_conversation_shows_running_then_done_when_it_lands() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
-    turn.tool_statuses = {
-        'compaction': {
-            'running': {'template': 'Summarising...', 'params': {}},
-            'done': {'template': 'Summarised', 'params': {}},
-        }
-    }
+    turn.tool_statuses = SUMMARY_STATUSES
     async with asyncio.timeout(2):
-        started = await render(turn, ChatEvent('compacting', {}))
+        started = await render(turn, calling('compaction'))
         ended = await render(turn, ChatEvent('compaction', {'stream': 'root', 'payload': {'summary': 'kort'}}))
         # A finished call shows done once the model moves on.
         await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
@@ -1567,6 +1574,33 @@ async def test_a_summary_of_the_conversation_shows_running_then_done_when_it_lan
     assert '<details type="tool_calls"' in content(started)
     assert '<details type="tool_calls"' not in content(ended)
     assert 'kort' not in content(ended)
+
+
+@pytest.mark.asyncio
+async def test_a_summary_ends_when_the_answer_written_from_it_starts() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    turn.tool_statuses = SUMMARY_STATUSES
+    async with asyncio.timeout(2):
+        await render(turn, calling('compaction'))
+        await render(turn, calling('model_output'))
+        await render(turn, ChatEvent('delta', {'text': 'Antwoord'}))
+        await render(turn, ChatEvent('compaction', {'stream': 'root', 'payload': {'summary': 'kort'}}))
+    shown = [call.args[0]['data'] for call in turn.emitter.call_args_list]
+    assert [(status['description'], status['done']) for status in shown] == [
+        ('Summarising...', False),
+        ('Summarised', True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_model_call_that_writes_no_summary_shows_no_status() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    async with asyncio.timeout(2):
+        shown = await render(turn, calling('model_output'))
+    assert shown == []
+    turn.emitter.assert_not_called()
 
 
 @pytest.mark.asyncio
