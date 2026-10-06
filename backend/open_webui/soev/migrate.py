@@ -161,6 +161,38 @@ def _picked(source):
     return {key: value for key, value in names.items() if isinstance(value, str) and 0 < len(value) <= 512}
 
 
+async def _subscribe(client, key, connection_id, scope, picked, cadence, *, owner, dry_run):
+    from open_webui.soev.client import SoevApiError
+
+    # [Gradient] Keyed by scope, not position: soev-api derives the schedule id from the key,
+    # so a key that names another scope after the sources change is refused as reused.
+    digest = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
+    for kind in ('content', 'acl_refresh'):
+        body = {
+            'connection_id': connection_id,
+            'kind': kind,
+            'scope': scope,
+            **picked,
+            'cadence_minutes': cadence,
+            'collection_key': key,
+        }
+        try:
+            await _send(
+                client,
+                'POST',
+                '/v1/schedules',
+                body,
+                key=f'migrate:schedule:{key}:{kind}:{digest}',
+                dry_run=dry_run,
+                as_user=owner,
+            )
+        except SoevApiError as error:
+            # The KB already subscribes this scope under another key (an earlier run or the UI).
+            if (error.status, error.code) != (409, 'schedule_exists'):
+                raise
+            print(f'{key}: {kind} schedule exists for this scope; kept')
+
+
 async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
     cadence = None
     for kb in rows:
@@ -195,24 +227,8 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
         connection_id = f'<connection:{kb.id}>' if dry_run else connection['id']
         if not scopes:
             print(f'{kb.id}: no cloud sources, no schedules created')
-        for index, (scope, picked) in enumerate(scopes):
-            for offset, kind in enumerate(('content', 'acl_refresh')):
-                await _send(
-                    client,
-                    'POST',
-                    '/v1/schedules',
-                    {
-                        'connection_id': connection_id,
-                        'kind': kind,
-                        'scope': scope,
-                        **picked,
-                        'cadence_minutes': cadence,
-                        'collection_key': kb.id,
-                    },
-                    key=f'migrate:schedule:{kb.id}:{2 * index + offset}',
-                    dry_run=dry_run,
-                    as_user=owner,
-                )
+        for scope, picked in scopes:
+            await _subscribe(client, kb.id, connection_id, scope, picked, cadence, owner=owner, dry_run=dry_run)
 
 
 async def _cloud_coverage(cloud_owners, client, *, dry_run):
