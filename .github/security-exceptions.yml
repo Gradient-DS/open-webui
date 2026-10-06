@@ -272,3 +272,77 @@ exceptions:
       encoder is never invoked on any input, attacker-controlled or otherwise.
     approved_by: "PENDING second review by @Gradient-DS/security"
     recheck: 2026-10-20
+
+  # ------------------------------------------------------------------- npm
+  # Both fixes below exist but were published inside the 14-day window that
+  # the required lockfile-age check enforces. NOT §7 exceptions — DEFERRED
+  # UPGRADES with a recheck tied to the date the fix becomes installable.
+  - id: GHSA-wq5f-xc86-pv6w
+    package: sharp
+    scanner: npm
+    reason: >-
+      sharp's bundled libvips ships a librsvg affected by CVE-2026-96889. Fixed
+      in sharp 0.35.5, published 2026-09-27; lockfile-age refuses it until
+      2026-10-11. On or after that date raise the existing
+      overrides["@huggingface/transformers"].sharp in package.json to ^0.35.5,
+      relock, and delete this entry and the kokoro-js entry below.
+    replacement_considered: >-
+      No replacement is needed; this is a deferred upgrade. Every sharp release
+      before 0.35.5 is affected, so no older pin helps. Taking 0.35.5 early
+      would fail the lockfile-age supply-chain gate for a package the shipped
+      app never loads.
+    usage_analysis: >-
+      sharp arrives only as a dependency of @huggingface/transformers (and,
+      through it, kokoro-js), which the frontend runs in the browser for
+      Whisper speech-to-text and Kokoro TTS workers. The package's browser
+      export (dist/transformers.web.js) marks sharp as ignored and decodes
+      images with the browser's own APIs, so sharp is never bundled. The
+      runtime image copies only the built frontend (/app/build), not
+      node_modules, so neither sharp nor libvips/librsvg is installed in any
+      published image. No SVG we render is ever passed to sharp.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  # The same finding as GHSA-wq5f-xc86-pv6w, reported again at kokoro-js
+  # because npm audit propagates sharp's severity up the dependency chain
+  # without an advisory id. Clears when sharp is bumped.
+  - id: kokoro-js
+    package: kokoro-js
+    scanner: npm
+    reason: >-
+      Package-level npm audit finding with no advisory of its own: kokoro-js
+      depends on @huggingface/transformers, which depends on sharp, affected by
+      GHSA-wq5f-xc86-pv6w. kokoro-js itself has no published advisory.
+    replacement_considered: >-
+      Deferred upgrade, identical to GHSA-wq5f-xc86-pv6w: the sharp bump on or
+      after 2026-10-11 removes this finding. kokoro-js 1.2.1 is its newest
+      release and still requires @huggingface/transformers 3.x.
+    usage_analysis: >-
+      kokoro-js runs only in the browser TTS worker
+      (src/lib/workers/kokoro.worker.ts); the web build of transformers ignores
+      sharp. See GHSA-wq5f-xc86-pv6w.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  - id: GHSA-68fv-2mgg-jv7q
+    package: source-map-js
+    scanner: npm
+    reason: >-
+      source-map-js 1.0.0 - 1.2.1 allows an event-loop denial of service
+      through indexed source-map section offsets. Fixed in 1.2.2, published
+      2026-09-30; lockfile-age refuses it until 2026-10-14. On or after that
+      date run `npm update source-map-js` (postcss, sass and
+      @tailwindcss/node all accept ^1.2.2) and delete this entry.
+    replacement_considered: >-
+      No replacement is needed; this is a deferred upgrade. 1.2.1 is the
+      newest release outside the cooldown, and the dependents (postcss, sass,
+      tailwind) are the CSS toolchain, which has no source-map-js-free
+      alternative worth a swap for a build-time DoS.
+    usage_analysis: >-
+      Build-time only. source-map-js is used by postcss, sass and tailwind
+      while vite builds the frontend, and it parses only source maps those
+      tools produce from this repository's own sources. No user-supplied
+      source map is ever parsed, and the runtime image copies only the built
+      frontend, not node_modules. Worst case is a hung local or CI build.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
