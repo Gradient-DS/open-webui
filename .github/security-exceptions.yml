@@ -211,3 +211,64 @@ exceptions:
     approved_by: Lex Lubbers, 2026-09-09
     recheck: 2026-12-09
 
+
+  # pymongo 4.18.1 (published 2026-09-10) is taken above and closes
+  # CVE-2026-88029. The three below are fixed only in 4.18.2, published
+  # 2026-09-24, which the 14-day uv exclude-newer cooldown refuses until
+  # 2026-10-08. NOT a §7 exception — a DEFERRED UPGRADE: on or after
+  # 2026-10-08 bump pymongo to 4.18.2 in pyproject.toml, uv.lock and both
+  # requirements files and delete these three entries. recheck 2026-10-20 is
+  # the deadline for that.
+  - id: CVE-2026-96747
+    package: pymongo
+    scanner: pip-audit
+    reason: >-
+      PyMongo passed a client-side-encryption data key's KMS endpoint verbatim
+      into parse_host(), which accepts any string ending in .sock as a Unix
+      socket path instead of validating it as a hostname. Fixed in 4.18.2,
+      which is inside the 14-day package cooldown until 2026-10-08.
+    replacement_considered: >-
+      No replacement is needed; this is a deferred upgrade. 4.18.1, the newest
+      release outside the cooldown, is pinned now. Exempting pymongo from the
+      cooldown to take 4.18.2 early was rejected: the cooldown is the
+      supply-chain control, and the package is not used (see usage_analysis).
+    usage_analysis: >-
+      Unreachable. Nothing under backend/ imports pymongo, bson or gridfs; the
+      pin is inherited from upstream's requirements and pyproject `all` extra.
+      No code path creates a MongoClient, so no client-side-encryption data key
+      or KMS endpoint is ever parsed.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  - id: CVE-2026-96748
+    package: pymongo
+    scanner: pip-audit
+    reason: >-
+      PyMongo percent-decoded the whole host section of a connection string
+      before splitting it into host:port entries, so an encoded comma or colon
+      in a hostname could redirect the connection. Fixed in 4.18.2, which is
+      inside the 14-day package cooldown until 2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as CVE-2026-96747: 4.18.1 is pinned now, 4.18.2
+      replaces it once it clears the cooldown.
+    usage_analysis: >-
+      Unreachable. No code under backend/ imports pymongo or parses a MongoDB
+      connection string, and no deployment configures one.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  - id: CVE-2026-96749
+    package: pymongo
+    scanner: pip-audit
+    reason: >-
+      Integer overflow in the BSON encoder of PyMongo's bundled C extension
+      when a single document is built from an unusually large input. Fixed in
+      4.18.2, which is inside the 14-day package cooldown until 2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as CVE-2026-96747: 4.18.1 is pinned now, 4.18.2
+      replaces it once it clears the cooldown.
+    usage_analysis: >-
+      Unreachable. Nothing under backend/ imports bson or pymongo, so the C
+      encoder is never invoked on any input, attacker-controlled or otherwise.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20

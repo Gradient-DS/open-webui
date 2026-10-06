@@ -156,7 +156,7 @@ unstructured = [
 ]
 
 all = [
-    "pymongo==4.17.0",
+    "pymongo==4.18.1",
     "psycopg2-binary==2.9.12",
     "pgvector==0.4.2",
     "moto[s3]>=5.0.26",
