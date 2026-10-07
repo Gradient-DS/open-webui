@@ -14,7 +14,10 @@ export function turnNotices(data: unknown): TurnNotices {
 }
 
 /** The chat's selection without the removed entries, so the next turn does not send them again. */
-export function withoutRemoved<T extends { id?: string }>(files: T[], removed: string[]): T[] {
+export function withoutRemoved<T extends { id?: string | null }>(
+	files: T[],
+	removed: string[]
+): T[] {
 	if (removed.length === 0) return files;
 	return files.filter((file) => !(file.id && removed.includes(file.id)));
 }
