@@ -1133,6 +1133,49 @@ async def test_an_answer_not_streamed_gets_its_markers_at_the_served_positions(c
     assert content(await chat.turn('question', 'a1')) == 'Eén [1], twee [2].'
 
 
+EMPHASIS_CASES = [
+    ('- **', ' Van jou →** naar', '- **[1] Van jou →** naar'),
+    ('**Van jou', '**: tekst', '**Van jou [1]**: tekst'),
+    ('*', '*', '*[1]*'),
+    ('(__', ' x__)', '(__[1] x__)'),
+    ('~~', ' oud~~', '~~[1] oud~~'),
+    ('**Bold**', ' then', '**Bold** [1] then'),
+    ('2**', ' x', '2** [1] x'),
+    ('Text', ' tail', 'Text [1] tail'),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('before,after,expected', EMPHASIS_CASES)
+async def test_a_streamed_marker_after_an_opening_emphasis_run_keeps_it_opening(
+    chat: Chat, before: str, after: str, expected: str
+) -> None:
+    chat.api.chat.turns = [
+        [
+            found(DOCUMENT, CHUNK),
+            ('delta', {'text': before}),
+            ('citation', cited(len(before), 'source-a')),
+            ('delta', {'text': after}),
+            answered(before + after, cited(len(before), 'source-a')),
+        ]
+    ]
+    assert content(await chat.turn('question', 'a1')) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('before,after,expected', EMPHASIS_CASES)
+async def test_a_served_marker_after_an_opening_emphasis_run_keeps_it_opening(
+    chat: Chat, before: str, after: str, expected: str
+) -> None:
+    chat.api.chat.turns = [[found(DOCUMENT, CHUNK), answered(before + after, cited(len(before), 'source-a'))]]
+    assert content(await chat.turn('question', 'a1')) == expected
+
+
+def test_served_markers_after_streamed_text_see_the_text_before_them() -> None:
+    assert agent_v2._marked('**Ja** **x**', [(9, 1)], 6) == ' **[1]x**'
+    assert agent_v2._marked('Ja **x**', [(5, 1), (5, 2)], 3) == '**[1][2]x**'
+
+
 @pytest.mark.asyncio
 async def test_an_invalid_citation_or_an_unknown_source_gets_no_marker(chat: Chat) -> None:
     invalid = {'at': 4, 'status': 'invalid', 'reason': 'no element has id 9'}
