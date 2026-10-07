@@ -112,6 +112,14 @@ def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] 
     return None
 
 
+def _field(element: dict[str, Any], field: str) -> Any:
+    """[Claude] A field of an element; a document without a title goes by its filename, as an attached one does."""
+    value = element.get(field)
+    if field == 'title' and not (isinstance(value, str) and value.strip()):
+        value = element.get('filename')
+    return value
+
+
 def _from_output(binding: str, elements: list[dict[str, Any]]) -> Any:
     """[Claude] `count.<type>`: how many distinct elements of a type; `first.<type>.<field>`: a field of the first."""
     how, _, rest = binding.partition('.')
@@ -119,8 +127,39 @@ def _from_output(binding: str, elements: list[dict[str, Any]]) -> Any:
         return len({element.get('id') for element in elements if element.get('type') == rest})
     if how == 'first':
         kind, _, field = rest.partition('.')
-        return next((element.get(field) for element in elements if element.get('type') == kind), None)
+        return next((_field(element, field) for element in elements if element.get('type') == kind), None)
     return None
+
+
+# [Claude] How a call shows when soev-api declares no status for its tool or the declared one cannot be filled:
+# running, done and failed, each a template the frontend translates. A named variant takes the document's `title`.
+_GENERIC = {
+    'search': ('Searching the knowledge base…', 'Searched the knowledge base', 'Could not search the knowledge bases'),
+    'find_documents': ('Finding documents…', 'Found documents', 'Could not find documents'),
+    'list_documents': ('Listing documents…', 'Listed documents', 'Could not list documents'),
+    'open_document': ('Opening document...', 'Opened document', 'Could not open document'),
+    'web_search': ('Searching the web…', 'Searched the web', 'Could not search the web'),
+    'fetch': ('Fetching web pages...', 'Read web pages', 'Could not read web page'),
+    'reopen': (
+        'Looking back at earlier results...',
+        'Looked back at earlier results',
+        'Could not reopen earlier results',
+    ),
+    'search_live_documents': ('Searching your files...', 'Searched your files', 'Could not search your files'),
+    'list_live_folder': ('Browsing your files...', 'Browsed your files', 'Could not browse your files'),
+    'attach_live_document': ('Opening documents...', 'Opened documents', 'Could not open document'),
+    'search_mail': ('Searching your mail...', 'Searched your mail', 'Could not search your mail'),
+    'read_mail': ('Reading email...', 'Read email', 'Could not read email'),
+    _COMPACTION: (
+        'Summarising the earlier conversation...',
+        'Summarised the earlier conversation',
+        'Could not summarise the earlier conversation',
+    ),
+}
+_NAMED = {'open_document': ('Opening document: {{title}}', 'Opened document: {{title}}')}
+# [Claude] A tool OWUI has no label for still shows its name, but reads as finished once it is.
+_UNKNOWN = ('Running {{tool}}…', 'Ran {{tool}}', 'Could not run {{tool}}')
+_PHASES = ('running', 'done', 'failed')
 
 
 def _web_items(elements: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -1002,6 +1041,13 @@ class AgentTurn:
                 }
             )
 
+    def keep_attachments(self, attachments: list[dict[str, Any]]) -> None:
+        """[Claude] Know the document the agent makes of each attached file, `<collection_key>/<file_id>` by its
+        filename, so a call opening one names it before any output shows it; a document already seen stays."""
+        for item in attachments:
+            document_id = f'{item["collection_key"]}/{item["file_id"]}'
+            self.elements.setdefault(document_id, {'type': 'document', 'id': document_id, 'filename': item['name']})
+
     async def keep(self, output: dict[str, Any]) -> list[dict[str, Any]]:
         """[Claude] Remember a tool output's elements, and number each text the agent read; the panel entries of
         the ones not seen before."""
@@ -1107,26 +1153,30 @@ class AgentTurn:
         """The tool's declared `running` status, `done` once there is an `output`, or `failed` when that output is
         an error; else a generic line."""
         # The action names the tool: the frontend lays a turn out as tool activity only for statuses with one.
-        # A template like the declared ones, so the frontend translates it.
-        generic = (
-            {'action': name, 'description': 'Searching the knowledge base…'}
-            if name == 'search'
-            else {'action': name, 'description': 'Running {{tool}}…', 'tool': name}
-        )
-        phase = 'running' if output is None else 'done'
-        if output is not None and output.get('error') is not None:
-            phase = 'failed'
-            generic = {'action': name, 'description': 'Could not run {{tool}}', 'tool': name}
+        phase = 'running' if output is None else 'failed' if output.get('error') is not None else 'done'
         declared = (self.tool_statuses.get(name) or {}).get(phase)
         filled = (
             _filled(declared, self.tool_params(declared, arguments, output)) if isinstance(declared, dict) else None
         )
-        status = {'action': name, **filled} if filled else generic
+        status = {'action': name, **filled} if filled else self.generic_status(name, phase, arguments, output)
         if name == 'search_mail':
             status = mail_search_status(status, arguments)
         if items := _web_items(self.touched(arguments, output)):
             status['items'] = items
         return status
+
+    def generic_status(self, name: str, phase: str, arguments: dict, output: dict | None) -> dict[str, Any]:
+        """[Claude] The line OWUI knows for a tool, a template the frontend translates: a readable label, naming the
+        opened document where it is known."""
+        index = _PHASES.index(phase)
+        if name in _NAMED and phase != 'failed':
+            documents = [element for element in self.touched(arguments, output) if element.get('type') == 'document']
+            titles = [title for element in documents if isinstance(title := _field(element, 'title'), str)]
+            if titles and titles[0].strip():
+                return {'action': name, 'description': _NAMED[name][index], 'title': titles[0]}
+        if name in _GENERIC:
+            return {'action': name, 'description': _GENERIC[name][index]}
+        return {'action': name, 'description': _UNKNOWN[index], 'tool': name}
 
     def touched(self, arguments: dict, output: dict | None) -> list[dict[str, Any]]:
         """[Claude] The elements a call reads: its output's once it lands, else the ones its arguments name."""
@@ -1154,7 +1204,7 @@ class AgentTurn:
                 argument, _, field = rest.partition('.')
                 named = arguments.get(argument)
                 names = named if isinstance(named, list) else [named]
-                values = [(self.elements.get(name) or {}).get(field) for name in names if isinstance(name, str)]
+                values = [_field(self.elements.get(name) or {}, field) for name in names if isinstance(name, str)]
                 value = ', '.join(
                     str(item) for item in values if isinstance(item, str | int | float) and str(item).strip()
                 )
@@ -1415,6 +1465,7 @@ class AgentTurn:
             self.tool_statuses = await _tool_statuses(self.client)
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()
+            self.keep_attachments(body['input'].get('attachments') or [])
             if not self.thread_id and (earlier := await _earlier(self.metadata)):
                 body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
             # Earlier turns' sources, so their numbers resolve; the panel lists only the ones this answer cites.

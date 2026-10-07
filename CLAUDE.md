@@ -143,7 +143,11 @@ completed document as its owning user and fills content_type before marking it r
 MSAL uses one organisational client and caches in-flight initialization across picker
 preparation and clicks. Personal Microsoft accounts and browser byte downloads are unsupported.
 
-Tool summaries use the agent's declared failed status when ToolOutput.error is set (fallback "Could not run {{tool}}"), otherwise done, including partial successes and already-attached documents.
+Tool summaries use the agent's declared failed status when ToolOutput.error is set, otherwise done, including partial successes and already-attached documents.
+Where no declared status can be filled, `agent_v2._GENERIC` gives each known tool a translated running/done/failed label
+(open_document names its document: "Opening document: {{title}}"); only an unknown tool shows its name
+("Running {{tool}}…", "Ran {{tool}}", "Could not run {{tool}}"). A document without a title goes by its filename,
+and the documents of attached files are known by the id the agent gives them (`<collection_key>/<file_id>`).
 
 OneDrive search uses the cloud-and-magnifier icon in its menu row, pinned button
 and tooltip. The picker retains the plain cloud; pinned tooltip labels are

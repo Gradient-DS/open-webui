@@ -1764,10 +1764,20 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'name,generic',
+    'name,generic,done,failed',
     [
-        ('search', {'description': 'Searching the knowledge base…'}),
-        ('calculate', {'description': 'Running {{tool}}…', 'tool': 'calculate'}),
+        (
+            'search',
+            {'description': 'Searching the knowledge base…'},
+            'Searched the knowledge base',
+            'Could not search the knowledge bases',
+        ),
+        (
+            'calculate',
+            {'description': 'Running {{tool}}…', 'tool': 'calculate'},
+            'Ran {{tool}}',
+            'Could not run {{tool}}',
+        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -1784,7 +1794,7 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
     ],
 )
 async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_its_output(
-    name: str, generic: dict, kind: str, payload: dict
+    name: str, generic: dict, done: str, failed: str, kind: str, payload: dict
 ) -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
@@ -1803,9 +1813,9 @@ async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_
         assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
         await render(turn, ChatEvent('delta', {'text': 'Answer'}))
     answered_call = kind == 'tool_output'
-    ended_status = {'type': 'status', 'data': {**status['data'], 'done': True}}
+    ended_status = {'type': 'status', 'data': {**status['data'], 'description': done, 'done': True}}
     if answered_call and payload.get('error'):
-        ended_status['data'].update(description='Could not run {{tool}}', tool=name)
+        ended_status['data']['description'] = failed
     shown = [call.args[0] for call in turn.emitter.call_args_list if call.args[0]['data'].get('action') != 'summary']
     assert shown == [status] + [ended_status] * answered_call
     assert '<details type="tool_calls"' in content(started)
@@ -1910,7 +1920,10 @@ async def test_parallel_tools_each_show_once() -> None:
         'call_id': 'c2',
         'done': False,
     }
-    ended = [{**calculate, 'done': True}, {**search, 'done': True}]
+    ended = [
+        {**calculate, 'description': 'Ran {{tool}}', 'done': True},
+        {**search, 'description': 'Searched the knowledge base', 'done': True},
+    ]
     assert [call.args[0]['data'] for call in turn.emitter.call_args_list] == [search, calculate, *ended]
 
 
@@ -2429,20 +2442,59 @@ async def test_opening_a_document_names_it_by_the_title_already_received(declare
 
 
 @pytest.mark.asyncio
-async def test_a_tool_without_a_declared_status_shows_the_generic_line(declared: Chat) -> None:
-    declared.api.chat.turns = [
-        [call('list_documents'), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]
-    ]
+@pytest.mark.parametrize(
+    'name,running,done',
+    [
+        ('list_documents', {'description': 'Listing documents…'}, {'description': 'Listed documents'}),
+        ('calculate', {'description': 'Running {{tool}}…', 'tool': 'calculate'}, {'description': 'Ran {{tool}}'}),
+    ],
+)
+async def test_a_tool_without_a_declared_status_shows_its_label_and_reads_finished_when_done(
+    declared: Chat, name: str, running: dict, done: dict
+) -> None:
+    declared.api.chat.turns = [[call(name), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]]
     await declared.turn('q', 'a1')
 
-    generic = {
-        'action': 'list_documents',
-        'description': 'Running {{tool}}…',
-        'tool': 'list_documents',
-        'call_id': 'c1',
-        'done': False,
-    }
-    assert statuses(declared) == [generic, {**generic, 'done': True}]
+    shown = {'action': name, 'call_id': 'c1', **running, 'done': False}
+    assert statuses(declared) == [shown, {**shown, **done, 'done': True}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('declares', [True, False])
+async def test_opening_an_attached_document_names_it_while_running_and_once_read(
+    declared: Chat, monkeypatch: pytest.MonkeyPatch, declares: bool
+) -> None:
+    if not declares:
+        monkeypatch.setattr(agent_v2, 'TOOL_STATUS_CACHE', {'expires_at': float('inf'), 'statuses': {}})
+    stored_files(monkeypatch, f1='completed')
+    attached = f'{ingest.attachments_collection_key("alice")}/f1'
+    # The agent's own document of an attached file has only its filename; the open call names it by that id.
+    opened = {'type': 'document', 'id': attached, 'filename': 'rapport.pdf'}
+    read = {'type': 'document-text', 'id': f'{attached}#0-4', 'ref': attached, 'text': 'body', 'start': 0, 'end': 4}
+    declared.api.chat.turns = [
+        [call('open_document', document=attached), found(opened, read, call_id='c1'), answered('Samenvatting')]
+    ]
+    chunks = await declared.turn('vat samen', 'a1', files=[{'type': 'file', 'id': 'f1', 'name': 'rapport.pdf'}])
+
+    if declares:
+        param, running, done = 'doc_title', 'Reading {{doc_title}}...', 'Read {{doc_title}}'
+    else:
+        param, running, done = 'title', 'Opening document: {{title}}', 'Opened document: {{title}}'
+    assert [
+        (status['description'], status[param], status['done'])
+        for status in statuses(declared)
+        if status['action'] == 'open_document'
+    ] == [(running, 'rapport.pdf', False), (done, 'rapport.pdf', True)]
+    assert 'open_document' not in content(chunks).split('<summary>')[1].split('</summary>')[0]
+
+
+def test_a_failed_open_never_names_its_tool() -> None:
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.running['c1'] = ('open_document', {'document': 'missing'})
+    turn.end_tool({'call_id': 'c1', 'error': 'not_found'})
+    assert turn.settling == [
+        {'action': 'open_document', 'description': 'Could not open document', 'call_id': 'c1', 'done': True}
+    ]
 
 
 @pytest.mark.asyncio
@@ -3149,7 +3201,7 @@ async def test_web_sources_do_not_infer_provider_from_urls_or_names(monkeypatch)
 
 
 @pytest.mark.parametrize('declared', [True, False])
-def test_list_failure_uses_declared_status_or_generic_fallback(declared):
+def test_list_failure_uses_declared_status_or_the_generic_label(declared):
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
     turn.tool_statuses = {
         'list_live_folder': {
@@ -3165,8 +3217,7 @@ def test_list_failure_uses_declared_status_or_generic_fallback(declared):
             'action': 'list_live_folder',
             'call_id': 'browse',
             'done': True,
-            'description': 'Could not browse your files' if declared else 'Could not run {{tool}}',
-            **({} if declared else {'tool': 'list_live_folder'}),
+            'description': 'Could not browse your files',
         }
     ]
 
