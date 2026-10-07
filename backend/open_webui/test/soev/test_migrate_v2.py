@@ -649,6 +649,30 @@ async def test_reingest_submits_only_missing_local_files_within_the_concurrency(
 
 
 @pytest.mark.asyncio
+async def test_a_synced_single_file_becomes_a_schedule_and_is_never_reingested(env, monkeypatch):
+    """A cloud KB's synced file lands through its schedule only, never also as a local upload."""
+    _, cloud = await seed_knowledge(env, monkeypatch)
+    source = {'type': 'file', 'drive_id': 'drive', 'item_id': 'item', 'name': 'Provider.docx'}
+    table = env.models['knowledge'].KnowledgeTable()
+    await table.update_knowledge_meta_by_id(cloud.id, {'onedrive_sync': {'sources': [source]}})
+    path = env.tmp_path / 'onedrive-item.docx'
+    path.write_bytes(b'synced')
+    files = env.models['files']
+    await files.Files.insert_new_file(
+        'alice',
+        files.FileForm(id='onedrive-item', filename='Provider.docx', path=str(path), meta={'source': 'onedrive'}),
+    )
+    assert await table.add_file_to_knowledge_by_id(cloud.id, 'onedrive-item', 'alice')
+    await env.module.apply(options(env))
+    schedules = [
+        json.loads(r.content) for r in env.api.requests if r.method == 'POST' and r.url.path == '/v1/schedules'
+    ]
+    assert {(body['collection_key'], body['scope']['single_file']) for body in schedules} == {(cloud.id, True)}
+    submitted = {json.loads(r.content)['documents'][0]['source_id'] for r in job_posts(env)}
+    assert submitted.isdisjoint({'cloud', 'onedrive-item'})
+
+
+@pytest.mark.asyncio
 async def test_finished_jobs_count_as_ingested_on_the_next_run(env, monkeypatch, capsys):
     local, _ = await seed_knowledge(env, monkeypatch)
     await env.module.apply(options(env))
