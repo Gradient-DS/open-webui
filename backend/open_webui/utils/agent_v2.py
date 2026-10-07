@@ -10,6 +10,7 @@ import logging
 import math
 import re
 import time
+import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from pathlib import Path
@@ -714,16 +715,24 @@ class Citations:
         return None if source is None else source['n']
 
 
-def _marked(text: str, markers: list[tuple[int, int]]) -> str:
-    """[Claude] `text` with ` [n]` inserted at each `(position, n)`, positions in code points; a number repeated at
-    one position shows once."""
+def _citation_marker(before: str, number: int) -> str:
+    """[Claude] The marker for `number` after `before`: spaced off the text, but flush after an opening `*`, `_` or
+    `~` run, which a following space would stop from opening (CommonMark flanking), so `**[1] text**` stays bold."""
+    run = before.rstrip('*_~')
+    opens = run != before and (not run or run[-1].isspace() or unicodedata.category(run[-1])[0] in 'PS')
+    return f'[{number}]' if opens else f' [{number}]'
+
+
+def _marked(text: str, markers: list[tuple[int, int]], start: int = 0) -> str:
+    """[Claude] `text[start:]` with a marker inserted at each `(position, n)`, positions in code points into `text`;
+    a number repeated at one position shows once."""
     shown: set[tuple[int, int]] = set()
-    pieces, start = [], 0
+    pieces = []
     for at, number in sorted(markers, key=lambda marker: marker[0]):
-        if (at, number) in shown or not 0 <= at <= len(text):
+        if (at, number) in shown or not start <= at <= len(text):
             continue
         shown.add((at, number))
-        pieces.append(text[start:at] + f' [{number}]')
+        pieces.append(text[start:at] + _citation_marker(text[:at], number))
         start = at
     return ''.join(pieces) + text[start:]
 
@@ -1035,7 +1044,7 @@ class AgentTurn:
             return ''
         await self.show_source(citation['source'], 'cited_this_turn')
         self.streamed.append((at, number))
-        return f' [{number}]'
+        return _citation_marker(self.partial[:at], number)
 
     async def resume(self) -> None:
         events = self.client.chat_stream(
@@ -1149,7 +1158,7 @@ class AgentTurn:
             log.warning('Durable model output disagrees with streamed text', extra={'thread_id': self.thread_id})
             return []
         markers = [
-            (citation['at'] - len(partial), number)
+            (citation['at'], number)
             for citation in citations
             if (number := self.citations.number(citation)) is not None
             and isinstance(citation.get('at'), int)
@@ -1159,7 +1168,7 @@ class AgentTurn:
         for citation in citations:
             if self.citations.number(citation) is not None:
                 await self.show_source(citation['source'], 'cited_this_turn')
-        text = _marked(content[len(partial) :], markers)
+        text = _marked(content, markers, len(partial))
         chunks = []
         if reasoning:
             chunks.append(_chunk({'reasoning_content': reasoning}))
