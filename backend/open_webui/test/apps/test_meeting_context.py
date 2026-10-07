@@ -45,6 +45,7 @@ def acting(monkeypatch):
         return f'owui:user:{user.id}'
 
     monkeypatch.setattr(meetings.identity, 'acting_ref', acting_ref)
+    monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: True)
 
 
 def test_render_has_metadata_clean_turns_and_outputs():
@@ -125,9 +126,47 @@ async def test_agent_path_sends_a_meeting_as_a_note_text(monkeypatch):
 
     monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', get_user)
     monkeypatch.setattr(agent_v2, 'meeting_document', document)
-    texts = await agent_v2._texts([{'type': 'meeting', 'id': 'thr-1', 'name': 'x'}], 'u1')
+    texts, skipped = await agent_v2._texts([{'type': 'meeting', 'id': 'thr-1', 'name': 'x'}], 'u1')
     assert texts == [
         {'id': 'note:meeting-thr-1', 'kind': 'note', 'title': 'Weekoverleg', 'text': '# Weekoverleg\n', 'length': 14}
     ]
-    with pytest.raises(agent_v2.AttachmentsUnavailable):
-        await agent_v2._texts([{'type': 'meeting', 'id': 'thr-gone', 'name': 'Overleg'}], 'u1')
+    assert skipped == []
+
+
+@pytest.mark.asyncio
+async def test_a_gone_meeting_is_skipped_with_a_notice(monkeypatch):
+    """A deleted meeting is left out with a notice, like a deleted note, instead of failing the turn."""
+    from open_webui.utils import agent_v2
+
+    async def get_user(user_id):
+        return USER
+
+    async def document(user, meeting_id, client=None):
+        raise meetings.MeetingUnavailable('gone')
+
+    monkeypatch.setattr(agent_v2.Users, 'get_user_by_id', get_user)
+    monkeypatch.setattr(agent_v2, 'meeting_document', document)
+    texts, skipped = await agent_v2._texts([{'type': 'meeting', 'id': 'thr-gone', 'name': 'Overleg'}], 'u1')
+    assert texts == []
+    assert skipped == [agent_v2.Skipped('meeting', 'gone', 'thr-gone', 'Overleg')]
+    assert agent_v2._notices(skipped, 'nl') == ["Vergadering 'Overleg' bestaat niet meer en is uit deze chat gehaald."]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('meeting_id', ['.', '..'])
+async def test_a_dot_segment_meeting_id_is_refused_before_any_request(meeting_id):
+    """The HTTP client would resolve a dot segment to another soev-api path."""
+    client = FakeClient(thread={'events': []})
+    with pytest.raises(meetings.MeetingUnavailable):
+        await meetings.meeting_document(USER, meeting_id, client)
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_meetings_turned_off_are_not_attached(monkeypatch):
+    """With the meetings feature off, an attached meeting is not read."""
+    monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: feature != 'meetings')
+    client = FakeClient(thread={'events': [{'type': 'meeting_state', 'payload': STATE}]})
+    with pytest.raises(meetings.MeetingUnavailable):
+        await meetings.meeting_document(USER, 'thr-1', client)
+    assert client.calls == []

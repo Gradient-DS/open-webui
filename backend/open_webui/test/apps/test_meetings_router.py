@@ -249,3 +249,14 @@ def test_stream_failure_mid_turn_ends_with_an_error_frame(monkeypatch):
         'event: error\ndata: {"code":"service_unavailable","detail":"Chat stream disconnected"}\n\n'
     )
     assert fake.closed
+
+
+@pytest.mark.parametrize('meeting_id', ['%2E', '%2E%2E'])
+def test_a_dot_segment_meeting_id_never_reaches_soev_api(monkeypatch, meeting_id):
+    """`..` would resolve /v1/chat/threads/../inputs to /v1/chat/inputs upstream."""
+    fake = FakeSoev(thread={'status': {'state': 'idle'}, 'events': []})
+    client = _client(monkeypatch, fake)
+    assert client.get(f'/api/v1/meetings/{meeting_id}').status_code == 404
+    assert client.post(f'/api/v1/meetings/{meeting_id}/inputs', json={'input': {'type': 'retry'}}).status_code == 404
+    assert client.delete(f'/api/v1/meetings/{meeting_id}').status_code == 404
+    assert fake.calls == []

@@ -72,6 +72,9 @@ MAX_FILE_SIZE_MB: int = 20
 MAX_FILE_SIZE: int = MAX_FILE_SIZE_MB * 1024 * 1024
 AZURE_MAX_FILE_SIZE_MB: int = 200
 AZURE_MAX_FILE_SIZE: int = AZURE_MAX_FILE_SIZE_MB * 1024 * 1024
+# [Gradient] The most audio one dictation may upload (the meeting cap), and the chunks transcribed at once.
+MAX_DICTATION_BYTES: int = 64 * 1024 * 1024
+CONCURRENT_CHUNKS: int = 4
 
 SPEECH_CACHE_DIR = CACHE_DIR / 'audio' / 'speech'
 SPEECH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -656,7 +659,7 @@ async def _transcribe_whisper(request, file_path, languages, file_dir, id):
     async with aiofiles.open(os.path.join(file_dir, f'{id}.json'), 'w') as f:
         await f.write(JSONCodec.dumps(data))
 
-    log.debug(data)
+    # [Gradient] Transcripts stay out of logs (content-free logging).
     return data
 
 
@@ -885,7 +888,7 @@ async def _transcribe_azure(request, file_path, filename, file_dir, id):
         async with aiofiles.open(os.path.join(file_dir, f'{id}.json'), 'w') as f:
             await f.write(JSONCodec.dumps(data))
 
-        log.debug(data)
+        # [Gradient] Transcripts stay out of logs (content-free logging).
         return data
 
     except (KeyError, IndexError, ValueError) as e:
@@ -1065,7 +1068,7 @@ async def _transcribe_mistral(request, file_path, filename, metadata, file_dir, 
         async with aiofiles.open(os.path.join(file_dir, f'{id}.json'), 'w') as f:
             await f.write(JSONCodec.dumps(data))
 
-        log.debug(data)
+        # [Gradient] Transcripts stay out of logs (content-free logging).
         return data
 
     except ValueError as e:
@@ -1123,8 +1126,15 @@ async def transcribe(request: Request, file_path: str, metadata: Optional[dict] 
                 detail=ERROR_MESSAGES.DEFAULT(e, 'Error processing audio file'),
             )
 
+    # [Gradient] A long upload splits into many chunks; transcribe a few at a time.
+    slots = asyncio.Semaphore(CONCURRENT_CHUNKS)
+
+    async def bounded(chunk_path):
+        async with slots:
+            return await transcription_handler(request, chunk_path, metadata, user)
+
     try:
-        tasks = [transcription_handler(request, chunk_path, metadata, user) for chunk_path in chunk_paths]
+        tasks = [bounded(chunk_path) for chunk_path in chunk_paths]
         # gather keeps results in chunk order, unlike as_completed
         results = await asyncio.gather(*tasks)
     except HTTPException:
@@ -1251,6 +1261,9 @@ async def transcription(
         id = uuid.uuid4()
 
         filename = f'{id}.{ext}'
+        # [Gradient] Refuse before reading the spooled upload into memory.
+        if file.size is None or file.size > MAX_DICTATION_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail='Audio exceeds 64 MiB')
         contents = await file.read()
 
         file_dir = os.path.join(CACHE_DIR, 'audio', 'transcriptions')

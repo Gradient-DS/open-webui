@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { partStore } from '$lib/components/meetings/parts';
 
 export const getAdminDetails = async (token: string) => {
 	let error = null;
@@ -404,6 +405,8 @@ export const userSignOut = async () => {
 	}
 
 	sessionStorage.clear();
+	// [Gradient] Vergadering: recovery copies of recordings are per device, not per account.
+	await partStore().clear();
 	return res;
 };
 
