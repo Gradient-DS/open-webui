@@ -773,6 +773,30 @@ async def test_search_knowledge_files_filters_by_query_and_pages(env, order_by, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('filters', 'folders', 'files'),
+    [
+        ({}, ['Bankzaken', 'BTW betalingen', 'E-boekhouden'], ['Alpha', 'beta', 'Gamma']),
+        (
+            {'order_by': 'name', 'direction': 'asc'},
+            ['Bankzaken', 'BTW betalingen', 'E-boekhouden'],
+            ['Alpha', 'beta', 'Gamma'],
+        ),
+        ({'order_by': 'name'}, ['E-boekhouden', 'BTW betalingen', 'Bankzaken'], ['Gamma', 'beta', 'Alpha']),
+    ],
+)
+async def test_listing_sorts_names_case_insensitively_with_folders_following(env, filters, folders, files):
+    """A level's folders and files both follow the chosen name order, ignoring case."""
+    for name in ['E-boekhouden', 'BTW betalingen', 'Bankzaken']:
+        await env.store.create_directory('kb', name, 'alice')
+    for source in ['beta', 'Gamma', 'Alpha']:
+        await file(env, source)
+    result = await env.store.search_files_by_id('kb', 'alice', {**filters, 'directory_id': None})
+    assert [row.name for row in result.directories] == folders
+    assert [row.id for row in result.items] == files
+
+
+@pytest.mark.asyncio
 async def test_create_directory_is_a_folder_mkdir(env):
     """Folder creation and the private materialization helper use mkdir and reversible parent ids."""
     first = await env.store.create_directory('kb', 'a', 'alice')

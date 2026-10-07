@@ -369,6 +369,26 @@ def _empty_status_counts() -> dict[str, int]:
     return {k: 0 for k in _STATUS_BUCKET_KEYS}
 
 
+# [Gradient] The listing's sort keys; a level's folders follow the same key and
+# direction as its files. Names compare case-insensitively.
+LISTING_SORT_KEYS = ('name', 'created_at', 'updated_at')
+
+
+def order_directories(directories: list, filter: dict | None) -> list:
+    """One level's folders in the listing's order; name ascending when no key is set."""
+    order_by = (filter or {}).get('order_by')
+    order_by = order_by if order_by in LISTING_SORT_KEYS else None
+    descending = order_by is not None and (filter or {}).get('direction') != 'asc'
+    rows = sorted(
+        directories,
+        key=lambda row: (row.name.casefold(), row.id),
+        reverse=descending and order_by == 'name',
+    )
+    if order_by in ('created_at', 'updated_at'):
+        rows.sort(key=lambda row: getattr(row, order_by) or 0, reverse=descending)
+    return rows
+
+
 def _unwrap_json_text(value):
     """Unwrap a ``cast(json_col['key'], Text)`` value.
 
@@ -981,8 +1001,10 @@ class KnowledgeTable:
                 elif has_directory_filter:
                     stmt = stmt.filter(KnowledgeFile.directory_id.is_(None))
 
-                # Default sort: filename ascending (alphabetical)
-                primary_sort = File.filename.asc()
+                # Default sort: filename ascending, case-insensitive. [Gradient]
+                # lower() so Postgres's C collation doesn't put uppercase first.
+                name_key = func.lower(File.filename)
+                primary_sort = name_key.asc()
 
                 # For the metadata path: build a cheap count stmt in parallel.
                 # It starts with the same join + knowledge_id filter but projects
@@ -1038,7 +1060,7 @@ class KnowledgeTable:
                     is_asc = direction == 'asc'
 
                     if order_by == 'name':
-                        primary_sort = File.filename.asc() if is_asc else File.filename.desc()
+                        primary_sort = name_key.asc() if is_asc else name_key.desc()
                     elif order_by == 'created_at':
                         primary_sort = File.created_at.asc() if is_asc else File.created_at.desc()
                     elif order_by == 'updated_at':
@@ -1125,10 +1147,13 @@ class KnowledgeTable:
                             )
                         )
 
-                directories = await self.get_directories(
-                    knowledge_id,
-                    parent_id=filter.get('directory_id') if filter else None,
-                    db=db,
+                directories = order_directories(
+                    await self.get_directories(
+                        knowledge_id,
+                        parent_id=filter.get('directory_id') if filter else None,
+                        db=db,
+                    ),
+                    filter,
                 )
                 # P2-8 decision 3: annotate each directory with its recursive
                 # descendant file count + coarse status buckets.
@@ -1816,7 +1841,7 @@ class KnowledgeTable:
             else:
                 stmt = stmt.filter(KnowledgeDirectory.parent_id.is_(None))
 
-            stmt = stmt.order_by(KnowledgeDirectory.name.asc())
+            stmt = stmt.order_by(func.lower(KnowledgeDirectory.name).asc(), KnowledgeDirectory.id.asc())
             result = await db.execute(stmt)
             return [KnowledgeDirectoryModel.model_validate(d) for d in result.scalars().all()]
 
