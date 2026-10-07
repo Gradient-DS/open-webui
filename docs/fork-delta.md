@@ -466,3 +466,23 @@ and speakers. Upstream files touched:
 check), i18n en-US/nl-NL, and the flag plumbing. Tests:
 `backend/open_webui/test/apps/test_meetings_router.py`,
 `src/lib/components/meetings/meeting.test.ts`.
+
+### Meetings as chat context
+
+"Vergaderingen bijvoegen" in the composer's + menu (and "Chat over deze
+vergadering" on a ready meeting) attaches `{type: 'meeting', id, name}` like a
+note. Only the reference is stored with the chat. At send time the server reads
+the meeting from soev-api as the user (`soev/meetings.py`; soev-api only returns
+the caller's own threads) and renders title, date, start–end, duration,
+speakers, the clean transcript as timestamped speaker turns, and any summary,
+minutes and action items. Nothing is written to OWUI files, storage or the
+vector store. Hooks: `retrieval/utils.py` `get_sources_from_items` (direct
+model path, `[Gradient]` branch next to `note`) and `utils/agent_v2.py`
+`_texts` (v2 agent). The agent's attached texts accept only `note` and `chat`,
+so a meeting goes as a `note` text with id `note:meeting-<thread>`; its citation
+links to `/meetings/<thread>`. A meeting that is gone or not the user's is
+reported to the model as unavailable (direct path) or refuses the turn like a
+missing note (agent path). Upstream files touched: `InputMenu.svelte` (menu
+item and tab), `FileItem.svelte` (chip icon and label), `Chat.svelte` (the two
+attachment type lists). "Chat over deze vergadering" uses the existing new-chat
+draft hand-off (`sessionStorage['chat-input']`, restored by `Chat.svelte`).

@@ -314,3 +314,20 @@ export const revealDelays = (
 /** How long a reveal of `count` items takes from its start to the last item settling. */
 export const revealTotalMs = (count: number, options?: { stepMs?: number; capMs?: number }) =>
 	(revealDelays(count, options).at(-1) ?? 0) + REVEAL_DURATION_MS;
+
+export type MeetingAttachment = { type: 'meeting'; id: string; name: string; status: 'processed' };
+
+/**
+ * The new-chat draft (the `chat-input` session entry the chat restores) with this meeting attached.
+ * Keeps any text and files already in the draft; never sends anything.
+ */
+export const draftWithMeeting = (draft: string | null, item: MeetingAttachment): string => {
+	let current: { prompt?: string; files?: { id?: string }[] } = {};
+	try {
+		current = JSON.parse(draft ?? '{}') ?? {};
+	} catch {
+		current = {};
+	}
+	const files = (current.files ?? []).filter((file) => file?.id !== item.id);
+	return JSON.stringify({ ...current, prompt: current.prompt ?? '', files: [...files, item] });
+};

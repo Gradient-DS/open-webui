@@ -9,6 +9,7 @@
 	import DropdownSub from '$lib/components/common/DropdownSub.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
+	import ChatBubble from '$lib/components/icons/ChatBubble.svelte';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -16,6 +17,7 @@
 	export let onDownload: ((format: 'md' | 'docx' | 'pdf') => void) | null = null;
 	export let downloadLabel = '';
 	export let onDelete: (() => void) | null = null;
+	export let onChat: (() => void) | null = null;
 	export let onChange: (state: boolean) => void = () => {};
 
 	const itemClass =
@@ -48,6 +50,19 @@
 						</button>
 					{/each}
 				</DropdownSub>
+			{/if}
+
+			{#if onChat}
+				<button
+					class={itemClass}
+					on:click={() => {
+						onChat?.();
+						show = false;
+					}}
+				>
+					<ChatBubble className="size-3.5" strokeWidth="2" />
+					<div class="flex items-center">{$i18n.t('Chat about this meeting')}</div>
+				</button>
 			{/if}
 
 			{#if onDelete}

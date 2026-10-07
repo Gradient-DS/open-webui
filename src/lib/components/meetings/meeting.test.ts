@@ -11,6 +11,7 @@ import {
 	matchesQuery,
 	meetingTimes,
 	metadataMarkdown,
+	draftWithMeeting,
 	revealDelays,
 	revealTotalMs,
 	wordCount,
@@ -393,5 +394,32 @@ describe('reveal schedule', () => {
 		expect(revealTotalMs(200)).toBe(3000);
 		expect(revealTotalMs(0)).toBe(250);
 		expect(revealDelays(0)).toEqual([]);
+	});
+});
+
+describe('chat about a meeting', () => {
+	const item = {
+		type: 'meeting' as const,
+		id: 'thr-1',
+		name: 'Weekoverleg',
+		status: 'processed' as const
+	};
+
+	it('attaches the meeting to an empty or broken draft', () => {
+		expect(JSON.parse(draftWithMeeting(null, item))).toEqual({ prompt: '', files: [item] });
+		expect(JSON.parse(draftWithMeeting('not json', item))).toEqual({ prompt: '', files: [item] });
+	});
+
+	it('keeps the draft text and other files, and does not attach twice', () => {
+		const draft = JSON.stringify({
+			prompt: 'Vat samen',
+			files: [{ id: 'f1' }, item],
+			toolApprovalMode: 'full'
+		});
+		expect(JSON.parse(draftWithMeeting(draft, item))).toEqual({
+			prompt: 'Vat samen',
+			files: [{ id: 'f1' }, item],
+			toolApprovalMode: 'full'
+		});
 	});
 });

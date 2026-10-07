@@ -67,6 +67,10 @@
 	import Chats from './InputMenu/Chats.svelte';
 	import Files from './InputMenu/Files.svelte';
 	import Notes from './InputMenu/Notes.svelte';
+	// [Gradient] Vergadering as chat context, gated like the sidebar entry.
+	import Meetings from './InputMenu/Meetings.svelte';
+	import Mic from '$lib/components/icons/Mic.svelte';
+	import { meetingsAvailable } from '$lib/components/meetings/availability';
 	import Knowledge from './InputMenu/Knowledge.svelte';
 	import MenuItem from './InputMenu/MenuItem.svelte';
 	import SearchInput from './InputMenu/SearchInput.svelte';
@@ -242,6 +246,7 @@
 	$: showCapture = itemAllowed('capture') && isFeatureEnabled('capture');
 	$: showWebpage = itemAllowed('attach_webpage') && isFeatureEnabled('webpage_url');
 	$: showNotes = itemAllowed('attach_notes') && ($config?.features?.enable_notes ?? false);
+	$: showMeetings = itemAllowed('attach_meetings') && $meetingsAvailable;
 	$: showGoogleDrive =
 		fileUploadEnabled &&
 		itemAllowed('google_drive') &&
@@ -275,7 +280,13 @@
 		toolPermissionsEnabled && itemAllowed('tools') && isFeatureEnabled('tools');
 
 	$: anyContext =
-		showUploadFiles || showCapture || showWebpage || showNotes || showGoogleDrive || showOneDrive;
+		showUploadFiles ||
+		showCapture ||
+		showWebpage ||
+		showNotes ||
+		showMeetings ||
+		showGoogleDrive ||
+		showOneDrive;
 	$: anyKnowledge = showKnowledge || showReferenceChats;
 	$: anyTools =
 		showLiveMail ||
@@ -723,6 +734,21 @@
 						</MenuItem>
 					{/if}
 
+					{#if showMeetings}
+						<MenuItem
+							label={$i18n.t('Attach meetings')}
+							submenu
+							tooltip={internalBlocked ? dataSeparationMessage : ''}
+							disabled={internalBlocked}
+							onClick={() => {
+								if (internalBlocked) return;
+								tab = 'meetings';
+							}}
+						>
+							<Mic slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
 					{#if showGoogleDrive}
 						<MenuItem
 							label={$i18n.t('Google Drive')}
@@ -1090,6 +1116,8 @@
 										{$i18n.t('Knowledge database')}
 									{:else if tab === 'notes'}
 										{$i18n.t('Notes')}
+									{:else if tab === 'meetings'}
+										{$i18n.t('Meetings')}
 									{:else if tab === 'files'}
 										{$i18n.t('Files')}
 									{:else if tab === 'chats'}
@@ -1112,6 +1140,8 @@
 						<Knowledge {onSelect} />
 					{:else if tab === 'notes'}
 						<Notes {onSelect} />
+					{:else if tab === 'meetings'}
+						<Meetings {onSelect} />
 					{:else if tab === 'files'}
 						<Files {onSelect} />
 					{:else if tab === 'chats'}

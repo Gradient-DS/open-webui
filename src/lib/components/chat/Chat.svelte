@@ -3675,7 +3675,9 @@
 		chatFiles.push(
 			..._files.filter(
 				(item) =>
-					['doc', 'text', 'url', 'note', 'chat', 'folder', 'collection'].includes(item.type) ||
+					['doc', 'text', 'url', 'note', 'meeting', 'chat', 'folder', 'collection'].includes(
+						item.type
+					) ||
 					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
 			)
 		);
@@ -4012,7 +4014,9 @@
 		files.push(
 			...(userMessage?.files ?? []).filter(
 				(item) =>
-					['doc', 'text', 'url', 'note', 'chat', 'collection', 'folder'].includes(item.type) ||
+					['doc', 'text', 'url', 'note', 'meeting', 'chat', 'collection', 'folder'].includes(
+						item.type
+					) ||
 					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
 			)
 		);

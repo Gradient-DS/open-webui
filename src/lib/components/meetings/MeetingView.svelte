@@ -27,6 +27,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
+	import ChatBubble from '$lib/components/icons/ChatBubble.svelte';
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 
 	import ConsentForm from './ConsentForm.svelte';
@@ -43,6 +44,7 @@
 	import {
 		CONSENT_TEXT_VERSION,
 		dayjsLocale,
+		draftWithMeeting,
 		REVEAL_DURATION_MS,
 		revealDelays,
 		revealTotalMs,
@@ -477,6 +479,26 @@
 		}
 	};
 
+	/** A new chat with this meeting attached, through the draft the new chat restores. */
+	const chatAbout = () => {
+		if (!meetingId) return;
+		const item = {
+			type: 'meeting' as const,
+			id: meetingId,
+			name: title,
+			status: 'processed' as const
+		};
+		try {
+			sessionStorage.setItem(
+				'chat-input',
+				draftWithMeeting(sessionStorage.getItem('chat-input'), item)
+			);
+		} catch (error) {
+			console.error(error);
+		}
+		goto('/');
+	};
+
 	const remove = async () => {
 		if (!meetingId) return;
 		try {
@@ -660,10 +682,23 @@
 
 				{#if meetingId && !recording}
 					<div class="flex items-center gap-0.5 shrink-0">
+						{#if meeting?.status === 'ready'}
+							<Tooltip content={$i18n.t('Chat about this meeting')}>
+								<button
+									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition"
+									type="button"
+									aria-label={$i18n.t('Chat about this meeting')}
+									onclick={chatAbout}
+								>
+									<ChatBubble className="size-4" />
+								</button>
+							</Tooltip>
+						{/if}
 						<MeetingMenu
 							bind:show={showMenu}
 							onDownload={meeting?.status === 'ready' ? download : null}
 							downloadLabel={tabLabel(tab)}
+							onChat={meeting?.status === 'ready' ? chatAbout : null}
 							onDelete={() => (showDelete = true)}
 						>
 							<button
