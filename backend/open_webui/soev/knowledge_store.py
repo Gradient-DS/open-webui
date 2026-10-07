@@ -650,7 +650,12 @@ class SoevKnowledgeTable:
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
         items = [
-            self._projection.file_response_of(row, by_id[row['id']][1], metadata_only=not filter.get('include_content'))
+            self._projection.file_response_of(
+                row,
+                by_id[row['id']][1],
+                metadata_only=not filter.get('include_content'),
+                collection=by_id[row['id']][0],
+            )
             for row in rows
         ]
         return self._projection.knowledge_file_list_of(items, total=total)

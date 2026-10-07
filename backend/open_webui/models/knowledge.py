@@ -234,6 +234,7 @@ class FileUserMetadataResponse(BaseModel):
     updated_at: Optional[int] = None
     user: Optional[UserResponse] = None
     added_at: Optional[int] = None
+    collection: Optional[dict] = None  # [Gradient] The KB holding the file, in cross-KB search.
 
 
 class KnowledgeListResponse(BaseModel):
