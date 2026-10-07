@@ -17,6 +17,7 @@ export type Feature =
 	| 'voice_call'
 	| 'read_aloud'
 	| 'changelog'
+	| 'meetings'
 	| 'system_prompt'
 	| 'models'
 	| 'knowledge'

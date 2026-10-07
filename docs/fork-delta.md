@@ -423,3 +423,38 @@ text is returned, and on failure too: dictation has no retry, and audio has no
 use once it is text. `transcribe()` itself is unchanged, so file-upload
 transcription in `routers/files.py` keeps its source file. Tests:
 `backend/open_webui/test/apps/test_voice_feature_gates.py`.
+
+## Vergadering (meeting assistant)
+
+A separate "Vergadering" page records a meeting, shows a rough live transcript,
+and after stop shows the cleaned, diarized transcript with Samenvatting / Notulen /
+Actiepunten. Open WebUI holds UI only: the soev-api meeting agent owns every
+meeting (one thread per meeting) and all state. Why fork-only: the agent and its
+platform audio live in soev-solutions; upstream has no counterpart (its Notes
+recording is unrelated and unchanged).
+
+Gated by `FEATURE_MEETINGS` (`config.py`, default `True`; Helm
+`featureMeetings`, default `"False"`; `/api/config` `feature_meetings`) **and**
+`meeting` in soev-api `GET /v1/agents` for the caller. Any failure of that check
+(soev-api unset or down, agent not allowlisted) hides the entry; the route gate
+redirects to `/`. No sharing UI: transcripts stay private, users share by
+downloading Markdown, .docx (built in the browser with jszip) or PDF (browser
+print via `utils/documentPrint.ts`).
+
+`backend/open_webui/routers/meetings.py` (mounted at `/api/v1/meetings` in
+`main.py`, since no fork router has a matching prefix) only forwards as the
+caller via `identity.build_client()`: audio bytes (64 MiB cap, held in memory,
+never written to disk) to `POST /v1/audio`, inputs to the thread routes, and
+`GET /{id}` returns `{status, state}` where `state` is the latest `meeting_state`
+event payload. Inputs return once soev-api accepts them; the turn runs on and the
+page polls. Every route refuses with 403 when the flag is off (admins too) and 503
+without `SOEV_API_URL`.
+
+Frontend, all fork-owned: `src/routes/(app)/meetings/`,
+`src/lib/components/meetings/` (consent, recorder with a 25 s self-contained
+segment rotation and serialized chunk delivery that retries 409s, view, list,
+sidebar entry, export), `src/lib/apis/meetings/`. Upstream files touched:
+`Sidebar.svelte` (two gated `MeetingsSidebarEntry` mounts and one availability
+check), i18n en-US/nl-NL, and the flag plumbing. Tests:
+`backend/open_webui/test/apps/test_meetings_router.py`,
+`src/lib/components/meetings/meeting.test.ts`.
