@@ -110,6 +110,13 @@ def is_unconfigured(model: dict) -> bool:
     return model.get('owned_by') == OWNER and not (model.get('info') or {}).get('id')
 
 
+async def is_offered(model_id: str, role: str | None) -> bool:
+    """In v2 mode a catalog model without an admin's model row is open to every user and admin."""
+    if not is_v2() or role not in ('user', 'admin'):
+        return False
+    return any(entry['id'] == model_id for entry in await catalog())
+
+
 async def default_models(configured: str | None) -> str | None:
     """The catalog default replaces ui.default_models in v2 mode."""
     if not is_v2():

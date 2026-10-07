@@ -11,6 +11,7 @@ from open_webui.soev import model_catalog
 from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import chat as chat_utils
 from open_webui.utils import models as models_utils
+from open_webui.utils.access_control import has_base_model_access
 from starlette.responses import StreamingResponse
 
 GLM = {
@@ -183,18 +184,92 @@ async def test_catalog_meta_survives_admin_rows_and_assistants_keep_catalog_base
     assert (await run())['gemma-4-31b']['info']['meta']['soev']['vendor'] is None
 
 
-@pytest.mark.asyncio
-async def test_unconfigured_catalog_models_follow_base_model_access(v2: FakeSoevApi, all_models, monkeypatch) -> None:
-    _, run = all_models
-    models = list((await run()).values())
+@pytest.fixture
+def access(monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, ModelModel], set[str]]:
+    """Access control on, with model rows and the caller's read grants by model id."""
+    rows: dict[str, ModelModel] = {}
+    granted: set[str] = set()
     monkeypatch.setattr(models_utils, 'BYPASS_MODEL_ACCESS_CONTROL', False)
     monkeypatch.setattr(models_utils, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
     monkeypatch.setattr(models_utils.Groups, 'get_groups_by_member_id', AsyncMock(return_value=[]))
-    monkeypatch.setattr(models_utils.AccessGrants, 'get_accessible_resource_ids', AsyncMock(return_value=set()))
-    admin = SimpleNamespace(id='root', role='admin')
-    user = SimpleNamespace(id='alice', role='user')
-    assert [m['id'] for m in await models_utils.get_filtered_models(models, admin)] == ['glm-5-3', 'gemma-4-31b']
-    assert await models_utils.get_filtered_models(models, user) == []
+    monkeypatch.setattr(models_utils.Models, 'get_model_by_id', AsyncMock(side_effect=lambda id, db=None: rows.get(id)))
+    monkeypatch.setattr(
+        models_utils.AccessGrants,
+        'has_access',
+        AsyncMock(side_effect=lambda **kwargs: kwargs['resource_id'] in granted),
+    )
+    monkeypatch.setattr(
+        models_utils.AccessGrants,
+        'get_accessible_resource_ids',
+        AsyncMock(side_effect=lambda **kwargs: granted & set(kwargs['resource_ids'])),
+    )
+    return rows, granted
+
+
+ADMIN = SimpleNamespace(id='root', role='admin')
+USER = SimpleNamespace(id='alice', role='user')
+PENDING = SimpleNamespace(id='bob', role='pending')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('user', [ADMIN, USER], ids=['admin', 'user'])
+async def test_v2_row_less_catalog_models_are_open_to_users_and_admins(
+    v2: FakeSoevApi, all_models, access, user
+) -> None:
+    _, run = all_models
+    models = list((await run()).values())
+    assert [m['id'] for m in await models_utils.get_filtered_models(models, user)] == ['glm-5-3', 'gemma-4-31b']
+    for model in models:
+        await models_utils.check_model_access(user, model)
+
+
+@pytest.mark.asyncio
+async def test_v2_row_less_catalog_models_stay_closed_to_pending_users(v2: FakeSoevApi, all_models, access) -> None:
+    _, run = all_models
+    models = list((await run()).values())
+    with pytest.raises(Exception, match='Model not found'):
+        await models_utils.check_model_access(PENDING, models[0])
+
+
+@pytest.mark.asyncio
+async def test_v2_admin_row_restricts_a_catalog_model_to_its_grants(v2: FakeSoevApi, all_models, access) -> None:
+    rows, run = all_models
+    rows.append(model_row('glm-5-3'))
+    models = await run()
+    access[0]['glm-5-3'] = rows[0]
+    assert [m['id'] for m in await models_utils.get_filtered_models(list(models.values()), USER)] == ['gemma-4-31b']
+    with pytest.raises(Exception, match='Model not found'):
+        await models_utils.check_model_access(USER, models['glm-5-3'])
+    access[1].add('glm-5-3')
+    await models_utils.check_model_access(USER, models['glm-5-3'])
+
+
+@pytest.mark.asyncio
+async def test_v2_custom_model_on_a_row_less_catalog_base_follows_its_own_grants(
+    v2: FakeSoevApi, all_models, access
+) -> None:
+    rows, run = all_models
+    rows.append(model_row('helper', base_model_id='glm-5-3'))
+    models = await run()
+    access[0]['helper'] = rows[0]
+    with pytest.raises(Exception, match='Model not found'):
+        await models_utils.check_model_access(USER, models['helper'])
+    access[1].add('helper')
+    await models_utils.check_model_access(USER, models['helper'])
+    assert await has_base_model_access(USER.id, rows[0], user_role=USER.role)
+    assert not await has_base_model_access(PENDING.id, rows[0], user_role=PENDING.role)
+
+
+@pytest.mark.asyncio
+async def test_v1_row_less_models_stay_admin_only(v1, access) -> None:
+    model = {'id': 'glm-5-3', 'owned_by': 'openai'}
+    assert await models_utils.get_filtered_models([model], USER) == []
+    assert await models_utils.get_filtered_models([model], ADMIN) == [model]
+    for user in (USER, ADMIN):
+        with pytest.raises(Exception, match='Model not found'):
+            await models_utils.check_model_access(user, model)
+    custom = model_row('helper', base_model_id='glm-5-3')
+    assert not await has_base_model_access(USER.id, custom, user_role=USER.role)
 
 
 @pytest.mark.asyncio

@@ -636,6 +636,8 @@ def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
             get_accessible_resource_ids=AsyncMock(return_value=set()),
         ),
         'has_base_model_access': AsyncMock(return_value=True),
+        # [Gradient] Outside v2 mode no model is offered by the soev catalog.
+        'model_catalog': SimpleNamespace(is_unconfigured=lambda model: False, is_offered=AsyncMock(return_value=False)),
         'MODEL_WHITELIST': [],
         'BYPASS_ADMIN_ACCESS_CONTROL': False,
         'BYPASS_MODEL_ACCESS_CONTROL': False,

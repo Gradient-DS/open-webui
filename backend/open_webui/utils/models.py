@@ -484,6 +484,9 @@ async def check_model_access(user, model, model_info=None, db=None):
         if model_info is None or model_info.id != model.get('id'):
             model_info = await Models.get_model_by_id(model.get('id'), db=db)
         if not model_info:
+            # [Gradient] The client's catalog is the tenant-level offer; an admin row restricts it.
+            if await model_catalog.is_offered(model.get('id'), user.role):
+                return
             raise Exception('Model not found')
 
         # One group-membership fetch shared by the direct check and every
@@ -526,7 +529,7 @@ async def get_filtered_models(models, user, db=None):
             if model.get('arena'):
                 continue
             info = model.get('info')
-            # [Gradient] Catalog meta is not an admin's model row; access rules stay as for any base model.
+            # [Gradient] Catalog meta is not an admin's model row.
             if info and not model_catalog.is_unconfigured(model):
                 model_infos[model['id']] = info
 
@@ -564,7 +567,8 @@ async def get_filtered_models(models, user, db=None):
                     or model['id'] in accessible_model_ids
                 ):
                     filtered_models.append(model)
-            elif user.role == 'admin':
+            # [Gradient] A row-less catalog model is open to every user and admin.
+            elif user.role == 'admin' or await model_catalog.is_offered(model['id'], user.role):
                 # No DB entry means no access control configured yet;
                 # only admins can see unconfigured models.
                 filtered_models.append(model)

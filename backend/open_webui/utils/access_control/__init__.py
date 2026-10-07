@@ -325,7 +325,10 @@ async def has_base_model_access(
         seen.add(base_model_id)
         base_model_info = await Models.get_model_by_id(base_model_id, db=db)
         if base_model_info is None:
-            return user_role == 'admin'
+            # [Gradient] In v2 mode a row-less catalog base is open to every user and admin.
+            from open_webui.soev import model_catalog
+
+            return user_role == 'admin' or await model_catalog.is_offered(base_model_id, user_role)
         if not (
             user_id == base_model_info.user_id
             or await AccessGrants.has_access(
