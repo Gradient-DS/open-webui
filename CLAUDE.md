@@ -70,6 +70,12 @@ the only source of models (`GET /v1/models`), the default (served as `default_mo
 (`POST /v1/completions/task`, called from `generate_chat_completion`). Connections, `ui.default_models` and the task
 model settings are not used. Details: `docs/agent-api-deployment.md`.
 
+A turn the agent refuses arrives as `invalid_field` with constraint `chat:<reason>`; `utils/agent_v2.py`
+(`_REFUSALS`) shows a nl/en message per reason, with the agent's detail only where it names what to fix
+(unreadable file names, the missing tool capability), and the generic text when no known reason is given.
+The log line carries status, code and constraint, never the detail. Before sending, a selected knowledge base
+the service cannot read either is reported as deleted; one only the user cannot read as no access (counts only).
+
 ## Live document attachments
 
 `soev/live_documents.py` registers every record in an agent `attached` event's

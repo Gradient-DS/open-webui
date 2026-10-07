@@ -152,11 +152,13 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
 
 
 class KnowledgeUnavailable(Exception):
-    """Selected knowledge bases the API does not show the user: unreadable, or deleted."""
+    """Selected knowledge bases the API does not show the user: `denied` exist but are hidden from them, `deleted`
+    exist for nobody."""
 
-    def __init__(self, count: int) -> None:
-        super().__init__(f'{count} selected knowledge bases are unavailable')
-        self.count = count
+    def __init__(self, *, denied: int, deleted: int) -> None:
+        super().__init__(f'{denied + deleted} selected knowledge bases are unavailable')
+        self.denied = denied
+        self.deleted = deleted
 
 
 async def _knowledge(metadata: dict[str, Any]) -> list[dict[str, str]]:
@@ -171,7 +173,9 @@ async def _knowledge(metadata: dict[str, Any]) -> list[dict[str, str]]:
     user_id = None if acting.acting_ref() else metadata['user_id']
     described = await Knowledges.describe_knowledge(keys, user_id=user_id)
     if missing := [key for key in keys if key not in described]:
-        raise KnowledgeUnavailable(len(missing))
+        existing = await Knowledges.existing_knowledge(missing)
+        denied = sum(key in existing for key in missing)
+        raise KnowledgeUnavailable(denied=denied, deleted=len(missing) - denied)
     return [
         {'key': key, 'name': name, **({'description': description} if description else {})}
         for key, (name, description) in ((key, described[key]) for key in keys)
@@ -529,19 +533,28 @@ async def _documents_allowed(user_id: str) -> bool:
     )
 
 
-def _unavailable(count: int, language: str | None) -> dict[str, Any]:
-    """[Claude] A count, never names: the name of a knowledge base the user cannot read may itself be confidential."""
-    if (language or '').lower().startswith('nl'):
-        message = (
-            f'Je hebt geen toegang tot {count} van de kennisbanken bij deze assistent of chat. '
-            'Haal ze uit de chat, of vraag je beheerder om toegang.'
+def _unavailable(unavailable: KnowledgeUnavailable, language: str | None) -> dict[str, Any]:
+    """[Claude] Counts, never names: the name of a knowledge base the user cannot read may itself be confidential.
+    A deleted one is only to be removed; one hidden from the user may need their admin."""
+    dutch = (language or '').lower().startswith('nl')
+    parts = []
+    if unavailable.deleted:
+        parts.append(
+            f'{unavailable.deleted} van de kennisbanken bij deze assistent of chat bestaat niet meer. '
+            'Haal ze uit de chat en verstuur je bericht opnieuw.'
+            if dutch
+            else f'{unavailable.deleted} of the knowledge bases on this assistant or chat no longer exist. '
+            'Remove them from the chat and send your message again.'
         )
-    else:
-        message = (
-            f"You don't have access to {count} of the knowledge bases on this assistant or chat. "
+    if unavailable.denied:
+        parts.append(
+            f'Je hebt geen toegang tot {unavailable.denied} van de kennisbanken bij deze assistent of chat. '
+            'Haal ze uit de chat, of vraag je beheerder om toegang.'
+            if dutch
+            else f"You don't have access to {unavailable.denied} of the knowledge bases on this assistant or chat. "
             'Remove them from the chat, or ask your admin for access.'
         )
-    return {'error': {'code': 'knowledge_unavailable', 'message': message}}
+    return {'error': {'code': 'knowledge_unavailable', 'message': ' '.join(parts)}}
 
 
 _WHY = {
@@ -589,7 +602,14 @@ def _chunk(delta: dict[str, Any]) -> dict[str, Any]:
     return {'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]}
 
 
-def _error(code: str, *, constraint: str | None = None, model: str | None = None) -> dict[str, Any]:
+def _error(
+    code: str,
+    *,
+    constraint: str | None = None,
+    model: str | None = None,
+    detail: str | None = None,
+    language: str | None = None,
+) -> dict[str, Any]:
     messages = {
         'not_found': 'The agent thread is unavailable.',
         'thread_active': 'The agent thread is already running or needs recovery.',
@@ -599,9 +619,65 @@ def _error(code: str, *, constraint: str | None = None, model: str | None = None
         'orphaned': 'The agent turn was interrupted and needs recovery.',
     }
     message = messages.get(code, 'The agent request failed.')
-    if code == 'invalid_field' and constraint == 'chat:model':
-        message = f'The agent could not accept model "{model}". Select another model.'
+    if code == 'invalid_field' and constraint is not None:
+        message = _refusal(constraint, model=model, detail=detail, language=language) or message
     return {'error': {'code': code, 'message': message}}
+
+
+# [Gradient] Why the agent refused a turn, by soev-api's `chat:<reason>` constraint. `{model}` is the chosen model;
+# `{detail}` is the agent's own words, shown only where they name what to fix (file names, the missing capability).
+_REFUSALS = {
+    'en': {
+        'chat:model': 'The agent could not accept model "{model}". Select another model.',
+        'chat:unknown_model': 'The agent could not accept model "{model}". Select another model.',
+        'chat:not_chat_model': 'Model "{model}" is not a chat model. Select another model.',
+        'chat:model_required': 'The agent received no model for this message. Select a model and send it again.',
+        'chat:knowledge_unavailable': (
+            'One or more knowledge bases on this assistant or chat are unavailable to you, or no longer exist. '
+            'Remove them from the chat and send your message again.'
+        ),
+        'chat:attachments_unreadable': (
+            "The assistant can't read some attached files ({detail}). "
+            'Remove them under Controls → Files and send your message again.'
+        ),
+        'chat:tool_unsupported': (
+            'The selected model cannot use a tool this message requires ({detail}). '
+            'Select another model or turn the tool off.'
+        ),
+        'chat:credential_not_live': 'Your access to the assistant has expired. Sign in again and retry.',
+    },
+    'nl': {
+        'chat:model': 'De assistent kon model "{model}" niet gebruiken. Kies een ander model.',
+        'chat:unknown_model': 'De assistent kon model "{model}" niet gebruiken. Kies een ander model.',
+        'chat:not_chat_model': 'Model "{model}" is geen chatmodel. Kies een ander model.',
+        'chat:model_required': (
+            'De assistent kreeg geen model mee voor dit bericht. Kies een model en verstuur het opnieuw.'
+        ),
+        'chat:knowledge_unavailable': (
+            'Een of meer kennisbanken bij deze assistent of chat zijn niet voor jou beschikbaar, of bestaan niet meer. '
+            'Haal ze uit de chat en verstuur je bericht opnieuw.'
+        ),
+        'chat:attachments_unreadable': (
+            'De assistent kan sommige bijlagen niet lezen ({detail}). '
+            'Verwijder ze onder Besturingselementen → Bestanden en verstuur je bericht opnieuw.'
+        ),
+        'chat:tool_unsupported': (
+            'Het gekozen model kan een hulpmiddel dat dit bericht vereist niet gebruiken ({detail}). '
+            'Kies een ander model of zet het hulpmiddel uit.'
+        ),
+        'chat:credential_not_live': 'Je toegang tot de assistent is verlopen. Log opnieuw in en probeer het nog eens.',
+    },
+}
+
+
+def _refusal(constraint: str, *, model: str | None, detail: str | None, language: str | None) -> str | None:
+    """[Gradient] The localised reason for a refused turn, or None for a constraint without one."""
+    template = _REFUSALS['nl' if (language or '').lower().startswith('nl') else 'en'].get(constraint)
+    if template is None:
+        return None
+    if not detail:
+        template = template.replace(' ({detail})', '')
+    return template.format(model=model, detail=detail)
 
 
 def _source_page(pages: Any) -> int | None:
@@ -1213,11 +1289,16 @@ class AgentTurn:
         else:
             await self.summarize()
         if event.event == 'error':
+            code, constraint = event.data.get('code', 'service_unavailable'), event.data.get('constraint')
+            log.warning('v2 agent turn refused: code=%s constraint=%s', code, constraint)
+            detail = event.data.get('detail')
             chunks.append(
                 _error(
-                    event.data.get('code', 'service_unavailable'),
-                    constraint=event.data.get('constraint'),
+                    code,
+                    constraint=constraint,
                     model=self.model,
+                    detail=detail if isinstance(detail, str) else None,
+                    language=self.metadata.get('user_language'),
                 )
             )
         elif state not in {'idle', 'waiting'}:
@@ -1262,7 +1343,17 @@ class AgentTurn:
         except Exception as error:
             await self.cancel()
             if isinstance(error, SoevApiError):
-                yield _error(error.code, constraint=error.constraint, model=self.model)
+                # [Gradient] Code and constraint only: the detail can name the user's files.
+                log.warning(
+                    'v2 agent turn refused: status=%s code=%s constraint=%s', error.status, error.code, error.constraint
+                )
+                yield _error(
+                    error.code,
+                    constraint=error.constraint,
+                    model=self.model,
+                    detail=error.detail,
+                    language=self.metadata.get('user_language'),
+                )
             else:
                 yield _error('service_unavailable')
 
@@ -1311,7 +1402,7 @@ async def _sent(
         texts = await _texts(entries, metadata['user_id'])
         images = await _images(metadata, turn.as_user)
     except KnowledgeUnavailable as unavailable:
-        return _refused(_unavailable(unavailable.count, metadata.get('user_language')))
+        return _refused(_unavailable(unavailable, metadata.get('user_language')))
     except AttachmentsUnavailable as unavailable:
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
     except ImagesUnavailable as unavailable:
