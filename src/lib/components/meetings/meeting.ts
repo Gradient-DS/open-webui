@@ -286,3 +286,23 @@ export const dayjsLocale = (languages: readonly string[] | undefined, loaded: ob
 	}
 	return 'en';
 };
+
+export const REVEAL_STEP_MS = 70;
+export const REVEAL_CAP_MS = 3000;
+export const REVEAL_DURATION_MS = 250;
+
+/**
+ * Start delay of each item when a finished transcript or list is revealed: one step apart,
+ * and everything after the cap appears together, so a long meeting is shown within ~3 s.
+ */
+export const revealDelays = (
+	count: number,
+	{ stepMs = REVEAL_STEP_MS, capMs = REVEAL_CAP_MS } = {}
+): number[] =>
+	Array.from({ length: Math.max(0, count) }, (_, index) =>
+		Math.min(index * stepMs, Math.max(0, capMs - REVEAL_DURATION_MS))
+	);
+
+/** How long a reveal of `count` items takes from its start to the last item settling. */
+export const revealTotalMs = (count: number, options?: { stepMs?: number; capMs?: number }) =>
+	(revealDelays(count, options).at(-1) ?? 0) + REVEAL_DURATION_MS;

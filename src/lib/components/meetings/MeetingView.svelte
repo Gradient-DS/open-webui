@@ -2,6 +2,8 @@
 	// [Gradient] Vergadering: one meeting, rendered from the agent's latest meeting_state snapshot.
 	// Header and subtitle follow the Notes editor; recording uses the dictation pill.
 	import { getContext, onDestroy, onMount, tick, untrack } from 'svelte';
+	import { fly } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { toast } from 'svelte-sonner';
@@ -38,6 +40,9 @@
 	import {
 		CONSENT_TEXT_VERSION,
 		dayjsLocale,
+		REVEAL_DURATION_MS,
+		revealDelays,
+		revealTotalMs,
 		OUTPUT_KINDS,
 		fileStem,
 		formatTimestamp,
@@ -84,6 +89,11 @@
 	let pending = $state<Pending | null>(null);
 	let outputStream = $state<OutputStream | null>(null);
 	let streamAbort: AbortController | null = null;
+	// A result that lands while the user watches is revealed item by item; opening one never animates.
+	let reveal = $state<'transcript' | 'actions' | null>(null);
+	let revealTimer: ReturnType<typeof setTimeout> | null = null;
+	let followTimer: ReturnType<typeof setInterval> | null = null;
+	let scroller: HTMLElement | null = $state(null);
 	let sending = $state(false);
 	// Set once this page sent `finish`; the agent's progress snapshot may lag behind its turn.
 	let finishedHere = $state(false);
@@ -176,10 +186,56 @@
 	const outputKey = (snapshot: MeetingState | null, kind: OutputKind) =>
 		JSON.stringify(snapshot?.outputs?.[kind] ?? null);
 
+	const reducedMotion = () =>
+		typeof window !== 'undefined' &&
+		window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+	const startReveal = (kind: 'transcript' | 'actions', count: number) => {
+		if (reducedMotion() || count === 0) return;
+		const atBottom =
+			!!scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
+		reveal = kind;
+		if (revealTimer) clearTimeout(revealTimer);
+		if (followTimer) clearInterval(followTimer);
+		followTimer = atBottom
+			? setInterval(
+					() => scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' }),
+					150
+				)
+			: null;
+		revealTimer = setTimeout(
+			() => {
+				reveal = null;
+				if (followTimer) clearInterval(followTimer);
+				followTimer = null;
+			},
+			revealTotalMs(count) + 50
+		);
+	};
+
+	const revealIn = (kind: 'transcript' | 'actions', index: number, count: number) =>
+		reveal === kind
+			? {
+					y: 6,
+					duration: REVEAL_DURATION_MS,
+					delay: revealDelays(count)[index] ?? 0,
+					easing: cubicOut
+				}
+			: { duration: 0 };
+
 	const load = async () => {
 		if (!meetingId) return;
+		const wasTranscribing = transcribing;
+		const actionsBefore = pending?.kind === 'actions' ? pending.before : null;
 		try {
 			read = await getMeeting(localStorage.token, meetingId);
+			if (wasTranscribing && meeting?.status === 'ready') {
+				tab = 'transcript';
+				startReveal('transcript', groupTurns(meeting.transcript?.segments ?? []).length);
+			}
+			if (actionsBefore !== null && outputKey(meeting, 'actions') !== actionsBefore) {
+				startReveal('actions', meeting?.outputs?.actions?.items?.length ?? 0);
+			}
 		} catch (error) {
 			if ((error as { status?: number })?.status === 404) {
 				toast.error($i18n.t('This meeting no longer exists.'));
@@ -315,7 +371,12 @@
 					(frame) => {
 						stream = reduceStream(stream, frame);
 						outputStream = stream;
-						if (stream.final && read) read = { ...read, state: stream.final };
+						if (stream.final && read) {
+							read = { ...read, state: stream.final };
+							if (kind === 'actions' && outputKey(stream.final, 'actions') !== before) {
+								startReveal('actions', stream.final.outputs?.actions?.items?.length ?? 0);
+							}
+						}
 					},
 					controller.signal
 				)
@@ -421,6 +482,8 @@
 		destroyed = true;
 		if (pollTimer) clearTimeout(pollTimer);
 		streamAbort?.abort();
+		if (revealTimer) clearTimeout(revealTimer);
+		if (followTimer) clearInterval(followTimer);
 		if (titleTimer) saveTitle();
 	});
 
@@ -464,7 +527,10 @@
 		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
 		: ''} max-w-full"
 >
-	<div class="relative flex-1 w-full max-h-full overflow-y-auto flex justify-center pt-2">
+	<div
+		bind:this={scroller}
+		class="relative flex-1 w-full max-h-full overflow-y-auto flex justify-center pt-2"
+	>
 		<div class="w-full flex flex-col">
 			<div class="shrink-0 w-full flex justify-between items-center px-3">
 				<div class="w-full min-w-0 flex items-center">
@@ -671,7 +737,7 @@
 
 							<div class="space-y-4">
 								{#each turns as turn, index (index)}
-									<div>
+									<div in:fly|global={revealIn('transcript', index, turns.length)}>
 										<div class="flex items-baseline gap-2 text-xs text-gray-500 mb-0.5">
 											<span class="font-medium text-gray-800 dark:text-gray-200"
 												>{speakerName(speakers, turn.speaker)}</span
@@ -719,7 +785,10 @@
 								{:else}
 									<ul class="flex flex-col gap-y-0.5">
 										{#each items as item, index (index)}
-											<li class="rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900">
+											<li
+												class="rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900"
+												in:fly|global={revealIn('actions', index, items.length)}
+											>
 												<div class="text-sm text-gray-800 dark:text-gray-200">{item.task}</div>
 												<div class="text-xs text-gray-500 flex flex-wrap gap-x-3">
 													{#if item.owner}<span>{$i18n.t('Owner')}: {item.owner}</span>{/if}

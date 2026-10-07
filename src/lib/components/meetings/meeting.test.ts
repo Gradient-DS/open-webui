@@ -11,6 +11,8 @@ import {
 	matchesQuery,
 	meetingTimes,
 	metadataMarkdown,
+	revealDelays,
+	revealTotalMs,
 	wordCount,
 	type MeetingMeta,
 	outputMarkdown,
@@ -368,5 +370,18 @@ describe('chunk delivery', () => {
 		expect(order).toEqual(['a', 'c']);
 		expect(errors).toHaveLength(1);
 		expect(queue.pending).toBe(0);
+	});
+});
+
+describe('reveal schedule', () => {
+	it('staggers by 70 ms and lets the rest appear together after the cap', () => {
+		expect(revealDelays(3)).toEqual([0, 70, 140]);
+		const long = revealDelays(200);
+		expect(long[10]).toBe(700);
+		expect(Math.max(...long)).toBe(2750);
+		expect(long.filter((delay) => delay === 2750).length).toBeGreaterThan(150);
+		expect(revealTotalMs(200)).toBe(3000);
+		expect(revealTotalMs(0)).toBe(250);
+		expect(revealDelays(0)).toEqual([]);
 	});
 });
