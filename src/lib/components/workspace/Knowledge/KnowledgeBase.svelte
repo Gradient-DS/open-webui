@@ -2263,8 +2263,10 @@
 						/>
 
 						{#if knowledge?.write_access && syncableSources.length > 1}
+							<!-- [Gradient] Keep the standard gap before "Add source". -->
 							<Tooltip
 								content={$i18n.t('Check every source of this knowledge base for changes now')}
+								className="flex mr-1.5"
 							>
 								<button
 									type="button"
