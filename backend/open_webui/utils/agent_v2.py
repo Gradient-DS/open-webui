@@ -602,7 +602,14 @@ def _chunk(delta: dict[str, Any]) -> dict[str, Any]:
     return {'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]}
 
 
-def _error(code: str, *, constraint: str | None = None, model: str | None = None) -> dict[str, Any]:
+def _error(
+    code: str,
+    *,
+    constraint: str | None = None,
+    model: str | None = None,
+    detail: str | None = None,
+    language: str | None = None,
+) -> dict[str, Any]:
     messages = {
         'not_found': 'The agent thread is unavailable.',
         'thread_active': 'The agent thread is already running or needs recovery.',
@@ -612,9 +619,65 @@ def _error(code: str, *, constraint: str | None = None, model: str | None = None
         'orphaned': 'The agent turn was interrupted and needs recovery.',
     }
     message = messages.get(code, 'The agent request failed.')
-    if code == 'invalid_field' and constraint == 'chat:model':
-        message = f'The agent could not accept model "{model}". Select another model.'
+    if code == 'invalid_field' and constraint is not None:
+        message = _refusal(constraint, model=model, detail=detail, language=language) or message
     return {'error': {'code': code, 'message': message}}
+
+
+# [Gradient] Why the agent refused a turn, by soev-api's `chat:<reason>` constraint. `{model}` is the chosen model;
+# `{detail}` is the agent's own words, shown only where they name what to fix (file names, the missing capability).
+_REFUSALS = {
+    'en': {
+        'chat:model': 'The agent could not accept model "{model}". Select another model.',
+        'chat:unknown_model': 'The agent could not accept model "{model}". Select another model.',
+        'chat:not_chat_model': 'Model "{model}" is not a chat model. Select another model.',
+        'chat:model_required': 'The agent received no model for this message. Select a model and send it again.',
+        'chat:knowledge_unavailable': (
+            'One or more knowledge bases on this assistant or chat are unavailable to you, or no longer exist. '
+            'Remove them from the chat and send your message again.'
+        ),
+        'chat:attachments_unreadable': (
+            "The assistant can't read some attached files ({detail}). "
+            'Remove them under Controls → Files and send your message again.'
+        ),
+        'chat:tool_unsupported': (
+            'The selected model cannot use a tool this message requires ({detail}). '
+            'Select another model or turn the tool off.'
+        ),
+        'chat:credential_not_live': 'Your access to the assistant has expired. Sign in again and retry.',
+    },
+    'nl': {
+        'chat:model': 'De assistent kon model "{model}" niet gebruiken. Kies een ander model.',
+        'chat:unknown_model': 'De assistent kon model "{model}" niet gebruiken. Kies een ander model.',
+        'chat:not_chat_model': 'Model "{model}" is geen chatmodel. Kies een ander model.',
+        'chat:model_required': (
+            'De assistent kreeg geen model mee voor dit bericht. Kies een model en verstuur het opnieuw.'
+        ),
+        'chat:knowledge_unavailable': (
+            'Een of meer kennisbanken bij deze assistent of chat zijn niet voor jou beschikbaar, of bestaan niet meer. '
+            'Haal ze uit de chat en verstuur je bericht opnieuw.'
+        ),
+        'chat:attachments_unreadable': (
+            'De assistent kan sommige bijlagen niet lezen ({detail}). '
+            'Verwijder ze onder Besturingselementen → Bestanden en verstuur je bericht opnieuw.'
+        ),
+        'chat:tool_unsupported': (
+            'Het gekozen model kan een hulpmiddel dat dit bericht vereist niet gebruiken ({detail}). '
+            'Kies een ander model of zet het hulpmiddel uit.'
+        ),
+        'chat:credential_not_live': 'Je toegang tot de assistent is verlopen. Log opnieuw in en probeer het nog eens.',
+    },
+}
+
+
+def _refusal(constraint: str, *, model: str | None, detail: str | None, language: str | None) -> str | None:
+    """[Gradient] The localised reason for a refused turn, or None for a constraint without one."""
+    template = _REFUSALS['nl' if (language or '').lower().startswith('nl') else 'en'].get(constraint)
+    if template is None:
+        return None
+    if not detail:
+        template = template.replace(' ({detail})', '')
+    return template.format(model=model, detail=detail)
 
 
 def _source_page(pages: Any) -> int | None:
@@ -1226,11 +1289,16 @@ class AgentTurn:
         else:
             await self.summarize()
         if event.event == 'error':
+            code, constraint = event.data.get('code', 'service_unavailable'), event.data.get('constraint')
+            log.warning('v2 agent turn refused: code=%s constraint=%s', code, constraint)
+            detail = event.data.get('detail')
             chunks.append(
                 _error(
-                    event.data.get('code', 'service_unavailable'),
-                    constraint=event.data.get('constraint'),
+                    code,
+                    constraint=constraint,
                     model=self.model,
+                    detail=detail if isinstance(detail, str) else None,
+                    language=self.metadata.get('user_language'),
                 )
             )
         elif state not in {'idle', 'waiting'}:
@@ -1275,7 +1343,17 @@ class AgentTurn:
         except Exception as error:
             await self.cancel()
             if isinstance(error, SoevApiError):
-                yield _error(error.code, constraint=error.constraint, model=self.model)
+                # [Gradient] Code and constraint only: the detail can name the user's files.
+                log.warning(
+                    'v2 agent turn refused: status=%s code=%s constraint=%s', error.status, error.code, error.constraint
+                )
+                yield _error(
+                    error.code,
+                    constraint=error.constraint,
+                    model=self.model,
+                    detail=error.detail,
+                    language=self.metadata.get('user_language'),
+                )
             else:
                 yield _error('service_unavailable')
 

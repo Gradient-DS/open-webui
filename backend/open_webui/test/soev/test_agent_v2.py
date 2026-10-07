@@ -1429,6 +1429,66 @@ async def test_refused_model_is_named_without_retry_or_default(
     assert chat.mutations()[-1][1]['model'] == 'refused-model'
 
 
+def refuse_turns(chat: Chat, monkeypatch: pytest.MonkeyPatch, problem: dict) -> None:
+    """soev-api refuses every new turn with this 422 problem."""
+    original = chat.api.chat.handle
+
+    def refuse(request: httpx.Request, body: dict | None, owner: tuple[str, str | None]) -> httpx.Response:
+        if request.method == 'POST':
+            chat.api.chat.requests.append(request)
+            return httpx.Response(422, json=problem, headers={'Content-Type': 'application/problem+json'})
+        return original(request, body, owner)
+
+    monkeypatch.setattr(chat.api.chat, 'handle', refuse)
+
+
+# Per agent refusal reason, per language: words its message must carry; whether the agent's detail is shown.
+REASONS = {
+    'knowledge_unavailable': ({'en-US': 'knowledge bases', 'nl-NL': 'kennisbanken'}, False),
+    'attachments_unreadable': ({'en-US': 'attached files', 'nl-NL': 'bijlagen'}, True),
+    'unknown_model': ({'en-US': '"picked-model"', 'nl-NL': '"picked-model"'}, False),
+    'not_chat_model': ({'en-US': 'not a chat model', 'nl-NL': 'geen chatmodel'}, False),
+    'model_required': ({'en-US': 'no model', 'nl-NL': 'geen model'}, False),
+    'tool_unsupported': ({'en-US': 'cannot use a tool', 'nl-NL': 'hulpmiddel'}, True),
+    'credential_not_live': ({'en-US': 'expired', 'nl-NL': 'verlopen'}, False),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+@pytest.mark.parametrize('reason', sorted(REASONS))
+async def test_an_agent_refusal_shows_its_reason_localised_and_logs_only_the_code(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, language: str, reason: str
+) -> None:
+    detail = 'these attached files cannot be read: geheim.pdf'
+    refuse_turns(chat, monkeypatch, {'code': 'invalid_field', 'constraint': f'chat:{reason}', 'detail': detail})
+    words, shows_detail = REASONS[reason]
+    with caplog.at_level('WARNING', logger=agent_v2.log.name):
+        chunks = await chat.turn(
+            'question', 'a1', user_language=language, model={'info': {'base_model_id': 'picked-model'}}
+        )
+    error = chunks[-1]['error']
+    assert error['code'] == 'invalid_field'
+    assert words[language] in error['message']
+    assert error['message'] != agent_v2._error('invalid_field')['error']['message']
+    assert (detail in error['message']) == shows_detail
+    assert f'code=invalid_field constraint=chat:{reason}' in caplog.text
+    assert 'geheim.pdf' not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('constraint', [None, 'chat:a_later_reason'])
+async def test_a_refusal_without_a_known_reason_keeps_the_generic_text(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, constraint: str | None
+) -> None:
+    problem = {'code': 'invalid_field', 'detail': 'input rejected'}
+    if constraint is not None:
+        problem['constraint'] = constraint
+    refuse_turns(chat, monkeypatch, problem)
+    chunks = await chat.turn('question', 'a1', user_language='nl-NL')
+    assert chunks[-1] == agent_v2._error('invalid_field')
+
+
 @pytest.mark.asyncio
 async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text(chat: Chat) -> None:
     """Stream each chunk once and render same-document markers with one number."""
