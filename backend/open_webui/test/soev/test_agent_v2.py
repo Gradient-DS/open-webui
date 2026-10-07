@@ -6,6 +6,7 @@ import copy
 import hashlib
 import html
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -881,20 +882,11 @@ def answered(text: str, *citations: dict, **payload: Any) -> tuple[str, dict]:
     return ('model_output', {'content': text, 'citations': list(citations), **payload})
 
 
-def panel(socket: list[dict]) -> list[int]:
-    """[Claude] The numbers the message's source pill lists, as `usedCitations` does: a document's last flags win,
-    and once any source speaks `cited_this_turn` only the cited ones show."""
-    flags: dict[str, dict[str, Any]] = {}
-    for event in socket:
-        if event['type'] == 'source':
-            data = event['data']
-            entry = flags.setdefault(data['source']['id'], {'n': data['n']})
-            entry.update({key: data[key] for key in ('current_turn', 'cited_this_turn') if key in data})
-    shown = list(flags.values())
-    for key in ('cited_this_turn', 'current_turn'):
-        if any(key in entry for entry in shown):
-            return sorted(entry['n'] for entry in shown if entry.get(key))
-    return sorted(entry['n'] for entry in shown)
+def panel(chunks: list[dict], socket: list[dict]) -> list[int]:
+    """[Claude] The numbers the message's source pill lists, as `citedCitations` does: each `[N]` in the answer
+    that names a source sent to the message."""
+    sent = {event['data']['n'] for event in socket if event['type'] == 'source'}
+    return sorted({n for marker in re.findall(r'\[(\d+)\]', content(chunks)) if (n := int(marker)) in sent})
 
 
 @pytest.mark.asyncio
@@ -919,8 +911,7 @@ async def test_attached_text_citations_emit_numbered_markers_and_local_source_li
     assert source['document'] == [text]
     assert source['metadata'][0]['chunk_id'] == citation['source']
     assert source['n'] == 1
-    assert source['cited_this_turn'] is True
-    assert panel(chat.socket) == [1]
+    assert panel(chunks, chat.socket) == [1]
 
 
 @pytest.mark.asyncio
@@ -938,10 +929,10 @@ async def test_attached_text_citations_are_seeded_from_root_inputs_at_the_parent
     assert content(chunks) == 'Answer [1] [2].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
     assert {source['source']['id'] for source in sources} == {'note:n1', 'document'}
-    note = next(source for source in sources if source['source']['id'] == 'note:n1' and source['cited_this_turn'])
+    note = next(source for source in sources if source['source']['id'] == 'note:n1')
     assert note['source']['url'] == '/notes/n1'
     assert note['document'] == ['Note body']
-    assert panel(chat.socket) == [1, 2]
+    assert panel(chunks, chat.socket) == [1, 2]
     if branch:
         assert chat.mutations()[-2][0] == '/v1/chat/threads/thr-1/fork'
 
@@ -985,10 +976,11 @@ async def test_document_numbers_survive_seeded_turns(chat: Chat) -> None:
             answered('Eerst.', cited(5, 'chunk-0'), cited(5, 'chunk-1'), cited(5, 'second-1', 'second')),
         ]
     ]
-    assert content(await chat.turn('first', 'a1')) == 'Eerst [1] [2].'
+    answer = await chat.turn('first', 'a1')
+    assert content(answer) == 'Eerst [1] [2].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 1, 2]
-    assert panel(chat.socket) == [1, 2]
+    assert [source['n'] for source in sources] == [1, 1, 1, 2]
+    assert panel(answer, chat.socket) == [1, 2]
     chat.socket.clear()
     chat.api.chat.turns = [
         [
@@ -997,10 +989,11 @@ async def test_document_numbers_survive_seeded_turns(chat: Chat) -> None:
             answered('Dan.', cited(3, 'chunk-0'), cited(3, 'third-1', 'third')),
         ]
     ]
-    assert content(await chat.turn('next', 'a2', 'a1')) == 'Dan [1] [3].'
+    answer = await chat.turn('next', 'a2', 'a1')
+    assert content(answer) == 'Dan [1] [3].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 2, 3, 1, 3]
-    assert panel(chat.socket) == [1, 3]
+    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 2, 3]
+    assert panel(answer, chat.socket) == [1, 3]
 
 
 def test_different_documents_with_the_same_title_keep_distinct_numbers() -> None:
@@ -1282,8 +1275,7 @@ async def test_the_panel_lists_what_this_turn_cited_with_cumulative_numbers(chat
     second = [document('document-b', 'Second'), chunk('source-b', 'document-b')]
     third = [document('document-c', 'Third'), chunk('source-c', 'document-c')]
     chat.api.chat.turns = [[found(DOCUMENT, CHUNK, *second), answered('First', cited(5, 'source-a'))]]
-    await chat.turn('first', 'a1')
-    assert panel(chat.socket) == [1]
+    assert panel(await chat.turn('first', 'a1'), chat.socket) == [1]
     chat.socket.clear()
     chat.api.chat.turns = [
         [
@@ -1296,11 +1288,11 @@ async def test_the_panel_lists_what_this_turn_cited_with_cumulative_numbers(chat
             ),
         ]
     ]
-    assert content(await chat.turn('second', 'a2', 'a1')) == 'Second [2] and [3]; earlier [1]'
-    assert panel(chat.socket) == [1, 2, 3]
+    answer = await chat.turn('second', 'a2', 'a1')
+    assert content(answer) == 'Second [2] and [3]; earlier [1]'
+    assert panel(answer, chat.socket) == [1, 2, 3]
     chat.socket.clear()
-    await chat.turn('third', 'a3', 'a2')
-    assert panel(chat.socket) == []
+    assert panel(await chat.turn('third', 'a3', 'a2'), chat.socket) == []
 
 
 @pytest.mark.asyncio
@@ -1438,7 +1430,7 @@ async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text
     assert 'PRIVATE' not in json.dumps(chunks)
     assert content(chunks, 'reasoning_content') == 'PlanExplain'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [(source['n'], 'cited_this_turn' in source) for source in sources] == [(1, False)] * 2 + [(1, True)] * 2
+    assert [source['n'] for source in sources] == [1, 1]
     assert sources[0]['source'] == {'id': 'document', 'name': 'Document', 'url': 'document'}
     assert sources[0]['document'] == ['quoted passage']
     assert sources[0]['metadata'][0]['source'] == 'document'
@@ -1453,8 +1445,9 @@ async def test_previous_sources_are_available_in_later_turn_and_fork(chat: Chat)
     for message_id in ('a2', 'regenerated'):
         chat.socket.clear()
         chat.api.chat.turns = [[answered('Again', cited(5, 'source-a'))]]
-        assert content(await chat.turn('again', message_id, 'a1')) == 'Again [1]'
-        assert panel(chat.socket) == [1]
+        answer = await chat.turn('again', message_id, 'a1')
+        assert content(answer) == 'Again [1]'
+        assert panel(answer, chat.socket) == [1]
 
 
 @pytest.mark.asyncio
@@ -2860,7 +2853,7 @@ async def test_documents_stream_as_answer_text_with_ordinary_citations(chat: Cha
     ]
     chunks = await chat.turn('write a report', 'a1', features={'document_writer': True})
     assert content(chunks).endswith(before + ' [1]' + after)
-    assert panel(chat.socket) == [1]
+    assert panel(chunks, chat.socket) == [1]
 
 
 def stored_chat(count: int, *, size: int = 10) -> SimpleNamespace:
