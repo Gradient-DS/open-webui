@@ -693,6 +693,9 @@ class SoevKnowledgeTable:
             root = ('\0sync:' + schedule_id,)
             model = self._folder_model(collection, {'path': root[0], 'created_at': collection['created_at']})
             model.name = schedule.get('label') or 'Folder'
+            # [Gradient] A folder source sorts by its last sync under "Updated".
+            if schedule.get('last_run_at'):
+                model.updated_at = int(dt.datetime.fromisoformat(schedule['last_run_at']).timestamp())
             directories[root] = model
         for source_id, (document, path) in members.items():
             reach = set((document or {}).get('schedule_ids', []))

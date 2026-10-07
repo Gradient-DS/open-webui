@@ -210,6 +210,18 @@ async def test_folder_sources_appear_as_top_level_directories(folder_store):
 
 
 @pytest.mark.asyncio
+async def test_folder_sources_sort_with_real_folders_by_name_and_last_sync(folder_store):
+    """Source roots and real folders share the chosen order; "Updated" means a source's last sync."""
+    env = folder_store
+    env.schedules[0]['last_run_at'] = '2026-03-01T00:00:00Z'
+    env.schedules[1]['last_run_at'] = '2026-05-01T00:00:00Z'
+    by_name = await env.store.search_files_by_id('kb', 'alice', {'directory_id': None, 'order_by': 'name'})
+    assert [row.name for row in by_name.directories] == ['Uploads', 'Reports', 'Reports', 'Folder']
+    updated = await env.store.search_files_by_id('kb', 'alice', {'directory_id': None, 'order_by': 'updated_at'})
+    assert [row.schedule_id for row in updated.directories][:2] == ['b', 'a']
+
+
+@pytest.mark.asyncio
 async def test_documents_list_under_their_source_folder(folder_store):
     """A shared document appears under both sources, with nested rollups and breadcrumbs."""
     store = folder_store.store
