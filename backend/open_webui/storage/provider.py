@@ -232,6 +232,9 @@ class S3StorageProvider(StorageProvider):
             self.s3_client.download_file(self.bucket_name, s3_key, local_file_path)
             return local_file_path
         except ClientError as e:
+            # [Gradient] A missing object is a missing file, as on local storage, not a storage fault.
+            if e.response.get('Error', {}).get('Code') in ('404', 'NoSuchKey'):
+                raise FileNotFoundError(f'S3 object not found: {file_path}') from e
             raise RuntimeError(f'Error downloading file from S3: {e}')
 
     def get_presigned_url(self, file_path: str, expires_in: int) -> str:
