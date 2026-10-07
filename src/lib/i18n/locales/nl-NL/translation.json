@@ -1400,6 +1400,7 @@
   "Failed to connect to {{URL}} OpenAPI tool server": "Kan geen verbinding maken met {{URL}} OpenAPI gereedschapserver",
   "Failed to connect to {{URL}} terminal server": "Verbinden met {{URL}} terminal server mislukt",
   "Failed to copy link": "Link kopiëren mislukt",
+  "Failed to copy path": "Pad kopiëren mislukt",
   "Failed to create API Key.": "Kan API Key niet aanmaken.",
   "Failed to create chat": "",
   "Failed to delete agent": "Verwijderen van agent mislukt",

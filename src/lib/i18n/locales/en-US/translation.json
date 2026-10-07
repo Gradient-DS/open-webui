@@ -1400,6 +1400,7 @@
   "Failed to connect to {{URL}} OpenAPI tool server": "",
   "Failed to connect to {{URL}} terminal server": "",
   "Failed to copy link": "",
+  "Failed to copy path": "",
   "Failed to create API Key.": "",
   "Failed to create chat": "",
   "Failed to delete agent": "",
