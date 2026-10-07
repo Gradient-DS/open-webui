@@ -100,3 +100,38 @@ export const captureAudio = async (source: AudioSource): Promise<Capture> => {
 		throw error;
 	}
 };
+
+type NavigatorLike = {
+	userAgent?: string;
+	maxTouchPoints?: number;
+	mediaDevices?: { getDisplayMedia?: unknown };
+	userAgentData?: { mobile?: boolean; platform?: string; brands?: { brand: string }[] };
+};
+
+export type AudioCapabilities = {
+	/** Tab or system audio can be shared: Chromium on a desktop. */
+	tabAudio: boolean;
+	mobile: boolean;
+	/** Windows can share system audio (e.g. the Teams app) from the whole screen. */
+	windows: boolean;
+};
+
+/** What this browser can record from. Pure: pass `navigator`. */
+export const audioCapabilities = (nav: NavigatorLike | undefined): AudioCapabilities => {
+	const ua = nav?.userAgent ?? '';
+	const data = nav?.userAgentData;
+	const mobile =
+		data?.mobile ??
+		(/Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+			// iPadOS reports itself as a Mac; touch gives it away.
+			(/Macintosh/.test(ua) && (nav?.maxTouchPoints ?? 0) > 1));
+	const chromium = data?.brands
+		? data.brands.some(({ brand }) => brand === 'Chromium')
+		: /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Firefox\/|FxiOS|CriOS|EdgiOS/.test(ua);
+	const windows = data?.platform ? data.platform === 'Windows' : /Windows/.test(ua);
+	return {
+		tabAudio: typeof nav?.mediaDevices?.getDisplayMedia === 'function' && !mobile && chromium,
+		mobile,
+		windows
+	};
+};

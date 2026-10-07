@@ -37,6 +37,7 @@
 	import { reduceStream, startStream, type OutputStream } from './stream';
 	import {
 		CONSENT_TEXT_VERSION,
+		dayjsLocale,
 		OUTPUT_KINDS,
 		fileStem,
 		formatTimestamp,
@@ -57,6 +58,9 @@
 	} from './meeting';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
+	// Dates in the UI language, whatever the global dayjs locale is.
+	const locale = $derived(dayjsLocale($i18n.languages, dayjs.Ls));
+	const day = (value?: string | null) => dayjs(value ?? undefined).locale(locale);
 
 	let { id }: { id: string } = $props();
 	// The route remounts this view per id; `new` stays local after the shallow URL update.
@@ -115,7 +119,7 @@
 	const times = $derived(meetingTimes(meeting));
 	const fallbackTitle = $derived(
 		$i18n.t('Meeting of {{date}}', {
-			date: dayjs(times.startedAt ?? undefined).format('LL')
+			date: day(times.startedAt ?? undefined).format('LL')
 		})
 	);
 	const title = $derived(titleDraft.trim() || meeting?.title || fallbackTitle);
@@ -132,7 +136,7 @@
 	});
 
 	const startLabel = (iso: string) => {
-		const start = dayjs(iso);
+		const start = day(iso);
 		if (start.isSame(dayjs(), 'day')) return start.format($i18n.t('[Today at] h:mm A'));
 		if (start.isSame(dayjs().subtract(1, 'day'), 'day'))
 			return start.format($i18n.t('[Yesterday at] h:mm A'));
@@ -143,7 +147,7 @@
 		const parts: string[] = [];
 		const startedAt = times.startedAt ?? (meetingId ? null : new Date().toISOString());
 		if (startedAt) {
-			const end = times.endedAt ? `–${dayjs(times.endedAt).format('LT')}` : '';
+			const end = times.endedAt ? `–${day(times.endedAt).format('LT')}` : '';
 			parts.push(`${startLabel(startedAt)}${end}`);
 		}
 		if (times.durationS !== null) parts.push(formatTimestamp(times.durationS));
@@ -256,9 +260,7 @@
 			console.error(error);
 			toast.error(
 				error instanceof NoAudioTrackError
-					? $i18n.t(
-							'No audio was shared. Choose a Chrome tab (not a window) and turn on "Also share tab audio".'
-						)
+					? $i18n.t('No audio was shared. Choose a browser tab and turn on "Share tab audio".')
 					: $i18n.t('Error accessing media devices.')
 			);
 			return;
@@ -358,9 +360,9 @@
 
 	const meta = (): MeetingMeta => ({
 		title,
-		date: times.startedAt ? dayjs(times.startedAt).format('LL') : null,
+		date: times.startedAt ? day(times.startedAt).format('LL') : null,
 		time: times.startedAt
-			? `${dayjs(times.startedAt).format('LT')}${times.endedAt ? `–${dayjs(times.endedAt).format('LT')}` : ''}`
+			? `${day(times.startedAt).format('LT')}${times.endedAt ? `–${day(times.endedAt).format('LT')}` : ''}`
 			: null,
 		duration: times.durationS !== null ? formatTimestamp(times.durationS) : null,
 		speakers: speakerNames(meeting)

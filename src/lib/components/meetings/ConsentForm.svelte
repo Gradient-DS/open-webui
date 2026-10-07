@@ -6,7 +6,7 @@
 
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import type { AudioSource } from './audio';
+	import { audioCapabilities, type AudioSource } from './audio';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -21,9 +21,9 @@
 	let consented = $state(false);
 	let starting = $state(false);
 
-	const displaySupported =
-		typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia;
-	let source = $state<AudioSource>(displaySupported ? 'mixed' : 'microphone');
+	// Tab audio needs Chromium on a desktop; elsewhere only the microphone is offered.
+	const can = audioCapabilities(typeof navigator !== 'undefined' ? navigator : undefined);
+	let source = $state<AudioSource>(can.tabAudio ? 'mixed' : 'microphone');
 
 	const options = $derived(
 		[
@@ -44,10 +44,10 @@
 			{
 				value: 'display' as AudioSource,
 				label: $i18n.t('Tab or window only'),
-				help: $i18n.t('Only the audio of a shared Chrome tab, without your microphone.'),
+				help: $i18n.t('Only the audio of a shared browser tab, without your microphone.'),
 				needsDisplay: true
 			}
-		].filter((option) => displaySupported || !option.needsDisplay)
+		].filter((option) => can.tabAudio || !option.needsDisplay)
 	);
 
 	const start = async () => {
@@ -90,11 +90,20 @@
 		{/each}
 	</div>
 
-	{#if source !== 'microphone'}
+	{#if !can.tabAudio}
 		<div class="mt-2 px-2 text-xs leading-5 text-gray-500">
 			{$i18n.t(
-				'In the picker, choose the Chrome tab of your call and turn on "Also share tab audio".'
+				'Recording an online meeting from a browser tab works in Chrome or Edge on a computer.'
 			)}
+		</div>
+	{:else if source !== 'microphone'}
+		<div class="mt-2 px-2 text-xs leading-5 text-gray-500">
+			{$i18n.t('Choose the browser tab of your call and turn on "Share tab audio".')}
+			{#if can.windows}
+				{$i18n.t(
+					'Using the Teams app? Then choose "Entire screen" and turn on "Share system audio".'
+				)}
+			{/if}
 		</div>
 	{/if}
 
@@ -144,4 +153,10 @@
 			{$i18n.t('Cancel')}
 		</button>
 	</div>
+
+	{#if can.mobile}
+		<div class="mt-2 px-2 text-xs leading-5 text-gray-500">
+			{$i18n.t('Keep your screen on during the recording.')}
+		</div>
+	{/if}
 </div>

@@ -20,7 +20,7 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 	import MeetingMenu from './MeetingMenu.svelte';
-	import { groupByRange, matchesQuery, type MeetingSummary } from './meeting';
+	import { dayjsLocale, groupByRange, matchesQuery, type MeetingSummary } from './meeting';
 
 	dayjs.extend(relativeTime);
 
@@ -33,7 +33,8 @@
 	let showDelete = $state(false);
 	let openMenuId = $state<string | null>(null);
 
-	const created = (meeting: MeetingSummary) => dayjs(meeting.created_at);
+	const locale = $derived(dayjsLocale($i18n.languages, dayjs.Ls));
+	const created = (meeting: MeetingSummary) => dayjs(meeting.created_at).locale(locale);
 	const sorted = $derived(
 		[...(meetings ?? [])].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
 	);

@@ -275,3 +275,14 @@ export const groupByRange = <T>(items: T[], rangeOf: (item: T) => string): [stri
 	}
 	return [...groups.entries()];
 };
+
+/** The dayjs locale for the UI languages (e.g. ['nl-NL', 'nl', 'en']), from those dayjs has loaded. */
+export const dayjsLocale = (languages: readonly string[] | undefined, loaded: object): string => {
+	for (const language of languages ?? []) {
+		const code = language.toLowerCase();
+		if (code in loaded) return code;
+		const base = code.split('-')[0];
+		if (base in loaded) return base;
+	}
+	return 'en';
+};
