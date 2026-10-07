@@ -82,9 +82,12 @@ def test_agents_and_list_forward_as_the_caller(monkeypatch):
     client = _client(monkeypatch, fake)
     assert client.get('/api/v1/meetings/agents').json()['data'][0]['name'] == 'meeting'
     assert client.get('/api/v1/meetings', params={'limit': 5}).status_code == 200
+    assert client.get('/api/v1/meetings', params={'include': 'status'}).status_code == 200
+    assert client.get('/api/v1/meetings', params={'include': 'x&y'}).status_code == 422
     assert fake.calls == [
         ('GET', '/v1/agents', 'owui:user:u1', None),
         ('GET', '/v1/chat/threads', 'owui:user:u1', {'agent': 'meeting', 'limit': 5}),
+        ('GET', '/v1/chat/threads', 'owui:user:u1', {'agent': 'meeting', 'include': 'status'}),
     ]
 
 

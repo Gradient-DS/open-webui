@@ -20,7 +20,13 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 	import MeetingMenu from './MeetingMenu.svelte';
-	import { dayjsLocale, groupByRange, matchesQuery, type MeetingSummary } from './meeting';
+	import {
+		dayjsLocale,
+		groupByRange,
+		matchesQuery,
+		statusLabelKey,
+		type MeetingSummary
+	} from './meeting';
 
 	dayjs.extend(relativeTime);
 
@@ -168,6 +174,14 @@
 									>
 										{meeting.title || $i18n.t('Untitled meeting')}
 									</div>
+
+									{#if statusLabelKey(meeting.status)}
+										<div
+											class="shrink-0 text-[0.6875rem] leading-5 text-gray-400 dark:text-gray-600"
+										>
+											{$i18n.t(statusLabelKey(meeting.status) ?? '')}
+										</div>
+									{/if}
 
 									<Tooltip content={created(meeting).format('LLLL')}>
 										<div

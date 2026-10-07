@@ -11,6 +11,7 @@ import {
 	matchesQuery,
 	meetingTimes,
 	metadataMarkdown,
+	statusLabelKey,
 	draftWithMeeting,
 	revealDelays,
 	revealTotalMs,
@@ -421,5 +422,15 @@ describe('chat about a meeting', () => {
 			files: [{ id: 'f1' }, item],
 			toolApprovalMode: 'full'
 		});
+	});
+});
+
+describe('list status label', () => {
+	it('labels unfinished meetings only', () => {
+		expect(statusLabelKey('ready')).toBeNull();
+		expect(statusLabelKey(undefined)).toBeNull();
+		expect(statusLabelKey('recording')).toBe('Not finished');
+		expect(statusLabelKey('transcribing')).toBe('In progress');
+		expect(statusLabelKey('failed')).toBe('Failed');
 	});
 });

@@ -27,7 +27,8 @@
 	const items = $derived(
 		[...(meetings ?? [])]
 			.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
-			.filter((meeting) => matchesQuery(meeting.title, query))
+			// Only finished meetings have a transcript to give the model.
+			.filter((meeting) => meeting.status === 'ready' && matchesQuery(meeting.title, query))
 			.map((meeting) => ({
 				type: 'meeting',
 				id: meeting.thread_id,

@@ -94,8 +94,11 @@ async def list_meetings(
     soev: Soev,
     limit: Annotated[int | None, Query(ge=1, le=200)] = None,
     before: Annotated[str | None, Query(max_length=256)] = None,
+    include: Annotated[str | None, Query(max_length=64, pattern=r'^[a-z_,]+$')] = None,
 ):
     params = {'agent': AGENT}
+    if include is not None:
+        params['include'] = include
     if limit is not None:
         params['limit'] = limit
     if before is not None:

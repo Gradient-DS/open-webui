@@ -45,7 +45,9 @@ const request = async <T>(token: string, path: string, init: RequestInit = {}): 
 export const getMeetingAgents = (token: string) =>
 	request<{ data: MeetingAgent[] }>(token, '/agents');
 
-export const getMeetings = (token: string) => request<{ data: MeetingSummary[] }>(token, '');
+/** The caller's meetings; each carries its meeting status (soev-api `include=status`). */
+export const getMeetings = (token: string) =>
+	request<{ data: MeetingSummary[] }>(token, '?include=status');
 
 export const getMeeting = (token: string, id: string) =>
 	request<MeetingRead>(token, `/${encodeURIComponent(id)}`);

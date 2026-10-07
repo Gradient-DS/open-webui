@@ -78,7 +78,18 @@ export type MeetingSummary = {
 	agent: string;
 	created_at: string;
 	title: string | null;
+	status?: MeetingStatus | null;
 };
+
+/** A muted label for a meeting that is not ready; null when it is (or the status is unknown). */
+export const statusLabelKey = (status: MeetingStatus | null | undefined): string | null =>
+	status === 'recording'
+		? 'Not finished'
+		: status === 'transcribing'
+			? 'In progress'
+			: status === 'failed'
+				? 'Failed'
+				: null;
 export type MeetingAgent = {
 	name: string;
 	kind: 'chat' | 'surface';
