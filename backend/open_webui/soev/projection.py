@@ -173,6 +173,9 @@ def file_response_of(
     file: dict, document: dict | None, *, metadata_only: bool
 ) -> FileUserMetadataResponse | FileUserResponse:
     fields = {key: file[key] for key in ('id', 'user_id', 'hash', 'filename', 'meta', 'created_at', 'updated_at')}
+    if document and document.get('schedule_ids'):
+        # A synced document belongs to its schedules: it leaves with its source, not on its own.
+        fields['meta'] = {**(fields['meta'] or {}), 'soev_schedule_ids': list(document['schedule_ids'])}
     added_at = int(dt.datetime.fromisoformat(document['ingested_at']).timestamp()) if document else file['created_at']
     fields.update(user=None, added_at=added_at)
     if metadata_only:
