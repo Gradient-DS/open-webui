@@ -70,6 +70,9 @@ the only source of models (`GET /v1/models`), the default (served as `default_mo
 (`POST /v1/completions/task`, called from `generate_chat_completion`). Connections, `ui.default_models` and the task
 model settings are not used. Details: `docs/agent-api-deployment.md`.
 
+Before sending, a selected knowledge base
+the service cannot read either is reported as deleted; one only the user cannot read as no access (counts only).
+
 ## Live document attachments
 
 `soev/live_documents.py` registers every record in an agent `attached` event's

@@ -152,11 +152,13 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
 
 
 class KnowledgeUnavailable(Exception):
-    """Selected knowledge bases the API does not show the user: unreadable, or deleted."""
+    """Selected knowledge bases the API does not show the user: `denied` exist but are hidden from them, `deleted`
+    exist for nobody."""
 
-    def __init__(self, count: int) -> None:
-        super().__init__(f'{count} selected knowledge bases are unavailable')
-        self.count = count
+    def __init__(self, *, denied: int, deleted: int) -> None:
+        super().__init__(f'{denied + deleted} selected knowledge bases are unavailable')
+        self.denied = denied
+        self.deleted = deleted
 
 
 async def _knowledge(metadata: dict[str, Any]) -> list[dict[str, str]]:
@@ -171,7 +173,9 @@ async def _knowledge(metadata: dict[str, Any]) -> list[dict[str, str]]:
     user_id = None if acting.acting_ref() else metadata['user_id']
     described = await Knowledges.describe_knowledge(keys, user_id=user_id)
     if missing := [key for key in keys if key not in described]:
-        raise KnowledgeUnavailable(len(missing))
+        existing = await Knowledges.existing_knowledge(missing)
+        denied = sum(key in existing for key in missing)
+        raise KnowledgeUnavailable(denied=denied, deleted=len(missing) - denied)
     return [
         {'key': key, 'name': name, **({'description': description} if description else {})}
         for key, (name, description) in ((key, described[key]) for key in keys)
@@ -529,19 +533,28 @@ async def _documents_allowed(user_id: str) -> bool:
     )
 
 
-def _unavailable(count: int, language: str | None) -> dict[str, Any]:
-    """[Claude] A count, never names: the name of a knowledge base the user cannot read may itself be confidential."""
-    if (language or '').lower().startswith('nl'):
-        message = (
-            f'Je hebt geen toegang tot {count} van de kennisbanken bij deze assistent of chat. '
-            'Haal ze uit de chat, of vraag je beheerder om toegang.'
+def _unavailable(unavailable: KnowledgeUnavailable, language: str | None) -> dict[str, Any]:
+    """[Claude] Counts, never names: the name of a knowledge base the user cannot read may itself be confidential.
+    A deleted one is only to be removed; one hidden from the user may need their admin."""
+    dutch = (language or '').lower().startswith('nl')
+    parts = []
+    if unavailable.deleted:
+        parts.append(
+            f'{unavailable.deleted} van de kennisbanken bij deze assistent of chat bestaat niet meer. '
+            'Haal ze uit de chat en verstuur je bericht opnieuw.'
+            if dutch
+            else f'{unavailable.deleted} of the knowledge bases on this assistant or chat no longer exist. '
+            'Remove them from the chat and send your message again.'
         )
-    else:
-        message = (
-            f"You don't have access to {count} of the knowledge bases on this assistant or chat. "
+    if unavailable.denied:
+        parts.append(
+            f'Je hebt geen toegang tot {unavailable.denied} van de kennisbanken bij deze assistent of chat. '
+            'Haal ze uit de chat, of vraag je beheerder om toegang.'
+            if dutch
+            else f"You don't have access to {unavailable.denied} of the knowledge bases on this assistant or chat. "
             'Remove them from the chat, or ask your admin for access.'
         )
-    return {'error': {'code': 'knowledge_unavailable', 'message': message}}
+    return {'error': {'code': 'knowledge_unavailable', 'message': ' '.join(parts)}}
 
 
 _WHY = {
@@ -1311,7 +1324,7 @@ async def _sent(
         texts = await _texts(entries, metadata['user_id'])
         images = await _images(metadata, turn.as_user)
     except KnowledgeUnavailable as unavailable:
-        return _refused(_unavailable(unavailable.count, metadata.get('user_language')))
+        return _refused(_unavailable(unavailable, metadata.get('user_language')))
     except AttachmentsUnavailable as unavailable:
         return _refused(_unattached(unavailable.files, metadata.get('user_language')))
     except ImagesUnavailable as unavailable:

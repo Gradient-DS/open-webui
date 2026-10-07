@@ -288,26 +288,49 @@ async def test_a_models_files_notes_and_legacy_entries_are_not_knowledge(chat: C
     assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-a', 'name': 'Contracten'}]
 
 
+def seed_hidden_collection(api: FakeSoevApi, key: str, name: str) -> None:
+    """A knowledge base that exists, readable by OWUI's service principal but not by the user."""
+    seed_collection(api, key, name)
+    api.collections[key].update(visibility='restricted', principals=['owui:service:webui'])
+
+
+# Per language: what a deleted knowledge base says, and what one hidden from the user says.
+DELETED = {'en-US': 'no longer exist', 'nl-NL': 'bestaat niet meer'}
+DENIED = {'en-US': 'ask your admin', 'nl-NL': 'vraag je beheerder'}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
-async def test_knowledge_the_user_cannot_read_refuses_the_turn_by_count_without_names(
-    chat: Chat, language: str
+@pytest.mark.parametrize(
+    ('hidden', 'gone'),
+    [(['kb-secret'], []), ([], ['kb-gone']), (['kb-secret', 'kb-private'], ['kb-gone'])],
+)
+async def test_unavailable_knowledge_refuses_by_count_telling_deleted_from_no_access(
+    chat: Chat, language: str, hidden: list[str], gone: list[str]
 ) -> None:
     seed_collection(chat.api, 'kb-a', 'Contracten')
+    for key in hidden:
+        seed_hidden_collection(chat.api, key, 'Integriteitsonderzoek')
     chunks = await chat.turn(
         'next',
         'a1',
         files=[
             {'type': 'collection', 'id': 'kb-a'},
-            {'type': 'collection', 'id': 'kb-secret', 'name': 'Integriteitsonderzoek'},
-            {'type': 'collection', 'id': 'kb-gone', 'name': 'Oud'},
+            *({'type': 'collection', 'id': key, 'name': 'Integriteitsonderzoek'} for key in hidden),
+            *({'type': 'collection', 'id': key, 'name': 'Oud'} for key in gone),
         ],
         user_language=language,
     )
     (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
     assert refusal['code'] == 'knowledge_unavailable'
-    assert '2' in refusal['message']
-    assert not any(hidden in refusal['message'] for hidden in ('kb-secret', 'Integriteitsonderzoek', 'kb-gone'))
+    message = refusal['message']
+    assert (DELETED[language] in message) == bool(gone)
+    assert (DENIED[language] in message) == bool(hidden)
+    if gone:
+        assert f'{len(gone)} ' in message
+    if hidden:
+        assert f'{len(hidden)} ' in message
+    assert not any(name in message for name in ('kb-secret', 'kb-private', 'Integriteitsonderzoek', 'kb-gone', 'Oud'))
     assert chat.mutations() == []
 
 

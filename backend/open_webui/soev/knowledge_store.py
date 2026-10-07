@@ -191,6 +191,20 @@ class SoevKnowledgeTable:
         rows = await asyncio.gather(*(self._collection(id, user_id=user_id) for id in ids))
         return {row['key']: (row['name'], row.get('description') or '') for row in rows if row is not None}
 
+    async def existing_knowledge(self, ids):
+        """[Gradient] The ids of the knowledge bases that still exist, read as the service, whose principal reads
+        every knowledge base OWUI creates: one missing here was deleted, not hidden from the user."""
+        rows = await asyncio.gather(*(self._service_collection(id) for id in ids))
+        return {row['key'] for row in rows if row is not None}
+
+    async def _service_collection(self, key):
+        try:
+            return await self._client.get(self._path(key), as_user=None)
+        except SoevApiError as error:
+            if error.status == 404:
+                return None
+            raise
+
     async def knowledge_document(self, key, source_id, *, user_id=None):
         """The document `source_id` as the knowledge base `key` holds it for the user, or None where they cannot
         read it there; synced documents included."""
