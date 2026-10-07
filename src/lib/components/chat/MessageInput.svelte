@@ -143,6 +143,9 @@
 	import Camera from '../icons/Camera.svelte';
 	import Link from '../icons/Link.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
+	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
+	import { meetingsAvailable } from '$lib/components/meetings/availability';
+	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
 	import DocumentArrowUp from '../icons/DocumentArrowUp.svelte';
@@ -945,6 +948,7 @@
 								'capture',
 								'attach_files',
 								'attach_notes',
+								'attach_meetings',
 								'knowledge',
 								'reference_chats',
 								'google_drive',
@@ -955,15 +959,33 @@
 			: []
 	);
 
-	// [Gradient] Pinned "+" menu items, rendered as buttons in the composer bar. The
-	// "Attach Files" submenu shares the upload_files restriction key with the menu.
-	$: pinnedInputItems = ($settings?.pinnedInputItems ?? []).filter(
-		(id) =>
-			(inputMenuRestrictTo === null ||
-				inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
-				(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
-			!dataSeparationBlockedItems.has(id)
-	);
+	// [Gradient] "+" menu items shown as buttons in the composer bar: every pinned item and
+	// every item that is on or on Auto, in menu order (inputItems.ts). The "Attach Files"
+	// submenu shares the upload_files restriction key with the menu.
+	$: inputBarAllowed = (id: string) =>
+		(inputMenuRestrictTo === null ||
+			inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
+			(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
+		!dataSeparationBlockedItems.has(id);
+	$: inputItemStates = {
+		live_mail: itemState(liveMailState),
+		live_documents: itemState(liveDocumentsState),
+		web_search: itemState(webSearchToolState),
+		image_generation: itemState(imageGenerationEnabled),
+		code_interpreter: itemState(codeInterpreterEnabled),
+		document_writer: itemState(documentWriterToolState),
+		tools: itemState((selectedToolIds ?? []).length),
+		skills: itemState((selectedSkillIds ?? []).length),
+		...Object.fromEntries(
+			(selectedFilterIds ?? []).map((id: string) => [`filter:${id}`, itemState(true)])
+		)
+	};
+	$: inputBarItems = barItemIds({
+		order: inputItemOrder(toggleFilters.map((filter: { id: string }) => filter.id)),
+		pinned: normalizePins($settings?.pinnedInputItems),
+		states: inputItemStates,
+		allowed: inputBarAllowed
+	});
 	$: inputMenuFileUploadCapableModels = getFilesystemUploadTerminal(
 		$selectedTerminalId,
 		$terminalServers,
@@ -2602,9 +2624,10 @@
 											</div>
 										{/if}
 
-										<div class="ml-1 flex gap-1.5 shrink-0">
-											<!-- [Gradient] Items pinned from the "+" menu, same gates as the menu. -->
-											{#each pinnedInputItems as itemId (itemId)}
+										<!-- [Gradient] Scrolls sideways on narrow screens instead of overflowing. -->
+										<div class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none">
+											<!-- [Gradient] Pinned or active "+" menu items, same gates as the menu. -->
+											{#each inputBarItems as itemId (itemId)}
 												{#if itemId === 'upload_files' && inputMenuFileUploadEnabled}
 													<Tooltip content={$i18n.t('Upload Files')} placement="top">
 														<button
@@ -2664,6 +2687,17 @@
 															on:click={() => inputMenuRef?.openTab('notes')}
 														>
 															<PageEdit className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_meetings' && $meetingsAvailable}
+													<Tooltip content={$i18n.t('Attach meetings')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Attach meetings')}
+															on:click={() => inputMenuRef?.openTab('meetings')}
+														>
+															<Mic className="size-4" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'google_drive' && inputMenuFileUploadEnabled && $config?.features?.enable_google_drive_integration}
@@ -2941,203 +2975,7 @@
 												{/if}
 											{/each}
 
-											<!-- [Gradient] Active capabilities that are not pinned. -->
-											{#if (selectedToolIds ?? []).length > 0 && !(showToolsButton && pinnedInputItems.includes('tools'))}
-												<Tooltip
-													content={$i18n.t('{{COUNT}} Available Tools', {
-														COUNT: (selectedToolIds ?? []).length
-													})}
-												>
-													<button
-														class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
-														aria-label="Available Tools"
-														type="button"
-														on:click={() => {
-															showTools = !showTools;
-														}}
-													>
-														<Wrench className="size-4" strokeWidth="1.75" />
-
-														<span class="text-sm">
-															{(selectedToolIds ?? []).length}
-														</span>
-													</button>
-												</Tooltip>
-											{/if}
-
-											{#if (selectedSkillIds ?? []).length > 0 && !(showSkillsButton && pinnedInputItems.includes('skills'))}
-												<Tooltip
-													content={$i18n.t('{{COUNT}} Available Skills', {
-														COUNT: (selectedSkillIds ?? []).length
-													})}
-												>
-													<button
-														class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
-														aria-label="Available Skills"
-														type="button"
-														on:click={() => {
-															showSkills = !showSkills;
-														}}
-													>
-														<Cube className="size-4" strokeWidth="1.75" />
-
-														<span class="text-sm">
-															{(selectedSkillIds ?? []).length}
-														</span>
-													</button>
-												</Tooltip>
-											{/if}
-
-											{#each selectedFilterIds as filterId (filterId)}
-												{@const filter = toggleFilters.find((f) => f.id === filterId)}
-												{#if filter && !pinnedInputItems.includes(`filter:${filterId}`)}
-													<Tooltip content={filter?.name} placement="top">
-														<button
-															on:click|preventDefault={() => {
-																if (
-																	filter?.has_user_valves &&
-																	($_user?.role === 'admin' ||
-																		($_user?.permissions?.chat?.valves ?? true))
-																) {
-																	selectedValvesType = 'function';
-																	selectedValvesItemId = filterId;
-																	showValvesModal = true;
-																} else {
-																	selectedFilterIds = selectedFilterIds.filter(
-																		(id) => id !== filterId
-																	);
-																}
-															}}
-															type="button"
-															class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
-																filterId
-															)
-																? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-																: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} capitalize"
-														>
-															{#if filter?.icon}
-																<div class="size-4 items-center flex justify-center">
-																	<img
-																		src={filter.icon}
-																		class="size-3.5 {filter.icon.includes('data:image/svg')
-																			? 'dark:invert-[80%]'
-																			: ''}"
-																		style="fill: currentColor;"
-																		alt={filter.name}
-																	/>
-																</div>
-															{:else}
-																<Sparkles className="size-4" strokeWidth="1.75" />
-															{/if}
-															<!-- svelte-ignore a11y-click-events-have-key-events -->
-															<!-- svelte-ignore a11y-no-static-element-interactions -->
-															<div
-																class="hidden group-hover:block"
-																on:click={(e) => {
-																	e.stopPropagation();
-																	e.preventDefault();
-																	selectedFilterIds = selectedFilterIds.filter(
-																		(id) => id !== filterId
-																	);
-																}}
-															>
-																<XMark className="size-4" strokeWidth="1.75" />
-															</div>
-														</button>
-													</Tooltip>
-												{/if}
-											{/each}
-
-											<!-- [Gradient] Only Altijd is worth a chip: Auto is the default. Its X drops back to Auto. -->
-											{#if webSearchToolState === 'required' && showWebSearchButton && !pinnedInputItems.includes('web_search')}
-												<Tooltip
-													content={pinnedStateTooltip(
-														$i18n.t('Web Search'),
-														webSearchToolState,
-														$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
-													)}
-													placement="top"
-												>
-													<button
-														on:click|preventDefault={() => (webSearchRequired = false)}
-														type="button"
-														aria-label={pinnedStateTooltip(
-															$i18n.t('Web Search'),
-															webSearchToolState,
-															$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
-														)}
-														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20"
-													>
-														<GlobeAlt className="size-4" strokeWidth="1.75" />
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
-
-											{#if imageGenerationEnabled && showImageGenerationButton && !pinnedInputItems.includes('image_generation')}
-												<Tooltip content={$i18n.t('Image')} placement="top">
-													<button
-														on:click|preventDefault={() =>
-															(imageGenerationEnabled = !imageGenerationEnabled)}
-														type="button"
-														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
-													>
-														<Photo className="size-4" strokeWidth="1.75" />
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
-
-											{#if codeInterpreterEnabled && showCodeInterpreterButton && !pinnedInputItems.includes('code_interpreter')}
-												<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
-													<button
-														aria-label={codeInterpreterEnabled
-															? $i18n.t('Disable Code Interpreter')
-															: $i18n.t('Enable Code Interpreter')}
-														aria-pressed={codeInterpreterEnabled}
-														on:click|preventDefault={() =>
-															(codeInterpreterEnabled = !codeInterpreterEnabled)}
-														type="button"
-														class=" group p-[0.375rem] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
-														false)
-															? 'm-1'
-															: 'focus:outline-hidden rounded-full'}"
-													>
-														<Terminal className="size-3.5" strokeWidth="2" />
-
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
-
-											<!-- [Gradient] Echo the required PDF writer capability. -->
-											{#if documentWriterRequired && showDocumentWriterButton && !pinnedInputItems.includes('document_writer')}
-												<Tooltip content={documentWriterTooltip} placement="top">
-													<button
-														aria-label={documentWriterTooltip}
-														aria-pressed={documentWriterEnabled}
-														on:click|preventDefault={() => (documentWriterRequired = false)}
-														type="button"
-														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20"
-													>
-														<Document className="size-3.5" strokeWidth="2" />
-
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
+											<!-- [Gradient] Active capabilities show in the bar above, pinned or not. -->
 
 											{#each pendingOAuthTools as pendingTool (pendingTool.id)}
 												<Tooltip content={$i18n.t('Click to connect')} placement="top">
