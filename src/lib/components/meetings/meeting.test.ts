@@ -265,6 +265,16 @@ describe('segment rotation', () => {
 			['r2', 2]
 		]);
 		expect(created).toHaveLength(3);
+
+		const resumed: number[] = [];
+		const next = new SegmentRotator(
+			() => new FakeRecorder('r'),
+			(_, seq) => resumed.push(seq),
+			7
+		);
+		next.start();
+		next.rotate();
+		expect(resumed).toEqual([7]);
 		expect(created.every((recorder) => recorder.state === 'inactive')).toBe(true);
 	});
 });

@@ -88,10 +88,14 @@ export class SegmentRotator {
 	private stopping: Promise<void> | null = null;
 	private readonly discarded = new WeakSet<RecorderLike>();
 
+	/** `firstSeq` continues the numbering of an earlier recording of the same meeting. */
 	constructor(
 		private readonly create: () => RecorderLike,
-		private readonly onSegment: (blob: Blob, seq: number) => void
-	) {}
+		private readonly onSegment: (blob: Blob, seq: number) => void,
+		firstSeq = 1
+	) {
+		this.seq = firstSeq - 1;
+	}
 
 	start(): void {
 		this.current = this.open();

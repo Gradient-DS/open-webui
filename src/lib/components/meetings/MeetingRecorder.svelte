@@ -11,6 +11,8 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import type { Capture } from './audio';
+	import { finishMeeting } from './finish';
+	import { partStore } from './parts';
 	import { formatTimestamp, type AudioRef } from './meeting';
 	import {
 		RECORDER_MIME_TYPES,
@@ -28,11 +30,17 @@
 	let {
 		meetingId,
 		capture,
+		part = 1,
+		firstSeq = 1,
 		onFinished,
 		onDiscard
 	}: {
 		meetingId: string;
 		capture: Capture;
+		/** This recorder session's part number; a resumed recording is part 2, 3, … */
+		part?: number;
+		/** The first live chunk seq, continuing an earlier part's numbering. */
+		firstSeq?: number;
 		onFinished: () => void;
 		onDiscard: () => void;
 	} = $props();
@@ -51,6 +59,10 @@
 
 	let full: MediaRecorder | null = null;
 	let fullParts: Blob[] = [];
+	// Every timeslice also goes to this device's part store, so a crash leaves a recording to finish.
+	const store = partStore();
+	let writes: Promise<void> = Promise.resolve();
+	let sliceIndex = 0;
 	let recording: Blob | null = null;
 	let rotator: SegmentRotator | null = null;
 	let chunkErrorShown = false;
@@ -153,11 +165,10 @@
 		phase = 'uploading';
 		try {
 			await queue.drain();
-			const blob = recording as Blob;
-			const audio_ref = await upload(blob, `meeting.${extension(blob.type)}`);
-			await sendWhenIdle(() =>
-				sendMeetingInput(localStorage.token, meetingId, { type: 'finish', audio_ref })
-			);
+			const earlier = (await store.parts(meetingId))
+				.filter((stored) => stored.part < part)
+				.map((stored) => stored.blob);
+			await finishMeeting(localStorage.token, meetingId, [...earlier, recording as Blob]);
 			recording = null;
 			phase = 'done';
 			onFinished();
@@ -173,6 +184,7 @@
 		phase = 'stopping';
 		await rotator?.stop();
 		recording = await stopFull();
+		await writes;
 		releaseCapture();
 		await finish();
 	};
@@ -184,16 +196,28 @@
 		releaseCapture();
 		fullParts = [];
 		recording = null;
+		await writes;
+		// A discarded resume drops only its own part; the earlier recording stays recoverable.
+		if (part > 1) await store.removePart(meetingId, part);
+		else await store.remove(meetingId);
 		onDiscard();
 	};
 
 	onMount(() => {
 		full = newRecorder();
 		full.ondataavailable = (event) => {
-			if (event.data.size > 0) fullParts.push(event.data);
+			if (event.data.size === 0) return;
+			fullParts.push(event.data);
+			const index = sliceIndex++;
+			writes = writes.then(() => store.append(meetingId, part, index, event.data));
 		};
-		full.start(10_000);
-		rotator = new SegmentRotator(() => newRecorder() as unknown as RecorderLike, sendChunk);
+		full.start(5_000);
+		const seqStart = untrack(() => firstSeq);
+		rotator = new SegmentRotator(
+			() => newRecorder() as unknown as RecorderLike,
+			sendChunk,
+			seqStart
+		);
 		rotator.start();
 
 		clock = setInterval(() => (seconds += 1), 1000);

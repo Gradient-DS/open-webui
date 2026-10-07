@@ -23,7 +23,7 @@ export type MeetingInput =
 			consent: { text_version: string; at: string };
 	  }
 	| { type: 'chunk'; seq: number; audio_ref: AudioRef }
-	| { type: 'finish'; audio_ref: AudioRef }
+	| { type: 'finish'; audio_refs: AudioRef[] }
 	| { type: 'retry' }
 	| { type: 'rename_speaker'; label: string; name: string }
 	| { type: 'set_title'; title: string }

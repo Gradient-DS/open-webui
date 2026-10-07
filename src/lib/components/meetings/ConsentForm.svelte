@@ -1,6 +1,6 @@
 <script lang="ts">
 	// [Gradient] Vergadering: consent and source choice before anything is recorded (D2, D20).
-	import { getContext } from 'svelte';
+	import { getContext, untrack } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
@@ -12,13 +12,16 @@
 
 	let {
 		onStart,
-		onCancel
+		onCancel,
+		resume = false
 	}: {
 		onStart: (source: AudioSource) => Promise<void>;
 		onCancel: () => void;
+		/** Continuing an interrupted meeting: its consent stands, only the source is asked. */
+		resume?: boolean;
 	} = $props();
 
-	let consented = $state(false);
+	let consented = $state(untrack(() => resume));
 	let starting = $state(false);
 
 	// Tab audio needs Chromium on a desktop; elsewhere only the microphone is offered.
@@ -107,33 +110,37 @@
 		</div>
 	{/if}
 
-	<div
-		class="mt-4 flex cursor-pointer items-start gap-2.5 px-2"
-		role="checkbox"
-		tabindex="0"
-		aria-checked={consented}
-		onclick={() => (consented = !consented)}
-		onkeydown={(event) => {
-			if (event.key === ' ' || event.key === 'Enter') {
-				event.preventDefault();
-				consented = !consented;
-			}
-		}}
-	>
-		<span class="mt-0.5 pointer-events-none">
-			<Checkbox state={consented ? 'checked' : 'unchecked'} />
-		</span>
-		<span>
-			<span class="block text-[0.8125rem] text-gray-800 dark:text-gray-200">
-				{$i18n.t('All participants know that this conversation is being recorded and transcribed')}
+	{#if !resume}
+		<div
+			class="mt-4 flex cursor-pointer items-start gap-2.5 px-2"
+			role="checkbox"
+			tabindex="0"
+			aria-checked={consented}
+			onclick={() => (consented = !consented)}
+			onkeydown={(event) => {
+				if (event.key === ' ' || event.key === 'Enter') {
+					event.preventDefault();
+					consented = !consented;
+				}
+			}}
+		>
+			<span class="mt-0.5 pointer-events-none">
+				<Checkbox state={consented ? 'checked' : 'unchecked'} />
 			</span>
-			<span class="block text-xs leading-5 text-gray-500">
-				{$i18n.t(
-					'The audio is deleted as soon as it has been transcribed. The transcript stays private to you.'
-				)}
+			<span>
+				<span class="block text-[0.8125rem] text-gray-800 dark:text-gray-200">
+					{$i18n.t(
+						'All participants know that this conversation is being recorded and transcribed'
+					)}
+				</span>
+				<span class="block text-xs leading-5 text-gray-500">
+					{$i18n.t(
+						'The audio is deleted as soon as it has been transcribed. The transcript stays private to you.'
+					)}
+				</span>
 			</span>
-		</span>
-	</div>
+		</div>
+	{/if}
 
 	<div class="mt-5 flex items-center gap-2 px-2">
 		<button
@@ -143,7 +150,7 @@
 			onclick={start}
 		>
 			{#if starting}<Spinner className="size-3.5" />{/if}
-			{$i18n.t('Start recording')}
+			{resume ? $i18n.t('Continue recording') : $i18n.t('Start recording')}
 		</button>
 		<button
 			type="button"

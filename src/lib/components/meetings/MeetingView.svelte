@@ -38,6 +38,8 @@
 	import { sendWhenIdle } from './recorder';
 	import { reduceStream, startStream, type OutputStream } from './stream';
 	import { attachesLeft, hasChanges, wordDiff, type DiffOp } from './diff';
+	import { finishMeeting } from './finish';
+	import { interruptedActions, nextChunkSeq, nextPart, partStore } from './parts';
 	import {
 		CONSENT_TEXT_VERSION,
 		dayjsLocale,
@@ -90,6 +92,13 @@
 	let pending = $state<Pending | null>(null);
 	let outputStream = $state<OutputStream | null>(null);
 	let streamAbort: AbortController | null = null;
+	// Recovery of an interrupted meeting: its parts kept on this device, and the resumed recorder.
+	let localParts = $state(0);
+	let resuming = $state(false);
+	let recovering = $state(false);
+	let recorderPart = $state(1);
+	let recorderSeq = $state(1);
+	let resumedSession = $state(false);
 	// A result that lands while the user watches is revealed item by item; opening one never animates.
 	let reveal = $state<'transcript' | 'actions' | null>(null);
 	let revealTimer: ReturnType<typeof setTimeout> | null = null;
@@ -111,7 +120,10 @@
 			(meeting?.status === 'recording' && !recording && (threadBusy || finishedHere))
 	);
 	const interrupted = $derived(
-		meeting?.status === 'recording' && !recording && !threadBusy && !finishedHere
+		meeting?.status === 'recording' && !recording && !threadBusy && !finishedHere && !recovering
+	);
+	const recoveryActions = $derived(
+		interruptedActions({ localParts, liveParts: liveParts(meeting).length })
 	);
 	const activeAction = $derived<OutputKind | null>(
 		(outputStream && !outputStream.final ? outputStream.kind : null) ??
@@ -225,12 +237,17 @@
 				}
 			: { duration: 0 };
 
+	const refreshLocalParts = async () => {
+		if (meetingId) localParts = (await partStore().parts(meetingId)).length;
+	};
+
 	const load = async () => {
 		if (!meetingId) return;
 		const wasTranscribing = transcribing;
 		const actionsBefore = pending?.kind === 'actions' ? pending.before : null;
 		try {
 			read = await getMeeting(localStorage.token, meetingId);
+			if (meeting?.status === 'recording' && !capture) await refreshLocalParts();
 			if (wasTranscribing && meeting?.status === 'ready') {
 				tab = 'transcript';
 				startReveal('transcript', groupTurns(meeting.transcript?.segments ?? []).length);
@@ -332,6 +349,9 @@
 			});
 			titleSent = chosen;
 			meetingId = res.id;
+			recorderPart = 1;
+			recorderSeq = 1;
+			resumedSession = false;
 			capture = captured;
 			replaceState(`/meetings/${encodeURIComponent(res.id)}`, {});
 			await load();
@@ -351,6 +371,11 @@
 
 	const discarded = async () => {
 		capture = null;
+		if (resumedSession) {
+			// A discarded resume leaves the meeting as it was: interrupted, still recoverable.
+			await load();
+			return;
+		}
 		if (meetingId) await deleteMeeting(localStorage.token, meetingId).catch(() => {});
 		goto('/meetings');
 	};
@@ -410,10 +435,53 @@
 		await send({ type: 'rename_speaker', label, name });
 	};
 
+	/** Continue an interrupted meeting as a new part; its consent stands. */
+	const resume = async (source: AudioSource) => {
+		let captured: Capture;
+		try {
+			captured = await captureAudio(source);
+		} catch (error) {
+			console.error(error);
+			toast.error(
+				error instanceof NoAudioTrackError
+					? $i18n.t('No audio was shared. Choose a browser tab and turn on "Share tab audio".')
+					: $i18n.t('Error accessing media devices.')
+			);
+			return;
+		}
+		recorderPart = nextPart(await partStore().parts(meetingId as string));
+		recorderSeq = nextChunkSeq(meeting?.live);
+		resuming = false;
+		resumedSession = true;
+		capture = captured;
+	};
+
+	/** Finish from the parts on this device, or with none: then only the live transcript is used. */
+	const finishInterrupted = async (useLocalParts: boolean) => {
+		if (!meetingId) return;
+		recovering = true;
+		try {
+			const parts = useLocalParts ? await partStore().parts(meetingId) : [];
+			await finishMeeting(
+				localStorage.token,
+				meetingId,
+				parts.map(({ blob }) => blob)
+			);
+			finishedHere = true;
+		} catch (error) {
+			toast.error(`${(error as Error)?.message ?? error}`);
+		} finally {
+			recovering = false;
+			await load();
+			schedule();
+		}
+	};
+
 	const remove = async () => {
 		if (!meetingId) return;
 		try {
 			await deleteMeeting(localStorage.token, meetingId);
+			await partStore().remove(meetingId);
 			toast.success($i18n.t('Meeting deleted'));
 			goto('/meetings');
 		} catch (error) {
@@ -625,8 +693,22 @@
 			<div class="flex-1 w-full px-3 pt-3 pb-10">
 				{#if !meetingId}
 					<ConsentForm onStart={start} onCancel={() => goto('/meetings')} />
+				{:else if resuming && !capture}
+					<ConsentForm resume onStart={resume} onCancel={() => (resuming = false)} />
+					<div class="px-2 text-xs leading-5 text-gray-500">
+						{$i18n.t(
+							'Speakers in the new part continue as new speakers (e.g. Speaker 3); rename them to merge them with earlier ones.'
+						)}
+					</div>
 				{:else if capture}
-					<MeetingRecorder {meetingId} {capture} onFinished={recorded} onDiscard={discarded} />
+					<MeetingRecorder
+						{meetingId}
+						{capture}
+						part={recorderPart}
+						firstSeq={recorderSeq}
+						onFinished={recorded}
+						onDiscard={discarded}
+					/>
 					{#if live.length === 0}
 						<div class="mt-4 text-xs text-gray-500">
 							{$i18n.t('The first part appears after about half a minute.')}
@@ -655,11 +737,48 @@
 						</div>
 					{/if}
 
-					{#if interrupted}
-						<div class="text-xs text-gray-500">
-							{$i18n.t(
-								'This recording was interrupted and cannot be completed. You can delete it.'
-							)}
+					{#if recovering}
+						<div class="flex items-center gap-2 text-xs text-gray-500">
+							<Spinner className="size-3.5" />
+							{$i18n.t('Uploading recording…')}
+						</div>
+						{@render liveTranscript()}
+					{:else if interrupted}
+						<div class="text-sm text-gray-800 dark:text-gray-200">
+							{$i18n.t('This recording was interrupted.')}
+						</div>
+						<div class="mt-2 flex flex-wrap items-center gap-2">
+							{#if recoveryActions.includes('finish_local')}
+								<button
+									type="button"
+									class={secondaryButton}
+									onclick={() => finishInterrupted(true)}
+								>
+									{$i18n.t('Finish recording')}
+								</button>
+							{/if}
+							<button type="button" class={secondaryButton} onclick={() => (resuming = true)}>
+								{$i18n.t('Continue recording')}
+							</button>
+							{#if recoveryActions.includes('finish_live')}
+								<button
+									type="button"
+									class={secondaryButton}
+									onclick={() => finishInterrupted(false)}
+								>
+									{$i18n.t('Finish with the live transcript')}
+								</button>
+							{/if}
+						</div>
+						<div class="mt-2 text-xs leading-5 text-gray-500">
+							{#if recoveryActions.includes('finish_local')}
+								{$i18n.t('The recording is still on this device and can be finished from here.')}
+							{/if}
+							{#if recoveryActions.includes('finish_live')}
+								{$i18n.t(
+									'Finishing with the live transcript uses the rough text only, without speakers.'
+								)}
+							{/if}
 						</div>
 						{@render liveTranscript()}
 					{:else if !meeting || transcribing}
