@@ -264,7 +264,8 @@
 		count: bulkCount,
 		breakdown: bulkBreakdown,
 		allSelected: bulkAllSelected,
-		indeterminate: bulkIndeterminate
+		indeterminate: bulkIndeterminate,
+		available: bulkAvailable
 	} = selection;
 	let showBulkRemoveConfirm = false;
 
@@ -1614,8 +1615,8 @@
 		}
 	};
 
-	// Bulk remove: replays each selected item's own removal (file-remove,
-	// directory-delete, or remove-source) without per-item toast/init, then
+	// Bulk remove: replays each selected item's own removal (file-remove or
+	// directory-delete) without per-item toast/init, then
 	// refreshes once. Directories always delete their contents.
 	const bulkRemoveHandler = async () => {
 		const items = [...get(selection.selected).values()];
@@ -2416,6 +2417,7 @@
 												count={$bulkCount}
 												allSelected={$bulkAllSelected}
 												indeterminate={$bulkIndeterminate}
+												selectable={$bulkAvailable.length > 0}
 												onToggleSelectAll={() => selection.toggleSelectAll()}
 												onDelete={() => (showBulkRemoveConfirm = true)}
 											/>

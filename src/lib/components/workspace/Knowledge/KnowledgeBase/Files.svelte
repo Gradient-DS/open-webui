@@ -24,6 +24,7 @@
 	import type { DirectoryItem } from './directory';
 	import SourceRow from './SourceRow.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { isSynced, withoutLooseSourceFiles } from './syncedFiles';
 	import { directoryItem, fileItem, type KbSelection, type SelectableItem } from './selection';
 	import { breadcrumbSegments, fileBadge } from '../utils/treeStatus';
 	import type { Connection, Schedule, ScheduleAction, SkippedItem } from '$lib/apis/cloudSync';
@@ -41,6 +42,7 @@
 			size?: number;
 			warning?: string;
 			relative_path?: string;
+			soev_schedule_ids?: string[];
 		};
 		updated_at?: number;
 		added_at?: number;
@@ -104,7 +106,11 @@
 	$: selectedStore = selection?.selected;
 	$: selectionModeStore = selection?.selectionMode;
 
-	const isSelectable = (file: KnowledgeFile) => !!file?.id && file?.status !== 'uploading';
+	// [Gradient] Synced files leave with their source: no delete, no checkbox.
+	$: shownFiles = searchMode ? files : withoutLooseSourceFiles(files ?? [], looseSources);
+
+	const isSelectable = (file: KnowledgeFile) =>
+		!!file?.id && file?.status !== 'uploading' && !isSynced(file);
 	const buildItem = (file: KnowledgeFile): SelectableItem =>
 		fileItem(file.id!, file?.name ?? file?.meta?.name ?? '');
 
@@ -118,7 +124,7 @@
 	// Shift-range and drag-paint spans behave predictably.
 	$: orderedItems = [
 		...(searchMode ? [] : (directories ?? []).filter(isDirSelectable).map(buildDirItem)),
-		...(files ?? []).filter(isSelectable).map(buildItem)
+		...shownFiles.filter(isSelectable).map(buildItem)
 	];
 	// Register this view's selectable rows so the header's select-all works.
 	$: if (selection) selection.setAvailable(orderedItems);
@@ -210,7 +216,7 @@
 	{/if}
 
 	<!-- Files -->
-	{#each files as file (file?.id ?? file?.itemId ?? file?.tempId)}
+	{#each shownFiles as file (file?.id ?? file?.itemId ?? file?.tempId)}
 		{@const selKey = `file:${file?.id}`}
 		{@const isSel = (selection && isSelectable(file) && $selectedStore?.has(selKey)) ?? false}
 		{@const crumbs = searchMode ? breadcrumbSegments(file?.meta?.relative_path) : []}
@@ -319,7 +325,7 @@
 				</div>
 			</button>
 
-			{#if knowledge?.write_access}
+			{#if knowledge?.write_access && !isSynced(file)}
 				<div class="flex items-center">
 					<Tooltip content={$i18n.t('Delete')}>
 						<button
