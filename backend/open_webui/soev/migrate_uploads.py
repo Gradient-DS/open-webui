@@ -36,12 +36,19 @@ class UploadState:
         return self.counts[status]
 
 
+def _list(value) -> list:
+    return value if isinstance(value, list) else []
+
+
 def _entries(chat: dict):
-    yield from chat.get('files') or []
-    for message in (chat.get('history') or {}).get('messages', {}).values():
-        yield from message.get('files') or []
-    for message in chat.get('messages') or []:
-        yield from message.get('files') or []
+    """Chat-level files and each message's, from the history tree and the legacy message list."""
+    history = chat.get('history')
+    tree = history.get('messages') if isinstance(history, dict) else None
+    messages = [*(tree.values() if isinstance(tree, dict) else []), *_list(chat.get('messages'))]
+    yield from _list(chat.get('files'))
+    for message in messages:
+        if isinstance(message, dict):
+            yield from _list(message.get('files'))
 
 
 def attached_file_ids(chat: dict) -> set[str]:

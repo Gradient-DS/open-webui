@@ -1221,6 +1221,19 @@ def test_the_uploads_flag_selects_the_uploads_only_step(monkeypatch, argv, calle
     assert seen == [(called, True)]
 
 
+def test_attached_files_come_from_the_tree_the_legacy_list_and_the_chat_and_odd_shapes_are_skipped():
+    from open_webui.soev.migrate_uploads import attached_file_ids
+
+    chat = {
+        'files': [upload('top'), 'junk'],
+        'history': {'messages': {'m1': {'files': [upload('tree')]}, 'm2': None, 'm3': {'files': None}}},
+        'messages': [{'files': [upload('listed'), {'type': 'file', 'id': ''}]}, 'junk'],
+    }
+    assert attached_file_ids(chat) == {'top', 'tree', 'listed'}
+    assert attached_file_ids({'history': {'messages': []}, 'files': None}) == set()
+    assert attached_file_ids({'history': None}) == set()
+
+
 @pytest.mark.parametrize('argv', [['--restore', '--uploads'], ['--apply', '--models', '--uploads']])
 def test_the_uploads_flag_refuses_restore_and_models(monkeypatch, argv):
     module = importlib.import_module('open_webui.soev.migrate')
