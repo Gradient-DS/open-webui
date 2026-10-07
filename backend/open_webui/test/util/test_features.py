@@ -267,6 +267,7 @@ class TestAllFeatureFlags:
             'voice_call',
             'read_aloud',
             'changelog',
+            'meetings',
             'system_prompt',
             'models',
             'knowledge',

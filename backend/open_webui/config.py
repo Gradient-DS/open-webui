@@ -2978,6 +2978,9 @@ FEATURE_READ_ALOUD = os.environ.get('FEATURE_READ_ALOUD', 'True').lower() == 'tr
 
 FEATURE_CHANGELOG = os.environ.get('FEATURE_CHANGELOG', 'True').lower() == 'true'
 
+# [Gradient] Vergadering (meeting assistant) page; also needs the meeting agent in the soev-api catalog.
+FEATURE_MEETINGS = os.environ.get('FEATURE_MEETINGS', 'True').lower() == 'true'
+
 FEATURE_SYSTEM_PROMPT = os.environ.get('FEATURE_SYSTEM_PROMPT', 'True').lower() == 'true'
 
 FEATURE_MODELS = os.environ.get('FEATURE_MODELS', 'True').lower() == 'true'

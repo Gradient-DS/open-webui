@@ -1,0 +1,158 @@
+"""[Gradient] Vergadering: forward meeting calls to soev-api as the caller.
+
+The meeting agent owns every meeting; Open WebUI stores nothing and adds no logic.
+"""
+
+from dataclasses import dataclass
+from typing import Annotated
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from open_webui import config
+from open_webui.soev import identity
+from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.utils.auth import get_verified_user
+from open_webui.utils.features import is_feature_enabled
+from pydantic import BaseModel, ConfigDict, JsonValue
+
+router = APIRouter()
+
+AGENT = 'meeting'
+MAX_AUDIO_BYTES = 64 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class Caller:
+    client: SoevClient
+    ref: str
+
+
+class MeetingInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    input: dict[str, JsonValue]
+
+
+def _http_error(error: SoevApiError) -> HTTPException:
+    return HTTPException(
+        status_code=error.status,
+        detail={'code': error.code, 'detail': error.detail},
+        headers={'Retry-After': error.retry_after} if error.retry_after is not None else None,
+    )
+
+
+async def require_meetings(user=Depends(get_verified_user)):
+    if not is_feature_enabled('meetings'):
+        raise HTTPException(status_code=403, detail="Feature 'meetings' is not available in your plan")
+    if not config.SOEV_API_URL:
+        raise HTTPException(status_code=503, detail='Meetings need soev-api, which is not configured')
+    return user
+
+
+async def caller(user=Depends(require_meetings)) -> Caller:
+    client = identity.build_client(timeout=120.0)
+    try:
+        return Caller(client, await identity.acting_ref(user, client))
+    except SoevApiError as error:
+        raise _http_error(error) from None
+
+
+Soev = Annotated[Caller, Depends(caller)]
+MeetingId = Annotated[str, Path(min_length=1, max_length=256)]
+
+
+def _thread(meeting_id: str, suffix: str = '') -> str:
+    return f'/v1/chat/threads/{quote(meeting_id, safe="")}{suffix}'
+
+
+def latest_state(events: list[dict]) -> dict | None:
+    """The payload of the thread's last `meeting_state` event; each one is a full snapshot."""
+    for event in reversed(events):
+        if event.get('type') == 'meeting_state' and isinstance(event.get('payload'), dict):
+            return event['payload']
+    return None
+
+
+async def _submit(soev: Caller, path: str, body: dict, *, thread_id: str | None = None) -> str:
+    """Hand one input to the agent and return once it is accepted; the turn runs on without us."""
+    stream = soev.client.chat_stream(path, body, as_user=soev.ref, thread_id=thread_id)
+    try:
+        frame = await anext(stream)
+    except SoevApiError as error:
+        raise _http_error(error) from None
+    finally:
+        await stream.aclose()
+    return frame.data['thread_id']
+
+
+@router.get('/agents')
+async def list_agents(soev: Soev):
+    try:
+        return await soev.client.get('/v1/agents', as_user=soev.ref)
+    except SoevApiError as error:
+        raise _http_error(error) from None
+
+
+@router.get('')
+async def list_meetings(
+    soev: Soev,
+    limit: Annotated[int | None, Query(ge=1, le=200)] = None,
+    before: Annotated[str | None, Query(max_length=256)] = None,
+):
+    params = {'agent': AGENT}
+    if limit is not None:
+        params['limit'] = limit
+    if before is not None:
+        params['before'] = before
+    try:
+        return await soev.client.get('/v1/chat/threads', as_user=soev.ref, params=params)
+    except SoevApiError as error:
+        raise _http_error(error) from None
+
+
+@router.post('', status_code=201)
+async def start_meeting(body: MeetingInput, soev: Soev):
+    thread_id = await _submit(soev, '/v1/chat/threads', {'agent': AGENT, 'input': body.input})
+    return {'id': thread_id}
+
+
+@router.post('/audio', status_code=201)
+async def upload_audio(request: Request, soev: Soev, name: Annotated[str, Query(min_length=1, max_length=255)]):
+    declared = request.headers.get('content-length')
+    if declared is not None and declared.isdigit() and int(declared) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail='Audio exceeds 64 MiB')
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail='Audio exceeds 64 MiB')
+    if not body:
+        raise HTTPException(status_code=400, detail='No audio received')
+    try:
+        return await soev.client.post_bytes('/v1/audio', bytes(body), as_user=soev.ref, params={'name': name})
+    except SoevApiError as error:
+        raise _http_error(error) from None
+
+
+@router.get('/{meeting_id}')
+async def get_meeting(meeting_id: MeetingId, soev: Soev):
+    try:
+        thread = await soev.client.get(_thread(meeting_id), as_user=soev.ref)
+    except SoevApiError as error:
+        raise _http_error(error) from None
+    return {'status': thread['status']['state'], 'state': latest_state(thread.get('events') or [])}
+
+
+@router.post('/{meeting_id}/inputs', status_code=202)
+async def send_input(meeting_id: MeetingId, body: MeetingInput, soev: Soev):
+    await _submit(soev, _thread(meeting_id, '/inputs'), {'input': body.input}, thread_id=meeting_id)
+    return {'id': meeting_id}
+
+
+@router.delete('/{meeting_id}', status_code=204)
+async def delete_meeting(meeting_id: MeetingId, soev: Soev):
+    try:
+        await soev.client.chat_delete(_thread(meeting_id), as_user=soev.ref)
+    except SoevApiError as error:
+        raise _http_error(error) from None
+    return Response(status_code=204)
