@@ -17,7 +17,6 @@
 	} from '../Messages/Citations/citationDocuments';
 	import { citationFileInfo, resolveExternalUrl } from '../Messages/Citations/useCitationDocument';
 	import type { DisplayCitation } from '../Messages/Citations/reduceSources';
-	import { usedCitations } from '../Messages/Citations/panelScope';
 	import {
 		calculateShowRelevance,
 		shouldShowPercentage
@@ -101,7 +100,7 @@
 	// [Gradient] Match by stable source id: history reduction creates new citation objects.
 	$: citation = panel?.citation ?? null;
 	$: cumulativeCitations = activeGroup?.citations ?? panel?.citations ?? [];
-	$: groupUsed = activeGroup?.used ?? usedCitations(cumulativeCitations);
+	$: groupUsed = activeGroup?.used ?? [];
 	$: visibleCitations =
 		citation && !groupUsed.some((item) => item.id === citation.id)
 			? cumulativeCitations
