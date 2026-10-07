@@ -92,6 +92,20 @@ describe('createKbSelection', () => {
 		expect(get(sel.count)).toBe(0);
 	});
 
+	it('shift-range spans folders, sources and files in listing order', () => {
+		const sel = createKbSelection();
+		const ordered = [d('p', 3), s('folder', 4), s('single'), f('a')];
+		sel.select(d('p', 3), ordered, {});
+		sel.select(f('a'), ordered, { shiftKey: true });
+		expect([...get(sel.selected).keys()]).toEqual([
+			'dir:p',
+			'source:folder',
+			'source:single',
+			'file:a'
+		]);
+		expect(get(sel.breakdown)).toEqual({ files: 1, sources: 2, directories: 1, totalFiles: 9 });
+	});
+
 	it('drag paints an additive contiguous range from anchor to hovered row', () => {
 		const sel = createKbSelection();
 		const ordered = [f('a'), f('b'), f('c'), f('d')];
