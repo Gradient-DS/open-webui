@@ -1033,3 +1033,198 @@ async def test_models_dry_run_previews_and_writes_nothing(env, monkeypatch, caps
     output = capsys.readouterr().out
     assert '3 model ids: map zai-org/GLM-5.3 -> zai-org/glm-5.3' in output
     assert '3 model ids: chat_message.model_id 1' in output
+
+
+ALICE, BOB = 'owui-attachments-alice', 'owui-attachments-bob'
+
+
+async def insert_chat(env, chat_id, user_id, chat, *, deleted=False):
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO chat (id, user_id, title, chat, created_at, updated_at, deleted_at, meta)'
+                " VALUES (:id, :user, 'T', :chat, 1, 1, :deleted, '{}')"
+            ),
+            {'id': chat_id, 'user': user_id, 'chat': json.dumps(chat), 'deleted': 5 if deleted else None},
+        )
+
+
+def upload(file_id, **extra):
+    return {'type': 'file', 'id': file_id, 'name': f'{file_id}.pdf', 'collection_name': f'file-{file_id}', **extra}
+
+
+async def seed_uploads(env, monkeypatch):
+    """v1 chats attaching loose uploads, a KB file, a KB pick, images, a gone original and a deleted file row."""
+    users = env.models['users'].Users
+    knowledge, files = env.models['knowledge'], env.models['files']
+    storage = importlib.import_module('open_webui.storage.provider')
+    monkeypatch.setattr(importlib.import_module('open_webui.soev.ingest'), 'Storage', storage.LocalStorageProvider())
+    monkeypatch.setattr(knowledge, 'AccessGrants', env.models['access_grants'].AccessGrantsTable())
+    for user_id in ('alice', 'bob'):
+        assert await users.insert_new_user(user_id, user_id, f'{user_id}@example.test', role='user')
+    owned = ['loose', 'chat-level', 'gone', 'in-kb', 'picked', 'photo', 'png', 'quiet', 'trashed']
+    for file_id, owner in [*((file_id, 'alice') for file_id in owned), ('bobs', 'bob')]:
+        path = env.tmp_path / f'{file_id}.pdf'
+        if file_id != 'gone':
+            path.write_bytes(f'original {file_id}'.encode())
+        meta = {
+            'name': f'{file_id}.pdf',
+            'content_type': 'application/pdf',
+            'size': 250_000,
+            'status': 'completed',
+            'collection_name': f'file-{file_id}',
+        }
+        await files.Files.insert_new_file(
+            owner, files.FileForm(id=file_id, filename=f'{file_id}.pdf', path=str(path), meta=meta)
+        )
+    table = knowledge.KnowledgeTable()
+    kb = await table.insert_new_knowledge(
+        'alice', knowledge.KnowledgeForm(name='Research', description='', type='local', access_grants=[])
+    )
+    for file_id in ('in-kb', 'picked'):
+        assert await table.add_file_to_knowledge_by_id(kb.id, file_id, 'alice')
+    messages = {
+        'm1': {'role': 'user', 'files': [upload('loose'), upload('bobs'), upload('gone'), upload('in-kb')]},
+        'm2': {
+            'role': 'user',
+            'files': [upload('picked', knowledge_id=kb.id), upload('png', content_type='image/png')],
+        },
+        'm3': {'role': 'user', 'files': [{'type': 'image', 'id': 'photo', 'url': 'photo'}, upload('no-row')]},
+        'm4': {'role': 'assistant', 'content': 'ok'},
+    }
+    await insert_chat(env, 'old', 'alice', {'history': {'messages': messages}, 'files': [upload('chat-level')]})
+    await insert_chat(env, 'binned', 'alice', {'files': [upload('trashed')]}, deleted=True)
+    return kb
+
+
+def submitted_uploads(env):
+    bodies = [json.loads(r.content) for r in job_posts(env)]
+    return sorted((body['collection_key'], body['documents'][0]['source_id']) for body in bodies)
+
+
+def uploads_options(env, monkeypatch):
+    monkeypatch.delenv('SOEV_V2_CONFIG', raising=False)
+    return env.module.options_from_env(migration_id='v2-uploads-1', uploads_only=True)
+
+
+async def file_meta(env, file_id):
+    ((meta,),) = await rows(env, 'SELECT meta FROM file WHERE id = :id', id=file_id)
+    return json.loads(meta)
+
+
+@pytest.mark.asyncio
+async def test_uploads_mode_ingests_each_attached_upload_as_its_owner_and_skips_the_rest(env, monkeypatch, capsys):
+    """KB files, KB picks, images, unattached files and deleted chats are left alone; a gone original is reported."""
+    await seed_uploads(env, monkeypatch)
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
+    assert submitted_uploads(env) == [(ALICE, 'chat-level'), (ALICE, 'loose'), (BOB, 'bobs')]
+    assert (await file_meta(env, 'loose'))['collection_name'] == ALICE
+    assert (await file_meta(env, 'bobs'))['collection_name'] == BOB
+    assert (await file_meta(env, 'gone'))['collection_name'] == 'file-gone'
+    assert (await file_meta(env, 'in-kb'))['collection_name'] == 'file-in-kb'
+    output = capsys.readouterr().out
+    assert '5 chat uploads: 6 files attached in chats, 5 with a file row' in output
+    assert '5 chat uploads: knowledge base file 1, no file row 1, original missing 1, submitted 3' in output
+    assert '5 chat uploads: original missing, skipped alice/gone (gone.pdf)' in output
+    assert 'chat uploads running 3 | chat uploads failed 0 | chat upload originals missing 1' in output
+
+
+@pytest.mark.asyncio
+async def test_an_uploads_rerun_submits_nothing_twice_and_ends_once_jobs_finish(env, monkeypatch, capsys):
+    await seed_uploads(env, monkeypatch)
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    env.api.requests.clear()
+    capsys.readouterr()
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
+    assert job_posts(env) == []
+    assert 'running 3' in capsys.readouterr().out
+    await finish_jobs(env, monkeypatch)
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 0
+    assert job_posts(env) == []
+    output = capsys.readouterr().out
+    assert 'ingested 3' in output and 'chat uploads running 0' in output
+
+
+@pytest.mark.asyncio
+async def test_an_upload_already_in_its_owners_collection_is_only_pointed_there(env, monkeypatch, capsys):
+    await seed_uploads(env, monkeypatch)
+    ingest = importlib.import_module('open_webui.soev.ingest')
+    key = await ingest.ensure_attachments_collection('alice', env.identity.build_client())
+    env.api.add_document(key, 'loose')
+    env.api.requests.clear()
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    assert (ALICE, 'loose') not in submitted_uploads(env)
+    assert (await file_meta(env, 'loose'))['collection_name'] == ALICE
+    assert 'ingested 1' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_an_upload_soev_api_refuses_is_reported_and_the_run_goes_on(env, monkeypatch, capsys):
+    await seed_uploads(env, monkeypatch)
+    ingest = importlib.import_module('open_webui.soev.ingest')
+    from open_webui.soev.client import SoevApiError
+
+    original = ingest.submit
+
+    async def refuse(file, **kwargs):
+        if file.id == 'loose':
+            raise SoevApiError(422, 'unsupported_media_type', 'no text')
+        return await original(file, **kwargs)
+
+    monkeypatch.setattr(ingest, 'submit', refuse)
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
+    assert submitted_uploads(env) == [(ALICE, 'chat-level'), (BOB, 'bobs')]
+    assert '5 chat uploads: failed alice/loose: unsupported_media_type' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_the_uploads_dry_run_reads_only_the_database(env, monkeypatch, capsys):
+    await seed_uploads(env, monkeypatch)
+    before = await rows(env, 'SELECT * FROM file ORDER BY id')
+    assert await env.module.plan_uploads(uploads_options(env, monkeypatch)) == 0
+    assert await rows(env, 'SELECT * FROM file ORDER BY id') == before
+    assert env.api.requests == []
+    output = capsys.readouterr().out
+    assert '5 chat uploads: knowledge base file 1, no file row 1, to check 4' in output
+    assert '5 chat uploads: to check 1.0 MB' in output
+
+
+@pytest.mark.asyncio
+async def test_the_full_apply_ingests_chat_uploads_too(env, monkeypatch, capsys):
+    await seed_uploads(env, monkeypatch)
+    assert await env.module.apply(options(env)) == 75
+    assert {(ALICE, 'loose'), (BOB, 'bobs')} <= set(submitted_uploads(env))
+    await finish_jobs(env, monkeypatch)
+    assert await env.module.apply(options(env)) == 0
+    assert 'chat uploads failed 0 | chat upload originals missing 1' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ('argv', 'called'),
+    [(['--apply', '--uploads'], 'apply_uploads'), (['--dry-run', '--uploads'], 'plan_uploads')],
+)
+def test_the_uploads_flag_selects_the_uploads_only_step(monkeypatch, argv, called):
+    module = importlib.import_module('open_webui.soev.migrate')
+    seen = []
+    monkeypatch.setattr(module, 'options_from_env', lambda **kwargs: kwargs)
+    for name in ('apply', 'plan', 'apply_models', 'plan_models', 'apply_uploads', 'plan_uploads'):
+
+        async def run(options, name=name):
+            seen.append((name, options['uploads_only']))
+            return 0
+
+        monkeypatch.setattr(module, name, run)
+    monkeypatch.setattr(sys, 'argv', ['migrate', *argv])
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+    assert exited.value.code == 0
+    assert seen == [(called, True)]
+
+
+@pytest.mark.parametrize('argv', [['--restore', '--uploads'], ['--apply', '--models', '--uploads']])
+def test_the_uploads_flag_refuses_restore_and_models(monkeypatch, argv):
+    module = importlib.import_module('open_webui.soev.migrate')
+    monkeypatch.setattr(sys, 'argv', ['migrate', *argv])
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+    assert exited.value.code == 2
