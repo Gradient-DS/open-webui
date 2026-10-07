@@ -36,9 +36,8 @@
 	export let size: number;
 
 	import DocumentPage from '../icons/DocumentPage.svelte';
-	import OneDrive from '../icons/OneDrive.svelte';
-	import GoogleDrive from '../icons/GoogleDrive.svelte';
-	import Confluence from '../icons/Confluence.svelte';
+	// [Gradient] Cloud collections show the folder icon with a provider badge.
+	import SourceItemIcon from './SourceItemIcon.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
 	import ChatBubble from '../icons/ChatBubble.svelte';
 	import Folder from '../icons/Folder.svelte';
@@ -137,14 +136,8 @@
 											: $i18n.t('Document')}
 						placement="top"
 					>
-						{#if type === 'collection' && item?.knowledge_type === 'onedrive'}
-							<OneDrive className="size-3.5" />
-						{:else if type === 'collection' && item?.knowledge_type === 'google_drive'}
-							<GoogleDrive className="size-3.5" />
-						{:else if type === 'collection' && item?.knowledge_type === 'confluence'}
-							<Confluence className="size-3.5" />
-						{:else if type === 'collection'}
-							<FolderOpen className="size-3.5" />
+						{#if type === 'collection'}
+							<SourceItemIcon kind="folder" icon={FolderOpen} provider={item?.knowledge_type} />
 						{:else if type === 'note'}
 							<PageEdit className="size-3.5" />
 						{:else if type === 'chat'}

@@ -1,8 +1,6 @@
 import type { ComponentType } from 'svelte';
 import type { ScheduleForm } from '$lib/apis/cloudSync';
-import OneDrive from '$lib/components/icons/OneDrive.svelte';
-import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
-import Folder from '$lib/components/icons/Folder.svelte';
+import { providerBadge } from './badges';
 import { openOneDriveItemPicker } from '$lib/utils/onedrive-file-picker';
 import {
 	createKnowledgePicker,
@@ -37,7 +35,7 @@ export const providers: Record<string, SourceProvider> = {
 	onedrive: {
 		kind: 'onedrive',
 		label: 'OneDrive',
-		icon: OneDrive,
+		icon: providerBadge('onedrive')!.icon,
 		startParam: 'start_onedrive_sync',
 		needsReconnectOn: DEFAULT_RECONNECT_CODES,
 		async pick() {
@@ -48,7 +46,7 @@ export const providers: Record<string, SourceProvider> = {
 	google_drive: {
 		kind: 'google_drive',
 		label: 'Google Drive',
-		icon: GoogleDrive,
+		icon: providerBadge('google_drive')!.icon,
 		startParam: 'start_google_drive_sync',
 		warmUp: () => initializeGooglePicker().catch(() => {}),
 		needsReconnectOn: DEFAULT_RECONNECT_CODES,
@@ -59,22 +57,12 @@ export const providers: Record<string, SourceProvider> = {
 	}
 };
 
-export const localSource: { kind: 'local'; label: string; icon: ComponentType } = {
-	kind: 'local',
-	label: 'Local',
-	icon: Folder
-};
-
 export function providerFor(kind: string | null | undefined): SourceProvider | null {
 	return kind && Object.hasOwn(providers, kind) ? providers[kind] : null;
 }
 
 export function reconnectCodes(kind: string | null | undefined): string[] {
 	return providerFor(kind)?.needsReconnectOn ?? DEFAULT_RECONNECT_CODES;
-}
-
-export function providerIcon(kind: string | null | undefined): ComponentType {
-	return providerFor(kind)?.icon ?? localSource.icon;
 }
 
 export function oneDriveScope(item: {

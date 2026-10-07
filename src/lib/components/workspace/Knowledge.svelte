@@ -3,7 +3,8 @@
 	import { knowledgeListCache, type KnowledgeListItem } from './Knowledge/utils/listCache';
 	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import { enabledProviders } from '$lib/sources/policy';
-	import { providerFor, providerIcon } from '$lib/sources/registry';
+	import { providerFor } from '$lib/sources/registry';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	dayjs.extend(relativeTime);
@@ -493,7 +494,8 @@
 								}}
 							>
 								<div class="flex w-5 shrink-0 items-center justify-center">
-									<svelte:component this={providerIcon(item?.type)} className="size-4" />
+									<!-- [Gradient] Folder icon with the provider badge for cloud KBs. -->
+									<SourceItemIcon kind="folder" provider={item?.type} className="size-4" />
 								</div>
 								<div class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
 									<div class="flex min-w-0 flex-1 flex-col overflow-hidden">

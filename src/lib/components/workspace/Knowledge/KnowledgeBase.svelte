@@ -123,6 +123,9 @@
 	// Any level inside a cloud source: the breadcrumb root names its schedule.
 	$: enclosingSourcePair =
 		(breadcrumbs[0]?.schedule_id && sourcePairs.get(breadcrumbs[0].schedule_id!)) || null;
+	// [Gradient] Everything below a cloud source root is that provider's item.
+	$: enclosingProvider =
+		(enclosingSourcePair?.content ?? enclosingSourcePair?.acl)?.source_kind ?? null;
 	$: enclosingSyncing =
 		enclosingSourcePair?.content && runIsLive(enclosingSourcePair.content.last_run)
 			? (runProgress(enclosingSourcePair.content) ?? true)
@@ -2432,6 +2435,7 @@
 												looseSources={currentDirectoryId === null ? looseSources : []}
 												skippedItems={currentSourcePair ? skippedItems : []}
 												syncing={enclosingSyncing}
+												{enclosingProvider}
 												{uploadProgress}
 												skippedProvider={currentSourceProvider}
 												syncAccess={!!knowledge?.write_access}

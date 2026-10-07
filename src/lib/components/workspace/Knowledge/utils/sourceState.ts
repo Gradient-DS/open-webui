@@ -24,7 +24,9 @@ export type SourceState =
 export interface SourceView {
 	state: SourceState;
 	label: string;
+	kind: 'file' | 'folder';
 	path: string;
+	itemPath: string;
 	provider: string;
 	lastSyncedAt: string | null;
 	nextDueAt: string | null;
@@ -40,6 +42,22 @@ export function displayPath(path: string | null | undefined): string {
 	if (!path) return '';
 	const root = path.indexOf('root:');
 	return root < 0 ? path : path.slice(root + 'root:'.length) || '/';
+}
+
+// A single-file source (or a folder synced without its subfolders' files) is
+// shown as a file; everything else is a folder.
+export function sourceKind(schedule: Pick<Schedule, 'scope'>): 'file' | 'folder' {
+	return schedule.scope.single_file === true || schedule.scope.include_descendants === false
+		? 'file'
+		: 'folder';
+}
+
+// The picker stores the item's parent path, so the item's own path is that
+// parent plus its name. Empty when the provider gave no path.
+export function itemPath(schedule: Pick<Schedule, 'path' | 'label'>): string {
+	const parent = displayPath(schedule.path);
+	if (!parent || !schedule.label) return '';
+	return `${parent.replace(/\/+$/, '')}/${schedule.label}`;
 }
 
 export function sourceState(pair: SchedulePair, connection: Connection): SourceView {
@@ -80,12 +98,10 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 	else state = 'scheduled';
 	return {
 		state,
-		label:
-			schedule.label ||
-			(schedule.scope.single_file || schedule.scope.include_descendants === false
-				? 'File'
-				: 'Folder'),
+		label: schedule.label || (sourceKind(schedule) === 'file' ? 'File' : 'Folder'),
+		kind: sourceKind(schedule),
 		path: displayPath(schedule.path),
+		itemPath: itemPath(schedule),
 		provider: providerFor(schedule.source_kind)?.label ?? schedule.source_kind,
 		lastSyncedAt: run?.finished_at ?? (run?.outcome ? run.started_at : null),
 		nextDueAt: schedule.next_due_at ?? null,
