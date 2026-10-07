@@ -1215,6 +1215,13 @@ async def transcription(
     language: Optional[str] = Form(None),
     user=Depends(get_verified_user),
 ):
+    # [Gradient] Dictation is tenant-gated; the gate binds admins too.
+    if not is_feature_enabled('voice'):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Feature 'voice' is not available in your plan",
+        )
+
     if user.role != 'admin' and not await has_permission(user.id, 'chat.stt', await Config.get('user.permissions')):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1229,6 +1236,7 @@ async def transcription(
             detail=ERROR_MESSAGES.FILE_NOT_SUPPORTED,
         )
 
+    id = None  # [Gradient] set once the upload has a name, so the finally can discard it
     try:
         safe_name = os.path.basename(file.filename) if file.filename else ''
         ext = safe_name.rsplit('.', 1)[-1].lower() if '.' in safe_name else ''
@@ -1299,6 +1307,20 @@ async def transcription(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Transcription failed.',
         )
+    finally:
+        # [Gradient] Dictation audio has no use once it is text: discard it on success and failure.
+        if id is not None:
+            await asyncio.to_thread(discard_transcription_files, str(id))
+
+
+def discard_transcription_files(id: str) -> None:
+    """[Gradient] Remove an upload and everything derived from it (converted, compressed, chunks, json)."""
+    file_dir = Path(CACHE_DIR) / 'audio' / 'transcriptions'
+    for path in file_dir.glob(f'{id}*'):
+        try:
+            path.unlink()
+        except OSError:
+            log.warning('Could not remove transcription file %s', path.name)
 
 
 async def get_available_models(request: Request) -> list[dict]:

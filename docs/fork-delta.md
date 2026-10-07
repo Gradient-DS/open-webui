@@ -404,3 +404,22 @@ libpcre2-8-0, failed dev's digest scan). The layer sits after the uv install, so
 the dependency layers stay cached. Upstream has no registry cache, so this is
 fork-only. `runtime-security.yml` builds the same Dockerfile through compose
 without a cache, so its build always runs the layer and needs no epoch.
+
+## Voice gates and dictation hygiene
+
+`FEATURE_VOICE` gates dictation (STT); `FEATURE_VOICE_CALL` and
+`FEATURE_READ_ALOUD` are sub-gates for call mode and read-aloud, so a tenant can
+offer dictation only. Upstream's per-user `chat.stt` / `chat.tts` / `chat.call`
+permissions are bypassed for admins; tenant gates bind admins too. Enforced
+server-side in `backend/open_webui/routers/audio.py`: `POST /audio/speech` needs
+read-aloud or call mode, `POST /audio/transcriptions` needs `voice` (403
+otherwise).
+
+Upstream writes every dictation upload to `CACHE_DIR/audio/transcriptions/`
+(plus converted, compressed and chunk copies and a `.json` transcript per engine
+call) and never deletes them. The fork's `transcription` route removes every
+file named after the upload's uuid (`discard_transcription_files`) as soon as the
+text is returned, and on failure too: dictation has no retry, and audio has no
+use once it is text. `transcribe()` itself is unchanged, so file-upload
+transcription in `routers/files.py` keeps its source file. Tests:
+`backend/open_webui/test/apps/test_voice_feature_gates.py`.
