@@ -309,6 +309,8 @@ class FakeSoevApi:
             row = {
                 'id': f'schedule-{len(self.schedules)}',
                 **body,
+                # soev-api stores the schedule's private corpus; the KB is a subscriber.
+                'collection_key': f'corpus-{len(self.schedules)}',
                 'source_kind': self.connections[body['connection_id']]['source_kind'],
                 'lifecycle': 'enabled',
                 'subscribers': [body['collection_key']],

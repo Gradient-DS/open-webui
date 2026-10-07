@@ -1,6 +1,7 @@
 """Migrate legacy cloud sources through owner-scoped, replayable HTTP requests."""
 
 import copy
+import hashlib
 import importlib
 import json
 from types import SimpleNamespace
@@ -38,21 +39,36 @@ class CloudApi(FakeSoevApi):
             self.connections[connection_id] = row
             self.connection_owners[connection_id] = subject
         else:
-            assert set(body) == {'connection_id', 'kind', 'scope', 'cadence_minutes', 'collection_key'}
+            assert {'connection_id', 'kind', 'scope', 'cadence_minutes', 'collection_key'} <= set(body)
+            assert set(body) <= {'connection_id', 'kind', 'scope', 'label', 'path', 'cadence_minutes', 'collection_key'}
             connection_id = body['connection_id']
             assert self.connection_owners[connection_id] == subject
             self._collection(body['collection_key'], credential, subject, write=True)
             assert body['cadence_minutes'] >= self.min_cadence_minutes
-            schedule_id = f'schedule-{len(self.schedules)}'
-            row = {
-                'id': schedule_id,
-                **body,
-                'source_kind': self.connections[connection_id]['source_kind'],
-                'lifecycle': 'enabled',
-                'subscribers': [body['collection_key']],
-            }
-            self.schedules[schedule_id] = row
-            self.schedule_owners[schedule_id] = subject
+            # Like soev-api: one schedule per connection, kind and scope, stored under its corpus key.
+            row = next(
+                (
+                    row
+                    for row in self.schedules.values()
+                    if (row['connection_id'], row['kind'], row['scope']) == (connection_id, body['kind'], body['scope'])
+                ),
+                None,
+            )
+            if row is None:
+                schedule_id = f'schedule-{len(self.schedules)}'
+                row = {
+                    'id': schedule_id,
+                    **body,
+                    'collection_key': f'corpus-{connection_id}-{len(self.schedules)}',
+                    'source_kind': self.connections[connection_id]['source_kind'],
+                    'lifecycle': 'enabled',
+                    'subscribers': [],
+                }
+                self.schedules[schedule_id] = row
+                self.schedule_owners[schedule_id] = subject
+            elif body['collection_key'] in row['subscribers']:
+                raise Problem(409, 'schedule_exists')
+            row['subscribers'].append(body['collection_key'])
         return httpx.Response(201, json=row)
 
 
@@ -128,7 +144,7 @@ async def env(identity_config, fake_api, monkeypatch):
             finally:
                 event.remove(engine.sync_engine, 'before_cursor_execute', read_only)
 
-        yield SimpleNamespace(api=api, identity=identity, seed=seed, run=run)
+        yield SimpleNamespace(api=api, identity=identity, seed=seed, run=run, db=db)
     await engine.dispose()
 
 
@@ -145,8 +161,9 @@ async def test_a_onedrive_kb_becomes_a_pending_connection_and_two_schedules(env,
     assert [row['kind'] for row in schedules] == ['content', 'acl_refresh']
     for row in schedules:
         assert row['connection_id'] == 'connection-0'
-        assert row['collection_key'] == kb.id
+        assert row['subscribers'] == [kb.id]
         assert row['cadence_minutes'] == 37
+        assert (row['label'], row['path']) == ('Source', '/Source')
         assert row['scope'] == {
             'drive_id': 'drive-1',
             'item_id': 'item-1',
@@ -154,10 +171,11 @@ async def test_a_onedrive_kb_becomes_a_pending_connection_and_two_schedules(env,
             'single_file': False,
         }
     writes = [r for r in env.api.requests if r.url.path in {'/v1/connections', '/v1/schedules'} and r.method == 'POST']
+    digest = hashlib.sha256(json.dumps(schedules[0]['scope'], sort_keys=True).encode()).hexdigest()
     assert [r.headers['Idempotency-Key'] for r in writes] == [
         f'migrate:connection:{kb.id}',
-        f'migrate:schedule:{kb.id}:0',
-        f'migrate:schedule:{kb.id}:1',
+        f'migrate:schedule:{kb.id}:content:{digest}',
+        f'migrate:schedule:{kb.id}:acl_refresh:{digest}',
     ]
     paths = [r.url.path for r in env.api.requests]
     assert paths.index('/v1/collections') < paths.index('/v1/connections')
@@ -243,6 +261,7 @@ async def test_rerun_creates_nothing_new(env, capsys):
         None,
         None,
     ]
+    assert not any('label' in row or 'path' in row for row in list(env.api.schedules.values())[:4])
     for clear_links in (False, True):
         if clear_links:
             env.identity._linked_refs.clear()
@@ -252,3 +271,47 @@ async def test_rerun_creates_nothing_new(env, capsys):
     schedule_reads = [r for r in env.api.requests if r.url.path == '/v1/schedules' and r.method == 'GET']
     assert all('X-Soev-Subject' in r.headers for r in schedule_reads)
     assert any('cursor' in r.url.params for r in schedule_reads)
+
+
+@pytest.mark.asyncio
+async def test_coverage_counts_subscribers_not_the_corpus_key(env, capsys):
+    """Staging printed 0 schedules: soev-api stores the corpus key and lists the KB under subscribers."""
+    kb = await env.seed()
+    assert await env.run() == 0
+    assert all(row['collection_key'] != kb.id for row in env.api.schedules.values())
+    assert 'KBs with a schedule: 1 | KBs of a cloud type: 1' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_a_rerun_after_the_sources_change_keeps_old_schedules_and_adds_new(env, capsys):
+    """A source added in front of the old one must not reuse the old one's key for another scope."""
+    kb = await env.seed()
+    assert await env.run() == 0
+    before = copy.deepcopy(env.api.schedules)
+    added = {'type': 'folder', 'item_id': 'item-0', 'drive_id': 'drive-1', 'name': 'New', 'item_path': '/New'}
+    kb.meta = {'onedrive_sync': {'sources': [added, *kb.meta['onedrive_sync']['sources']]}}
+    await env.db.commit()
+    assert await env.run() == 0
+    assert {key: env.api.schedules[key] for key in before} == before
+    assert sorted(row['scope']['item_id'] for row in env.api.schedules.values()) == [
+        'item-0',
+        'item-0',
+        'item-1',
+        'item-1',
+    ]
+    assert 'KBs with a schedule: 1 | KBs of a cloud type: 1' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_a_scope_subscribed_under_another_key_is_kept(env, capsys):
+    """Schedules from a run with the old position keys answer schedule_exists; the run goes on."""
+    kb = await env.seed()
+    assert await env.run() == 0
+    before = copy.deepcopy(env.api.schedules)
+    for key in [key for key in env.api.replays if key[1].startswith('migrate:schedule:')]:
+        del env.api.replays[key]
+    assert await env.run() == 0
+    assert env.api.schedules == before
+    output = capsys.readouterr().out
+    assert f'{kb.id}: content schedule exists for this scope; kept' in output
+    assert f'{kb.id}: acl_refresh schedule exists for this scope; kept' in output
