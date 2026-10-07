@@ -11,6 +11,8 @@
 		type Schedule,
 		type ScheduleAction
 	} from '$lib/apis/cloudSync';
+	import { toast } from 'svelte-sonner';
+	import { copyToClipboard } from '$lib/utils';
 	import Badge from '$lib/components/common/Badge.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -99,6 +101,8 @@
 			? { ...badges.error, definition: 'Failed: no file could be synced; see details' }
 			: badges[view.state];
 	$: targets = [pair.content, pair.acl].filter((item): item is Schedule => !!item);
+	// A queued run shows as syncing but has no run row to cancel yet.
+	$: liveTargets = targets.filter((item) => runIsLive(item.last_run));
 	$: expiry = targets.flatMap((item) =>
 		typeof item.provider_secret_days_to_expiry === 'number'
 			? [item.provider_secret_days_to_expiry]
@@ -149,6 +153,12 @@
 		showMenu = false;
 		dispatch('action', { schedules, action });
 	};
+	// [Gradient] Where the item lives in the provider, for anyone who can see the row.
+	async function copyPath() {
+		showMenu = false;
+		if (await copyToClipboard(view.itemPath)) toast.success($i18n.t('Path copied'));
+		else toast.error($i18n.t('Failed to copy path'));
+	}
 	function primaryAction() {
 		if (view.primary === 'reconnect') dispatch('reconnect', schedule.connection);
 		else if (view.primary === 'resume') action(targets, 'resume');
@@ -216,23 +226,19 @@
 			><Badge type={badge.type} content={$i18n.t(badge.label)} /></button
 		>
 	</Tooltip>
-	{#if isAdmin || (writeAccess && view.state === 'syncing')}
+	{#if view.itemPath || isAdmin || (writeAccess && liveTargets.length > 0)}
 		<Dropdown bind:show={showMenu} align="end">
 			<button
 				type="button"
 				class="rounded-lg px-1.5 py-0.5 text-xs"
-				aria-label={$i18n.t('Source actions')}
-				disabled={busy}>⋯</button
+				aria-label={$i18n.t('Source actions')}>⋯</button
 			>
 			<div slot="content">
 				<DropdownMenu>
-					{#if writeAccess && view.state === 'syncing'}<button
+					{#if view.itemPath}<button on:click={copyPath}>{$i18n.t('Copy Path')}</button>{/if}
+					{#if writeAccess && liveTargets.length > 0}<button
 							disabled={busy}
-							on:click={() =>
-								action(
-									targets.filter((item) => runIsLive(item.last_run)),
-									'cancel'
-								)}>{$i18n.t('Cancel')}</button
+							on:click={() => action(liveTargets, 'cancel')}>{$i18n.t('Cancel')}</button
 						>{/if}
 					{#if isAdmin}
 						{#if schedule.lifecycle === 'enabled'}<button

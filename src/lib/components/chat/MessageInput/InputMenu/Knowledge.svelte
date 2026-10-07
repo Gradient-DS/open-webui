@@ -1,8 +1,6 @@
 <script lang="ts">
-	// [Gradient] Cloud collections retain their provider identity.
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
-	import Confluence from '$lib/components/icons/Confluence.svelte';
+	// [Gradient] Cloud collections and their files carry their provider's badge.
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 
 	import { onDestroy, onMount, tick, getContext } from 'svelte';
 
@@ -11,7 +9,6 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
-	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -232,11 +229,8 @@
 						>
 							<div class="w-full text-left text-black dark:text-gray-100 flex items-center gap-1">
 								<Tooltip content={$i18n.t('Collection')} placement="top">
-									<!-- [Gradient] Per-provider collection icons; local KBs are folders. -->
-									{#if item.type === 'onedrive'}<OneDrive className="size-3.5" />
-									{:else if item.type === 'google_drive'}<GoogleDrive className="size-3.5" />
-									{:else if item.type === 'confluence'}<Confluence className="size-3.5" />
-									{:else}<FolderOpen className="size-3.5" />{/if}
+									<!-- [Gradient] Folder icon; cloud collections add their provider badge. -->
+									<SourceItemIcon kind="folder" icon={FolderOpen} provider={item.type} />
 								</Tooltip>
 
 								<Tooltip
@@ -298,7 +292,8 @@
 									>
 										<div class=" flex items-center gap-1.5">
 											<Tooltip content={$i18n.t('Collection')} placement="top">
-												<DocumentPage className="size-3.5" />
+												<!-- [Gradient] Files of a cloud collection carry its badge. -->
+												<SourceItemIcon kind="file" provider={item.type} />
 											</Tooltip>
 
 											<Tooltip content={decodeString(file?.meta?.name)} placement="top-start">

@@ -14,7 +14,7 @@
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
@@ -77,6 +77,9 @@
 	// [Gradient] Set inside a cloud source whose run is live: files show up
 	// as they land, so the listing says more is coming.
 	export let syncing: FolderProgress | true | null = null;
+	// [Gradient] The provider of the cloud source this listing sits in, if any:
+	// its folders and files carry that provider's badge.
+	export let enclosingProvider: string | null = null;
 	// [Gradient] Local folder upload in flight, keyed by top-level directory id.
 	export let uploadProgress: Map<string, FolderProgress> = new Map();
 
@@ -185,6 +188,7 @@
 					directory={dir}
 					writeAccess={structureEditable}
 					pair={dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null}
+					provider={enclosingProvider}
 					uploading={uploadProgress.get(dir.id) ?? null}
 					knowledgeId={knowledge?.id ?? ''}
 					{syncAccess}
@@ -259,7 +263,7 @@
 								window.open(`${WEBUI_BASE_URL}/api/v1/files/${fileId}/content`, '_blank');
 							}}
 						>
-							<DocumentPage className="size-3.5" />
+							<SourceItemIcon kind="file" provider={enclosingProvider} />
 						</button>
 					</Tooltip>
 				{/if}
@@ -380,7 +384,11 @@
 			<div class="flex w-full items-center rounded-xl px-1.5 py-0.5 opacity-60" role="listitem">
 				{#if selection}<SelectCheckbox selectable={false} />{/if}
 				<div class="flex items-center p-1">
-					<DocumentPage className="size-3.5 text-gray-400" />
+					<SourceItemIcon
+						kind="file"
+						provider={enclosingProvider}
+						className="size-3.5 text-gray-400"
+					/>
 				</div>
 				<div class="flex min-w-0 flex-1 items-center gap-2 p-2 text-left">
 					<div class="line-clamp-1 text-sm text-gray-500 dark:text-gray-400">

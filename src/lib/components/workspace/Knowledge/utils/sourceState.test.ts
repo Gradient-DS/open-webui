@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule, SyncRun } from '$lib/apis/cloudSync';
 import {
 	displayPath,
+	itemPath,
+	sourceKind,
 	sourceState,
 	sourceTiming,
 	skippedReason,
@@ -59,6 +61,11 @@ describe('source states', () => {
 			state: 'syncing',
 			primary: null
 		});
+	});
+	it('syncing while a requested run waits for a worker', () => {
+		expect(
+			sourceState({ content: schedule({ last_run: run }), queued: true }, connection)
+		).toMatchObject({ state: 'syncing', primary: null });
 	});
 	it('needs_reconnect', () => {
 		for (const lifecycle of ['pending', 'suspended:reauth', 'revoked'])
@@ -356,4 +363,17 @@ it('shows Graph parent paths from the drive root', () => {
 	expect(displayPath('/Team/Reports')).toBe('/Team/Reports');
 	expect(displayPath(null)).toBe('');
 	expect(view({ path: '/drive/root:/Team' }).path).toBe('/Team');
+});
+
+it('names a source file or folder by its scope and joins its parent path with its name', () => {
+	expect(sourceKind({ scope: { single_file: true } })).toBe('file');
+	expect(sourceKind({ scope: { include_descendants: false } })).toBe('file');
+	expect(sourceKind({ scope: { include_descendants: true } })).toBe('folder');
+	expect(itemPath({ path: '/drive/root:/Team', label: 'Plan.docx' })).toBe('/Team/Plan.docx');
+	expect(itemPath({ path: '/drive/root:', label: 'Team' })).toBe('/Team');
+	expect(itemPath({ path: null, label: 'Team' })).toBe('');
+	expect(view({ path: '/drive/root:/Team', label: 'Reports' })).toMatchObject({
+		kind: 'folder',
+		itemPath: '/Team/Reports'
+	});
 });

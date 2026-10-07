@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { providerIcon } from '$lib/sources/registry';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import dayjs from '$lib/dayjs';
 	import duration from 'dayjs/plugin/duration';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -27,6 +27,8 @@
 	// [Gradient] Set when this directory is the root a cloud source writes: the
 	// row shows the provider's logo and carries the source's sync controls.
 	export let pair: SchedulePair | null = null;
+	// [Gradient] Provider of the cloud source this directory sits inside.
+	export let provider: string | null = null;
 	export let knowledgeId = '';
 	export let syncAccess = false;
 	export let syncBusy = false;
@@ -152,10 +154,8 @@
 			type="button"
 			on:click={() => onNavigate(directory.id)}
 		>
-			<svelte:component
-				this={providerIcon((pair?.content ?? pair?.acl)?.source_kind)}
-				className="size-3.5"
-			/>
+			<!-- [Gradient] Folder icon, badged with the provider for a cloud source root. -->
+			<SourceItemIcon kind="folder" provider={pair ? sourceKind : provider} />
 		</button>
 	</div>
 
