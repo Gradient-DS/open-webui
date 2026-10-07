@@ -111,7 +111,7 @@ def is_unconfigured(model: dict) -> bool:
 
 
 async def is_offered(model_id: str, role: str | None) -> bool:
-    """In v2 mode a catalog model without an admin's model row is open to every user and admin."""
+    """In v2 mode soev-api decides model access: every catalog model is open to every user and admin."""
     if not is_v2() or role not in ('user', 'admin'):
         return False
     return any(entry['id'] == model_id for entry in await catalog())

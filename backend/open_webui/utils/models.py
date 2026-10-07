@@ -479,14 +479,14 @@ async def check_model_access(user, model, model_info=None, db=None):
             db=db,
         ):
             raise Exception('Model not found')
+    # [Gradient] soev-api's catalog is the only gate; an admin row's grants do not restrict it.
+    elif await model_catalog.is_offered(model.get('id'), user.role):
+        return
     else:
         # Callers that already fetched the row (chat completion entry) pass it in
         if model_info is None or model_info.id != model.get('id'):
             model_info = await Models.get_model_by_id(model.get('id'), db=db)
         if not model_info:
-            # [Gradient] The client's catalog is the tenant-level offer; an admin row restricts it.
-            if await model_catalog.is_offered(model.get('id'), user.role):
-                return
             raise Exception('Model not found')
 
         # One group-membership fetch shared by the direct check and every
@@ -560,15 +560,17 @@ async def get_filtered_models(models, user, db=None):
                 continue
 
             model_info = model_infos.get(model['id'])
-            if model_info:
+            # [Gradient] soev-api's catalog is the only gate; an admin row's grants do not restrict it.
+            if await model_catalog.is_offered(model['id'], user.role):
+                filtered_models.append(model)
+            elif model_info:
                 if (
                     (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == model_info.get('user_id')
                     or model['id'] in accessible_model_ids
                 ):
                     filtered_models.append(model)
-            # [Gradient] A row-less catalog model is open to every user and admin.
-            elif user.role == 'admin' or await model_catalog.is_offered(model['id'], user.role):
+            elif user.role == 'admin':
                 # No DB entry means no access control configured yet;
                 # only admins can see unconfigured models.
                 filtered_models.append(model)
