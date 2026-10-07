@@ -193,7 +193,9 @@ class AttachmentsUnavailable(Exception):
 async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     """[Claude] The files attached in the chat, as the turn's `attachments` field; none while nothing is attached.
 
-    The collection is the one the finished upload reported, else where chat uploads go; the agent checks access.
+    The collection is the one the file's own record names (a live document, or an upload the v2 migration ingested),
+    else where chat uploads go; the agent checks access. A chat entry's `collection_name` is never read: a v1 entry
+    names the per-file vector collection `file-<id>`, which soev-api does not have.
     A file picked from a knowledge base (`knowledge_id`) is that KB's document, read there as the user: synced
     documents have no File row, and an uploaded one's row does not name the KB.
 
@@ -203,13 +205,7 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     attached: list[dict[str, str]] = []
     unavailable: list[tuple[str, str]] = []
     notes: list[str] = []
-    entries = {
-        entry['id']: entry
-        for entry in metadata.get('files') or []
-        if entry.get('type') == 'file'
-        and entry.get('id')
-        and not (entry.get('content_type') or '').startswith('image/')
-    }
+    entries = {entry['id']: entry for entry in metadata.get('files') or [] if ingest.is_chat_attachment(entry)}
     user_id = None if acting.acting_ref() else metadata['user_id']
     for file_id, entry in entries.items():
         if knowledge_id := entry.get('knowledge_id'):
@@ -234,11 +230,7 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
             else:
                 unavailable.append((name, status))
             continue
-        key = (
-            (file.meta or {}).get('collection_name')
-            or entry.get('collection_name')
-            or ingest.attachments_collection_key(file.user_id)
-        )
+        key = (file.meta or {}).get('collection_name') or ingest.attachments_collection_key(file.user_id)
         item = {'collection_key': key, 'file_id': file_id, 'name': name}
         if (file.meta or {}).get('source'):
             item['document_ref'] = file.meta['source']['ref']

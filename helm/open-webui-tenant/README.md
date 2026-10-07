@@ -123,6 +123,13 @@ directory copy, re-ingest, memories or sign-out, and needs no `config`. It
 snapshots just the two model-id config rows, so `mode: restore` with the same
 `id` undoes it.
 
+`mode: uploads` runs `--apply --uploads`: it ingests only the uploads stored
+chats attach (not KB files or images) into their owners' attachments
+collections in soev-api, for a tenant whose `apply` ran before that step was
+part of it. It needs no `config` or `modelMap`, is safe to rerun (ingested
+files are skipped), exits 75 while its ingest jobs run and lists files whose
+original is gone. There is nothing to restore: v1 never reads soev-api.
+
 ## Render checks
 
 ```sh
