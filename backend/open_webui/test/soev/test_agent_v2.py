@@ -376,6 +376,35 @@ async def test_attached_files_are_sent_with_their_collection_and_name(
 
 
 @pytest.mark.asyncio
+async def test_the_file_record_names_the_collection_and_a_chat_entry_never_does(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A v1 entry's `file-<id>` is not a soev-api collection; a migrated upload's record names its collection."""
+    records = {
+        'v1': SimpleNamespace(id='v1', user_id='alice', filename='oud.pdf', meta={'status': 'completed'}),
+        'moved': SimpleNamespace(
+            id='moved',
+            user_id='bob',
+            filename='gedeeld.pdf',
+            meta={'status': 'completed', 'collection_name': ingest.attachments_collection_key('bob')},
+        ),
+    }
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', AsyncMock(side_effect=records.get))
+    await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'v1', 'name': 'oud.pdf', 'collection_name': 'file-v1'},
+            {'type': 'file', 'id': 'moved', 'name': 'gedeeld.pdf', 'collection_name': 'file-moved'},
+        ],
+    )
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': ingest.attachments_collection_key('alice'), 'file_id': 'v1', 'name': 'oud.pdf'},
+        {'collection_key': ingest.attachments_collection_key('bob'), 'file_id': 'moved', 'name': 'gedeeld.pdf'},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_a_file_picked_from_a_knowledge_base_is_sent_as_that_kb_document(
     chat: Chat, monkeypatch: pytest.MonkeyPatch
 ) -> None:
