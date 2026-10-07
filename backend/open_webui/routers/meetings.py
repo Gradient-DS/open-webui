@@ -3,14 +3,17 @@
 The meeting agent owns every meeting; Open WebUI stores nothing and adds no logic.
 """
 
+import json
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from open_webui import config
 from open_webui.soev import identity
-from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.features import is_feature_enabled
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -144,9 +147,38 @@ async def get_meeting(meeting_id: MeetingId, soev: Soev):
 
 
 @router.post('/{meeting_id}/inputs', status_code=202)
-async def send_input(meeting_id: MeetingId, body: MeetingInput, soev: Soev):
-    await _submit(soev, _thread(meeting_id, '/inputs'), {'input': body.input}, thread_id=meeting_id)
-    return {'id': meeting_id}
+async def send_input(meeting_id: MeetingId, body: MeetingInput, request: Request, soev: Soev):
+    path, payload = _thread(meeting_id, '/inputs'), {'input': body.input}
+    if 'text/event-stream' not in request.headers.get('accept', ''):
+        await _submit(soev, path, payload, thread_id=meeting_id)
+        return {'id': meeting_id}
+    stream = soev.client.chat_stream(path, payload, as_user=soev.ref, thread_id=meeting_id)
+    try:
+        await anext(stream)  # the client's own `connection` frame: the input was accepted
+    except SoevApiError as error:
+        await stream.aclose()
+        raise _http_error(error) from None
+    return StreamingResponse(
+        _sse(stream),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
+
+
+def _frame(event: ChatEvent) -> str:
+    head = f'id: {event.position}\n' if event.position is not None else ''
+    return f'{head}event: {event.event}\ndata: {json.dumps(event.data, separators=(",", ":"))}\n\n'
+
+
+async def _sse(stream: AsyncGenerator[ChatEvent, None]) -> AsyncIterator[str]:
+    """Pass the turn's frames through as they arrive; a client that leaves closes the upstream stream."""
+    try:
+        async for event in stream:
+            yield _frame(event)
+    except SoevApiError as error:
+        yield _frame(ChatEvent('error', {'code': error.code, 'detail': error.detail}))
+    finally:
+        await stream.aclose()
 
 
 @router.delete('/{meeting_id}', status_code=204)

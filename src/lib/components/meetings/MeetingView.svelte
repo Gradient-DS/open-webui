@@ -5,13 +5,20 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { toast } from 'svelte-sonner';
-	import DOMPurify from 'dompurify';
-	import { marked } from 'marked';
 
 	import { beforeNavigate, goto, replaceState } from '$app/navigation';
 	import dayjs from '$lib/dayjs';
 	import { mobile, showSidebar } from '$lib/stores';
-	import { deleteMeeting, getMeeting, sendMeetingInput, startMeeting } from '$lib/apis/meetings';
+	import {
+		MeetingApiError,
+		deleteMeeting,
+		getMeeting,
+		sendMeetingInput,
+		startMeeting,
+		streamMeetingInput
+	} from '$lib/apis/meetings';
+	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
+	import Skeleton from '$lib/components/chat/Messages/Skeleton.svelte';
 	import { printDocument } from '$lib/utils/documentPrint';
 
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -27,6 +34,7 @@
 	import { NoAudioTrackError, captureAudio, type AudioSource, type Capture } from './audio';
 	import { markdownToDocx } from './docx';
 	import { sendWhenIdle } from './recorder';
+	import { reduceStream, startStream, type OutputStream } from './stream';
 	import {
 		CONSENT_TEXT_VERSION,
 		OUTPUT_KINDS,
@@ -70,6 +78,8 @@
 	let showRaw = $state(false);
 	let tab = $state<Tab>('transcript');
 	let pending = $state<Pending | null>(null);
+	let outputStream = $state<OutputStream | null>(null);
+	let streamAbort: AbortController | null = null;
 	let sending = $state(false);
 	// Set once this page sent `finish`; the agent's progress snapshot may lag behind its turn.
 	let finishedHere = $state(false);
@@ -89,7 +99,10 @@
 		meeting?.status === 'recording' && !recording && !threadBusy && !finishedHere
 	);
 	const activeAction = $derived<OutputKind | null>(
-		meeting?.pending_action ?? pending?.kind ?? null
+		(outputStream && !outputStream.final ? outputStream.kind : null) ??
+			meeting?.pending_action ??
+			pending?.kind ??
+			null
 	);
 	const speakers = $derived(meeting?.transcript?.speakers ?? []);
 	const turns = $derived(groupTurns(meeting?.transcript?.segments ?? [], showRaw));
@@ -282,10 +295,47 @@
 		goto('/meetings');
 	};
 
+	/** Runs an action on the turn's own stream so the output writes itself into its tab (C6). */
 	const runAction = async (kind: OutputKind) => {
+		if (!meetingId) return;
 		tab = kind;
-		pending = { kind, before: outputKey(meeting, kind), since: Date.now(), seen: false };
-		if (!(await send({ type: 'action', kind, template_id: null }))) pending = null;
+		const before = outputKey(meeting, kind);
+		let stream = startStream(kind);
+		outputStream = stream;
+		const controller = new AbortController();
+		streamAbort = controller;
+		try {
+			await sendWhenIdle(() =>
+				streamMeetingInput(
+					localStorage.token,
+					meetingId as string,
+					{ type: 'action', kind, template_id: null },
+					(frame) => {
+						stream = reduceStream(stream, frame);
+						outputStream = stream;
+						if (stream.final && read) read = { ...read, state: stream.final };
+					},
+					controller.signal
+				)
+			);
+		} catch (error) {
+			if (controller.signal.aborted) return;
+			if (error instanceof MeetingApiError) {
+				toast.error(error.message);
+				outputStream = null;
+				return;
+			}
+			console.error('Output stream dropped', error);
+		} finally {
+			if (streamAbort === controller) streamAbort = null;
+		}
+		if (!stream.final) {
+			// The stream dropped before the result: the turn runs on, so poll for it as before.
+			pending = { kind, before, since: Date.now(), seen: false };
+		}
+		outputStream = null;
+		await load();
+		schedule();
 	};
 
 	const saveSpeaker = async (label: string) => {
@@ -353,9 +403,6 @@
 		}
 	};
 
-	const renderMarkdown = (markdown: string) =>
-		DOMPurify.sanitize(marked.parse(markdown, { async: false }) as string);
-
 	beforeNavigate(({ cancel, type }) => {
 		if (recording && type !== 'leave' && !confirm($i18n.t('Stop this recording and leave?')))
 			cancel();
@@ -371,6 +418,7 @@
 	onDestroy(() => {
 		destroyed = true;
 		if (pollTimer) clearTimeout(pollTimer);
+		streamAbort?.abort();
 		if (titleTimer) saveTitle();
 	});
 
@@ -550,7 +598,6 @@
 										onclick={() => (tab = value as Tab)}
 									>
 										{tabLabel(value as Tab)}
-										{#if activeAction === value}<Spinner className="size-3" />{/if}
 									</button>
 								{/each}
 							</div>
@@ -568,7 +615,6 @@
 										disabled={!!activeAction || sending || threadBusy}
 										onclick={() => runAction(tab as OutputKind)}
 									>
-										{#if activeAction === tab}<Spinner className="size-3" />{/if}
 										{meeting.outputs?.[tab as OutputKind]
 											? $i18n.t('Regenerate')
 											: $i18n.t('Generate {{name}}', { name: tabLabel(tab).toLowerCase() })}
@@ -640,11 +686,21 @@
 							</div>
 						{:else}
 							{@const output = meeting.outputs?.[tab]}
-							{#if activeAction === tab}
-								<div class="flex items-center gap-2 py-6 text-xs text-gray-500">
-									<Spinner className="size-3.5" />
-									{$i18n.t('Generating…')}
+							{#if outputStream && outputStream.kind === tab && !outputStream.final && outputStream.text && tab !== 'actions'}
+								<div class="markdown-prose">
+									<Markdown
+										id={`meeting-${meetingId}-${tab}-stream`}
+										content={outputStream.text}
+										done={false}
+									/>
 								</div>
+								<div class="text-[0.9375rem] leading-relaxed">
+									<span
+										class="inline-block w-[0.125rem] h-3.5 bg-gray-400 dark:bg-gray-500 ml-0.5 animate-pulse align-text-bottom"
+									></span>
+								</div>
+							{:else if activeAction === tab}
+								<Skeleton />
 							{:else if !output}
 								<div class="flex w-full flex-col items-center justify-center py-16">
 									<div class="max-w-sm text-center text-gray-900 dark:text-gray-100">
@@ -673,9 +729,11 @@
 									</ul>
 								{/if}
 							{:else}
-								<div class="prose prose-sm dark:prose-invert max-w-none">
-									<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-									{@html renderMarkdown((output as { markdown: string }).markdown ?? '')}
+								<div class="markdown-prose">
+									<Markdown
+										id={`meeting-${meetingId}-${tab}`}
+										content={(output as { markdown: string }).markdown ?? ''}
+									/>
 								</div>
 							{/if}
 						{/if}

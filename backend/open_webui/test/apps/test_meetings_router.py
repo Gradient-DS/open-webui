@@ -14,6 +14,7 @@ class FakeSoev:
         self.fail = fail
         self.thread = thread
         self.closed = False
+        self.frames: list = [ChatEvent('meeting_state', {})]
 
     def _maybe_fail(self):
         if self.fail is not None:
@@ -40,7 +41,10 @@ class FakeSoev:
         self._maybe_fail()
         try:
             yield ChatEvent('connection', {'thread_id': thread_id or 'thr-new'})
-            yield ChatEvent('meeting_state', {})
+            for event in self.frames:
+                if isinstance(event, SoevApiError):
+                    raise event
+                yield event
         finally:
             self.closed = True
 
@@ -185,3 +189,60 @@ def test_upstream_errors_keep_status_and_code(monkeypatch):
     assert response.status_code == 403
     assert response.json()['detail'] == {'code': 'agent_not_allowed', 'detail': 'Agent not allowed'}
     assert response.headers['Retry-After'] == '3'
+
+
+SSE = {'Accept': 'text/event-stream'}
+
+
+def test_inputs_stream_the_turn_when_asked(monkeypatch):
+    """With Accept: text/event-stream the turn's frames pass through in order, ids kept."""
+    fake = FakeSoev()
+    fake.frames = [
+        ChatEvent('input', {'type': 'input'}, 4),
+        ChatEvent('meeting_state', {'type': 'meeting_state', 'payload': {'pending_action': 'summary'}}, 5),
+        ChatEvent('delta', {'text': 'Kort '}),
+        ChatEvent('delta', {'text': 'overleg.'}),
+        ChatEvent('meeting_state', {'type': 'meeting_state', 'payload': {'pending_action': None}}, 6),
+        ChatEvent('status', {'state': 'idle', 'position': 6}),
+    ]
+    client = _client(monkeypatch, fake)
+    body = {'input': {'type': 'action', 'kind': 'summary', 'template_id': None}}
+    with client.stream('POST', '/api/v1/meetings/thr-1/inputs', json=body, headers=SSE) as response:
+        assert response.status_code == 200
+        assert response.headers['content-type'].startswith('text/event-stream')
+        text = ''.join(response.iter_text())
+    frames = [frame for frame in text.split('\n\n') if frame]
+    assert [line.split(': ', 1)[1] for frame in frames for line in frame.split('\n') if line.startswith('event:')] == [
+        'input',
+        'meeting_state',
+        'delta',
+        'delta',
+        'meeting_state',
+        'status',
+    ]
+    assert frames[0].startswith('id: 4\nevent: input\n')
+    assert frames[2] == 'event: delta\ndata: {"text":"Kort "}'
+    assert fake.closed
+
+
+def test_stream_refusal_before_the_turn_keeps_its_status(monkeypatch):
+    """A busy thread still answers 409 before any stream starts."""
+    fake = FakeSoev(fail=SoevApiError(409, 'turn_running', 'A turn is running'))
+    client = _client(monkeypatch, fake)
+    response = client.post('/api/v1/meetings/thr-1/inputs', json={'input': {'type': 'retry'}}, headers=SSE)
+    assert response.status_code == 409
+
+
+def test_stream_failure_mid_turn_ends_with_an_error_frame(monkeypatch):
+    """A dropped upstream ends the stream with an error frame instead of a broken connection."""
+    fake = FakeSoev()
+    fake.frames = [
+        ChatEvent('delta', {'text': 'a'}),
+        SoevApiError(502, 'service_unavailable', 'Chat stream disconnected'),
+    ]
+    client = _client(monkeypatch, fake)
+    response = client.post('/api/v1/meetings/thr-1/inputs', json={'input': {'type': 'retry'}}, headers=SSE)
+    assert response.text.endswith(
+        'event: error\ndata: {"code":"service_unavailable","detail":"Chat stream disconnected"}\n\n'
+    )
+    assert fake.closed
