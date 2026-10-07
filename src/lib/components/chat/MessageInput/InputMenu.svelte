@@ -109,7 +109,7 @@
 	export let uploadGoogleDriveHandler: () => void;
 	export let uploadOneDriveHandler: () => void;
 	// [Gradient] Assistant-builder restrictions and strict data-separation state. Item keys
-	// match the pin ids: 'upload_files', 'capture', 'attach_webpage', 'attach_notes',
+	// match the pin ids (see MessageInput/inputItems.ts): 'upload_files', 'capture', 'attach_webpage', 'attach_notes',
 	// 'google_drive', 'onedrive', 'knowledge', 'reference_chats', 'tools', 'skills',
 	// 'filters', 'web_search', 'image_generation', 'code_interpreter', 'document_writer'.
 	// Null shows every globally enabled item.
@@ -737,6 +737,7 @@
 					{#if showMeetings}
 						<MenuItem
 							label={$i18n.t('Attach meetings')}
+							pinId="attach_meetings"
 							submenu
 							tooltip={internalBlocked ? dataSeparationMessage : ''}
 							disabled={internalBlocked}
