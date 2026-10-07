@@ -598,7 +598,9 @@ async def seed_knowledge(env, monkeypatch):
     for name in names:
         meta = {'name': f'{name}.txt', 'content_type': 'text/plain'}
         if name == 'failed':
-            meta.update(status='failed', soev_collection_key=local.id, error='unsupported_media_type: no text')
+            meta.update(
+                status='failed', soev_collection_key=local.id, error='unsupported_media_type: failed.txt has no text'
+            )
         await files.Files.insert_new_file(
             'alice',
             files.FileForm(id=name, filename=f'{name}.txt', path=str(env.tmp_path / f'{name}.txt'), meta=meta),
@@ -639,8 +641,10 @@ async def test_reingest_submits_only_missing_local_files_within_the_concurrency(
     assert max(peak) == 2
     output = capsys.readouterr().out
     assert f'5 re-ingest: {local.id}: failed 2, submitted 5' in output
-    assert f'{local.id}/missing: original missing from storage' in output
-    assert f'{local.id}/failed: unsupported_media_type: no text' in output
+    assert f'5 re-ingest: failed {local.id}/missing: original_missing' in output
+    assert f'5 re-ingest: failed {local.id}/failed: unsupported_media_type\n' in output
+    assert '5 re-ingest: failed 2 (original_missing 1, unsupported_media_type 1)' in output
+    assert '.txt' not in output and 'Research' not in output
 
     env.api.requests.clear()
     await env.module.apply(options(env))
@@ -739,7 +743,9 @@ async def test_the_embedding_function_is_built_from_the_rag_config_rows(monkeypa
 async def finish_jobs(env, monkeypatch, status='SUCCEEDED'):
     for job_id in list(env.api.jobs):
         if env.api.jobs[job_id]['status'] not in {'SUCCEEDED', 'COMPLETED_WITH_ERRORS'}:
-            env.api.advance(job_id, status, item_code='unsupported_media_type', item_detail='no text')
+            env.api.advance(
+                job_id, status, item_code='unsupported_media_type', item_detail='Secret plan.pdf has no text'
+            )
     jobs = importlib.import_module('open_webui.soev.jobs')
     monkeypatch.setattr(jobs, 'emit_file_status', AsyncMock())
     await jobs.poll_once(env.identity.build_client(), now=10**10)
@@ -755,8 +761,10 @@ async def test_reconcile_exits_75_while_ingest_runs_and_0_once_terminal(env, mon
     assert await env.module.apply(options(env)) == 0
     output = capsys.readouterr().out
     assert f'{local.id}: failed 7' in output
-    assert f'{local.id}/file-0: unsupported_media_type: no text' in output
+    assert f'{local.id}/file-0: unsupported_media_type\n' in output
+    assert '5 re-ingest: failed 7 (original_missing 1, unsupported_media_type 6)' in output
     assert 'ingest running 0 | ingest failed 7' in output
+    assert 'Secret plan' not in output and '.txt' not in output
 
 
 @pytest.mark.asyncio
@@ -900,7 +908,8 @@ def test_an_abort_names_the_failing_call_and_problem_without_secrets(monkeypatch
         module.main()
     assert exited.value.code == 1
     err = capsys.readouterr().err
-    assert 'POST /v1/schedules -> 403 policy_forbids: Schedule scope is disallowed (constraint: None)' in err
+    assert 'POST /v1/schedules -> 403 policy_forbids (constraint: None)' in err
+    assert 'Schedule scope is disallowed' not in err
     assert 'soev-api response POST /v1/schedules 403 request_id=req-1' in caplog.messages
     assert not any(secret in err + ' '.join(caplog.messages) for secret in ('sk-secret', 'private', 'x=1'))
 
@@ -1125,7 +1134,8 @@ async def test_uploads_mode_ingests_each_attached_upload_as_its_owner_and_skips_
     output = capsys.readouterr().out
     assert '5 chat uploads: 6 files attached in chats, 5 with a file row' in output
     assert '5 chat uploads: knowledge base file 1, no file row 1, original missing 1, submitted 3' in output
-    assert '5 chat uploads: original missing, skipped alice/gone (gone.pdf)' in output
+    assert '5 chat uploads: original missing, skipped alice/gone\n' in output
+    assert '.pdf' not in output
     assert 'chat uploads running 3 | chat uploads failed 0 | chat upload originals missing 1' in output
 
 
@@ -1168,13 +1178,16 @@ async def test_an_upload_soev_api_refuses_is_reported_and_the_run_goes_on(env, m
 
     async def refuse(file, **kwargs):
         if file.id == 'loose':
-            raise SoevApiError(422, 'unsupported_media_type', 'no text')
+            raise SoevApiError(422, 'unsupported_media_type', "unsupported content type, filename 'loose.pdf'")
         return await original(file, **kwargs)
 
     monkeypatch.setattr(ingest, 'submit', refuse)
     assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
     assert submitted_uploads(env) == [(ALICE, 'chat-level'), (BOB, 'bobs')]
-    assert '5 chat uploads: failed alice/loose: unsupported_media_type' in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert '5 chat uploads: failed alice/loose: unsupported_media_type\n' in output
+    assert '5 chat uploads: failed 1 (unsupported_media_type 1)' in output
+    assert '.pdf' not in output
 
 
 @pytest.mark.asyncio
@@ -1241,3 +1254,21 @@ def test_the_uploads_flag_refuses_restore_and_models(monkeypatch, argv):
     with pytest.raises(SystemExit) as exited:
         module.main()
     assert exited.value.code == 2
+
+
+@pytest.mark.parametrize(
+    ('error', 'code'),
+    [
+        ("unsupported_content_type: unsupported content type, filename 'Plan.ifc'", 'unsupported_content_type'),
+        ('job disappeared', 'job_not_found'),
+        ('upload could not be completed', 'upload_incomplete'),
+        ('did not complete within 3600s', 'job_timed_out'),
+        ('CANCELLED', 'job_cancelled'),
+        ('Plan.ifc: could not be read', 'ingest_failed'),
+        (None, 'ingest_failed'),
+    ],
+)
+def test_a_stored_ingest_error_is_reported_by_its_code_alone(error, code):
+    from open_webui.soev.migrate_ingest import stored_code
+
+    assert stored_code(SimpleNamespace(meta={'error': error}, data=None)) == code
