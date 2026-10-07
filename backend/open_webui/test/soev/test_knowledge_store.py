@@ -708,6 +708,9 @@ async def test_search_knowledge_files_spans_every_readable_collection(env, monke
     filters = {'user_id': 'alice', 'group_ids': ['irrelevant']}
     result = await env.store.search_knowledge_files(filters)
     assert [row.id for row in result.items] == ['first', 'shared']
+    assert [row.collection for row in result.items] == [
+        {'id': key, 'name': env.api.collections[key]['name']} for key in ('kb', 'second')
+    ]
     assert result.total == 2 and result.directories == [] and result.breadcrumbs == []
     assert result.items[0].added_at == int(
         dt.datetime.fromisoformat(env.api.documents['kb', 'first']['ingested_at']).timestamp()
