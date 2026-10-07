@@ -1431,6 +1431,12 @@ async def get_sources_from_items(
                     'metadatas': [[{'file_id': note.id, 'name': note.title}]],
                 }
 
+        elif item.get('type') == 'meeting':
+            # [Gradient] Vergadering: read from soev-api as the user at send time; never stored in OWUI.
+            from open_webui.soev.meetings import meeting_source
+
+            query_result = await meeting_source(item, user)
+
         elif item.get('type') == 'chat':
             # Chat Attached
             chat = await Chats.get_chat_by_id(item.get('id'))

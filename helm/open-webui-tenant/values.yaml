@@ -271,8 +271,11 @@ openWebui:
     featurePlayground: "False"
     featureChatOverview: "False"
     featureNotesAiControls: "False"
-    featureVoice: "False"
+    featureVoice: "False"  # Dictation (STT); also the master gate for the two below
+    featureVoiceCall: "False"  # Call mode (STT -> model -> TTS loop)
+    featureReadAloud: "False"  # Read-aloud button on answers (TTS)
     featureChangelog: "False"
+    featureMeetings: "False"  # Vergadering page; also needs the meeting agent allowlisted in soev-api
     featureSystemPrompt: "False"
     featureModels: "True"
     # Show the per-model Quality/Speed meters + legend in the model picker.

@@ -404,3 +404,85 @@ libpcre2-8-0, failed dev's digest scan). The layer sits after the uv install, so
 the dependency layers stay cached. Upstream has no registry cache, so this is
 fork-only. `runtime-security.yml` builds the same Dockerfile through compose
 without a cache, so its build always runs the layer and needs no epoch.
+
+## Voice gates and dictation hygiene
+
+`FEATURE_VOICE` gates dictation (STT); `FEATURE_VOICE_CALL` and
+`FEATURE_READ_ALOUD` are sub-gates for call mode and read-aloud, so a tenant can
+offer dictation only. Upstream's per-user `chat.stt` / `chat.tts` / `chat.call`
+permissions are bypassed for admins; tenant gates bind admins too. Enforced
+server-side in `backend/open_webui/routers/audio.py`: `POST /audio/speech` needs
+read-aloud or call mode, `POST /audio/transcriptions` needs `voice` (403
+otherwise).
+
+Upstream writes every dictation upload to `CACHE_DIR/audio/transcriptions/`
+(plus converted, compressed and chunk copies and a `.json` transcript per engine
+call) and never deletes them. The fork's `transcription` route removes every
+file named after the upload's uuid (`discard_transcription_files`) as soon as the
+text is returned, and on failure too: dictation has no retry, and audio has no
+use once it is text. `transcribe()` itself is unchanged, so file-upload
+transcription in `routers/files.py` keeps its source file. Tests:
+`backend/open_webui/test/apps/test_voice_feature_gates.py`.
+
+## Vergadering (meeting assistant)
+
+A separate "Vergadering" page records a meeting, shows a rough live transcript,
+and after stop shows the cleaned, diarized transcript with Samenvatting / Notulen /
+Actiepunten. Open WebUI holds UI only: the soev-api meeting agent owns every
+meeting (one thread per meeting) and all state. Why fork-only: the agent and its
+platform audio live in soev-solutions; upstream has no counterpart (its Notes
+recording is unrelated and unchanged).
+
+Gated by `FEATURE_MEETINGS` (`config.py`, default `True`; Helm
+`featureMeetings`, default `"False"`; `/api/config` `feature_meetings`) **and**
+`meeting` in soev-api `GET /v1/agents` for the caller. Any failure of that check
+(soev-api unset or down, agent not allowlisted) hides the entry; the route gate
+redirects to `/`. No sharing UI: transcripts stay private, users share by
+downloading Markdown, .docx (built in the browser with jszip) or PDF (browser
+print via `utils/documentPrint.ts`).
+
+`backend/open_webui/routers/meetings.py` (mounted at `/api/v1/meetings` in
+`main.py`, since no fork router has a matching prefix) only forwards as the
+caller via `identity.build_client()`: audio bytes (64 MiB cap, held in memory,
+never written to disk) to `POST /v1/audio`, inputs to the thread routes, and
+`GET /{id}` returns `{status, state}` where `state` is the latest `meeting_state`
+event payload. Inputs return once soev-api accepts them; the turn runs on and the
+page polls. Every route refuses with 403 when the flag is off (admins too) and 503
+without `SOEV_API_URL`.
+
+Frontend, all fork-owned: `src/routes/(app)/meetings/`,
+`src/lib/components/meetings/` (consent and source choice, recorder, view, list,
+sidebar entry, export), `src/lib/apis/meetings/`. The list and the meeting
+header reuse the Notes list and Notes editor markup; the recorder reuses the
+chat dictation pill's look without touching `VoiceRecording.svelte`. Sources:
+microphone, a shared Chrome tab, or both mixed through an AudioContext (the
+default for online meetings, since tab audio lacks the user's own voice); a
+share without an audio track is refused. Live segments are self-contained
+recordings cut at the first pause (RMS under an adaptive noise-floor threshold
+for 400 ms) after 20 s, at most 45 s, and are sent one at a time, retrying 409s.
+Every download starts with the meeting's title, date, start–end time, duration
+and speakers. Upstream files touched:
+`Sidebar.svelte` (two gated `MeetingsSidebarEntry` mounts and one availability
+check), i18n en-US/nl-NL, and the flag plumbing. Tests:
+`backend/open_webui/test/apps/test_meetings_router.py`,
+`src/lib/components/meetings/meeting.test.ts`.
+
+### Meetings as chat context
+
+"Vergaderingen bijvoegen" in the composer's + menu (and "Chat over deze
+vergadering" on a ready meeting) attaches `{type: 'meeting', id, name}` like a
+note. Only the reference is stored with the chat. At send time the server reads
+the meeting from soev-api as the user (`soev/meetings.py`; soev-api only returns
+the caller's own threads) and renders title, date, start–end, duration,
+speakers, the clean transcript as timestamped speaker turns, and any summary,
+minutes and action items. Nothing is written to OWUI files, storage or the
+vector store. Hooks: `retrieval/utils.py` `get_sources_from_items` (direct
+model path, `[Gradient]` branch next to `note`) and `utils/agent_v2.py`
+`_texts` (v2 agent). The agent's attached texts accept only `note` and `chat`,
+so a meeting goes as a `note` text with id `note:meeting-<thread>`; its citation
+links to `/meetings/<thread>`. A meeting that is gone or not the user's is
+reported to the model as unavailable (direct path) or refuses the turn like a
+missing note (agent path). Upstream files touched: `InputMenu.svelte` (menu
+item and tab), `FileItem.svelte` (chip icon and label), `Chat.svelte` (the two
+attachment type lists). "Chat over deze vergadering" uses the existing new-chat
+draft hand-off (`sessionStorage['chat-input']`, restored by `Chat.svelte`).

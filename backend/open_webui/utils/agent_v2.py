@@ -30,6 +30,7 @@ from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
 from open_webui.soev import acting, agent_threads, identity, ingest, live_documents
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
+from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
 from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.files import has_access_to_file
@@ -373,6 +374,25 @@ async def _texts(entries: list[dict[str, Any]], user_id: str) -> tuple[list[dict
     texts, unavailable = [], []
     for entry in {(entry['type'], entry.get('id')): entry for entry in entries}.values():
         kind, item_id = entry['type'], entry.get('id')
+        if kind == 'meeting':
+            # [Gradient] A meeting is read from soev-api as the user and sent as an attached text.
+            # The agent's AttachedText knows notes and chats only, so it travels as kind "note"
+            # with a `meeting-` id; citations link it back to /meetings.
+            try:
+                title, text = await meeting_document(user, item_id)
+            except MeetingUnavailable:
+                unavailable.append((entry.get('name') or item_id or kind, 'gone'))
+                continue
+            texts.append(
+                {
+                    'id': f'note:{MEETING_TEXT_PREFIX}{item_id}',
+                    'kind': 'note',
+                    'title': title,
+                    'text': text[:TEXT_CHARACTERS],
+                    'length': len(text),
+                }
+            )
+            continue
         item = await (Notes.get_note_by_id(item_id) if kind == 'note' else Chats.get_chat_by_id(item_id))
         allowed = bool(item and user and (user.role == 'admin' or item.user_id == user.id))
         if item and user and not allowed:
@@ -1024,12 +1044,16 @@ class AgentTurn:
         for entry in texts:
             text_id, text = entry['id'], entry['text']
             route = 'notes' if entry['kind'] == 'note' else 'c'
+            url = f'/{route}/{text_id.split(":", 1)[1]}'
+            if text_id.startswith(f'note:{MEETING_TEXT_PREFIX}'):
+                # [Gradient] A meeting sent as a note text links to its meeting page.
+                url = f'/meetings/{text_id.removeprefix(f"note:{MEETING_TEXT_PREFIX}")}'
             self.citations.add(
                 {
                     'id': f'{text_id}#0-{len(text)}',
                     'ref': text_id,
                     'text': text,
-                    'properties': {'title': entry['title'], 'source_url': f'/{route}/{text_id.split(":", 1)[1]}'},
+                    'properties': {'title': entry['title'], 'source_url': url},
                 }
             )
 
@@ -1524,7 +1548,7 @@ async def _sent(
     turn: AgentTurn, text: str, metadata: dict[str, Any], *, agent: str | None, model: str | None
 ) -> AsyncIterator[dict[str, Any]]:
     """[Claude] The turn's chunks: run with its input, or refused before anything is sent."""
-    entries = [entry for entry in metadata.get('files') or [] if entry.get('type') in ('note', 'chat')]
+    entries = [entry for entry in metadata.get('files') or [] if entry.get('type') in ('note', 'chat', 'meeting')]
     if len(entries) > 10:
         message = (
             'Voeg maximaal 10 notities of chats toe.'

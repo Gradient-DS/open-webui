@@ -95,6 +95,9 @@ from open_webui.config import (
     FEATURE_TOOLS,
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_VOICE,
+    FEATURE_VOICE_CALL,
+    FEATURE_READ_ALOUD,
+    FEATURE_MEETINGS,
     FEATURE_WEBPAGE_URL,
     FRONTEND_BUILD_DIR,
     IFRAME_CSP,
@@ -211,6 +214,7 @@ from open_webui.routers import (
     evaluations,
     export,
     feedback_report,
+    meetings,
     files,
     folders,
     functions,
@@ -1136,6 +1140,9 @@ app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['
 # Mounted unconditionally — gated in-handler on the feedback_report.enable
 # config flag so it can be toggled at runtime without a pod restart.
 app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['feedback'])
+
+# [Gradient] Vergadering: thin forward to soev-api, gated in-handler on FEATURE_MEETINGS.
+app.include_router(meetings.router, prefix='/api/v1/meetings', tags=['meetings'])
 
 
 ##################################
@@ -2919,7 +2926,10 @@ async def get_app_config(request: Request):
                     'feature_chat_overview': FEATURE_CHAT_OVERVIEW,
                     'feature_notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
                     'feature_voice': FEATURE_VOICE,
+                    'feature_voice_call': FEATURE_VOICE and FEATURE_VOICE_CALL,
+                    'feature_read_aloud': FEATURE_VOICE and FEATURE_READ_ALOUD,
                     'feature_changelog': FEATURE_CHANGELOG,
+                    'feature_meetings': FEATURE_MEETINGS,
                     'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
                     'feature_models': FEATURE_MODELS,
                     'feature_model_meters': FEATURE_MODEL_METERS,

@@ -40,6 +40,8 @@
 	import SourceItemIcon from './SourceItemIcon.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
 	import ChatBubble from '../icons/ChatBubble.svelte';
+	// [Gradient] Vergadering attached as chat context.
+	import Mic from '../icons/Mic.svelte';
 	import Folder from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
@@ -127,19 +129,23 @@
 							? $i18n.t('Collection')
 							: type === 'note'
 								? $i18n.t('Note')
-								: type === 'chat'
-									? $i18n.t('Chat')
-									: type === 'file' || type === 'filesystem'
-										? $i18n.t('File')
-										: type === 'url'
-											? $i18n.t('Web page')
-											: $i18n.t('Document')}
+								: type === 'meeting'
+									? $i18n.t('Meeting')
+									: type === 'chat'
+										? $i18n.t('Chat')
+										: type === 'file' || type === 'filesystem'
+											? $i18n.t('File')
+											: type === 'url'
+												? $i18n.t('Web page')
+												: $i18n.t('Document')}
 						placement="top"
 					>
 						{#if type === 'collection'}
 							<SourceItemIcon kind="folder" icon={FolderOpen} provider={item?.knowledge_type} />
 						{:else if type === 'note'}
 							<PageEdit className="size-3.5" />
+						{:else if type === 'meeting'}
+							<Mic className="size-3.5" />
 						{:else if type === 'chat'}
 							<ChatBubble className="size-3.5" />
 						{:else if type === 'folder'}
@@ -172,6 +178,8 @@
 						{$i18n.t('File')}
 					{:else if type === 'note'}
 						{$i18n.t('Note')}
+					{:else if type === 'meeting'}
+						{$i18n.t('Meeting')}
 					{:else if type === 'doc'}
 						{$i18n.t('Document')}
 					{:else if type === 'collection'}

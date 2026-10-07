@@ -1666,7 +1666,7 @@
 									</Tooltip>
 								{/if}
 
-								{#if isFeatureEnabled('voice') && !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
+								{#if isFeatureEnabled('read_aloud') && !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
 											aria-label={$i18n.t('Read Aloud')}

@@ -89,6 +89,9 @@
 	import CodeIcon from './Sidebar/icons/Code.svelte';
 	import EditPencilIcon from './Sidebar/icons/EditPencil.svelte';
 	import NotesIcon from './Sidebar/icons/Notes.svelte';
+	// [Gradient] Vergadering entry, gated on FEATURE_MEETINGS and the soev-api agent catalog.
+	import MeetingsSidebarEntry from '$lib/components/meetings/SidebarEntry.svelte';
+	import { checkMeetingsAvailable, meetingsAvailable } from '$lib/components/meetings/availability';
 	import SearchIcon from './Sidebar/icons/Search.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import WorkspaceIcon from './Sidebar/icons/Workspace.svelte';
@@ -329,6 +332,9 @@
 		) {
 			await initChannels();
 		}
+
+		// [Gradient] Hidden unless soev-api lists the meeting agent; failures keep it hidden.
+		checkMeetingsAvailable(localStorage.token);
 
 		await initChatList();
 	};
@@ -968,6 +974,11 @@
 						</div>
 					{/if}
 
+					<!-- [Gradient] Vergadering (meeting assistant) -->
+					{#if $meetingsAvailable}
+						<MeetingsSidebarEntry collapsed onClick={itemClickHandler} />
+					{/if}
+
 					{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
 						<div class="">
 							<Tooltip content={$i18n.t('Knowledge')} placement="right">
@@ -1315,6 +1326,11 @@
 										</div>
 									</a>
 								</div>
+							{/if}
+
+							<!-- [Gradient] Vergadering (meeting assistant) -->
+							{#if $meetingsAvailable}
+								<MeetingsSidebarEntry onClick={itemClickHandler} />
 							{/if}
 
 							{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
