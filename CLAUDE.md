@@ -73,8 +73,12 @@ model settings are not used. Details: `docs/agent-api-deployment.md`.
 A turn the agent refuses arrives as `invalid_field` with constraint `chat:<reason>`; `utils/agent_v2.py`
 (`_REFUSALS`) shows a nl/en message per reason, with the agent's detail only where it names what to fix
 (unreadable file names, the missing tool capability), and the generic text when no known reason is given.
-The log line carries status, code and constraint, never the detail. Before sending, a selected knowledge base
-the service cannot read either is reported as deleted; one only the user cannot read as no access (counts only).
+The log line carries status, code and constraint, never the detail. Before sending, an unavailable chat item never
+blocks the turn: it runs without it and the answer shows a nl/en notice (`chat:message:notices`, stored as
+`message.notices`, rendered by `ResponseMessage/TurnNotices.svelte`). A deleted knowledge base, file, note or chat
+is named and dropped from the chat's `files` (backend and the frontend's `chatFiles`); one that exists but is not
+accessible stays, and knowledge bases are then only counted. Failed and still-processing files are skipped with a
+notice too; images keep refusing (`_unimaged`).
 
 ## Live document attachments
 

@@ -86,6 +86,7 @@
 		parseToolOffsets
 	} from './ResponseMessage/mergeHistory';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
+	import TurnNotices from './ResponseMessage/TurnNotices.svelte';
 	import OutputEditView from './OutputEditView.svelte';
 	import {
 		getOutputProseRuns,
@@ -100,6 +101,7 @@
 		model: string;
 		assistant_id?: string; // [Gradient]
 		meta?: { answered_model?: string }; // [Gradient] Set when a fallback answered a v2 turn.
+		notices?: string[]; // [Claude] Chat items a v2 turn ran without, shown above its answer.
 		content: string;
 		output?: OutputItem[];
 		files?: {
@@ -1094,6 +1096,7 @@
 			<div>
 				<div class="chat-{message.role} w-full min-w-full">
 					<div>
+						<TurnNotices notices={message?.notices ?? []} />
 						{#if protocol === 'reasoning_only' && (model?.info?.meta?.capabilities?.status_updates ?? true)}
 							<!-- No-tool / bezwaar turn: render parent reasoning blocks and
 							     subagent groups interleaved by their `started_at` timestamp.
