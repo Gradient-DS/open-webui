@@ -715,7 +715,9 @@ soevApi:
     # Pinned separately from openWebui.image.tag: the Job's pod template is immutable.
     image:
       tag: ""
-    mode: apply  # apply | restore (puts back the config snapshot and model ids)
+    # apply | restore (puts back the config snapshot and model ids) | models (only rewrites
+    # stored model ids by modelMap, e.g. after catalog ids are renamed; restore with the same id)
+    mode: apply
     id: v2  # Snapshot, step markers and the one-time sign-out are kept per id.
     # SOEV_V2_CONFIG: exactly these keys (the migration refuses others).
     config: {}
@@ -727,10 +729,10 @@ soevApi:
     #   web.search.enable: true
     #   webui.url: https://client.soev.ai
     #   user.permissions.features: {web_search: true, notes: true}
-    # SOEV_V2_MODEL_MAP: LiteLLM model name -> soev-api catalog id. soev-api has no
-    # /v1/models with the registry model_string yet; take the pairs from the catalog.
+    # SOEV_V2_MODEL_MAP: stored model id -> soev-api catalog id. For apply, the LiteLLM model
+    # names (take the pairs from the catalog); for models, the old catalog ids.
     modelMap: {}
-    #   zai-org/GLM-5.3: glm-5-3
+    #   zai-org/GLM-5.3: zai-org/glm-5.3
     ingestConcurrency: 4
     # Keep polling running ingest this long before exiting 75 (retry).
     waitSeconds: 600

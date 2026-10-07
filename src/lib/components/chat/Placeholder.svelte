@@ -20,6 +20,7 @@
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { sanitizeResponseContent } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
+	import { isAssistant } from '$lib/utils/assistants';
 	import { isAgentRouted, isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -91,6 +92,10 @@
 	// [Gradient] Keep the LLM id out of assistant avatar URLs and greetings.
 	$: greetingModel =
 		$activeAssistant ?? $_models.find((m) => m.id === selectedModels[selectedModelIdx]);
+	// [Gradient] Only an assistant's description greets; a catalog model shows its handle alone.
+	$: greetingDescription = isAssistant(greetingModel)
+		? (greetingModel?.info?.meta?.description ?? null)
+		: null;
 
 	$: if (selectedModels.length > 0) {
 		selectedModelIdx = models.length - 1;
@@ -217,14 +222,12 @@
 
 				<div class="flex mt-1 mb-2">
 					<div in:fade={{ duration: 100, delay: 50 }}>
-						{#if greetingModel?.info?.meta?.description ?? null}
+						{#if greetingDescription}
 							<Tooltip
 								className=" w-fit"
 								content={DOMPurify.sanitize(
 									marked.parse(
-										sanitizeResponseContent(
-											greetingModel?.info?.meta?.description ?? ''
-										).replaceAll('\n', '<br>')
+										sanitizeResponseContent(greetingDescription ?? '').replaceAll('\n', '<br>')
 									)
 								)}
 								placement="top"
@@ -235,9 +238,7 @@
 									<!-- eslint-disable-next-line svelte/no-at-html-tags -- Content is sanitized with DOMPurify. -->
 									{@html DOMPurify.sanitize(
 										marked.parse(
-											sanitizeResponseContent(
-												greetingModel?.info?.meta?.description ?? ''
-											).replaceAll('\n', '<br>')
+											sanitizeResponseContent(greetingDescription ?? '').replaceAll('\n', '<br>')
 										)
 									)}
 								</div>
