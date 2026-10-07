@@ -6,14 +6,32 @@ import {
 	formatTimestamp,
 	groupTurns,
 	hasMeetingAgent,
-	liveText,
+	groupByRange,
+	liveParts,
+	matchesQuery,
+	meetingTimes,
+	metadataMarkdown,
+	wordCount,
+	type MeetingMeta,
 	outputMarkdown,
 	transcriptMarkdown,
 	type ExportLabels,
 	type MeetingState
 } from './meeting';
 import { documentXml, escapeXml, markdownBlocks, markdownToDocx } from './docx';
-import { SegmentRotator, SerialQueue, sendWhenIdle, type RecorderLike } from './recorder';
+import {
+	SEGMENT_MAX_MS,
+	SEGMENT_MIN_MS,
+	SegmentRotator,
+	SerialQueue,
+	decideCut,
+	initialCutState,
+	rmsOf,
+	sendWhenIdle,
+	type CutState,
+	type RecorderLike
+} from './recorder';
+import { displayMediaOptions } from './audio';
 
 const labels: ExportLabels = {
 	transcript: 'Transcript',
@@ -22,7 +40,19 @@ const labels: ExportLabels = {
 	actions: 'Actiepunten',
 	owner: 'Eigenaar',
 	due: 'Deadline',
-	noActions: 'Geen actiepunten'
+	noActions: 'Geen actiepunten',
+	date: 'Datum',
+	time: 'Tijd',
+	duration: 'Duur',
+	speakers: 'Sprekers'
+};
+
+const meta: MeetingMeta = {
+	title: 'Weekoverleg',
+	date: '7 oktober 2026',
+	time: '10:00–10:47',
+	duration: '47:12',
+	speakers: ['Xander', 'Spreker 2']
 };
 
 const state: MeetingState = {
@@ -82,28 +112,73 @@ describe('meeting helpers', () => {
 		expect(groupTurns(state.transcript!.segments, true)[0].texts[0]).toBe('Heedemorgen allemaal');
 	});
 
-	it('joins live parts in sequence order', () => {
-		expect(liveText(state)).toBe('eerste tweede');
+	it('keeps live parts as separate paragraphs in sequence order', () => {
+		expect(liveParts(state)).toEqual(['eerste', 'tweede']);
+	});
+
+	it('takes start, end and duration from the snapshot, falling back to consent time', () => {
+		expect(
+			meetingTimes({
+				...state,
+				started_at: '2026-10-07T10:00:00Z',
+				ended_at: '2026-10-07T10:47:12Z'
+			})
+		).toEqual({
+			startedAt: '2026-10-07T10:00:00Z',
+			endedAt: '2026-10-07T10:47:12Z',
+			durationS: 2832
+		});
+		expect(
+			meetingTimes({ ...state, consent: { text_version: 'v', at: '2026-10-01T09:00:00Z' } })
+		).toEqual({ startedAt: '2026-10-01T09:00:00Z', endedAt: null, durationS: null });
+		expect(meetingTimes({ ...state, duration_s: 60 }).durationS).toBe(60);
+	});
+
+	it('counts transcript words, or live words before there is a transcript', () => {
+		expect(wordCount(state)).toBe(7);
+		expect(wordCount({ ...state, transcript: null })).toBe(2);
+	});
+
+	it('writes the metadata block every download starts with', () => {
+		const block = metadataMarkdown(meta, labels);
+		expect(block).toContain('# Weekoverleg');
+		expect(block).toContain('**Datum:** 7 oktober 2026');
+		expect(block).toContain('**Tijd:** 10:00–10:47');
+		expect(block).toContain('**Duur:** 47:12');
+		expect(block).toContain('**Sprekers:** Xander, Spreker 2');
+		expect(metadataMarkdown({ ...meta, duration: null, speakers: [] }, labels)).not.toContain(
+			'Duur'
+		);
+	});
+
+	it('filters titles ignoring case and accents, and groups in order', () => {
+		expect(matchesQuery('Overleg café', 'CAFE')).toBe(true);
+		expect(matchesQuery(null, 'x')).toBe(false);
+		expect(matchesQuery('x', ' ')).toBe(true);
+		expect(groupByRange([1, 2, 3, 4], (n) => (n < 3 ? 'Today' : 'Yesterday'))).toEqual([
+			['Today', [1, 2]],
+			['Yesterday', [3, 4]]
+		]);
 	});
 
 	it('exports the transcript with names, labels and timestamps', () => {
-		const md = transcriptMarkdown('Weekoverleg', state, labels);
+		const md = transcriptMarkdown(meta, state, labels);
 		expect(md).toContain('# Weekoverleg');
 		expect(md).toContain('**Xander** (00:00)\n\nGoedemorgen allemaal. We beginnen.');
 		expect(md).toContain('**Spreker 2** (01:05)');
-		expect(transcriptMarkdown('W', state, labels, true)).toContain(
+		expect(transcriptMarkdown(meta, state, labels, true)).toContain(
 			'Heedemorgen allemaal eh we beginnen'
 		);
 	});
 
 	it('exports outputs, actions as a list, and nothing for a missing output', () => {
-		expect(outputMarkdown('W', state, 'summary', labels)).toContain(
+		expect(outputMarkdown(meta, state, 'summary', labels)).toContain(
 			'Kort **overleg** over één punt.'
 		);
-		expect(outputMarkdown('W', state, 'actions', labels)).toContain(
+		expect(outputMarkdown(meta, state, 'actions', labels)).toContain(
 			'- Offerte sturen (Eigenaar: Xander, Deadline: vrijdag)\n- Agenda'
 		);
-		expect(outputMarkdown('W', state, 'minutes', labels)).toBeNull();
+		expect(outputMarkdown(meta, state, 'minutes', labels)).toBeNull();
 	});
 
 	it('keeps accented letters in file names and drops path characters', () => {
@@ -166,8 +241,7 @@ class FakeRecorder implements RecorderLike {
 }
 
 describe('segment rotation', () => {
-	it('emits one self-contained segment per interval and drops the trailing one', async () => {
-		let tick: () => void = () => {};
+	it('emits one self-contained segment per rotation and drops the trailing one', async () => {
 		const created: FakeRecorder[] = [];
 		const segments: [string, number][] = [];
 		const rotator = new SegmentRotator(
@@ -176,20 +250,83 @@ describe('segment rotation', () => {
 				created.push(recorder);
 				return recorder;
 			},
-			async (blob, seq) => segments.push([await blob.text(), seq]),
-			25_000,
-			{ setInterval: (fn) => ((tick = fn), 1), clearInterval: () => (tick = () => {}) }
+			async (blob, seq) => segments.push([await blob.text(), seq])
 		);
 		rotator.start();
-		tick();
-		tick();
+		rotator.rotate();
+		rotator.rotate();
 		await rotator.stop();
+		rotator.rotate();
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(segments).toEqual([
 			['r1', 1],
 			['r2', 2]
 		]);
+		expect(created).toHaveLength(3);
 		expect(created.every((recorder) => recorder.state === 'inactive')).toBe(true);
+	});
+});
+
+/** Feeds `rms` every 100 ms from `from` to `to` (ms) and returns the times a cut was decided. */
+const run = (state: CutState, from: number, to: number, rms: (t: number) => number) => {
+	const cuts: number[] = [];
+	for (let t = from; t <= to; t += 100) {
+		const decision = decideCut(state, t, rms(t));
+		state = decision.state;
+		if (decision.cut) cuts.push(t);
+	}
+	return { cuts, state };
+};
+
+describe('silence cuts', () => {
+	const speech = 0.15;
+	const quiet = 0.003;
+
+	it('never cuts before 20 s, even in silence', () => {
+		expect(run(initialCutState(0), 0, SEGMENT_MIN_MS - 100, () => quiet).cuts).toEqual([]);
+	});
+
+	it('cuts at the first pause of at least 400 ms after 20 s', () => {
+		// Speech until 23 s, then a pause.
+		const { cuts } = run(initialCutState(0), 0, 30_000, (t) => (t < 23_000 ? speech : quiet));
+		expect(cuts).toEqual([23_400]);
+	});
+
+	it('ignores pauses shorter than 400 ms', () => {
+		const blip = (t: number) => (t >= 21_000 && t < 21_300 ? quiet : speech);
+		expect(run(initialCutState(0), 0, 30_000, blip).cuts).toEqual([]);
+	});
+
+	it('cuts at 45 s when nobody pauses, and restarts the clock', () => {
+		const { cuts, state } = run(initialCutState(0), 0, SEGMENT_MAX_MS + 500, () => speech);
+		expect(cuts).toEqual([SEGMENT_MAX_MS]);
+		expect(state.segmentStart).toBe(SEGMENT_MAX_MS);
+	});
+
+	it('adapts to a noisy room: the background level is not speech, but not silence either', () => {
+		// A steady 0.02 hum with speech at 0.2 until 25 s, then only the hum.
+		const room = (t: number) => (t < 25_000 ? (Math.floor(t / 1000) % 4 === 3 ? 0.02 : 0.2) : 0.02);
+		const { cuts } = run(initialCutState(0), 0, 30_000, room);
+		expect(cuts[0]).toBeGreaterThanOrEqual(SEGMENT_MIN_MS);
+		expect(cuts[0]).toBeLessThan(26_000);
+	});
+
+	it('measures RMS around the 128 midpoint', () => {
+		expect(rmsOf(new Uint8Array([128, 128]))).toBe(0);
+		expect(rmsOf(new Uint8Array([0, 0]))).toBe(1);
+	});
+});
+
+describe('display capture hints', () => {
+	it('asks for a browser tab with its audio and leaves this tab out', () => {
+		expect(displayMediaOptions()).toMatchObject({
+			video: { displaySurface: 'browser' },
+			audio: { echoCancellation: false, noiseSuppression: false },
+			preferCurrentTab: false,
+			selfBrowserSurface: 'exclude',
+			systemAudio: 'include',
+			surfaceSwitching: 'include'
+		});
 	});
 });
 

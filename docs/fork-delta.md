@@ -451,9 +451,17 @@ page polls. Every route refuses with 403 when the flag is off (admins too) and 5
 without `SOEV_API_URL`.
 
 Frontend, all fork-owned: `src/routes/(app)/meetings/`,
-`src/lib/components/meetings/` (consent, recorder with a 25 s self-contained
-segment rotation and serialized chunk delivery that retries 409s, view, list,
-sidebar entry, export), `src/lib/apis/meetings/`. Upstream files touched:
+`src/lib/components/meetings/` (consent and source choice, recorder, view, list,
+sidebar entry, export), `src/lib/apis/meetings/`. The list and the meeting
+header reuse the Notes list and Notes editor markup; the recorder reuses the
+chat dictation pill's look without touching `VoiceRecording.svelte`. Sources:
+microphone, a shared Chrome tab, or both mixed through an AudioContext (the
+default for online meetings, since tab audio lacks the user's own voice); a
+share without an audio track is refused. Live segments are self-contained
+recordings cut at the first pause (RMS under an adaptive noise-floor threshold
+for 400 ms) after 20 s, at most 45 s, and are sent one at a time, retrying 409s.
+Every download starts with the meeting's title, date, start–end time, duration
+and speakers. Upstream files touched:
 `Sidebar.svelte` (two gated `MeetingsSidebarEntry` mounts and one availability
 check), i18n en-US/nl-NL, and the flag plumbing. Tests:
 `backend/open_webui/test/apps/test_meetings_router.py`,

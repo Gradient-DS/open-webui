@@ -1,5 +1,5 @@
 <script lang="ts">
-	// [Gradient] Vergadering: list of the caller's meetings.
+	// [Gradient] Vergadering: list of the caller's meetings, framed like the Notes route.
 	import { showSidebar } from '$lib/stores';
 	import Meetings from '$lib/components/meetings/Meetings.svelte';
 </script>
@@ -10,6 +10,8 @@
 		: ''} max-w-full"
 >
 	<div class="flex-1 max-h-full overflow-y-auto">
-		<Meetings />
+		<div class="pb-1 px-2.5 pt-2">
+			<Meetings />
+		</div>
 	</div>
 </div>

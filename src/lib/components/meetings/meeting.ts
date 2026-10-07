@@ -3,7 +3,6 @@
 export const CONSENT_TEXT_VERSION = '2026-10-07';
 export const MEETING_AGENT = 'meeting';
 
-export type AudioSource = 'microphone' | 'display';
 export type MeetingStatus = 'recording' | 'transcribing' | 'ready' | 'failed';
 export type OutputKind = 'summary' | 'minutes' | 'actions';
 export const OUTPUT_KINDS: OutputKind[] = ['summary', 'minutes', 'actions'];
@@ -27,6 +26,7 @@ export type MeetingInput =
 	| { type: 'finish'; audio_ref: AudioRef }
 	| { type: 'retry' }
 	| { type: 'rename_speaker'; label: string; name: string }
+	| { type: 'set_title'; title: string }
 	| { type: 'action'; kind: OutputKind; template_id: string | null };
 
 export type Speaker = {
@@ -66,6 +66,10 @@ export type MeetingState = {
 	error?: null | { stage: 'chunk' | 'finish' | 'action'; message: string; retryable: boolean };
 	audio_retained?: boolean;
 	usage?: { audio_seconds?: number; stt_output_tokens?: number };
+	pending_action?: OutputKind | null;
+	started_at?: string | null;
+	ended_at?: string | null;
+	duration_s?: number | null;
 };
 
 export type MeetingRead = { status: string; state: MeetingState | null };
@@ -121,12 +125,44 @@ export const groupTurns = (segments: Segment[], raw = false): SpeakerTurn[] => {
 	return turns;
 };
 
-export const liveText = (state: MeetingState | null): string =>
+/** Live parts in sequence order, one paragraph each. */
+export const liveParts = (state: MeetingState | null): string[] =>
 	[...(state?.live ?? [])]
 		.sort((a, b) => a.seq - b.seq)
 		.map((part) => part.text.trim())
-		.filter(Boolean)
-		.join(' ');
+		.filter(Boolean);
+
+export type MeetingTimes = {
+	startedAt: string | null;
+	endedAt: string | null;
+	durationS: number | null;
+};
+
+/** Start, end and duration; meetings from before `started_at` fall back to the consent time. */
+export const meetingTimes = (state: MeetingState | null): MeetingTimes => {
+	const startedAt = state?.started_at ?? state?.consent?.at ?? null;
+	const endedAt = state?.ended_at ?? null;
+	let durationS = state?.duration_s ?? null;
+	if (durationS === null && startedAt && endedAt) {
+		const ms = Date.parse(endedAt) - Date.parse(startedAt);
+		durationS = Number.isFinite(ms) && ms >= 0 ? Math.round(ms / 1000) : null;
+	}
+	return { startedAt, endedAt, durationS };
+};
+
+const countWords = (text: string) => text.split(/\s+/).filter(Boolean).length;
+
+/** Words in the clean transcript once it exists, else in the live parts. */
+export const wordCount = (state: MeetingState | null): number => {
+	const segments = state?.transcript?.segments ?? [];
+	if (segments.length > 0) {
+		return segments.reduce(
+			(sum, segment) => sum + countWords(segment.clean || segment.raw || ''),
+			0
+		);
+	}
+	return liveParts(state).reduce((sum, part) => sum + countWords(part), 0);
+};
 
 export type ExportLabels = {
 	transcript: string;
@@ -136,16 +172,44 @@ export type ExportLabels = {
 	owner: string;
 	due: string;
 	noActions: string;
+	date: string;
+	time: string;
+	duration: string;
+	speakers: string;
+};
+
+/** Already-formatted metadata (locale and timezone are the caller's). */
+export type MeetingMeta = {
+	title: string;
+	date: string | null;
+	time: string | null;
+	duration: string | null;
+	speakers: string[];
+};
+
+export const speakerNames = (state: MeetingState | null): string[] =>
+	(state?.transcript?.speakers ?? []).map((speaker) => speaker.name || speaker.label);
+
+/** The header every download starts with: title, date, start–end time, duration and speakers. */
+export const metadataMarkdown = (meta: MeetingMeta, labels: ExportLabels): string => {
+	const rows: [string, string | null][] = [
+		[labels.date, meta.date],
+		[labels.time, meta.time],
+		[labels.duration, meta.duration],
+		[labels.speakers, meta.speakers.length ? meta.speakers.join(', ') : null]
+	];
+	const lines = rows.filter(([, value]) => value).map(([label, value]) => `**${label}:** ${value}`);
+	return [`# ${meta.title}`, '', ...lines.flatMap((line) => [line, ''])].join('\n');
 };
 
 export const transcriptMarkdown = (
-	title: string,
+	meta: MeetingMeta,
 	state: MeetingState,
 	labels: ExportLabels,
 	raw = false
 ): string => {
 	const transcript = state.transcript;
-	const lines = [`# ${title}`, '', `## ${labels.transcript}`, ''];
+	const lines = [metadataMarkdown(meta, labels), `## ${labels.transcript}`, ''];
 	for (const turn of groupTurns(transcript?.segments ?? [], raw)) {
 		lines.push(
 			`**${speakerName(transcript?.speakers ?? [], turn.speaker)}** (${formatTimestamp(turn.start)})`,
@@ -173,7 +237,7 @@ export const actionsMarkdown = (items: ActionItem[], labels: ExportLabels): stri
 };
 
 export const outputMarkdown = (
-	title: string,
+	meta: MeetingMeta,
 	state: MeetingState,
 	kind: OutputKind,
 	labels: ExportLabels
@@ -184,7 +248,7 @@ export const outputMarkdown = (
 		kind === 'actions'
 			? actionsMarkdown((output as { items: ActionItem[] }).items ?? [], labels)
 			: ((output as { markdown: string }).markdown ?? '');
-	return `# ${title}\n\n## ${labels[kind]}\n\n${body.trim()}\n`;
+	return `${metadataMarkdown(meta, labels)}## ${labels[kind]}\n\n${body.trim()}\n`;
 };
 
 /** Safe file name stem: keeps letters (incl. accents), digits, spaces, dots and dashes. */
@@ -194,3 +258,20 @@ export const fileStem = (value: string): string =>
 		.trim()
 		.replace(/\s+/g, '-')
 		.slice(0, 80) || 'vergadering';
+
+/** Client-side title search, case- and accent-insensitive. */
+export const matchesQuery = (title: string | null | undefined, query: string): boolean => {
+	const fold = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+	const needle = fold(query.trim());
+	return !needle || fold(title ?? '').includes(needle);
+};
+
+/** Groups items (already newest first) under the label `rangeOf` gives each, keeping order. */
+export const groupByRange = <T>(items: T[], rangeOf: (item: T) => string): [string, T[]][] => {
+	const groups = new Map<string, T[]>();
+	for (const item of items) {
+		const range = rangeOf(item);
+		groups.set(range, [...(groups.get(range) ?? []), item]);
+	}
+	return [...groups.entries()];
+};
