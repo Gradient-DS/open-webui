@@ -37,6 +37,7 @@
 	import { markdownToDocx } from './docx';
 	import { sendWhenIdle } from './recorder';
 	import { reduceStream, startStream, type OutputStream } from './stream';
+	import { attachesLeft, hasChanges, wordDiff, type DiffOp } from './diff';
 	import {
 		CONSENT_TEXT_VERSION,
 		dayjsLocale,
@@ -84,7 +85,7 @@
 	let titleTimer: ReturnType<typeof setTimeout> | null = null;
 	let showDelete = $state(false);
 	let showMenu = $state(false);
-	let showRaw = $state(false);
+	let showChanges = $state(false);
 	let tab = $state<Tab>('transcript');
 	let pending = $state<Pending | null>(null);
 	let outputStream = $state<OutputStream | null>(null);
@@ -119,7 +120,8 @@
 			null
 	);
 	const speakers = $derived(meeting?.transcript?.speakers ?? []);
-	const turns = $derived(groupTurns(meeting?.transcript?.segments ?? [], showRaw));
+	const turns = $derived(groupTurns(meeting?.transcript?.segments ?? []));
+	const changed = $derived(hasChanges(meeting?.transcript?.segments ?? []));
 	const live = $derived(liveParts(meeting));
 	const tabHasContent = $derived(
 		tab === 'transcript'
@@ -432,7 +434,7 @@
 	const exportMarkdown = (): string | null => {
 		if (!meeting) return null;
 		return tab === 'transcript'
-			? transcriptMarkdown(meta(), meeting, labels(), showRaw)
+			? transcriptMarkdown(meta(), meeting, labels())
 			: outputMarkdown(meta(), meeting, tab, labels());
 	};
 
@@ -510,16 +512,36 @@
 />
 
 {#snippet liveTranscript()}
-	{#if live.length > 0}
-		<div class="mt-4">
+	<!-- The list stays mounted so only paragraphs that arrive later fade in (local transitions). -->
+	<div class={live.length > 0 ? 'mt-4' : ''}>
+		{#if live.length > 0}
 			<div class="mb-2 text-xs text-gray-500">{$i18n.t('Live transcript (rough)')}</div>
-			<div class="space-y-3">
-				{#each live as part, index (index)}
-					<p class="text-sm leading-relaxed text-gray-700 dark:text-gray-300">{part}</p>
-				{/each}
-			</div>
+		{/if}
+		<div class="space-y-3">
+			{#each live as part, index (index)}
+				<p
+					class="text-sm leading-relaxed text-gray-700 dark:text-gray-300"
+					in:fly={reducedMotion()
+						? { duration: 0 }
+						: { y: 6, duration: REVEAL_DURATION_MS, easing: cubicOut }}
+				>
+					{part}
+				</p>
+			{/each}
 		</div>
-	{/if}
+	</div>
+{/snippet}
+
+{#snippet diffText(ops: DiffOp[])}
+	{#each ops as op, index (index)}{#if index > 0 && !attachesLeft(op.text)}{' '}{/if}{#if op.type === 'same'}{op.text}{:else if op.type === 'removed'}<del
+				class="text-gray-400 dark:text-gray-500 decoration-gray-400/70 {op.punctuation
+					? 'opacity-60'
+					: ''}">{op.text}</del
+			>{:else}<ins
+				class="no-underline rounded-sm bg-gray-100 px-0.5 dark:bg-gray-800 {op.punctuation
+					? 'opacity-60'
+					: ''}">{op.text}</ins
+			>{/if}{/each}
 {/snippet}
 
 <div
@@ -672,9 +694,13 @@
 
 							<div class="flex items-center gap-2">
 								{#if tab === 'transcript'}
-									<label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
-										<input type="checkbox" bind:checked={showRaw} />
-										{$i18n.t('Show original')}
+									<label
+										class="flex items-center gap-1.5 text-xs text-gray-500 {changed
+											? 'cursor-pointer'
+											: 'opacity-70'}"
+									>
+										<input type="checkbox" bind:checked={showChanges} disabled={!changed} />
+										{changed ? $i18n.t('Show changes') : $i18n.t('No changes')}
 									</label>
 								{:else}
 									<button
@@ -745,7 +771,15 @@
 											<span class="tabular-nums">{formatTimestamp(turn.start)}</span>
 										</div>
 										<div class="text-sm leading-relaxed text-gray-800 dark:text-gray-200">
-											{turn.texts.join(' ')}
+											{#if showChanges && changed}
+												{@render diffText(
+													turn.segments.flatMap((segment) =>
+														wordDiff(segment.raw, segment.clean || segment.raw)
+													)
+												)}
+											{:else}
+												{turn.texts.join(' ')}
+											{/if}
 										</div>
 									</div>
 								{:else}

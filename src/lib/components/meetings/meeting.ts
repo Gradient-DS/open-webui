@@ -102,7 +102,13 @@ export const formatTimestamp = (seconds: number): string => {
 export const speakerName = (speakers: Speaker[], label: string): string =>
 	speakers.find((speaker) => speaker.label === label)?.name || label;
 
-export type SpeakerTurn = { speaker: string; start: number; end: number; texts: string[] };
+export type SpeakerTurn = {
+	speaker: string;
+	start: number;
+	end: number;
+	texts: string[];
+	segments: Segment[];
+};
 
 /** Consecutive segments of one speaker form one turn; order is kept. */
 export const groupTurns = (segments: Segment[], raw = false): SpeakerTurn[] => {
@@ -112,13 +118,15 @@ export const groupTurns = (segments: Segment[], raw = false): SpeakerTurn[] => {
 		const last = turns.at(-1);
 		if (last && last.speaker === segment.speaker) {
 			last.texts.push(text);
+			last.segments.push(segment);
 			last.end = segment.end;
 		} else {
 			turns.push({
 				speaker: segment.speaker,
 				start: segment.start,
 				end: segment.end,
-				texts: [text]
+				texts: [text],
+				segments: [segment]
 			});
 		}
 	}
