@@ -186,6 +186,16 @@ class SoevKnowledgeTable:
         rows = await asyncio.gather(*(self._collection(id, user_id=user_id) for id in ids))
         return {row['key']: (row['name'], row.get('description') or '') for row in rows if row is not None}
 
+    async def knowledge_document(self, key, source_id, *, user_id=None):
+        """The document `source_id` as the knowledge base `key` holds it for the user, or None where they cannot
+        read it there; synced documents included."""
+        try:
+            return await self._get(self._path(key) + '/documents/' + quote(source_id, safe=''), user_id=user_id)
+        except SoevApiError as error:
+            if error.status == 404:
+                return None
+            raise
+
     async def get_knowledge_by_id_unfiltered(self, id, db=None):
         return await self._knowledge_with_type(await self._collection(id))
 

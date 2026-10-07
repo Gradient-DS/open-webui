@@ -352,6 +352,55 @@ async def test_attached_files_are_sent_with_their_collection_and_name(
 
 
 @pytest.mark.asyncio
+async def test_a_file_picked_from_a_knowledge_base_is_sent_as_that_kb_document(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_collection(chat.api, 'kb-cloud', 'OneDrive')
+    seed_collection(chat.api, 'kb-local', 'Contracten')
+    chat.api.add_document('kb-cloud', 'onedrive-item-1', filename='202508.pdf', schedule_ids=['sch-1'])
+    chat.api.add_document('kb-local', 'f-local', filename='contract.pdf')
+    # The synced document has no OWUI File row; the local one keeps its upload's row, without a collection.
+    stored_files(monkeypatch, **{'f-local': 'completed'})
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'onedrive-item-1', 'name': '202508.pdf', 'knowledge_id': 'kb-cloud'},
+            {'type': 'file', 'id': 'f-local', 'name': 'contract.pdf', 'knowledge_id': 'kb-local'},
+        ],
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': 'kb-cloud', 'file_id': 'onedrive-item-1', 'name': '202508.pdf'},
+        {'collection_key': 'kb-local', 'file_id': 'f-local', 'name': 'contract.pdf'},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_knowledge_base_file_the_user_cannot_read_there_refuses_the_turn_by_name(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    chat.api.add_document('kb-a', 'elsewhere', filename='elders.pdf')
+    stored_files(monkeypatch, busy='processing')
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'removed', 'name': 'weg.pdf', 'knowledge_id': 'kb-a'},
+            {'type': 'file', 'id': 'elsewhere', 'name': 'elders.pdf', 'knowledge_id': 'kb-gone'},
+            {'type': 'file', 'id': 'busy', 'name': 'bezig.pdf', 'knowledge_id': 'kb-a'},
+        ],
+        user_language='nl-NL',
+    )
+    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
+    assert refusal['code'] == 'attachments_unavailable'
+    assert all(name in refusal['message'] for name in ('weg.pdf', 'elders.pdf', 'bezig.pdf'))
+    assert 'niet meer beschikbaar' in refusal['message'] and 'wordt nog verwerkt' in refusal['message']
+    assert chat.mutations() == []
+
+
+@pytest.mark.asyncio
 async def test_attached_images_are_not_attachments(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
     stored_files(monkeypatch, img='completed')
     await chat.turn('question', 'a1', files=[{'type': 'file', 'id': 'img', 'content_type': 'image/png'}])

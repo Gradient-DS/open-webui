@@ -190,6 +190,8 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     """[Claude] The files attached in the chat, as the turn's `attachments` field; none while nothing is attached.
 
     The collection is the one the finished upload reported, else where chat uploads go; the agent checks access.
+    A file picked from a knowledge base (`knowledge_id`) is that KB's document, read there as the user: synced
+    documents have no File row, and an uploaded one's row does not name the KB.
 
     Raises:
         AttachmentsUnavailable: a file is gone, still being processed, or failed.
@@ -204,7 +206,19 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
         and entry.get('id')
         and not (entry.get('content_type') or '').startswith('image/')
     }
+    user_id = None if acting.acting_ref() else metadata['user_id']
     for file_id, entry in entries.items():
+        if knowledge_id := entry.get('knowledge_id'):
+            document = await Knowledges.knowledge_document(knowledge_id, file_id, user_id=user_id)
+            name = entry.get('name') or (document or {}).get('filename') or file_id
+            if document is not None:
+                attached.append({'collection_key': knowledge_id, 'file_id': file_id, 'name': name})
+                continue
+            # Not landed yet: an upload still being ingested into the KB keeps its status on the File row.
+            file = await Files.get_file_by_id(file_id)
+            status = (file.meta or {}).get('status') if file is not None else None
+            unavailable.append((name, status if status in ('processing', 'failed') else 'gone'))
+            continue
         file = await Files.get_file_by_id(file_id)
         name = entry.get('name') or (file.filename if file is not None else file_id)
         status = 'gone' if file is None else (file.meta or {}).get('status')
