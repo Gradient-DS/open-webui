@@ -284,7 +284,8 @@ async def test_dry_run_sends_nothing(env, capsys):
     output = capsys.readouterr().out
     assert not env.api.requests and not env.identity._linked_refs
     assert '/v1/identity/links' in output and '/v1/directory/groups/' in output
-    assert '/v1/collections' in output and 'reports/2026' in output
+    assert '/v1/collections' in output and '/folders' in output
+    assert 'reports/2026' not in output and env.kbs[0].name not in output and '<redacted>' in output
     assert 'OWUI files' in output and 'document_count' in output and 'not read' in output
     assert 'soev_test_cred-runtime_test-secret' not in output and 'PRIVATE KEY' not in output and 'eyJ' not in output
     assert env.kbs[3].id not in output and env.kbs[4].id not in output
@@ -341,7 +342,7 @@ async def test_module_dry_run_preserves_sql_tables(env, tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert 'KB count: 3' in result.stdout
-    assert 'reports/2026' in result.stdout
+    assert '/folders' in result.stdout and 'reports/2026' not in result.stdout
     assert all(kb.id in result.stdout for kb in env.kbs[:3])
     with sqlite3.connect(database_path) as snapshot:
         assert list(snapshot.iterdump()) == before

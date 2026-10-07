@@ -250,6 +250,8 @@ async def test_dry_run_sends_nothing(env, capsys):
     assert all(row['as_user'] == 'owui:user:alice' for row in connections + schedules)
     assert all(row['body']['cadence_minutes'] == '<sync-policy.min_cadence_minutes>' for row in schedules)
     assert all(row['body']['connection_id'].startswith('<connection:') for row in schedules)
+    assert all(row['body']['label'] == '<redacted>' for row in schedules)
+    assert 'Cloud notes' not in output and '"Source"' not in output and '/Source' not in output
     assert 'KBs with a schedule: not read (dry-run) | KBs of a cloud type: 3' in output
     assert 'soev_test_cred-runtime_test-secret' not in output and 'PRIVATE KEY' not in output and 'eyJ' not in output
 

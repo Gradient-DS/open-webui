@@ -30,10 +30,16 @@ class UploadState:
     counts: Counter = field(default_factory=Counter)
     bytes_planned: int = 0
     failures: list[str] = field(default_factory=list)
+    failure_codes: Counter = field(default_factory=Counter)
     missing: list[str] = field(default_factory=list)
 
     def total(self, status: str) -> int:
         return self.counts[status]
+
+    def fail(self, ref: str, code: str) -> None:
+        """Ids and a stable code only: file names and soev-api details are content."""
+        self.failures.append(f'{ref}: {code}')
+        self.failure_codes[code] += 1
 
 
 def _list(value) -> list:
@@ -147,16 +153,16 @@ async def _submit(file, key: str, client, state: UploadState, gate: asyncio.Sema
             state.counts[RUNNING] += 1
         except FileNotFoundError:
             state.counts[MISSING] += 1
-            state.missing.append(f'{file.user_id}/{file.id} ({file.filename})')
+            state.missing.append(f'{file.user_id}/{file.id}')
         except SoevApiError as error:
             # Server faults, throttling and auth problems are retried by the next run, not reported.
             if error.status >= 500 or error.status in {401, 403, 429}:
                 raise
             state.counts[FAILED] += 1
-            state.failures.append(f'{file.user_id}/{file.id}: {error.code}')
+            state.fail(f'{file.user_id}/{file.id}', error.code)
         except OSError as error:
             state.counts[FAILED] += 1
-            state.failures.append(f'{file.user_id}/{file.id}: {type(error).__name__}')
+            state.fail(f'{file.user_id}/{file.id}', type(error).__name__)
         else:
             await _point(file, key)
             state.counts[SUBMITTED] += 1
@@ -173,7 +179,7 @@ def _by_owner(files: list, linked: set[str], users: set[str], state: UploadState
             state.counts[REFERENCE] += 1
         elif file.user_id not in users:
             state.counts[NO_OWNER] += 1
-            state.failures.append(f'{file.user_id}/{file.id}: owner missing')
+            state.fail(f'{file.user_id}/{file.id}', 'owner_missing')
         else:
             owned.setdefault(file.user_id, []).append(file)
     return owned
@@ -182,6 +188,7 @@ def _by_owner(files: list, linked: set[str], users: set[str], state: UploadState
 async def _check(owner: str, owned: list, client, state: UploadState, *, dry_run: bool) -> list:
     """Count the owner's files that need nothing; return the ones to submit."""
     from open_webui.soev import ingest
+    from open_webui.soev.migrate_ingest import stored_code
 
     key = ingest.attachments_collection_key(owner)
     documents = set()
@@ -199,8 +206,7 @@ async def _check(owner: str, owned: list, client, state: UploadState, *, dry_run
             pending.append(file)
         elif status == FAILED:
             state.counts[status] += 1
-            error = (file.meta or {}).get('error') or (file.data or {}).get('error') or 'ingest failed'
-            state.failures.append(f'{owner}/{file.id}: {error}')
+            state.fail(f'{owner}/{file.id}', stored_code(file))
         else:
             state.counts[status] += 1
             if not dry_run:

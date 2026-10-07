@@ -57,9 +57,20 @@ async def _folder_paths(table, keys, db):
     return paths
 
 
+# KB names and descriptions, folder paths and picked item names are content; the preview shows ids only.
+CONTENT_FIELDS = {'name', 'description', 'path', 'label'}
+
+
+def _content_free(body):
+    if not isinstance(body, dict):
+        return body
+    return {key: '<redacted>' if key in CONTENT_FIELDS and value else value for key, value in body.items()}
+
+
 async def _send(client, method, path, body, *, key, dry_run, as_user=None):
     if dry_run:
-        print(json.dumps({'method': method, 'path': path, 'body': body, 'idempotency_key': key, 'as_user': as_user}))
+        planned = {'method': method, 'path': path, 'body': _content_free(body), 'idempotency_key': key}
+        print(json.dumps({**planned, 'as_user': as_user}))
         return
     return await client.send(method, path, body, idempotency_key=key, as_user=as_user)
 
@@ -391,8 +402,15 @@ def _print_ingest(state, *, prefix: str) -> None:
     for key, counts in sorted(state.per_kb.items()):
         summary = ', '.join(f'{status} {count}' for status, count in sorted(counts.items())) or 'no files'
         print(f'{prefix}: {key}: {summary}')
+    _print_failures(state, prefix=prefix)
+
+
+def _print_failures(state, *, prefix: str) -> None:
     for line in state.failures:
         print(f'{prefix}: failed {line}')
+    if state.failures:
+        codes = ', '.join(f'{code} {count}' for code, count in sorted(state.failure_codes.items()))
+        print(f'{prefix}: failed {len(state.failures)} ({codes})')
 
 
 def _print_uploads(state, *, prefix: str) -> None:
@@ -400,8 +418,7 @@ def _print_uploads(state, *, prefix: str) -> None:
     print(f'{prefix}: {summary or "no files"}')
     if state.bytes_planned:
         print(f'{prefix}: to check {state.bytes_planned / 1e6:.1f} MB')
-    for line in state.failures:
-        print(f'{prefix}: failed {line}')
+    _print_failures(state, prefix=prefix)
     for line in state.missing:
         print(f'{prefix}: original missing, skipped {line}')
 
@@ -643,13 +660,14 @@ async def plan(options: Options, *, db=None) -> int:
 
 
 def _failure(error: Exception) -> str:
-    """The failing call and soev-api's problem fields; never tokens, bodies or assertions."""
+    """The failing call, status, code and constraint; never tokens, bodies, assertions or soev-api's detail,
+    which can name a file or KB."""
     from open_webui.soev.client import SoevApiError
 
     if not isinstance(error, SoevApiError):
         return type(error).__name__
     call = f'{error.method} {error.path} -> ' if error.method else ''
-    return f'{call}{error.status} {error.code}: {error.detail} (constraint: {error.constraint})'
+    return f'{call}{error.status} {error.code} (constraint: {error.constraint})'
 
 
 def main():

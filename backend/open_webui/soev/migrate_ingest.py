@@ -5,6 +5,7 @@ content digest and refuses files with a job in flight, so a rerun submits nothin
 """
 
 import asyncio
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from urllib.parse import quote
@@ -13,15 +14,37 @@ from open_webui.soev.client import SoevApiError
 
 CLOUD_TYPES = {'onedrive', 'google_drive', 'confluence'}
 INGESTED, SUBMITTED, RUNNING, FAILED, PLANNED = 'ingested', 'submitted', 'running', 'failed', 'to check'
+# The fixed reasons soev.jobs stores; anything else it stores is `<code>: <detail>` or a job status.
+_POLLER_REASONS = {'job disappeared': 'job_not_found', 'upload could not be completed': 'upload_incomplete'}
+
+
+def stored_code(file) -> str:
+    """The stable code of a file's stored ingest error; never its detail, which can name the file."""
+    error = str((file.meta or {}).get('error') or (file.data or {}).get('error') or '')
+    if match := re.match(r'([a-z][a-z0-9_]*):', error):
+        return match.group(1)
+    if error in _POLLER_REASONS:
+        return _POLLER_REASONS[error]
+    if error.startswith('did not complete within'):
+        return 'job_timed_out'
+    if re.fullmatch(r'[A-Z_]+', error):
+        return f'job_{error.lower()}'
+    return 'ingest_failed'
 
 
 @dataclass
 class IngestState:
     per_kb: dict[str, Counter] = field(default_factory=dict)
     failures: list[str] = field(default_factory=list)
+    failure_codes: Counter = field(default_factory=Counter)
 
     def count(self, key: str, status: str) -> None:
         self.per_kb.setdefault(key, Counter())[status] += 1
+
+    def fail(self, ref: str, code: str) -> None:
+        """Ids and a stable code only: file names, titles and soev-api details are content."""
+        self.failures.append(f'{ref}: {code}')
+        self.failure_codes[code] += 1
 
     def total(self, status: str) -> int:
         return sum(counts[status] for counts in self.per_kb.values())
@@ -50,13 +73,13 @@ async def _submit(file, key: str, owner: str, client, state: IngestState, gate: 
             state.count(key, RUNNING)
         except FileNotFoundError:
             state.count(key, FAILED)
-            state.failures.append(f'{key}/{file.id}: original missing from storage')
+            state.fail(f'{key}/{file.id}', 'original_missing')
         except SoevApiError as error:
             # Server faults, throttling and auth problems are retried by the next run, not reported.
             if error.status >= 500 or error.status in {401, 403, 429}:
                 raise
             state.count(key, FAILED)
-            state.failures.append(f'{key}/{file.id}: {error.code}')
+            state.fail(f'{key}/{file.id}', error.code)
         else:
             state.count(key, SUBMITTED)
 
@@ -75,7 +98,7 @@ async def reingest(directory, *, concurrency: int, dry_run: bool = False, db=Non
         if kb.user_id not in directory.user_ids:
             for file in files:
                 state.count(kb.id, FAILED)
-                state.failures.append(f'{kb.id}/{file.id}: KB owner missing')
+                state.fail(f'{kb.id}/{file.id}', 'kb_owner_missing')
             continue
         documents = set()
         if not dry_run:
@@ -87,8 +110,7 @@ async def reingest(directory, *, concurrency: int, dry_run: bool = False, db=Non
             if status is not None:
                 state.count(kb.id, status)
                 if status == FAILED:
-                    error = (file.meta or {}).get('error') or (file.data or {}).get('error') or 'ingest failed'
-                    state.failures.append(f'{kb.id}/{file.id}: {error}')
+                    state.fail(f'{kb.id}/{file.id}', stored_code(file))
             elif dry_run:
                 state.count(kb.id, PLANNED)
             else:
