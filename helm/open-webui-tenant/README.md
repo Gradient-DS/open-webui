@@ -117,6 +117,12 @@ Rollback: set `mode: restore` first (the Job puts back the config snapshot and
 model ids), then revert the image and values to v1. The steps are in
 `docs/agent-api-deployment.md`.
 
+`mode: models` runs `--apply --models`: it rewrites only the stored model ids by
+`modelMap` (old catalog id to new) under its own `id`, with no config switch,
+directory copy, re-ingest, memories or sign-out, and needs no `config`. It
+snapshots just the two model-id config rows, so `mode: restore` with the same
+`id` undoes it.
+
 ## Render checks
 
 ```sh
