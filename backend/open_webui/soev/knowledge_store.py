@@ -23,7 +23,12 @@ def _sort_file_rows(rows, filters, *, default_order='filename', default_descendi
     descending = filters.get('direction') != 'asc' if order else default_descending
     field = order or default_order
     rows.sort(key=lambda row: row['id'])
-    rows.sort(key=lambda row: (row[field] is not None, row[field]), reverse=descending)
+    rows.sort(key=lambda row: (row[field] is not None, _sort_value(row[field])), reverse=descending)
+
+
+# [Gradient] Names sort case-insensitively, as a person reads the list.
+def _sort_value(value):
+    return value.casefold() if isinstance(value, str) else value
 
 
 def _catalog_file_row(document: dict, owner_id: str) -> dict:
@@ -616,7 +621,11 @@ class SoevKnowledgeTable:
         _sort_file_rows(rows, filters)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
-        directories = await self._directory_models(knowledge_id, path, user_id=user_id, view=view)
+        from open_webui.models.knowledge import order_directories
+
+        directories = order_directories(
+            await self._directory_models(knowledge_id, path, user_id=user_id, view=view), filters
+        )
         rollups = await self._rollups(knowledge_id, [row.id for row in directories], user_id=user_id, view=view)
         breadcrumbs = await self._breadcrumbs(filters.get('directory_id'), user_id=user_id, view=view)
         return self._projection.knowledge_file_list_of(
@@ -699,6 +708,9 @@ class SoevKnowledgeTable:
             root = ('\0sync:' + schedule_id,)
             model = self._folder_model(collection, {'path': root[0], 'created_at': collection['created_at']})
             model.name = schedule.get('label') or 'Folder'
+            # [Gradient] A folder source sorts by its last sync under "Updated".
+            if schedule.get('last_run_at'):
+                model.updated_at = int(dt.datetime.fromisoformat(schedule['last_run_at']).timestamp())
             directories[root] = model
         for source_id, (document, path) in members.items():
             reach = set((document or {}).get('schedule_ids', []))
@@ -754,10 +766,10 @@ class SoevKnowledgeTable:
         view = await self._directory_view(key, user_id=user_id) if view is None else view
         virtual = [model for location, model in view[0].items() if location[:-1] == path]
         if path and path[0].startswith('\0sync:'):
-            return sorted(virtual, key=lambda row: (row.name, row.id))
+            return sorted(virtual, key=lambda row: (row.name.casefold(), row.id))
         folders, _ = await self._folder_entries(key, path, user_id=user_id)
         real = [self._folder_model(collection, folder) for folder in sorted(folders, key=lambda row: row['path'])]
-        return sorted(real + virtual, key=lambda row: (row.name, row.id))
+        return sorted(real + virtual, key=lambda row: (row.name.casefold(), row.id))
 
     async def create_directory(self, knowledge_id, name, user_id, parent_id=None, db=None):
         path = self._directory_path(knowledge_id, parent_id) + (name,)

@@ -19,6 +19,7 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import { runIsLive, type SchedulePair } from '../utils/cloudSync';
+	import { removalTargets } from './sources';
 	import {
 		runProgress,
 		sourceState,
@@ -249,7 +250,7 @@
 								disabled={busy || schedule.connection.lifecycle !== 'enabled'}
 								on:click={() => action(targets, 'resume')}>{$i18n.t('Resume')}</button
 							>{/if}
-						<button disabled={busy} on:click={() => action([...targets].reverse(), 'delete')}
+						<button disabled={busy} on:click={() => action(removalTargets(pair), 'delete')}
 							>{$i18n.t('Remove')}</button
 						>
 					{/if}

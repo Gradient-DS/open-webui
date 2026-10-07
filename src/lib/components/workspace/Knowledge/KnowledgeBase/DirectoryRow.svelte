@@ -44,6 +44,14 @@
 	export let selected = false;
 	export let checkboxVisible = false;
 	export let onToggleSelect: () => void = () => {};
+	// Cmd/Ctrl/Shift-click selects the row instead of opening it.
+	export let onSelectClick: (e: MouseEvent) => void = () => {};
+	const selectClick = (e: MouseEvent) => {
+		if (!selectable || !(e.metaKey || e.ctrlKey || e.shiftKey)) return false;
+		e.preventDefault();
+		onSelectClick(e);
+		return true;
+	};
 
 	export let onNavigate: (id: string) => void = () => {};
 	export let onRename: (id: string, name: string) => void = () => {};
@@ -92,10 +100,12 @@
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
-	class="group flex cursor-pointer w-full px-2 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition
+	class="group flex cursor-pointer w-full px-1.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition
 		{dragOver
 		? 'bg-gray-100 dark:bg-gray-800 ring-1 ring-gray-300 dark:ring-gray-600'
-		: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+		: selected
+			? 'bg-blue-50 dark:bg-blue-900/20'
+			: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
 	draggable={writeAccess}
 	on:dragstart={(e) => {
 		if (!writeAccess) return;
@@ -152,7 +162,9 @@
 		<button
 			class="p-1 rounded-full transition"
 			type="button"
-			on:click={() => onNavigate(directory.id)}
+			on:click={(e) => {
+				if (!selectClick(e)) onNavigate(directory.id);
+			}}
 		>
 			<!-- [Gradient] Folder icon, badged with the provider for a cloud source root. -->
 			<SourceItemIcon kind="folder" provider={pair ? sourceKind : provider} />
@@ -162,8 +174,8 @@
 	<button
 		class="relative flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
 		type="button"
-		on:click={() => {
-			if (editing) return;
+		on:click={(e) => {
+			if (editing || selectClick(e)) return;
 			onNavigate(directory.id);
 		}}
 	>

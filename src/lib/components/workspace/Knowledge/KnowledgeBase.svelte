@@ -46,6 +46,7 @@
 	import type { DirectoryItem } from './KnowledgeBase/directory';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
+	import { removalTargets, sortSourcePairs } from './KnowledgeBase/sources';
 	import type { SchedulePair } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
 	import {
@@ -117,6 +118,8 @@
 			)
 		)
 	);
+	// [Gradient] Single-file sources follow the listing's sort, like its files.
+	$: listedSources = sortSourcePairs(looseSources, sortKey, direction);
 	$: looseSources = schedulePairs.filter(
 		(pair) =>
 			!pair.content ||
@@ -222,8 +225,8 @@
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 
 	let viewOption = null;
-	let sortKey = null;
-	let direction = null;
+	let sortKey: string | null = null;
+	let direction: string | null = null;
 
 	let currentPage = 1;
 	let fileItems = null;
@@ -278,6 +281,8 @@
 		available: bulkAvailable
 	} = selection;
 	let showBulkRemoveConfirm = false;
+	// [Gradient] Only cloud sources selected: the dialog speaks of removing sources.
+	$: bulkOnlySources = $bulkBreakdown.sources > 0 && $bulkBreakdown.sources === $bulkCount;
 
 	// Clear the selection when the search query changes — search mode renders
 	// a different row set, so a lingering selection would strand there.
@@ -1268,9 +1273,14 @@
 		} else void scheduleAction(targets, action);
 	};
 
-	const scheduleAction = async (targets: Schedule[], action: ScheduleAction | 'delete') => {
-		if (!knowledge || cloudActionBusy) return;
+	// Resolves true once every target took the action.
+	const scheduleAction = async (
+		targets: Schedule[],
+		action: ScheduleAction | 'delete'
+	): Promise<boolean> => {
+		if (!knowledge || cloudActionBusy) return false;
 		cloudActionBusy = true;
+		let done = false;
 		try {
 			const actions = {
 				run: cloudSync.runSchedule,
@@ -1283,6 +1293,7 @@
 				await actions[action](localStorage.token, knowledge.id, schedule.id);
 				if (action === 'run') queuedRuns = queueRuns(queuedRuns, schedules, [schedule.id]);
 			}
+			done = true;
 			await refreshCloudSync();
 			repollCloudSyncSoon();
 		} catch (error) {
@@ -1304,6 +1315,7 @@
 		} finally {
 			cloudActionBusy = false;
 		}
+		return done;
 	};
 
 	const singleUploads = new Set<string>();
@@ -1632,8 +1644,8 @@
 		}
 	};
 
-	// Bulk remove: replays each selected item's own removal (file-remove or
-	// directory-delete) without per-item toast/init, then
+	// Bulk remove: replays each selected item's own removal (file-remove,
+	// directory-delete or source-remove) without per-item toast/init, then
 	// refreshes once. Directories always delete their contents.
 	const bulkRemoveHandler = async () => {
 		const items = [...get(selection.selected).values()];
@@ -1648,6 +1660,10 @@
 				} else if (item.kind === 'directory') {
 					const res = await deleteKnowledgeDirectory(localStorage.token, id, item.dirId, false);
 					if (res) ok++;
+				} else {
+					// [Gradient] The same unsubscribe as the source's ⋯ → Remove.
+					const pair = sourcePairs.get(item.itemId);
+					if (pair && (await scheduleAction(removalTargets(pair), 'delete'))) ok++;
 				}
 			} catch (e) {
 				console.error('Bulk remove failed for', item.key, e);
@@ -1919,23 +1935,29 @@
 <FilesOverlay show={dragged} />
 <ConfirmDialog
 	bind:show={showBulkRemoveConfirm}
-	title={$bulkBreakdown.sources > 0
-		? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
-				fileCount: $bulkBreakdown.totalFiles,
-				sourceCount: $bulkBreakdown.sources
-			})
-		: $bulkBreakdown.directories > 0
-			? $i18n.t('Delete {{fileCount}} file(s) and {{folderCount}} folder(s)?', {
+	title={bulkOnlySources
+		? $i18n.t('Remove {{count}} source(s)?', { count: $bulkBreakdown.sources })
+		: $bulkBreakdown.sources > 0
+			? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
 					fileCount: $bulkBreakdown.totalFiles,
-					folderCount: $bulkBreakdown.directories
+					sourceCount: $bulkBreakdown.sources
 				})
-			: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.totalFiles })}
-	message={$bulkBreakdown.sources > 0
-		? $i18n.t('Removing a source stops its sync and deletes all of its files.')
-		: $bulkBreakdown.directories > 0
-			? $i18n.t('Deleting a folder also deletes all files inside it.')
-			: $i18n.t('This will remove the selected files from this knowledge base.')}
-	confirmLabel={$i18n.t('Delete')}
+			: $bulkBreakdown.directories > 0
+				? $i18n.t('Delete {{fileCount}} file(s) and {{folderCount}} folder(s)?', {
+						fileCount: $bulkBreakdown.totalFiles,
+						folderCount: $bulkBreakdown.directories
+					})
+				: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.totalFiles })}
+	message={bulkOnlySources
+		? $i18n.t(
+				'Their files leave this knowledge base and its search. Nothing changes in the cloud storage.'
+			)
+		: $bulkBreakdown.sources > 0
+			? $i18n.t('Removing a source stops its sync and deletes all of its files.')
+			: $bulkBreakdown.directories > 0
+				? $i18n.t('Deleting a folder also deletes all files inside it.')
+				: $i18n.t('This will remove the selected files from this knowledge base.')}
+	confirmLabel={bulkOnlySources ? $i18n.t('Remove') : $i18n.t('Delete')}
 	on:confirm={() => {
 		bulkRemoveHandler();
 	}}
@@ -2430,7 +2452,9 @@
 								     fixed-height by design ("the list never jumps") — gating it on
 								     fileItems alone defeated that, since entering a folder with
 								     files made the header appear and shift the rows down. -->
-									{#if knowledge?.write_access && fileItems && (fileItems.length > 0 || (!query && directoryItems.length > 0))}
+									<!-- [Gradient] Hidden where nothing on the level can be selected
+									     (inside a synced folder) rather than shown as a dead control. -->
+									{#if knowledge?.write_access && fileItems && ($bulkAvailable.length > 0 || $bulkCount > 0) && (fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentDirectoryId === null && looseSources.length > 0))))}
 										<div class="pb-1.5 shrink-0">
 											<KbSelectionHeader
 												count={$bulkCount}
@@ -2450,7 +2474,7 @@
 												searchMode={!!query}
 												{structureEditable}
 												{sourcePairs}
-												looseSources={currentDirectoryId === null ? looseSources : []}
+												looseSources={currentDirectoryId === null ? listedSources : []}
 												skippedItems={currentSourcePair ? skippedItems : []}
 												syncing={enclosingSyncing}
 												{enclosingProvider}
