@@ -228,6 +228,7 @@ async def test_documents_list_under_their_source_folder(folder_store):
         'kb', 'alice', {'directory_id': store._projection.directory_id('kb', ('Uploads',))}
     )
     assert [file.id for file in owned.items] == ['owned']
+    assert 'soev_schedule_ids' not in owned.items[0].meta.model_dump()
 
 
 @pytest.mark.asyncio
@@ -235,6 +236,7 @@ async def test_single_file_sources_stay_at_the_root(folder_store):
     """Single-file sources remain at root even when their catalog path is populated."""
     page = await folder_store.store.search_files_by_id('kb', 'alice', {'directory_id': None})
     assert [file.id for file in page.items] == ['single']
+    assert page.items[0].meta.soev_schedule_ids == ['file']
     assert page.total == 1
     all_files = await folder_store.store.search_files_by_id('kb', 'alice', {})
     assert all_files.total == 4

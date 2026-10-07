@@ -1398,3 +1398,21 @@ async def test_search_overlaps_owners_and_needed_schedules(env, monkeypatch, own
     assert owners_started.is_set() and schedules_started.is_set()
     assert sum(request.url.path == '/v1/schedules' for request in env.api.requests) == 1
     assert len(env.api.requests) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_synced_document_is_left_to_its_source(env):
+    """Removing a schedule-reached document is refused and a reset leaves it; owned ones go."""
+    from fastapi import HTTPException
+
+    await file(env)
+    env.api.add_document('kb', 'catalog')
+    env.api.add_document('kb', 'synced', schedule_ids=['schedule'])
+    with pytest.raises(HTTPException) as error:
+        await env.store.remove_file_from_knowledge_by_id('kb', 'synced')
+    assert error.value.status_code == 403
+    assert error.value.detail == {'code': 'synced_document_read_only'}
+    assert not [r for r in env.api.requests if r.method == 'DELETE']
+    await env.store.reset_knowledge_by_id('kb', include_directories=False)
+    deleted = [r.url.path for r in env.api.requests if r.method == 'DELETE']
+    assert sorted(deleted) == ['/v1/collections/kb/documents/catalog', '/v1/collections/kb/documents/f1']

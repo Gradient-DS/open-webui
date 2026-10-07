@@ -502,6 +502,10 @@ class SoevKnowledgeTable:
             if not landed:
                 await Files.update_file_metadata_by_id(file_id, {'soev_collection_key': None})
                 return True
+        document, _ = (await self._members(knowledge_id)).get(file_id, (None, None))
+        if document and document.get('schedule_ids'):
+            # Deleting it from the KB would leave the corpus copy, and the next sync lands it again.
+            raise HTTPException(status_code=403, detail={'code': 'synced_document_read_only'})
         await self._send(
             'DELETE',
             self._path(knowledge_id) + '/documents/' + quote(file_id, safe=''),
@@ -522,7 +526,8 @@ class SoevKnowledgeTable:
                 else:
                     await Files.update_file_metadata_by_id(file.id, {'soev_collection_key': None})
             for document in await self._documents(id):
-                await self.remove_file_from_knowledge_by_id(id, document['source_id'])
+                if not document.get('schedule_ids'):
+                    await self.remove_file_from_knowledge_by_id(id, document['source_id'])
             if include_directories:
                 for folder in sorted(
                     await self._folder_tree(id), key=lambda row: len(row['path'].split('/')), reverse=True
