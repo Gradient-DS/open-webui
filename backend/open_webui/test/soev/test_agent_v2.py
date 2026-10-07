@@ -1232,6 +1232,30 @@ async def test_resolved_picker_model_wins_over_agent_model(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('meta', 'sent'),
+    [
+        ({}, 'soev_react'),
+        ({'runtime': 'v1'}, 'soev_react'),
+        (None, 'soev_chat_manual'),
+        ({'runtime': 'v2'}, 'soev_chat_manual'),
+    ],
+)
+async def test_v2_deployment_replaces_a_v1_agent_binding_with_the_configured_agent(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, meta: dict | None, sent: str
+) -> None:
+    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v2')
+    monkeypatch.setattr(agent.Config, 'get', AsyncMock(return_value='soev_react'))
+    monkeypatch.setattr(
+        AgentConfigs,
+        'get_agent_config_by_id',
+        AsyncMock(return_value=SimpleNamespace(meta=meta) if meta is not None else None),
+    )
+    await chat.turn('first', 'a1', override_agent='soev_chat_manual')
+    assert [body['agent'] for path, body in chat.mutations() if path == '/v1/chat/threads'] == [sent]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('meta', [None, {}, {'runtime': 'v1'}, {'runtime': 'v2', 'model': 'agent-model'}])
 @pytest.mark.parametrize('selected_agent', [None, 'test'])
 async def test_environment_routes_every_turn_to_v2(

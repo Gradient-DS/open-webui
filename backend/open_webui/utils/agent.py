@@ -430,6 +430,11 @@ async def call_agent_api(
 
     agent_config = await AgentConfigs.get_agent_config_by_id(selected_agent) if selected_agent else None
     agent_meta = agent_config.meta if agent_config else {}
+    # [Gradient] In a v2 deployment a chat can still be bound to a v1 agent row (migrated
+    # chats, a sticky browser pick); the v2 host serves only the configured agent.
+    if AGENT_API_RUNTIME == 'v2' and agent_config and agent_meta.get('runtime') != 'v2':
+        selected_agent = await Config.get('agent_api.selected_agent') or None
+        agent_meta = {}
     if AGENT_API_RUNTIME == 'v2' or agent_meta.get('runtime') == 'v2':
         agent_model = agent_meta.get('model')
         model = llm_model or agent_model
