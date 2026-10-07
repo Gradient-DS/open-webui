@@ -8,8 +8,8 @@
 
 	import Citations from './Citations.svelte';
 	import { reduceSources, type DisplayCitation, type RawSource } from './Citations/reduceSources';
-	// [Gradient] Share answer-used scope with the grouped Sources tab.
-	import { usedCitations } from './Citations/panelScope';
+	// [Gradient] Share the cited-marker scope with the grouped Sources tab.
+	import { citedCitations } from './Citations/citedSources';
 	import { calculateShowRelevance, shouldShowPercentage } from './Citations/relevanceDisplay';
 
 	// [Gradient] Type the shared translation store for citation controls.
@@ -22,22 +22,8 @@
 	export let readOnly = false;
 	// [Gradient] False keeps only pill clicks: the document panel shows sources in the sources panel.
 	export let listed = true;
-	/**
-	 * [Gradient] Whether the parent message has finished streaming. Used to
-	 * suppress the bottom pill until the agent's final source dispatch is
-	 * in. Intermediate dispatches (one after every tool iteration) carry the
-	 * full "retrieved so far" set with `current_turn` true, so a web-search
-	 * turn briefly shows the entire result corpus (e.g. 19 hits) before the
-	 * post-answer dispatch settles the `cited_this_turn` flags. The final
-	 * dispatch arrives right after the answer text finishes streaming —
-	 * effectively the same moment as `done` flipping true — so gating on
-	 * done avoids the flash without delaying anything that was stable
-	 * mid-stream.
-	 *
-	 * Defaults to `true` so non-streaming callers (e.g. `Document.svelte`)
-	 * keep their previous behavior without opting in.
-	 */
-	export let messageDone: boolean = true;
+	// [Gradient] The answer text whose `[N]` markers pick the sources the pill lists; it grows while streaming.
+	export let text = '';
 
 	let citations: DisplayCitation[] = [];
 	let visibleCitations: DisplayCitation[] = [];
@@ -68,16 +54,16 @@
 		if (citations[index]) openPanel(citations[index], 'detail');
 	};
 
-	// [Gradient] Inline [N] retains cumulative numbering; the pill lists only answer-used sources.
+	// [Gradient] Inline [N] retains cumulative numbering; the pill lists only the sources the text cites.
 	$: citations = reduceSources(sources);
-	$: visibleCitations = usedCitations(citations);
+	$: visibleCitations = citedCitations(citations, text);
 	$: showRelevance = calculateShowRelevance(visibleCitations);
 	$: showPercentage = shouldShowPercentage(visibleCitations);
 </script>
 
 {#if readOnly}
-	<Citations {id} {chatId} {sources} {readOnly} {messageDone} {listed} bind:this={inner} />
-{:else if listed && visibleCitations.length > 0 && messageDone}
+	<Citations {id} {chatId} {sources} {text} {readOnly} {listed} bind:this={inner} />
+{:else if listed && visibleCitations.length > 0}
 	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
 		<button
 			class="text-xs font-normal text-gray-600 dark:text-gray-300 px-3.5 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-1 border border-gray-50 dark:border-gray-850/30"

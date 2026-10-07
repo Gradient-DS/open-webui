@@ -54,19 +54,13 @@ export interface RawSource {
 	document?: string[];
 	metadata?: RawSourceMeta[];
 	distances?: number[];
-	// [Gradient] Per-source provenance from the agent service. `n` is the
-	// cumulative `[N]` id; `current_turn` is true when a tool retrieved the
-	// source this turn; `cited_this_turn` is true when the model wrote its
-	// `[N]` in this turn's answer. Absent for legacy chats / upstream
-	// providers. The per-message panel renders `current_turn ∪ cited_this_turn`.
-	// `granularity` is "document" when the citation's contents are
+	// [Gradient] `n` is the agent service's cumulative `[N]` id, absent for
+	// legacy chats / upstream providers. `granularity` is "document" when the citation's contents are
 	// whole-document reads (read_document/summarize/fetch_url) rather than
 	// retrieved passages — the modal skips passage highlighting for those.
 	// Absent (= chunk) for retrieval citations and all legacy payloads.
 	granularity?: string;
 	n?: number;
-	current_turn?: boolean;
-	cited_this_turn?: boolean;
 }
 
 export interface DisplayCitation {
@@ -78,8 +72,6 @@ export interface DisplayCitation {
 	// chunks whose source carried no distances (e.g. whole-document reads).
 	distances: (number | undefined)[];
 	n?: number;
-	current_turn?: boolean;
-	cited_this_turn?: boolean;
 }
 
 export function reduceSources(sources: RawSource[]): DisplayCitation[] {
@@ -125,16 +117,11 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 				seenChunks.set(id, new Set());
 			}
 
-			// [Gradient] Carry the agent's per-source provenance flags onto the
-			// merged entry — they live at the top level of each `event: source`
-			// payload, and this reducer rebuilds entries from scratch, so without
-			// this they'd be dropped before the panel filter sees them. Re-applied
-			// on every dispatch so the latest (post-answer) flags win:
-			// `current_turn` / `cited_this_turn` flip as a turn progresses.
+			// [Gradient] Carry the agent's `n` and provider onto the merged entry —
+			// they live at the top level of each `event: source` payload, and this
+			// reducer rebuilds entries from scratch, so without this they'd be dropped.
 			if (source.n !== undefined) entry.n = source.n;
 			if (_source.provider) entry.source = { ...entry.source, provider: _source.provider };
-			if (source.current_turn !== undefined) entry.current_turn = source.current_turn;
-			if (source.cited_this_turn !== undefined) entry.cited_this_turn = source.cited_this_turn;
 
 			const seen = seenChunks.get(id)!;
 			const fingerprint = chunkFingerprint(document, metadata);

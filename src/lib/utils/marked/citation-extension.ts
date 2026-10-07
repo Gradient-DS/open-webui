@@ -41,6 +41,13 @@ function parseCitationGroups(raw: string): { ids: number[]; citationIdentifiers:
 	return { ids, citationIdentifiers };
 }
 
+// [Gradient] The source numbers the citation markers in `text` name, parsed as the renderer parses them.
+export function citationIds(text: string): number[] {
+	return [...text.matchAll(new RegExp(CITATION_RUN_SOURCE, 'g'))].flatMap(
+		(match) => parseCitationGroups(match[0]).ids
+	);
+}
+
 export function citationExtension() {
 	return {
 		name: 'citation',

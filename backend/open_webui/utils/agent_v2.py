@@ -761,8 +761,8 @@ class AgentTurn:
         self.input_position: int | None = None
         self.terminal = False
         self.citations = Citations()
-        # [Claude] The source ids this turn flagged, per flag: the panel lists the cited ones.
-        self.turn_sources: dict[str, set[str]] = {'current_turn': set(), 'cited_this_turn': set()}
+        # [Claude] The source ids this turn already sent to the message's `sources`.
+        self.shown_sources: set[str] = set()
         self.partial = ''
         # [Claude] Markers already shown in the answer being streamed, as (position, number).
         self.streamed: list[tuple[int, int]] = []
@@ -1038,16 +1038,16 @@ class AgentTurn:
             if element.get('type') == 'action-required' and element.get('kind') == 'connect':
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
             if _read(element):
-                await self.show_source(element['id'], 'current_turn')
+                await self.show_source(element['id'])
         self.end_tool(payload)
 
-    async def show_source(self, source_id: str, flag: str) -> None:
-        """[Claude] Flag a source once per turn: `current_turn` when a tool read it now, `cited_this_turn` when the
-        answer cites it. The panel keeps the last flags it got for a source and lists the cited ones."""
-        if source_id in self.turn_sources[flag] or source_id not in self.citations.sources:
+    async def show_source(self, source_id: str) -> None:
+        """[Claude] Send a source once per turn, when a tool reads it or the answer cites it, so its `[N]` resolves
+        while the answer streams. The frontend lists a message's sources from the markers in its text."""
+        if source_id in self.shown_sources or source_id not in self.citations.sources:
             return
-        self.turn_sources[flag].add(source_id)
-        await self.emit('source', {**self.citations.sources[source_id], flag: True})
+        self.shown_sources.add(source_id)
+        await self.emit('source', self.citations.sources[source_id])
 
     async def cite(self, citation: dict[str, Any]) -> str:
         """[Claude] The marker a streamed citation adds after the text already sent, once per number there."""
@@ -1056,7 +1056,7 @@ class AgentTurn:
         at = citation.get('at')
         if number is None or not isinstance(at, int) or (at, number) in self.streamed:
             return ''
-        await self.show_source(citation['source'], 'cited_this_turn')
+        await self.show_source(citation['source'])
         self.streamed.append((at, number))
         return _citation_marker(self.partial[:at], number)
 
@@ -1181,7 +1181,7 @@ class AgentTurn:
         ]
         for citation in citations:
             if self.citations.number(citation) is not None:
-                await self.show_source(citation['source'], 'cited_this_turn')
+                await self.show_source(citation['source'])
         text = _marked(content, markers, len(partial))
         chunks = []
         if reasoning:
@@ -1243,9 +1243,9 @@ class AgentTurn:
             if not self.thread_id and (earlier := await _earlier(self.metadata)):
                 body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
             self.emitter = await get_event_emitter(self.metadata)
-            # Earlier turns' sources, so their numbers resolve; flagged so the panel leaves them out.
-            for source in self.citations.sources.values():
-                await self.emit('source', {**source, 'current_turn': False, 'cited_this_turn': False})
+            # Earlier turns' sources, so their numbers resolve; the panel lists only the ones this answer cites.
+            for source_id in self.citations.sources:
+                await self.show_source(source_id)
             self.keep_texts(body['input'].get('texts') or [])
             if not self.thread_id:
                 body = {**body, 'agent': agent}
