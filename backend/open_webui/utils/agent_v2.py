@@ -13,6 +13,7 @@ import time
 import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -112,6 +113,14 @@ def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] 
     return None
 
 
+def _field(element: dict[str, Any], field: str) -> Any:
+    """[Claude] A field of an element; a document without a title goes by its filename, as an attached one does."""
+    value = element.get(field)
+    if field == 'title' and not (isinstance(value, str) and value.strip()):
+        value = element.get('filename')
+    return value
+
+
 def _from_output(binding: str, elements: list[dict[str, Any]]) -> Any:
     """[Claude] `count.<type>`: how many distinct elements of a type; `first.<type>.<field>`: a field of the first."""
     how, _, rest = binding.partition('.')
@@ -119,8 +128,39 @@ def _from_output(binding: str, elements: list[dict[str, Any]]) -> Any:
         return len({element.get('id') for element in elements if element.get('type') == rest})
     if how == 'first':
         kind, _, field = rest.partition('.')
-        return next((element.get(field) for element in elements if element.get('type') == kind), None)
+        return next((_field(element, field) for element in elements if element.get('type') == kind), None)
     return None
+
+
+# [Claude] How a call shows when soev-api declares no status for its tool or the declared one cannot be filled:
+# running, done and failed, each a template the frontend translates. A named variant takes the document's `title`.
+_GENERIC = {
+    'search': ('Searching the knowledge base…', 'Searched the knowledge base', 'Could not search the knowledge bases'),
+    'find_documents': ('Finding documents…', 'Found documents', 'Could not find documents'),
+    'list_documents': ('Listing documents…', 'Listed documents', 'Could not list documents'),
+    'open_document': ('Opening document...', 'Opened document', 'Could not open document'),
+    'web_search': ('Searching the web…', 'Searched the web', 'Could not search the web'),
+    'fetch': ('Fetching web pages...', 'Read web pages', 'Could not read web page'),
+    'reopen': (
+        'Looking back at earlier results...',
+        'Looked back at earlier results',
+        'Could not reopen earlier results',
+    ),
+    'search_live_documents': ('Searching your files...', 'Searched your files', 'Could not search your files'),
+    'list_live_folder': ('Browsing your files...', 'Browsed your files', 'Could not browse your files'),
+    'attach_live_document': ('Opening documents...', 'Opened documents', 'Could not open document'),
+    'search_mail': ('Searching your mail...', 'Searched your mail', 'Could not search your mail'),
+    'read_mail': ('Reading email...', 'Read email', 'Could not read email'),
+    _COMPACTION: (
+        'Summarising the earlier conversation...',
+        'Summarised the earlier conversation',
+        'Could not summarise the earlier conversation',
+    ),
+}
+_NAMED = {'open_document': ('Opening document: {{title}}', 'Opened document: {{title}}')}
+# [Claude] A tool OWUI has no label for still shows its name, but reads as finished once it is.
+_UNKNOWN = ('Running {{tool}}…', 'Ran {{tool}}', 'Could not run {{tool}}')
+_PHASES = ('running', 'done', 'failed')
 
 
 def _web_items(elements: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -152,65 +192,73 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
     raise ValueError('A v2 agent turn requires user_message text')
 
 
-class KnowledgeUnavailable(Exception):
-    """Selected knowledge bases the API does not show the user: `denied` exist but are hidden from them, `deleted`
-    exist for nobody."""
+@dataclass(frozen=True)
+class Skipped:
+    """[Claude] An item of the chat or assistant this turn runs without: `kind` is knowledge, file, note or chat;
+    `reason` gone (deleted), denied (exists, not for this user), failed or processing. `in_chat` is False for an
+    assistant's own knowledge base, which the chat cannot drop."""
 
-    def __init__(self, *, denied: int, deleted: int) -> None:
-        super().__init__(f'{denied + deleted} selected knowledge bases are unavailable')
-        self.denied = denied
-        self.deleted = deleted
+    kind: str
+    reason: str
+    id: str
+    name: str | None = None
+    in_chat: bool = True
 
 
-async def _knowledge(metadata: dict[str, Any]) -> list[dict[str, str]]:
-    """The selected knowledge bases with their current name and description, read at send time.
-
-    Raises:
-        KnowledgeUnavailable: the API does not show the user every selected one.
-    """
+async def _knowledge(metadata: dict[str, Any]) -> tuple[list[dict[str, str]], list[Skipped]]:
+    """The selected knowledge bases with their current name and description, read at send time, and the ones the
+    API does not show the user: deleted for everyone, or hidden from them."""
     keys = _knowledge_keys(metadata)
     if not keys:
-        return []
+        return [], []
     user_id = None if acting.acting_ref() else metadata['user_id']
     described = await Knowledges.describe_knowledge(keys, user_id=user_id)
+    skipped = []
     if missing := [key for key in keys if key not in described]:
         existing = await Knowledges.existing_knowledge(missing)
-        denied = sum(key in existing for key in missing)
-        raise KnowledgeUnavailable(denied=denied, deleted=len(missing) - denied)
-    return [
+        chosen = {
+            item['id']: item.get('name')
+            for item in metadata.get('files') or []
+            if item.get('type') == 'collection' and item.get('id')
+        }
+        skipped = [
+            Skipped('knowledge', 'denied' if key in existing else 'gone', key, chosen.get(key), key in chosen)
+            for key in missing
+        ]
+    knowledge = [
         {'key': key, 'name': name, **({'description': description} if description else {})}
-        for key, (name, description) in ((key, described[key]) for key in keys)
+        for key, (name, description) in ((key, described[key]) for key in keys if key in described)
     ]
+    return knowledge, skipped
 
 
-class AttachmentsUnavailable(Exception):
-    """[Claude] Attached files the agent cannot read: each name with why (`gone`, `processing`, `failed`)."""
-
-    def __init__(self, files: list[tuple[str, str]]) -> None:
-        super().__init__(f'{len(files)} attached files are unavailable')
-        self.files = files
+async def _knowledge_document_reason(knowledge_id: str, file_id: str, user_id: str | None) -> str:
+    """[Claude] Why a KB-picked document cannot be read: still landing or failed on its File row, denied while its
+    KB exists but not for the user, else gone."""
+    file = await Files.get_file_by_id(file_id)
+    status = (file.meta or {}).get('status') if file is not None else None
+    if status in ('processing', 'failed'):
+        return status
+    if user_id is not None and await Knowledges.existing_knowledge([knowledge_id]):
+        if not await Knowledges.describe_knowledge([knowledge_id], user_id=user_id):
+            return 'denied'
+    return 'gone'
 
 
 async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     """[Claude] The files attached in the chat, as the turn's `attachments` field; none while nothing is attached.
 
-    The collection is the one the finished upload reported, else where chat uploads go; the agent checks access.
+    The collection is the one the file's own record names (a live document, or an upload the v2 migration ingested),
+    else where chat uploads go; the agent checks access. A chat entry's `collection_name` is never read: a v1 entry
+    names the per-file vector collection `file-<id>`, which soev-api does not have.
     A file picked from a knowledge base (`knowledge_id`) is that KB's document, read there as the user: synced
-    documents have no File row, and an uploaded one's row does not name the KB.
-
-    Raises:
-        AttachmentsUnavailable: a file is gone, still being processed, or failed.
+    documents have no File row, and an uploaded one's row does not name the KB. A file the agent cannot read is
+    left out under `skipped`; a processing one is also noted for the agent.
     """
     attached: list[dict[str, str]] = []
-    unavailable: list[tuple[str, str]] = []
+    unavailable: list[Skipped] = []
     notes: list[str] = []
-    entries = {
-        entry['id']: entry
-        for entry in metadata.get('files') or []
-        if entry.get('type') == 'file'
-        and entry.get('id')
-        and not (entry.get('content_type') or '').startswith('image/')
-    }
+    entries = {entry['id']: entry for entry in metadata.get('files') or [] if ingest.is_chat_attachment(entry)}
     user_id = None if acting.acting_ref() else metadata['user_id']
     for file_id, entry in entries.items():
         if knowledge_id := entry.get('knowledge_id'):
@@ -219,10 +267,9 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
             if document is not None:
                 attached.append({'collection_key': knowledge_id, 'file_id': file_id, 'name': name})
                 continue
-            # Not landed yet: an upload still being ingested into the KB keeps its status on the File row.
-            file = await Files.get_file_by_id(file_id)
-            status = (file.meta or {}).get('status') if file is not None else None
-            unavailable.append((name, status if status in ('processing', 'failed') else 'gone'))
+            unavailable.append(
+                Skipped('file', await _knowledge_document_reason(knowledge_id, file_id, user_id), file_id, name)
+            )
             continue
         file = await Files.get_file_by_id(file_id)
         name = entry.get('name') or (file.filename if file is not None else file_id)
@@ -233,20 +280,19 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
                 if status == 'processing':
                     notes.append(f'still processing: {name}')
             else:
-                unavailable.append((name, status))
+                unavailable.append(Skipped('file', status or 'gone', file_id, name))
             continue
-        key = (
-            (file.meta or {}).get('collection_name')
-            or entry.get('collection_name')
-            or ingest.attachments_collection_key(file.user_id)
-        )
+        key = (file.meta or {}).get('collection_name') or ingest.attachments_collection_key(file.user_id)
         item = {'collection_key': key, 'file_id': file_id, 'name': name}
         if (file.meta or {}).get('source'):
             item['document_ref'] = file.meta['source']['ref']
         attached.append(item)
-    if unavailable:
-        raise AttachmentsUnavailable(unavailable)
-    return {**({'attachments': attached} if attached else {}), **({'attachment_notes': notes} if notes else {})}
+    notes.extend(f'still processing: {item.name}' for item in unavailable if item.reason == 'processing')
+    return {
+        **({'attachments': attached} if attached else {}),
+        **({'attachment_notes': notes} if notes else {}),
+        **({'skipped': unavailable} if unavailable else {}),
+    }
 
 
 # [Gradient] The most characters of a note or chat the agent takes (its `MAX_CHARACTERS`); `length` says how much
@@ -309,10 +355,21 @@ async def _earlier(metadata: dict[str, Any]) -> list[str]:
     return _conversation(chat, parent_id) if chat is not None else []
 
 
-async def _texts(entries: list[dict[str, Any]], user_id: str) -> list[dict[str, Any]]:
-    """[Gradient] Read attached notes and chats with the same grants as upstream retrieval."""
+async def _drop_chat_files(chat_id: str, ids: list[str]) -> None:
+    """[Claude] Remove entries from the chat's own `files`, the selection every next turn sends; the messages that
+    attached them keep their record."""
+    chat = await Chats.get_chat_by_id(chat_id)
+    files = (chat.chat.get('files') or []) if chat is not None else []
+    kept = [entry for entry in files if not (isinstance(entry, dict) and entry.get('id') in ids)]
+    if len(kept) != len(files):
+        await Chats.update_chat_by_id(chat_id, {'files': kept}, touch=False)
+
+
+async def _texts(entries: list[dict[str, Any]], user_id: str) -> tuple[list[dict[str, Any]], list[Skipped]]:
+    """[Gradient] Read attached notes and chats with the same grants as upstream retrieval; the ones deleted or not
+    readable by the user are left out."""
     if not entries:
-        return []
+        return [], []
     user = await Users.get_user_by_id(user_id)
     texts, unavailable = [], []
     for entry in {(entry['type'], entry.get('id')): entry for entry in entries}.values():
@@ -349,7 +406,8 @@ async def _texts(entries: list[dict[str, Any]], user_id: str) -> list[dict[str, 
             folder = await Folders.get_folder_by_id(item.folder_id)
             allowed = folder and await has_folder_access(user.id, folder, 'read', db=None)
         if not allowed:
-            unavailable.append((entry.get('name') or item_id or kind, 'gone'))
+            name = entry.get('name') or (item.title if item else None) or item_id or kind
+            unavailable.append(Skipped(kind, 'denied' if item else 'gone', item_id or '', name))
             continue
         text = item.data.get('content', {}).get('md', '') if kind == 'note' else _chat_text(item)
         title = item.title or entry.get('name') or ('Notitie' if kind == 'note' else 'Chat')
@@ -362,9 +420,7 @@ async def _texts(entries: list[dict[str, Any]], user_id: str) -> list[dict[str, 
                 'length': len(text),
             }
         )
-    if unavailable:
-        raise AttachmentsUnavailable(unavailable)
-    return texts
+    return texts, unavailable
 
 
 def _urls(metadata: dict[str, Any]) -> dict[str, list[str]]:
@@ -553,52 +609,97 @@ async def _documents_allowed(user_id: str) -> bool:
     )
 
 
-def _unavailable(unavailable: KnowledgeUnavailable, language: str | None) -> dict[str, Any]:
-    """[Claude] Counts, never names: the name of a knowledge base the user cannot read may itself be confidential.
-    A deleted one is only to be removed; one hidden from the user may need their admin."""
-    dutch = (language or '').lower().startswith('nl')
-    parts = []
-    if unavailable.deleted:
-        parts.append(
-            f'{unavailable.deleted} van de kennisbanken bij deze assistent of chat bestaat niet meer. '
-            'Haal ze uit de chat en verstuur je bericht opnieuw.'
-            if dutch
-            else f'{unavailable.deleted} of the knowledge bases on this assistant or chat no longer exist. '
-            'Remove them from the chat and send your message again.'
-        )
-    if unavailable.denied:
-        parts.append(
-            f'Je hebt geen toegang tot {unavailable.denied} van de kennisbanken bij deze assistent of chat. '
-            'Haal ze uit de chat, of vraag je beheerder om toegang.'
-            if dutch
-            else f"You don't have access to {unavailable.denied} of the knowledge bases on this assistant or chat. "
-            'Remove them from the chat, or ask your admin for access.'
-        )
-    return {'error': {'code': 'knowledge_unavailable', 'message': ' '.join(parts)}}
-
-
+# [Claude] What a notice above the answer calls a skipped item, by language: named, or unnamed.
+_SUBJECTS = {
+    'en': {
+        'knowledge': ("Knowledge base '{name}'", 'A knowledge base'),
+        'file': ("File '{name}'", 'A file'),
+        'note': ("Note '{name}'", 'A note'),
+        'chat': ("Chat '{name}'", 'A chat'),
+    },
+    'nl': {
+        'knowledge': ("Kennisbank '{name}'", 'Een kennisbank'),
+        'file': ("Bestand '{name}'", 'Een bestand'),
+        'note': ("Notitie '{name}'", 'Een notitie'),
+        'chat': ("Chat '{name}'", 'Een chat'),
+    },
+}
 _WHY = {
-    'en': {'gone': 'no longer available', 'processing': 'still being processed', 'failed': 'could not be processed'},
-    'nl': {'gone': 'niet meer beschikbaar', 'processing': 'wordt nog verwerkt', 'failed': 'kon niet worden verwerkt'},
+    'en': {
+        'gone': '{subject} no longer exists and was removed from this chat.',
+        'denied': '{subject} is not accessible and was skipped.',
+        'failed': '{subject} could not be processed and was skipped.',
+        'processing': '{subject} is still being processed and was skipped this time.',
+    },
+    'nl': {
+        'gone': '{subject} bestaat niet meer en is uit deze chat gehaald.',
+        'denied': '{subject} is niet toegankelijk en is overgeslagen.',
+        'failed': '{subject} kon niet worden verwerkt en is overgeslagen.',
+        'processing': '{subject} wordt nog verwerkt en is deze keer overgeslagen.',
+    },
+}
+# [Claude] Knowledge bases the user cannot see are only counted: their names may themselves be confidential. An
+# assistant's own deleted one cannot be dropped from the chat, so it is counted as skipped.
+_COUNTED = {
+    'en': {
+        ('denied', True): (
+            '{n} knowledge base in this chat is not accessible and was skipped.',
+            '{n} knowledge bases in this chat are not accessible and were skipped.',
+        ),
+        ('denied', False): (
+            '{n} knowledge base of this assistant is not accessible and was skipped.',
+            '{n} knowledge bases of this assistant are not accessible and were skipped.',
+        ),
+        ('gone', False): (
+            '{n} knowledge base of this assistant no longer exists and was skipped.',
+            '{n} knowledge bases of this assistant no longer exist and were skipped.',
+        ),
+    },
+    'nl': {
+        ('denied', True): (
+            '{n} kennisbank in deze chat is niet toegankelijk en is overgeslagen.',
+            '{n} kennisbanken in deze chat zijn niet toegankelijk en zijn overgeslagen.',
+        ),
+        ('denied', False): (
+            '{n} kennisbank van deze assistent is niet toegankelijk en is overgeslagen.',
+            '{n} kennisbanken van deze assistent zijn niet toegankelijk en zijn overgeslagen.',
+        ),
+        ('gone', False): (
+            '{n} kennisbank van deze assistent bestaat niet meer en is overgeslagen.',
+            '{n} kennisbanken van deze assistent bestaan niet meer en zijn overgeslagen.',
+        ),
+    },
 }
 
 
-def _unattached(files: list[tuple[str, str]], language: str | None) -> dict[str, Any]:
-    """[Claude] Names each file: the user attached it, so its name tells them nothing new."""
-    dutch = (language or '').lower().startswith('nl')
-    why = _WHY['nl' if dutch else 'en']
-    listed = ', '.join(f'{name} ({why[reason]})' for name, reason in files)
-    if dutch:
-        message = (
-            f'Deze bijlagen kan de assistent niet lezen: {listed}. '
-            'Verwijder ze onder Besturingselementen → Bestanden en verstuur je bericht opnieuw.'
-        )
-    else:
-        message = (
-            f"The assistant can't read these attached files: {listed}. "
-            'Remove them under Controls → Files and send your message again.'
-        )
-    return {'error': {'code': 'attachments_unavailable', 'message': message}}
+def _notices(skipped: list[Skipped], language: str | None) -> list[str]:
+    """[Claude] One line per item this turn runs without, in the UI's language, shown above the answer. Names come
+    from the chat's own entries; a knowledge base is named only when it was deleted from this chat."""
+    lang = 'nl' if (language or '').lower().startswith('nl') else 'en'
+    notices = []
+    for (reason, in_chat), templates in _COUNTED[lang].items():
+        count = sum(item.kind == 'knowledge' and (item.reason, item.in_chat) == (reason, in_chat) for item in skipped)
+        if count:
+            notices.append(templates[count != 1].format(n=count))
+    for item in skipped:
+        if item.kind == 'knowledge' and (item.reason, item.in_chat) != ('gone', True):
+            continue
+        named, unnamed = _SUBJECTS[lang][item.kind]
+        subject = named.format(name=item.name) if item.name else unnamed
+        notices.append(_WHY[lang][item.reason].format(subject=subject))
+    return notices
+
+
+def _skipped_notes(skipped: list[Skipped]) -> list[str]:
+    """[Claude] What the agent is told of the items left out, so it does not answer as if it had read them."""
+    notes = [
+        f'not available, left out: {item.name or item.kind}'
+        for item in skipped
+        if item.kind != 'knowledge' and item.reason != 'processing'
+    ]
+    if count := sum(item.kind == 'knowledge' for item in skipped):
+        notes.append(f'{count} selected knowledge base{"s" if count != 1 else ""} not available, left out')
+    return notes
 
 
 def _knowledge_keys(metadata: dict[str, Any]) -> list[str]:
@@ -884,6 +985,28 @@ class AgentTurn:
         self.answered_model: str | None = None
         self.attached_files: dict[str, dict] = {}
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
+        # [Claude] The lines shown above the answer for the items this turn runs without, and the chat entries
+        # dropped because they were deleted.
+        self.notices: list[str] = []
+        self.removed: list[str] = []
+
+    def left_out(self, skipped: list[Skipped]) -> None:
+        self.notices = _notices(skipped, self.metadata.get('user_language'))
+        gone = (item.id for item in skipped if item.reason == 'gone' and item.in_chat and item.id)
+        self.removed = list(dict.fromkeys(gone))
+
+    async def notify(self) -> None:
+        """[Claude] Show the notices on the answer and drop deleted items from the chat, so the next turn does not
+        send them again; the frontend drops them from its selection too."""
+        if not self.notices:
+            return
+        chat_id, message_id = self.metadata.get('chat_id'), self.metadata.get('message_id')
+        if chat_id and not is_temporary_chat_id(chat_id):
+            if self.removed:
+                await _drop_chat_files(chat_id, self.removed)
+            if message_id:
+                await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, {'notices': self.notices})
+        await self.emit('chat:message:notices', {'notices': self.notices, 'removed': self.removed})
 
     def path(self, operation: str = '') -> str:
         return f'{_ROOT}/{quote(self.thread_id or "", safe="")}' + (f'/{operation}' if operation else '')
@@ -933,6 +1056,13 @@ class AgentTurn:
                     'properties': {'title': entry['title'], 'source_url': url},
                 }
             )
+
+    def keep_attachments(self, attachments: list[dict[str, Any]]) -> None:
+        """[Claude] Know the document the agent makes of each attached file, `<collection_key>/<file_id>` by its
+        filename, so a call opening one names it before any output shows it; a document already seen stays."""
+        for item in attachments:
+            document_id = f'{item["collection_key"]}/{item["file_id"]}'
+            self.elements.setdefault(document_id, {'type': 'document', 'id': document_id, 'filename': item['name']})
 
     async def keep(self, output: dict[str, Any]) -> list[dict[str, Any]]:
         """[Claude] Remember a tool output's elements, and number each text the agent read; the panel entries of
@@ -1039,26 +1169,30 @@ class AgentTurn:
         """The tool's declared `running` status, `done` once there is an `output`, or `failed` when that output is
         an error; else a generic line."""
         # The action names the tool: the frontend lays a turn out as tool activity only for statuses with one.
-        # A template like the declared ones, so the frontend translates it.
-        generic = (
-            {'action': name, 'description': 'Searching the knowledge base…'}
-            if name == 'search'
-            else {'action': name, 'description': 'Running {{tool}}…', 'tool': name}
-        )
-        phase = 'running' if output is None else 'done'
-        if output is not None and output.get('error') is not None:
-            phase = 'failed'
-            generic = {'action': name, 'description': 'Could not run {{tool}}', 'tool': name}
+        phase = 'running' if output is None else 'failed' if output.get('error') is not None else 'done'
         declared = (self.tool_statuses.get(name) or {}).get(phase)
         filled = (
             _filled(declared, self.tool_params(declared, arguments, output)) if isinstance(declared, dict) else None
         )
-        status = {'action': name, **filled} if filled else generic
+        status = {'action': name, **filled} if filled else self.generic_status(name, phase, arguments, output)
         if name == 'search_mail':
             status = mail_search_status(status, arguments)
         if items := _web_items(self.touched(arguments, output)):
             status['items'] = items
         return status
+
+    def generic_status(self, name: str, phase: str, arguments: dict, output: dict | None) -> dict[str, Any]:
+        """[Claude] The line OWUI knows for a tool, a template the frontend translates: a readable label, naming the
+        opened document where it is known."""
+        index = _PHASES.index(phase)
+        if name in _NAMED and phase != 'failed':
+            documents = [element for element in self.touched(arguments, output) if element.get('type') == 'document']
+            titles = [title for element in documents if isinstance(title := _field(element, 'title'), str)]
+            if titles and titles[0].strip():
+                return {'action': name, 'description': _NAMED[name][index], 'title': titles[0]}
+        if name in _GENERIC:
+            return {'action': name, 'description': _GENERIC[name][index]}
+        return {'action': name, 'description': _UNKNOWN[index], 'tool': name}
 
     def touched(self, arguments: dict, output: dict | None) -> list[dict[str, Any]]:
         """[Claude] The elements a call reads: its output's once it lands, else the ones its arguments name."""
@@ -1086,7 +1220,7 @@ class AgentTurn:
                 argument, _, field = rest.partition('.')
                 named = arguments.get(argument)
                 names = named if isinstance(named, list) else [named]
-                values = [(self.elements.get(name) or {}).get(field) for name in names if isinstance(name, str)]
+                values = [_field(self.elements.get(name) or {}, field) for name in names if isinstance(name, str)]
                 value = ', '.join(
                     str(item) for item in values if isinstance(item, str | int | float) and str(item).strip()
                 )
@@ -1341,13 +1475,15 @@ class AgentTurn:
     async def run(self, body: dict, agent: str | None) -> AsyncIterator[dict[str, Any]]:
         self.model = body.get('model')
         try:
+            self.emitter = await get_event_emitter(self.metadata)
+            await self.notify()
             await identity.ensure_link(self.as_user, self.client)
             self.tool_statuses = await _tool_statuses(self.client)
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()
+            self.keep_attachments(body['input'].get('attachments') or [])
             if not self.thread_id and (earlier := await _earlier(self.metadata)):
                 body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
-            self.emitter = await get_event_emitter(self.metadata)
             # Earlier turns' sources, so their numbers resolve; the panel lists only the ones this answer cites.
             for source_id in self.citations.sources:
                 await self.show_source(source_id)
@@ -1421,23 +1557,22 @@ async def _sent(
         )
         return _refused({'error': {'code': 'attachments_unavailable', 'message': message}})
     try:
-        knowledge = await _knowledge(metadata)
+        knowledge, skipped = await _knowledge(metadata)
         attachments = await _attachments(metadata)
-        texts = await _texts(entries, metadata['user_id'])
+        texts, skipped_texts = await _texts(entries, metadata['user_id'])
         images = await _images(metadata, turn.as_user)
-    except KnowledgeUnavailable as unavailable:
-        return _refused(_unavailable(unavailable, metadata.get('user_language')))
-    except AttachmentsUnavailable as unavailable:
-        return _refused(_unattached(unavailable.files, metadata.get('user_language')))
     except ImagesUnavailable as unavailable:
         return _refused(_unimaged(unavailable, metadata.get('user_language')))
+    skipped += attachments.pop('skipped', []) + skipped_texts
+    if skipped:
+        turn.left_out(skipped)
     tools = _tools(
         metadata,
         await _web_search_allowed(metadata['user_id']),
         await _live_documents_allowed(),
         await _live_mail_allowed(),
     )
-    notes = attachments.pop('attachment_notes', [])
+    notes = attachments.pop('attachment_notes', []) + _skipped_notes(skipped)
     collection = {}
     references = any(entry.get('attached_by') or entry.get('source') for entry in metadata.get('files') or [])
     if tools['tools']['search_live_documents'] != 'off' or references:

@@ -31,6 +31,15 @@ def is_attachments_collection(key: str) -> bool:
     return key.startswith(ATTACHMENTS_PREFIX)
 
 
+def is_chat_attachment(entry: dict) -> bool:
+    """A chat `files` entry the agent reads as a document; an image goes to the model as pixels instead."""
+    return (
+        entry.get('type') == 'file'
+        and bool(entry.get('id'))
+        and not (entry.get('content_type') or '').startswith('image/')
+    )
+
+
 async def _as_user(user_id: str, client: SoevClient) -> str:
     ref = f'owui:user:{user_id}'
     await identity.ensure_link(ref, client)

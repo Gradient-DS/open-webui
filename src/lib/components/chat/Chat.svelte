@@ -7,6 +7,7 @@
 	} from '$lib/utils/composerPreferences';
 	import { type ToolState } from '$lib/utils/toolState';
 	import { getHistorySide } from '$lib/utils/dataSeparation';
+	import { turnNotices, withoutRemoved } from '$lib/utils/turnNotices';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
 	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
@@ -1486,6 +1487,11 @@
 								(!previous.has(file.id) || chatFiles.some((item) => item.id === file.id))
 						)
 					);
+				} else if (type === 'chat:message:notices') {
+					// [Claude] Chat items the v2 turn ran without; deleted ones also leave the chat's selection.
+					const { notices, removed } = turnNotices(data);
+					message.notices = notices;
+					chatFiles = withoutRemoved(chatFiles, removed);
 				} else if (type === 'action_required') {
 					message.action_required = data;
 				} else if (type === 'chat:message:tasks') {

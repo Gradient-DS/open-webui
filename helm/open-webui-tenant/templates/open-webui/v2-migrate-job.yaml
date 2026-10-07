@@ -3,8 +3,8 @@
 {{- if not .Values.soevApi.url }}
 {{- fail "soevApi.migrate.enabled needs soevApi.url" }}
 {{- end }}
-{{- if not (has $migrate.mode (list "apply" "restore" "models")) }}
-{{- fail "soevApi.migrate.mode must be apply, restore or models" }}
+{{- if not (has $migrate.mode (list "apply" "restore" "models" "uploads")) }}
+{{- fail "soevApi.migrate.mode must be apply, restore, models or uploads" }}
 {{- end }}
 {{- if and (eq $migrate.mode "apply") (not $migrate.config) }}
 {{- fail "soevApi.migrate.config must hold the v2 config key set" }}
@@ -64,6 +64,9 @@ spec:
           {{- if eq $migrate.mode "models" }}
           # [Gradient] Only the stored model ids, under this id: no config, ingest or sign-out.
           command: ["python", "-m", "open_webui.soev.migrate", "--apply", "--models"]
+          {{- else if eq $migrate.mode "uploads" }}
+          # [Gradient] Only the uploads stored chats attach, into their owners' attachments collections.
+          command: ["python", "-m", "open_webui.soev.migrate", "--apply", "--uploads"]
           {{- else }}
           command: ["python", "-m", "open_webui.soev.migrate", "--{{ $migrate.mode }}"]
           {{- end }}

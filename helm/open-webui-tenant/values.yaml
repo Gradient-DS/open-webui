@@ -720,6 +720,7 @@ soevApi:
       tag: ""
     # apply | restore (puts back the config snapshot and model ids) | models (only rewrites
     # stored model ids by modelMap, e.g. after catalog ids are renamed; restore with the same id)
+    # | uploads (only ingests the uploads stored chats attach, for tenants applied before that step)
     mode: apply
     id: v2  # Snapshot, step markers and the one-time sign-out are kept per id.
     # SOEV_V2_CONFIG: exactly these keys (the migration refuses others).

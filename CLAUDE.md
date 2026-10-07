@@ -73,8 +73,12 @@ model settings are not used. Details: `docs/agent-api-deployment.md`.
 A turn the agent refuses arrives as `invalid_field` with constraint `chat:<reason>`; `utils/agent_v2.py`
 (`_REFUSALS`) shows a nl/en message per reason, with the agent's detail only where it names what to fix
 (unreadable file names, the missing tool capability), and the generic text when no known reason is given.
-The log line carries status, code and constraint, never the detail. Before sending, a selected knowledge base
-the service cannot read either is reported as deleted; one only the user cannot read as no access (counts only).
+The log line carries status, code and constraint, never the detail. Before sending, an unavailable chat item never
+blocks the turn: it runs without it and the answer shows a nl/en notice (`chat:message:notices`, stored as
+`message.notices`, rendered by `ResponseMessage/TurnNotices.svelte`). A deleted knowledge base, file, note or chat
+is named and dropped from the chat's `files` (backend and the frontend's `chatFiles`); one that exists but is not
+accessible stays, and knowledge bases are then only counted. Failed and still-processing files are skipped with a
+notice too; images keep refusing (`_unimaged`).
 
 ## Live document attachments
 
@@ -139,7 +143,11 @@ completed document as its owning user and fills content_type before marking it r
 MSAL uses one organisational client and caches in-flight initialization across picker
 preparation and clicks. Personal Microsoft accounts and browser byte downloads are unsupported.
 
-Tool summaries use the agent's declared failed status when ToolOutput.error is set (fallback "Could not run {{tool}}"), otherwise done, including partial successes and already-attached documents.
+Tool summaries use the agent's declared failed status when ToolOutput.error is set, otherwise done, including partial successes and already-attached documents.
+Where no declared status can be filled, `agent_v2._GENERIC` gives each known tool a translated running/done/failed label
+(open_document names its document: "Opening document: {{title}}"); only an unknown tool shows its name
+("Running {{tool}}…", "Ran {{tool}}", "Could not run {{tool}}"). A document without a title goes by its filename,
+and the documents of attached files are known by the id the agent gives them (`<collection_key>/<file_id>`).
 
 OneDrive search uses the cloud-and-magnifier icon in its menu row, pinned button
 and tooltip. The picker retains the plain cloud; pinned tooltip labels are
