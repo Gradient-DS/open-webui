@@ -295,52 +295,106 @@ def seed_hidden_collection(api: FakeSoevApi, key: str, name: str) -> None:
     api.collections[key].update(visibility='restricted', principals=['owui:service:webui'])
 
 
-# Per language: what a deleted knowledge base says, and what one hidden from the user says.
-DELETED = {'en-US': 'no longer exist', 'nl-NL': 'bestaat niet meer'}
-DENIED = {'en-US': 'ask your admin', 'nl-NL': 'vraag je beheerder'}
+def notices(chat: Chat) -> list[dict]:
+    """The turn's notices events: the lines above the answer and the chat entries dropped."""
+    return [event['data'] for event in chat.socket if event['type'] == 'chat:message:notices']
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
 @pytest.mark.parametrize(
-    ('hidden', 'gone'),
-    [(['kb-secret'], []), ([], ['kb-gone']), (['kb-secret', 'kb-private'], ['kb-gone'])],
+    'language,expected',
+    [
+        (
+            'nl-NL',
+            [
+                '2 kennisbanken in deze chat zijn niet toegankelijk en zijn overgeslagen.',
+                "Kennisbank 'Oud' bestaat niet meer en is uit deze chat gehaald.",
+            ],
+        ),
+        (
+            'en-US',
+            [
+                '2 knowledge bases in this chat are not accessible and were skipped.',
+                "Knowledge base 'Oud' no longer exists and was removed from this chat.",
+            ],
+        ),
+    ],
 )
-async def test_unavailable_knowledge_refuses_by_count_telling_deleted_from_no_access(
-    chat: Chat, language: str, hidden: list[str], gone: list[str]
+async def test_unavailable_knowledge_is_left_out_with_a_notice_naming_only_the_deleted(
+    chat: Chat, language: str, expected: list[str]
 ) -> None:
     seed_collection(chat.api, 'kb-a', 'Contracten')
-    for key in hidden:
+    for key in ('kb-secret', 'kb-private'):
         seed_hidden_collection(chat.api, key, 'Integriteitsonderzoek')
     chunks = await chat.turn(
         'next',
         'a1',
         files=[
             {'type': 'collection', 'id': 'kb-a'},
-            *({'type': 'collection', 'id': key, 'name': 'Integriteitsonderzoek'} for key in hidden),
-            *({'type': 'collection', 'id': key, 'name': 'Oud'} for key in gone),
+            {'type': 'collection', 'id': 'kb-secret', 'name': 'Integriteitsonderzoek'},
+            {'type': 'collection', 'id': 'kb-private', 'name': 'Integriteitsonderzoek'},
+            {'type': 'collection', 'id': 'kb-gone', 'name': 'Oud'},
         ],
         user_language=language,
     )
-    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
-    assert refusal['code'] == 'knowledge_unavailable'
-    message = refusal['message']
-    assert (DELETED[language] in message) == bool(gone)
-    assert (DENIED[language] in message) == bool(hidden)
-    if gone:
-        assert f'{len(gone)} ' in message
-    if hidden:
-        assert f'{len(hidden)} ' in message
-    assert not any(name in message for name in ('kb-secret', 'kb-private', 'Integriteitsonderzoek', 'kb-gone', 'Oud'))
-    assert chat.mutations() == []
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['knowledge'] == [{'key': 'kb-a', 'name': 'Contracten'}]
+    assert sent['text'] == 'next\n\nAttachment status:\n3 selected knowledge bases not available, left out'
+    assert notices(chat) == [{'notices': expected, 'removed': ['kb-gone']}]
+    assert chat.messages['chat', 'a1']['notices'] == expected
+    assert not any('Integriteitsonderzoek' in line or 'kb-' in line for line in expected)
 
 
 @pytest.mark.asyncio
-async def test_the_refusal_speaks_the_users_language(chat: Chat) -> None:
-    gone = [{'type': 'collection', 'id': 'kb-gone'}]
-    english = await chat.turn('next', 'a1', files=gone, user_language='en-US')
-    dutch = await chat.turn('next', 'a2', files=gone, user_language='nl-NL')
-    assert english[0]['error']['message'] != dutch[0]['error']['message']
+async def test_an_assistants_own_unavailable_knowledge_is_counted_and_stays(chat: Chat) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    seed_hidden_collection(chat.api, 'kb-secret', 'Geheim')
+    await chat.turn('next', 'a1', knowledge=[{'id': 'kb-a'}, {'id': 'kb-secret'}, {'id': 'kb-gone'}])
+    assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-a', 'name': 'Contracten'}]
+    assert notices(chat) == [
+        {
+            'notices': [
+                '1 knowledge base of this assistant is not accessible and was skipped.',
+                '1 knowledge base of this assistant no longer exists and was skipped.',
+            ],
+            'removed': [],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_item_is_dropped_from_the_chats_selection(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    selection = [
+        {'type': 'collection', 'id': 'kb-gone', 'name': 'Oud'},
+        {'type': 'collection', 'id': 'kb-secret', 'name': 'Geheim'},
+        {'type': 'file', 'id': 'kept'},
+    ]
+    stored = SimpleNamespace(chat={'files': selection})
+    monkeypatch.setattr(Chats, 'get_chat_by_id', AsyncMock(return_value=stored))
+    monkeypatch.setattr(Chats, 'update_chat_by_id', AsyncMock())
+    seed_hidden_collection(chat.api, 'kb-secret', 'Geheim')
+    await chat.turn('next', 'a1', files=selection[:2])
+    Chats.update_chat_by_id.assert_awaited_once_with('chat', {'files': selection[1:]}, touch=False)
+
+
+@pytest.mark.asyncio
+async def test_a_temporary_chat_only_shows_its_notices(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(socket_main, 'SESSION_POOL', {'sid-1': {}})
+    monkeypatch.setattr(socket_main, 'TEMPORARY_AGENT_THREADS', {})
+    monkeypatch.setattr(Chats, 'update_chat_by_id', AsyncMock())
+    await chat.turn('next', 'a1', files=[{'type': 'collection', 'id': 'kb-gone'}], chat_id='temporary:sid-1:chat')
+    Chats.update_chat_by_id.assert_not_awaited()
+    assert not chat.messages
+    assert notices(chat)[0]['removed'] == ['kb-gone']
+
+
+@pytest.mark.asyncio
+async def test_a_turn_without_unavailable_items_shows_no_notice(chat: Chat) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    await chat.turn('next', 'a1', files=[{'type': 'collection', 'id': 'kb-a'}])
+    assert notices(chat) == []
+    assert 'notices' not in chat.messages['chat', 'a1']
 
 
 def stored_files(monkeypatch: pytest.MonkeyPatch, **statuses: str | None) -> None:
@@ -430,27 +484,48 @@ async def test_a_file_picked_from_a_knowledge_base_is_sent_as_that_kb_document(
 
 
 @pytest.mark.asyncio
-async def test_a_knowledge_base_file_the_user_cannot_read_there_refuses_the_turn_by_name(
+async def test_a_knowledge_base_file_the_user_cannot_read_there_is_left_out_with_a_notice(
     chat: Chat, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seed_collection(chat.api, 'kb-a', 'Contracten')
+    seed_hidden_collection(chat.api, 'kb-secret', 'Geheim')
     chat.api.add_document('kb-a', 'elsewhere', filename='elders.pdf')
+    chat.api.add_document('kb-a', 'ok', filename='goed.pdf')
+    chat.api.add_document('kb-secret', 'hidden', filename='verborgen.pdf')
     stored_files(monkeypatch, busy='processing')
     chunks = await chat.turn(
         'question',
         'a1',
         files=[
+            {'type': 'file', 'id': 'ok', 'name': 'goed.pdf', 'knowledge_id': 'kb-a'},
             {'type': 'file', 'id': 'removed', 'name': 'weg.pdf', 'knowledge_id': 'kb-a'},
             {'type': 'file', 'id': 'elsewhere', 'name': 'elders.pdf', 'knowledge_id': 'kb-gone'},
             {'type': 'file', 'id': 'busy', 'name': 'bezig.pdf', 'knowledge_id': 'kb-a'},
+            {'type': 'file', 'id': 'hidden', 'name': 'verborgen.pdf', 'knowledge_id': 'kb-secret'},
         ],
         user_language='nl-NL',
     )
-    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
-    assert refusal['code'] == 'attachments_unavailable'
-    assert all(name in refusal['message'] for name in ('weg.pdf', 'elders.pdf', 'bezig.pdf'))
-    assert 'niet meer beschikbaar' in refusal['message'] and 'wordt nog verwerkt' in refusal['message']
-    assert chat.mutations() == []
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['attachments'] == [{'collection_key': 'kb-a', 'file_id': 'ok', 'name': 'goed.pdf'}]
+    assert notices(chat) == [
+        {
+            'notices': [
+                "Bestand 'weg.pdf' bestaat niet meer en is uit deze chat gehaald.",
+                "Bestand 'elders.pdf' bestaat niet meer en is uit deze chat gehaald.",
+                "Bestand 'bezig.pdf' wordt nog verwerkt en is deze keer overgeslagen.",
+                "Bestand 'verborgen.pdf' is niet toegankelijk en is overgeslagen.",
+            ],
+            'removed': ['removed', 'elsewhere'],
+        }
+    ]
+    assert sent['text'].splitlines()[2:] == [
+        'Attachment status:',
+        'still processing: bezig.pdf',
+        'not available, left out: weg.pdf',
+        'not available, left out: elders.pdf',
+        'not available, left out: verborgen.pdf',
+    ]
 
 
 @pytest.mark.asyncio
@@ -605,16 +680,22 @@ async def test_attached_chat_uses_folder_read_access(
         assert chat.mutations()[-1][1]['input']['texts'][0]['id'] == 'chat:c1'
         assert not any('error' in chunk for chunk in chunks)
     else:
-        assert chunks[0]['error']['code'] == 'attachments_unavailable'
-        assert 'Shared chat (no longer available)' in chunks[0]['error']['message']
-        assert chat.mutations() == []
+        assert 'texts' not in chat.mutations()[-1][1]['input']
+        assert notices(chat)[0]['notices'] == ["Chat 'Shared chat' is not accessible and was skipped."]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('kind,item_id', [('note', 'n1'), ('chat', 'c1')])
-@pytest.mark.parametrize('reason', ['missing', 'denied', 'unknown-user'])
-async def test_unreadable_text_attachment_refuses_the_whole_turn(
-    chat: Chat, stored_texts: dict, kind: str, item_id: str, reason: str
+@pytest.mark.parametrize('kind,item_id,noun', [('note', 'n1', 'Note'), ('chat', 'c1', 'Chat')])
+@pytest.mark.parametrize(
+    'reason,notice,removed',
+    [
+        ('missing', "{noun} 'Attached title' no longer exists and was removed from this chat.", True),
+        ('denied', "{noun} 'Attached title' is not accessible and was skipped.", False),
+        ('unknown-user', "{noun} 'Attached title' is not accessible and was skipped.", False),
+    ],
+)
+async def test_unreadable_text_attachment_is_left_out_with_a_notice(
+    chat: Chat, stored_texts: dict, kind: str, item_id: str, noun: str, reason: str, notice: str, removed: bool
 ) -> None:
     if reason == 'missing':
         del stored_texts[item_id]
@@ -623,9 +704,11 @@ async def test_unreadable_text_attachment_refuses_the_whole_turn(
     else:
         agent_v2.Users.get_user_by_id.return_value = None
     chunks = await chat.turn('read', 'a1', files=[{'type': kind, 'id': item_id, 'name': 'Attached title'}])
-    assert chunks[0]['error']['code'] == 'attachments_unavailable'
-    assert 'Attached title (no longer available)' in chunks[0]['error']['message']
-    assert chat.mutations() == []
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert 'texts' not in sent
+    assert sent['text'] == 'read\n\nAttachment status:\nnot available, left out: Attached title'
+    assert notices(chat) == [{'notices': [notice.format(noun=noun)], 'removed': [item_id] if removed else []}]
 
 
 @pytest.mark.asyncio
@@ -697,26 +780,37 @@ async def test_ten_notes_and_chats_are_allowed_together(chat: Chat, stored_texts
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
-async def test_attached_files_the_agent_cannot_read_refuse_the_turn_by_name(
+async def test_attached_files_the_agent_cannot_read_are_left_out_with_a_notice(
     chat: Chat, monkeypatch: pytest.MonkeyPatch, language: str
 ) -> None:
     stored_files(monkeypatch, ok='completed', busy='processing', broken='failed')
+    files = [
+        {'type': 'file', 'id': 'ok', 'name': 'goed.pdf'},
+        {'type': 'file', 'id': 'busy', 'name': 'bezig.pdf'},
+        {'type': 'file', 'id': 'broken', 'name': 'kapot.pdf'},
+        {'type': 'file', 'id': 'deleted', 'name': 'weg.pdf'},
+    ]
+    # Attached in this very message too: left out like the chat's earlier files, not refused.
     chunks = await chat.turn(
-        'question',
-        'a1',
-        files=[
-            {'type': 'file', 'id': 'ok', 'name': 'goed.pdf'},
-            {'type': 'file', 'id': 'busy', 'name': 'bezig.pdf'},
-            {'type': 'file', 'id': 'broken', 'name': 'kapot.pdf'},
-            {'type': 'file', 'id': 'deleted', 'name': 'weg.pdf'},
-        ],
-        user_language=language,
+        'question', 'a1', files=files, user_message={'id': 'user-a1', 'content': 'question', 'files': files}
     )
-    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
-    assert refusal['code'] == 'attachments_unavailable'
-    assert all(name in refusal['message'] for name in ('bezig.pdf', 'kapot.pdf', 'weg.pdf'))
-    assert 'goed.pdf' not in refusal['message']
-    assert chat.mutations() == []
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert [item['file_id'] for item in sent['attachments']] == ['ok']
+    expected = {
+        'en-US': [
+            "File 'bezig.pdf' is still being processed and was skipped this time.",
+            "File 'kapot.pdf' could not be processed and was skipped.",
+            "File 'weg.pdf' no longer exists and was removed from this chat.",
+        ],
+        'nl-NL': [
+            "Bestand 'bezig.pdf' wordt nog verwerkt en is deze keer overgeslagen.",
+            "Bestand 'kapot.pdf' kon niet worden verwerkt en is overgeslagen.",
+            "Bestand 'weg.pdf' bestaat niet meer en is uit deze chat gehaald.",
+        ],
+    }
+    await chat.turn('question', 'a2', files=files, user_language=language)
+    assert notices(chat)[-1] == {'notices': expected[language], 'removed': ['deleted']}
 
 
 @pytest.mark.asyncio
@@ -1699,10 +1793,20 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'name,generic',
+    'name,generic,done,failed',
     [
-        ('search', {'description': 'Searching the knowledge base…'}),
-        ('calculate', {'description': 'Running {{tool}}…', 'tool': 'calculate'}),
+        (
+            'search',
+            {'description': 'Searching the knowledge base…'},
+            'Searched the knowledge base',
+            'Could not search the knowledge bases',
+        ),
+        (
+            'calculate',
+            {'description': 'Running {{tool}}…', 'tool': 'calculate'},
+            'Ran {{tool}}',
+            'Could not run {{tool}}',
+        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -1719,7 +1823,7 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
     ],
 )
 async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_its_output(
-    name: str, generic: dict, kind: str, payload: dict
+    name: str, generic: dict, done: str, failed: str, kind: str, payload: dict
 ) -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
@@ -1738,9 +1842,9 @@ async def test_a_tool_call_shows_running_then_done_once_the_model_moves_on_from_
         assert [call.args[0] for call in turn.emitter.call_args_list] == [status]
         await render(turn, ChatEvent('delta', {'text': 'Answer'}))
     answered_call = kind == 'tool_output'
-    ended_status = {'type': 'status', 'data': {**status['data'], 'done': True}}
+    ended_status = {'type': 'status', 'data': {**status['data'], 'description': done, 'done': True}}
     if answered_call and payload.get('error'):
-        ended_status['data'].update(description='Could not run {{tool}}', tool=name)
+        ended_status['data']['description'] = failed
     shown = [call.args[0] for call in turn.emitter.call_args_list if call.args[0]['data'].get('action') != 'summary']
     assert shown == [status] + [ended_status] * answered_call
     assert '<details type="tool_calls"' in content(started)
@@ -1845,7 +1949,10 @@ async def test_parallel_tools_each_show_once() -> None:
         'call_id': 'c2',
         'done': False,
     }
-    ended = [{**calculate, 'done': True}, {**search, 'done': True}]
+    ended = [
+        {**calculate, 'description': 'Ran {{tool}}', 'done': True},
+        {**search, 'description': 'Searched the knowledge base', 'done': True},
+    ]
     assert [call.args[0]['data'] for call in turn.emitter.call_args_list] == [search, calculate, *ended]
 
 
@@ -2364,20 +2471,59 @@ async def test_opening_a_document_names_it_by_the_title_already_received(declare
 
 
 @pytest.mark.asyncio
-async def test_a_tool_without_a_declared_status_shows_the_generic_line(declared: Chat) -> None:
-    declared.api.chat.turns = [
-        [call('list_documents'), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]
-    ]
+@pytest.mark.parametrize(
+    'name,running,done',
+    [
+        ('list_documents', {'description': 'Listing documents…'}, {'description': 'Listed documents'}),
+        ('calculate', {'description': 'Running {{tool}}…', 'tool': 'calculate'}, {'description': 'Ran {{tool}}'}),
+    ],
+)
+async def test_a_tool_without_a_declared_status_shows_its_label_and_reads_finished_when_done(
+    declared: Chat, name: str, running: dict, done: dict
+) -> None:
+    declared.api.chat.turns = [[call(name), ('tool_output', {'call_id': 'c1'}), ('model_output', {'content': 'done'})]]
     await declared.turn('q', 'a1')
 
-    generic = {
-        'action': 'list_documents',
-        'description': 'Running {{tool}}…',
-        'tool': 'list_documents',
-        'call_id': 'c1',
-        'done': False,
-    }
-    assert statuses(declared) == [generic, {**generic, 'done': True}]
+    shown = {'action': name, 'call_id': 'c1', **running, 'done': False}
+    assert statuses(declared) == [shown, {**shown, **done, 'done': True}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('declares', [True, False])
+async def test_opening_an_attached_document_names_it_while_running_and_once_read(
+    declared: Chat, monkeypatch: pytest.MonkeyPatch, declares: bool
+) -> None:
+    if not declares:
+        monkeypatch.setattr(agent_v2, 'TOOL_STATUS_CACHE', {'expires_at': float('inf'), 'statuses': {}})
+    stored_files(monkeypatch, f1='completed')
+    attached = f'{ingest.attachments_collection_key("alice")}/f1'
+    # The agent's own document of an attached file has only its filename; the open call names it by that id.
+    opened = {'type': 'document', 'id': attached, 'filename': 'rapport.pdf'}
+    read = {'type': 'document-text', 'id': f'{attached}#0-4', 'ref': attached, 'text': 'body', 'start': 0, 'end': 4}
+    declared.api.chat.turns = [
+        [call('open_document', document=attached), found(opened, read, call_id='c1'), answered('Samenvatting')]
+    ]
+    chunks = await declared.turn('vat samen', 'a1', files=[{'type': 'file', 'id': 'f1', 'name': 'rapport.pdf'}])
+
+    if declares:
+        param, running, done = 'doc_title', 'Reading {{doc_title}}...', 'Read {{doc_title}}'
+    else:
+        param, running, done = 'title', 'Opening document: {{title}}', 'Opened document: {{title}}'
+    assert [
+        (status['description'], status[param], status['done'])
+        for status in statuses(declared)
+        if status['action'] == 'open_document'
+    ] == [(running, 'rapport.pdf', False), (done, 'rapport.pdf', True)]
+    assert 'open_document' not in content(chunks).split('<summary>')[1].split('</summary>')[0]
+
+
+def test_a_failed_open_never_names_its_tool() -> None:
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.running['c1'] = ('open_document', {'document': 'missing'})
+    turn.end_tool({'call_id': 'c1', 'error': 'not_found'})
+    assert turn.settling == [
+        {'action': 'open_document', 'description': 'Could not open document', 'call_id': 'c1', 'done': True}
+    ]
 
 
 @pytest.mark.asyncio
@@ -3084,7 +3230,7 @@ async def test_web_sources_do_not_infer_provider_from_urls_or_names(monkeypatch)
 
 
 @pytest.mark.parametrize('declared', [True, False])
-def test_list_failure_uses_declared_status_or_generic_fallback(declared):
+def test_list_failure_uses_declared_status_or_the_generic_label(declared):
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
     turn.tool_statuses = {
         'list_live_folder': {
@@ -3100,8 +3246,7 @@ def test_list_failure_uses_declared_status_or_generic_fallback(declared):
             'action': 'list_live_folder',
             'call_id': 'browse',
             'done': True,
-            'description': 'Could not browse your files' if declared else 'Could not run {{tool}}',
-            **({} if declared else {'tool': 'list_live_folder'}),
+            'description': 'Could not browse your files',
         }
     ]
 
