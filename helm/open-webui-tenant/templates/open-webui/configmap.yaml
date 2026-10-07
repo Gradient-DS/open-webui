@@ -171,6 +171,8 @@ data:
   FEATURE_CHAT_OVERVIEW: {{ .Values.openWebui.config.featureChatOverview | quote }}
   FEATURE_NOTES_AI_CONTROLS: {{ .Values.openWebui.config.featureNotesAiControls | quote }}
   FEATURE_VOICE: {{ .Values.openWebui.config.featureVoice | quote }}
+  FEATURE_VOICE_CALL: {{ .Values.openWebui.config.featureVoiceCall | quote }}
+  FEATURE_READ_ALOUD: {{ .Values.openWebui.config.featureReadAloud | quote }}
   FEATURE_CHANGELOG: {{ .Values.openWebui.config.featureChangelog | quote }}
   FEATURE_SYSTEM_PROMPT: {{ .Values.openWebui.config.featureSystemPrompt | quote }}
   FEATURE_MODELS: {{ .Values.openWebui.config.featureModels | quote }}

@@ -271,7 +271,9 @@ openWebui:
     featurePlayground: "False"
     featureChatOverview: "False"
     featureNotesAiControls: "False"
-    featureVoice: "False"
+    featureVoice: "False"  # Dictation (STT); also the master gate for the two below
+    featureVoiceCall: "False"  # Call mode (STT -> model -> TTS loop)
+    featureReadAloud: "False"  # Read-aloud button on answers (TTS)
     featureChangelog: "False"
     featureSystemPrompt: "False"
     featureModels: "True"

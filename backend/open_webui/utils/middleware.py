@@ -80,6 +80,7 @@ from open_webui.socket.main import (
 )
 from open_webui.tasks import clear_response_stream, save_response_stream
 from open_webui.utils.access_control import has_connection_access, has_permission
+from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.ask_user import stage_ask_user_tool_calls
@@ -2958,7 +2959,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # KBs are configured on the model (id, name, type, collection_names).
     raw_knowledge = model.get('info', {}).get('meta', {}).get('knowledge', None)
     if features:
-        if 'voice' in features and features['voice']:
+        # [Gradient] features is client-supplied; call mode is tenant-gated.
+        if 'voice' in features and features['voice'] and is_feature_enabled('voice_call'):
             if await Config.get('task.voice.prompt.enable'):
                 template = await Config.get('task.voice.prompt_template')
                 if not template:

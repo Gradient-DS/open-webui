@@ -2308,6 +2308,8 @@
 	//////////////////////////
 
 	const openCallOverlay = () => {
+		// [Gradient] Tenant gate; covers the ?call=true URL and the desktop call shortcut.
+		if (!isFeatureEnabled('voice_call')) return;
 		setTimeout(() => {
 			showCallOverlay.set(true);
 			showControls.set(true);

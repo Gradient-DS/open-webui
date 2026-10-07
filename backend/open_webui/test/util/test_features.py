@@ -264,6 +264,8 @@ class TestAllFeatureFlags:
             'chat_overview',
             'notes_ai_controls',
             'voice',
+            'voice_call',
+            'read_aloud',
             'changelog',
             'system_prompt',
             'models',

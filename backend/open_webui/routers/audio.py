@@ -51,6 +51,7 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.headers import include_user_info_headers
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.misc import strict_match_mime_type
@@ -562,6 +563,13 @@ _TTS_ENGINES = {
 
 @router.post('/speech')
 async def speech(request: Request, user=Depends(get_verified_user)):
+    # [Gradient] Speech output serves read-aloud and call mode; tenant gates bind admins too.
+    if not (is_feature_enabled('read_aloud') or is_feature_enabled('voice_call')):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Feature 'read_aloud' is not available in your plan",
+        )
+
     engine = await Config.get('audio.tts.engine')
     if engine == '':
         raise HTTPException(

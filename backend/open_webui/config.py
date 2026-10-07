@@ -2971,6 +2971,11 @@ FEATURE_NOTES_AI_CONTROLS = os.environ.get('FEATURE_NOTES_AI_CONTROLS', 'True').
 
 FEATURE_VOICE = os.environ.get('FEATURE_VOICE', 'True').lower() == 'true'
 
+# [Gradient] Sub-gates under FEATURE_VOICE: FEATURE_VOICE alone leaves dictation only.
+FEATURE_VOICE_CALL = os.environ.get('FEATURE_VOICE_CALL', 'True').lower() == 'true'
+
+FEATURE_READ_ALOUD = os.environ.get('FEATURE_READ_ALOUD', 'True').lower() == 'true'
+
 FEATURE_CHANGELOG = os.environ.get('FEATURE_CHANGELOG', 'True').lower() == 'true'
 
 FEATURE_SYSTEM_PROMPT = os.environ.get('FEATURE_SYSTEM_PROMPT', 'True').lower() == 'true'
