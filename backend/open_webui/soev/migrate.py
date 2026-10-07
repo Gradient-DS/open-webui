@@ -2,6 +2,7 @@
 
 python -m open_webui.soev.migrate --apply | --restore | --dry-run. The directory copy
 (identities, groups, collections, folders, cloud schedules) only reads OWUI tables.
+--models with --apply or --dry-run rewrites stored model ids alone, under its own id.
 """
 
 import argparse
@@ -347,7 +348,7 @@ class Options:
     wait_seconds: int = 0
 
 
-def options_from_env(environ=os.environ, *, migration_id: str | None = None) -> Options:
+def options_from_env(environ=os.environ, *, migration_id: str | None = None, models_only: bool = False) -> Options:
     from open_webui.soev.migrate_config import parse_v2_config
     from open_webui.soev.migrate_models import parse_model_map
     from open_webui.soev.migrate_state import MigrationError
@@ -355,10 +356,15 @@ def options_from_env(environ=os.environ, *, migration_id: str | None = None) -> 
     migration_id = migration_id or environ.get('SOEV_V2_MIGRATION_ID')
     if not migration_id:
         raise MigrationError('Set SOEV_V2_MIGRATION_ID or pass --migration-id')
+    # A models-only run switches no config, so it neither needs nor reads SOEV_V2_CONFIG.
+    v2_config = {} if models_only else parse_v2_config(environ.get('SOEV_V2_CONFIG'))
+    model_map = parse_model_map(environ.get('SOEV_V2_MODEL_MAP'))
+    if models_only and not model_map:
+        raise MigrationError('SOEV_V2_MODEL_MAP maps no model ids')
     return Options(
         migration_id=migration_id,
-        v2_config=parse_v2_config(environ.get('SOEV_V2_CONFIG')),
-        model_map=parse_model_map(environ.get('SOEV_V2_MODEL_MAP')),
+        v2_config=v2_config,
+        model_map=model_map,
         ingest_concurrency=_positive_int(environ, 'SOEV_V2_INGEST_CONCURRENCY', 4),
         wait_seconds=_positive_int(environ, 'SOEV_V2_WAIT_SECONDS', 0, minimum=0),
     )
@@ -472,6 +478,42 @@ async def apply(options: Options, *, db=None) -> int:
         _print_ingest(ingest_state, prefix='5 re-ingest')
 
 
+async def apply_models(options: Options, *, db=None) -> int:
+    """Only step 3, for renamed catalog ids: no config switch, directory, ingest, memories or sign-out.
+
+    The snapshot covers just the config rows the rewrite touches, so --restore with this id undoes it.
+    """
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.soev import migrate_config, migrate_models, migrate_state
+
+    async with get_async_db_context(db) as session:
+        await migrate_state.ensure_tables(session)
+        keys = migrate_config.MODEL_ID_KEYS
+        taken = await migrate_state.snapshot(session, options.migration_id, keys)
+        print(f'1 snapshot: {"taken" if taken else "kept"} ({len(keys)} keys)')
+        if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
+            print('3 model ids: already done')
+            return EXIT_OK
+        report = await migrate_models.rewrite(session, options.model_map, options.migration_id)
+        await migrate_state.add_marker(session, options.migration_id, 'model_ids')
+        await session.commit()
+        _print_model_report(report, prefix='3 model ids')
+    return EXIT_OK
+
+
+async def plan_models(options: Options, *, db=None) -> int:
+    """Preview apply_models: the map and what it would rewrite; nothing is written."""
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.soev import migrate_models
+
+    async with get_async_db_context(db) as session:
+        for source, target in sorted(options.model_map.items()):
+            print(f'3 model ids: map {source} -> {target}')
+        report = await migrate_models.rewrite(session, options.model_map, options.migration_id, dry_run=True)
+        _print_model_report(report, prefix='3 model ids')
+    return EXIT_OK
+
+
 async def restore(migration_id: str, *, db=None) -> int:
     from open_webui.internal.db import get_async_db_context
     from open_webui.soev import migrate_models, migrate_state
@@ -543,8 +585,11 @@ def main():
     mode.add_argument('--apply', action='store_true', help='Run every step; safe to rerun')
     mode.add_argument('--restore', action='store_true', help='Put back the config snapshot and model ids')
     mode.add_argument('--dry-run', action='store_true', help='Print the plan; no writes and no HTTP requests')
+    parser.add_argument('--models', action='store_true', help='With --apply or --dry-run: only rewrite model ids')
     parser.add_argument('--migration-id', help='Defaults to SOEV_V2_MIGRATION_ID')
     args = parser.parse_args()
+    if args.models and args.restore:
+        parser.error('--restore takes no --models: the migration id says what to undo')
     if args.dry_run:
         # Config otherwise runs schema migrations on import, which would write OWUI tables.
         os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
@@ -561,8 +606,11 @@ def main():
                 raise MigrationError('Set SOEV_V2_MIGRATION_ID or pass --migration-id')
             status = asyncio.run(restore(migration_id))
         else:
-            options = options_from_env(migration_id=args.migration_id)
-            status = asyncio.run(plan(options) if args.dry_run else apply(options))
+            options = options_from_env(migration_id=args.migration_id, models_only=args.models)
+            if args.models:
+                status = asyncio.run(plan_models(options) if args.dry_run else apply_models(options))
+            else:
+                status = asyncio.run(plan(options) if args.dry_run else apply(options))
     except MigrationError as error:
         print(f'Migration aborted: {error}', file=sys.stderr)
         raise SystemExit(EXIT_INVALID) from None

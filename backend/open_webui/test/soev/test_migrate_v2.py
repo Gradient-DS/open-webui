@@ -879,3 +879,133 @@ def test_an_abort_names_the_failing_call_and_problem_without_secrets(monkeypatch
     assert 'POST /v1/schedules -> 403 policy_forbids: Schedule scope is disallowed (constraint: None)' in err
     assert 'soev-api response POST /v1/schedules 403 request_id=req-1' in caplog.messages
     assert not any(secret in err + ' '.join(caplog.messages) for secret in ('sk-secret', 'private', 'x=1'))
+
+
+HANDLES = 'v2-test-model-handles-1'
+HANDLE_MAP = {'zai-org/GLM-5.3': 'zai-org/glm-5.3'}
+
+
+def handles_options(env, monkeypatch, model_map=HANDLE_MAP):
+    monkeypatch.setenv('SOEV_V2_MODEL_MAP', json.dumps(model_map))
+    monkeypatch.delenv('SOEV_V2_CONFIG', raising=False)
+    return env.module.options_from_env(migration_id=HANDLES, models_only=True)
+
+
+@pytest.mark.asyncio
+async def test_models_mode_rewrites_only_model_ids_and_restore_undoes_it(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        await connection.execute(sa.text("DELETE FROM user WHERE id = 'alice'"))
+    # A knowledge base the full apply would copy and re-ingest; this mode leaves it alone.
+    await seed_knowledge(env, monkeypatch)
+    config, original = await config_rows(env), await dumps(env)
+    assert await env.module.apply_models(handles_options(env, monkeypatch)) == 0
+    data = await dumps(env)
+    chat = dict(data['chat'])['c1']
+    assert chat['models'] == ['zai-org/glm-5.3', 'helper']
+    assert data['chat_message'] == [('m.1', None), ('m.2', 'zai-org/glm-5.3'), ('m.3', 'unknown/model')]
+    assert data['model'] == [('helper', 'zai-org/glm-5.3'), ('legacy', 'unknown/model'), ('zai-org/glm-5.3', None)]
+    assert await config_value(env, 'ui.default_pinned_models') == 'zai-org/glm-5.3,unknown/model'
+    unchanged = [row for row in await config_rows(env) if row[0] != 'ui.default_pinned_models']
+    assert unchanged == [row for row in config if row[0] != 'ui.default_pinned_models']
+    assert env.api.requests == [] and env.redis.sets == [] and env.embedded == []
+    assert await rows(env, 'SELECT step FROM owui_v2_migration_migration_marker ORDER BY step') == [
+        ('model_ids',),
+        ('snapshot',),
+    ]
+    assert '1 snapshot: taken (2 keys)' in capsys.readouterr().out
+    assert await env.module.apply_models(handles_options(env, monkeypatch)) == 0
+    assert '3 model ids: already done' in capsys.readouterr().out
+    assert await env.module.restore(HANDLES) == 0
+    assert await dumps(env) == original
+    assert await config_rows(env) == config
+
+
+@pytest.mark.asyncio
+async def test_models_mode_merges_several_ids_into_the_most_recently_updated_row(env, monkeypatch):
+    rows_sql = 'SELECT id, is_active FROM model ORDER BY id'
+    grants_sql = 'SELECT id, resource_id FROM access_grant ORDER BY id'
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
+                " VALUES ('glm-5-3', 'admin', NULL, 'GLM', '{}', '{}', 1, 1, 9),"
+                " ('glm-5-2-fp8', 'admin', NULL, 'Old', '{}', '{}', 1, 1, 1),"
+                " ('glm-5-fp8', 'admin', NULL, 'Older', '{}', '{}', 1, 1, 1)"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission,'
+                " created_at) VALUES ('g1', 'model', 'glm-5-3', 'user', '*', 'read', 1),"
+                " ('g2', 'model', 'glm-5-2-fp8', 'group', 'team', 'read', 1)"
+            )
+        )
+    original = (await rows(env, rows_sql), await rows(env, grants_sql))
+    target = 'zai-org/glm-5.3'
+    model_map = {'glm-5-3': target, 'glm-5-2-fp8': target, 'glm-5-fp8': target}
+    assert await env.module.apply_models(handles_options(env, monkeypatch, model_map)) == 0
+    assert await rows(env, rows_sql) == [('glm-5-2-fp8', 0), ('glm-5-fp8', 0), (target, 1)]
+    assert await rows(env, grants_sql) == [('g1', target), ('g2', target)]
+    assert await env.module.restore(HANDLES) == 0
+    assert (await rows(env, rows_sql), await rows(env, grants_sql)) == original
+
+
+def test_models_mode_needs_a_map_but_no_v2_config(monkeypatch):
+    from open_webui.soev.migrate_state import MigrationError
+
+    module = importlib.import_module('open_webui.soev.migrate')
+    monkeypatch.delenv('SOEV_V2_CONFIG', raising=False)
+    monkeypatch.setenv('SOEV_V2_MODEL_MAP', '{}')
+    with pytest.raises(MigrationError, match='maps no model ids'):
+        module.options_from_env(migration_id=HANDLES, models_only=True)
+    monkeypatch.setenv('SOEV_V2_MODEL_MAP', json.dumps(HANDLE_MAP))
+    options = module.options_from_env(migration_id=HANDLES, models_only=True)
+    assert (options.v2_config, options.model_map) == ({}, HANDLE_MAP)
+
+
+@pytest.mark.parametrize(
+    ('argv', 'called'),
+    [
+        (['--apply', '--models'], 'apply_models'),
+        (['--dry-run', '--models'], 'plan_models'),
+        (['--apply'], 'apply'),
+    ],
+)
+def test_the_models_flag_selects_the_models_only_steps(monkeypatch, argv, called):
+    module = importlib.import_module('open_webui.soev.migrate')
+    seen = []
+    monkeypatch.setattr(module, 'options_from_env', lambda **kwargs: kwargs)
+    for name in ('apply', 'plan', 'apply_models', 'plan_models'):
+
+        async def run(options, name=name):
+            seen.append((name, options['models_only']))
+            return 0
+
+        monkeypatch.setattr(module, name, run)
+    monkeypatch.setattr(sys, 'argv', ['migrate', *argv])
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+    assert exited.value.code == 0
+    assert seen == [(called, '--models' in argv)]
+
+
+def test_restore_refuses_the_models_flag(monkeypatch, capsys):
+    module = importlib.import_module('open_webui.soev.migrate')
+    monkeypatch.setattr(sys, 'argv', ['migrate', '--restore', '--models'])
+    with pytest.raises(SystemExit) as exited:
+        module.main()
+    assert exited.value.code == 2
+    assert '--restore takes no --models' in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_models_dry_run_previews_and_writes_nothing(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    before = (await config_rows(env), await dumps(env))
+    assert await env.module.plan_models(handles_options(env, monkeypatch)) == 0
+    assert (await config_rows(env), await dumps(env)) == before
+    assert await rows(env, "SELECT name FROM sqlite_master WHERE name LIKE 'owui_v2_migration%'") == []
+    output = capsys.readouterr().out
+    assert '3 model ids: map zai-org/GLM-5.3 -> zai-org/glm-5.3' in output
+    assert '3 model ids: chat_message.model_id 1' in output

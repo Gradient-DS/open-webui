@@ -1,7 +1,7 @@
-"""Rewrite stored LiteLLM model names to soev-api catalog ids, recording each change for --restore.
+"""Rewrite stored model ids to soev-api catalog ids, recording each change for --restore.
 
-soev-api serves no /v1/models with the LiteLLM model_string yet, so the mapping is an
-explicit input: SOEV_V2_MODEL_MAP, a JSON object of LiteLLM model name to catalog id.
+The mapping is an explicit input, SOEV_V2_MODEL_MAP: a JSON object of old id to catalog id,
+either LiteLLM model names (the v2 apply) or renamed catalog ids (a --models run).
 """
 
 import copy
@@ -36,7 +36,7 @@ def parse_model_map(raw: str | None) -> dict[str, str]:
     if not isinstance(mapping, dict) or not all(
         isinstance(key, str) and key and isinstance(value, str) and value for key, value in mapping.items()
     ):
-        raise MigrationError('SOEV_V2_MODEL_MAP must map LiteLLM model names to catalog ids')
+        raise MigrationError('SOEV_V2_MODEL_MAP must map stored model ids to catalog ids')
     mapping = {key: value for key, value in mapping.items() if key != value}
     # A catalog id that is also a source name would be rewritten again on every rerun.
     if chained := sorted(set(mapping.values()) & mapping.keys()):
@@ -122,8 +122,10 @@ class _Rewrite:
         """Base-model override rows are keyed by the model id; rename them and their grants."""
         site = 'model.id'
         existing = set((await self.db.execute(sa.select(Model.id))).scalars().all())
-        rows = (await self.db.execute(sa.select(Model.id).where(Model.base_model_id.is_(None)))).scalars().all()
-        for model_id in sorted(rows):
+        rows = (await self.db.execute(sa.select(Model.id, Model.updated_at).where(Model.base_model_id.is_(None)))).all()
+        # [Gradient] When several ids map to one target, the most recently updated row becomes it
+        # and the others merge into it.
+        for model_id, _ in sorted(rows, key=lambda row: (-(row[1] or 0), row[0])):
             if model_id not in self.mapping:
                 self.map(site, model_id, [], model_id, record=False)
                 continue
@@ -132,6 +134,7 @@ class _Rewrite:
                 await self.merge_model(model_id, new)
                 continue
             self.map(site, new, [], model_id)
+            existing.add(new)
             if self.dry_run:
                 continue
             await self.db.execute(sa.update(Model).where(Model.id == model_id).values(id=new))
