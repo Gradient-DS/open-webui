@@ -170,9 +170,15 @@ def knowledge_list_of(items: list, total: int) -> KnowledgeListResponse:
 
 
 def file_response_of(
-    file: dict, document: dict | None, *, metadata_only: bool
+    file: dict, document: dict | None, *, metadata_only: bool, collection: dict | None = None
 ) -> FileUserMetadataResponse | FileUserResponse:
     fields = {key: file[key] for key in ('id', 'user_id', 'hash', 'filename', 'meta', 'created_at', 'updated_at')}
+    if collection is not None:
+        # Cross-KB search names the KB holding each file, so a picked file is attached as that KB's document.
+        fields['collection'] = {'id': collection['key'], 'name': collection['name']}
+    if document and document.get('schedule_ids'):
+        # A synced document belongs to its schedules: it leaves with its source, not on its own.
+        fields['meta'] = {**(fields['meta'] or {}), 'soev_schedule_ids': list(document['schedule_ids'])}
     added_at = int(dt.datetime.fromisoformat(document['ingested_at']).timestamp()) if document else file['created_at']
     fields.update(user=None, added_at=added_at)
     if metadata_only:

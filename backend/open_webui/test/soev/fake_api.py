@@ -24,20 +24,24 @@ class FakeSoevApi:
     def __init__(self, *, page_size=200):
         self.page_size = page_size
         self.now = '2026-09-11T12:00:00Z'
-        self.credentials = {'test-runtime-key': 'owui:service:webui'}
-        self.capabilities = {'test-runtime-key': {'*'}}
-        self.credential_id = 'runtime-credential'
+        self.credentials = {'soev_test_cred-runtime_test-secret': 'owui:service:webui'}
+        self.capabilities = {'soev_test_cred-runtime_test-secret': {'*'}}
+        self.credential_id = 'cred-runtime'
         self.audience = None
         self.signing_keys: dict[str, dict] = {}
         self.collections, self.documents, self.folders = {}, {}, {}
         self.inherited_access = set()
         self.jobs, self.job_owners, self.job_effects = {}, {}, {}
         self.schedules, self.schedule_owners = {}, {}
+        self.connections, self.min_cadence_minutes = {}, 60
         self.uploads = {}
         self.links, self.groups, self.replays, self.creation_bodies = {}, {}, {}, {}
         self.seen_jtis = set()
         self.requests, self.failures = [], []
         self.chat = FakeChatApi()
+        self.models: list[dict] = []
+        self.task_bodies: list[tuple[str | None, dict]] = []
+        self.task_model = 'task-model'
 
     def handle(self, request):
         self.requests.append(request)
@@ -61,7 +65,11 @@ class FakeSoevApi:
         if subject and subject not in self.links:
             raise Problem(401, 'identity_not_linked')
         body = json.loads(request.content) if request.content else None
-        if request.method == 'GET' or request.url.path.startswith('/v1/chat/threads'):
+        if (
+            request.method == 'GET'
+            or request.url.path.startswith('/v1/chat/threads')
+            or request.url.path == '/v1/completions/task'
+        ):
             return self._route(request, body, credential, subject)
         operation = request.headers.get('Idempotency-Key', '')
         if not 8 <= len(operation) <= 255:
@@ -171,7 +179,8 @@ class FakeSoevApi:
                 }
             ),
             'document_count': sum(
-                key == row['key'] and self._readable(document, subject or self.credentials['test-runtime-key'])
+                key == row['key']
+                and self._readable(document, subject or self.credentials['soev_test_cred-runtime_test-secret'])
                 for (key, _), document in self.documents.items()
             ),
             'caller_may_write': bool(self._closure(subject).intersection(row['writers'])) if subject else None,
@@ -195,10 +204,19 @@ class FakeSoevApi:
     def _route(self, request: httpx.Request, body: dict | None, credential: str, subject: str | None) -> httpx.Response:
         if request.url.path.startswith('/v1/chat/threads'):
             return self.chat.handle(request, body, (credential, subject))
+        if request.url.path == '/v1/sync-policy' and request.method == 'GET':
+            return httpx.Response(200, json={'min_cadence_minutes': self.min_cadence_minutes})
+        if request.url.path in ('/v1/connections', '/v1/schedules') and request.method == 'POST':
+            return self._cloud_create(request.url.path.rpartition('/')[2], body, subject)
         return self._catalog_route(request, body, credential, subject)
 
     def _catalog_route(self, request, body, credential, subject):
         parts = [unquote(part) for part in request.url.raw_path.decode().split('?')[0].strip('/').split('/')]
+        if parts == ['v1', 'models'] and request.method == 'GET':
+            self._require(credential, 'read')
+            return httpx.Response(200, json={'data': copy.deepcopy(self.models)})
+        if parts == ['v1', 'completions', 'task'] and request.method == 'POST':
+            return self._task(request, body, credential, subject)
         if parts[:2] == ['v1', 'identity'] or parts[:2] == ['v1', 'directory']:
             return self._identity(request.method, parts, body)
         if parts[:2] == ['v1', 'jobs']:
@@ -222,6 +240,42 @@ class FakeSoevApi:
             return self._folders(request, parts, body, credential, subject)
         raise Problem(404, 'route_not_found')
 
+    def _task(self, request, body, credential, subject):
+        """The task route: `read` plus a subject; it picks the model and refuses unknown fields."""
+        self._require(credential, 'read')
+        if subject is None:
+            raise Problem(401, 'credential_invalid')
+        allowed = {'messages', 'stream', 'temperature', 'max_tokens', 'top_p', 'response_format', 'stop'}
+        if not isinstance(body, dict) or set(body) - allowed or not body.get('messages'):
+            raise Problem(422, 'invalid_field')
+        for message in body['messages']:
+            if set(message) - {'role', 'content', 'tool_call_id', 'tool_calls'}:
+                raise Problem(422, 'invalid_field')
+        self.task_bodies.append((subject, copy.deepcopy(body)))
+        answer = f'Task answer {len(self.task_bodies)}'
+        if not body.get('stream'):
+            return httpx.Response(
+                200,
+                json={
+                    'id': 'chatcmpl-task',
+                    'object': 'chat.completion',
+                    'model': self.task_model,
+                    'choices': [
+                        {'index': 0, 'message': {'role': 'assistant', 'content': answer}, 'finish_reason': 'stop'}
+                    ],
+                },
+            )
+        chunks = [{'role': 'assistant', 'content': ''}, {'content': answer}]
+        content = ''.join(
+            'data: '
+            + json.dumps({'object': 'chat.completion.chunk', 'model': self.task_model, 'choices': [{'delta': delta}]})
+            + '\n\n'
+            for delta in chunks
+        )
+        return httpx.Response(
+            200, content=(content + 'data: [DONE]\n\n').encode(), headers={'Content-Type': 'text/event-stream'}
+        )
+
     def _collections(self, request, body, credential, subject):
         if request.method == 'POST':
             return self._create(body, subject)
@@ -243,6 +297,27 @@ class FakeSoevApi:
         if 'kind' in request.url.params:
             rows = [row for row in rows if row['kind'] == request.url.params['kind']]
         return self._page(rows, request)
+
+    def _cloud_create(self, kind, body, subject):
+        """Pending user-owned connections and enabled schedules, as the migration creates them."""
+        if subject is None:
+            raise Problem(403, 'subject_required')
+        if kind == 'connections':
+            row = {'id': f'connection-{len(self.connections)}', **body, 'lifecycle': 'pending', 'owner': subject}
+            self.connections[row['id']] = row
+        else:
+            row = {
+                'id': f'schedule-{len(self.schedules)}',
+                **body,
+                # soev-api stores the schedule's private corpus; the KB is a subscriber.
+                'collection_key': f'corpus-{len(self.schedules)}',
+                'source_kind': self.connections[body['connection_id']]['source_kind'],
+                'lifecycle': 'enabled',
+                'subscribers': [body['collection_key']],
+            }
+            self.schedules[row['id']] = row
+            self.schedule_owners[row['id']] = subject
+        return httpx.Response(201, json=row)
 
     def _lookup_documents(self, request, credential, subject):
         source_id = request.url.params.get('source_id')

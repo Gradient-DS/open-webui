@@ -34,11 +34,20 @@ async def env(identity_config, fake_api, monkeypatch):
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     users = importlib.import_module('open_webui.models.users')
+    config = importlib.import_module('open_webui.models.config')
+    referencing = [
+        importlib.import_module(f'open_webui.models.{name}').__dict__[cls].__table__
+        for name, cls in (('chats', 'Chat'), ('chat_messages', 'ChatMessage'), ('models', 'Model'))
+    ]
+    referencing.append(importlib.import_module('open_webui.models.automations').Automation.__table__)
+    referencing.append(importlib.import_module('open_webui.models.memories').Memory.__table__)
     async with engine.begin() as connection:
         await connection.run_sync(
             lambda sync: database.Base.metadata.create_all(
                 sync,
                 tables=[
+                    config.Config.__table__,
+                    *referencing,
                     users.User.__table__,
                     groups.Group.__table__,
                     groups.GroupMember.__table__,
@@ -277,7 +286,7 @@ async def test_dry_run_sends_nothing(env, capsys):
     assert '/v1/identity/links' in output and '/v1/directory/groups/' in output
     assert '/v1/collections' in output and 'reports/2026' in output
     assert 'OWUI files' in output and 'document_count' in output and 'not read' in output
-    assert 'test-runtime-key' not in output and 'PRIVATE KEY' not in output and 'eyJ' not in output
+    assert 'soev_test_cred-runtime_test-secret' not in output and 'PRIVATE KEY' not in output and 'eyJ' not in output
     assert env.kbs[3].id not in output and env.kbs[4].id not in output
     assert (
         (await env.db.execute(select(importlib.import_module('open_webui.models.knowledge').Knowledge))).scalars().all()
@@ -305,6 +314,20 @@ async def test_module_dry_run_preserves_sql_tables(env, tmp_path):
         'VECTOR_DB': 'weaviate',
         'SOEV_API_URL': 'https://soev.invalid',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
+        'SOEV_V2_MIGRATION_ID': 'v2-test',
+        'SOEV_V2_MODEL_MAP': json.dumps({'zai-org/GLM-5.3': 'glm-5-3'}),
+        'SOEV_V2_CONFIG': json.dumps(
+            {
+                'agent_api.selected_agent': 'soev',
+                'document_writer.enable': True,
+                'live_documents.enable': False,
+                'live_mail.enable': False,
+                'notes.enable': True,
+                'web.search.enable': True,
+                'webui.url': 'https://client.soev.ai',
+                'user.permissions.features': {},
+            }
+        ),
     }
     for name in ('TYPE', 'USER', 'PASSWORD', 'HOST', 'PORT', 'NAME'):
         environment[f'DATABASE_{name}'] = ''

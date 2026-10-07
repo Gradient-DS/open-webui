@@ -318,11 +318,15 @@ async def has_base_model_access(
     """
     from open_webui.models.access_grants import AccessGrants
     from open_webui.models.models import Models
+    from open_webui.soev import model_catalog
 
     base_model_id = getattr(model_info, 'base_model_id', None)
     seen = {model_info.id}
     while base_model_id and base_model_id not in seen:
         seen.add(base_model_id)
+        # [Gradient] In v2 mode a catalog base is open to every user and admin, row or not.
+        if await model_catalog.is_offered(base_model_id, user_role):
+            return True
         base_model_info = await Models.get_model_by_id(base_model_id, db=db)
         if base_model_info is None:
             return user_role == 'admin'

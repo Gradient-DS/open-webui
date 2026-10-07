@@ -20,6 +20,7 @@ from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.models.users import UserModel
 from open_webui.routers import ollama, openai
 from open_webui.socket.utils import RedisDict
+from open_webui.soev import model_catalog
 from open_webui.utils.access_control import has_access, has_base_model_access
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.plugin import (
@@ -57,6 +58,9 @@ async def fetch_openai_models(request: Request, user: UserModel = None):
 
 
 async def get_all_base_models(request: Request, user: UserModel = None):
+    # [Gradient] In v2 mode the soev-api catalog is the only source of base models.
+    if model_catalog.is_v2():
+        return await model_catalog.base_models()
     config = await Config.get_many('openai.enable', 'ollama.enable')
     openai_task = fetch_openai_models(request, user) if config.get('openai.enable') else asyncio.sleep(0, result=[])
     ollama_task = fetch_ollama_models(request, user) if config.get('ollama.enable') else asyncio.sleep(0, result=[])
@@ -268,6 +272,9 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
 
             models.append(model)
 
+    # [Gradient] Catalog meta survives an admin's model row; each model gets its own copy.
+    model_catalog.apply_catalog(models, base_models)
+
     # Process action_ids to get the actions
     def get_action_items_from_module(function, module):
         actions = []
@@ -472,6 +479,9 @@ async def check_model_access(user, model, model_info=None, db=None):
             db=db,
         ):
             raise Exception('Model not found')
+    # [Gradient] soev-api's catalog is the only gate; an admin row's grants do not restrict it.
+    elif await model_catalog.is_offered(model.get('id'), user.role):
+        return
     else:
         # Callers that already fetched the row (chat completion entry) pass it in
         if model_info is None or model_info.id != model.get('id'):
@@ -519,7 +529,8 @@ async def get_filtered_models(models, user, db=None):
             if model.get('arena'):
                 continue
             info = model.get('info')
-            if info:
+            # [Gradient] Catalog meta is not an admin's model row.
+            if info and not model_catalog.is_unconfigured(model):
                 model_infos[model['id']] = info
 
         user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
@@ -549,7 +560,10 @@ async def get_filtered_models(models, user, db=None):
                 continue
 
             model_info = model_infos.get(model['id'])
-            if model_info:
+            # [Gradient] soev-api's catalog is the only gate; an admin row's grants do not restrict it.
+            if await model_catalog.is_offered(model['id'], user.role):
+                filtered_models.append(model)
+            elif model_info:
                 if (
                     (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == model_info.get('user_id')

@@ -208,3 +208,15 @@ def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, m
     api.writes.grants.assert_not_awaited()
     api.writes.delete.assert_not_awaited()
     api.writes.reset.assert_not_awaited()
+
+
+@pytest.mark.parametrize('member', [True, False])
+def test_a_member_without_an_owui_file_row_is_removed(api, monkeypatch, member):
+    """Membership, not an OWUI file row, decides whether a KB file can be removed."""
+    remove = AsyncMock(return_value=True)
+    monkeypatch.setattr(knowledge.Files, 'get_file_by_id', AsyncMock(return_value=None))
+    monkeypatch.setattr(knowledge.Knowledges, 'has_file', AsyncMock(return_value=member))
+    monkeypatch.setattr(knowledge.Knowledges, 'remove_file_from_knowledge_by_id', remove)
+    result = api.browser.post('/knowledge/kb/file/remove', json={'file_id': 'catalog'})
+    assert result.status_code == (200 if member else 400)
+    assert remove.await_count == int(member)

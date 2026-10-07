@@ -352,6 +352,55 @@ async def test_attached_files_are_sent_with_their_collection_and_name(
 
 
 @pytest.mark.asyncio
+async def test_a_file_picked_from_a_knowledge_base_is_sent_as_that_kb_document(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_collection(chat.api, 'kb-cloud', 'OneDrive')
+    seed_collection(chat.api, 'kb-local', 'Contracten')
+    chat.api.add_document('kb-cloud', 'onedrive-item-1', filename='202508.pdf', schedule_ids=['sch-1'])
+    chat.api.add_document('kb-local', 'f-local', filename='contract.pdf')
+    # The synced document has no OWUI File row; the local one keeps its upload's row, without a collection.
+    stored_files(monkeypatch, **{'f-local': 'completed'})
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'onedrive-item-1', 'name': '202508.pdf', 'knowledge_id': 'kb-cloud'},
+            {'type': 'file', 'id': 'f-local', 'name': 'contract.pdf', 'knowledge_id': 'kb-local'},
+        ],
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': 'kb-cloud', 'file_id': 'onedrive-item-1', 'name': '202508.pdf'},
+        {'collection_key': 'kb-local', 'file_id': 'f-local', 'name': 'contract.pdf'},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_knowledge_base_file_the_user_cannot_read_there_refuses_the_turn_by_name(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    chat.api.add_document('kb-a', 'elsewhere', filename='elders.pdf')
+    stored_files(monkeypatch, busy='processing')
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'removed', 'name': 'weg.pdf', 'knowledge_id': 'kb-a'},
+            {'type': 'file', 'id': 'elsewhere', 'name': 'elders.pdf', 'knowledge_id': 'kb-gone'},
+            {'type': 'file', 'id': 'busy', 'name': 'bezig.pdf', 'knowledge_id': 'kb-a'},
+        ],
+        user_language='nl-NL',
+    )
+    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
+    assert refusal['code'] == 'attachments_unavailable'
+    assert all(name in refusal['message'] for name in ('weg.pdf', 'elders.pdf', 'bezig.pdf'))
+    assert 'niet meer beschikbaar' in refusal['message'] and 'wordt nog verwerkt' in refusal['message']
+    assert chat.mutations() == []
+
+
+@pytest.mark.asyncio
 async def test_attached_images_are_not_attachments(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
     stored_files(monkeypatch, img='completed')
     await chat.turn('question', 'a1', files=[{'type': 'file', 'id': 'img', 'content_type': 'image/png'}])
@@ -1133,6 +1182,49 @@ async def test_an_answer_not_streamed_gets_its_markers_at_the_served_positions(c
     assert content(await chat.turn('question', 'a1')) == 'Eén [1], twee [2].'
 
 
+EMPHASIS_CASES = [
+    ('- **', ' Van jou →** naar', '- **[1] Van jou →** naar'),
+    ('**Van jou', '**: tekst', '**Van jou [1]**: tekst'),
+    ('*', '*', '*[1]*'),
+    ('(__', ' x__)', '(__[1] x__)'),
+    ('~~', ' oud~~', '~~[1] oud~~'),
+    ('**Bold**', ' then', '**Bold** [1] then'),
+    ('2**', ' x', '2** [1] x'),
+    ('Text', ' tail', 'Text [1] tail'),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('before,after,expected', EMPHASIS_CASES)
+async def test_a_streamed_marker_after_an_opening_emphasis_run_keeps_it_opening(
+    chat: Chat, before: str, after: str, expected: str
+) -> None:
+    chat.api.chat.turns = [
+        [
+            found(DOCUMENT, CHUNK),
+            ('delta', {'text': before}),
+            ('citation', cited(len(before), 'source-a')),
+            ('delta', {'text': after}),
+            answered(before + after, cited(len(before), 'source-a')),
+        ]
+    ]
+    assert content(await chat.turn('question', 'a1')) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('before,after,expected', EMPHASIS_CASES)
+async def test_a_served_marker_after_an_opening_emphasis_run_keeps_it_opening(
+    chat: Chat, before: str, after: str, expected: str
+) -> None:
+    chat.api.chat.turns = [[found(DOCUMENT, CHUNK), answered(before + after, cited(len(before), 'source-a'))]]
+    assert content(await chat.turn('question', 'a1')) == expected
+
+
+def test_served_markers_after_streamed_text_see_the_text_before_them() -> None:
+    assert agent_v2._marked('**Ja** **x**', [(9, 1)], 6) == ' **[1]x**'
+    assert agent_v2._marked('Ja **x**', [(5, 1), (5, 2)], 3) == '**[1][2]x**'
+
+
 @pytest.mark.asyncio
 async def test_an_invalid_citation_or_an_unknown_source_gets_no_marker(chat: Chat) -> None:
     invalid = {'at': 4, 'status': 'invalid', 'reason': 'no element has id 9'}
@@ -1229,6 +1321,30 @@ async def test_resolved_picker_model_wins_over_agent_model(
         if path.endswith('/fork'):
             continue
         assert body['model'] == ('llm' if picked else 'custom')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('meta', 'sent'),
+    [
+        ({}, 'soev_react'),
+        ({'runtime': 'v1'}, 'soev_react'),
+        (None, 'soev_chat_manual'),
+        ({'runtime': 'v2'}, 'soev_chat_manual'),
+    ],
+)
+async def test_v2_deployment_replaces_a_v1_agent_binding_with_the_configured_agent(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, meta: dict | None, sent: str
+) -> None:
+    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v2')
+    monkeypatch.setattr(agent.Config, 'get', AsyncMock(return_value='soev_react'))
+    monkeypatch.setattr(
+        AgentConfigs,
+        'get_agent_config_by_id',
+        AsyncMock(return_value=SimpleNamespace(meta=meta) if meta is not None else None),
+    )
+    await chat.turn('first', 'a1', override_agent='soev_chat_manual')
+    assert [body['agent'] for path, body in chat.mutations() if path == '/v1/chat/threads'] == [sent]
 
 
 @pytest.mark.asyncio
@@ -2844,6 +2960,21 @@ async def test_a_turn_on_a_thread_sends_no_earlier_conversation(chat: Chat, monk
     await chat.turn('second', 'a2', 'a1')
     assert sent_text(chat) == 'second'
     stored.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_answered_model_is_stored_and_announced_when_reported(chat: Chat) -> None:
+    chat.api.chat.turns = [[('model_output', {'content': 'Hi', 'answered_model': 'fallback-llm'})]]
+    await chat.turn('first', 'a1')
+    assert chat.messages['chat', 'a1']['meta']['answered_model'] == 'fallback-llm'
+    assert {'type': 'chat:completion', 'data': {'answered_model': 'fallback-llm'}} in chat.socket
+
+
+@pytest.mark.asyncio
+async def test_no_answered_model_without_a_report(chat: Chat) -> None:
+    await chat.turn('first', 'a1')
+    assert 'answered_model' not in chat.messages['chat', 'a1']['meta']
+    assert not [event for event in chat.socket if event['type'] == 'chat:completion']
 
 
 @pytest.mark.asyncio

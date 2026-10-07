@@ -5,6 +5,9 @@ import {
 	connectionOutcome,
 	shouldRefetchSyncItems,
 	pairSchedules,
+	queueRuns,
+	settleQueuedRuns,
+	QUEUED_RUN_MAX_MS,
 	connectResult,
 	trustedConnectOrigins,
 	reconnectConnections,
@@ -184,6 +187,35 @@ it('pairs schedules by connection and deep-equal scope regardless of key or sche
 	expect(
 		pairSchedules([content, { ...content, id: 'duplicate' }, acl]).filter((pair) => pair.acl)
 	).toHaveLength(1);
+});
+
+it('marks a pair queued while its requested run has no run row yet', () => {
+	const content = scheduleFixture('content', 'content');
+	expect(pairSchedules([content], new Map([['content', 1]]))).toEqual([
+		{ content, acl: undefined, queued: true }
+	]);
+});
+
+describe('queued runs', () => {
+	const finished = { id: 'r1', started_at: 't', finished_at: 't', outcome: 'succeeded' as const };
+	const idle = { ...scheduleFixture('s', 'content'), last_run: finished };
+	it('queues idle schedules, including ones not in the last status yet', () => {
+		const queued = queueRuns(new Map(), [idle], ['s', 'new'], 5);
+		expect([...queued]).toEqual([
+			['s', { runId: 'r1', since: 5 }],
+			['new', { runId: null, since: 5 }]
+		]);
+		const live = { ...idle, last_run: { ...finished, id: 'r2', outcome: null } };
+		expect(queueRuns(new Map(), [live], ['s']).size).toBe(0);
+	});
+	it('settles once the run changes, the schedule is gone, or the request is stale', () => {
+		const queued = queueRuns(new Map(), [idle], ['s'], 0);
+		expect(settleQueuedRuns(queued, [idle], 1).has('s')).toBe(true);
+		const claimed = { ...idle, last_run: { ...finished, id: 'r2', outcome: null } };
+		expect(settleQueuedRuns(queued, [claimed], 1).size).toBe(0);
+		expect(settleQueuedRuns(queued, [], 1).size).toBe(0);
+		expect(settleQueuedRuns(queued, [idle], QUEUED_RUN_MAX_MS).size).toBe(0);
+	});
 });
 
 it.each([

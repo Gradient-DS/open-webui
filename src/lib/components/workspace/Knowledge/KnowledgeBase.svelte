@@ -36,6 +36,7 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import * as cloudSync from '$lib/apis/cloudSync';
 	import type { Connection, Schedule, ScheduleAction, SkippedItem } from '$lib/apis/cloudSync';
+	import { relinkPrompt } from '$lib/utils/live-connections';
 
 	import { blobToFile, copyToClipboard } from '$lib/utils';
 	import { computeFileHash } from '$lib/utils/hash';
@@ -45,6 +46,7 @@
 	import type { DirectoryItem } from './KnowledgeBase/directory';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
+	import { removalTargets, sortSourcePairs } from './KnowledgeBase/sources';
 	import type { SchedulePair } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
 	import {
@@ -59,6 +61,9 @@
 		connectionOutcome,
 		reconnectConnections,
 		pairSchedules,
+		queueRuns,
+		settleQueuedRuns,
+		type QueuedRun,
 		shouldRefetchSyncItems,
 		finishedRuns,
 		runIsLive
@@ -88,6 +93,9 @@
 
 	let requestedProvider: SourceProvider | null = null;
 	let schedules: Schedule[] = [];
+	// [Gradient] Runs requested from this page that no worker has claimed yet:
+	// their rows show as syncing right away instead of after the claim.
+	let queuedRuns = new Map<string, QueuedRun>();
 	let connecting: Connection | null = null;
 	let cloudActionBusy = false;
 	let syncPoll: ReturnType<typeof setTimeout> | undefined;
@@ -102,14 +110,17 @@
 	$: reconnectNeeded = reconnectConnections(schedules, connecting);
 	// [Gradient] Sources render inside the listing: folder sources on the
 	// directory row their schedule writes, single-file sources as loose rows.
+	$: schedulePairs = pairSchedules(schedules, queuedRuns);
 	$: sourcePairs = new Map(
-		pairSchedules(schedules).flatMap((pair) =>
+		schedulePairs.flatMap((pair) =>
 			[pair.content, pair.acl].flatMap((schedule) =>
 				schedule ? [[schedule.id, pair] as [string, SchedulePair]] : []
 			)
 		)
 	);
-	$: looseSources = pairSchedules(schedules).filter(
+	// [Gradient] Single-file sources follow the listing's sort, like its files.
+	$: listedSources = sortSourcePairs(looseSources, sortKey, direction);
+	$: looseSources = schedulePairs.filter(
 		(pair) =>
 			!pair.content ||
 			pair.content.scope.single_file === true ||
@@ -122,6 +133,9 @@
 	// Any level inside a cloud source: the breadcrumb root names its schedule.
 	$: enclosingSourcePair =
 		(breadcrumbs[0]?.schedule_id && sourcePairs.get(breadcrumbs[0].schedule_id!)) || null;
+	// [Gradient] Everything below a cloud source root is that provider's item.
+	$: enclosingProvider =
+		(enclosingSourcePair?.content ?? enclosingSourcePair?.acl)?.source_kind ?? null;
 	$: enclosingSyncing =
 		enclosingSourcePair?.content && runIsLive(enclosingSourcePair.content.last_run)
 			? (runProgress(enclosingSourcePair.content) ?? true)
@@ -211,8 +225,8 @@
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 
 	let viewOption = null;
-	let sortKey = null;
-	let direction = null;
+	let sortKey: string | null = null;
+	let direction: string | null = null;
 
 	let currentPage = 1;
 	let fileItems = null;
@@ -263,9 +277,12 @@
 		count: bulkCount,
 		breakdown: bulkBreakdown,
 		allSelected: bulkAllSelected,
-		indeterminate: bulkIndeterminate
+		indeterminate: bulkIndeterminate,
+		available: bulkAvailable
 	} = selection;
 	let showBulkRemoveConfirm = false;
+	// [Gradient] Only cloud sources selected: the dialog speaks of removing sources.
+	$: bulkOnlySources = $bulkBreakdown.sources > 0 && $bulkBreakdown.sources === $bulkCount;
 
 	// Clear the selection when the search query changes — search mode renders
 	// a different row set, so a lingering selection would strand there.
@@ -916,10 +933,13 @@
 	};
 
 	const reportCloudError = (error: unknown) => {
+		const prompt = relinkPrompt(error);
 		toast.error(
-			error instanceof Error && error.message
-				? error.message
-				: $i18n.t('Cloud sync request failed.')
+			prompt
+				? $i18n.t(prompt)
+				: error instanceof Error && error.message
+					? error.message
+					: $i18n.t('Cloud sync request failed.')
 		);
 	};
 
@@ -940,9 +960,11 @@
 		if (destroyed || request !== syncStatusRequest) return false;
 		const previous = schedules;
 		schedules = status.schedules;
+		queuedRuns = settleQueuedRuns(queuedRuns, schedules);
 		syncStatusError = false;
 		for (const schedule of finishedRuns(previous, schedules)) announceFinishedRun(schedule);
-		const isLive = schedules.some((schedule) => runIsLive(schedule.last_run));
+		const isLive =
+			queuedRuns.size > 0 || schedules.some((schedule) => runIsLive(schedule.last_run));
 		if (refreshItems && shouldRefetchSyncItems(previous, schedules)) await getItemsPage();
 		return isLive;
 	};
@@ -1110,7 +1132,51 @@
 		if (cloudActionBusy || !provider) return;
 		cloudActionBusy = true;
 		try {
-			await authorizeBackgroundSync(provider, connection.id);
+			// [Gradient] One reconnect restores every source on the account; start them all.
+			if (await authorizeBackgroundSync(provider, connection.id)) await runAllSources(true);
+		} finally {
+			cloudActionBusy = false;
+		}
+	};
+
+	// [Gradient] Sync every source of this knowledge base in one call. Each source
+	// keeps its own cooldown, so refusals come back per source and never fail the rest.
+	$: syncableSources = schedules.filter(
+		(schedule) => schedule.kind === 'content' && schedule.lifecycle !== 'revoked'
+	);
+	const runAllSources = async (quiet = false) => {
+		if (!knowledge) return;
+		try {
+			const { data } = await cloudSync.syncKnowledge(localStorage.token, knowledge.id);
+			const startedIds = data.filter((run) => run.job_id).map((run) => run.schedule_id);
+			queuedRuns = queueRuns(queuedRuns, schedules, startedIds);
+			const started = startedIds.length;
+			const codes = new Set(data.map((run) => run.code));
+			if (started) toast.success($i18n.t('Sync started for {{count}} sources', { count: started }));
+			else if (quiet) return;
+			else if (!data.length) toast.info($i18n.t('Only the person who added a source can sync it.'));
+			else if (codes.has('connection_pending'))
+				toast.info(
+					$i18n.t('Reconnect {{provider}} to resume syncing.', {
+						provider: $i18n.t(activeProvider?.label ?? '')
+					})
+				);
+			else if (codes.has('run_too_soon'))
+				toast.info($i18n.t('Sync was started recently. Try again in a moment.'));
+			else toast.info($i18n.t('A sync is already running.'));
+		} catch (error) {
+			reportCloudError(error);
+		}
+		await refreshCloudSync().catch(() => {
+			syncStatusError = true;
+		});
+		repollCloudSyncSoon();
+	};
+	const syncAllSources = async () => {
+		if (cloudActionBusy) return;
+		cloudActionBusy = true;
+		try {
+			await runAllSources();
 		} finally {
 			cloudActionBusy = false;
 		}
@@ -1163,6 +1229,7 @@
 						throw error;
 					}
 					await cloudSync.runSchedule(localStorage.token, knowledge.id, content.id);
+					queuedRuns = queueRuns(queuedRuns, schedules, [content.id]);
 					started++;
 				} catch (error) {
 					if (
@@ -1206,9 +1273,14 @@
 		} else void scheduleAction(targets, action);
 	};
 
-	const scheduleAction = async (targets: Schedule[], action: ScheduleAction | 'delete') => {
-		if (!knowledge || cloudActionBusy) return;
+	// Resolves true once every target took the action.
+	const scheduleAction = async (
+		targets: Schedule[],
+		action: ScheduleAction | 'delete'
+	): Promise<boolean> => {
+		if (!knowledge || cloudActionBusy) return false;
 		cloudActionBusy = true;
+		let done = false;
 		try {
 			const actions = {
 				run: cloudSync.runSchedule,
@@ -1217,8 +1289,11 @@
 				resume: cloudSync.resumeSchedule,
 				delete: cloudSync.deleteSchedule
 			};
-			for (const schedule of targets)
+			for (const schedule of targets) {
 				await actions[action](localStorage.token, knowledge.id, schedule.id);
+				if (action === 'run') queuedRuns = queueRuns(queuedRuns, schedules, [schedule.id]);
+			}
+			done = true;
 			await refreshCloudSync();
 			repollCloudSyncSoon();
 		} catch (error) {
@@ -1240,6 +1315,7 @@
 		} finally {
 			cloudActionBusy = false;
 		}
+		return done;
 	};
 
 	const singleUploads = new Set<string>();
@@ -1569,7 +1645,7 @@
 	};
 
 	// Bulk remove: replays each selected item's own removal (file-remove,
-	// directory-delete, or remove-source) without per-item toast/init, then
+	// directory-delete or source-remove) without per-item toast/init, then
 	// refreshes once. Directories always delete their contents.
 	const bulkRemoveHandler = async () => {
 		const items = [...get(selection.selected).values()];
@@ -1584,6 +1660,10 @@
 				} else if (item.kind === 'directory') {
 					const res = await deleteKnowledgeDirectory(localStorage.token, id, item.dirId, false);
 					if (res) ok++;
+				} else {
+					// [Gradient] The same unsubscribe as the source's ⋯ → Remove.
+					const pair = sourcePairs.get(item.itemId);
+					if (pair && (await scheduleAction(removalTargets(pair), 'delete'))) ok++;
 				}
 			} catch (e) {
 				console.error('Bulk remove failed for', item.key, e);
@@ -1855,23 +1935,29 @@
 <FilesOverlay show={dragged} />
 <ConfirmDialog
 	bind:show={showBulkRemoveConfirm}
-	title={$bulkBreakdown.sources > 0
-		? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
-				fileCount: $bulkBreakdown.totalFiles,
-				sourceCount: $bulkBreakdown.sources
-			})
-		: $bulkBreakdown.directories > 0
-			? $i18n.t('Delete {{fileCount}} file(s) and {{folderCount}} folder(s)?', {
+	title={bulkOnlySources
+		? $i18n.t('Remove {{count}} source(s)?', { count: $bulkBreakdown.sources })
+		: $bulkBreakdown.sources > 0
+			? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
 					fileCount: $bulkBreakdown.totalFiles,
-					folderCount: $bulkBreakdown.directories
+					sourceCount: $bulkBreakdown.sources
 				})
-			: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.totalFiles })}
-	message={$bulkBreakdown.sources > 0
-		? $i18n.t('Removing a source stops its sync and deletes all of its files.')
-		: $bulkBreakdown.directories > 0
-			? $i18n.t('Deleting a folder also deletes all files inside it.')
-			: $i18n.t('This will remove the selected files from this knowledge base.')}
-	confirmLabel={$i18n.t('Delete')}
+			: $bulkBreakdown.directories > 0
+				? $i18n.t('Delete {{fileCount}} file(s) and {{folderCount}} folder(s)?', {
+						fileCount: $bulkBreakdown.totalFiles,
+						folderCount: $bulkBreakdown.directories
+					})
+				: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.totalFiles })}
+	message={bulkOnlySources
+		? $i18n.t(
+				'Their files leave this knowledge base and its search. Nothing changes in the cloud storage.'
+			)
+		: $bulkBreakdown.sources > 0
+			? $i18n.t('Removing a source stops its sync and deletes all of its files.')
+			: $bulkBreakdown.directories > 0
+				? $i18n.t('Deleting a folder also deletes all files inside it.')
+				: $i18n.t('This will remove the selected files from this knowledge base.')}
+	confirmLabel={bulkOnlySources ? $i18n.t('Remove') : $i18n.t('Delete')}
 	on:confirm={() => {
 		bulkRemoveHandler();
 	}}
@@ -2004,7 +2090,8 @@
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
 								{#if fileItemsTotal || kbFileTotal}
-									{#if knowledge?.type !== 'local' && knowledge?.type}
+									<!-- [Gradient] Synced cloud sources have no per-KB file cap: show the count only. -->
+									{#if knowledge?.type !== 'local' && knowledge?.type && !activeProvider}
 										{@const maxFiles =
 											$config?.integration_providers?.[knowledge?.type]?.max_files_per_kb ||
 											$config?.features?.knowledge_max_file_count ||
@@ -2212,6 +2299,20 @@
 							}}
 						/>
 
+						{#if knowledge?.write_access && syncableSources.length > 1}
+							<!-- [Gradient] Keep the standard gap before "Add source". -->
+							<Tooltip
+								content={$i18n.t('Check every source of this knowledge base for changes now')}
+								className="flex mr-1.5"
+							>
+								<button
+									type="button"
+									class="py-1.5 px-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+									disabled={cloudActionBusy}
+									on:click={syncAllSources}>{$i18n.t('Sync all now')}</button
+								>
+							</Tooltip>
+						{/if}
 						{#if knowledge?.write_access}
 							<div>
 								{#if activeProviderEnabled}
@@ -2351,12 +2452,15 @@
 								     fixed-height by design ("the list never jumps") — gating it on
 								     fileItems alone defeated that, since entering a folder with
 								     files made the header appear and shift the rows down. -->
-									{#if knowledge?.write_access && fileItems && (fileItems.length > 0 || (!query && directoryItems.length > 0))}
+									<!-- [Gradient] Hidden where nothing on the level can be selected
+									     (inside a synced folder) rather than shown as a dead control. -->
+									{#if knowledge?.write_access && fileItems && ($bulkAvailable.length > 0 || $bulkCount > 0) && (fileItems.length > 0 || (!query && (directoryItems.length > 0 || (currentDirectoryId === null && looseSources.length > 0))))}
 										<div class="pb-1.5 shrink-0">
 											<KbSelectionHeader
 												count={$bulkCount}
 												allSelected={$bulkAllSelected}
 												indeterminate={$bulkIndeterminate}
+												selectable={$bulkAvailable.length > 0}
 												onToggleSelectAll={() => selection.toggleSelectAll()}
 												onDelete={() => (showBulkRemoveConfirm = true)}
 											/>
@@ -2370,9 +2474,10 @@
 												searchMode={!!query}
 												{structureEditable}
 												{sourcePairs}
-												looseSources={currentDirectoryId === null ? looseSources : []}
+												looseSources={currentDirectoryId === null ? listedSources : []}
 												skippedItems={currentSourcePair ? skippedItems : []}
 												syncing={enclosingSyncing}
+												{enclosingProvider}
 												{uploadProgress}
 												skippedProvider={currentSourceProvider}
 												syncAccess={!!knowledge?.write_access}

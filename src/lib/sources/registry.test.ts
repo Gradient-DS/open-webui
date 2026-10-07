@@ -4,11 +4,10 @@ import {
 	DEFAULT_RECONNECT_CODES,
 	reconnectCodes,
 	providerFor,
-	providerIcon,
-	localSource,
 	oneDriveScope,
 	googleDriveScope
 } from './registry';
+import { providerBadge } from './badges';
 import { openOneDriveItemPicker } from '$lib/utils/onedrive-file-picker';
 import {
 	createKnowledgePicker,
@@ -77,12 +76,12 @@ describe('provider registry', () => {
 		expect(provider.needsReconnectOn.length).toBeGreaterThan(0);
 		expect(reconnectCodes(kind)).toBe(provider.needsReconnectOn);
 		expect(providerFor(kind)).toBe(provider);
-		expect(providerIcon(kind)).toBe(provider.icon);
+		expect(providerBadge(kind)?.icon).toBe(provider.icon);
 	});
 	it.each([null, undefined, 'local', 'unknown', 'toString'])('falls back for %s', (kind) => {
 		expect(reconnectCodes(kind)).toBe(DEFAULT_RECONNECT_CODES);
 		expect(providerFor(kind)).toBeNull();
-		expect(providerIcon(kind)).toBe(localSource.icon);
+		expect(providerBadge(kind)).toBeNull();
 	});
 });
 

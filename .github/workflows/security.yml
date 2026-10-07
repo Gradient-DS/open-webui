@@ -45,7 +45,7 @@ jobs:
       hit: ${{ steps.check.outputs.hit }}
     steps:
       - id: check
-        uses: Gradient-DS/security-ci/actions/tested-tree/check@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
+        uses: Gradient-DS/security-ci/actions/tested-tree/check@e18c245d84975f79da5c97d1987b83039c13292e # v8
         with:
           workflow-key: security
 
@@ -53,7 +53,7 @@ jobs:
     needs: reuse
     # Every PR and scheduled run; a push unless its exact tree already passed.
     if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
-    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
+    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
       contents: read
@@ -71,7 +71,7 @@ jobs:
   # daily run scans the published digests (`image-published`).
   image:
     if: github.event_name == 'pull_request'
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
       contents: read
@@ -122,7 +122,7 @@ jobs:
       fail-fast: false
       matrix:
         branch: [dev, test, main]
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
       contents: read
@@ -201,6 +201,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: Gradient-DS/security-ci/actions/tested-tree/record@05a6276fff8a3a2a95abb95cc441041eb951df4f # v7
+      - uses: Gradient-DS/security-ci/actions/tested-tree/record@e18c245d84975f79da5c97d1987b83039c13292e # v8
         with:
           workflow-key: security

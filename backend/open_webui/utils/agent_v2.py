@@ -1,6 +1,5 @@
 """Adapt one OWUI turn to a server-owned thread and the existing chat renderer.
-Feed the model picker with an OpenAI-type connection whose base URL is
-<SOEV_API_URL>/v1/chat and whose API key is the soev-api key."""
+The model picker, its default and task completions come from soev-api (soev/model_catalog.py)."""
 
 import asyncio
 import base64
@@ -11,6 +10,7 @@ import logging
 import math
 import re
 import time
+import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from pathlib import Path
@@ -192,6 +192,8 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     """[Claude] The files attached in the chat, as the turn's `attachments` field; none while nothing is attached.
 
     The collection is the one the finished upload reported, else where chat uploads go; the agent checks access.
+    A file picked from a knowledge base (`knowledge_id`) is that KB's document, read there as the user: synced
+    documents have no File row, and an uploaded one's row does not name the KB.
 
     Raises:
         AttachmentsUnavailable: a file is gone, still being processed, or failed.
@@ -206,7 +208,19 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
         and entry.get('id')
         and not (entry.get('content_type') or '').startswith('image/')
     }
+    user_id = None if acting.acting_ref() else metadata['user_id']
     for file_id, entry in entries.items():
+        if knowledge_id := entry.get('knowledge_id'):
+            document = await Knowledges.knowledge_document(knowledge_id, file_id, user_id=user_id)
+            name = entry.get('name') or (document or {}).get('filename') or file_id
+            if document is not None:
+                attached.append({'collection_key': knowledge_id, 'file_id': file_id, 'name': name})
+                continue
+            # Not landed yet: an upload still being ingested into the KB keeps its status on the File row.
+            file = await Files.get_file_by_id(file_id)
+            status = (file.meta or {}).get('status') if file is not None else None
+            unavailable.append((name, status if status in ('processing', 'failed') else 'gone'))
+            continue
         file = await Files.get_file_by_id(file_id)
         name = entry.get('name') or (file.filename if file is not None else file_id)
         status = 'gone' if file is None else (file.meta or {}).get('status')
@@ -717,16 +731,24 @@ class Citations:
         return None if source is None else source['n']
 
 
-def _marked(text: str, markers: list[tuple[int, int]]) -> str:
-    """[Claude] `text` with ` [n]` inserted at each `(position, n)`, positions in code points; a number repeated at
-    one position shows once."""
+def _citation_marker(before: str, number: int) -> str:
+    """[Claude] The marker for `number` after `before`: spaced off the text, but flush after an opening `*`, `_` or
+    `~` run, which a following space would stop from opening (CommonMark flanking), so `**[1] text**` stays bold."""
+    run = before.rstrip('*_~')
+    opens = run != before and (not run or run[-1].isspace() or unicodedata.category(run[-1])[0] in 'PS')
+    return f'[{number}]' if opens else f' [{number}]'
+
+
+def _marked(text: str, markers: list[tuple[int, int]], start: int = 0) -> str:
+    """[Claude] `text[start:]` with a marker inserted at each `(position, n)`, positions in code points into `text`;
+    a number repeated at one position shows once."""
     shown: set[tuple[int, int]] = set()
-    pieces, start = [], 0
+    pieces = []
     for at, number in sorted(markers, key=lambda marker: marker[0]):
-        if (at, number) in shown or not 0 <= at <= len(text):
+        if (at, number) in shown or not start <= at <= len(text):
             continue
         shown.add((at, number))
-        pieces.append(text[start:at] + f' [{number}]')
+        pieces.append(text[start:at] + _citation_marker(text[:at], number))
         start = at
     return ''.join(pieces) + text[start:]
 
@@ -764,6 +786,8 @@ class AgentTurn:
         # [Claude] Done lines of calls whose output landed, held until the model thinks again or moves on.
         self.settling: list[dict[str, Any]] = []
         self.model: str | None = None
+        # [Claude] The catalog id that answered, once soev-api reports one (a fallback may differ from self.model).
+        self.answered_model: str | None = None
         self.attached_files: dict[str, dict] = {}
         self.emitter: Callable[[dict], Awaitable[None]] | None = None
 
@@ -837,6 +861,7 @@ class AgentTurn:
             meta = {
                 **((stored or {}).get('meta') or {}),
                 'agent_v2': {'thread_id': self.thread_id, 'position': self.position},
+                **({'answered_model': self.answered_model} if self.answered_model else {}),
             }
             await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, message_id, {'meta': meta})
 
@@ -1040,7 +1065,7 @@ class AgentTurn:
             return ''
         await self.show_source(citation['source'], 'cited_this_turn')
         self.streamed.append((at, number))
-        return f' [{number}]'
+        return _citation_marker(self.partial[:at], number)
 
     async def resume(self) -> None:
         events = self.client.chat_stream(
@@ -1097,8 +1122,18 @@ class AgentTurn:
             self.position = position
         return await self.render_event(event)
 
+    async def answered(self, event: ChatEvent, payload: dict) -> None:
+        """[Claude] Note the answering model wherever soev-api reports it; not every relay sends it yet."""
+        answered = (payload.get('answered_model') if isinstance(payload, dict) else None) or event.data.get(
+            'answered_model'
+        )
+        if isinstance(answered, str) and answered and answered != self.answered_model:
+            self.answered_model = answered
+            await self.emit('chat:completion', {'answered_model': answered})
+
     async def render_event(self, event: ChatEvent) -> list[dict[str, Any]]:
         payload = event.data.get('payload') or {}
+        await self.answered(event, payload)
         if event.event == 'input' and event.data.get('stream') == 'root' and self.input_position is None:
             self.input_position = self.position
             await self.persist()
@@ -1144,7 +1179,7 @@ class AgentTurn:
             log.warning('Durable model output disagrees with streamed text', extra={'thread_id': self.thread_id})
             return []
         markers = [
-            (citation['at'] - len(partial), number)
+            (citation['at'], number)
             for citation in citations
             if (number := self.citations.number(citation)) is not None
             and isinstance(citation.get('at'), int)
@@ -1154,7 +1189,7 @@ class AgentTurn:
         for citation in citations:
             if self.citations.number(citation) is not None:
                 await self.show_source(citation['source'], 'cited_this_turn')
-        text = _marked(content[len(partial) :], markers)
+        text = _marked(content, markers, len(partial))
         chunks = []
         if reasoning:
             chunks.append(_chunk({'reasoning_content': reasoning}))

@@ -114,7 +114,7 @@ async def test_stream_reconnects_without_reposting_input(chat_http: FakeSoevApi)
     ]
     assert requests[1].headers['Last-Event-ID'] == '2'
     assert len({r.headers['X-Soev-Subject'] for r in requests}) == 3
-    assert all(r.headers['Authorization'] == 'Bearer test-runtime-key' for r in requests)
+    assert all(r.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret' for r in requests)
     assert all('Idempotency-Key' not in r.headers for r in requests)
     assert all(tail.closed for tail in chat_http.chat.tails)
 

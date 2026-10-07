@@ -139,6 +139,11 @@ async def sync_status(knowledge_id: str, sync=Depends(cloud_sync)):
     return await sync.sync_status(knowledge_id)
 
 
+@router.post('/knowledge/{knowledge_id}/sync')
+async def sync_all(knowledge_id: str, sync=Depends(cloud_sync)):
+    return await sync.sync_all(knowledge_id)
+
+
 @router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/run', status_code=201)
 async def run_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     return await sync.schedule_action(knowledge_id, schedule_id, 'run')

@@ -211,3 +211,155 @@ exceptions:
     approved_by: Lex Lubbers, 2026-09-09
     recheck: 2026-12-09
 
+
+  # pymongo 4.18.1 (published 2026-09-10) is taken above and closes
+  # CVE-2026-88029. The three below are fixed only in 4.18.2, published
+  # 2026-09-24, which the 14-day uv exclude-newer cooldown refuses until
+  # 2026-10-08. NOT a §7 exception — a DEFERRED UPGRADE: on or after
+  # 2026-10-08 bump pymongo to 4.18.2 in pyproject.toml, uv.lock and both
+  # requirements files and delete these three entries. recheck 2026-10-20 is
+  # the deadline for that.
+  # Keyed by GHSA alias (pip-audit matches aliases) because ids must be unique
+  # across scanners and the image scan reports the CVE ids; see the trivy
+  # entries below.
+  - id: GHSA-qx36-8mw2-4r3x
+    package: pymongo
+    scanner: pip-audit
+    reason: >-
+      CVE-2026-96747. PyMongo passed a client-side-encryption data key's KMS
+      endpoint verbatim into parse_host(), which accepts any string ending in
+      .sock as a Unix socket path instead of validating it as a hostname.
+      Fixed in 4.18.2, which is inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      No replacement is needed; this is a deferred upgrade. 4.18.1, the newest
+      release outside the cooldown, is pinned now. Exempting pymongo from the
+      cooldown to take 4.18.2 early was rejected: the cooldown is the
+      supply-chain control, and the package is not used (see usage_analysis).
+    usage_analysis: >-
+      Unreachable. Nothing under backend/ imports pymongo, bson or gridfs; the
+      pin is inherited from upstream's requirements and pyproject `all` extra.
+      No code path creates a MongoClient, so no client-side-encryption data key
+      or KMS endpoint is ever parsed.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  - id: GHSA-vp6j-j7w5-5xjj
+    package: pymongo
+    scanner: pip-audit
+    reason: >-
+      CVE-2026-96748. PyMongo percent-decoded the whole host section of a
+      connection string before splitting it into host:port entries, so an
+      encoded comma or colon in a hostname could redirect the connection.
+      Fixed in 4.18.2, which is inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as CVE-2026-96747: 4.18.1 is pinned now, 4.18.2
+      replaces it once it clears the cooldown.
+    usage_analysis: >-
+      Unreachable. No code under backend/ imports pymongo or parses a MongoDB
+      connection string, and no deployment configures one.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  - id: GHSA-v4x9-3549-crwv
+    package: pymongo
+    scanner: pip-audit
+    reason: >-
+      CVE-2026-96749. Integer overflow in the BSON encoder of PyMongo's
+      bundled C extension when a single document is built from an unusually
+      large input. Fixed in 4.18.2, which is inside the 14-day package
+      cooldown until 2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as CVE-2026-96747: 4.18.1 is pinned now, 4.18.2
+      replaces it once it clears the cooldown.
+    usage_analysis: >-
+      Unreachable. Nothing under backend/ imports bson or pymongo, so the C
+      encoder is never invoked on any input, attacker-controlled or otherwise.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  # The image installs backend/requirements.txt, so the image scan reports
+  # the same two pymongo findings at HIGH. Cleared by the same 4.18.2 bump.
+  - id: CVE-2026-96748
+    package: pymongo (open-webui image)
+    scanner: trivy
+    reason: >-
+      Same finding as GHSA-vp6j-j7w5-5xjj, reported by the image scan. Fixed
+      only in pymongo 4.18.2, inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as GHSA-vp6j-j7w5-5xjj.
+    usage_analysis: >-
+      See GHSA-vp6j-j7w5-5xjj: nothing under backend/ imports pymongo, so no
+      connection string is ever parsed.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  - id: CVE-2026-96749
+    package: pymongo (open-webui image)
+    scanner: trivy
+    reason: >-
+      Same finding as GHSA-v4x9-3549-crwv, reported by the image scan. Fixed
+      only in pymongo 4.18.2, inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as GHSA-v4x9-3549-crwv.
+    usage_analysis: >-
+      See GHSA-v4x9-3549-crwv: nothing under backend/ imports bson or pymongo,
+      so the C encoder is never invoked.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  # ------------------------------------------------------------------- npm
+  # Both fixes below exist but were published inside the 14-day window that
+  # the required lockfile-age check enforces. NOT §7 exceptions — DEFERRED
+  # UPGRADES with a recheck tied to the date the fix becomes installable.
+  - id: GHSA-wq5f-xc86-pv6w
+    package: sharp
+    scanner: npm
+    reason: >-
+      sharp's bundled libvips ships a librsvg affected by CVE-2026-96889. Fixed
+      in sharp 0.35.5, published 2026-09-27; lockfile-age refuses it until
+      2026-10-11. On or after that date raise the existing
+      overrides["@huggingface/transformers"].sharp in package.json to ^0.35.5,
+      relock, and delete this entry.
+    replacement_considered: >-
+      No replacement is needed; this is a deferred upgrade. Every sharp release
+      before 0.35.5 is affected, so no older pin helps. Taking 0.35.5 early
+      would fail the lockfile-age supply-chain gate for a package the shipped
+      app never loads.
+    usage_analysis: >-
+      sharp arrives only as a dependency of @huggingface/transformers (and,
+      through it, kokoro-js), which the frontend runs in the browser for
+      Whisper speech-to-text and Kokoro TTS workers. The package's browser
+      export (dist/transformers.web.js) marks sharp as ignored and decodes
+      images with the browser's own APIs, so sharp is never bundled. The
+      runtime image copies only the built frontend (/app/build), not
+      node_modules, so neither sharp nor libvips/librsvg is installed in any
+      published image. No SVG we render is ever passed to sharp.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20
+
+  - id: GHSA-68fv-2mgg-jv7q
+    package: source-map-js
+    scanner: npm
+    reason: >-
+      source-map-js 1.0.0 - 1.2.1 allows an event-loop denial of service
+      through indexed source-map section offsets. Fixed in 1.2.2, published
+      2026-09-30; lockfile-age refuses it until 2026-10-14. On or after that
+      date run `npm update source-map-js` (postcss, sass and
+      @tailwindcss/node all accept ^1.2.2) and delete this entry.
+    replacement_considered: >-
+      No replacement is needed; this is a deferred upgrade. 1.2.1 is the
+      newest release outside the cooldown, and the dependents (postcss, sass,
+      tailwind) are the CSS toolchain, which has no source-map-js-free
+      alternative worth a swap for a build-time DoS.
+    usage_analysis: >-
+      Build-time only. source-map-js is used by postcss, sass and tailwind
+      while vite builds the frontend, and it parses only source maps those
+      tools produce from this repository's own sources. No user-supplied
+      source map is ever parsed, and the runtime image copies only the built
+      frontend, not node_modules. Worst case is a hung local or CI build.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-10-20

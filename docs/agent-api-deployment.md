@@ -33,6 +33,24 @@ AGENT_API_AGENTS=agent-one,agent-two
 
 By default the agent (persona) is selected server-side via `default_agent` in the agent service config. Deployments that expose multiple agents behind one `AGENT_API_KEY` can optionally use `AGENT_API_AGENTS` + the "External Agents" admin tab to let admins switch without a redeploy.
 
+## soev-api caller identity (v2)
+
+soev-api declares the credential at startup; Open WebUI derives the credential id from `SOEV_API_KEY` and the signing kid from `SOEV_API_SIGNING_KEY` (RFC 7638 JWK thumbprint).
+
+Deployment generates the soev key and an Ed25519 key pair. Configure soev-api with
+`SOEV_API_BOOTSTRAP__OWUI__KEY`, `SOEV_API_BOOTSTRAP__OWUI__PUBLIC_KEY`, and
+`SOEV_API_BOOTSTRAP__OWUI__PRINCIPAL`, and configure Open WebUI with:
+
+| Variable | Value |
+| --- | --- |
+| `SOEV_API_URL` | soev-api base URL |
+| `SOEV_API_KEY` | The same `soev_<env>_<cred-id>_<secret>` caller key |
+| `SOEV_API_SIGNING_KEY` | Unencrypted Ed25519 private key PEM, preserving newlines |
+| `SOEV_API_AUDIENCE` | The deployment's assertion audience |
+| `SOEV_API_SERVICE_PRINCIPAL` | The declared Open WebUI service principal |
+
+When `SOEV_API_URL` is set, Open WebUI validates both keys during startup and refuses to start if either is malformed.
+
 ## What Changes When Enabled
 
 | Capability                | Stock OpenWebUI                                    | With Agent API                                           |
@@ -44,20 +62,15 @@ By default the agent (persona) is selected server-side via `default_agent` in th
 
 **Unchanged:** streaming to UI, DB persistence, title generation, WebSocket transport, system prompts, memory retrieval, voice mode.
 
-## Title and tag generation under the v2 runtime
+## Models, default and tasks under the v2 runtime
 
-Titles, tags and follow-ups are Open WebUI tasks: a plain chat completion on the task model, outside the agent. Under the v2 runtime (`AGENT_API_RUNTIME=v2`), the model connection is soev-api's `/v1/chat`. It lists the models but serves only threads, so a task sent there returns `404 route_not_found` and the chat keeps the first words of the prompt as its title.
+v2 mode is on when `AGENT_API_ENABLED=true`, `AGENT_API_RUNTIME=v2` and `SOEV_API_URL` is set. soev-api then decides which models exist, which one is the default, and which model runs tasks:
 
-When no task model is set, or the one set is not on any connection, the task falls back to the chat model, which is on soev-api. Give Open WebUI a second connection straight to inference (LiteLLM in a cluster) and point the external task model at a model on it:
+- **Models.** The picker lists only soev-api's catalog (`GET /v1/models`, cached per process for 60 s). OpenAI and Ollama connections, function models and direct user connections are not offered, so `OPENAI_API_BASE_URLS` and connection `model_ids` have no effect. Access is unchanged: as with any base model, users see a catalog model only once an admin grants it under Admin > Models.
+- **Default.** `/api/config` serves the catalog entry marked `default` as `default_models`. `ui.default_models` (`DEFAULT_MODELS`) is ignored. A model the user saved or picked still wins.
+- **Tasks.** Titles, tags, follow-ups, emoji, queries, autocomplete, image prompts, MoA, context compaction, memory review and tool selection all go to `POST /v1/completions/task` as the acting user. soev-api runs them on the client's `task` model, so `TASK_MODEL`, `TASK_MODEL_EXTERNAL` and a direct LiteLLM connection are not needed. The prompt templates still come from Open WebUI.
 
-```env
-OPENAI_API_BASE_URLS=http://soev-api/v1/chat;http://litellm-proxy.shared-services.svc:4000/v1
-OPENAI_API_KEYS=<soev-api key>;<litellm key>
-OPENAI_API_CONFIGS={"0": {"enable": true}, "1": {"enable": true, "model_ids": ["google/gemma-4-31B-it"]}}
-TASK_MODEL_EXTERNAL=google/gemma-4-31B-it
-```
-
-The task model then also appears in the model picker. Hide it under Admin > Models; a hidden model still serves tasks. Hiding is stored on the model in the database and has no environment variable.
+Each catalog model carries its facts (vendor, origin, hosting, tri-state capabilities, lifecycle) under `info.meta.soev`. Vision counts as on only when the catalog says `supported`.
 
 ## Request Payload
 
@@ -153,3 +166,36 @@ After deploying, verify the integration is working:
 2. Send a chat message — it should hit `{AGENT_API_BASE_URL}/v1/chat/completions` instead of the model provider
 3. Confirm status spinners and citation chips render in the UI
 4. Confirm that setting `AGENT_API_ENABLED=false` (or removing it) restores stock behavior
+
+## Migrating a v1 tenant to v2
+
+`python -m open_webui.soev.migrate` moves an existing tenant (own Weaviate, a direct LiteLLM connection, local KBs) to v2 (soev-api KBs in pgvector, models from the soev-api catalog, the agent through soev-api). The chart runs it as a Job when `soevApi.migrate.enabled` (see `helm/open-webui-tenant/README.md`). It needs the v2 image with O4: the switch retires the OpenAI connection, so models must come from soev-api's catalog.
+
+Inputs (environment):
+
+- `SOEV_V2_MIGRATION_ID`: names the run. The snapshot, the once-only steps and the sign-out are recorded per id.
+- `SOEV_V2_CONFIG`: JSON with exactly `agent_api.selected_agent`, `document_writer.enable`, `live_documents.enable`, `live_mail.enable`, `notes.enable`, `web.search.enable`, `webui.url` and `user.permissions.features` (merged into `user.permissions`).
+- `SOEV_V2_MODEL_MAP`: JSON of LiteLLM model name to catalog id, e.g. `{"zai-org/GLM-5.3": "glm-5-3"}`. soev-api serves no `/v1/models` with the registry `model_string` yet, so the pairs come from the catalog by hand.
+- `SOEV_V2_INGEST_CONCURRENCY` (default 4) and `SOEV_V2_WAIT_SECONDS` (default 0; the chart sets 600).
+
+`--apply` runs these steps in order; each is safe to rerun after a partial failure:
+
+1. **Snapshot.** The config rows the next steps change are kept as stored text, once per migration id. The migration's state (snapshot, model id records, step markers) lives outside Alembic, in schema `owui_v2_migration` on PostgreSQL (`owui_v2_migration_*` tables on SQLite), so the database stays at the v1 Alembic head.
+2. **Config switch** (once per id). The OpenAI and Ollama connections, `ui.default_models` and the task models are retired; the `SOEV_V2_CONFIG` values are written.
+3. **Model ids** (once per id). LiteLLM names become catalog ids in message model ids, chat JSON, assistant base models, base-model override rows and their grants, user default and pinned models, automations, `ui.default_pinned_models` and `ui.model_order_list`. Every change is recorded with its path. Unmapped ids are listed and left as they are.
+4. **Directory and KB copy.** Identity links, groups, collections with grants, folders and cloud schedules.
+5. **Re-ingest.** Each file of a local KB without a soev document is submitted through `ingest.submit`. Cloud KBs re-sync from their schedules. The job outcome is written to the file row (processing, then completed or failed), which v1 shares: after a rollback, v1 shows the v2 outcome on re-ingested files, e.g. failed for a file v2 could not ingest, while its own v1 vectors are intact.
+6. **Memories.** Users whose vectors do not match their memory rows are re-embedded with the app's embedding function.
+7. **Reconcile.** Exit 0 when every file is ingested or terminally failed (listed); 75 while ingest jobs still run; 1 on a missing or conflicting collection, missing memory vectors or an unreachable soev-api; 2 on invalid input.
+8. **Sign-out** (once per id, after exit 0). Every user's tokens are revoked through the Redis `revoked_at` marker, so each first Microsoft login creates the proven Entra link soev-connect requires. `WEBUI_SECRET_KEY` is not rotated. The sign-out is best-effort: if Redis loses its state, a user keeps their session, gets "Log in again with Microsoft to connect" (shown whenever soev-api answers `subject_not_linked`) on their first consent, and the link forms at that login. Being signed out is a convenience, not a security control.
+
+`--dry-run` prints the plan without writes or HTTP requests (it does not create the state tables either), and needs the same `SOEV_V2_*` inputs as `--apply`. The CLI requires one of `--apply`, `--restore` or `--dry-run`; it no longer runs the directory copy alone. The plan shows the snapshot state, every switched key, the model mapping with counts and unmapped ids, per-KB files to check, memory rows and the sign-out.
+
+`--restore` puts the snapshotted config rows back byte for byte (and removes keys that had no row), and puts back every recorded model id that still holds the value written; references changed since are listed and left. Messages added after the cutover stay. soev-api data and the `owui_v2_migration` state are not touched; the state stays for audit until the cleanup PR drops it. A later `--apply` with the same id switches again from the kept snapshot but does not sign users out again.
+
+Rollback procedure:
+
+1. Set `soevApi.migrate.mode: restore`. The new Job restores the config rows and model ids.
+2. Then revert the image and values to v1. The database is still at the v1 Alembic head, so the v1 image's schema upgrade runs as before.
+
+Not migrated: Confluence KBs (Confluence is out of scope), web-search result collections (transient), Weaviate vectors (re-embedded from the originals), and model ids in feedback records. Proven Entra links are never backfilled; they form at login.

@@ -1746,12 +1746,9 @@ async def remove_file_from_knowledge_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    # [Gradient] Membership decides: a catalog document (synced, or landed without an upload)
+    # has no OWUI file row, and the store removes it all the same.
     file = await Files.get_file_by_id(form_data.file_id, db=db)
-    if not file:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
 
     # Validate the file actually belongs to this knowledge base
     if not await Knowledges.has_file(knowledge_id=id, file_id=form_data.file_id, db=db):
@@ -1761,6 +1758,18 @@ async def remove_file_from_knowledge_by_id(
         )
 
     await Knowledges.remove_file_from_knowledge_by_id(knowledge_id=id, file_id=form_data.file_id, db=db)
+    if file is None:
+        # Nothing of it lives in OWUI: no vectors, upload or legacy sync sources to clean up.
+        await publish_event(
+            request,
+            EVENTS.KNOWLEDGE_FILE_REMOVED,
+            actor=user,
+            subject_id=form_data.file_id,
+            data={'knowledge_id': knowledge.id, 'delete_file': False},
+        )
+        return KnowledgeFilesResponse(
+            **knowledge.model_dump(), files=await Knowledges.get_file_metadatas_by_id(knowledge.id, db=db)
+        )
 
     # Remove content from the vector database
     try:

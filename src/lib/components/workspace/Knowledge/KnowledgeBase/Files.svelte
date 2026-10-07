@@ -14,7 +14,7 @@
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
@@ -24,7 +24,9 @@
 	import type { DirectoryItem } from './directory';
 	import SourceRow from './SourceRow.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { isSynced, withoutLooseSourceFiles } from './syncedFiles';
 	import { directoryItem, fileItem, type KbSelection, type SelectableItem } from './selection';
+	import { sourcePairItem } from './sources';
 	import { breadcrumbSegments, fileBadge } from '../utils/treeStatus';
 	import type { Connection, Schedule, ScheduleAction, SkippedItem } from '$lib/apis/cloudSync';
 	import type { SchedulePair } from '../utils/cloudSync';
@@ -41,6 +43,7 @@
 			size?: number;
 			warning?: string;
 			relative_path?: string;
+			soev_schedule_ids?: string[];
 		};
 		updated_at?: number;
 		added_at?: number;
@@ -59,7 +62,7 @@
 
 	// [Gradient] Cloud sources live in the listing: a folder source is the
 	// directory row its schedule writes (keyed by the row's schedule_id), a
-	// single-file source gets its own row above the directories.
+	// single-file source gets its own row below the directories.
 	export let sourcePairs: Map<string, SchedulePair> = new Map();
 	export let looseSources: SchedulePair[] = [];
 	export let syncAccess = false;
@@ -77,6 +80,9 @@
 	// [Gradient] Set inside a cloud source whose run is live: files show up
 	// as they land, so the listing says more is coming.
 	export let syncing: FolderProgress | true | null = null;
+	// [Gradient] The provider of the cloud source this listing sits in, if any:
+	// its folders and files carry that provider's badge.
+	export let enclosingProvider: string | null = null;
 	// [Gradient] Local folder upload in flight, keyed by top-level directory id.
 	export let uploadProgress: Map<string, FolderProgress> = new Map();
 
@@ -104,22 +110,53 @@
 	$: selectedStore = selection?.selected;
 	$: selectionModeStore = selection?.selectionMode;
 
-	const isSelectable = (file: KnowledgeFile) => !!file?.id && file?.status !== 'uploading';
+	// [Gradient] Synced files leave with their source: no delete, no checkbox.
+	$: shownFiles = searchMode ? files : withoutLooseSourceFiles(files ?? [], looseSources);
+
+	const isSelectable = (file: KnowledgeFile) =>
+		!!file?.id && file?.status !== 'uploading' && !isSynced(file);
 	const buildItem = (file: KnowledgeFile): SelectableItem =>
 		fileItem(file.id!, file?.name ?? file?.meta?.name ?? '');
 
-	const buildDirItem = (dir: DirectoryItem): SelectableItem =>
-		directoryItem(dir.id, dir.name, dir.child_count ?? 0);
-	// Synced folders are removed through their own controls, never in bulk.
+	// [Gradient] A folder source's root row selects as its source, so bulk
+	// remove unsubscribes it the way the row's ⋯ menu does.
+	const dirPair = (dir: DirectoryItem) =>
+		dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null;
+	const buildDirItem = (dir: DirectoryItem): SelectableItem => {
+		const pair = dirPair(dir);
+		return pair ? sourcePairItem(pair) : directoryItem(dir.id, dir.name, dir.child_count ?? 0);
+	};
+	// Sources are removable where their menu offers Remove (admins); other
+	// folders only where the structure is editable. Files inside a synced
+	// folder stay read-only.
 	const isDirSelectable = (dir: DirectoryItem) =>
-		!dir.placeholder && !dir.schedule_id && structureEditable;
+		!dir.placeholder && (dir.schedule_id ? isAdmin && !!dirPair(dir) : structureEditable);
+	const isSourceSelectable = () => !!selection && isAdmin;
 
-	// Selection order mirrors render order (dirs first, then files) so
-	// Shift-range and drag-paint spans behave predictably.
-	$: orderedItems = [
-		...(searchMode ? [] : (directories ?? []).filter(isDirSelectable).map(buildDirItem)),
-		...(files ?? []).filter(isSelectable).map(buildItem)
-	];
+	// Selection order mirrors render order (folders, single-file sources,
+	// files) so Shift-range and drag-paint spans behave predictably.
+	let orderedItems: SelectableItem[] = [];
+	$: {
+		// Rebuild when any selectability gate changes, not just the rows.
+		void [structureEditable, isAdmin, sourcePairs, selection];
+		orderedItems = searchMode
+			? shownFiles.filter(isSelectable).map(buildItem)
+			: [
+					...(directories ?? []).filter(isDirSelectable).map(buildDirItem),
+					...(isSourceSelectable() ? looseSources.map(sourcePairItem) : []),
+					...shownFiles.filter(isSelectable).map(buildItem)
+				];
+	}
+
+	// Modifier clicks select; once a selection exists a plain click on a
+	// row without its own action (a single-file source) toggles it too.
+	const onSourceRowClick = (pair: SchedulePair, e: MouseEvent) => {
+		if (!selection || !isSourceSelectable()) return;
+		if (e.metaKey || e.ctrlKey || e.shiftKey || $selectionModeStore) {
+			e.preventDefault();
+			selection.select(sourcePairItem(pair), orderedItems, e);
+		}
+	};
 	// Register this view's selectable rows so the header's select-all works.
 	$: if (selection) selection.setAvailable(orderedItems);
 	onDestroy(() => selection?.setAvailable([]));
@@ -159,19 +196,8 @@
 </script>
 
 <div class=" max-h-full flex flex-col w-full gap-[0.03125rem]" role="list">
-	<!-- Sources and directories first -->
+	<!-- Folders (incl. folder sources) first, then single-file sources, then files -->
 	{#if !searchMode}
-		{#each looseSources as pair ((pair.content ?? pair.acl)?.id)}
-			<SourceRow
-				knowledgeId={knowledge?.id ?? ''}
-				{pair}
-				writeAccess={syncAccess}
-				busy={syncBusy}
-				{isAdmin}
-				on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
-				on:reconnect={(event) => onReconnect(event.detail)}
-			/>
-		{/each}
 		{#each directories as dir (dir.id)}
 			{#if dir.placeholder}
 				<PlaceholderRow
@@ -185,6 +211,7 @@
 					directory={dir}
 					writeAccess={structureEditable}
 					pair={dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null}
+					provider={enclosingProvider}
 					uploading={uploadProgress.get(dir.id) ?? null}
 					knowledgeId={knowledge?.id ?? ''}
 					{syncAccess}
@@ -199,6 +226,10 @@
 					onToggleSelect={() => {
 						if (selection && isDirSelectable(dir)) selection.toggle(buildDirItem(dir));
 					}}
+					onSelectClick={(e) => {
+						if (selection && isDirSelectable(dir))
+							selection.select(buildDirItem(dir), orderedItems, e);
+					}}
 					onNavigate={(id) => onNavigateDirectory(id)}
 					onRename={(id, name) => onRenameDirectory(id, name)}
 					onDelete={(id) => onDeleteDirectory(id)}
@@ -207,10 +238,27 @@
 				/>
 			{/if}
 		{/each}
+		{#each looseSources as pair ((pair.content ?? pair.acl)?.id)}
+			<SourceRow
+				knowledgeId={knowledge?.id ?? ''}
+				{pair}
+				writeAccess={syncAccess}
+				busy={syncBusy}
+				{isAdmin}
+				selectionActive={!!selection}
+				selectable={!!selection && isAdmin}
+				selected={(selection && $selectedStore?.has(sourcePairItem(pair).key)) ?? false}
+				checkboxVisible={!!$selectionModeStore}
+				onToggleSelect={() => selection?.toggle(sourcePairItem(pair))}
+				onRowClick={(e) => onSourceRowClick(pair, e)}
+				on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
+				on:reconnect={(event) => onReconnect(event.detail)}
+			/>
+		{/each}
 	{/if}
 
 	<!-- Files -->
-	{#each files as file (file?.id ?? file?.itemId ?? file?.tempId)}
+	{#each shownFiles as file (file?.id ?? file?.itemId ?? file?.tempId)}
 		{@const selKey = `file:${file?.id}`}
 		{@const isSel = (selection && isSelectable(file) && $selectedStore?.has(selKey)) ?? false}
 		{@const crumbs = searchMode ? breadcrumbSegments(file?.meta?.relative_path) : []}
@@ -259,7 +307,7 @@
 								window.open(`${WEBUI_BASE_URL}/api/v1/files/${fileId}/content`, '_blank');
 							}}
 						>
-							<DocumentPage className="size-3.5" />
+							<SourceItemIcon kind="file" provider={enclosingProvider} />
 						</button>
 					</Tooltip>
 				{/if}
@@ -319,7 +367,7 @@
 				</div>
 			</button>
 
-			{#if knowledge?.write_access}
+			{#if knowledge?.write_access && !isSynced(file)}
 				<div class="flex items-center">
 					<Tooltip content={$i18n.t('Delete')}>
 						<button
@@ -380,7 +428,11 @@
 			<div class="flex w-full items-center rounded-xl px-1.5 py-0.5 opacity-60" role="listitem">
 				{#if selection}<SelectCheckbox selectable={false} />{/if}
 				<div class="flex items-center p-1">
-					<DocumentPage className="size-3.5 text-gray-400" />
+					<SourceItemIcon
+						kind="file"
+						provider={enclosingProvider}
+						className="size-3.5 text-gray-400"
+					/>
 				</div>
 				<div class="flex min-w-0 flex-1 items-center gap-2 p-2 text-left">
 					<div class="line-clamp-1 text-sm text-gray-500 dark:text-gray-400">
