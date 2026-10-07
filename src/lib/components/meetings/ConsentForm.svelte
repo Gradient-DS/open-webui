@@ -61,7 +61,7 @@
 	};
 </script>
 
-<div class="max-w-xl w-full py-2 text-sm">
+<div class="w-full py-2 text-sm">
 	<div class="mb-1 text-xs text-gray-500">{$i18n.t('Record from')}</div>
 	<div class="flex flex-col gap-0.5" role="radiogroup" aria-label={$i18n.t('Record from')}>
 		{#each options as option (option.value)}

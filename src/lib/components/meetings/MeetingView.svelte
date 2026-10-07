@@ -532,7 +532,7 @@
 				</div>
 			</div>
 
-			<div class="flex-1 w-full px-3.5 pt-3 pb-10 max-w-4xl">
+			<div class="flex-1 w-full px-3 pt-3 pb-10">
 				{#if !meetingId}
 					<ConsentForm onStart={start} onCancel={() => goto('/meetings')} />
 				{:else if capture}
