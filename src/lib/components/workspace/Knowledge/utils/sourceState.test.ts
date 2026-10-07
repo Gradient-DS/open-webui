@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule, SyncRun } from '$lib/apis/cloudSync';
 import {
+	displayPath,
 	sourceState,
 	sourceTiming,
 	skippedReason,
@@ -347,4 +348,12 @@ describe('skip explainers', () => {
 		expect(skippedExplainer('restricted_item')).toContain('{{provider}}');
 		expect(skippedExplainer('reach_failed')).toMatch(/retried/);
 	});
+});
+
+it('shows Graph parent paths from the drive root', () => {
+	expect(displayPath('/drives/b!x/root:/Team/Reports')).toBe('/Team/Reports');
+	expect(displayPath('/drive/root:')).toBe('/');
+	expect(displayPath('/Team/Reports')).toBe('/Team/Reports');
+	expect(displayPath(null)).toBe('');
+	expect(view({ path: '/drive/root:/Team' }).path).toBe('/Team');
 });

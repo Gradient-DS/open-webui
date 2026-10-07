@@ -112,6 +112,15 @@ export const deleteSchedule = (token: string, knowledgeId: string, id: string) =
 	request<void>(token, schedulePath(knowledgeId, id), 'DELETE');
 export const getSyncStatus = (token: string, knowledgeId: string) =>
 	request<{ schedules: Schedule[] }>(token, `${knowledgePath(knowledgeId)}/sync`);
+export interface KnowledgeRun {
+	schedule_id: string;
+	job_id: string | null;
+	code: string | null;
+}
+// One call runs every content schedule the user owns in this knowledge base;
+// each keeps its own cooldown and refusals come back per schedule.
+export const syncKnowledge = (token: string, knowledgeId: string) =>
+	request<{ data: KnowledgeRun[] }>(token, `${knowledgePath(knowledgeId)}/sync`, 'POST');
 export const runSchedule = (token: string, knowledgeId: string, id: string) =>
 	request<{ job_id: string }>(token, `${schedulePath(knowledgeId, id)}/run`, 'POST');
 export const cancelSchedule = (token: string, knowledgeId: string, id: string) =>

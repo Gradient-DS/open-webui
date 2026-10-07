@@ -195,6 +195,7 @@ async def _subscribe(client, key, connection_id, scope, picked, cadence, *, owne
 
 async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
     cadence = None
+    connections = {}
     for kb in rows:
         if kb.id not in cloud_owners:
             continue
@@ -215,16 +216,20 @@ async def _create_cloud_sync(rows, cloud_owners, client, *, conflicts, dry_run):
                 if dry_run
                 else (await client.get('/v1/sync-policy'))['min_cadence_minutes']
             )
-        connection = await _send(
-            client,
-            'POST',
-            '/v1/connections',
-            {'source_kind': kb.type, 'credential_kind': 'user_oauth'},
-            key=f'migrate:connection:{kb.id}',
-            dry_run=dry_run,
-            as_user=owner,
-        )
-        connection_id = f'<connection:{kb.id}>' if dry_run else connection['id']
+        # One connection per owner and provider: one reconnect restores all their KBs.
+        account = (owner, kb.type)
+        if account not in connections:
+            connection = await _send(
+                client,
+                'POST',
+                '/v1/connections',
+                {'source_kind': kb.type, 'credential_kind': 'user_oauth'},
+                key=f'migrate:connection:{owner}:{kb.type}',
+                dry_run=dry_run,
+                as_user=owner,
+            )
+            connections[account] = f'<connection:{owner}:{kb.type}>' if dry_run else connection['id']
+        connection_id = connections[account]
         if not scopes:
             print(f'{kb.id}: no cloud sources, no schedules created')
         for scope, picked in scopes:
@@ -306,7 +311,8 @@ async def copy_directory(*, dry_run=False, db=None) -> Directory:
     }
     await _create_cloud_sync(rows, cloud_owners, client, conflicts=conflicts, dry_run=dry_run)
     for key in keys:
-        if key in conflicts:
+        # A cloud KB's tree comes from its sync; legacy folders would sit beside it empty.
+        if key in conflicts or key in cloud_owners:
             continue
         for path in sorted(paths[key]):
             digest = hashlib.sha256(path.encode()).hexdigest()

@@ -1114,7 +1114,49 @@
 		if (cloudActionBusy || !provider) return;
 		cloudActionBusy = true;
 		try {
-			await authorizeBackgroundSync(provider, connection.id);
+			// [Gradient] One reconnect restores every source on the account; start them all.
+			if (await authorizeBackgroundSync(provider, connection.id)) await runAllSources(true);
+		} finally {
+			cloudActionBusy = false;
+		}
+	};
+
+	// [Gradient] Sync every source of this knowledge base in one call. Each source
+	// keeps its own cooldown, so refusals come back per source and never fail the rest.
+	$: syncableSources = schedules.filter(
+		(schedule) => schedule.kind === 'content' && schedule.lifecycle !== 'revoked'
+	);
+	const runAllSources = async (quiet = false) => {
+		if (!knowledge) return;
+		try {
+			const { data } = await cloudSync.syncKnowledge(localStorage.token, knowledge.id);
+			const started = data.filter((run) => run.job_id).length;
+			const codes = new Set(data.map((run) => run.code));
+			if (started) toast.success($i18n.t('Sync started for {{count}} sources', { count: started }));
+			else if (quiet) return;
+			else if (!data.length) toast.info($i18n.t('Only the person who added a source can sync it.'));
+			else if (codes.has('connection_pending'))
+				toast.info(
+					$i18n.t('Reconnect {{provider}} to resume syncing.', {
+						provider: $i18n.t(activeProvider?.label ?? '')
+					})
+				);
+			else if (codes.has('run_too_soon'))
+				toast.info($i18n.t('Sync was started recently. Try again in a moment.'));
+			else toast.info($i18n.t('A sync is already running.'));
+		} catch (error) {
+			reportCloudError(error);
+		}
+		await refreshCloudSync().catch(() => {
+			syncStatusError = true;
+		});
+		repollCloudSyncSoon();
+	};
+	const syncAllSources = async () => {
+		if (cloudActionBusy) return;
+		cloudActionBusy = true;
+		try {
+			await runAllSources();
 		} finally {
 			cloudActionBusy = false;
 		}
@@ -2008,7 +2050,8 @@
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
 								{#if fileItemsTotal || kbFileTotal}
-									{#if knowledge?.type !== 'local' && knowledge?.type}
+									<!-- [Gradient] Synced cloud sources have no per-KB file cap: show the count only. -->
+									{#if knowledge?.type !== 'local' && knowledge?.type && !activeProvider}
 										{@const maxFiles =
 											$config?.integration_providers?.[knowledge?.type]?.max_files_per_kb ||
 											$config?.features?.knowledge_max_file_count ||
@@ -2216,6 +2259,18 @@
 							}}
 						/>
 
+						{#if knowledge?.write_access && syncableSources.length > 1}
+							<Tooltip
+								content={$i18n.t('Check every source of this knowledge base for changes now')}
+							>
+								<button
+									type="button"
+									class="py-1.5 px-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+									disabled={cloudActionBusy}
+									on:click={syncAllSources}>{$i18n.t('Sync all now')}</button
+								>
+							</Tooltip>
+						{/if}
 						{#if knowledge?.write_access}
 							<div>
 								{#if activeProviderEnabled}

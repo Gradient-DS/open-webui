@@ -34,6 +34,14 @@ export interface SourceView {
 	primary: 'sync_now' | 'reconnect' | 'resume' | 'request_access' | null;
 }
 
+// Graph parent paths read `/drive/root:/Team` or `/drives/<id>/root:/Team`; the
+// part after `root:` is what the user recognises from their drive.
+export function displayPath(path: string | null | undefined): string {
+	if (!path) return '';
+	const root = path.indexOf('root:');
+	return root < 0 ? path : path.slice(root + 'root:'.length) || '/';
+}
+
 export function sourceState(pair: SchedulePair, connection: Connection): SourceView {
 	const schedules = [pair.content, pair.acl].filter((item): item is Schedule => !!item);
 	const schedule = pair.content ?? pair.acl!;
@@ -77,7 +85,7 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 			(schedule.scope.single_file || schedule.scope.include_descendants === false
 				? 'File'
 				: 'Folder'),
-		path: schedule.path ?? '',
+		path: displayPath(schedule.path),
 		provider: providerFor(schedule.source_kind)?.label ?? schedule.source_kind,
 		lastSyncedAt: run?.finished_at ?? (run?.outcome ? run.started_at : null),
 		nextDueAt: schedule.next_due_at ?? null,

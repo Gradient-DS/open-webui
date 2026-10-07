@@ -80,6 +80,10 @@ class CloudSync:
             return await self._send('DELETE', f'{path}?collection_key={quote(collection_key, safe="")}')
         return await self._send('POST', f'{path}/{action}')
 
+    async def sync_all(self, collection_key: str) -> dict:
+        """Run every content schedule the user owns in this KB; refusals come back per schedule."""
+        return await self._send('POST', f'/v1/collections/{quote(collection_key, safe="")}/sync')
+
     async def skipped_items(self, collection_key: str, schedule_id: str) -> list[dict]:
         await self._get(f'/v1/collections/{quote(collection_key, safe="")}')
         schedule = await self._get(f'/v1/schedules/{quote(schedule_id, safe="")}')
