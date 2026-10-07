@@ -60,6 +60,9 @@
 		connectionOutcome,
 		reconnectConnections,
 		pairSchedules,
+		queueRuns,
+		settleQueuedRuns,
+		type QueuedRun,
 		shouldRefetchSyncItems,
 		finishedRuns,
 		runIsLive
@@ -89,6 +92,9 @@
 
 	let requestedProvider: SourceProvider | null = null;
 	let schedules: Schedule[] = [];
+	// [Gradient] Runs requested from this page that no worker has claimed yet:
+	// their rows show as syncing right away instead of after the claim.
+	let queuedRuns = new Map<string, QueuedRun>();
 	let connecting: Connection | null = null;
 	let cloudActionBusy = false;
 	let syncPoll: ReturnType<typeof setTimeout> | undefined;
@@ -103,14 +109,15 @@
 	$: reconnectNeeded = reconnectConnections(schedules, connecting);
 	// [Gradient] Sources render inside the listing: folder sources on the
 	// directory row their schedule writes, single-file sources as loose rows.
+	$: schedulePairs = pairSchedules(schedules, queuedRuns);
 	$: sourcePairs = new Map(
-		pairSchedules(schedules).flatMap((pair) =>
+		schedulePairs.flatMap((pair) =>
 			[pair.content, pair.acl].flatMap((schedule) =>
 				schedule ? [[schedule.id, pair] as [string, SchedulePair]] : []
 			)
 		)
 	);
-	$: looseSources = pairSchedules(schedules).filter(
+	$: looseSources = schedulePairs.filter(
 		(pair) =>
 			!pair.content ||
 			pair.content.scope.single_file === true ||
@@ -947,9 +954,11 @@
 		if (destroyed || request !== syncStatusRequest) return false;
 		const previous = schedules;
 		schedules = status.schedules;
+		queuedRuns = settleQueuedRuns(queuedRuns, schedules);
 		syncStatusError = false;
 		for (const schedule of finishedRuns(previous, schedules)) announceFinishedRun(schedule);
-		const isLive = schedules.some((schedule) => runIsLive(schedule.last_run));
+		const isLive =
+			queuedRuns.size > 0 || schedules.some((schedule) => runIsLive(schedule.last_run));
 		if (refreshItems && shouldRefetchSyncItems(previous, schedules)) await getItemsPage();
 		return isLive;
 	};
@@ -1133,7 +1142,9 @@
 		if (!knowledge) return;
 		try {
 			const { data } = await cloudSync.syncKnowledge(localStorage.token, knowledge.id);
-			const started = data.filter((run) => run.job_id).length;
+			const startedIds = data.filter((run) => run.job_id).map((run) => run.schedule_id);
+			queuedRuns = queueRuns(queuedRuns, schedules, startedIds);
+			const started = startedIds.length;
 			const codes = new Set(data.map((run) => run.code));
 			if (started) toast.success($i18n.t('Sync started for {{count}} sources', { count: started }));
 			else if (quiet) return;
@@ -1212,6 +1223,7 @@
 						throw error;
 					}
 					await cloudSync.runSchedule(localStorage.token, knowledge.id, content.id);
+					queuedRuns = queueRuns(queuedRuns, schedules, [content.id]);
 					started++;
 				} catch (error) {
 					if (
@@ -1266,8 +1278,10 @@
 				resume: cloudSync.resumeSchedule,
 				delete: cloudSync.deleteSchedule
 			};
-			for (const schedule of targets)
+			for (const schedule of targets) {
 				await actions[action](localStorage.token, knowledge.id, schedule.id);
+				if (action === 'run') queuedRuns = queueRuns(queuedRuns, schedules, [schedule.id]);
+			}
 			await refreshCloudSync();
 			repollCloudSyncSoon();
 		} catch (error) {

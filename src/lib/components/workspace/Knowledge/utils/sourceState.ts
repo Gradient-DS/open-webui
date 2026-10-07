@@ -70,7 +70,7 @@ export function sourceState(pair: SchedulePair, connection: Connection): SourceV
 		...schedules.map((item) => item.last_error ?? item.last_run?.error_code)
 	];
 	let state: SourceState;
-	if (schedules.some((item) => runIsLive(item.last_run))) state = 'syncing';
+	if (pair.queued || schedules.some((item) => runIsLive(item.last_run))) state = 'syncing';
 	else if (
 		[connection.lifecycle, ...errors].some((code) =>
 			reconnectCodes(connection.source_kind).includes(code ?? '')

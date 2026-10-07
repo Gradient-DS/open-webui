@@ -62,6 +62,11 @@ describe('source states', () => {
 			primary: null
 		});
 	});
+	it('syncing while a requested run waits for a worker', () => {
+		expect(
+			sourceState({ content: schedule({ last_run: run }), queued: true }, connection)
+		).toMatchObject({ state: 'syncing', primary: null });
+	});
 	it('needs_reconnect', () => {
 		for (const lifecycle of ['pending', 'suspended:reauth', 'revoked'])
 			expect(view({}, { ...connection, lifecycle })).toMatchObject({

@@ -91,9 +91,59 @@ export function runCounts(run: SyncRun): { label: string; count: number }[] {
 export interface SchedulePair {
 	content?: Schedule;
 	acl?: Schedule;
+	// A run was just requested for the content schedule but no worker has
+	// claimed it yet, so the schedule has no live run row to show.
+	queued?: boolean;
 }
 
-export function pairSchedules(schedules: Schedule[]): SchedulePair[] {
+// A requested run is queued until its schedule reports a different last run
+// (claimed, or even finished, between polls), the schedule is gone, or the
+// request is old enough that the worker evidently dropped it.
+export const QUEUED_RUN_MAX_MS = 10 * 60 * 1000;
+
+export interface QueuedRun {
+	runId: string | null;
+	since: number;
+}
+
+export function queueRuns(
+	queued: ReadonlyMap<string, QueuedRun>,
+	schedules: Schedule[],
+	ids: string[],
+	now = Date.now()
+): Map<string, QueuedRun> {
+	const next = new Map(queued);
+	for (const id of ids) {
+		// A schedule created a moment ago is not in the last status yet.
+		const schedule = schedules.find((item) => item.id === id);
+		if (!runIsLive(schedule?.last_run))
+			next.set(id, { runId: schedule?.last_run?.id ?? null, since: now });
+	}
+	return next;
+}
+
+export function settleQueuedRuns(
+	queued: ReadonlyMap<string, QueuedRun>,
+	schedules: Schedule[],
+	now = Date.now()
+): Map<string, QueuedRun> {
+	const next = new Map<string, QueuedRun>();
+	for (const [id, entry] of queued) {
+		const schedule = schedules.find((item) => item.id === id);
+		if (
+			schedule &&
+			(schedule.last_run?.id ?? null) === entry.runId &&
+			now - entry.since < QUEUED_RUN_MAX_MS
+		)
+			next.set(id, entry);
+	}
+	return next;
+}
+
+export function pairSchedules(
+	schedules: Schedule[],
+	queued: ReadonlyMap<string, unknown> = new Map()
+): SchedulePair[] {
 	const remaining = new Set(schedules.filter((schedule) => schedule.kind === 'acl_refresh'));
 	const pairs: SchedulePair[] = schedules
 		.filter((schedule) => schedule.kind === 'content')
@@ -103,7 +153,7 @@ export function pairSchedules(schedules: Schedule[]): SchedulePair[] {
 					schedule.connection_id === content.connection_id && equal(schedule.scope, content.scope)
 			);
 			if (acl) remaining.delete(acl);
-			return { content, acl };
+			return queued.has(content.id) ? { content, acl, queued: true } : { content, acl };
 		});
 	return [...pairs, ...[...remaining].map((acl) => ({ acl }))];
 }
