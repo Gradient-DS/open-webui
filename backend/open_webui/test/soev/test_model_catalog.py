@@ -213,9 +213,7 @@ PENDING = SimpleNamespace(id='bob', role='pending')
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('user', [ADMIN, USER], ids=['admin', 'user'])
-async def test_v2_row_less_catalog_models_are_open_to_users_and_admins(
-    v2: FakeSoevApi, all_models, access, user
-) -> None:
+async def test_v2_catalog_models_are_open_to_users_and_admins(v2: FakeSoevApi, all_models, access, user) -> None:
     _, run = all_models
     models = list((await run()).values())
     assert [m['id'] for m in await models_utils.get_filtered_models(models, user)] == ['glm-5-3', 'gemma-4-31b']
@@ -224,7 +222,7 @@ async def test_v2_row_less_catalog_models_are_open_to_users_and_admins(
 
 
 @pytest.mark.asyncio
-async def test_v2_row_less_catalog_models_stay_closed_to_pending_users(v2: FakeSoevApi, all_models, access) -> None:
+async def test_v2_catalog_models_stay_closed_to_pending_users(v2: FakeSoevApi, all_models, access) -> None:
     _, run = all_models
     models = list((await run()).values())
     with pytest.raises(Exception, match='Model not found'):
@@ -232,22 +230,22 @@ async def test_v2_row_less_catalog_models_stay_closed_to_pending_users(v2: FakeS
 
 
 @pytest.mark.asyncio
-async def test_v2_admin_row_restricts_a_catalog_model_to_its_grants(v2: FakeSoevApi, all_models, access) -> None:
+async def test_v2_admin_row_grants_do_not_restrict_a_catalog_model(v2: FakeSoevApi, all_models, access) -> None:
     rows, run = all_models
     rows.append(model_row('glm-5-3'))
     models = await run()
     access[0]['glm-5-3'] = rows[0]
-    assert [m['id'] for m in await models_utils.get_filtered_models(list(models.values()), USER)] == ['gemma-4-31b']
-    with pytest.raises(Exception, match='Model not found'):
-        await models_utils.check_model_access(USER, models['glm-5-3'])
-    access[1].add('glm-5-3')
+    assert [m['id'] for m in await models_utils.get_filtered_models(list(models.values()), USER)] == [
+        'glm-5-3',
+        'gemma-4-31b',
+    ]
     await models_utils.check_model_access(USER, models['glm-5-3'])
+    with pytest.raises(Exception, match='Model not found'):
+        await models_utils.check_model_access(PENDING, models['glm-5-3'])
 
 
 @pytest.mark.asyncio
-async def test_v2_custom_model_on_a_row_less_catalog_base_follows_its_own_grants(
-    v2: FakeSoevApi, all_models, access
-) -> None:
+async def test_v2_custom_model_on_a_catalog_base_follows_its_own_grants(v2: FakeSoevApi, all_models, access) -> None:
     rows, run = all_models
     rows.append(model_row('helper', base_model_id='glm-5-3'))
     models = await run()
@@ -257,7 +255,19 @@ async def test_v2_custom_model_on_a_row_less_catalog_base_follows_its_own_grants
     access[1].add('helper')
     await models_utils.check_model_access(USER, models['helper'])
     assert await has_base_model_access(USER.id, rows[0], user_role=USER.role)
+    access[0]['glm-5-3'] = model_row('glm-5-3')
+    assert await has_base_model_access(USER.id, rows[0], user_role=USER.role)
     assert not await has_base_model_access(PENDING.id, rows[0], user_role=PENDING.role)
+
+
+@pytest.mark.asyncio
+async def test_v2_row_less_models_outside_the_catalog_stay_admin_only(v2: FakeSoevApi, access) -> None:
+    model = {'id': 'zai-org/GLM-5.3', 'owned_by': 'openai'}
+    assert await models_utils.get_filtered_models([model], USER) == []
+    assert await models_utils.get_filtered_models([model], ADMIN) == [model]
+    for user in (USER, ADMIN):
+        with pytest.raises(Exception, match='Model not found'):
+            await models_utils.check_model_access(user, model)
 
 
 @pytest.mark.asyncio
