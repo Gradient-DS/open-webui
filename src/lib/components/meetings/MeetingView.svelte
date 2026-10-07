@@ -21,6 +21,7 @@
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 
 	import ConsentForm from './ConsentForm.svelte';
+	import DownloadButton from './DownloadButton.svelte';
 	import MeetingMenu from './MeetingMenu.svelte';
 	import MeetingRecorder from './MeetingRecorder.svelte';
 	import { NoAudioTrackError, captureAudio, type AudioSource, type Capture } from './audio';
@@ -93,6 +94,11 @@
 	const speakers = $derived(meeting?.transcript?.speakers ?? []);
 	const turns = $derived(groupTurns(meeting?.transcript?.segments ?? [], showRaw));
 	const live = $derived(liveParts(meeting));
+	const tabHasContent = $derived(
+		tab === 'transcript'
+			? (meeting?.transcript?.segments?.length ?? 0) > 0
+			: !!meeting?.outputs?.[tab]
+	);
 	const times = $derived(meetingTimes(meeting));
 	const fallbackTitle = $derived(
 		$i18n.t('Meeting of {{date}}', {
@@ -549,24 +555,29 @@
 								{/each}
 							</div>
 
-							{#if tab !== 'transcript'}
-								<button
-									type="button"
-									class={secondaryButton}
-									disabled={!!activeAction || sending || threadBusy}
-									onclick={() => runAction(tab as OutputKind)}
-								>
-									{#if activeAction === tab}<Spinner className="size-3" />{/if}
-									{meeting.outputs?.[tab as OutputKind]
-										? $i18n.t('Regenerate')
-										: $i18n.t('Generate {{name}}', { name: tabLabel(tab).toLowerCase() })}
-								</button>
-							{:else}
-								<label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
-									<input type="checkbox" bind:checked={showRaw} />
-									{$i18n.t('Show original')}
-								</label>
-							{/if}
+							<div class="flex items-center gap-2">
+								{#if tab === 'transcript'}
+									<label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+										<input type="checkbox" bind:checked={showRaw} />
+										{$i18n.t('Show original')}
+									</label>
+								{:else}
+									<button
+										type="button"
+										class={secondaryButton}
+										disabled={!!activeAction || sending || threadBusy}
+										onclick={() => runAction(tab as OutputKind)}
+									>
+										{#if activeAction === tab}<Spinner className="size-3" />{/if}
+										{meeting.outputs?.[tab as OutputKind]
+											? $i18n.t('Regenerate')
+											: $i18n.t('Generate {{name}}', { name: tabLabel(tab).toLowerCase() })}
+									</button>
+								{/if}
+								{#if tabHasContent && activeAction !== tab}
+									<DownloadButton className={secondaryButton} onDownload={download} />
+								{/if}
+							</div>
 						</div>
 
 						{#if tab === 'transcript'}
