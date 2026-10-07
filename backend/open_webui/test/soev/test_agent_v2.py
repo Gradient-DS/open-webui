@@ -6,6 +6,7 @@ import copy
 import hashlib
 import html
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -288,26 +289,49 @@ async def test_a_models_files_notes_and_legacy_entries_are_not_knowledge(chat: C
     assert chat.mutations()[-1][1]['input']['knowledge'] == [{'key': 'kb-a', 'name': 'Contracten'}]
 
 
+def seed_hidden_collection(api: FakeSoevApi, key: str, name: str) -> None:
+    """A knowledge base that exists, readable by OWUI's service principal but not by the user."""
+    seed_collection(api, key, name)
+    api.collections[key].update(visibility='restricted', principals=['owui:service:webui'])
+
+
+# Per language: what a deleted knowledge base says, and what one hidden from the user says.
+DELETED = {'en-US': 'no longer exist', 'nl-NL': 'bestaat niet meer'}
+DENIED = {'en-US': 'ask your admin', 'nl-NL': 'vraag je beheerder'}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
-async def test_knowledge_the_user_cannot_read_refuses_the_turn_by_count_without_names(
-    chat: Chat, language: str
+@pytest.mark.parametrize(
+    ('hidden', 'gone'),
+    [(['kb-secret'], []), ([], ['kb-gone']), (['kb-secret', 'kb-private'], ['kb-gone'])],
+)
+async def test_unavailable_knowledge_refuses_by_count_telling_deleted_from_no_access(
+    chat: Chat, language: str, hidden: list[str], gone: list[str]
 ) -> None:
     seed_collection(chat.api, 'kb-a', 'Contracten')
+    for key in hidden:
+        seed_hidden_collection(chat.api, key, 'Integriteitsonderzoek')
     chunks = await chat.turn(
         'next',
         'a1',
         files=[
             {'type': 'collection', 'id': 'kb-a'},
-            {'type': 'collection', 'id': 'kb-secret', 'name': 'Integriteitsonderzoek'},
-            {'type': 'collection', 'id': 'kb-gone', 'name': 'Oud'},
+            *({'type': 'collection', 'id': key, 'name': 'Integriteitsonderzoek'} for key in hidden),
+            *({'type': 'collection', 'id': key, 'name': 'Oud'} for key in gone),
         ],
         user_language=language,
     )
     (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
     assert refusal['code'] == 'knowledge_unavailable'
-    assert '2' in refusal['message']
-    assert not any(hidden in refusal['message'] for hidden in ('kb-secret', 'Integriteitsonderzoek', 'kb-gone'))
+    message = refusal['message']
+    assert (DELETED[language] in message) == bool(gone)
+    assert (DENIED[language] in message) == bool(hidden)
+    if gone:
+        assert f'{len(gone)} ' in message
+    if hidden:
+        assert f'{len(hidden)} ' in message
+    assert not any(name in message for name in ('kb-secret', 'kb-private', 'Integriteitsonderzoek', 'kb-gone', 'Oud'))
     assert chat.mutations() == []
 
 
@@ -349,6 +373,55 @@ async def test_attached_files_are_sent_with_their_collection_and_name(
         {'collection_key': attachments_key, 'file_id': 'f2', 'name': 'besluit.docx'},
         {'collection_key': attachments_key, 'file_id': 'f3', 'name': 'oud.txt'},
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_file_picked_from_a_knowledge_base_is_sent_as_that_kb_document(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_collection(chat.api, 'kb-cloud', 'OneDrive')
+    seed_collection(chat.api, 'kb-local', 'Contracten')
+    chat.api.add_document('kb-cloud', 'onedrive-item-1', filename='202508.pdf', schedule_ids=['sch-1'])
+    chat.api.add_document('kb-local', 'f-local', filename='contract.pdf')
+    # The synced document has no OWUI File row; the local one keeps its upload's row, without a collection.
+    stored_files(monkeypatch, **{'f-local': 'completed'})
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'onedrive-item-1', 'name': '202508.pdf', 'knowledge_id': 'kb-cloud'},
+            {'type': 'file', 'id': 'f-local', 'name': 'contract.pdf', 'knowledge_id': 'kb-local'},
+        ],
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': 'kb-cloud', 'file_id': 'onedrive-item-1', 'name': '202508.pdf'},
+        {'collection_key': 'kb-local', 'file_id': 'f-local', 'name': 'contract.pdf'},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_knowledge_base_file_the_user_cannot_read_there_refuses_the_turn_by_name(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    chat.api.add_document('kb-a', 'elsewhere', filename='elders.pdf')
+    stored_files(monkeypatch, busy='processing')
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        files=[
+            {'type': 'file', 'id': 'removed', 'name': 'weg.pdf', 'knowledge_id': 'kb-a'},
+            {'type': 'file', 'id': 'elsewhere', 'name': 'elders.pdf', 'knowledge_id': 'kb-gone'},
+            {'type': 'file', 'id': 'busy', 'name': 'bezig.pdf', 'knowledge_id': 'kb-a'},
+        ],
+        user_language='nl-NL',
+    )
+    (refusal,) = [chunk['error'] for chunk in chunks if 'error' in chunk]
+    assert refusal['code'] == 'attachments_unavailable'
+    assert all(name in refusal['message'] for name in ('weg.pdf', 'elders.pdf', 'bezig.pdf'))
+    assert 'niet meer beschikbaar' in refusal['message'] and 'wordt nog verwerkt' in refusal['message']
+    assert chat.mutations() == []
 
 
 @pytest.mark.asyncio
@@ -832,20 +905,11 @@ def answered(text: str, *citations: dict, **payload: Any) -> tuple[str, dict]:
     return ('model_output', {'content': text, 'citations': list(citations), **payload})
 
 
-def panel(socket: list[dict]) -> list[int]:
-    """[Claude] The numbers the message's source pill lists, as `usedCitations` does: a document's last flags win,
-    and once any source speaks `cited_this_turn` only the cited ones show."""
-    flags: dict[str, dict[str, Any]] = {}
-    for event in socket:
-        if event['type'] == 'source':
-            data = event['data']
-            entry = flags.setdefault(data['source']['id'], {'n': data['n']})
-            entry.update({key: data[key] for key in ('current_turn', 'cited_this_turn') if key in data})
-    shown = list(flags.values())
-    for key in ('cited_this_turn', 'current_turn'):
-        if any(key in entry for entry in shown):
-            return sorted(entry['n'] for entry in shown if entry.get(key))
-    return sorted(entry['n'] for entry in shown)
+def panel(chunks: list[dict], socket: list[dict]) -> list[int]:
+    """[Claude] The numbers the message's source pill lists, as `citedCitations` does: each `[N]` in the answer
+    that names a source sent to the message."""
+    sent = {event['data']['n'] for event in socket if event['type'] == 'source'}
+    return sorted({n for marker in re.findall(r'\[(\d+)\]', content(chunks)) if (n := int(marker)) in sent})
 
 
 @pytest.mark.asyncio
@@ -870,8 +934,7 @@ async def test_attached_text_citations_emit_numbered_markers_and_local_source_li
     assert source['document'] == [text]
     assert source['metadata'][0]['chunk_id'] == citation['source']
     assert source['n'] == 1
-    assert source['cited_this_turn'] is True
-    assert panel(chat.socket) == [1]
+    assert panel(chunks, chat.socket) == [1]
 
 
 @pytest.mark.asyncio
@@ -889,10 +952,10 @@ async def test_attached_text_citations_are_seeded_from_root_inputs_at_the_parent
     assert content(chunks) == 'Answer [1] [2].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
     assert {source['source']['id'] for source in sources} == {'note:n1', 'document'}
-    note = next(source for source in sources if source['source']['id'] == 'note:n1' and source['cited_this_turn'])
+    note = next(source for source in sources if source['source']['id'] == 'note:n1')
     assert note['source']['url'] == '/notes/n1'
     assert note['document'] == ['Note body']
-    assert panel(chat.socket) == [1, 2]
+    assert panel(chunks, chat.socket) == [1, 2]
     if branch:
         assert chat.mutations()[-2][0] == '/v1/chat/threads/thr-1/fork'
 
@@ -936,10 +999,11 @@ async def test_document_numbers_survive_seeded_turns(chat: Chat) -> None:
             answered('Eerst.', cited(5, 'chunk-0'), cited(5, 'chunk-1'), cited(5, 'second-1', 'second')),
         ]
     ]
-    assert content(await chat.turn('first', 'a1')) == 'Eerst [1] [2].'
+    answer = await chat.turn('first', 'a1')
+    assert content(answer) == 'Eerst [1] [2].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 1, 2]
-    assert panel(chat.socket) == [1, 2]
+    assert [source['n'] for source in sources] == [1, 1, 1, 2]
+    assert panel(answer, chat.socket) == [1, 2]
     chat.socket.clear()
     chat.api.chat.turns = [
         [
@@ -948,10 +1012,11 @@ async def test_document_numbers_survive_seeded_turns(chat: Chat) -> None:
             answered('Dan.', cited(3, 'chunk-0'), cited(3, 'third-1', 'third')),
         ]
     ]
-    assert content(await chat.turn('next', 'a2', 'a1')) == 'Dan [1] [3].'
+    answer = await chat.turn('next', 'a2', 'a1')
+    assert content(answer) == 'Dan [1] [3].'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 2, 3, 1, 3]
-    assert panel(chat.socket) == [1, 3]
+    assert [source['n'] for source in sources] == [1, 1, 1, 2, 1, 2, 3]
+    assert panel(answer, chat.socket) == [1, 3]
 
 
 def test_different_documents_with_the_same_title_keep_distinct_numbers() -> None:
@@ -1233,8 +1298,7 @@ async def test_the_panel_lists_what_this_turn_cited_with_cumulative_numbers(chat
     second = [document('document-b', 'Second'), chunk('source-b', 'document-b')]
     third = [document('document-c', 'Third'), chunk('source-c', 'document-c')]
     chat.api.chat.turns = [[found(DOCUMENT, CHUNK, *second), answered('First', cited(5, 'source-a'))]]
-    await chat.turn('first', 'a1')
-    assert panel(chat.socket) == [1]
+    assert panel(await chat.turn('first', 'a1'), chat.socket) == [1]
     chat.socket.clear()
     chat.api.chat.turns = [
         [
@@ -1247,11 +1311,11 @@ async def test_the_panel_lists_what_this_turn_cited_with_cumulative_numbers(chat
             ),
         ]
     ]
-    assert content(await chat.turn('second', 'a2', 'a1')) == 'Second [2] and [3]; earlier [1]'
-    assert panel(chat.socket) == [1, 2, 3]
+    answer = await chat.turn('second', 'a2', 'a1')
+    assert content(answer) == 'Second [2] and [3]; earlier [1]'
+    assert panel(answer, chat.socket) == [1, 2, 3]
     chat.socket.clear()
-    await chat.turn('third', 'a3', 'a2')
-    assert panel(chat.socket) == []
+    assert panel(await chat.turn('third', 'a3', 'a2'), chat.socket) == []
 
 
 @pytest.mark.asyncio
@@ -1357,6 +1421,66 @@ async def test_refused_model_is_named_without_retry_or_default(
     assert chat.mutations()[-1][1]['model'] == 'refused-model'
 
 
+def refuse_turns(chat: Chat, monkeypatch: pytest.MonkeyPatch, problem: dict) -> None:
+    """soev-api refuses every new turn with this 422 problem."""
+    original = chat.api.chat.handle
+
+    def refuse(request: httpx.Request, body: dict | None, owner: tuple[str, str | None]) -> httpx.Response:
+        if request.method == 'POST':
+            chat.api.chat.requests.append(request)
+            return httpx.Response(422, json=problem, headers={'Content-Type': 'application/problem+json'})
+        return original(request, body, owner)
+
+    monkeypatch.setattr(chat.api.chat, 'handle', refuse)
+
+
+# Per agent refusal reason, per language: words its message must carry; whether the agent's detail is shown.
+REASONS = {
+    'knowledge_unavailable': ({'en-US': 'knowledge bases', 'nl-NL': 'kennisbanken'}, False),
+    'attachments_unreadable': ({'en-US': 'attached files', 'nl-NL': 'bijlagen'}, True),
+    'unknown_model': ({'en-US': '"picked-model"', 'nl-NL': '"picked-model"'}, False),
+    'not_chat_model': ({'en-US': 'not a chat model', 'nl-NL': 'geen chatmodel'}, False),
+    'model_required': ({'en-US': 'no model', 'nl-NL': 'geen model'}, False),
+    'tool_unsupported': ({'en-US': 'cannot use a tool', 'nl-NL': 'hulpmiddel'}, True),
+    'credential_not_live': ({'en-US': 'expired', 'nl-NL': 'verlopen'}, False),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+@pytest.mark.parametrize('reason', sorted(REASONS))
+async def test_an_agent_refusal_shows_its_reason_localised_and_logs_only_the_code(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, language: str, reason: str
+) -> None:
+    detail = 'these attached files cannot be read: geheim.pdf'
+    refuse_turns(chat, monkeypatch, {'code': 'invalid_field', 'constraint': f'chat:{reason}', 'detail': detail})
+    words, shows_detail = REASONS[reason]
+    with caplog.at_level('WARNING', logger=agent_v2.log.name):
+        chunks = await chat.turn(
+            'question', 'a1', user_language=language, model={'info': {'base_model_id': 'picked-model'}}
+        )
+    error = chunks[-1]['error']
+    assert error['code'] == 'invalid_field'
+    assert words[language] in error['message']
+    assert error['message'] != agent_v2._error('invalid_field')['error']['message']
+    assert (detail in error['message']) == shows_detail
+    assert f'code=invalid_field constraint=chat:{reason}' in caplog.text
+    assert 'geheim.pdf' not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('constraint', [None, 'chat:a_later_reason'])
+async def test_a_refusal_without_a_known_reason_keeps_the_generic_text(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, constraint: str | None
+) -> None:
+    problem = {'code': 'invalid_field', 'detail': 'input rejected'}
+    if constraint is not None:
+        problem['constraint'] = constraint
+    refuse_turns(chat, monkeypatch, problem)
+    chunks = await chat.turn('question', 'a1', user_language='nl-NL')
+    assert chunks[-1] == agent_v2._error('invalid_field')
+
+
 @pytest.mark.asyncio
 async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text(chat: Chat) -> None:
     """Stream each chunk once and render same-document markers with one number."""
@@ -1389,7 +1513,7 @@ async def test_stream_renders_sources_reasoning_and_tools_without_duplicate_text
     assert 'PRIVATE' not in json.dumps(chunks)
     assert content(chunks, 'reasoning_content') == 'PlanExplain'
     sources = [event['data'] for event in chat.socket if event['type'] == 'source']
-    assert [(source['n'], 'cited_this_turn' in source) for source in sources] == [(1, False)] * 2 + [(1, True)] * 2
+    assert [source['n'] for source in sources] == [1, 1]
     assert sources[0]['source'] == {'id': 'document', 'name': 'Document', 'url': 'document'}
     assert sources[0]['document'] == ['quoted passage']
     assert sources[0]['metadata'][0]['source'] == 'document'
@@ -1404,8 +1528,9 @@ async def test_previous_sources_are_available_in_later_turn_and_fork(chat: Chat)
     for message_id in ('a2', 'regenerated'):
         chat.socket.clear()
         chat.api.chat.turns = [[answered('Again', cited(5, 'source-a'))]]
-        assert content(await chat.turn('again', message_id, 'a1')) == 'Again [1]'
-        assert panel(chat.socket) == [1]
+        answer = await chat.turn('again', message_id, 'a1')
+        assert content(answer) == 'Again [1]'
+        assert panel(answer, chat.socket) == [1]
 
 
 @pytest.mark.asyncio
@@ -2811,7 +2936,7 @@ async def test_documents_stream_as_answer_text_with_ordinary_citations(chat: Cha
     ]
     chunks = await chat.turn('write a report', 'a1', features={'document_writer': True})
     assert content(chunks).endswith(before + ' [1]' + after)
-    assert panel(chat.socket) == [1]
+    assert panel(chunks, chat.socket) == [1]
 
 
 def stored_chat(count: int, *, size: int = 10) -> SimpleNamespace:

@@ -61,6 +61,7 @@
 
 	import Error from './Error.svelte';
 	import Citations from './SoevCitations.svelte'; // [Gradient]
+	import { answerText } from './Citations/citedSources'; // [Gradient]
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import PresentUIDispatcher from './Markdown/PresentUIDispatcher.svelte';
@@ -89,7 +90,6 @@
 	import {
 		getOutputProseRuns,
 		getOutputStreamAnchors,
-		getOutputText,
 		replaceOutputMessageText,
 		type OutputItem
 	} from './structuredOutput';
@@ -529,8 +529,8 @@
 	$: scheduleResponsePartsRebuild(reasoningItems, message?.subagents ?? _EMPTY_SUBAGENT_EVENTS);
 	$: responseParts = _memoResponseParts;
 
-	$: visibleResponseContent =
-		getOutputText(message.output) || removeAllDetails(message.content ?? '');
+	// [Gradient] Shared with the Sources panel, which lists the sources this text cites.
+	$: visibleResponseContent = answerText(message);
 	$: hasResponseContent = Boolean((message.content ?? '').trim() || message.output?.length);
 	$: hasAnswerText = Boolean(removeAllDetails(renderedContent ?? '').trim());
 
@@ -1376,7 +1376,7 @@
 									id={message?.id}
 									{chatId}
 									sources={message?.sources ?? message?.citations}
-									messageDone={message?.done ?? false}
+									text={visibleResponseContent}
 									{readOnly}
 								/>
 							{/if}

@@ -186,7 +186,9 @@
 				...item,
 				type: 'file',
 				name: item.filename,
-				description: item.collection ? item.collection.name : ''
+				description: item.collection ? item.collection.name : '',
+				// [Gradient] The agent reads a picked file as its KB's document.
+				knowledge_id: item.collection?.id
 			}));
 		}
 	};

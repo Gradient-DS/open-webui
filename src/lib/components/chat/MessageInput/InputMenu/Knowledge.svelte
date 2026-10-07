@@ -283,10 +283,12 @@
 										type="button"
 										on:click={() => {
 											console.log(file);
+											// [Gradient] The agent reads a picked file as this KB's document.
 											onSelect({
 												type: 'file',
 												name: file?.meta?.name,
-												...file
+												...file,
+												knowledge_id: item.id
 											});
 										}}
 									>

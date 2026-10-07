@@ -3,7 +3,8 @@ import {
 	type DisplayCitation,
 	type RawSource
 } from '../Messages/Citations/reduceSources';
-import { usedCitations } from '../Messages/Citations/panelScope';
+import { answerText, citedCitations } from '../Messages/Citations/citedSources';
+import type { OutputItem } from '../Messages/structuredOutput';
 import {
 	calculateShowRelevance,
 	shouldShowPercentage
@@ -14,10 +15,11 @@ export interface CitationMessage {
 	role: string;
 	parentId?: string | null;
 	content?: string;
+	output?: OutputItem[] | null;
 	sources?: RawSource[];
 }
 
-// [Gradient] Keep cumulative citations for inline references and used sources for each question.
+// [Gradient] Keep cumulative citations for inline references and the cited sources for each question.
 export interface SourceGroup {
 	messageId: string;
 	question: string;
@@ -36,17 +38,21 @@ export function sourceGroups(history: CitationHistory | null | undefined): Sourc
 		const message = history?.messages?.[id];
 		if (!message) break;
 		if (message.role === 'assistant' && message.sources?.length) {
-			const parent = message.parentId ? history?.messages?.[message.parentId] : undefined;
 			const citations = reduceSources(message.sources);
-			const used = usedCitations(citations);
-			groups.push({
-				messageId: message.id,
-				question: parent?.role === 'user' ? (parent.content ?? '').replace(/\s+/g, ' ').trim() : '',
-				citations,
-				used,
-				showPercentage: shouldShowPercentage(used),
-				showRelevance: calculateShowRelevance(used)
-			});
+			const used = citedCitations(citations, answerText(message));
+			const parent = message.parentId ? history?.messages?.[message.parentId] : undefined;
+			// [Gradient] An answer that cites nothing gets no group.
+			if (used.length > 0) {
+				groups.push({
+					messageId: message.id,
+					question:
+						parent?.role === 'user' ? (parent.content ?? '').replace(/\s+/g, ' ').trim() : '',
+					citations,
+					used,
+					showPercentage: shouldShowPercentage(used),
+					showRelevance: calculateShowRelevance(used)
+				});
+			}
 		}
 		id = message.parentId;
 	}

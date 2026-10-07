@@ -708,6 +708,9 @@ async def test_search_knowledge_files_spans_every_readable_collection(env, monke
     filters = {'user_id': 'alice', 'group_ids': ['irrelevant']}
     result = await env.store.search_knowledge_files(filters)
     assert [row.id for row in result.items] == ['first', 'shared']
+    assert [row.collection for row in result.items] == [
+        {'id': key, 'name': env.api.collections[key]['name']} for key in ('kb', 'second')
+    ]
     assert result.total == 2 and result.directories == [] and result.breadcrumbs == []
     assert result.items[0].added_at == int(
         dt.datetime.fromisoformat(env.api.documents['kb', 'first']['ingested_at']).timestamp()
@@ -770,6 +773,30 @@ async def test_search_knowledge_files_filters_by_query_and_pages(env, order_by, 
     shared = await env.store.search_knowledge_files({**filters, 'view_option': 'shared'})
     assert [row.id for row in shared.items] == ['z'] and shared.total == 1
     assert (await env.store.search_knowledge_files({**filters, 'view_option': 'created'})).total == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('filters', 'folders', 'files'),
+    [
+        ({}, ['Bankzaken', 'BTW betalingen', 'E-boekhouden'], ['Alpha', 'beta', 'Gamma']),
+        (
+            {'order_by': 'name', 'direction': 'asc'},
+            ['Bankzaken', 'BTW betalingen', 'E-boekhouden'],
+            ['Alpha', 'beta', 'Gamma'],
+        ),
+        ({'order_by': 'name'}, ['E-boekhouden', 'BTW betalingen', 'Bankzaken'], ['Gamma', 'beta', 'Alpha']),
+    ],
+)
+async def test_listing_sorts_names_case_insensitively_with_folders_following(env, filters, folders, files):
+    """A level's folders and files both follow the chosen name order, ignoring case."""
+    for name in ['E-boekhouden', 'BTW betalingen', 'Bankzaken']:
+        await env.store.create_directory('kb', name, 'alice')
+    for source in ['beta', 'Gamma', 'Alpha']:
+        await file(env, source)
+    result = await env.store.search_files_by_id('kb', 'alice', {**filters, 'directory_id': None})
+    assert [row.name for row in result.directories] == folders
+    assert [row.id for row in result.items] == files
 
 
 @pytest.mark.asyncio

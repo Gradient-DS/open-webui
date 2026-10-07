@@ -4,7 +4,8 @@
 	import { config, embed, showControls, showEmbeds } from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
-	import { reduceSources, type DisplayCitation } from './Citations/reduceSources';
+	import { reduceSources } from './Citations/reduceSources';
+	import { citedCitations } from './Citations/citedSources';
 	import { calculateShowRelevance, shouldShowPercentage } from './Citations/relevanceDisplay';
 
 	const i18n = getContext('i18n');
@@ -16,22 +17,8 @@
 	export let readOnly = false;
 	// [Gradient] False keeps only pill clicks (SoevCitations' read-only path).
 	export let listed = true;
-	/**
-	 * [Gradient] Whether the parent message has finished streaming. Used to
-	 * suppress the bottom pill until the agent's final source dispatch is
-	 * in. Intermediate dispatches (one after every tool iteration) carry the
-	 * full "retrieved so far" set with `current_turn` true, so a web-search
-	 * turn briefly shows the entire result corpus (e.g. 19 hits) before the
-	 * post-answer dispatch settles the `cited_this_turn` flags. The final
-	 * dispatch arrives right after the answer text finishes streaming —
-	 * effectively the same moment as `done` flipping true — so gating on
-	 * done avoids the flash without delaying anything that was stable
-	 * mid-stream.
-	 *
-	 * Defaults to `true` so non-streaming callers (e.g. `Document.svelte`)
-	 * keep their previous behavior without opting in.
-	 */
-	export let messageDone: boolean = true;
+	// [Gradient] The answer text whose `[N]` markers pick the sources the pill lists.
+	export let text = '';
 
 	let citations = [];
 	let visibleCitations = [];
@@ -101,21 +88,9 @@
 		showPercentage = shouldShowPercentage(citations);
 	}
 
-	// [Gradient] Per-message panel scope from the agent's provenance flags:
-	// `current_turn` (a tool retrieved the source this turn) ∪ `cited_this_turn`
-	// (the model wrote its `[N]` in this turn's answer, incl. cross-turn cites).
-	// Prior-turn sources neither retrieved nor cited this turn stay out of the
-	// panel. Falls back to show-all when no citation carries provenance flags
-	// (legacy chats / upstream providers). The filter does NOT touch the
-	// underlying `citations` array — inline `[N]` clicks still resolve via
-	// `showSourceModal(N)` against the cumulative list.
-	$: {
-		const all = citations as DisplayCitation[];
-		const hasProvenance = all.some(
-			(c) => c.current_turn !== undefined || c.cited_this_turn !== undefined
-		);
-		visibleCitations = hasProvenance ? all.filter((c) => c.current_turn || c.cited_this_turn) : all;
-	}
+	// [Gradient] The pill lists the sources the text's `[N]` markers cite; inline
+	// `[N]` clicks still resolve via `showSourceModal(N)` against the full list.
+	$: visibleCitations = citedCitations(citations, text);
 
 	const decodeString = (str: string) => {
 		try {
@@ -133,7 +108,7 @@
 	showRelevance={citationRelevanceEnabled && showRelevance}
 />
 
-{#if listed && visibleCitations.length > 0 && messageDone}
+{#if listed && visibleCitations.length > 0}
 	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
 		<button
 			class="text-xs font-normal text-gray-600 dark:text-gray-300 px-3.5 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-1 border border-gray-50 dark:border-gray-850/30"
@@ -183,7 +158,7 @@
 				<button
 					id={`source-${id}-${idx + 1}`}
 					aria-label={$i18n.t('View source: {{name}}', {
-						name: decodeString(citation.source.name)
+						name: decodeString(citation.source.name ?? '')
 					})}
 					class="no-toggle outline-hidden flex dark:text-gray-300 bg-transparent text-gray-600 rounded-xl gap-1.5 items-center"
 					on:click={() => {
@@ -198,7 +173,7 @@
 					<div
 						class="flex-1 truncate hover:text-black dark:text-white/60 dark:hover:text-white transition text-left"
 					>
-						{decodeString(citation.source.name)}
+						{decodeString(citation.source.name ?? '')}
 					</div>
 				</button>
 			{/each}
