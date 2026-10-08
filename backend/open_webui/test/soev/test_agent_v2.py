@@ -675,6 +675,23 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 
 
 @pytest.mark.asyncio
+async def test_the_browsers_time_zone_is_sent_as_the_zone(chat: Chat) -> None:
+    await chat.turn('question', 'a1', variables={'{{CURRENT_TIMEZONE}}': 'Europe/Amsterdam'})
+    assert chat.mutations()[-1][1]['input']['zone'] == 'Europe/Amsterdam'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'variables',
+    [None, {}, {'{{CURRENT_TIMEZONE}}': ''}, {'{{CURRENT_TIMEZONE}}': 'Not/AZone'}, {'{{CURRENT_TIMEZONE}}': 3}],
+    ids=['no-variables', 'no-zone', 'empty', 'unknown', 'not-a-string'],
+)
+async def test_no_known_time_zone_sends_no_zone(chat: Chat, variables: dict | None) -> None:
+    await chat.turn('question', 'a1', variables=variables)
+    assert 'zone' not in chat.mutations()[-1][1]['input']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ('features', 'state'),
     [

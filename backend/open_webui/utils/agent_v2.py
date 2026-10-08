@@ -16,6 +16,7 @@ from contextlib import aclosing
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anyio
 from open_webui.models.access_grants import AccessGrants
@@ -468,6 +469,19 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
     each sent only when it says something."""
     fields = {'assistant_instructions': 'system_prompt', 'user_instructions': 'chat_system_prompt'}
     return {field: text for field, key in fields.items() if isinstance(text := metadata.get(key), str) and text.strip()}
+
+
+def _zone(metadata: dict[str, Any]) -> dict[str, str]:
+    """[Claude] The browser's IANA time zone from the request's prompt variables, sent only when zoneinfo knows it."""
+    variables = metadata.get('variables')
+    name = variables.get('{{CURRENT_TIMEZONE}}') if isinstance(variables, dict) else None
+    if not isinstance(name, str) or not name:
+        return {}
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return {}
+    return {'zone': name}
 
 
 def _tools(
@@ -1356,6 +1370,7 @@ async def _sent(
             **attachments,
             **_urls(metadata),
             **_instructions(metadata),
+            **_zone(metadata),
             **tools,
             'documents': documents,
         }
