@@ -194,7 +194,7 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
 
 @dataclass(frozen=True)
 class Skipped:
-    """[Claude] An item of the chat or assistant this turn runs without: `kind` is knowledge, file, note or chat;
+    """[Claude] An item of the chat or assistant this turn runs without: `kind` is knowledge, file, note, chat or meeting;
     `reason` gone (deleted), denied (exists, not for this user), failed or processing. `in_chat` is False for an
     assistant's own knowledge base, which the chat cannot drop."""
 
@@ -381,7 +381,7 @@ async def _texts(entries: list[dict[str, Any]], user_id: str) -> tuple[list[dict
             try:
                 title, text = await meeting_document(user, item_id)
             except MeetingUnavailable:
-                unavailable.append((entry.get('name') or item_id or kind, 'gone'))
+                unavailable.append(Skipped(kind, 'gone', item_id or '', entry.get('name') or item_id or kind))
                 continue
             texts.append(
                 {
@@ -616,12 +616,14 @@ _SUBJECTS = {
         'file': ("File '{name}'", 'A file'),
         'note': ("Note '{name}'", 'A note'),
         'chat': ("Chat '{name}'", 'A chat'),
+        'meeting': ("Meeting '{name}'", 'A meeting'),
     },
     'nl': {
         'knowledge': ("Kennisbank '{name}'", 'Een kennisbank'),
         'file': ("Bestand '{name}'", 'Een bestand'),
         'note': ("Notitie '{name}'", 'Een notitie'),
         'chat': ("Chat '{name}'", 'Een chat'),
+        'meeting': ("Vergadering '{name}'", 'Een vergadering'),
     },
 }
 _WHY = {

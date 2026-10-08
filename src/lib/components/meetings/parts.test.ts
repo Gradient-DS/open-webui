@@ -38,19 +38,30 @@ describe('part store', () => {
 		expect(await store.parts('m2')).toHaveLength(1);
 	});
 
+	it('clears every meeting, as on sign-out', async () => {
+		const store = new MemoryPartStore();
+		await store.append('m1', 1, 0, blob('a'));
+		await store.append('m2', 1, 0, blob('x'));
+		await store.clear();
+		expect(await store.parts('m1')).toEqual([]);
+		expect(await store.parts('m2')).toEqual([]);
+	});
+
 	it('keeps working when storage fails', async () => {
 		const broken: PartStore = {
 			append: () => Promise.reject(new Error('quota')),
 			parts: () => Promise.reject(new Error('blocked')),
 			remove: () => Promise.reject(new Error('blocked')),
-			removePart: () => Promise.reject(new Error('blocked'))
+			removePart: () => Promise.reject(new Error('blocked')),
+			clear: () => Promise.reject(new Error('blocked'))
 		};
 		const errors: unknown[] = [];
 		const store = new SafePartStore(broken, (error) => errors.push(error));
 		await expect(store.append('m', 1, 0, blob('a'))).resolves.toBeUndefined();
 		await expect(store.parts('m')).resolves.toEqual([]);
 		await expect(store.remove('m')).resolves.toBeUndefined();
-		expect(errors).toHaveLength(3);
+		await expect(store.clear()).resolves.toBeUndefined();
+		expect(errors).toHaveLength(4);
 	});
 });
 

@@ -141,3 +141,46 @@ def test_transcription_discard_leaves_other_uploads(monkeypatch, tmp_path):
     client = _transcription_client(monkeypatch, tmp_path, transcribe=transcribe)
     assert _upload(client).status_code == 200
     assert list(other.parent.iterdir()) == [other]
+
+
+def test_transcription_over_the_cap_is_refused_before_it_is_read(monkeypatch, tmp_path):
+    """An upload over the dictation cap gets 413 and is never stored or transcribed."""
+    from open_webui.routers import audio
+
+    async def transcribe(request, file_path, metadata=None, user=None):
+        raise AssertionError('not transcribed')
+
+    monkeypatch.setattr(audio, 'MAX_DICTATION_BYTES', 4)
+    client = _transcription_client(monkeypatch, tmp_path, transcribe=transcribe)
+    response = _upload(client)
+    assert response.status_code == 413, response.text
+    assert not (tmp_path / 'audio' / 'transcriptions').exists()
+
+
+@pytest.mark.asyncio
+async def test_long_dictation_transcribes_a_few_chunks_at_a_time(monkeypatch, tmp_path):
+    """A split upload runs at most CONCURRENT_CHUNKS transcriptions at once, in order."""
+    import asyncio
+
+    from open_webui.routers import audio
+
+    running, most = 0, 0
+
+    async def handler(request, chunk_path, metadata, user=None):
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return {'text': chunk_path.rsplit('-', 1)[1]}
+
+    source = tmp_path / 'rec.mp3'
+    source.write_bytes(b'x')
+    monkeypatch.setattr(audio, 'BYPASS_PYDUB_PREPROCESSING', False)
+    monkeypatch.setattr(audio, 'is_audio_conversion_required', lambda path: False)
+    monkeypatch.setattr(audio, 'compress_audio', lambda path: path)
+    monkeypatch.setattr(audio, 'split_audio', lambda path, size: [f'{tmp_path}/chunk-{n}' for n in range(10)])
+    monkeypatch.setattr(audio, 'transcription_handler', handler)
+    result = await audio.transcribe(None, str(source))
+    assert result['text'] == ' '.join(str(n) for n in range(10))
+    assert most == audio.CONCURRENT_CHUNKS == 4

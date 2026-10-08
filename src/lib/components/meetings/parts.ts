@@ -12,6 +12,8 @@ export interface PartStore {
 	remove(meetingId: string): Promise<void>;
 	/** Drops one part, e.g. a resumed recording the user discarded. */
 	removePart(meetingId: string, part: number): Promise<void>;
+	/** Drops every meeting's recordings, e.g. on sign-out, so the next user of this device finds none. */
+	clear(): Promise<void>;
 }
 
 type Slice = { meetingId: string; part: number; index: number; data: Blob };
@@ -52,6 +54,10 @@ export class MemoryPartStore implements PartStore {
 		this.slices = this.slices.filter(
 			(slice) => !(slice.meetingId === meetingId && slice.part === part)
 		);
+	}
+
+	async clear() {
+		this.slices = [];
 	}
 }
 
@@ -97,6 +103,10 @@ export class IdbPartStore implements PartStore {
 		}
 		await tx.done;
 	}
+
+	async clear() {
+		await (await this.open()).clear(STORE);
+	}
 }
 
 /** Recovery is best effort: when storage fails, recording and finishing work as before. */
@@ -130,6 +140,10 @@ export class SafePartStore implements PartStore {
 
 	removePart(meetingId: string, part: number) {
 		return this.guard(() => this.inner.removePart(meetingId, part), undefined);
+	}
+
+	clear() {
+		return this.guard(() => this.inner.clear(), undefined);
 	}
 }
 

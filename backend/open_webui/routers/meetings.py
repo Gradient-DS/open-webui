@@ -7,14 +7,13 @@ import json
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from open_webui import config
 from open_webui.soev import identity
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
-from open_webui.soev.meetings import latest_state
+from open_webui.soev.meetings import MeetingUnavailable, latest_state, thread_path
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.features import is_feature_enabled
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -66,7 +65,10 @@ MeetingId = Annotated[str, Path(min_length=1, max_length=256)]
 
 
 def _thread(meeting_id: str, suffix: str = '') -> str:
-    return f'/v1/chat/threads/{quote(meeting_id, safe="")}{suffix}'
+    try:
+        return thread_path(meeting_id, suffix)
+    except MeetingUnavailable:
+        raise HTTPException(status_code=404, detail='Meeting not found') from None
 
 
 async def _submit(soev: Caller, path: str, body: dict, *, thread_id: str | None = None) -> str:

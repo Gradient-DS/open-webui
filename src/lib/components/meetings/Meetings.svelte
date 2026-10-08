@@ -20,6 +20,7 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 	import MeetingMenu from './MeetingMenu.svelte';
+	import { partStore } from './parts';
 	import {
 		dayjsLocale,
 		groupByRange,
@@ -65,6 +66,7 @@
 		if (!target) return;
 		try {
 			await deleteMeeting(localStorage.token, target.thread_id);
+			await partStore().remove(target.thread_id);
 			meetings = (meetings ?? []).filter((meeting) => meeting.thread_id !== target.thread_id);
 			toast.success($i18n.t('Meeting deleted'));
 		} catch (error) {

@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from open_webui.soev import identity
 from open_webui.soev.client import SoevApiError, SoevClient
+from open_webui.utils.features import is_feature_enabled
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +22,13 @@ OUTPUT_TITLES = {'summary': 'Samenvatting', 'minutes': 'Notulen', 'actions': 'Ac
 
 class MeetingUnavailable(Exception):
     """The meeting is gone, not the user's, or has no snapshot yet."""
+
+
+def thread_path(meeting_id: str, suffix: str = '') -> str:
+    """The meeting's soev-api thread path; a dot segment would be resolved away by the HTTP client."""
+    if meeting_id in {'', '.', '..'}:
+        raise MeetingUnavailable('Invalid meeting id')
+    return f'/v1/chat/threads/{quote(meeting_id, safe="")}{suffix}'
 
 
 def latest_state(events: list[dict]) -> dict | None:
@@ -125,12 +133,12 @@ async def meeting_document(user, meeting_id: str, client: SoevClient | None = No
     """Read the meeting as `user`; soev-api only returns the caller's own threads."""
     if user is None or not meeting_id:
         raise MeetingUnavailable('No user or meeting')
+    if not is_feature_enabled('meetings'):
+        raise MeetingUnavailable('Meetings are not available')
+    path = thread_path(meeting_id)
     client = client or identity.build_client()
     try:
-        thread = await client.get(
-            f'/v1/chat/threads/{quote(meeting_id, safe="")}',
-            as_user=await identity.acting_ref(user, client),
-        )
+        thread = await client.get(path, as_user=await identity.acting_ref(user, client))
     except SoevApiError as error:
         raise MeetingUnavailable(error.detail) from None
     state = latest_state(thread.get('events') or [])
