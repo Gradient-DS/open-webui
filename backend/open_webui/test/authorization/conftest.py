@@ -31,7 +31,24 @@ MODULES = (
 
 
 @pytest.fixture(scope='module')
-def application(tmp_path_factory):
+def no_network():
+    connect = socket.socket.connect
+    attempts = []
+
+    def local_only(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            attempts.append(address)
+            raise AssertionError(f'Unexpected network connection: {address}')
+        return connect(sock, address)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(socket.socket, 'connect', local_only)
+        yield
+    assert not attempts, f'Network attempts, including swallowed exceptions: {attempts}'
+
+
+@pytest.fixture(scope='module')
+def application(tmp_path_factory, no_network):
     with pytest.MonkeyPatch.context() as patch:
         directory = tmp_path_factory.mktemp('acl-import')
         for key, value in {
@@ -40,6 +57,7 @@ def application(tmp_path_factory):
             'ENABLE_DB_MIGRATIONS': 'false',
             'VECTOR_DB': 'weaviate',
             'OFFLINE_MODE': 'true',
+            'OLLAMA_BASE_URL': 'http://ollama.invalid',
         }.items():
             patch.setenv(key, value)
         for part in ('TYPE', 'USER', 'PASSWORD', 'HOST', 'PORT', 'NAME'):
@@ -108,16 +126,19 @@ def seeded(template, application, monkeypatch, tmp_path):
     from open_webui.utils import features
     from open_webui.utils.auth import create_token
     from open_webui.models.access_grants import AccessGrants, AccessGrantsTable
+    from open_webui.models.groups import Groups, GroupTable
     from open_webui.models.knowledge import Knowledges, KnowledgeTable
 
     # The fork exports remote adapters unconditionally; exercise the retained SQL implementations.
-    sql_grants, sql_knowledge = AccessGrantsTable(), KnowledgeTable()
+    sql_grants, sql_knowledge, sql_groups = AccessGrantsTable(), KnowledgeTable(), GroupTable()
     for name, module in list(sys.modules.items()):
         if name.startswith('open_webui.') and module is not None:
             if getattr(module, 'AccessGrants', None) is AccessGrants:
                 monkeypatch.setattr(module, 'AccessGrants', sql_grants)
             if getattr(module, 'Knowledges', None) is Knowledges:
                 monkeypatch.setattr(module, 'Knowledges', sql_knowledge)
+            if getattr(module, 'Groups', None) is Groups:
+                monkeypatch.setattr(module, 'Groups', sql_groups)
 
     path = tmp_path / 'seed.db'
     shutil.copyfile(template, path)
@@ -130,14 +151,6 @@ def seeded(template, application, monkeypatch, tmp_path):
     for feature in ('knowledge', 'models', 'prompts', 'tools'):
         monkeypatch.setitem(features.FEATURE_FLAGS, feature, True)
 
-    connect = socket.socket.connect
-
-    def local_only(sock, address):
-        if sock.family in (socket.AF_INET, socket.AF_INET6):
-            raise AssertionError(f'Unexpected network connection: {address}')
-        return connect(sock, address)
-
-    monkeypatch.setattr(socket.socket, 'connect', local_only)
     prefixes = tuple(f'/api/v1/{name}/' for name in MODULES)
     app = FastAPI(routes=[route for route in application.routes if route.path.startswith(prefixes)])
     app.state.redis = None
@@ -150,5 +163,15 @@ def seeded(template, application, monkeypatch, tmp_path):
             engine=engine,
             headers=lambda principal: {'Authorization': f'Bearer {create_token({"id": principal})}'},
         )
+        client.portal.call(drain_background_tasks)
     asyncio.run(async_engine.dispose())
     engine.dispose()
+
+
+async def drain_background_tasks():
+    while pending := [
+        task
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task() and '/open_webui/' in task.get_coro().cr_code.co_filename
+    ]:
+        await asyncio.gather(*pending)
