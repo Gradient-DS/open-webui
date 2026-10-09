@@ -46,7 +46,6 @@ from starsessions import (
 from starsessions.stores.redis import RedisStore
 
 from open_webui.config import (
-    BYPASS_ADMIN_ACCESS_CONTROL,
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
     DEFAULT_LOCALE,
@@ -1411,7 +1410,7 @@ async def chat_completion(
                     fallback_model = request.app.state.MODELS.get(fallback_model_id)
 
             # Check if user has access to the model
-            if not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
+            if not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user):
                 try:
                     access_model_info = (
                         model_info.model_copy(update={'base_model_id': None})
@@ -1438,8 +1437,7 @@ async def chat_completion(
                 model,
                 model_info,
                 user,
-                check_access=not BYPASS_MODEL_ACCESS_CONTROL
-                and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL),
+                check_access=not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user),
                 chat_id=form_data.get('chat_id'),
                 message_ids=form_data.get('message_ids'),
             )
