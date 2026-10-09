@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
+from open_webui.models.access_grants import AccessGrants, has_public_write_access_grant
 from open_webui.models.automations import (
     AutomationForm,
     AutomationListResponse,
@@ -15,11 +16,10 @@ from open_webui.models.automations import (
     AutomationRuns,
     Automations,
 )
-from open_webui.models.access_grants import AccessGrants, has_public_write_access_grant
 from open_webui.models.channels import Channels
 from open_webui.models.config import Config
 from open_webui.models.folders import Folders
-from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control import can_bypass_access_control, has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.automations import (
     execute_automation,
@@ -124,7 +124,7 @@ async def check_automation_channel_access(form_data: AutomationForm, user, db: A
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if user.role == 'admin':
+    if can_bypass_access_control(user):
         return
     if not await has_permission(user.id, 'features.channels', await Config.get('user.permissions')):
         raise HTTPException(

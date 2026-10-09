@@ -11,8 +11,6 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
-
 from open_webui.env import (
     AGENT_API_AGENTS,
     AGENT_API_ENABLED,
@@ -21,11 +19,13 @@ from open_webui.env import (
 from open_webui.models.agent_configs import (
     AgentConfigForm,
     AgentConfigModel,
-    AgentConfigUserResponse,
     AgentConfigs,
+    AgentConfigUserResponse,
 )
 from open_webui.models.groups import Groups
+from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from pydantic import BaseModel
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ async def list_visible_agents(user=Depends(get_verified_user)):
     if not FEATURE_AGENT_PICKER or not AGENT_API_ENABLED:
         return []
     env_slugs = set(AGENT_API_AGENTS)
-    if user.role == 'admin':
+    if can_bypass_access_control(user):
         rows = [r for r in await AgentConfigs.list_all() if r.is_active]
     else:
         user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id)}
