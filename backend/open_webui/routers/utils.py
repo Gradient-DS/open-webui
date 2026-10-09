@@ -4,7 +4,6 @@ import logging
 
 import black
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from open_webui import config
 from open_webui.config import DATA_DIR, ENABLE_DOCX_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.chats import ChatTitleMessagesForm
@@ -15,6 +14,7 @@ from open_webui.utils.misc import get_gravatar_url
 from open_webui.utils.pdf_generator import PDFGenerator
 from pydantic import BaseModel
 from starlette.responses import FileResponse
+from open_webui import config
 
 log = logging.getLogger(__name__)
 
@@ -216,10 +216,9 @@ async def export_db_json(user=Depends(get_admin_user)):
     import json
     import time
     from io import BytesIO
-
+    from starlette.responses import StreamingResponse
     from open_webui.internal.db import engine, get_db
     from sqlalchemy import inspect, text
-    from starlette.responses import StreamingResponse
 
     if not config.ENABLE_ADMIN_EXPORT:
         raise HTTPException(

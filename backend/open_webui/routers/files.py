@@ -47,13 +47,13 @@ from open_webui.soev import ingest
 from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
 from open_webui.soev.live_documents import stream_original
 from open_webui.storage.provider import Storage
-from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.content_types import content_type_for  # [Gradient]
 from open_webui.utils.misc import strict_match_mime_type
 from open_webui.utils.upload_guard import check_upload
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 

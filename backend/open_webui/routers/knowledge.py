@@ -10,11 +10,9 @@ from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from open_webui.config import (
     ENABLE_KNOWLEDGE_FILE_RETENTION,
-    KNOWLEDGE_MAX_FILE_COUNT,
     RAG_EMBEDDING_CONTENT_PREFIX,
 )
 from open_webui.constants import ERROR_MESSAGES
@@ -22,7 +20,8 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
-from open_webui.models.files import FileMetadataResponse, FileModel, FileModelResponse, Files, FileUpdateForm
+from open_webui.services.remaining_request_bodies import access_grants_body
+from open_webui.models.files import FileMetadataResponse, FileModel, FileModelResponse, Files
 from open_webui.models.groups import Groups
 from open_webui.models.knowledge import (
     KNOWLEDGE_SORTABLE_FIELDS,
@@ -33,8 +32,8 @@ from open_webui.models.knowledge import (
     KnowledgeResponse,
     Knowledges,
     KnowledgeUserResponse,
-    is_synced_kb,  # [Gradient]
 )
+from open_webui.models.files import FileUpdateForm
 from open_webui.models.models import ModelForm, Models
 from open_webui.retrieval.external import retrieve_external_knowledge, retrieve_external_knowledge_for_connection
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
@@ -44,16 +43,19 @@ from open_webui.routers.retrieval import (
     process_file,
     process_files_batch,
 )
-from open_webui.services.deletion import DeletionService
-from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.storage.provider import Storage
-from open_webui.utils.access_control import can_bypass_access_control, filter_allowed_access_grants, has_permission
+from open_webui.services.deletion import DeletionService
+from open_webui.models.knowledge import is_synced_kb  # [Gradient]
+from open_webui.utils.features import require_feature
+from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
+from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.features import require_feature
+from fastapi.concurrency import run_in_threadpool
 from open_webui.utils.json_codec import JSONCodec
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 

@@ -6,10 +6,11 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import STATIC_DIR
 from open_webui.events import EVENTS, publish_event
+from open_webui.env import STATIC_DIR
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants, has_public_read_access_grant, has_public_write_access_grant
+from open_webui.models.config import Config
 from open_webui.models.channels import (
     ChannelForm,
     ChannelModel,
@@ -19,7 +20,6 @@ from open_webui.models.channels import (
     ChannelWebhookModel,
     CreateChannelForm,
 )
-from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.messages import (
     MessageForm,
@@ -41,7 +41,7 @@ from open_webui.socket.main import (
     get_user_ids_from_room,
     sio,
 )
-from open_webui.utils.access_control import can_bypass_access_control, filter_allowed_access_grants, has_permission
+from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.channels import extract_mentions, replace_mentions
 from open_webui.utils.files import get_image_base64_from_file_id
@@ -51,6 +51,7 @@ from open_webui.utils.models import (
 )
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 

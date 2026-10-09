@@ -9,8 +9,8 @@ from open_webui.models.groups import Groups
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel, Users
-from open_webui.utils.access_control import can_bypass_access_control
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 

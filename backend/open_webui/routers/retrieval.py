@@ -117,7 +117,7 @@ from open_webui.retrieval.web.ydc import search_youcom
 from open_webui.soev import identity, ingest
 from open_webui.soev.client import SoevApiError
 from open_webui.storage.provider import Storage
-from open_webui.utils.access_control import can_bypass_access_control, has_permission
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.content_types import content_type_for  # [Gradient]
 from open_webui.utils.loop_bridge import run_on_main_loop
@@ -127,6 +127,7 @@ from open_webui.utils.misc import (
 )
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 

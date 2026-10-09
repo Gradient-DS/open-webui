@@ -15,17 +15,18 @@ from open_webui.models.config import Config
 from open_webui.models.functions import Functions
 from open_webui.models.groups import Groups
 from open_webui.models.models import Models
+from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.models.users import UserModel
 from open_webui.routers import ollama, openai
 from open_webui.socket.utils import RedisDict
 from open_webui.soev import model_catalog
-from open_webui.utils.access_control import can_bypass_access_control, has_access, has_base_model_access
-from open_webui.utils.chat_variables import get_chat_variables_schema
+from open_webui.utils.access_control import has_access, has_base_model_access
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.plugin import (
-    get_function_module_from_cache,
     get_functions_cache,
+    get_function_module_from_cache,
 )
+from open_webui.utils.access_control import can_bypass_access_control
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)

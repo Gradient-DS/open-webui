@@ -99,7 +99,7 @@ from open_webui.tools.builtin import (
     view_skill,
     write_note,
 )
-from open_webui.utils.access_control import can_bypass_access_control, has_access, has_connection_access, has_permission
+from open_webui.utils.access_control import has_access, has_connection_access, has_permission
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.headers import (
     bearer_auth_header,
@@ -119,6 +119,7 @@ from open_webui.utils.terminals import (
 )
 from pydantic import BaseModel, Field, create_model
 from pydantic.fields import FieldInfo
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 

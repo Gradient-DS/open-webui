@@ -14,6 +14,8 @@ from uuid import uuid4
 
 import aiohttp
 import anyio.to_thread
+from redis.asyncio import Redis as AsyncRedis
+
 from cryptography.fernet import InvalidToken
 from fastapi import (
     Depends,
@@ -28,7 +30,6 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from redis.asyncio import Redis as AsyncRedis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import Headers
@@ -57,6 +58,7 @@ from open_webui.config import (
     ENABLE_DATA_EXPORT,
     # [Gradient] export formats
     ENABLE_DOCX_EXPORT,
+    USE_STYLIZED_PDF_EXPORT,
     # [Gradient] Skills
     ENABLE_SKILL_EXECUTION,
     # OpenAI
@@ -76,13 +78,11 @@ from open_webui.config import (
     FEATURE_DOCUMENT_WRITER,
     FEATURE_INPUT_MENU,
     FEATURE_KNOWLEDGE,
-    FEATURE_MEETINGS,
     FEATURE_MODEL_METERS,
     FEATURE_MODELS,
     FEATURE_NOTES_AI_CONTROLS,
     FEATURE_PLAYGROUND,
     FEATURE_PROMPTS,
-    FEATURE_READ_ALOUD,
     FEATURE_REFERENCE_CHATS,
     FEATURE_SIMPLE_ASSISTANT_BUILDER,
     FEATURE_SKILL_FILES,
@@ -96,6 +96,8 @@ from open_webui.config import (
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_VOICE,
     FEATURE_VOICE_CALL,
+    FEATURE_READ_ALOUD,
+    FEATURE_MEETINGS,
     FEATURE_WEBPAGE_URL,
     FRONTEND_BUILD_DIR,
     IFRAME_CSP,
@@ -111,14 +113,16 @@ from open_webui.config import (
     STATIC_DIR,
     THREAD_POOL_SIZE,
     THREAD_POOL_THREAD_NAME_PREFIX,
-    USE_STYLIZED_PDF_EXPORT,
     WEBUI_AUTH,
     WEBUI_NAME,
     async_reset_config,
     import_legacy_config_json,
     seed_registered_defaults,
 )
+from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
+from open_webui.soev.acting import install
+from open_webui.soev import model_catalog
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -133,6 +137,7 @@ from open_webui.env import (
     ENABLE_COMPRESSION_MIDDLEWARE,
     ENABLE_CUSTOM_MODEL_FALLBACK,
     ENABLE_EASTER_EGGS,
+    FEATURE_AGENT_PICKER,  # [Gradient] Master flag for the agent picker UI
     # OAuth Back-Channel Logout
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
     ENABLE_OTEL,
@@ -146,7 +151,6 @@ from open_webui.env import (
     ENABLE_VERSION_UPDATE_CHECK,
     ENABLE_WEBSOCKET_SUPPORT,
     EXTERNAL_PWA_MANIFEST_URL,
-    FEATURE_AGENT_PICKER,  # [Gradient] Master flag for the agent picker UI
     GLOBAL_LOG_LEVEL,
     INSTANCE_ID,
     LICENSE_KEY,
@@ -203,13 +207,14 @@ from open_webui.routers import (
     calendar,
     channels,
     chats,
-    cloud_sync,
     configs,
+    cloud_sync,
     data_warnings,
     discovery,
     evaluations,
     export,
     feedback_report,
+    meetings,
     files,
     folders,
     functions,
@@ -219,7 +224,6 @@ from open_webui.routers import (
     internal_retrieval,
     invites,
     knowledge,
-    meetings,
     memories,
     models,
     notes,
@@ -245,8 +249,6 @@ from open_webui.routers.retrieval import (
     get_reranking_function,
     get_rf,
 )
-from open_webui.services.email.auth import is_mail_configured  # [Gradient]
-from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
 from open_webui.socket.main import (
     MODELS,
     get_event_emitter,
@@ -258,8 +260,6 @@ from open_webui.socket.main import (
 from open_webui.socket.main import (
     app as socket_app,
 )
-from open_webui.soev import model_catalog
-from open_webui.soev.acting import install
 from open_webui.tasks import (
     cleanup_task,
     create_task,
@@ -271,7 +271,7 @@ from open_webui.tasks import (
     stop_task,
 )  # Import from tasks.py
 from open_webui.utils import logger
-from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control, has_permission
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.actions import chat_action as chat_action_handler
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
@@ -305,10 +305,11 @@ from open_webui.utils.feedback_report import (  # [Gradient] Feedback Reporting
     build_http_error_body,
     get_current_trace_id,
 )
-from open_webui.utils.json_codec import JSONCodec
-from open_webui.utils.json_response import apply_orjson_http_json
 from open_webui.utils.lazy_resource import lazy  # [Gradient] HA Redis fix
 from open_webui.utils.log_context import install_log_context
+
+from open_webui.utils.json_codec import JSONCodec
+from open_webui.utils.json_response import apply_orjson_http_json
 from open_webui.utils.logger import start_logger
 from open_webui.utils.middleware import (
     background_tasks_handler,
@@ -340,13 +341,15 @@ from open_webui.utils.oauth import (
 from open_webui.utils.plugin import install_tool_and_function_dependencies
 from open_webui.utils.redis import clear_connection_cache, get_redis_client
 from open_webui.utils.session_pool import cleanup_response, get_client_timeout, get_session, stream_wrapper
-from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tool_approval import (
     ResolveToolCallForm,
     build_tool_approval_resume_payload,
     resolve_tool_call_output,
 )
+from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
+from open_webui.services.email.auth import is_mail_configured  # [Gradient]
+from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')

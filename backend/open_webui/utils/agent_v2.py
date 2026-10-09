@@ -32,15 +32,17 @@ from open_webui.soev import acting, agent_threads, identity, ingest, live_docume
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
 from open_webui.storage.provider import Storage
-from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control, has_permission
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat_id import is_temporary_chat_id
-from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.mail_status import mail_search_status
+
+from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
 from starlette.responses import StreamingResponse
+from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
 
 log = logging.getLogger(__name__)
 _ROOT = '/v1/chat/threads'

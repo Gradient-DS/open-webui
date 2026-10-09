@@ -11,6 +11,8 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+
 from open_webui.env import (
     AGENT_API_AGENTS,
     AGENT_API_ENABLED,
@@ -19,13 +21,12 @@ from open_webui.env import (
 from open_webui.models.agent_configs import (
     AgentConfigForm,
     AgentConfigModel,
-    AgentConfigs,
     AgentConfigUserResponse,
+    AgentConfigs,
 )
 from open_webui.models.groups import Groups
-from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from pydantic import BaseModel
+from open_webui.utils.access_control import can_bypass_access_control
 
 router = APIRouter()
 log = logging.getLogger(__name__)

@@ -7,6 +7,8 @@ from typing import Any
 
 import pycrdt as Y
 import socketio
+from socketio.packet import Packet
+
 from open_webui.config import CORS_ALLOW_ORIGIN
 from open_webui.env import (
     ENABLE_WEBSOCKET_SUPPORT,
@@ -31,10 +33,10 @@ from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
 from open_webui.models.folders import Folders
 from open_webui.models.notes import Notes, NoteUpdateForm
-from open_webui.models.users import UserNameResponse, Users
+from open_webui.models.users import Users, UserNameResponse
 from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
 from open_webui.tasks import create_task, stop_item_tasks
-from open_webui.utils.access_control import can_bypass_access_control, has_permission
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_verified_user_by_token
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.json_codec import SOCKETIO_JSON
@@ -45,7 +47,7 @@ from open_webui.utils.redis import (
     get_redis_connection,
     get_sentinels_from_env,
 )
-from socketio.packet import Packet
+from open_webui.utils.access_control import can_bypass_access_control
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)

@@ -1,6 +1,5 @@
 from typing import Any
 
-from open_webui import config
 from open_webui.config import DEFAULT_USER_PERMISSIONS
 from open_webui.models.access_grants import (
     has_anyone_read_access_grant,
@@ -14,6 +13,7 @@ from open_webui.models.groups import Groups
 from open_webui.models.users import UserModel
 from open_webui.utils.json_codec import JSONCodec
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui import config
 
 
 def can_bypass_access_control(user: UserModel | dict) -> bool:

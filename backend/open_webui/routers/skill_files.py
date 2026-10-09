@@ -37,10 +37,10 @@ from open_webui.models.files import FileForm, Files
 from open_webui.models.skill_files import SkillFileListResponse, SkillFiles
 from open_webui.models.skills import Skills
 from open_webui.models.users import Users
-from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.utils.auth import decode_token, get_optional_verified_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 

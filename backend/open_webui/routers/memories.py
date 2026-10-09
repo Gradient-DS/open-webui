@@ -13,7 +13,7 @@ from open_webui.models.config import Config
 from open_webui.models.memories import Memories, MemoryModel
 from open_webui.models.users import Users
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.utils.access_control import can_bypass_access_control, has_permission
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.memory import (
     clean_memory_content,
@@ -26,6 +26,7 @@ from open_webui.utils.memory import (
 )
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 

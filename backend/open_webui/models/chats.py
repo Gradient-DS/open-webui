@@ -6,20 +6,21 @@ import logging
 import re
 import time
 import uuid
+from typing import Any, Literal
 
 # Keep Optional imported: with future-annotations pydantic resolves field
 # annotations lazily, so pydantic models using Optional[...] (ChatModel.deleted_at,
 # ChatForm.meta, …) don't fail at import — they 500 on their FIRST live
 # validation ("`ChatForm` is not fully defined") if this import is missing.
-from typing import Any, Literal, Optional
+from typing import Optional
 
 # local imports
 from open_webui.internal.db import Base, JSONField, get_async_db_context
+from open_webui.models.ordering import request_order
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.automations import AutomationRun
 from open_webui.models.chat_messages import ChatMessage, ChatMessages
 from open_webui.models.folders import Folders
-from open_webui.models.ordering import request_order
 from open_webui.models.tags import Tag, TagModel, Tags
 from open_webui.utils.misc import get_output_text, sanitize_data_for_db, sanitize_text_for_db
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -2699,8 +2700,8 @@ class ChatTable:
         # Only link files the caller can read; blocks forging a chat_file row to another user's file.
         from open_webui.models.files import Files
         from open_webui.models.users import Users
-        from open_webui.utils.access_control import can_bypass_access_control
         from open_webui.utils.access_control.files import has_access_to_file
+        from open_webui.utils.access_control import can_bypass_access_control
 
         user = await Users.get_user_by_id(user_id, db=db)
         accessible_file_ids = []
