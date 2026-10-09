@@ -1,13 +1,13 @@
 from typing import Any, Literal
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
+from open_webui.utils.access_control import can_access_admin_chats
 from open_webui.utils.json_codec import JSONCodec
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class ResolveToolCallForm(BaseModel):
@@ -25,7 +25,7 @@ async def resolve_tool_call_output(
     db: AsyncSession | None = None,
 ) -> dict:
     chat = await Chats.get_chat_by_id(chat_id, db=db)
-    if not chat or (chat.user_id != user.id and user.role != 'admin'):
+    if not chat or (chat.user_id != user.id and not can_access_admin_chats(user)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
