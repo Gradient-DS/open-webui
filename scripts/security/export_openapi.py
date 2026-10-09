@@ -21,7 +21,7 @@ keeps Chroma and other import-time data disposable; CHROMA_HTTP_HOST= selects
 embedded Chroma. The disposable secret satisfies direct app import's auth
 requirement; do not use it for a running deployment. Remove export_dir after
 the process exits. Use the same
-environment with python -m pytest -c backend/open_webui/test/security/pytest.ini
+environment with python -m pytest -c backend/pytest.ini
 backend/open_webui/test/security/test_openapi_surface.py to check drift.
 
 Route flags (including FEATURE_SKILL_FILES, ENABLE_ADMIN_ANALYTICS and

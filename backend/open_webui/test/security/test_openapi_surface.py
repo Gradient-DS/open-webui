@@ -36,6 +36,11 @@ def drift_message(committed, fresh):
     for section in sorted(committed.keys() | fresh.keys()):
         if section != 'paths' and committed.get(section) != fresh.get(section):
             lines.append(f'Changed document section: {section}')
+    before_schemas = committed.get('components', {}).get('schemas', {})
+    after_schemas = fresh.get('components', {}).get('schemas', {})
+    for name in sorted(before_schemas.keys() | after_schemas.keys()):
+        if before_schemas.get(name) != after_schemas.get(name):
+            lines.append(f'Changed schema {name}: {before_schemas.get(name)} -> {after_schemas.get(name)}')
     return '\n'.join(lines)
 
 
@@ -60,13 +65,6 @@ def test_the_spec_is_the_same_surface_the_gate_measures(request):
 
 
 def test_export_preserves_static_assets(exporter, tmp_path):
-    # The hazard is host-side: importing the app empties STATIC_DIR and refills it
-    # from the frontend build, so exporting in a checkout with no build deletes the
-    # repository's static assets. Inside the CI image there is no repository and no
-    # `git`, so the check cannot run -- skip rather than fail, and keep it blocking
-    # where the hazard actually exists.
-    if subprocess.run(['git', 'rev-parse', '--git-dir'], cwd=REPO, capture_output=True).returncode != 0:
-        pytest.skip('not a git checkout; the static-asset hazard is host-side only')
     exporter.export(tmp_path / 'openapi.json')
     status = subprocess.run(
         ['git', 'status', '--porcelain', '--', 'backend/open_webui/static/'],

@@ -73,33 +73,22 @@ jobs:
       health-url: 'http://127.0.0.1:8080/health'
       # Paths are relative to the container's workdir, /app/backend, not to the
       # repository root: the image copies ./backend to /app/backend.
-      # Test order is load-bearing. The plane writes the hits file that the
-      # coverage gate reads, in the same invocation: a separate run would race a
-      # stale artefact. The authorization module runs last of the live modules
-      # because it drives the owner's own destructive routes as a positive control
-      # and would otherwise consume state the other modules depend on. After it
-      # come tests that leave the stack alone, then the coverage gate, which
-      # needs every pass's hits.
+      # Keep the live pass order: authorization destroys owner state, and the
+      # coverage gate consumes hits from all passes in this same invocation.
+      # Offline checks and helper unit tests run in Backend Unit Tests.
       test-command: >-
         docker compose -f docker-compose.ci.yaml exec -T
         -e ATTACK_BASE_URL=http://localhost:8080
         -e ATTACK_CONFIG_STATE_DIR=/tmp/attack-config
         open-webui python -m pytest
-        open_webui/test/security/test_runtime_egress.py
-        open_webui/test/security/test_deployed_config.py
-        open_webui/test/security/test_openapi_surface.py
-        open_webui/test/security/test_writable_fields.py
-        open_webui/test/security/attack/test_client.py
-        open_webui/test/security/attack/test_seeds.py
-        open_webui/test/security/attack/test_plane.py
-        open_webui/test/security/attack/test_shapes.py
-        open_webui/test/security/attack/test_query.py
-        open_webui/test/security/attack/test_model_path.py
-        open_webui/test/security/attack/test_crossuser.py
-        open_webui/test/security/test_plane_findings.py
-        open_webui/test/security/test_route_shadowing.py
-        open_webui/test/security/test_stub_upstream.py
-        open_webui/test/security/test_route_coverage.py
+        open_webui/test/security/attack/test_live_client.py
+        open_webui/test/security/attack/test_live_seeds.py
+        open_webui/test/security/attack/test_live_plane.py
+        open_webui/test/security/attack/test_live_shapes.py
+        open_webui/test/security/attack/test_live_query.py
+        open_webui/test/security/attack/test_live_model_path.py
+        open_webui/test/security/attack/test_live_crossuser.py
+        open_webui/test/security/test_live_route_coverage.py
         -v
       # Findings are reported, not enforced. Flipping this to true is a separate,
       # deliberate change that pairs with adding `runtime-gate` to the branch

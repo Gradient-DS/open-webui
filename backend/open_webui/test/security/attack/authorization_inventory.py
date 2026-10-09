@@ -8,25 +8,52 @@ from .authorization_surface import _admin_dependency
 from .seeds import METHODS, ROOT, SPEC
 
 
+def _router_prefix(tree, router):
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == router for t in node.targets)
+            and isinstance(node.value, ast.Call)
+        ):
+            return next((ast.literal_eval(k.value) for k in node.value.keywords if k.arg == 'prefix'), '')
+    return ''
+
+
 def _mounts():
     root = ROOT / 'backend/open_webui'
     main = ast.parse((root / 'main.py').read_text())
     mounts = [(root / 'main.py', '', 'app', main)]
-    for call in ast.walk(main):
-        if not (
-            isinstance(call, ast.Call)
-            and isinstance(call.func, ast.Attribute)
-            and call.func.attr == 'include_router'
-            and call.args
-        ):
-            continue
-        target = call.args[0]
-        if not (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)):
-            continue
-        prefix = next((ast.literal_eval(k.value) for k in call.keywords if k.arg == 'prefix'), '')
-        path = root / 'routers' / f'{target.value.id}.py'
-        if path.exists():
-            mounts.append((path, prefix, target.attr, ast.parse(path.read_text())))
+    # include_router can mount another router inside an already-mounted module.
+    for source, prefix, router, tree in mounts:
+        imports = {
+            alias.asname or alias.name: (node.module, alias.name)
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom) and node.module
+            for alias in node.names
+        }
+        for call in ast.walk(tree):
+            if not (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == router
+                and call.func.attr == 'include_router'
+                and call.args
+            ):
+                continue
+            target = call.args[0]
+            if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+                module, name = imports[target.value.id]
+                module, child_router = f'{module}.{name}', target.attr
+            elif isinstance(target, ast.Name) and target.id in imports:
+                module, child_router = imports[target.id]
+            else:
+                continue
+            path = ROOT / 'backend' / (module.replace('.', '/') + '.py')
+            child_prefix = prefix + _router_prefix(tree, router)
+            child_prefix += next((ast.literal_eval(k.value) for k in call.keywords if k.arg == 'prefix'), '')
+            if path.exists():
+                mounts.append((path, child_prefix, child_router, ast.parse(path.read_text())))
     return mounts
 
 

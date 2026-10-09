@@ -1,5 +1,4 @@
 import json
-import os
 import re
 from contextlib import nullcontext
 from unittest.mock import Mock
@@ -13,9 +12,6 @@ from hostile_corpus import NON_OBJECT_BODIES, whitespace_variants
 from pydantic import BaseModel, Field
 
 from . import plane, shapes
-from .pass_support import crash_details, fresh_surface
-
-needs_stack = pytest.mark.skipif(not os.getenv('ATTACK_BASE_URL'), reason='Requires the live sealed stack')
 
 
 @pytest.fixture
@@ -150,6 +146,8 @@ def test_sampling_and_full_mode_visit_every_whitespace_field(offline, monkeypatc
 
 
 def test_shapes_cannot_borrow_another_pass_entries_or_hide_a_5xx(offline):
+    from .test_live_shapes import test_live_shapes_has_its_own_5xx_assertion
+
     route = 'POST /raw'
     plane.record(route, 200, {}, pass_name='drive')
     actor = Mock()
@@ -161,23 +159,3 @@ def test_shapes_cannot_borrow_another_pass_entries_or_hide_a_5xx(offline):
     plane.record(route, 200, {}, pass_name='shapes')
     with pytest.raises(AssertionError, match='shape exploded'):
         test_live_shapes_has_its_own_5xx_assertion(tally)
-
-
-@pytest.fixture(scope='module')
-def live_shapes():
-    with fresh_surface() as (identities, parameters):
-        yield shapes.drive_shapes(identities.admin, parameters)
-
-
-@needs_stack
-def test_live_shapes_has_its_own_5xx_assertion(live_shapes):
-    assert not live_shapes.crashes, crash_details(live_shapes)
-
-
-@needs_stack
-def test_live_shapes_reports_its_own_reach(live_shapes, record_property):
-    assert live_shapes.statuses.keys() | live_shapes.skipped.keys() == live_shapes.expected
-    assert live_shapes.expected == set(shapes.write_operations())
-    assert live_shapes.config_restore_verified
-    record_property('shapes_unentered', live_shapes.unentered)
-    assert live_shapes.entered, 'No shape request entered a handler'

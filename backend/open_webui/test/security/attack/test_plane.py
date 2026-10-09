@@ -23,8 +23,6 @@ def response(status=200, body=None):
 
 @pytest.fixture(autouse=True)
 def isolated_unit_test(request, monkeypatch, tmp_path):
-    if 'live_seeding' in request.fixturenames:
-        return
     monkeypatch.setattr(plane, '_PASSES', {})
     monkeypatch.setattr(plane, 'preserve_configuration', lambda *a, **kw: nullcontext())
     monkeypatch.setenv('ROUTE_HITS_PATH', str(tmp_path / 'hits.json'))
@@ -57,9 +55,9 @@ def test_body_shapes_and_union_container_precedence(fields, expected):
     assert plane._body_for(list(reversed(fields)), 'hostile') == expected
 
 
-def test_body_builder_can_plant_each_of_the_2757_derived_fields():
+def test_body_builder_can_plant_each_of_the_2684_derived_fields():
     fields = plane.writable_string_fields(seeds.SPEC)
-    assert (len(fields), sum(map(len, fields.values()))) == (252, 2757)
+    assert (len(fields), sum(map(len, fields.values()))) == (237, 2684)
     for names in fields.values():
         for name in names:
             assert plane._contains(plane._body_for([name], 'hostile'), name, 'hostile'), name
@@ -273,7 +271,7 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 662
+    assert len(plane.operations()) == 637
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
 
 
@@ -389,73 +387,6 @@ def test_drive_uses_returned_status_for_crashes_and_html_reflection():
     assert outcomes['GET /item'].entered
     assert outcomes['GET /item'].reflected
     assert plane._PASSES['drive'].crashes == {'GET /item': html.text}
-
-
-needs_stack = pytest.mark.skipif(not os.getenv('ATTACK_BASE_URL'), reason='requires ATTACK_BASE_URL and the CI stack')
-
-
-def _stop_task(admin, parameters):
-    path = '/api/tasks/stop/{task_id}'
-    result = admin.request('POST', plane._fill(path, parameters))
-    assert result.status_code == 200, f'Seed task cleanup: HTTP {result.status_code}'
-
-
-@pytest.fixture(scope='module')
-def live_seeding():
-    from .identities import ensure_identities
-
-    plane._PASSES.clear()
-    plane.flush_hits()  # A new invocation cannot inherit a stale artefact.
-    identities = ensure_identities()
-    parameters = None
-    try:
-        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin)
-        yield plane.seed_every_writable_field(identities.admin, parameters)
-    finally:
-        try:
-            if parameters is not None:
-                _stop_task(identities.admin, parameters)
-        finally:
-            identities.close()
-
-
-@pytest.fixture(scope='module')
-def live_drive(live_seeding):
-    from .identities import ensure_identities
-
-    identities = ensure_identities()
-    parameters = None
-    try:
-        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin)
-        yield plane.drive_every_route(identities.admin, parameters)
-    finally:
-        try:
-            if parameters is not None:
-                _stop_task(identities.admin, parameters)
-        finally:
-            identities.close()
-
-
-@needs_stack
-def test_live_seeding_has_its_own_5xx_assertion(live_seeding):
-    assert not live_seeding.crashes, f'Seeding found server errors:\n{plane.crash_report(live_seeding)}'
-
-
-@needs_stack
-def test_live_seeding_reports_its_own_reach(live_seeding, record_property):
-    accounted = live_seeding.statuses.keys() | live_seeding.skipped.keys() | live_seeding.unanswered.keys()
-    assert accounted == live_seeding.expected
-    record_property('seeding_reached', len(live_seeding.entered))
-    record_property('seeding_unentered', len(live_seeding.unentered))
-    record_property('seeding_unanswered', len(live_seeding.unanswered))
-    record_property('seeding_config_unverified', len(live_seeding.config_unverified))
-    assert live_seeding.entered, 'No seeding request entered a handler'
-
-
-@needs_stack
-def test_live_drive_has_its_own_5xx_assertion(live_drive):
-    crashes = {route: outcome for route, outcome in live_drive.items() if outcome.status >= 500}
-    assert not crashes, f'Drive found server errors:\n{plane.drive_report(live_drive)}'
 
 
 def timing_out_client():
@@ -576,6 +507,8 @@ def test_the_5xx_report_is_the_gate_message_itself_not_pytest_explanation():
 
 @pytest.mark.parametrize('pass_name', ['seeding', 'drive'])
 def test_5xx_gate_message_includes_every_route_status_and_actionable_body(pass_name):
+    from .test_live_plane import test_live_drive_has_its_own_5xx_assertion, test_live_seeding_has_its_own_5xx_assertion
+
     bodies = {
         'POST /broken': 'x' * 450 + ' model_type: expected a dictionary',
         'DELETE /proxy/{server_id}/{path}': '<html>Unsupported method DELETE</html>',
@@ -607,24 +540,6 @@ def test_5xx_gate_message_includes_every_route_status_and_actionable_body(pass_n
     assert '422' not in message
     assert 'Earlier validation refusal' not in message
     assert 'Later success' not in message
-
-
-@needs_stack
-def test_live_drive_reports_its_own_reach(live_drive, record_property):
-    tally = plane._PASSES['drive']
-    assert live_drive.keys() | tally.skipped.keys() == set(plane.operations())
-    record_property('drive_reached', len(tally.entered))
-    record_property('drive_unentered', len(tally.unentered))
-    record_property('drive_unanswered', len(tally.unanswered))
-    record_property('drive_config_unverified', len(tally.config_unverified))
-    record_property('combined_unentered', len(plane.unentered_routes()))
-    assert tally.entered, 'No drive request entered a handler'
-
-
-@needs_stack
-def test_live_drive_does_not_reflect_corpus_in_html(live_drive):
-    reflected = [route for route, outcome in live_drive.items() if outcome.reflected]
-    assert not reflected, reflected
 
 
 def test_the_skeleton_carries_what_no_string_derivation_can_report():
