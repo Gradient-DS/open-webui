@@ -101,7 +101,7 @@ async def get_prompt_list(
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not (can_bypass_access_control(user)):
+    if not can_bypass_access_control(user):
         if groups:
             filter['group_ids'] = [group.id for group in groups]
 
@@ -125,7 +125,7 @@ async def get_prompt_list(
             PromptAccessResponse(
                 **prompt.model_dump(),
                 write_access=(
-                    (can_bypass_access_control(user)) or user.id == prompt.user_id or prompt.id in writable_prompt_ids
+                    can_bypass_access_control(user) or user.id == prompt.user_id or prompt.id in writable_prompt_ids
                 ),
             )
             for prompt in result.items
@@ -222,7 +222,7 @@ async def get_prompt_by_id(
             return PromptAccessResponse(
                 **prompt.model_dump(),
                 write_access=(
-                    (can_bypass_access_control(user))
+                    can_bypass_access_control(user)
                     or user.id == prompt.user_id
                     or await AccessGrants.has_access(
                         user_id=user.id,

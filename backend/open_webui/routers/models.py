@@ -191,7 +191,7 @@ async def get_models(
         data = add_chat_variables_schema(model.model_dump())
         if data.get('meta'):
             data['meta'].pop('profile_image_url', None)
-        write_access = (can_bypass_access_control(user)) or user.id == model.user_id or model.id in writable_model_ids
+        write_access = can_bypass_access_control(user) or user.id == model.user_id or model.id in writable_model_ids
         # Strip params (system prompt and other curated config) for read-only
         # callers, mirroring the per-id endpoint.
         if not write_access:
@@ -233,7 +233,7 @@ async def get_base_models(
 async def get_model_tags(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     tags = await Models.get_all_tags(
         user_id=user.id,
-        is_admin=(can_bypass_access_control(user)),
+        is_admin=can_bypass_access_control(user),
         db=db,
     )
     return sorted(tags)
@@ -591,7 +591,7 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
     model = await Models.get_model_by_id(id, db=db)
     if model:
         write_access = (
-            (can_bypass_access_control(user))
+            can_bypass_access_control(user)
             or user.id == model.user_id
             or await AccessGrants.has_access(
                 user_id=user.id,

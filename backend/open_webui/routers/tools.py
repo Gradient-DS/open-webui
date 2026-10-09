@@ -459,7 +459,7 @@ async def get_tools_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
             )
         ):
             write_access = (
-                (can_bypass_access_control(user))
+                can_bypass_access_control(user)
                 or user.id == tools.user_id
                 or await AccessGrants.has_access(
                     user_id=user.id,

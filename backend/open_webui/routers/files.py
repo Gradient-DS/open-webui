@@ -659,7 +659,7 @@ async def list_files(
     db: AsyncSession = Depends(get_async_session),
 ):
     skip = (page - 1) * PAGE_SIZE
-    user_id = None if (can_bypass_access_control(user)) else user.id
+    user_id = None if can_bypass_access_control(user) else user.id
 
     result = await Files.get_file_list(user_id=user_id, skip=skip, limit=PAGE_SIZE, db=db)
 
@@ -693,7 +693,7 @@ async def search_files(
     Uses SQL-based filtering with pagination for better performance.
     """
     # Determine user_id: null for admin with bypass (search all), user.id otherwise
-    user_id = None if (can_bypass_access_control(user)) else user.id
+    user_id = None if can_bypass_access_control(user) else user.id
 
     # Use optimized database query with pagination
     files = await Files.search_files(
@@ -728,7 +728,7 @@ async def count_files(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    user_id = None if (can_bypass_access_control(user)) else user.id
+    user_id = None if can_bypass_access_control(user) else user.id
     return await Files.count_files_by_user_id(user_id=user_id, db=db)
 
 

@@ -563,7 +563,7 @@ async def get_filtered_models(models, user, db=None):
                 filtered_models.append(model)
             elif model_info:
                 if (
-                    (can_bypass_access_control(user))
+                    can_bypass_access_control(user)
                     or user.id == model_info.get('user_id')
                     or model['id'] in accessible_model_ids
                 ):

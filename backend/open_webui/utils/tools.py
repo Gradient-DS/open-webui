@@ -287,7 +287,7 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
         if tool:
             # Check access control for local tools
             if (
-                not (can_bypass_access_control(user))
+                not can_bypass_access_control(user)
                 and tool.user_id != user.id
                 and not await AccessGrants.has_access(
                     user_id=user.id,
