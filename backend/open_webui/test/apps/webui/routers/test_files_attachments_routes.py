@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -23,7 +23,7 @@ def app(monkeypatch, tmp_path):
     monkeypatch.setattr(
         files_router.Files,
         'get_file_by_id',
-        lambda _id, db=None: SimpleNamespace(id=_id, user_id='user-1'),
+        AsyncMock(side_effect=lambda _id, db=None: SimpleNamespace(id=_id, user_id='user-1')),
     )
     return app
 
@@ -55,7 +55,7 @@ def test_list_attachments_returns_manifest(app, monkeypatch):
 
 
 def test_list_attachments_404_when_file_missing(app, monkeypatch):
-    monkeypatch.setattr(files_router.Files, 'get_file_by_id', lambda _id, db=None: None)
+    monkeypatch.setattr(files_router.Files, 'get_file_by_id', AsyncMock(return_value=None))
     res = TestClient(app).get('/api/v1/files/missing/attachments')
     assert res.status_code == 404
 
@@ -131,12 +131,12 @@ def test_list_attachments_404_when_user_has_no_access(app, monkeypatch):
     monkeypatch.setattr(
         files_router.Files,
         'get_file_by_id',
-        lambda _id, db=None: SimpleNamespace(id=_id, user_id='other-user'),
+        AsyncMock(side_effect=lambda _id, db=None: SimpleNamespace(id=_id, user_id='other-user')),
     )
     monkeypatch.setattr(
         files_router,
         'has_access_to_file',
-        lambda *_a, **_k: False,
+        AsyncMock(return_value=False),
     )
     res = TestClient(app).get('/api/v1/files/file-1/attachments')
     assert res.status_code == 404
@@ -146,12 +146,12 @@ def test_get_attachment_bytes_404_when_user_has_no_access(app, monkeypatch):
     monkeypatch.setattr(
         files_router.Files,
         'get_file_by_id',
-        lambda _id, db=None: SimpleNamespace(id=_id, user_id='other-user'),
+        AsyncMock(side_effect=lambda _id, db=None: SimpleNamespace(id=_id, user_id='other-user')),
     )
     monkeypatch.setattr(
         files_router,
         'has_access_to_file',
-        lambda *_a, **_k: False,
+        AsyncMock(return_value=False),
     )
     res = TestClient(app).get('/api/v1/files/file-1/attachments/att-1')
     assert res.status_code == 404

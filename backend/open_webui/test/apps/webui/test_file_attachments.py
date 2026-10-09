@@ -59,11 +59,7 @@ def db(tmp_path, monkeypatch):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    # get_db_context only passes the caller's session through when this is true.
-    monkeypatch.setenv('DATABASE_ENABLE_SESSION_SHARING', 'True')
-    import open_webui.internal.db as _db_mod
-
-    monkeypatch.setattr(_db_mod, 'DATABASE_ENABLE_SESSION_SHARING', True)
+    from contextlib import nullcontext
 
     from open_webui.internal.db import Base
     from open_webui.models.file_attachments import FileAttachment  # noqa: F401 — registers
@@ -72,8 +68,10 @@ def db(tmp_path, monkeypatch):
     Base.metadata.create_all(engine, tables=[FileAttachment.__table__])
     Session = sessionmaker(bind=engine)
     session = Session()
+    monkeypatch.setattr('open_webui.models.file_attachments.get_db_context', lambda db=None: nullcontext(session))
     yield session
     session.close()
+    engine.dispose()
 
 
 def test_insert_then_get_by_id(db):
@@ -194,172 +192,51 @@ def test_delete_attachment_by_id_returns_false_when_missing(db):
     assert ok is False
 
 
-@pytest.mark.skip(reason='async migration follow-up: rewrite stubs for get_async_db_context + asyncio.to_thread')
-def test_files_delete_file_by_id_cascades_to_attachments(monkeypatch):
-    """Deleting a Files row also drops its attachments and Storage paths."""
-    from open_webui.models import files as files_mod
+@pytest.fixture
+def file_session(monkeypatch):
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
 
-    cascaded_for: list[str] = []
+    from open_webui.models import files
 
-    class SpyAttachments:
-        @staticmethod
-        def delete_attachments_by_file_id(file_id, db=None):
-            cascaded_for.append(file_id)
-            return 0
+    session = AsyncMock()
 
-    monkeypatch.setattr('open_webui.models.file_attachments.FileAttachments', SpyAttachments)
+    @asynccontextmanager
+    async def context(db=None):
+        yield session
 
-    # Don't actually touch a DB; stub the inner query so the method returns True.
-    class StubQuery:
-        def filter_by(self, **_kw):
-            return self
-
-        def filter(self, *_a, **_kw):
-            return self
-
-        def delete(self, *_a, **_kw):
-            return 0
-
-    class StubSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            return False
-
-        def query(self, *_a, **_kw):
-            return StubQuery()
-
-        def commit(self):
-            return None
-
-    monkeypatch.setattr(files_mod, 'get_db_context', lambda _db=None: StubSession())
-
-    assert files_mod.Files.delete_file_by_id('file-cascade-1') is True
-    assert cascaded_for == ['file-cascade-1']
+    monkeypatch.setattr(files, 'get_async_db_context', context)
+    return session
 
 
-@pytest.mark.skip(reason='async migration follow-up: rewrite stubs for get_async_db_context + asyncio.to_thread')
-def test_files_delete_files_by_ids_cascades_in_bulk(monkeypatch):
-    from open_webui.models import files as files_mod
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'method, arguments, cascade',
+    [
+        ('delete_file_by_id', ('file-cascade-1',), 'delete_attachments_by_file_id'),
+        ('delete_files_by_ids', (['a', 'b', 'c'],), 'delete_attachments_by_file_ids'),
+        ('delete_all_files', (), 'delete_all_attachments'),
+    ],
+)
+async def test_files_deletion_cascades_to_attachments(file_session, method, arguments, cascade):
+    from open_webui.models.file_attachments import FileAttachments
+    from open_webui.models.files import Files
 
-    bulk_calls: list[tuple] = []
-
-    class SpyAttachments:
-        @staticmethod
-        def delete_attachments_by_file_ids(file_ids, db=None):
-            bulk_calls.append((file_ids, db))
-            return 0
-
-    monkeypatch.setattr('open_webui.models.file_attachments.FileAttachments', SpyAttachments)
-
-    class StubQuery:
-        def filter(self, *_a, **_kw):
-            return self
-
-        def delete(self, *_a, **_kw):
-            return 0
-
-    class StubSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            return False
-
-        def query(self, *_a, **_kw):
-            return StubQuery()
-
-        def commit(self):
-            return None
-
-    monkeypatch.setattr(files_mod, 'get_db_context', lambda _db=None: StubSession())
-
-    assert files_mod.Files.delete_files_by_ids(['a', 'b', 'c']) is True
-    # Must be called exactly once with all ids — not per-id
-    assert len(bulk_calls) == 1
-    assert sorted(bulk_calls[0][0]) == ['a', 'b', 'c']
+    with patch.object(FileAttachments, cascade, return_value=0) as attachments:
+        assert await getattr(Files, method)(*arguments) is True
+    attachments.assert_called_once_with(*arguments)
+    file_session.execute.assert_awaited_once()
+    file_session.commit.assert_awaited_once()
 
 
-@pytest.mark.skip(reason='async migration follow-up: rewrite stubs for get_async_db_context + asyncio.to_thread')
-def test_files_delete_all_files_calls_wipe(monkeypatch):
-    from open_webui.models import files as files_mod
+@pytest.mark.asyncio
+async def test_files_delete_file_by_id_propagates_cascade_failure(file_session):
+    """A failed cascade must stop the parent deletion and expose the error."""
+    from open_webui.models.file_attachments import FileAttachments
+    from open_webui.models.files import Files
 
-    wiped: list[bool] = []
-
-    class SpyAttachments:
-        @staticmethod
-        def delete_all_attachments(db=None):
-            wiped.append(True)
-            return 0
-
-        @staticmethod
-        def delete_attachments_by_file_id(file_id, db=None):  # unused on this path
-            return 0
-
-    monkeypatch.setattr('open_webui.models.file_attachments.FileAttachments', SpyAttachments)
-
-    class StubQuery:
-        def delete(self, *_a, **_kw):
-            return 0
-
-    class StubSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            return False
-
-        def query(self, *_a, **_kw):
-            return StubQuery()
-
-        def commit(self):
-            return None
-
-    monkeypatch.setattr(files_mod, 'get_db_context', lambda _db=None: StubSession())
-
-    assert files_mod.Files.delete_all_files() is True
-    assert wiped == [True]
-
-
-@pytest.mark.skip(reason='async migration follow-up: rewrite stubs for get_async_db_context + asyncio.to_thread')
-def test_files_delete_file_by_id_returns_false_when_cascade_raises(monkeypatch):
-    """If the attachment cascade fails, Files.delete_file_by_id returns False."""
-    from open_webui.models import files as files_mod
-
-    class ExplodingAttachments:
-        @staticmethod
-        def delete_attachments_by_file_id(file_id, db=None):
-            raise RuntimeError('boom')
-
-    monkeypatch.setattr(
-        'open_webui.models.file_attachments.FileAttachments',
-        ExplodingAttachments,
-    )
-
-    class StubQuery:
-        def filter_by(self, **_kw):
-            return self
-
-        def filter(self, *_a, **_kw):
-            return self
-
-        def delete(self, *_a, **_kw):
-            return 0
-
-    class StubSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_a):
-            return False
-
-        def query(self, *_a, **_kw):
-            return StubQuery()
-
-        def commit(self):
-            return None
-
-    monkeypatch.setattr(files_mod, 'get_db_context', lambda db=None: StubSession())
-
-    assert files_mod.Files.delete_file_by_id('file-1') is False
+    with patch.object(FileAttachments, 'delete_attachments_by_file_id', side_effect=RuntimeError('boom')):
+        with pytest.raises(RuntimeError, match='boom'):
+            await Files.delete_file_by_id('file-1')
+    file_session.execute.assert_not_awaited()
+    file_session.commit.assert_not_awaited()

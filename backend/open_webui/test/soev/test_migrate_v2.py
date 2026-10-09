@@ -235,17 +235,12 @@ V1_HEAD = 'e24b7c9d1f63'
 
 
 @pytest.mark.asyncio
-async def test_restore_is_byte_for_byte_on_postgres_and_state_stays_outside_alembic(env):
+async def test_restore_is_byte_for_byte_on_postgres_and_state_stays_outside_alembic(env, postgres_database):
     """PostgreSQL json keeps the stored text; the state lives in its own schema and public is untouched."""
-    import os
-
-    url = os.environ.get('SOEV_MIGRATE_TEST_DATABASE_URL')
-    if not url:
-        pytest.skip('Set SOEV_MIGRATE_TEST_DATABASE_URL to an isolated PostgreSQL test database')
     from open_webui.soev import migrate_config, migrate_state
 
     config = env.models['config'].Config.__table__
-    engine = create_async_engine(url)
+    engine = create_async_engine(postgres_database)
 
     async def reset(connection):
         await connection.execute(sa.text(f'DROP SCHEMA IF EXISTS {migrate_state.SCHEMA} CASCADE'))

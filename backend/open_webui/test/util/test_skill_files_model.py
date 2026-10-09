@@ -402,11 +402,16 @@ class TestSearchFilesByIdMediaTypeDerivation:
         assert item.size == 1234
 
     @pytest.mark.asyncio
-    async def test_extension_fallback_when_no_content_type(self, db_session):
+    async def test_extension_fallback_when_no_content_type(self, db_session, monkeypatch):
         """When File.meta has NO content_type, media_type falls back to
         mimetypes.guess_type of the virtual path (the SkillFile.path, not the
         storage path).  Two known extensions are exercised."""
         import mimetypes
+
+        types = mimetypes.MimeTypes(filenames=())
+        types.add_type('text/markdown', '.md')
+        types.add_type('text/csv', '.csv')
+        monkeypatch.setattr(mimetypes, 'guess_type', types.guess_type)
 
         skill_id = 'skill-mt-2'
 
