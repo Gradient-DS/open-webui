@@ -52,6 +52,7 @@ from open_webui.utils.access_control.files import get_owner_accessible_folder_fi
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.headers import get_json_bearer_headers, include_user_info_headers
 from open_webui.utils.misc import get_content_from_message, get_message_list
+from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -1281,7 +1282,7 @@ async def filter_accessible_collections(
 ) -> set[str]:
     """
     Return only the collection names the user is allowed to access.
-    Admins bypass all checks.  For non-admins the policy is:
+    Admins bypass only with BYPASS_ADMIN_ACCESS_CONTROL. Otherwise:
 
       - any name with characters outside [A-Za-z0-9_-] → rejected
       - file-*          → validated via has_access_to_file
@@ -1305,7 +1306,7 @@ async def filter_accessible_collections(
             getattr(user, 'id', '<unknown>'),
         )
 
-    if user.role == 'admin':
+    if can_bypass_access_control(user):
         return safe_names
 
     validated = set()
@@ -1372,7 +1373,7 @@ async def get_sources_from_items(
         expanded_folders.add(folder_id)
 
         folder = await Folders.get_folder_by_id(folder_id)
-        if folder and (user.role == 'admin' or await has_folder_access(user.id, folder, 'read', db=None)):
+        if folder and (can_bypass_access_control(user) or await has_folder_access(user.id, folder, 'read', db=None)):
             files = await get_owner_accessible_folder_files(folder)
             folder_items.update((entry.get('type'), entry.get('id')) for entry in files if isinstance(entry, dict))
             items.extend(files)
@@ -1416,7 +1417,7 @@ async def get_sources_from_items(
             note = await Notes.get_note_by_id(item.get('id'))
 
             if note and (
-                user.role == 'admin'
+                can_bypass_access_control(user)
                 or note.user_id == user.id
                 or await AccessGrants.has_access(
                     user_id=user.id,
@@ -1440,7 +1441,7 @@ async def get_sources_from_items(
         elif item.get('type') == 'chat':
             # Chat Attached
             chat = await Chats.get_chat_by_id(item.get('id'))
-            has_read_access = bool(chat and (user.role == 'admin' or chat.user_id == user.id))
+            has_read_access = bool(chat and (can_access_admin_chats(user) or chat.user_id == user.id))
 
             if chat and not has_read_access:
                 has_read_access = await AccessGrants.has_access(
@@ -1501,7 +1502,7 @@ async def get_sources_from_items(
                 elif item.get('id'):
                     file_object = await Files.get_file_by_id(item.get('id'))
                     if file_object and (
-                        user.role == 'admin'
+                        can_bypass_access_control(user)
                         or file_object.user_id == user.id
                         or await has_access_to_file(item.get('id'), 'read', user)
                         or ('file', item.get('id')) in folder_items
@@ -1532,7 +1533,7 @@ async def get_sources_from_items(
                     else:
                         file_object = await Files.get_file_by_id(file_id)
                         if file_object and (
-                            user.role == 'admin'
+                            can_bypass_access_control(user)
                             or file_object.user_id == user.id
                             or await has_access_to_file(file_id, 'read', user)
                             or ('file', file_id) in folder_items
@@ -1547,7 +1548,7 @@ async def get_sources_from_items(
             knowledge_base = await Knowledges.get_knowledge_by_id(item.get('id'))
 
             if knowledge_base and (
-                user.role == 'admin'
+                can_bypass_access_control(user)
                 or knowledge_base.user_id == user.id
                 or await AccessGrants.has_access(
                     user_id=user.id,
@@ -1570,7 +1571,7 @@ async def get_sources_from_items(
                 else:
                     if item.get('context') == 'full' or bypass_embedding_and_retrieval:
                         if knowledge_base and (
-                            user.role == 'admin'
+                            can_bypass_access_control(user)
                             or knowledge_base.user_id == user.id
                             or await AccessGrants.has_access(
                                 user_id=user.id,

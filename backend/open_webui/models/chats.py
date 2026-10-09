@@ -15,7 +15,6 @@ from typing import Any, Literal
 from typing import Optional
 
 # local imports
-from open_webui.env import ENABLE_ADMIN_CHAT_ACCESS
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.ordering import request_order
 from open_webui.models.access_grants import AccessGrants
@@ -1835,7 +1834,9 @@ class ChatTable:
         if not chat:
             return None
 
-        if user.role == 'admin' and (ENABLE_ADMIN_CHAT_ACCESS or is_internal_chat(chat.meta)):
+        from open_webui.utils.access_control import can_access_admin_chats
+
+        if can_access_admin_chats(user):
             return chat
 
         if await AccessGrants.has_access(
@@ -2700,6 +2701,7 @@ class ChatTable:
         from open_webui.models.files import Files
         from open_webui.models.users import Users
         from open_webui.utils.access_control.files import has_access_to_file
+        from open_webui.utils.access_control import can_bypass_access_control
 
         user = await Users.get_user_by_id(user_id, db=db)
         accessible_file_ids = []
@@ -2709,7 +2711,7 @@ class ChatTable:
                 continue
             if (
                 file.user_id == user_id
-                or (user and user.role == 'admin')
+                or (user and can_bypass_access_control(user))
                 or (user and await has_access_to_file(file_id, 'read', user, db=db))
             ):
                 accessible_file_ids.append(file_id)

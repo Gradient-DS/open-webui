@@ -15,7 +15,7 @@ MATRIX = [
     # object     action    bypass off  bypass on
     ('chat', 'read', 'DADDDDD', 'AADDDDD'),
     ('chat', 'update', 'DADDDDD', 'DADDDDD'),
-    ('chat', 'delete', 'AADDDDD', 'AADDDDD'),  # Administrative deletion is independent of chat viewing.
+    ('chat', 'delete', 'DADDDDD', 'AADDDDD'),
     ('chat', 'share', 'DADDDDD', 'DADDDDD'),  # Native chats are owner-only; snapshots have grants.
     ('file', 'read', 'DAAADDA', 'AAAADDA'),
     ('file', 'update', 'DADADDD', 'AADADDD'),
@@ -49,6 +49,10 @@ MATRIX = [
     ('knowledge', 'update', 'DADADDD', 'AADADDD'),
     ('knowledge', 'delete', 'DADADDD', 'AADADDD'),
     ('knowledge', 'share', 'DADADDD', 'AADADDD'),
+    ('skill', 'read', 'DAAADDA', 'AAAADDA'),
+    ('skill', 'update', 'DADADDD', 'AADADDD'),
+    ('skill', 'delete', 'DADADDD', 'AADADDD'),
+    ('skill', 'share', 'DADADDD', 'AADADDD'),
 ]
 
 # Low-level helpers deliberately do not confer ownership/admin privileges unless documented.
@@ -82,6 +86,11 @@ async def seed_resource(seeded, kind, public=False):
         'model': ('models', 'Model', {'name': 'original', 'params': {}, 'meta': {}}),
         'prompt': ('prompts', 'Prompt', {'name': 'original', 'command': '/original', 'content': 'original'}),
         'tool': ('tools', 'Tool', {'name': 'original', 'content': TOOL_CODE, 'specs': [], 'meta': {}}),
+        'skill': (
+            'skills',
+            'Skill',
+            {'name': 'original', 'content': 'original', 'description': 'original', 'meta': {}},
+        ),
         'channel': ('channels', 'Channel', {'name': 'original'}),
         'knowledge': ('knowledge', 'Knowledge', {'name': 'original', 'description': 'original'}),
     }
@@ -116,6 +125,7 @@ def request_for(kind, action):
         'model': 'models',
         'prompt': 'prompts',
         'tool': 'tools',
+        'skill': 'skills',
         'channel': 'channels',
     }[kind]
     path = f'/api/v1/{plural}'
@@ -126,7 +136,7 @@ def request_for(kind, action):
             'delete': ('POST', path + '/model/delete', {'id': 'target'}),
             'share': ('POST', path + '/model/access/update', {'id': 'target', 'access_grants': []}),
         }[action]
-    path += ('/id' if kind in ('prompt', 'tool') else '') + '/target'
+    path += ('/id' if kind in ('prompt', 'tool', 'skill') else '') + '/target'
     body = {
         'chat': {'chat': {'title': 'changed'}},
         'file': {'filename': 'changed.txt'},
@@ -134,6 +144,7 @@ def request_for(kind, action):
         'folder': {'name': 'changed'},
         'prompt': {'command': '/original', 'name': 'changed', 'content': 'changed'},
         'tool': {'id': 'target', 'name': 'changed', 'content': TOOL_CODE, 'meta': {}},
+        'skill': {'id': 'target', 'name': 'changed', 'description': 'changed', 'content': 'changed', 'meta': {}},
         'channel': {'name': 'changed'},
         'knowledge': {'name': 'changed', 'description': 'changed'},
     }[kind]
@@ -156,23 +167,16 @@ CASES = [
     if off is not None
     for bypass, cells in ((False, off), (True, on))
     for index, principal in enumerate(PRINCIPALS)
-    if not bypass or principal == 'admin'
 ]
 
 
 @pytest.mark.parametrize('kind,action,principal,bypass,allowed', CASES)
 def test_http_matrix(seeded, monkeypatch, kind, action, principal, bypass, allowed):
     from open_webui import config
-    from open_webui.models import chats
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass)
-    monkeypatch.setattr(chats, 'ENABLE_ADMIN_CHAT_ACCESS', bypass)
-    for name in ('chats', 'files', 'notes', 'folders', 'models', 'prompts', 'tools', 'channels', 'knowledge'):
-        module = importlib.import_module(f'open_webui.routers.{name}')
-        if hasattr(module, 'BYPASS_ADMIN_ACCESS_CONTROL'):
-            monkeypatch.setattr(module, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass)
-        if hasattr(module, 'ENABLE_ADMIN_CHAT_ACCESS'):
-            monkeypatch.setattr(module, 'ENABLE_ADMIN_CHAT_ACCESS', bypass)
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', bypass)
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_EXPORT', bypass)
     model = seeded.run(seed_resource, seeded, kind, principal == 'public')
     from open_webui.models.access_grants import AccessGrants
 

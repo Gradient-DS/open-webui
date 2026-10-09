@@ -46,7 +46,6 @@ from starsessions import (
 from starsessions.stores.redis import RedisStore
 
 from open_webui.config import (
-    BYPASS_ADMIN_ACCESS_CONTROL,
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
     DEFAULT_LOCALE,
@@ -349,6 +348,7 @@ from open_webui.utils.tool_approval import (
 from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
 from open_webui.services.email.auth import is_mail_configured  # [Gradient]
+from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')
@@ -1410,7 +1410,7 @@ async def chat_completion(
                     fallback_model = request.app.state.MODELS.get(fallback_model_id)
 
             # Check if user has access to the model
-            if not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
+            if not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user):
                 try:
                     access_model_info = (
                         model_info.model_copy(update={'base_model_id': None})
@@ -1437,8 +1437,7 @@ async def chat_completion(
                 model,
                 model_info,
                 user,
-                check_access=not BYPASS_MODEL_ACCESS_CONTROL
-                and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL),
+                check_access=not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user),
                 chat_id=form_data.get('chat_id'),
                 message_ids=form_data.get('message_ids'),
             )
@@ -1617,7 +1616,7 @@ async def chat_completion(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=ERROR_MESSAGES.NOT_FOUND,
                     )
-                if user.role != 'admin':
+                if not can_bypass_access_control(user):
                     if channel.type in ['group', 'dm']:
                         if not await Channels.is_user_channel_member(channel.id, user.id):
                             raise HTTPException(
@@ -1643,7 +1642,7 @@ async def chat_completion(
                     if target_message and (
                         target_message.channel_id != channel.id
                         # Write access is not authorship — block cross-member edits.
-                        or (user.role != 'admin' and target_message.user_id != user.id)
+                        or (not can_bypass_access_control(user) and target_message.user_id != user.id)
                     ):
                         raise HTTPException(
                             status_code=status.HTTP_403_FORBIDDEN,
@@ -1794,7 +1793,7 @@ async def chat_completion(
                         asyncio.create_task(run_initial_title_generation())
                 else:
                     # Existing chat — verify ownership
-                    if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':
+                    if not await Chats.is_chat_owner(chat_id, user.id) and not can_access_admin_chats(user):
                         raise HTTPException(
                             status_code=status.HTTP_404_NOT_FOUND,
                             detail=ERROR_MESSAGES.DEFAULT(),
@@ -2021,7 +2020,7 @@ async def chat_completion(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail='This chat is bound to an agent that is no longer available.',
                     )
-                if user.role != 'admin':
+                if not can_bypass_access_control(user):
                     user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id)}
                     accessible = await AccessGrants.get_accessible_resource_ids(
                         user_id=user.id,
@@ -2514,7 +2513,7 @@ async def verify_chat_ownership(chat_id: str | None, user) -> None:
             detail='Channel chats are not supported on this endpoint',
         )
 
-    if user.role != 'admin' and not await Chats.is_chat_owner(chat_id, user.id):
+    if not can_access_admin_chats(user) and not await Chats.is_chat_owner(chat_id, user.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.DEFAULT(),
@@ -2582,11 +2581,11 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     socket_id = get_temporary_chat_session_id(chat_id)
     if socket_id:
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and user.role != 'admin':
+        if owner_id != user.id and not can_access_admin_chats(user):
             return {'task_ids': []}
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        if chat is None or (chat.user_id != user.id and not can_access_admin_chats(user)):
             return {'task_ids': []}
 
     task_ids = await list_task_ids_by_item_id(request.app.state.redis, chat_id)
@@ -2601,11 +2600,11 @@ async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     chat = None
     if socket_id:
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and user.role != 'admin':
+        if owner_id != user.id and not can_access_admin_chats(user):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        if chat is None or (chat.user_id != user.id and not can_access_admin_chats(user)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     result = await stop_item_tasks(request.app.state.redis, chat_id)
 

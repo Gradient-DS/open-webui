@@ -4,7 +4,7 @@ import logging
 
 import black
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from open_webui.config import DATA_DIR, ENABLE_ADMIN_EXPORT, ENABLE_DOCX_EXPORT
+from open_webui.config import DATA_DIR, ENABLE_DOCX_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.chats import ChatTitleMessagesForm
 from open_webui.models.config import Config
@@ -14,6 +14,7 @@ from open_webui.utils.misc import get_gravatar_url
 from open_webui.utils.pdf_generator import PDFGenerator
 from pydantic import BaseModel
 from starlette.responses import FileResponse
+from open_webui import config
 
 log = logging.getLogger(__name__)
 
@@ -188,7 +189,7 @@ async def export_document_as_docx(
 @router.get('/db/download')
 async def download_db(user=Depends(get_admin_user)):
     """Download the raw SQLite database file (admin-only, SQLite deployments only)."""
-    if not ENABLE_ADMIN_EXPORT:
+    if not config.ENABLE_ADMIN_EXPORT:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
     # Lazy import avoids circular dependency at module load time
@@ -219,7 +220,7 @@ async def export_db_json(user=Depends(get_admin_user)):
     from open_webui.internal.db import engine, get_db
     from sqlalchemy import inspect, text
 
-    if not ENABLE_ADMIN_EXPORT:
+    if not config.ENABLE_ADMIN_EXPORT:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,

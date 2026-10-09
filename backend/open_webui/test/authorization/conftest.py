@@ -27,6 +27,10 @@ MODULES = (
     'knowledge',
     'groups',
     'users',
+    'skills',
+    'evaluations',
+    'utils',
+    'calendar',
 )
 
 
@@ -131,7 +135,7 @@ def seeded(template, application, monkeypatch, tmp_path):
 
     # The fork exports remote adapters unconditionally; exercise the retained SQL implementations.
     sql_grants, sql_knowledge, sql_groups = AccessGrantsTable(), KnowledgeTable(), GroupTable()
-    for name, module in list(sys.modules.items()):
+    for name, module in sys.modules.copy().items():
         if name.startswith('open_webui.') and module is not None:
             if getattr(module, 'AccessGrants', None) is AccessGrants:
                 monkeypatch.setattr(module, 'AccessGrants', sql_grants)
@@ -148,11 +152,15 @@ def seeded(template, application, monkeypatch, tmp_path):
     monkeypatch.setattr(database, 'AsyncSessionLocal', sessions)
     monkeypatch.setattr(database, 'SessionLocal', sessionmaker(engine, expire_on_commit=False))
     monkeypatch.setattr(Config, 'PERSISTENT_ENABLED', True)
-    for feature in ('knowledge', 'models', 'prompts', 'tools'):
+    for feature in ('knowledge', 'models', 'prompts', 'tools', 'skills', 'admin_evaluations'):
         monkeypatch.setitem(features.FEATURE_FLAGS, feature, True)
 
     prefixes = tuple(f'/api/v1/{name}/' for name in MODULES)
     app = FastAPI(routes=[route for route in application.routes if route.path.startswith(prefixes)])
+    from open_webui.routers import skill_files
+
+    # Exercise bundle authorization independently of the deployment feature gate.
+    app.include_router(skill_files.router, prefix='/api/v1/skills')
     app.state.redis = None
     app.state.MODELS = {}
     with TestClient(app) as client:

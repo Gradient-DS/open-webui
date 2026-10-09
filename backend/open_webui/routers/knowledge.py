@@ -11,7 +11,6 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.config import (
     ENABLE_KNOWLEDGE_FILE_RETENTION,
     RAG_EMBEDDING_CONTENT_PREFIX,
@@ -56,6 +55,7 @@ from fastapi.concurrency import run_in_threadpool
 from open_webui.utils.json_codec import JSONCodec
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -207,7 +207,7 @@ async def get_knowledge_bases(
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not can_bypass_access_control(user):
         if groups:
             filter['group_ids'] = [group.id for group in groups]
 
@@ -235,7 +235,7 @@ async def get_knowledge_bases(
                 file_count=file_counts.get(knowledge_base.id, 0),  # [Gradient] Caller-scoped count.
                 write_access=(
                     user.id == knowledge_base.user_id
-                    or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    or can_bypass_access_control(user)
                     or knowledge_base.id in writable_knowledge_base_ids
                 ),
             )
@@ -278,7 +278,7 @@ async def search_knowledge_bases(
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not can_bypass_access_control(user):
         if groups:
             filter['group_ids'] = [group.id for group in groups]
 
@@ -306,7 +306,7 @@ async def search_knowledge_bases(
                 file_count=file_counts.get(knowledge_base.id, 0),  # [Gradient] Caller-scoped count.
                 write_access=(
                     user.id == knowledge_base.user_id
-                    or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    or can_bypass_access_control(user)
                     or knowledge_base.id in writable_knowledge_base_ids
                 ),
             )
@@ -1076,6 +1076,12 @@ async def update_external_knowledge_source(
     knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
     if not knowledge or not is_external_knowledge(knowledge):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+    if not (
+        can_bypass_access_control(user)
+        or knowledge.user_id == user.id
+        or await AccessGrants.has_access(user.id, 'knowledge', id, 'write', db=db)
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     # [Gradient] External metadata does not exempt a subscribed KB from the share guard.
     _assert_synced_grants_unchanged(knowledge, form_data.access_grants)
     if not form_data.name.strip():
@@ -1165,7 +1171,7 @@ async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Asyn
 
     if knowledge:
         if (
-            user.role == 'admin'
+            can_bypass_access_control(user)
             or knowledge.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -1179,7 +1185,7 @@ async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Asyn
                 **knowledge.model_dump(),
                 write_access=(
                     user.id == knowledge.user_id
-                    or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    or can_bypass_access_control(user)
                     or await AccessGrants.has_access(
                         user_id=user.id,
                         resource_type='knowledge',
@@ -1233,7 +1239,7 @@ async def update_knowledge_by_id(
             resource_id=knowledge.id,
             permission='write',
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1314,7 +1320,7 @@ async def update_knowledge_access_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1389,7 +1395,7 @@ async def get_pending_knowledge_files(
         )
 
     if not (
-        user.role == 'admin'
+        can_bypass_access_control(user)
         or knowledge.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -1449,7 +1455,7 @@ async def get_knowledge_files_by_id(
         )
 
     if not (
-        user.role == 'admin'
+        can_bypass_access_control(user)
         or knowledge.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -1525,7 +1531,7 @@ async def add_file_to_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1554,7 +1560,7 @@ async def add_file_to_knowledge_by_id(
         )
 
     # KB write-access alone is not enough — caller must also be able to read the file.
-    if file.user_id != user.id and user.role != 'admin':
+    if file.user_id != user.id and not can_bypass_access_control(user):
         if not await has_access_to_file(file.id, 'read', user, db=db):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1643,7 +1649,7 @@ async def update_file_from_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1739,7 +1745,7 @@ async def remove_file_from_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1871,7 +1877,7 @@ async def remove_file_from_knowledge_by_id(
     # file. Collaborators with KB write access can unlink a file from the KB
     # but must not be able to destroy files they do not own, as the same file
     # may be referenced by other KBs and chats (upstream v0.9.5 security hunk).
-    if delete_file and (file.user_id == user.id or user.role == 'admin'):
+    if delete_file and (file.user_id == user.id or can_bypass_access_control(user)):
         file_report = await DeletionService.delete_file(form_data.file_id)
         if file_report.has_errors:
             log.warning(f'Errors deleting file {form_data.file_id}: {file_report.errors}')
@@ -1957,7 +1963,7 @@ async def delete_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2041,7 +2047,7 @@ async def reset_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2057,7 +2063,7 @@ async def reset_knowledge_by_id(
         pass
 
     for file in files:
-        if file.user_id == user.id or user.role == 'admin':
+        if file.user_id == user.id or can_bypass_access_control(user):
             await delete_file_resource(file, db)
 
     knowledge = await Knowledges.reset_knowledge_by_id(id=id, include_directories=include_directories, db=db)
@@ -2107,7 +2113,7 @@ async def add_files_to_knowledge_batch(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2141,7 +2147,7 @@ async def add_files_to_knowledge_batch(
         )
 
     # Per-file read-access check — same gate as the single-file endpoint.
-    if user.role != 'admin':
+    if not can_bypass_access_control(user):
         for file in files:
             if file.user_id != user.id and not await has_access_to_file(file.id, 'read', user, db=db):
                 raise HTTPException(
@@ -2231,6 +2237,13 @@ async def export_knowledge_by_id(id: str, user=Depends(get_admin_user), db: Asyn
     if is_external_knowledge(knowledge):
         external_knowledge_error()
 
+    if not (
+        can_bypass_access_control(user)
+        or knowledge.user_id == user.id
+        or await AccessGrants.has_access(user.id, 'knowledge', id, 'read', db=db)
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
     files = await Knowledges.get_files_by_id(id, db=db)
 
     # Create zip file in memory
@@ -2297,7 +2310,7 @@ async def _verify_knowledge_write_access(id: str, user, db: AsyncSession):
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

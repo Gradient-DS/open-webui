@@ -25,7 +25,6 @@ from fastapi import Request
 from langchain_core.utils.function_calling import (
     convert_to_openai_function as convert_pydantic_model_to_openai_function_spec,
 )
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.env import (
     AIOHTTP_CLIENT_ALLOW_REDIRECTS,
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -120,6 +119,7 @@ from open_webui.utils.terminals import (
 )
 from pydantic import BaseModel, Field, create_model
 from pydantic.fields import FieldInfo
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -287,7 +287,7 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
         if tool:
             # Check access control for local tools
             if (
-                not (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                not can_bypass_access_control(user)
                 and tool.user_id != user.id
                 and not await AccessGrants.has_access(
                     user_id=user.id,

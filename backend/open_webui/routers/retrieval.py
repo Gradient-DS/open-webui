@@ -127,6 +127,7 @@ from open_webui.utils.misc import (
 )
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -1894,7 +1895,7 @@ async def process_file(
     The session is committed before external API calls, and updates use a fresh session.
     """
     config = await get_rag_config_state()
-    if user.role == 'admin':
+    if can_bypass_access_control(user):
         file = await Files.get_file_by_id(form_data.file_id, db=db)
     else:
         file = await Files.get_file_by_id_and_user_id(form_data.file_id, user.id, db=db)
@@ -3177,6 +3178,7 @@ async def delete_entries_from_collection(
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    await _validate_collection_access([form_data.collection_name], user, access_type='write')
     try:
         if await ASYNC_VECTOR_DB_CLIENT.has_collection(collection_name=form_data.collection_name):
             file = await Files.get_file_by_id(form_data.file_id, db=db)
@@ -3223,12 +3225,16 @@ async def delete_entries_from_collection(
 
 @router.post('/reset/db')
 async def reset_vector_db(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+    if not can_bypass_access_control(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     await ASYNC_VECTOR_DB_CLIENT.reset()
     await Knowledges.delete_all_knowledge(db=db)
 
 
 @router.post('/reset/uploads')
 async def reset_upload_dir(request: Request, user=Depends(get_admin_user)) -> bool:
+    if not can_bypass_access_control(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     folder = f'{UPLOAD_DIR}'
     try:
         # Check if the directory exists
@@ -3325,7 +3331,7 @@ async def process_files_batch(
                     )
                 )
                 continue
-            if db_file.user_id != user.id and user.role != 'admin':
+            if db_file.user_id != user.id and not can_bypass_access_control(user):
                 file_errors.append(
                     BatchProcessFilesResult(
                         file_id=file.id,

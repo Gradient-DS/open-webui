@@ -17,7 +17,6 @@ from fastapi import (
     status,
 )
 from fastapi.responses import RedirectResponse, StreamingResponse
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES
 from open_webui.events import EVENTS, publish_event
@@ -44,6 +43,8 @@ from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.utils.models import get_all_models
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui import config
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ async def _verify_knowledge_file_access(
     db: AsyncSession,
 ) -> None:
     """Raise 403 if any knowledge item references a file the caller cannot read."""
-    if not knowledge_items or user.role == 'admin':
+    if not knowledge_items or can_bypass_access_control(user):
         return
     for item in knowledge_items:
         if not isinstance(item, dict) or item.get('type') != 'file':
@@ -165,7 +166,7 @@ async def get_models(
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not can_bypass_access_control(user):
         if groups:
             filter['group_ids'] = [group.id for group in groups]
 
@@ -190,11 +191,7 @@ async def get_models(
         data = add_chat_variables_schema(model.model_dump())
         if data.get('meta'):
             data['meta'].pop('profile_image_url', None)
-        write_access = (
-            (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
-            or user.id == model.user_id
-            or model.id in writable_model_ids
-        )
+        write_access = can_bypass_access_control(user) or user.id == model.user_id or model.id in writable_model_ids
         # Strip params (system prompt and other curated config) for read-only
         # callers, mirroring the per-id endpoint.
         if not write_access:
@@ -236,7 +233,7 @@ async def get_base_models(
 async def get_model_tags(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     tags = await Models.get_all_tags(
         user_id=user.id,
-        is_admin=(user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL),
+        is_admin=can_bypass_access_control(user),
         db=db,
     )
     return sorted(tags)
@@ -354,7 +351,7 @@ async def export_models(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if can_bypass_access_control(user) and config.ENABLE_ADMIN_EXPORT:
         return await Models.get_models(db=db)
     else:
         return await Models.get_models(writable_by_user_id=user.id, db=db)
@@ -402,7 +399,7 @@ async def import_models(
             # Batch-resolve write permissions in one query instead of
             # per-model has_access calls (N+1 avoidance).
             existing_model_ids = list(existing_models.keys())
-            if user.role != 'admin' and existing_model_ids:
+            if not can_bypass_access_control(user) and existing_model_ids:
                 groups = await Groups.get_groups_by_member_id(user.id, db=db)
                 user_group_ids = {group.id for group in groups}
                 writable_model_ids = await AccessGrants.get_accessible_resource_ids(
@@ -445,7 +442,7 @@ async def import_models(
                     if existing_model:
                         # Enforce ownership/write-access before allowing overwrite
                         if (
-                            user.role != 'admin'
+                            not can_bypass_access_control(user)
                             and existing_model.user_id != user.id
                             and model_id not in writable_model_ids
                         ):
@@ -565,6 +562,9 @@ async def sync_models(
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    if not can_bypass_access_control(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
     models = await Models.sync_models(user.id, form_data.models, db=db)
     await publish_event(
         request,
@@ -591,7 +591,7 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
     model = await Models.get_model_by_id(id, db=db)
     if model:
         write_access = (
-            (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+            can_bypass_access_control(user)
             or user.id == model.user_id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -734,7 +734,7 @@ async def toggle_model_by_id(
     model = await Models.get_model_by_id(id, db=db)
     if model:
         if (
-            user.role == 'admin'
+            can_bypass_access_control(user)
             or model.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -802,7 +802,7 @@ async def update_model_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -903,7 +903,7 @@ async def update_model_access_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -952,7 +952,7 @@ async def delete_model_by_id(
         )
 
     if (
-        user.role != 'admin'
+        not can_bypass_access_control(user)
         and model.user_id != user.id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -983,6 +983,9 @@ async def delete_model_by_id(
 async def delete_all_models(
     request: Request, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
 ):
+    if not can_bypass_access_control(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
     result = await Models.delete_all_models(db=db)
     if result:
         await publish_event(request, EVENTS.MODEL_DELETED, actor=user, subject_type='model')

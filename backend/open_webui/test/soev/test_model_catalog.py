@@ -187,10 +187,12 @@ async def test_catalog_meta_survives_admin_rows_and_assistants_keep_catalog_base
 @pytest.fixture
 def access(monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, ModelModel], set[str]]:
     """Access control on, with model rows and the caller's read grants by model id."""
+    from open_webui import config
+
     rows: dict[str, ModelModel] = {}
     granted: set[str] = set()
     monkeypatch.setattr(models_utils, 'BYPASS_MODEL_ACCESS_CONTROL', False)
-    monkeypatch.setattr(models_utils, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
     monkeypatch.setattr(models_utils.Groups, 'get_groups_by_member_id', AsyncMock(return_value=[]))
     monkeypatch.setattr(models_utils.Models, 'get_model_by_id', AsyncMock(side_effect=lambda id, db=None: rows.get(id)))
     monkeypatch.setattr(
