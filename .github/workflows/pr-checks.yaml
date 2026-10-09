@@ -1,6 +1,8 @@
 name: PR Quality Gates
 
 on:
+  push:
+    branches: [dev]
   pull_request:
     branches:
       - dev
@@ -15,12 +17,16 @@ concurrency:
 # No Docker build here: security.yml's `image / Container Scan (Trivy)` job
 # builds the same Dockerfile with the same USE_SLIM=true on every PR to these
 # branches, and a broken build fails that job.
+permissions:
+  contents: read
+
 jobs:
   # Job id and name kept so the check name does not change. `npm run build` is
   # not repeated here: the Dockerfile's `build` stage runs the same `npm ci
   # --force && npm run build` (Node 22, 8 GB heap) on the same tree in
   # security.yml's image job on every PR, and vitest does not need its output.
   frontend-build:
+    if: github.event_name == 'pull_request'
     name: Frontend Build & Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -41,6 +47,7 @@ jobs:
         run: npm run test:frontend
 
   backend-format:
+    if: github.event_name == 'pull_request'
     name: Backend Format (Ruff)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -67,42 +74,143 @@ jobs:
         with:
           args: check --select=F --ignore=F401,F403,F405,F541,F811,F841 backend/ scripts/
 
+  reuse:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      hit: ${{ steps.check.outputs.hit }}
+    steps:
+      - id: check
+        uses: Gradient-DS/security-ci/actions/tested-tree/check@e18c245d84975f79da5c97d1987b83039c13292e # v8
+        with:
+          workflow-key: backend-tests
+
+  changes:
+    needs: reuse
+    if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v4.0.2
+        id: filter
+        with:
+          # Compare the entire push, including multi-commit pushes to dev.
+          base: ${{ github.event_name == 'push' && github.event.before || github.event.repository.default_branch }}
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/pr-checks.yaml'
+
+  # Keep this required check green for unrelated paths and exact-tree reuse,
+  # but red if either lookup fails. Expensive steps run only after this gate.
   backend-tests:
     name: Backend Unit Tests
+    needs: [reuse, changes]
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      tested: ${{ steps.pytest.outcome == 'success' }}
     steps:
+      - name: Decide whether to run tests
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          REUSE: ${{ needs.reuse.result }}
+          REUSED: ${{ needs.reuse.outputs.hit }}
+          CHANGES: ${{ needs.changes.result }}
+          BACKEND: ${{ needs.changes.outputs.backend }}
+        run: |
+          if [ "$EVENT" = push ] && [ "$REUSE" != success ]; then echo 'tested-tree lookup did not succeed'; exit 1; fi
+          if [ "$EVENT" = push ] && [ "$REUSE" = success ] && [ "$REUSED" = true ] && [ "$CHANGES" = skipped ]; then echo 'Exact tree already passed Backend Unit Tests'; exit 0; fi
+          [ "$CHANGES" = success ] || { echo 'Path lookup did not succeed'; exit 1; }
+          case "$BACKEND" in true) echo 'run=true' >> "$GITHUB_OUTPUT" ;; false) echo 'No backend paths changed' ;; *) exit 1 ;; esac
+
       - name: Checkout Repository
+        if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v6
 
       - name: Set up Python
+        if: steps.gate.outputs.run == 'true'
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
       - name: Set up uv
+        if: steps.gate.outputs.run == 'true'
         uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/requirements.txt
+            backend/requirements-security-ci.txt
+            pyproject.toml
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libmariadb-dev
+        if: steps.gate.outputs.run == 'true'
+        run: sudo apt-get update && sudo apt-get install -y libmariadb-dev libmagic1 libpango-1.0-0 libpangoft2-1.0-0
+
+      - name: Read private test tooling
+        if: steps.gate.outputs.run == 'true'
+        id: tooling-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v4.2.0
+        with:
+          app-id: ${{ secrets.SECURITY_CI_APP_ID }}
+          private-key: ${{ secrets.SECURITY_CI_APP_PRIVATE_KEY }}
+          owner: Gradient-DS
+          repositories: security-ci
 
       - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ steps.tooling-token.outputs.token }}
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: credential.helper
+          GIT_CONFIG_VALUE_0: '!gh auth git-credential'
         run: |
           uv venv
-          uv pip install -r backend/requirements.txt
+          uv pip install -r backend/requirements.txt -r backend/requirements-security-ci.txt
 
-      - name: Run pytest (working tests only)
-        env:
-          WEBUI_SECRET_KEY: test-secret-key
+      # Start PostgreSQL only when testing; a job-level service also starts on
+      # filtered and reused runs. Every integration test gets its own database.
+      - name: Start test PostgreSQL
+        if: steps.gate.outputs.run == 'true'
         run: |
-          source .venv/bin/activate
-          cd backend
-          PYTHONPATH=. pytest \
-            open_webui/test/util/test_features.py \
-            open_webui/test/util/test_chat_message_analytics.py \
-            -v --tb=short
+          docker run --detach --name backend-tests-postgres -e POSTGRES_PASSWORD=backend-test -e POSTGRES_DB=backend_tests -p 127.0.0.1:5432:5432 postgres:16-alpine
+          for _ in {1..30}; do if docker exec backend-tests-postgres pg_isready -U postgres; then exit 0; fi; sleep 1; done
+          docker logs backend-tests-postgres
+          exit 1
+
+      - name: Run backend suite
+        if: steps.gate.outputs.run == 'true'
+        id: pytest
+        working-directory: backend
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend
+          WEBUI_SECRET_KEY: test-secret-key
+          STATIC_DIR: ${{ runner.temp }}/owui-static
+          BACKEND_TEST_DATABASE_URL: postgresql+psycopg://postgres:backend-test@127.0.0.1:5432/backend_tests
+        # Only live HTTP attack passes and their hits-file gates are excluded.
+        run: ../.venv/bin/python -m pytest open_webui/test/ --ignore-glob='**/security/test_live_*.py' --ignore-glob='**/security/attack/test_live_*.py' -n auto --tb=short -q
+
+      - name: Remove test PostgreSQL
+        if: always() && steps.gate.outputs.run == 'true'
+        run: docker rm -f backend-tests-postgres 2>/dev/null || true
 
   helm-lint:
+    if: github.event_name == 'pull_request'
     name: Helm Chart Validation
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -127,3 +235,23 @@ jobs:
           helm template test-release helm/open-webui-tenant -f helm/open-webui-tenant/ci/external-postgres-values.yaml > /tmp/external-postgres.yaml
           test "$(grep -c 'pg-external.database-staging' /tmp/external-postgres.yaml)" -eq 6
           ! grep -q 'open-webui-tenant-postgres' /tmp/external-postgres.yaml
+
+  # Record only same-repository PRs whose tests really ran and whose other
+  # quality checks passed. A path-only no-op cannot certify an untested tree.
+  record:
+    needs: [backend-tests, frontend-build, backend-format, helm-lint]
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.backend-tests.result == 'success'
+      && needs.backend-tests.outputs.tested == 'true'
+      && needs.frontend-build.result == 'success'
+      && needs.backend-format.result == 'success'
+      && needs.helm-lint.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: Gradient-DS/security-ci/actions/tested-tree/record@e18c245d84975f79da5c97d1987b83039c13292e # v8
+        with:
+          workflow-key: backend-tests
