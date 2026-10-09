@@ -28,15 +28,12 @@ def test_object_route_rejects_unverified_identity(seeded, principal):
 
 @pytest.mark.parametrize('kind', ('chat', 'file', 'note', 'folder', 'model', 'prompt', 'tool', 'channel', 'knowledge'))
 def test_admin_keeps_owned_resource_access_without_bypass(seeded, monkeypatch, kind):
-    import importlib
     from open_webui import config
-    from open_webui.models import chats
+
     from .test_matrix import request_for
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
-    monkeypatch.setattr(chats, 'ENABLE_ADMIN_CHAT_ACCESS', False)
-    for name in ('files', 'notes', 'models', 'prompts', 'tools', 'knowledge'):
-        monkeypatch.setattr(importlib.import_module(f'open_webui.routers.{name}'), 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', False)
 
     async def prepare():
         model = await seed_resource(seeded, kind)
@@ -208,7 +205,7 @@ def test_file_cannot_be_laundered_through_foreign_owned_knowledge(seeded, permis
 def test_folder_file_entries_require_valid_readable_targets(seeded):
     async def check():
         from open_webui.models.users import Users
-        from open_webui.utils.access_control.files import get_accessible_folder_files, can_read_all_folder_files
+        from open_webui.utils.access_control.files import can_read_all_folder_files, get_accessible_folder_files
 
         await seed_resource(seeded, 'note')
         user = await Users.get_user_by_id('reader')
@@ -226,11 +223,12 @@ def test_folder_file_entries_require_valid_readable_targets(seeded):
 @pytest.mark.parametrize('bypass', (False, True))
 @pytest.mark.parametrize('principal', PRINCIPALS)
 def test_shared_chat_read_matrix(seeded, monkeypatch, bypass, principal):
+    from open_webui import config
     from open_webui.routers import chats
 
     # admin owner reader writer outsider other_group wildcard reader
     expected = ('AAAADDA' if bypass else 'DAAADDA')[PRINCIPALS.index(principal)] == 'A'
-    monkeypatch.setattr(chats, 'ENABLE_ADMIN_CHAT_ACCESS', bypass)
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', bypass)
 
     async def prepare():
         from open_webui.models.access_grants import AccessGrants
@@ -260,9 +258,10 @@ def test_shared_chat_read_matrix(seeded, monkeypatch, bypass, principal):
     [(False, False, False), (True, False, True), (False, True, True), (True, True, True)],
 )
 def test_model_listing_bypass_flags(seeded, monkeypatch, admin_bypass, model_bypass, allowed):
+    from open_webui import config
     from open_webui.utils import models
 
-    monkeypatch.setattr(models, 'BYPASS_ADMIN_ACCESS_CONTROL', admin_bypass)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', admin_bypass)
     monkeypatch.setattr(models, 'BYPASS_MODEL_ACCESS_CONTROL', model_bypass)
     monkeypatch.setattr(models, 'MODEL_WHITELIST', [])
 
