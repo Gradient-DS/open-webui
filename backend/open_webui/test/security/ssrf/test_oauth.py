@@ -2,7 +2,7 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -89,8 +89,9 @@ async def test_advertised_registration_endpoint_is_guarded(http_boundary, monkey
     assert_public_only(http_boundary)
 
 
+@pytest.mark.parametrize('kind', ['mcp', 'oidc'])
 @pytest.mark.asyncio
-async def test_advertised_refresh_endpoint_is_guarded(http_boundary, monkeypatch):
+async def test_advertised_refresh_endpoint_is_guarded(kind, http_boundary, monkeypatch):
     monkeypatch.setattr(
         oauth,
         'get_oauth_runtime_config',
@@ -101,17 +102,33 @@ async def test_advertised_refresh_endpoint_is_guarded(http_boundary, monkeypatch
         ),
     )
     manager = SimpleNamespace(
-        get_client=AsyncMock(return_value=SimpleNamespace(client_id='test', client_secret='secret')),
+        get_client=(AsyncMock if kind == 'mcp' else Mock)(
+            return_value=SimpleNamespace(client_id='test', client_secret='secret')
+        ),
         get_client_info=AsyncMock(return_value=None),
-        get_server_metadata_url=AsyncMock(return_value=PUBLIC),
+        get_server_metadata_url=(AsyncMock if kind == 'mcp' else Mock)(return_value=PUBLIC),
     )
     http_boundary.responses[PUBLIC] = (200, {}, json.dumps({'token_endpoint': INTERNAL}).encode())
-    await oauth.OAuthClientManager._perform_token_refresh(
+    manager_class = oauth.OAuthClientManager if kind == 'mcp' else oauth.OAuthManager
+    await manager_class._perform_token_refresh(
         manager,
         SimpleNamespace(provider='mcp:test', token={'refresh_token': 'test'}, id='test'),
     )
     assert http_boundary.sent == [PUBLIC]
     assert_public_only(http_boundary)
+
+
+@pytest.mark.parametrize('url', BLOCKED_URLS)
+@pytest.mark.asyncio
+async def test_authorization_preflight_target_is_blocked(url, http_boundary):
+    client = SimpleNamespace(create_authorization_url=AsyncMock(return_value={'url': url}))
+    info = oauth.OAuthClientInformationFull(
+        client_id='test',
+        redirect_uris=['http://webui.example/callback'],
+    )
+    await oauth.OAuthClientManager._preflight_authorization_url(None, client, info)
+    client.create_authorization_url.assert_awaited_once()
+    assert http_boundary.sent == []
 
 
 @pytest.mark.parametrize('url', BLOCKED_URLS)
