@@ -26,6 +26,31 @@ def test_object_route_rejects_unverified_identity(seeded, principal):
     assert response.status_code in (401, 403), response.text
 
 
+@pytest.mark.parametrize('kind', ('chat', 'file', 'note', 'folder', 'model', 'prompt', 'tool', 'channel', 'knowledge'))
+def test_admin_keeps_owned_resource_access_without_bypass(seeded, monkeypatch, kind):
+    import importlib
+    from open_webui import config
+    from open_webui.models import chats
+    from .test_matrix import request_for
+
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+    monkeypatch.setattr(chats, 'ENABLE_ADMIN_CHAT_ACCESS', False)
+    for name in ('files', 'notes', 'models', 'prompts', 'tools', 'knowledge'):
+        monkeypatch.setattr(importlib.import_module(f'open_webui.routers.{name}'), 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+
+    async def prepare():
+        model = await seed_resource(seeded, kind)
+        async with seeded.sessions() as db:
+            await db.execute(update(model).where(model.id == 'target').values(user_id='admin'))
+            await db.commit()
+
+    seeded.run(prepare)
+    method, path, body = request_for(kind, 'read')
+    response = seeded.client.request(method, path, headers=seeded.headers('admin'))
+    assert response.status_code == 200, response.text
+    assert response.json()['id'] == 'target'
+
+
 def test_permissions_merge_groups_without_mutating_defaults(seeded):
     async def check():
         from open_webui.models.groups import Group, GroupMember
