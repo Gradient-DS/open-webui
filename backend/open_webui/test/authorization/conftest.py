@@ -135,7 +135,7 @@ def seeded(template, application, monkeypatch, tmp_path):
 
     # The fork exports remote adapters unconditionally; exercise the retained SQL implementations.
     sql_grants, sql_knowledge, sql_groups = AccessGrantsTable(), KnowledgeTable(), GroupTable()
-    for name, module in list(sys.modules.items()):
+    for name, module in sys.modules.copy().items():
         if name.startswith('open_webui.') and module is not None:
             if getattr(module, 'AccessGrants', None) is AccessGrants:
                 monkeypatch.setattr(module, 'AccessGrants', sql_grants)
