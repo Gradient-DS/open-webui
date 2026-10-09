@@ -822,6 +822,23 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 
 
 @pytest.mark.asyncio
+async def test_the_browsers_time_zone_is_sent_as_the_zone(chat: Chat) -> None:
+    await chat.turn('question', 'a1', variables={'{{CURRENT_TIMEZONE}}': 'Europe/Amsterdam'})
+    assert chat.mutations()[-1][1]['input']['zone'] == 'Europe/Amsterdam'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'variables',
+    [None, {}, {'{{CURRENT_TIMEZONE}}': ''}, {'{{CURRENT_TIMEZONE}}': 'Not/AZone'}, {'{{CURRENT_TIMEZONE}}': 3}],
+    ids=['no-variables', 'no-zone', 'empty', 'unknown', 'not-a-string'],
+)
+async def test_no_known_time_zone_sends_no_zone(chat: Chat, variables: dict | None) -> None:
+    await chat.turn('question', 'a1', variables=variables)
+    assert 'zone' not in chat.mutations()[-1][1]['input']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ('features', 'state'),
     [
@@ -952,9 +969,9 @@ async def test_absent_or_blank_prompts_send_no_instructions(chat: Chat) -> None:
 
 
 @pytest.mark.asyncio
-async def test_orphaned_input_resumes_before_one_new_input(chat: Chat) -> None:
+async def test_interrupted_input_resumes_before_one_new_input(chat: Chat) -> None:
     await chat.turn('first', 'a1')
-    chat.api.chat.threads['thr-1']['state'] = 'orphaned'
+    chat.api.chat.threads['thr-1']['state'] = 'interrupted'
     chunks = await chat.turn('second', 'a2', 'a1')
     assert content(chunks) == 'Answer: second'
     assert [path for path, _ in chat.mutations()][-3:] == [
@@ -1675,7 +1692,10 @@ async def test_capped_stream_recovers_durable_suffix_and_split_marker(chat: Chat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('state,error', [('idle', False), ('waiting', False), ('halted', True), ('orphaned', True)])
+@pytest.mark.parametrize(
+    'state,error',
+    [('finished', False), ('cancelled', False), ('waiting', False), ('failed', True), ('interrupted', True)],
+)
 async def test_terminal_state_never_cancels(chat: Chat, state: str, error: bool) -> None:
     chat.api.chat.terminal_state = state
     chunks = await chat.turn('question', 'a1')
@@ -1702,7 +1722,7 @@ async def test_generator_close_cancels_only_its_own_input(chat: Chat) -> None:
     assert 'partial' in await asyncio.wait_for(anext(response.body_iterator), timeout=2)
     await asyncio.wait_for(response.body_iterator.aclose(), timeout=2)
     assert chat.mutations()[-1] == ('/v1/chat/threads/thr-1/cancel', {'input': 2})
-    assert chat.api.chat.threads['thr-1']['state'] == 'idle'
+    assert chat.api.chat.threads['thr-1']['state'] == 'cancelled'
 
 
 @pytest.mark.asyncio
@@ -1868,18 +1888,25 @@ async def test_a_call_shows_done_once_the_model_thinks_again() -> None:
     ]
 
 
+SUMMARY_STATUSES = {
+    'compaction': {
+        'running': {'template': 'Summarising...', 'params': {}},
+        'done': {'template': 'Summarised', 'params': {}},
+    }
+}
+
+
+def calling(produces: str) -> ChatEvent:
+    return ChatEvent('calling', {'model': 'm', 'node': 'llm', 'produces': produces})
+
+
 @pytest.mark.asyncio
 async def test_a_summary_of_the_conversation_shows_running_then_done_when_it_lands() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
-    turn.tool_statuses = {
-        'compaction': {
-            'running': {'template': 'Summarising...', 'params': {}},
-            'done': {'template': 'Summarised', 'params': {}},
-        }
-    }
+    turn.tool_statuses = SUMMARY_STATUSES
     async with asyncio.timeout(2):
-        started = await render(turn, ChatEvent('compacting', {}))
+        started = await render(turn, calling('compaction'))
         ended = await render(turn, ChatEvent('compaction', {'stream': 'root', 'payload': {'summary': 'kort'}}))
         # A finished call shows done once the model moves on.
         await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
@@ -1895,6 +1922,33 @@ async def test_a_summary_of_the_conversation_shows_running_then_done_when_it_lan
 
 
 @pytest.mark.asyncio
+async def test_a_summary_ends_when_the_answer_written_from_it_starts() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    turn.tool_statuses = SUMMARY_STATUSES
+    async with asyncio.timeout(2):
+        await render(turn, calling('compaction'))
+        await render(turn, calling('model_output'))
+        await render(turn, ChatEvent('delta', {'text': 'Antwoord'}))
+        await render(turn, ChatEvent('compaction', {'stream': 'root', 'payload': {'summary': 'kort'}}))
+    shown = [call.args[0]['data'] for call in turn.emitter.call_args_list]
+    assert [(status['description'], status['done']) for status in shown] == [
+        ('Summarising...', False),
+        ('Summarised', True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_model_call_that_writes_no_summary_shows_no_status() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    async with asyncio.timeout(2):
+        shown = await render(turn, calling('model_output'))
+    assert shown == []
+    turn.emitter.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_calls_the_budget_stopped_end_before_the_answer() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
@@ -1904,9 +1958,7 @@ async def test_calls_the_budget_stopped_end_before_the_answer() -> None:
             turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': calls}})
         )
         await render(turn, ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
-        stopped = await render(
-            turn, ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {'count': 3, 'cap': 3}})
-        )
+        stopped = await render(turn, ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {}}))
         await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     assert '<details type="tool_calls" done="true" name="calculate">' in content(started)
     assert not stopped
@@ -2115,7 +2167,7 @@ async def test_explicit_stop_and_broken_transport_cancel_the_submitted_input(
             await asyncio.wait_for(task, timeout=2)
     assert chat.mutations()[-1] == ('/v1/chat/threads/thr-1/cancel', {'input': 2})
     assert streams[0].closed
-    assert chat.api.chat.threads['thr-1']['state'] == 'idle'
+    assert chat.api.chat.threads['thr-1']['state'] == 'cancelled'
     assert [event['data'] for event in chat.socket if event['type'] == 'status'] == [
         {'action': 'search', 'description': 'Searching the knowledge base…', 'call_id': 'c1', 'done': False},
     ]
@@ -2145,7 +2197,7 @@ async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_ans
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=2)
     monkeypatch.setattr(chat.api.chat, '_response', original)
-    chat.api.chat.terminal_state = 'idle'
+    chat.api.chat.terminal_state = 'finished'
     stopped = len(chat.mutations())
     cancelled = next(e['position'] for e in chat.api.chat.threads['thr-1']['events'] if e['type'] == 'cancelled')
     assert chat.bookmark('a1') == {'thread_id': 'thr-1', 'position': cancelled}
@@ -2611,20 +2663,23 @@ def test_attach_summary_reflects_the_agent_outcome(output: dict, expected: str) 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('resume', [False, True])
 async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(monkeypatch, resume):
-    records = [
+    documents = [
         {
-            'source_id': source,
+            'type': 'attached-document',
+            'id': 'owui-attachments-alice/' + source,
+            'title': source,
+            'filename': source + '.pdf',
             'collection_key': 'owui-attachments-alice',
+            'file_id': source,
             'job_id': 'job-' + source,
-            'name': source + '.pdf',
-            'web_url': 'https://files.test/' + source,
+            'document_ref': {'grant_id': 'g', 'drive_id': 'd', 'item_id': source, 'etag': 'v1'},
             'provider': 'onedrive',
-            'attached_by': 'agent',
-            'provider_ref': {'grant_id': 'g', 'drive_id': 'd', 'item_id': source, 'etag': 'v1'},
-            'status': status,
+            'web_url': 'https://files.test/' + source,
             'content_type': 'application/pdf',
+            'ready': source != 'pending',
+            'readable': True,
         }
-        for source, status in [('ready', 'ready'), ('mismatch', 'ready'), ('pending', 'processing')]
+        for source in ['ready', 'mismatch', 'pending']
     ]
 
     async def register(user_id, record):
@@ -2635,7 +2690,7 @@ async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(
             filename=record['name'],
             meta={
                 'collection_name': record['collection_key'],
-                'status': 'completed' if record['status'] == 'ready' else 'processing',
+                'status': 'processing' if record['source_id'] == 'pending' else 'completed',
                 'source': {'provider': record['provider'], 'ref': record['provider_ref']},
                 'web_url': record['web_url'],
                 'attached_by': record['attached_by'],
@@ -2649,8 +2704,8 @@ async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(
     upsert = AsyncMock()
     monkeypatch.setattr(Chats, 'get_message_by_id_and_message_id', get_message)
     monkeypatch.setattr(Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
-    payload = {'call_id': 'attach', 'attachments': records, 'elements': [], 'text': 'Attached two files.'}
-    event = ChatEvent('attached', {'stream': 'root', 'payload': payload})
+    payload = {'call_id': 'attach', 'elements': documents, 'text': 'Attached two files.'}
+    event = ChatEvent('tool_output', {'stream': 'root', 'payload': payload})
 
     async def stream(*args, **kwargs):
         yield event
@@ -2674,7 +2729,10 @@ async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(
         assert upsert.await_count == get_message.await_count == turn.emitter.await_count == replay + 1
         turn.emitter.assert_awaited_with({'type': 'chat:message:files', 'data': update})
         stored.update(update)
-    assert [call.args for call in registration.await_args_list] == [('alice', record) for record in records] * 2
+    registered = [
+        (call.args[0], call.args[1]['source_id'], call.args[1]['attached_by']) for call in registration.await_args_list
+    ]
+    assert registered == [('alice', source, 'agent') for source in ['ready', 'mismatch', 'pending']] * 2
     if not resume:
         assert len(turn.settling) == 1
         assert turn.settling[0]['description'] != 'Could not open document'
@@ -3273,13 +3331,13 @@ def test_failed_status_parameters_use_the_declared_fallback(arguments, expected)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('kind,attached', [('document-text', False), ('document-text', True), ('chunk', False)])
-async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind, attached):
+@pytest.mark.parametrize('kind', ['document-text', 'chunk'])
+async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind):
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
     turn.attached = AsyncMock()
     element = {'type': kind, 'id': 'text', 'ref': 'doc', 'text': 'Body', 'pages': [2]}
-    await turn.record_output({'elements': [document('doc', 'Plan'), element]}, attached=attached)
+    await turn.record_output({'elements': [document('doc', 'Plan'), element]})
     source = turn.citations.sources['text']
     metadata = source['metadata'][0]
     assert metadata.get('granularity') == ('document' if kind == 'document-text' else None)

@@ -82,10 +82,11 @@ notice too; images keep refusing (`_unimaged`).
 
 ## Live document attachments
 
-`soev/live_documents.py` registers every record in an agent `attached` event's
-`attachments` array as a File whose id is the platform source id. A call with accepted
-documents produces one event carrying all document elements and text; the consumer
-merges its attachment chips into message files and emits `chat:message:files` once.
+`utils/agent_v2.py` registers every `attached-document` element of a root `tool_output`
+(live, on resume and on replay) through `soev/live_documents.register_attachment`, as a
+File whose id is the element's `file_id`, with `attached_by: 'agent'`; the OneDrive
+picker registers through the same function with `attached_by: 'user'`. One attach call's
+documents are merged into the message files and `chat:message:files` is emitted once.
 Their `meta.source` contains the provider reference; bytes are never stored in OWUI. Reference
 jobs use the existing durable job poller, skipping upload commit and path moves. File content
 routes stream platform originals with the requesting user's assertion. Every v2 turn ensures
