@@ -1,0 +1,30 @@
+sink,product_file_line,guard,test_file
+Web fetch / search results,retrieval/web/utils.py:1023;routers/retrieval.py:2946,safe_validate_urls -> validate_url -> resolve_hostname; HTTP(S) and global addresses only with local fetch disabled,test_web.py
+Native web loader sync / async,retrieval/web/utils.py:900;retrieval/web/utils.py:939,_SSRFSafeAdapter / _SSRFSafeConnector check connect-time and redirected addresses,test_web.py
+Playwright navigation / subresources,retrieval/web/utils.py:725;retrieval/web/utils.py:780,Browser interception validates each hop and fetches via guarded sessions,test_web.py
+Firecrawl delegated fetch,retrieval/web/firecrawl.py:156,get_web_loader validates URLs; configured remote service does the crawling,test_web.py
+External delegated fetch,retrieval/loaders/external_web.py:30,get_web_loader validates URLs; configured remote service does the crawling,test_web.py
+Tavily / Microsoft Web IQ delegated fetch,retrieval/loaders/tavily.py:68;retrieval/loaders/microsoft_web_iq.py:79,get_web_loader validates URLs; configured remote service does the crawling,test_web.py
+Playwright / Tavily / Microsoft Web IQ TLS probe,retrieval/web/utils.py:344,Initial validation only; bare TLS socket resolves again,test_web.py
+RAG add URL / upload from URL,routers/retrieval.py:2215;routers/retrieval.py:2224,validate_url plus guarded aiohttp session,test_retrieval.py
+RAG web and YouTube route aliases / URL attachments,routers/retrieval.py:2397;retrieval/utils.py:253;retrieval/utils.py:275,validate_url plus guarded requests probe and web loader,test_retrieval.py
+YouTube transcript SDK,retrieval/loaders/youtube.py:123,Initial validation and fixed YouTube host/video ID; unguarded SDK requests session,test_retrieval.py
+Image edit URL,routers/images.py:941;routers/images.py:947,validate_url plus guarded aiohttp session; data URIs are inline; file IDs access checked,test_images.py
+Generated image URL,routers/images.py:493;routers/images.py:495,validate_url except exact admin trusted origin; shared session has no redirect or connection guard,test_images.py
+Chat image_url / remote image conversion,utils/middleware.py:2354;utils/files.py:72;utils/files.py:76,validate_url plus guarded aiohttp session; other strings resolved as access-checked file IDs,test_images.py
+User notifications / automation webhooks,utils/notifications.py:44;utils/webhook.py:36;utils/webhook.py:88,Settings validation plus delivery-time validation and guarded aiohttp session,test_webhooks.py
+OpenAPI spec download,utils/tools.py:1488,Admin-configured URL; no redirect or DNS guard,test_tools.py
+OpenAPI tool execution,utils/tools.py:1703;utils/tools.py:1746,Connection access check and quoted arguments; spec path can replace authority; no redirect guard,test_tools.py
+MCP streamable HTTP,utils/middleware.py:2576;utils/mcp/client.py:31;utils/mcp/client.py:67,Admin-configured connection with access check; httpx follows unguarded redirects,test_tools.py
+OAuth/OIDC picture claim,utils/oauth.py:1803;utils/oauth.py:1812,validate_url plus guarded aiohttp session and image MIME validation,test_oauth.py
+OAuth resource metadata,utils/oauth.py:436,No guard on WWW-Authenticate resource_metadata URL,test_oauth.py
+OAuth authorization-server discovery,utils/oauth.py:539;utils/oauth.py:670,No destination guard on advertised authorization_servers,test_oauth.py
+OAuth dynamic registration,utils/oauth.py:596,Schema validation but no destination guard on registration_endpoint,test_oauth.py
+OAuth authorization preflight,utils/oauth.py:972,No destination guard on metadata-derived authorization URL,test_oauth.py
+MCP OAuth / OIDC refresh,utils/oauth.py:1164;utils/oauth.py:1490,No destination guard on advertised token_endpoint,test_oauth.py
+Datalab Marker poll,retrieval/loaders/datalab_marker.py:132,No guard on request_check_url in extraction response,test_document_loaders.py
+MinerU upload,retrieval/loaders/mineru.py:299,No guard on presigned file_urls in extraction response,test_document_loaders.py
+MinerU result download,retrieval/loaders/mineru.py:427,No guard on full_zip_url in extraction response,test_document_loaders.py
+PDF / document export resources,utils/chat_export.py:259,HTML sanitization plus WeasyPrint URLFetcher restricted to inline data protocol,test_exports.py
+Connection verify / tool source import,routers/configs.py:580;routers/openai.py:1069;routers/ollama.py:260;routers/tools.py:271,get_admin_user rejects non-admins before HTTP transport,test_connections.py
+User direct model connection,utils/chat.py:50;utils/chat.py:135,Browser request:chat:completion event; no server HTTP fetch,test_connections.py
