@@ -3,6 +3,7 @@
 import asyncio
 import shutil
 import socket
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -106,6 +107,17 @@ def seeded(template, application, monkeypatch, tmp_path):
     from open_webui.models.config import Config
     from open_webui.utils import features
     from open_webui.utils.auth import create_token
+    from open_webui.models.access_grants import AccessGrants, AccessGrantsTable
+    from open_webui.models.knowledge import Knowledges, KnowledgeTable
+
+    # The fork exports remote adapters unconditionally; exercise the retained SQL implementations.
+    sql_grants, sql_knowledge = AccessGrantsTable(), KnowledgeTable()
+    for name, module in list(sys.modules.items()):
+        if name.startswith('open_webui.') and module is not None:
+            if getattr(module, 'AccessGrants', None) is AccessGrants:
+                monkeypatch.setattr(module, 'AccessGrants', sql_grants)
+            if getattr(module, 'Knowledges', None) is Knowledges:
+                monkeypatch.setattr(module, 'Knowledges', sql_knowledge)
 
     path = tmp_path / 'seed.db'
     shutil.copyfile(template, path)
