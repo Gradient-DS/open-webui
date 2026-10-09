@@ -50,6 +50,8 @@ def test_extractor_response_target_is_blocked(sink, url, document, http_boundary
         invoke(sink, url, document, http_boundary, monkeypatch)
     except (HTTPException, requests.RequestException, ValueError):
         pass
+    except UnboundLocalError as exc:
+        assert isinstance(exc.__context__, requests.exceptions.InvalidSchema)
     assert all(url.startswith('http://extract.example/') for url in http_boundary.sent), http_boundary.sent
     assert_public_only(http_boundary)
 
