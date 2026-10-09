@@ -1,8 +1,8 @@
 """Deliver through the user notification helper and the shared webhook sender."""
 
 import pytest
-
 from open_webui.utils import notifications, webhook
+
 from .conftest import BLOCKED_URLS, INTERNAL, PUBLIC, assert_public_only
 
 

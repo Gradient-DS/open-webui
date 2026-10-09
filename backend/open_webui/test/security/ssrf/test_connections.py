@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI
-
-from open_webui.routers import configs, openai, ollama, tools
+from open_webui.routers import configs, ollama, openai, tools
 from open_webui.utils import auth, chat
+
 from .conftest import INTERNAL
 
 

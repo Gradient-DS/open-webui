@@ -5,8 +5,8 @@ import json
 import pytest
 import requests
 from fastapi import HTTPException
-
 from open_webui.retrieval.loaders import datalab_marker, mineru
+
 from .conftest import BLOCKED_URLS, INTERNAL, PUBLIC, assert_public_only
 
 

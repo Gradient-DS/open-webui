@@ -11,7 +11,6 @@ import aiohttp
 import pytest
 import requests
 from multidict import CIMultiDict
-
 from open_webui.retrieval.web import utils as web
 
 PUBLIC = 'http://public.example/'

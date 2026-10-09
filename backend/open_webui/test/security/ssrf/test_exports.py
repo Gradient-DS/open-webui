@@ -1,8 +1,8 @@
 """Exercise the renderer URL callback used by chat and document PDF exports."""
 
 import pytest
-
 from open_webui.utils.chat_export import safe_pdf_url_fetcher
+
 from .conftest import BLOCKED_URLS, PUBLIC
 
 

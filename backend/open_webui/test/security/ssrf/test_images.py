@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock
 import aiohttp
 import pytest
 from fastapi import HTTPException
-
 from open_webui.models.config import Config
 from open_webui.routers import images
 from open_webui.utils import files
+
 from .conftest import BLOCKED_URLS, INTERNAL, PUBLIC, assert_public_only
 
 

@@ -1,9 +1,9 @@
 """Exercise URL uploads and the shared web/YouTube ingestion helper."""
 
 import pytest
-
 from open_webui.retrieval import utils
 from open_webui.routers import retrieval
+
 from .conftest import BLOCKED_URLS, INTERNAL, PUBLIC, assert_public_only
 
 CONFIG = {'web_loader_engine': 'safe_web', 'youtube_language': ['en']}

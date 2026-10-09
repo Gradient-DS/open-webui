@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-
 from open_webui.utils import oauth
+
 from .conftest import BLOCKED_URLS, INTERNAL, PUBLIC, assert_public_only
 
 

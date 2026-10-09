@@ -1,12 +1,12 @@
 """Exercise the web loader entry point and its actual HTTP connection guards."""
 
-from unittest.mock import AsyncMock, MagicMock
 import socket
 import ssl
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from open_webui.retrieval.web import utils as web
+
 from .conftest import BLOCKED_URLS, INTERNAL, PUBLIC, assert_public_only
 
 

@@ -1,11 +1,12 @@
 """Treat OpenAPI paths, redirect locations and MCP responses as untrusted content."""
 
-import httpx
-import pytest
 from urllib.parse import urlsplit
 
+import httpx
+import pytest
 from open_webui.utils import tools
 from open_webui.utils.mcp import client as mcp
+
 from .conftest import HOSTS, INTERNAL, PUBLIC, assert_public_only
 
 
