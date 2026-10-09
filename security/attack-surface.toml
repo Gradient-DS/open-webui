@@ -344,20 +344,6 @@ description = "Handler resolves Files.id; service authentication is independent 
 same_as = "file"
 
 [[parameter]]
-key = "integration_source"
-name = "source_id"
-prefix = "/api/v1/integrations/collections/{source_id}"
-description = "Integration DELETE routes resolve provider-owned external source ids."
-unseedable = "POST /integrations/ingest was removed; no remaining HTTP route creates integration source metadata for these legacy DELETE routes."
-
-[[parameter]]
-key = "integration_document"
-name = "document_source_id"
-prefix = "/api/v1/integrations/collections/{source_id}/documents/{document_source_id}"
-description = "integrations.py:delete_document prefixes this external source_id with the provider; it is NOT the File UUID."
-unseedable = "POST /integrations/ingest was removed; no remaining HTTP route creates a provider-owned integration collection and document."
-
-[[parameter]]
 key = "attachment_file"
 name = "id"
 prefix = "/api/v1/files/{id}/attachments"
