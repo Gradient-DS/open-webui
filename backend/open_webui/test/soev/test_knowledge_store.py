@@ -148,6 +148,50 @@ async def seed(env, key='kb', owner='alice', name='Research'):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('identifier', ['garbage', 'd_@@', 'd__w', 'd_', 'd_b3RoZXIKZGly'])
+async def test_invalid_or_foreign_directory_parent_is_a_client_error_without_a_write(env, identifier):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        await env.store.create_directory('kb', 'child', 'alice', parent_id=identifier)
+    assert error.value.status_code == 400
+    assert not env.api.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('name', ['', '/', 'a/b'])
+async def test_unrepresentable_directory_name_is_a_client_error_without_a_write(env, name):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        await env.store.create_directory('kb', name, 'alice')
+    assert error.value.status_code == 400
+    assert not env.api.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('identifier', ['garbage', 'd_@@', 'd__w', 'd_'])
+async def test_directory_lookup_rejects_malformed_ids_without_a_platform_request(env, identifier):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        await env.store.get_directory_by_id(identifier)
+    assert error.value.status_code == 400
+    assert not env.api.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('identifier', ['garbage', 'd_@@', 'd__w', 'd_', 'd_b3RoZXIKZGly'])
+async def test_directory_filter_rejects_malformed_or_foreign_ids_before_catalog_reads(env, identifier):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        await env.store.search_files_by_id('kb', 'alice', {'directory_id': identifier})
+    assert error.value.status_code == 400
+    assert not env.api.requests
+
+
 async def file(env, source='f1', path=None, key='kb', **meta):
     env.api.add_document(key, source, path=path)
     async with env.sessions() as session:
