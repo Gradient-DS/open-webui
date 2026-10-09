@@ -26,7 +26,6 @@ from open_webui.utils.memory import (
 )
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -451,8 +450,6 @@ async def reindex_memories_from_vector_db(
     request: Request,
     user=Depends(get_admin_user),
 ):
-    if not can_bypass_access_control(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     memories = await Memories.get_memories()
     memories = memories or []
     memories_by_user_id = {}

@@ -358,17 +358,11 @@ async def update_config(
 
 @router.get('/feedbacks/models', response_model=list[str])
 async def get_feedback_model_ids(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-    if not can_access_admin_chats(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
     return await Feedbacks.get_distinct_model_ids(db=db)
 
 
 @router.get('/feedbacks/all/ids', response_model=list[FeedbackIdResponse])
 async def get_all_feedback_ids(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-    if not can_access_admin_chats(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
     return await Feedbacks.get_all_feedback_ids(db=db)
 
 

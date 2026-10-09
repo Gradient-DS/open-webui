@@ -418,11 +418,14 @@ async def create_new_knowledge(
 @router.post('/reindex', response_model=bool)
 async def reindex_knowledge_files(
     request: Request,
-    user=Depends(get_admin_user),
+    user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if not can_bypass_access_control(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+    if user.role != 'admin':
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
 
     knowledge_bases = await Knowledges.get_knowledge_bases(db=db)
     knowledge_base_files = [
@@ -519,9 +522,6 @@ async def reindex_knowledge_base_metadata_embeddings(
     for each one, making N external embedding API calls. Holding a session during
     this entire operation would exhaust the connection pool.
     """
-    if not can_bypass_access_control(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-
     knowledge_bases = await Knowledges.get_knowledge_bases()
     log.info('Reindexing embeddings for %s knowledge bases', len(knowledge_bases))
     try:

@@ -2566,8 +2566,6 @@ async def chat_action(
 
 @app.post('/api/tasks/stop/{task_id}')
 async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_admin_user)):
-    if not can_access_admin_chats(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     try:
         result = await stop_task(request.app.state.redis, task_id)
         return result
@@ -2577,8 +2575,6 @@ async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_ad
 
 @app.get('/api/tasks')
 async def list_tasks_endpoint(request: Request, user=Depends(get_admin_user)):
-    if not can_access_admin_chats(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     return {'tasks': await list_tasks(request.app.state.redis)}
 
 

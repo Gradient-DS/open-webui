@@ -145,8 +145,6 @@ def test_folder_chat_cascade_requires_both_flags(seeded, monkeypatch, bypass, ch
         ('POST', '/feedback/feedback', {'type': 'rating', 'data': {'rating': 1}}),
         ('DELETE', '/feedback/feedback', None),
         ('GET', '/feedbacks/list', None),
-        ('GET', '/feedbacks/models', None),
-        ('GET', '/feedbacks/all/ids', None),
         ('GET', '/feedbacks/all/export', None),
         ('DELETE', '/feedbacks/all', None),
     ],
@@ -235,11 +233,8 @@ def test_internal_chats_require_chat_flag(seeded, bypass, monkeypatch, internal)
         ('files', 'delete_all_files'),
         ('models', 'delete_all_models'),
         ('models', 'sync_models'),
-        ('knowledge', 'reindex_knowledge_files'),
-        ('knowledge', 'reindex_knowledge_base_metadata_embeddings'),
         ('retrieval', 'reset_vector_db'),
         ('retrieval', 'reset_upload_dir'),
-        ('memories', 'reindex_memories_from_vector_db'),
     ],
 )
 def test_bulk_workspace_mutation(seeded, bypass, monkeypatch, tmp_path, module_name, function_name):
@@ -259,8 +254,6 @@ def test_bulk_workspace_mutation(seeded, bypass, monkeypatch, tmp_path, module_n
         monkeypatch.setattr(module.Storage, 'delete_all_files', lambda: None)
     if hasattr(module, 'UPLOAD_DIR'):
         monkeypatch.setattr(module, 'UPLOAD_DIR', str(tmp_path))
-    if module_name == 'memories':
-        monkeypatch.setattr(module, 'reindex_memory_vectors_for_user', AsyncMock(return_value=0))
     monkeypatch.setattr(module, 'publish_event', AsyncMock(), raising=False)
 
     async def check():
@@ -343,33 +336,22 @@ def test_shared_folder_chats_use_chat_flag(seeded, bypass, monkeypatch):
     assert response.status_code == (200 if bypass else 403), response.text
 
 
-@pytest.mark.parametrize('function_name', ['stop_task_endpoint', 'list_tasks_endpoint', 'verify_chat_ownership'])
-def test_chat_runtime_gates(seeded, bypass, monkeypatch, function_name):
+def test_chat_runtime_ownership(seeded, bypass, monkeypatch):
     from fastapi import HTTPException
     from open_webui import config, main
     from open_webui.models.users import Users
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', not bypass)
-    monkeypatch.setattr(main, 'stop_task', AsyncMock(return_value=True))
-    monkeypatch.setattr(main, 'list_tasks', AsyncMock(return_value=[]))
     seeded.run(seed_resource, seeded, 'chat')
 
     async def check():
         user = await Users.get_user_by_id('admin')
-        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(redis=None)))
-        if function_name == 'verify_chat_ownership':
-            kwargs = {'chat_id': 'target', 'user': user}
-        else:
-            kwargs = {'request': request, 'user': user}
-            if function_name == 'stop_task_endpoint':
-                kwargs['task_id'] = 'private-task'
         if bypass:
-            await getattr(main, function_name)(**kwargs)
+            await main.verify_chat_ownership('target', user)
         else:
             with pytest.raises(HTTPException) as denied:
-                await getattr(main, function_name)(**kwargs)
-            assert denied.value.status_code in (403, 404)
-            main.stop_task.assert_not_awaited()
+                await main.verify_chat_ownership('target', user)
+            assert denied.value.status_code == 404
 
     seeded.run(check)
 
