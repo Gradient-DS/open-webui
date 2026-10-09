@@ -1,5 +1,6 @@
 """Keep real URL parsing, redirects and connection guards above fake transports."""
 
+import asyncio
 import ipaddress
 import socket
 from collections import Counter
@@ -102,6 +103,8 @@ def http_boundary(monkeypatch, offline):
         protocol = MagicMock()
         protocol.is_connected.return_value = True
         protocol.should_close = True
+        protocol.closed = asyncio.get_running_loop().create_future()
+        protocol.closed.set_result(None)
         return protocol
 
     async def send(req, connection):
@@ -109,6 +112,8 @@ def http_boundary(monkeypatch, offline):
         state.sent.append(url)
         status, headers, body = response_for(url)
         response = MagicMock()
+        response.__aenter__.return_value = response
+        response.__aexit__.side_effect = lambda *args: connection.close()
         response.status = status
         response.ok = status < 400
         response.url = req.url
