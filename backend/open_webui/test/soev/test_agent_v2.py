@@ -2414,20 +2414,23 @@ def test_attach_summary_reflects_the_agent_outcome(output: dict, expected: str) 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('resume', [False, True])
 async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(monkeypatch, resume):
-    records = [
+    documents = [
         {
-            'source_id': source,
+            'type': 'attached-document',
+            'id': 'owui-attachments-alice/' + source,
+            'title': source,
+            'filename': source + '.pdf',
             'collection_key': 'owui-attachments-alice',
+            'file_id': source,
             'job_id': 'job-' + source,
-            'name': source + '.pdf',
-            'web_url': 'https://files.test/' + source,
+            'document_ref': {'grant_id': 'g', 'drive_id': 'd', 'item_id': source, 'etag': 'v1'},
             'provider': 'onedrive',
-            'attached_by': 'agent',
-            'provider_ref': {'grant_id': 'g', 'drive_id': 'd', 'item_id': source, 'etag': 'v1'},
-            'status': status,
+            'web_url': 'https://files.test/' + source,
             'content_type': 'application/pdf',
+            'ready': source != 'pending',
+            'readable': True,
         }
-        for source, status in [('ready', 'ready'), ('mismatch', 'ready'), ('pending', 'processing')]
+        for source in ['ready', 'mismatch', 'pending']
     ]
 
     async def register(user_id, record):
@@ -2438,7 +2441,7 @@ async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(
             filename=record['name'],
             meta={
                 'collection_name': record['collection_key'],
-                'status': 'completed' if record['status'] == 'ready' else 'processing',
+                'status': 'processing' if record['source_id'] == 'pending' else 'completed',
                 'source': {'provider': record['provider'], 'ref': record['provider_ref']},
                 'web_url': record['web_url'],
                 'attached_by': record['attached_by'],
@@ -2452,8 +2455,8 @@ async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(
     upsert = AsyncMock()
     monkeypatch.setattr(Chats, 'get_message_by_id_and_message_id', get_message)
     monkeypatch.setattr(Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
-    payload = {'call_id': 'attach', 'attachments': records, 'elements': [], 'text': 'Attached two files.'}
-    event = ChatEvent('attached', {'stream': 'root', 'payload': payload})
+    payload = {'call_id': 'attach', 'elements': documents, 'text': 'Attached two files.'}
+    event = ChatEvent('tool_output', {'stream': 'root', 'payload': payload})
 
     async def stream(*args, **kwargs):
         yield event
@@ -2477,7 +2480,10 @@ async def test_attached_batch_merges_files_once_and_skips_individual_mismatches(
         assert upsert.await_count == get_message.await_count == turn.emitter.await_count == replay + 1
         turn.emitter.assert_awaited_with({'type': 'chat:message:files', 'data': update})
         stored.update(update)
-    assert [call.args for call in registration.await_args_list] == [('alice', record) for record in records] * 2
+    registered = [
+        (call.args[0], call.args[1]['source_id'], call.args[1]['attached_by']) for call in registration.await_args_list
+    ]
+    assert registered == [('alice', source, 'agent') for source in ['ready', 'mismatch', 'pending']] * 2
     if not resume:
         assert len(turn.settling) == 1
         assert turn.settling[0]['description'] != 'Could not open document'
@@ -3077,13 +3083,13 @@ def test_failed_status_parameters_use_the_declared_fallback(arguments, expected)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('kind,attached', [('document-text', False), ('document-text', True), ('chunk', False)])
-async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind, attached):
+@pytest.mark.parametrize('kind', ['document-text', 'chunk'])
+async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind):
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
     turn.attached = AsyncMock()
     element = {'type': kind, 'id': 'text', 'ref': 'doc', 'text': 'Body', 'pages': [2]}
-    await turn.record_output({'elements': [document('doc', 'Plan'), element]}, attached=attached)
+    await turn.record_output({'elements': [document('doc', 'Plan'), element]})
     source = turn.citations.sources['text']
     metadata = source['metadata'][0]
     assert metadata.get('granularity') == ('document' if kind == 'document-text' else None)

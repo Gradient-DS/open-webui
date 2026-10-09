@@ -49,6 +49,8 @@ _PLACEHOLDER = re.compile(r'{{(\w+)}}')
 _COMPACTION = 'compaction'
 # [Claude] The thread states in which the last turn is over: the agent finished it, or the user cancelled it.
 _ENDED = frozenset({'finished', 'cancelled'})
+# [Claude] The element type of a file attached to the chat; in a root tool output, the agent attached it.
+_ATTACHED = 'attached-document'
 # [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
 TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
 
@@ -245,6 +247,21 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     if unavailable:
         raise AttachmentsUnavailable(unavailable)
     return {**({'attachments': attached} if attached else {}), **({'attachment_notes': notes} if notes else {})}
+
+
+def _attachment(document: dict[str, Any]) -> dict[str, Any]:
+    """[Claude] The record `register_attachment` takes, of an `attached-document` element an agent tool recorded."""
+    return {
+        'source_id': document['file_id'],
+        'collection_key': document['collection_key'],
+        'job_id': document['job_id'],
+        'name': document['filename'],
+        'web_url': document.get('web_url'),
+        'provider': document['provider'],
+        'provider_ref': document['document_ref'],
+        'attached_by': 'agent',
+        'content_type': document.get('content_type'),
+    }
 
 
 # [Gradient] The most characters of a note or chat the agent takes (its `MAX_CHARACTERS`); `length` says how much
@@ -831,7 +848,7 @@ class AgentTurn:
         for event in events:
             if event['position'] > position or event.get('stream') != 'root':
                 continue
-            if event['type'] in {'tool_output', 'attached'}:
+            if event['type'] == 'tool_output':
                 await self.keep(event['payload'])
             elif event['type'] == 'input':
                 self.keep_texts((event['payload'].get('payload') or {}).get('texts') or [])
@@ -1028,10 +1045,12 @@ class AgentTurn:
         self.running.clear()
 
     async def attached(self, payload: dict) -> None:
+        """[Claude] Add the documents a tool output attached to the message's files."""
         files = {}
-        for attachment in payload['attachments']:
+        documents = [element for element in payload.get('elements') or [] if element.get('type') == _ATTACHED]
+        for document in documents:
             try:
-                file = await live_documents.register_attachment(self.metadata['user_id'], attachment)
+                file = await live_documents.register_attachment(self.metadata['user_id'], _attachment(document))
             except live_documents.AttachmentMismatch as error:
                 log.warning('Skipping mismatched attachment event (%s)', error.status)
                 continue
@@ -1050,10 +1069,9 @@ class AgentTurn:
         # The full list, stored above: a `files` event would be appended to the stored files again.
         await self.emit('chat:message:files', update)
 
-    async def record_output(self, payload: dict, *, attached: bool = False) -> None:
+    async def record_output(self, payload: dict) -> None:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
-        if attached:
-            await self.attached(payload)
+        await self.attached(payload)
         await self.keep(payload)
         for element in payload.get('elements') or []:
             if element.get('type') == 'action-required' and element.get('kind') == 'connect':
@@ -1091,9 +1109,8 @@ class AgentTurn:
                     raise SoevApiError(503, event.data.get('code', 'service_unavailable'), 'Recovery failed')
                 if event.position is not None:
                     self.position = event.position
-                if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
-                    if event.event == 'attached':
-                        await self.attached(event.data['payload'])
+                if event.event == 'tool_output' and event.data.get('stream') == 'root':
+                    await self.attached(event.data['payload'])
                     for source in await self.keep(event.data['payload']):
                         await self.emit('source', source)
                 if event.event == 'status' and event.data['state'] not in {*_ENDED, 'waiting'}:
@@ -1167,8 +1184,8 @@ class AgentTurn:
             return [_chunk({'content': marker})] if marker else []
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
-        if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
-            await self.record_output(payload, attached=event.event == 'attached')
+        if event.event == 'tool_output' and event.data.get('stream') == 'root':
+            await self.record_output(payload)
             return []
         if event.event in {'calling', 'compaction'}:
             return await self.summary(event)
