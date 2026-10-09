@@ -54,8 +54,10 @@ def test_extractor_response_target_is_blocked(sink, url, document, http_boundary
 
 
 @pytest.mark.parametrize('sink', ['marker_poll', 'mineru_upload', 'mineru_zip'])
-def test_extractor_response_redirect_is_guarded(sink, document, http_boundary, monkeypatch):
-    http_boundary.redirect = INTERNAL
+@pytest.mark.parametrize('attack', ['redirect', 'rebind'])
+def test_extractor_response_redirect_is_guarded(sink, attack, document, http_boundary, offline, monkeypatch):
+    offline.rebind = attack == 'rebind'
+    http_boundary.redirect = PUBLIC + 'next' if offline.rebind else INTERNAL
     try:
         invoke(sink, PUBLIC, document, http_boundary, monkeypatch)
     except (HTTPException, requests.RequestException, ValueError):

@@ -19,11 +19,14 @@ async def test_openapi_spec_path_cannot_replace_authority(host, http_boundary):
 
 
 @pytest.mark.parametrize('sink', ['spec', 'execute'])
+@pytest.mark.parametrize('attack', ['redirect', 'rebind'])
 @pytest.mark.asyncio
-async def test_tool_server_redirect_is_guarded(sink, http_boundary, monkeypatch):
+async def test_tool_server_redirect_is_guarded(sink, attack, http_boundary, offline, monkeypatch):
     monkeypatch.setattr(tools, 'AIOHTTP_CLIENT_ALLOW_REDIRECTS', True)
-    http_boundary.redirect = INTERNAL
+    offline.rebind = attack == 'rebind'
+    http_boundary.redirect = PUBLIC + 'next' if offline.rebind else INTERNAL
     http_boundary.responses[INTERNAL] = (200, {'Content-Type': 'application/json'}, b'{}')
+    http_boundary.responses[PUBLIC + 'next'] = (200, {'Content-Type': 'application/json'}, b'{}')
     if sink == 'spec':
         await tools.get_tool_server_data(PUBLIC, {})
     else:
@@ -31,6 +34,29 @@ async def test_tool_server_redirect_is_guarded(sink, http_boundary, monkeypatch)
         await tools.execute_tool_server(PUBLIC.rstrip('/'), {}, {}, 'fetch', {}, spec)
     assert http_boundary.sent == [PUBLIC]
     assert_public_only(http_boundary)
+
+
+@pytest.mark.asyncio
+async def test_mcp_rebinding_after_redirect_is_guarded(monkeypatch, offline):
+    connected = []
+    offline.rebind = True
+
+    def respond(request):
+        connected.append(offline(request.url.host, request.url.port or 80)[0][4][0])
+        if str(request.url) == PUBLIC:
+            return httpx.Response(302, headers={'Location': PUBLIC + 'next', 'Connection': 'close'})
+        return httpx.Response(403)
+
+    monkeypatch.setattr(httpx.AsyncClient, '_init_transport', lambda *args, **kwargs: httpx.MockTransport(respond))
+    client = mcp.MCPClient()
+    try:
+        await client.connect(PUBLIC)
+    except Exception:
+        pass
+    finally:
+        await client.disconnect()
+    assert offline.calls['public.example'] >= 2
+    assert connected == ['93.184.216.34'], connected
 
 
 @pytest.mark.parametrize('host', HOSTS)
