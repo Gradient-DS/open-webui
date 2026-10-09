@@ -79,7 +79,7 @@ def test_local_fetch_opt_in_retains_its_semantics(monkeypatch, http_boundary):
     assert http_boundary.sent == [INTERNAL]
 
 
-@pytest.mark.parametrize('engine', ['tavily', 'microsoft_web_iq'])
+@pytest.mark.parametrize('engine', ['tavily', 'microsoft_web_iq', 'playwright'])
 @pytest.mark.parametrize('asynchronous', [False, True], ids=['sync', 'async'])
 @pytest.mark.asyncio
 async def test_ssl_probe_refuses_rebinding(engine, asynchronous, offline, monkeypatch, http_boundary):
@@ -95,7 +95,13 @@ async def test_ssl_probe_refuses_rebinding(engine, asynchronous, offline, monkey
     tls_socket.connect.side_effect = connect
     monkeypatch.setattr(ssl.SSLContext, 'wrap_socket', lambda *args, **kwargs: tls_socket)
     loader = web.get_web_loader('https://public.example/', loader_config={'web_loader_engine': engine})
-    if asynchronous:
+    if engine == 'playwright':
+        with pytest.raises(ValueError, match='SSL certificate verification failed'):
+            if asynchronous:
+                await loader._safe_process_url('https://public.example/')
+            else:
+                loader._safe_process_url_sync('https://public.example/')
+    elif asynchronous:
         await loader.aload()
     else:
         loader.load()
