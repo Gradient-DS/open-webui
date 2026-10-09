@@ -431,7 +431,11 @@ async def get_channel_by_id(
             }
         )
     else:
-        if user.role != 'admin' and not await channel_has_access(user.id, channel, permission='read', db=db):
+        if (
+            user.role != 'admin'
+            and channel.user_id != user.id
+            and not await channel_has_access(user.id, channel, permission='read', db=db)
+        ):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
         write_access = await channel_has_access(
