@@ -30,7 +30,8 @@ def invoke(sink, url, document, http_boundary, monkeypatch):
                 }
             ).encode(),
         )
-        http_boundary.responses.setdefault(url, (200, {}, b'{"status":"failed"}'))
+        if url != PUBLIC or not http_boundary.redirect:
+            http_boundary.responses.setdefault(url, (200, {}, b'{"status":"failed"}'))
         monkeypatch.setattr(datalab_marker.time, 'sleep', lambda _: None)
         loader = datalab_marker.DatalabMarkerLoader(document, 'test', endpoint, output_format='markdown')
         loader.load()
