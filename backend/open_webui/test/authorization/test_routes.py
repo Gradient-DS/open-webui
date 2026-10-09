@@ -1,16 +1,12 @@
 """Every registered HTTP surface must declare authentication or a public contract."""
 
+import importlib.util
+
 import pytest
 from fastapi import Depends, FastAPI
 from starlette.routing import Mount, WebSocketRoute
 
 PUBLIC_ROUTES = {
-    'GET /openapi.json': 'Development API schema for API clients.',
-    'HEAD /openapi.json': 'Metadata for the development API schema.',
-    'GET /docs': 'Development API documentation UI.',
-    'HEAD /docs': 'Metadata for the development documentation UI.',
-    'GET /docs/oauth2-redirect': 'OAuth callback used by the development documentation UI.',
-    'HEAD /docs/oauth2-redirect': 'Metadata for the documentation OAuth callback.',
     'MOUNT /ws': 'Socket.IO transport handshake is public; socket events authenticate their tokens.',
     'GET /ollama/': 'Constant compatibility health status; no backend call.',
     'HEAD /ollama/': 'Constant compatibility health status; no backend call.',
@@ -42,6 +38,16 @@ PUBLIC_ROUTES = {
     'GET /ready': 'Unauthenticated readiness probe.',
     'GET /health/db': 'Unauthenticated database health probe.',
     'MOUNT /static': 'Public static frontend assets needed before login.',
+}
+
+# Registered only when ENV == 'dev' (main.py docs_url/openapi_url).
+DEV_PUBLIC_ROUTES = {
+    'GET /openapi.json': 'Development API schema for API clients.',
+    'HEAD /openapi.json': 'Metadata for the development API schema.',
+    'GET /docs': 'Development API documentation UI.',
+    'HEAD /docs': 'Metadata for the development documentation UI.',
+    'GET /docs/oauth2-redirect': 'OAuth callback used by the development documentation UI.',
+    'HEAD /docs/oauth2-redirect': 'Metadata for the documentation OAuth callback.',
 }
 
 
@@ -91,13 +97,36 @@ def audit_routes(routes, public, authenticated):
 
 
 def test_route_authentication_inventory(application):
-    audit_routes(application.routes, PUBLIC_ROUTES, authentication_dependencies())
+    from open_webui.env import ENV
+
+    public = PUBLIC_ROUTES | (DEV_PUBLIC_ROUTES if ENV == 'dev' else {})
+    audit_routes(application.routes, public, authentication_dependencies())
+
+
+@pytest.fixture
+def dev_retrieval_router(monkeypatch):
+    """The retrieval router as built under ENV=dev, where it adds the /ef probe."""
+    import open_webui.config
+    import open_webui.routers.retrieval as retrieval
+
+    monkeypatch.setattr(open_webui.config, 'ENV', 'dev')
+    spec = importlib.util.spec_from_file_location('retrieval_dev', retrieval.__file__)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.router
+
+
+def test_dev_only_routes_require_authentication(dev_retrieval_router):
+    """Dev-only routes are invisible to the ENV=prod sweep, so audit them directly."""
+    audit_routes(dev_retrieval_router.routes, {}, authentication_dependencies())
 
 
 @pytest.mark.parametrize('principal', (None, 'owner', 'admin'))
-def test_embedding_probe_requires_admin_before_embedding(seeded, application, principal):
-    route = next(route for route in application.routes if route.path == '/api/v1/retrieval/ef/{text}')
-    seeded.client.app.router.routes.append(route)
+def test_embedding_probe_requires_admin_before_embedding(seeded, dev_retrieval_router, principal):
+    probe = FastAPI()
+    probe.include_router(dev_retrieval_router, prefix='/api/v1/retrieval')
+    route = next(route for route in probe.routes if getattr(route, 'path', '') == '/api/v1/retrieval/ef/{text}')
+    seeded.client.app.router.routes.insert(0, route)
     calls = []
 
     async def embed(text, **kwargs):
