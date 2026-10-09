@@ -40,7 +40,7 @@ def generate_pdf(title: str, messages: list[dict], include_chrome: bool = True) 
     from weasyprint import HTML
 
     html_string = _render_html(title, messages, include_chrome=include_chrome)
-    pdf_bytes = HTML(string=html_string, url_fetcher=safe_pdf_url_fetcher).write_pdf()
+    pdf_bytes = HTML(string=html_string, url_fetcher=safe_pdf_url_fetcher()).write_pdf()
     return pdf_bytes
 
 

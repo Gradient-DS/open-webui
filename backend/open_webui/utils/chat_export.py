@@ -256,21 +256,11 @@ def sanitize_export_html(html: str) -> str:
     return str(soup)
 
 
-def safe_pdf_url_fetcher(url: str):
-    """WeasyPrint url_fetcher that permits only inline ``data:`` URIs.
+def safe_pdf_url_fetcher():
+    """Allow only inline data resources when WeasyPrint renders an export."""
+    from weasyprint.urls import URLFetcher
 
-    Backstop for the PDF path: even if a fetchable URL survives HTML
-    sanitisation (e.g. inside a CSS ``url()``), WeasyPrint will refuse to
-    dereference anything but a self-contained ``data:`` URI, so it cannot be
-    used for SSRF or local-file reads. Blocked resources are simply skipped by
-    WeasyPrint (rendered as missing), not fatal.
-    """
-    if not _is_data_uri(url):
-        raise ValueError(f'Blocked non-data resource URL during PDF export: {url[:64]!r}')
-
-    from weasyprint import default_url_fetcher
-
-    return default_url_fetcher(url)
+    return URLFetcher(allowed_protocols={'data'})
 
 
 def _md_to_html(text: str) -> str:
