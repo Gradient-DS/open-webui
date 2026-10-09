@@ -37,6 +37,7 @@ from open_webui.models.files import FileForm, Files
 from open_webui.models.skill_files import SkillFileListResponse, SkillFiles
 from open_webui.models.skills import Skills
 from open_webui.models.users import Users
+from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.utils.auth import decode_token, get_optional_verified_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -193,7 +194,7 @@ async def _assert_write_access(skill, user, db: AsyncSession) -> None:
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -625,7 +626,7 @@ async def get_skill_file_content(
     skill = await _get_skill_or_404(id, db)
 
     if (
-        user.role != 'admin'
+        not can_bypass_access_control(user)
         and skill.user_id != user.id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -656,7 +657,7 @@ async def list_skill_files(
 
     # Read auth: owner, admin, or any AccessGrant read
     if (
-        user.role != 'admin'
+        not can_bypass_access_control(user)
         and skill.user_id != user.id
         and not await AccessGrants.has_access(
             user_id=user.id,

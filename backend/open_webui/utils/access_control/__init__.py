@@ -1,5 +1,6 @@
 from typing import Any
 
+from open_webui import config
 from open_webui.config import DEFAULT_USER_PERMISSIONS
 from open_webui.models.access_grants import (
     has_anyone_read_access_grant,
@@ -13,6 +14,15 @@ from open_webui.models.groups import Groups
 from open_webui.models.users import UserModel
 from open_webui.utils.json_codec import JSONCodec
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def can_bypass_access_control(user: UserModel | dict) -> bool:
+    role = user.get('role') if isinstance(user, dict) else user.role
+    return role == 'admin' and bool(config.BYPASS_ADMIN_ACCESS_CONTROL)
+
+
+def can_access_admin_chats(user: UserModel) -> bool:
+    return user.role == 'admin' and bool(config.ENABLE_ADMIN_CHAT_ACCESS)
 
 
 def fill_missing_permissions(permissions: dict[str, Any], default_permissions: dict[str, Any]) -> dict[str, Any]:
@@ -158,9 +168,7 @@ async def has_connection_access(
     - Missing, None, or empty access_grants → private, admin-only
     - access_grants has entries → delegates to ``has_access``
     """
-    from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
-
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if can_bypass_access_control(user):
         return True
 
     access_grants = (connection.get('config') or {}).get('access_grants', [])
@@ -370,8 +378,8 @@ async def check_model_access(
         return
 
     if model_info:
-        # Enforce for every non-admin role (including pending); never fail open.
-        if user.role != 'admin':
+        # Enforce grants unless the administrator explicitly opts into bypass.
+        if not can_bypass_access_control(user):
             from open_webui.models.access_grants import AccessGrants
 
             user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}

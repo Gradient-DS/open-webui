@@ -25,7 +25,6 @@ from fastapi import Request
 from langchain_core.utils.function_calling import (
     convert_to_openai_function as convert_pydantic_model_to_openai_function_spec,
 )
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.env import (
     AIOHTTP_CLIENT_ALLOW_REDIRECTS,
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -100,7 +99,7 @@ from open_webui.tools.builtin import (
     view_skill,
     write_note,
 )
-from open_webui.utils.access_control import has_access, has_connection_access, has_permission
+from open_webui.utils.access_control import can_bypass_access_control, has_access, has_connection_access, has_permission
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.headers import (
     bearer_auth_header,
@@ -287,7 +286,7 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
         if tool:
             # Check access control for local tools
             if (
-                not (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                not (can_bypass_access_control(user))
                 and tool.user_id != user.id
                 and not await AccessGrants.has_access(
                     user_id=user.id,

@@ -5,7 +5,6 @@ import sys
 
 from fastapi import Request
 from open_webui.config import (
-    BYPASS_ADMIN_ACCESS_CONTROL,
     DEFAULT_ARENA_MODEL,
     MODEL_WHITELIST,
 )
@@ -16,16 +15,16 @@ from open_webui.models.config import Config
 from open_webui.models.functions import Functions
 from open_webui.models.groups import Groups
 from open_webui.models.models import Models
-from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.models.users import UserModel
 from open_webui.routers import ollama, openai
 from open_webui.socket.utils import RedisDict
 from open_webui.soev import model_catalog
-from open_webui.utils.access_control import has_access, has_base_model_access
+from open_webui.utils.access_control import can_bypass_access_control, has_access, has_base_model_access
+from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.plugin import (
-    get_functions_cache,
     get_function_module_from_cache,
+    get_functions_cache,
 )
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -521,9 +520,7 @@ async def get_filtered_models(models, user, db=None):
         models = [m for m in models if m.get('id') in MODEL_WHITELIST]
 
     # Filter out models that the user does not have access to
-    if (
-        user.role == 'user' or (user.role == 'admin' and not BYPASS_ADMIN_ACCESS_CONTROL)
-    ) and not BYPASS_MODEL_ACCESS_CONTROL:
+    if (not can_bypass_access_control(user)) and not BYPASS_MODEL_ACCESS_CONTROL:
         model_infos = {}
         for model in models:
             if model.get('arena'):
@@ -565,7 +562,7 @@ async def get_filtered_models(models, user, db=None):
                 filtered_models.append(model)
             elif model_info:
                 if (
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (can_bypass_access_control(user))
                     or user.id == model_info.get('user_id')
                     or model['id'] in accessible_model_ids
                 ):

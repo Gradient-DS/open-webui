@@ -23,12 +23,13 @@ from open_webui.models.chats import Chats
 from open_webui.models.files import Files
 from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
 from open_webui.routers.files import upload_file_handler
-from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.routers.images import (
     get_image_data,
     upload_image,
 )
 from open_webui.storage.provider import Storage
+from open_webui.utils.access_control import can_bypass_access_control
+from open_webui.utils.access_control.files import has_access_to_file
 
 BASE64_IMAGE_URL_PREFIX = re.compile(r'data:image/\w+;base64,', re.IGNORECASE)
 MARKDOWN_IMAGE_URL_PATTERN = re.compile(r'!\[(.*?)\]\((.+?)\)', re.IGNORECASE)
@@ -211,7 +212,11 @@ async def get_image_base64_from_file_id(id: str, user=None) -> Optional[str]:
     # Owner, admin, and explicit read-grant holders are allowed.
     if user is None:
         return None
-    if file.user_id != user.id and user.role != 'admin' and not await has_access_to_file(file.id, 'read', user):
+    if (
+        file.user_id != user.id
+        and not can_bypass_access_control(user)
+        and not await has_access_to_file(file.id, 'read', user)
+    ):
         return None
 
     try:

@@ -3,18 +3,12 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from open_webui.config import (
-    BYPASS_ADMIN_ACCESS_CONTROL,
-    ENABLE_ADMIN_CHAT_ACCESS,
-    ENABLE_ADMIN_EXPORT,
-)
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import ChatForm, ChatResponse, Chats
 from open_webui.models.config import Config
-from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.groups import Groups
 from open_webui.models.notes import (
     NoteForm,
@@ -24,8 +18,10 @@ from open_webui.models.notes import (
     NoteUserResponse,
 )
 from open_webui.models.users import UserResponse, Users
+from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.socket.main import sio
 from open_webui.utils.access_control import (
+    can_bypass_access_control,
     filter_allowed_access_grants,
     has_permission,
     has_public_read_access_grant,
@@ -186,7 +182,7 @@ async def search_notes(
     if direction:
         filter['direction'] = direction
 
-    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not can_bypass_access_control(user):
         groups = await Groups.get_groups_by_member_id(user.id, db=db)
         if groups:
             filter['group_ids'] = [group.id for group in groups]
@@ -273,7 +269,7 @@ async def get_note_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if not can_bypass_access_control(user) and (
         user.id != note.user_id
         and (
             not await AccessGrants.has_access(
@@ -288,7 +284,7 @@ async def get_note_by_id(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     write_access = (
-        user.role == 'admin'
+        can_bypass_access_control(user)
         or (user.id == note.user_id)
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -327,7 +323,7 @@ async def get_note_chat_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if not can_bypass_access_control(user) and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -417,7 +413,7 @@ async def get_note_chats_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if not can_bypass_access_control(user) and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -475,7 +471,7 @@ async def create_note_chat_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if not can_bypass_access_control(user) and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -545,7 +541,7 @@ async def update_note_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if not can_bypass_access_control(user) and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -625,7 +621,7 @@ async def update_note_access_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if not can_bypass_access_control(user) and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -683,7 +679,7 @@ async def pin_note_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if not can_bypass_access_control(user) and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -732,7 +728,7 @@ async def delete_note_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if not can_bypass_access_control(user) and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,

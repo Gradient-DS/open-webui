@@ -3,13 +3,12 @@ import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
+from open_webui import config
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
-from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.groups import Groups
 from open_webui.models.skills import (
     SkillAccessListResponse,
@@ -20,7 +19,8 @@ from open_webui.models.skills import (
     Skills,
     SkillUserResponse,
 )
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
+from open_webui.services.remaining_request_bodies import access_grants_body
+from open_webui.utils.access_control import can_bypass_access_control, filter_allowed_access_grants, has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,7 +44,7 @@ async def get_skills(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if can_bypass_access_control(user):
         skills = await Skills.get_skills(db=db)
     else:
         skills = await Skills.get_skills(db=db, user_id=user.id)
@@ -86,7 +86,7 @@ async def get_skill_list(
     if direction:
         filter['direction'] = direction
 
-    is_bypass_admin = user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL
+    is_bypass_admin = can_bypass_access_control(user)
     user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
 
     if not is_bypass_admin:
@@ -138,7 +138,7 @@ async def export_skills(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if can_bypass_access_control(user) and config.ENABLE_ADMIN_EXPORT:
         return await Skills.get_skills(db=db)
     else:
         return await Skills.get_skills(db=db, user_id=user.id)
@@ -231,7 +231,7 @@ async def get_skill_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
 
     if skill:
         if (
-            user.role == 'admin'
+            can_bypass_access_control(user)
             or skill.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -244,7 +244,7 @@ async def get_skill_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
             return SkillAccessResponse(
                 **skill.model_dump(),
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (can_bypass_access_control(user))
                     or user.id == skill.user_id
                     or await AccessGrants.has_access(
                         user_id=user.id,
@@ -296,7 +296,7 @@ async def update_skill_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -379,7 +379,7 @@ async def update_skill_access_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -422,7 +422,7 @@ async def toggle_skill_by_id(
     skill = await Skills.get_skill_by_id(id, db=db)
     if skill:
         if (
-            user.role == 'admin'
+            can_bypass_access_control(user)
             or skill.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -488,7 +488,7 @@ async def delete_skill_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

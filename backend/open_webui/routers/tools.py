@@ -8,14 +8,14 @@ from typing import Optional
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, CACHE_DIR
+from open_webui import config
+from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT, ENABLE_PLUGINS
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
-from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.tools import (
@@ -26,15 +26,17 @@ from open_webui.models.tools import (
     Tools,
     ToolUserResponse,
 )
+from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.utils.access_control import (
+    can_bypass_access_control,
     filter_allowed_access_grants,
     has_access,
     has_permission,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.plugin import (
-    get_tools_cache,
     get_tool_module_from_cache,
+    get_tools_cache,
     load_tool_module_by_id,
     replace_imports,
     resolve_valves_schema_options,
@@ -72,7 +74,7 @@ async def get_tools(
     db: AsyncSession = Depends(get_async_session),
 ):
     tools = []
-    bypass_access_control = user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL
+    bypass_access_control = can_bypass_access_control(user)
     user_group_ids = (
         set() if bypass_access_control else {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
     )
@@ -207,7 +209,7 @@ async def get_tool_list(user=Depends(get_verified_user), db: AsyncSession = Depe
     if not ENABLE_PLUGINS:
         return []
 
-    bypass_access_control = user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL
+    bypass_access_control = can_bypass_access_control(user)
     user_group_ids = (
         set() if bypass_access_control else {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
     )
@@ -339,7 +341,7 @@ async def export_tools(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    bypass_access_control = user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL
+    bypass_access_control = can_bypass_access_control(user) and config.ENABLE_ADMIN_EXPORT
     return await Tools.get_tools(
         db=db,
         user_id=None if bypass_access_control else user.id,
@@ -446,7 +448,7 @@ async def get_tools_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
 
     if tools:
         if (
-            user.role == 'admin'
+            can_bypass_access_control(user)
             or tools.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -457,7 +459,7 @@ async def get_tools_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
             )
         ):
             write_access = (
-                (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                (can_bypass_access_control(user))
                 or user.id == tools.user_id
                 or await AccessGrants.has_access(
                     user_id=user.id,
@@ -528,7 +530,7 @@ async def update_tools_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -630,7 +632,7 @@ async def update_tool_access_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -686,7 +688,7 @@ async def delete_tools_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -733,7 +735,7 @@ async def get_tools_valves_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -778,7 +780,7 @@ async def get_tools_valves_spec_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -825,7 +827,7 @@ async def update_tools_valves_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -886,7 +888,7 @@ async def get_tools_user_valves_by_id(
             permission='read',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -926,7 +928,7 @@ async def get_tools_user_valves_spec_by_id(
             permission='read',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -968,7 +970,7 @@ async def update_tools_user_valves_by_id(
             permission='read',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

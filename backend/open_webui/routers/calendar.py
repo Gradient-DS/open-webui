@@ -23,7 +23,7 @@ from open_webui.models.calendar import (
 from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.users import UserModel
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
+from open_webui.utils.access_control import can_bypass_access_control, filter_allowed_access_grants, has_permission
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.calendar import expand_recurring_event
 
@@ -64,7 +64,7 @@ async def _check_calendar_access(calendar_id: str, user: UserModel, permission: 
     cal = await Calendars.get_calendar_by_id(calendar_id)
     if not cal:
         raise HTTPException(status_code=404, detail='Calendar not found')
-    if cal.user_id == user.id or user.role == 'admin':
+    if cal.user_id == user.id or can_bypass_access_control(user):
         return cal
     user_groups = await Groups.get_groups_by_member_id(user.id)
     user_group_ids = [g.id for g in user_groups]
@@ -402,7 +402,7 @@ async def update_calendar(
     cal = await _check_calendar_access(calendar_id, user, 'write')
 
     # Only owner/admin can change access grants
-    if form_data.access_grants is not None and cal.user_id != user.id and user.role != 'admin':
+    if form_data.access_grants is not None and cal.user_id != user.id and not can_bypass_access_control(user):
         raise HTTPException(status_code=403, detail='Only owner can manage sharing')
 
     # Strip public/user grants the requesting user is not permitted to assign
@@ -443,7 +443,7 @@ async def delete_calendar(request: Request, calendar_id: str, user: UserModel = 
     cal = await _check_calendar_access(calendar_id, user, 'write')
 
     # Only owner/admin can delete
-    if cal.user_id != user.id and user.role != 'admin':
+    if cal.user_id != user.id and not can_bypass_access_control(user):
         raise HTTPException(status_code=403, detail='Only owner can delete calendar')
 
     # Block deletion of default calendar
