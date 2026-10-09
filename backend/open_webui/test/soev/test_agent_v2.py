@@ -1749,9 +1749,7 @@ async def test_calls_the_budget_stopped_end_before_the_answer() -> None:
             turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': '', 'tool_calls': calls}})
         )
         await render(turn, ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'c1'}}))
-        stopped = await render(
-            turn, ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {}})
-        )
+        stopped = await render(turn, ChatEvent('budget_exceeded', {'stream': 'root', 'payload': {}}))
         await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': ''}}))
     assert '<details type="tool_calls" done="true" name="calculate">' in content(started)
     assert not stopped
