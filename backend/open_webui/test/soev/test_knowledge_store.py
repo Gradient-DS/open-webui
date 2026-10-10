@@ -60,6 +60,7 @@ SOEV = {
     'move_file_to_directory',
     'set_path_fields_by_file_id',
     'update_knowledge_data_by_id',
+    'update_knowledge_meta_by_id',
 }
 REMOVED = {
     'get_pending_deletions',
@@ -69,7 +70,6 @@ REMOVED = {
     'get_suspension_info',
 }
 REFUSED = {
-    'update_knowledge_meta_by_id',
     'update_knowledge_user_id_by_id',
 }
 
@@ -913,18 +913,11 @@ async def test_reset_preserves_the_original_failure_result_until_folders_are_emp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ('method', 'args', 'reason'),
-    [
-        ('update_knowledge_meta_by_id', ('kb', {}), 'cloud sync'),
-        ('update_knowledge_user_id_by_id', ('kb', 'bob'), 'owner transfer'),
-    ],
-)
-async def test_a_refused_method_names_the_plan_it_moves_with(env, method, args, reason):
-    """Unsupported writes identify their method and the missing plan or owner-transfer route."""
+async def test_a_refused_method_names_the_plan_it_moves_with(env):
+    """Unsupported writes identify their method and the missing owner-transfer route."""
     with pytest.raises(env.module.NotOnSoev) as caught:
-        await getattr(env.store, method)(*args)
-    assert method in str(caught.value) and reason in str(caught.value)
+        await env.store.update_knowledge_user_id_by_id('kb', 'bob')
+    assert 'update_knowledge_user_id_by_id' in str(caught.value) and 'owner transfer' in str(caught.value)
     assert env.api.requests == []
 
 

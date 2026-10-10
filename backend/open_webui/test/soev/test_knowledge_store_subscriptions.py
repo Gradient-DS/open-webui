@@ -113,6 +113,7 @@ async def test_every_subscriber_keeps_its_synced_type(subscribed_store, provider
             'visibility': 'restricted',
             'principals': [],
             'writers': [],
+            'meta': {},
         }
         assert is_synced_kb(env.store._knowledge(row, types)) == (key != 'unsubscribed')
     assert env.requests[0].url.path == '/v1/schedules'
@@ -136,6 +137,7 @@ def folder_store(monkeypatch, identity_config):
         'visibility': 'restricted',
         'principals': [],
         'writers': [],
+        'meta': {},
         'subscriptions': ['onedrive'],
         'document_count': 4,
         'created_at': '2026-01-01T00:00:00Z',

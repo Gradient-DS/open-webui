@@ -38,6 +38,7 @@ def collection():
         'metadata_spec': {},
         'retention_days': None,
         'tags': [],
+        'meta': {},
         'document_count': 3,
         'subscriptions': [],
         'created_at': '2026-01-01T00:00:00Z',

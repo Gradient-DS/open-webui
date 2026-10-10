@@ -177,6 +177,7 @@ def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, m
         'principals': ['owui:user:owner', 'owui:user:co-writer'],
         'writers': ['owui:user:owner', 'owui:user:co-writer'],
         'subscriptions': ['onedrive'],
+        'meta': {},
         'created_at': '2026-01-01T00:00:00Z',
         'updated_at': '2026-01-01T00:00:00Z',
     }
