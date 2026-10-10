@@ -993,7 +993,14 @@ class SoevKnowledgeTable:
         return True
 
     async def update_knowledge_meta_by_id(self, id, meta, db=None):
-        raise NotOnSoev('update_knowledge_meta_by_id', moves_with='cloud sync')
+        """Replace OWUI's meta, kept under its own namespace in the collection's client-owned ``meta``."""
+        current = await self._collection(id)
+        if current is None:
+            return None
+        namespace = self._projection.META_NAMESPACE
+        patch = self._projection.meta_patch(current['meta'].get(namespace, {}), meta)
+        result = await self._send('PATCH', self._path(id), {'meta': {namespace: patch}})
+        return await self._knowledge_with_type(result)
 
     async def update_knowledge_data_by_id(self, id, data, db=None):
         return None
