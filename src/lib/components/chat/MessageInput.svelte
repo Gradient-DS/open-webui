@@ -97,7 +97,7 @@
 		webSearchState,
 		type ToolState
 	} from '$lib/utils/toolState';
-	import { uploadFile, getFileAttachments } from '$lib/apis/files';
+	import { uploadFile } from '$lib/apis/files';
 	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
 	import { generateAutoCompletion } from '$lib/apis';
 	import { getChatById } from '$lib/apis/chats';
@@ -1357,19 +1357,6 @@
 					}
 
 					files = files;
-
-					// Pre-load render attachments (e.g. IFC plan PNGs) so the chat-side
-					// image-builder in Chat.svelte can inline them as first-turn vision
-					// for the BIM agent. Non-blocking; on error the file silently has
-					// no attachments.
-					getFileAttachments(localStorage.token, uploadedFile.id)
-						.then((manifest) => {
-							fileItem.attachments = manifest;
-							files = files; // trigger Svelte reactivity
-						})
-						.catch(() => {
-							fileItem.attachments = [];
-						});
 				} else {
 					fileItem.status = 'error';
 					fileItem.error = $i18n.t('Failed to upload file.');
