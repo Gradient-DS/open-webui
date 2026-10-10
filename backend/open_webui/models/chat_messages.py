@@ -254,6 +254,9 @@ class ChatMessageTable:
 
     @staticmethod
     def _build_message(composite_id: str, chat_id: str, user_id: str, data: dict, now: int) -> ChatMessage:
+        timestamp = data.get('timestamp', now)
+        if timestamp > 10_000_000_000:
+            timestamp //= 1000
         return ChatMessage(
             id=composite_id,
             chat_id=chat_id,
@@ -274,7 +277,7 @@ class ChatMessageTable:
             error=data.get('error'),
             usage=get_usage(data),
             context_summary=data.get('context_summary') or data.get('contextSummary'),
-            created_at=data.get('timestamp', now),
+            created_at=timestamp,
             updated_at=now,
         )
 

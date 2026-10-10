@@ -47,9 +47,9 @@ def _docx_bytes() -> bytes:
     """A minimal but structurally-valid OOXML (word) zip container."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w') as z:
-        z.writestr('[Content_Types].xml', '<?xml version="1.0"?><Types/>')
-        z.writestr('_rels/.rels', '<?xml version="1.0"?><Relationships/>')
-        z.writestr('word/document.xml', '<?xml version="1.0"?><w:document/>')
+        z.writestr(zipfile.ZipInfo('[Content_Types].xml'), '<?xml version="1.0"?><Types/>')
+        z.writestr(zipfile.ZipInfo('_rels/.rels'), '<?xml version="1.0"?><Relationships/>')
+        z.writestr(zipfile.ZipInfo('word/document.xml'), '<?xml version="1.0"?><w:document/>')
     return buf.getvalue()
 
 
@@ -57,8 +57,8 @@ def _plain_zip_bytes() -> bytes:
     """A generic zip (not an OOXML container) -> sniffs as application/zip."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w') as z:
-        z.writestr('a.txt', 'hello')
-        z.writestr('b.txt', 'world')
+        z.writestr(zipfile.ZipInfo('a.txt'), 'hello')
+        z.writestr(zipfile.ZipInfo('b.txt'), 'world')
     return buf.getvalue()
 
 

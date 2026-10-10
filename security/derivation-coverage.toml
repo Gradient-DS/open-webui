@@ -1,8 +1,8 @@
 # Derivation gaps measured from committed security/openapi.json using openapi-surface.
 # Phase 4b audited all 27 previously labelled untyped JSON write bodies.
-# 25 blind body operations remain: 17 JSON writes, 1 JSON read, 7 multipart.
-# The 17 writes are 10 already typed boolean/integer-only bodies, 5 author-defined
-# valve bodies, 1 arbitrary config-import blob, and 1 typed provider map whose
+# 27 blind body operations remain: 20 JSON writes, 1 JSON read, 6 multipart.
+# The writes include typed boolean/integer-only bodies, author-defined
+# valve bodies, an arbitrary config-import blob, and typed maps whose
 # dynamic keys the derivation deliberately does not traverse.
 # Exact set equality in test_writable_fields.py rejects missing or stale waivers.
 # Known fields in open objects are not exhaustive coverage of extension data.
@@ -107,3 +107,13 @@ reason = "Multipart file upload: file contents are a different surface that the 
 id = "POST /api/v1/users/user/variables/update"
 reason = "UserVariablesForm declares `variables: dict` (routers/users.py:634-635) -- free-form key/value chosen by the user, not a shape the derivation can enumerate. Same class as the tool and function valve bodies. Typing it would mean inventing keys that do not exist."
 
+
+# MeetingInput is already typed as input: dict[str, JsonValue]. The meeting
+# agent owns the dynamic input schema; OWUI forwards it without inventing keys.
+[[waived]]
+id = "POST /api/v1/meetings"
+reason = "MeetingInput.input is a typed dynamic JsonValue map. The string-field derivation does not traverse additionalProperties; exercising agent-defined keys needs a meeting-agent schema and map-key seeding, not fictitious fixed OWUI fields."
+
+[[waived]]
+id = "POST /api/v1/meetings/{meeting_id}/inputs"
+reason = "MeetingInput.input is the same typed dynamic JsonValue map used to start a meeting. Its keys belong to the meeting agent; the fixed-field derivation cannot enumerate them. Revisit when the corpus supports map-key seeding against the agent schema."

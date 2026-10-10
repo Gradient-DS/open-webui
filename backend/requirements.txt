@@ -155,7 +155,9 @@ qrcode[pil]==8.0
 ## Tests
 pytest>=9.0.3,<10
 pytest-asyncio>=1.0.0
+pytest-xdist==3.8.0
 fakeredis>=2.35.0
+moto[s3]==5.2.3
 
 ## LDAP
 ldap3==2.9.1

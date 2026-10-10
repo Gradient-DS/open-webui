@@ -282,17 +282,6 @@ async def test_background_task_update_does_not_clear_usage():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        'upsert_message stores data["timestamp"] raw; a millisecond timestamp '
-        'lands as created_at≈1.75e12, which fails the created_at <= end_date '
-        'filter (epoch seconds) of every dated dashboard window. '
-        '_normalize_timestamp exists (chat_messages.py) but is only applied '
-        'on read paths, not on insert. Fix: normalize on insert. When this '
-        'xfail starts passing, the bug is fixed — remove the marker.'
-    ),
-)
 async def test_millisecond_timestamp_still_lands_inside_query_window():
     chat_id, user_id, message_id = _ids()
     model = f'model-{uuid.uuid4()}'

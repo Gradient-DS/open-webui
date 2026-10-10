@@ -173,82 +173,6 @@
         "title": "AccessibleFilesResponse",
         "type": "object"
       },
-      "AccessibleKB": {
-        "properties": {
-          "collection_name": {
-            "title": "Collection Name",
-            "type": "string"
-          },
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "owner_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Owner Id"
-          },
-          "type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Type"
-          }
-        },
-        "required": [
-          "id",
-          "collection_name",
-          "name"
-        ],
-        "title": "AccessibleKB",
-        "type": "object"
-      },
-      "AccessibleKBsResponse": {
-        "properties": {
-          "kb_index_collection_name": {
-            "title": "Kb Index Collection Name",
-            "type": "string"
-          },
-          "kbs": {
-            "items": {
-              "$ref": "#/components/schemas/AccessibleKB"
-            },
-            "title": "Kbs",
-            "type": "array"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "kbs",
-          "kb_index_collection_name"
-        ],
-        "title": "AccessibleKBsResponse",
-        "type": "object"
-      },
       "AddMemoryForm": {
         "properties": {
           "content": {
@@ -4152,6 +4076,17 @@
       },
       "ChatMessageModel": {
         "properties": {
+          "assistant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistant Id"
+          },
           "chat_id": {
             "title": "Chat Id",
             "type": "string"
@@ -5035,9 +4970,14 @@
           "ENABLE_CODE_INTERPRETER": {
             "title": "Enable Code Interpreter",
             "type": "boolean"
+          },
+          "ENABLE_DOCUMENT_WRITER": {
+            "title": "Enable Document Writer",
+            "type": "boolean"
           }
         },
         "required": [
+          "ENABLE_DOCUMENT_WRITER",
           "ENABLE_CODE_EXECUTION",
           "CODE_EXECUTION_ENGINE",
           "CODE_EXECUTION_JUPYTER_URL",
@@ -5901,361 +5841,24 @@
         "title": "ConfigForm",
         "type": "object"
       },
-      "ConfluenceConfigForm": {
+      "ConnectionForm": {
+        "additionalProperties": false,
         "properties": {
-          "CONFLUENCE_AUTH_MODE": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Auth Mode"
-          },
-          "CONFLUENCE_BASIC_AUTH_API_TOKEN": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Basic Auth Api Token"
-          },
-          "CONFLUENCE_BASIC_AUTH_USERNAME": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Basic Auth Username"
-          },
-          "CONFLUENCE_CLOUD_ID": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Cloud Id"
-          },
-          "CONFLUENCE_KB_MODE": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Kb Mode"
-          },
-          "CONFLUENCE_MAX_PAGES_PER_SYNC": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Max Pages Per Sync"
-          },
-          "CONFLUENCE_OAUTH_CLIENT_ID": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Oauth Client Id"
-          },
-          "CONFLUENCE_OAUTH_CLIENT_SECRET": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Oauth Client Secret"
-          },
-          "CONFLUENCE_SCOPED_API_TOKEN": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Scoped Api Token"
-          },
-          "CONFLUENCE_SITE_URL": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Site Url"
-          },
-          "CONFLUENCE_SYNC_INTERVAL_MINUTES": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confluence Sync Interval Minutes"
-          },
-          "ENABLE_CONFLUENCE_INTEGRATION": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Confluence Integration"
-          },
-          "ENABLE_CONFLUENCE_SYNC": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Confluence Sync"
-          }
-        },
-        "title": "ConfluenceConfigForm",
-        "type": "object"
-      },
-      "ConfluenceKbItem": {
-        "description": "One Confluence space, page, or page-subtree opted into the shared KB.\n\nBack-compat: rows persisted before page-level granularity carry only\n``{id, key, name, cloud_id}`` \u2014 ``type`` defaults to ``'space'`` and\n``item_id`` / ``space_id`` fall back to ``id`` on normalization.",
-        "properties": {
-          "cloud_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cloud Id"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "include_descendants": {
-            "default": true,
-            "title": "Include Descendants",
-            "type": "boolean"
-          },
-          "item_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Id"
-          },
-          "item_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Path"
-          },
-          "key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Key"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "site_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Site Url"
-          },
-          "space_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Space Id"
-          },
-          "space_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Space Key"
-          },
-          "type": {
-            "default": "space",
+          "provider": {
             "enum": [
-              "space",
-              "page"
+              "onedrive",
+              "outlook_mail",
+              "google_drive",
+              "confluence"
             ],
-            "title": "Type",
+            "title": "Provider",
             "type": "string"
           }
         },
-        "title": "ConfluenceKbItem",
-        "type": "object"
-      },
-      "ConfluenceProvisionForm": {
-        "description": "Shared-KB provisioning request \u2014 the admin-selected items to sync.\n\nEach entry can be a whole space, a single page, or a page-subtree.\nSelection is opt-in: only the listed items are synced. An empty list\nprovisions the KB shell but syncs nothing until the admin picks at least\none item. The field name stays ``spaces`` for back-compat with deployed\nfrontends and persisted KB meta despite now accepting page items.\n\n``owner_user_id`` carries the admin's basic-mode owner pick (empty =\nsystem-owned). In OAuth mode the form value is ignored \u2014 the calling\nadmin is implicitly the owner, since only their stored token can run the\nsync.",
-        "properties": {
-          "owner_user_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Owner User Id"
-          },
-          "spaces": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/ConfluenceKbItem"
-            },
-            "title": "Spaces",
-            "type": "array"
-          }
-        },
-        "title": "ConfluenceProvisionForm",
-        "type": "object"
-      },
-      "ConfluenceTestConnectionForm": {
-        "description": "Optional credential overrides for the service-account test-connection probe.\n\nAny field left blank falls back to the stored config, so an admin can\ntest typed-but-unsaved values or re-test the saved credential. ``mode``\nselects which service transport to probe ('basic' \u2192 site, 'scoped' \u2192\ngateway); blank/unknown defaults to 'basic' for back-compat. ``cloud_id``\nis only consulted in scoped mode (blank \u2192 auto-resolve from the site URL).",
-        "properties": {
-          "api_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Token"
-          },
-          "cloud_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cloud Id"
-          },
-          "mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mode"
-          },
-          "site_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Site Url"
-          },
-          "username": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Username"
-          }
-        },
-        "title": "ConfluenceTestConnectionForm",
+        "required": [
+          "provider"
+        ],
+        "title": "ConnectionForm",
         "type": "object"
       },
       "ConnectionsConfigForm": {
@@ -7819,30 +7422,6 @@
         "title": "ExternalKnowledgeSourceUpdateForm",
         "type": "object"
       },
-      "FailedFileInfo": {
-        "description": "Information about a file that failed to sync.",
-        "properties": {
-          "error_message": {
-            "title": "Error Message",
-            "type": "string"
-          },
-          "error_type": {
-            "title": "Error Type",
-            "type": "string"
-          },
-          "filename": {
-            "title": "Filename",
-            "type": "string"
-          }
-        },
-        "required": [
-          "filename",
-          "error_type",
-          "error_message"
-        ],
-        "title": "FailedFileInfo",
-        "type": "object"
-      },
       "FeaturesPermissions": {
         "properties": {
           "api_keys": {
@@ -8378,34 +7957,6 @@
         "title": "FileListResponse",
         "type": "object"
       },
-      "FileManifestEntry": {
-        "properties": {
-          "checksum": {
-            "title": "Checksum",
-            "type": "string"
-          },
-          "filename": {
-            "title": "Filename",
-            "type": "string"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          },
-          "size": {
-            "title": "Size",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "filename",
-          "path",
-          "checksum",
-          "size"
-        ],
-        "title": "FileManifestEntry",
-        "type": "object"
-      },
       "FileMeta": {
         "additionalProperties": true,
         "properties": {
@@ -8702,6 +8253,18 @@
               }
             ],
             "title": "Added At"
+          },
+          "collection": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
           },
           "created_at": {
             "title": "Created At",
@@ -9696,78 +9259,6 @@
           "prompt"
         ],
         "title": "GenerateEmbeddingsForm",
-        "type": "object"
-      },
-      "GoogleDriveConfigForm": {
-        "properties": {
-          "ENABLE_GOOGLE_DRIVE_INTEGRATION": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Google Drive Integration"
-          },
-          "ENABLE_GOOGLE_DRIVE_SYNC": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Google Drive Sync"
-          },
-          "GOOGLE_DRIVE_API_KEY": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Google Drive Api Key"
-          },
-          "GOOGLE_DRIVE_CLIENT_ID": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Google Drive Client Id"
-          },
-          "GOOGLE_DRIVE_MAX_FILES_PER_SYNC": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Google Drive Max Files Per Sync"
-          },
-          "GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Google Drive Sync Interval Minutes"
-          }
-        },
-        "title": "GoogleDriveConfigForm",
         "type": "object"
       },
       "GroupExportResponse": {
@@ -10858,6 +10349,7 @@
         "title": "InviteValidation",
         "type": "object"
       },
+      "JsonValue": {},
       "KnowledgeAccessListResponse": {
         "properties": {
           "items": {
@@ -11056,6 +10548,17 @@
             ],
             "title": "Parent Id"
           },
+          "schedule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule Id"
+          },
           "status_counts": {
             "additionalProperties": {
               "type": "integer"
@@ -11111,6 +10614,17 @@
               }
             ],
             "title": "Parent Id"
+          },
+          "schedule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule Id"
           },
           "updated_at": {
             "title": "Updated At",
@@ -11193,6 +10707,17 @@
             },
             "title": "Breadcrumbs",
             "type": "array"
+          },
+          "collection_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Total"
           },
           "directories": {
             "items": {
@@ -11735,6 +11260,23 @@
           "url"
         ],
         "title": "LoadUrlForm",
+        "type": "object"
+      },
+      "MeetingInput": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Input",
+            "type": "object"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "MeetingInput",
         "type": "object"
       },
       "MemoryModel": {
@@ -14796,120 +14338,68 @@
         "title": "OAuthConfigResponse",
         "type": "object"
       },
-      "OneDriveConfigForm": {
+      "PickerAttachment": {
+        "additionalProperties": false,
         "properties": {
-          "ENABLE_ONEDRIVE_BUSINESS": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Onedrive Business"
+          "drive_id": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Drive Id",
+            "type": "string"
           },
-          "ENABLE_ONEDRIVE_INTEGRATION": {
+          "etag": {
             "anyOf": [
               {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Onedrive Integration"
-          },
-          "ENABLE_ONEDRIVE_PERSONAL": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Onedrive Personal"
-          },
-          "ENABLE_ONEDRIVE_SYNC": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Onedrive Sync"
-          },
-          "ONEDRIVE_CLIENT_ID_BUSINESS": {
-            "anyOf": [
-              {
+                "maxLength": 1024,
+                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Onedrive Client Id Business"
+            "title": "Etag"
           },
-          "ONEDRIVE_CLIENT_ID_PERSONAL": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Onedrive Client Id Personal"
+          "grant_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Grant Id",
+            "type": "string"
           },
-          "ONEDRIVE_MAX_FILES_PER_SYNC": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Onedrive Max Files Per Sync"
+          "item_id": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Item Id",
+            "type": "string"
           },
-          "ONEDRIVE_SHAREPOINT_TENANT_ID": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Onedrive Sharepoint Tenant Id"
+          "name": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
           },
-          "ONEDRIVE_SHAREPOINT_URL": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Onedrive Sharepoint Url"
+          "size": {
+            "minimum": 0.0,
+            "title": "Size",
+            "type": "integer"
           },
-          "ONEDRIVE_SYNC_INTERVAL_MINUTES": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Onedrive Sync Interval Minutes"
+          "web_url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Web Url",
+            "type": "string"
           }
         },
-        "title": "OneDriveConfigForm",
+        "required": [
+          "grant_id",
+          "drive_id",
+          "item_id",
+          "name",
+          "web_url",
+          "size"
+        ],
+        "title": "PickerAttachment",
         "type": "object"
       },
       "PinMessageForm": {
@@ -16120,20 +15610,6 @@
         "title": "RemoveMembersForm",
         "type": "object"
       },
-      "RemoveSourceRequest": {
-        "description": "Request to remove a source from a KB's sync configuration.",
-        "properties": {
-          "item_id": {
-            "title": "Item Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "item_id"
-        ],
-        "title": "RemoveSourceRequest",
-        "type": "object"
-      },
       "ReorderRequest": {
         "properties": {
           "slugs": {
@@ -16203,77 +15679,6 @@
           "action"
         ],
         "title": "ResolveToolCallForm",
-        "type": "object"
-      },
-      "RunSummaryForm": {
-        "properties": {
-          "counts": {
-            "additionalProperties": true,
-            "default": {},
-            "title": "Counts",
-            "type": "object"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "error_codes": {
-            "additionalProperties": true,
-            "default": {},
-            "title": "Error Codes",
-            "type": "object"
-          },
-          "failed_files": {
-            "default": [],
-            "items": {},
-            "title": "Failed Files",
-            "type": "array"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "revoked": {
-            "default": [],
-            "items": {},
-            "title": "Revoked",
-            "type": "array"
-          },
-          "sources": {
-            "anyOf": [
-              {
-                "items": {},
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sources"
-          },
-          "staged_file_ids": {
-            "default": [],
-            "items": {},
-            "title": "Staged File Ids",
-            "type": "array"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "provider",
-          "status"
-        ],
-        "title": "RunSummaryForm",
         "type": "object"
       },
       "STTConfigForm": {
@@ -16373,6 +15778,75 @@
           "MISTRAL_USE_CHAT_COMPLETIONS"
         ],
         "title": "STTConfigForm",
+        "type": "object"
+      },
+      "ScheduleForm": {
+        "additionalProperties": false,
+        "properties": {
+          "cadence_minutes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cadence Minutes"
+          },
+          "connection_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "content",
+              "acl_refresh"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "scope": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Scope",
+            "type": "object"
+          }
+        },
+        "required": [
+          "connection_id",
+          "kind",
+          "scope"
+        ],
+        "title": "ScheduleForm",
         "type": "object"
       },
       "SearchForm": {
@@ -17334,78 +16808,6 @@
         "title": "SnapshotData",
         "type": "object"
       },
-      "StageRequest": {
-        "properties": {
-          "content_type": {
-            "default": "application/octet-stream",
-            "title": "Content Type",
-            "type": "string"
-          },
-          "directory_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Directory Id"
-          },
-          "file_hash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "File Hash"
-          },
-          "filename": {
-            "title": "Filename",
-            "type": "string"
-          },
-          "knowledge_id": {
-            "title": "Knowledge Id",
-            "type": "string"
-          },
-          "relative_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Relative Path"
-          },
-          "source_id": {
-            "title": "Source Id",
-            "type": "string"
-          },
-          "source_item_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Item Id"
-          }
-        },
-        "required": [
-          "knowledge_id",
-          "source_id",
-          "filename"
-        ],
-        "title": "StageRequest",
-        "type": "object"
-      },
       "SubagentsConfigForm": {
         "properties": {
           "ENABLE_SUBAGENTS": {
@@ -17449,24 +16851,6 @@
         "title": "SubagentsConfigForm",
         "type": "object"
       },
-      "SubmitRequest": {
-        "properties": {
-          "file_id": {
-            "title": "File Id",
-            "type": "string"
-          },
-          "knowledge_id": {
-            "title": "Knowledge Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "file_id",
-          "knowledge_id"
-        ],
-        "title": "SubmitRequest",
-        "type": "object"
-      },
       "SummaryResponse": {
         "properties": {
           "total_chats": {
@@ -17493,110 +16877,6 @@
           "total_users"
         ],
         "title": "SummaryResponse",
-        "type": "object"
-      },
-      "SyncCleanupForm": {
-        "properties": {
-          "dir_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Dir Ids",
-            "type": "array"
-          },
-          "file_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "File Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "file_ids"
-        ],
-        "title": "SyncCleanupForm",
-        "type": "object"
-      },
-      "SyncDiffForm": {
-        "properties": {
-          "manifest": {
-            "items": {
-              "$ref": "#/components/schemas/FileManifestEntry"
-            },
-            "title": "Manifest",
-            "type": "array"
-          }
-        },
-        "required": [
-          "manifest"
-        ],
-        "title": "SyncDiffForm",
-        "type": "object"
-      },
-      "SyncDiffResponse": {
-        "properties": {
-          "added": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Added",
-            "type": "array"
-          },
-          "deleted": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Deleted",
-            "type": "array"
-          },
-          "directory_map": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Directory Map",
-            "type": "object"
-          },
-          "mkdir": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Mkdir",
-            "type": "array"
-          },
-          "modified": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Modified",
-            "type": "array"
-          },
-          "rmdir": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Rmdir",
-            "type": "array"
-          },
-          "unmodified_count": {
-            "title": "Unmodified Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "added",
-          "modified",
-          "deleted",
-          "mkdir",
-          "rmdir",
-          "unmodified_count",
-          "directory_map"
-        ],
-        "title": "SyncDiffResponse",
         "type": "object"
       },
       "SyncFunctionsForm": {
@@ -17627,104 +16907,55 @@
         "title": "SyncModelsForm",
         "type": "object"
       },
-      "SyncStatusResponse": {
-        "description": "Response with sync status.",
+      "SyncPolicy": {
         "properties": {
-          "error": {
+          "default_cadence_minutes": {
             "anyOf": [
               {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Cadence Minutes"
+          },
+          "min_cadence_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Cadence Minutes"
+          },
+          "providers_enabled": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers Enabled",
+            "type": "array"
+          },
+          "scope_shapes_allowed": {
+            "additionalProperties": {
+              "items": {
                 "type": "string"
               },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "failed_files": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/FailedFileInfo"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failed Files"
-          },
-          "knowledge_id": {
-            "title": "Knowledge Id",
-            "type": "string"
-          },
-          "last_sync_at": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Sync At"
-          },
-          "progress_current": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Progress Current"
-          },
-          "progress_total": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Progress Total"
-          },
-          "source_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Count"
-          },
-          "stage_counts": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stage Counts"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
+              "type": "array"
+            },
+            "title": "Scope Shapes Allowed",
+            "type": "object"
           }
         },
         "required": [
-          "knowledge_id",
-          "status"
+          "providers_enabled",
+          "scope_shapes_allowed",
+          "min_cadence_minutes",
+          "default_cadence_minutes"
         ],
-        "title": "SyncStatusResponse",
+        "title": "SyncPolicy",
         "type": "object"
       },
       "TTSConfigForm": {
@@ -18444,35 +17675,6 @@
           "token"
         ],
         "title": "TokenExchangeForm",
-        "type": "object"
-      },
-      "TokenRequest": {
-        "properties": {
-          "knowledge_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Knowledge Id"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "provider"
-        ],
-        "title": "TokenRequest",
         "type": "object"
       },
       "TokenUsageEntry": {
@@ -22630,181 +21832,6 @@
         "title": "MessageForm",
         "type": "object"
       },
-      "open_webui__routers__confluence_sync__SyncItem": {
-        "description": "A single Confluence item (whole space, or one page with optional subtree).",
-        "properties": {
-          "cloud_id": {
-            "title": "Cloud Id",
-            "type": "string"
-          },
-          "include_descendants": {
-            "default": true,
-            "title": "Include Descendants",
-            "type": "boolean"
-          },
-          "item_id": {
-            "title": "Item Id",
-            "type": "string"
-          },
-          "item_path": {
-            "title": "Item Path",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "site_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Site Url"
-          },
-          "space_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Space Id"
-          },
-          "space_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Space Key"
-          },
-          "type": {
-            "enum": [
-              "space",
-              "page"
-            ],
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "cloud_id",
-          "item_id",
-          "item_path",
-          "name"
-        ],
-        "title": "SyncItem",
-        "type": "object"
-      },
-      "open_webui__routers__confluence_sync__SyncItemsRequest": {
-        "description": "Request to sync multiple Confluence items to a Knowledge base.",
-        "properties": {
-          "access_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Access Token"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/open_webui__routers__confluence_sync__SyncItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "knowledge_id": {
-            "title": "Knowledge Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "knowledge_id",
-          "items"
-        ],
-        "title": "SyncItemsRequest",
-        "type": "object"
-      },
-      "open_webui__routers__google_drive_sync__SyncItem": {
-        "description": "A single Google Drive item (file or folder) to sync.",
-        "properties": {
-          "item_id": {
-            "title": "Item Id",
-            "type": "string"
-          },
-          "item_path": {
-            "title": "Item Path",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "type": {
-            "enum": [
-              "file",
-              "folder"
-            ],
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "item_id",
-          "item_path",
-          "name"
-        ],
-        "title": "SyncItem",
-        "type": "object"
-      },
-      "open_webui__routers__google_drive_sync__SyncItemsRequest": {
-        "description": "Request to sync multiple Google Drive items to a Knowledge base.",
-        "properties": {
-          "access_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Access Token"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/open_webui__routers__google_drive_sync__SyncItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "knowledge_id": {
-            "title": "Knowledge Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "knowledge_id",
-          "items"
-        ],
-        "title": "SyncItemsRequest",
-        "type": "object"
-      },
       "open_webui__routers__ollama__ConnectionVerificationForm": {
         "properties": {
           "key": {
@@ -22875,71 +21902,6 @@
           "model"
         ],
         "title": "ResponsesForm",
-        "type": "object"
-      },
-      "open_webui__routers__onedrive_sync__SyncItem": {
-        "description": "A single OneDrive item (file or folder) to sync.",
-        "properties": {
-          "drive_id": {
-            "title": "Drive Id",
-            "type": "string"
-          },
-          "item_id": {
-            "title": "Item Id",
-            "type": "string"
-          },
-          "item_path": {
-            "title": "Item Path",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "type": {
-            "enum": [
-              "file",
-              "folder"
-            ],
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "drive_id",
-          "item_id",
-          "item_path",
-          "name"
-        ],
-        "title": "SyncItem",
-        "type": "object"
-      },
-      "open_webui__routers__onedrive_sync__SyncItemsRequest": {
-        "description": "Request to sync multiple OneDrive items to a Knowledge base.",
-        "properties": {
-          "access_token": {
-            "title": "Access Token",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/open_webui__routers__onedrive_sync__SyncItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "knowledge_id": {
-            "title": "Knowledge Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "knowledge_id",
-          "items",
-          "access_token"
-        ],
-        "title": "SyncItemsRequest",
         "type": "object"
       },
       "open_webui__routers__openai__ConnectionVerificationForm": {
@@ -24320,7 +23282,7 @@
     },
     "/api/v1/agent/chat/completions": {
       "post": {
-        "description": "Proxy POST /v1/chat/completions to the agent service with SSE streaming.\n\nInjects the verified user's UUID into the body as ``user_id`` so the\nagent service can set its acting-user ContextVar. Without this, KB\nretrieval tools that gate on ``/accessible-kbs`` fail with\n\"acting user is not set\".\n\nEach ``files[]`` entry of type ``collection`` may be addressed by KB\nUUID (``id``) or by the integration ingest pair (``source_id`` +\n``provider``). The pair is resolved to a UUID here so the upstream\nagent only ever sees ``id``. ``id`` takes precedence when both are\nprovided.",
+        "description": "Proxy POST /v1/chat/completions to the agent service with SSE streaming.\n\nInjects the verified user's UUID into the body as ``user_id`` so the\nagent service can read through the internal retrieval routes as that\nuser by sending ``X-Acting-User-Id``.\n\nEach ``files[]`` entry of type ``collection`` may be addressed by KB\nUUID (``id``) or by the integration ingest pair (``source_id`` +\n``provider``). The pair is resolved to a UUID here so the upstream\nagent only ever sees ``id``. ``id`` takes precedence when both are\nprovided.",
         "operationId": "chat_completions_api_v1_agent_chat_completions_post",
         "requestBody": {
           "content": {
@@ -32776,6 +31738,893 @@
         ]
       }
     },
+    "/api/v1/cloud-sync/connect/done": {
+      "get": {
+        "operationId": "connect_done_api_v1_cloud_sync_connect_done_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "connection",
+            "required": true,
+            "schema": {
+              "title": "Connection",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "result",
+            "required": true,
+            "schema": {
+              "enum": [
+                "pending",
+                "error",
+                "invalid"
+              ],
+              "title": "Result",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connect Done",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/connections": {
+      "get": {
+        "operationId": "list_connections_api_v1_cloud_sync_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Connections",
+        "tags": [
+          "cloud-sync"
+        ]
+      },
+      "post": {
+        "operationId": "create_connection_api_v1_cloud_sync_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Connection",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/connections/{connection_id}": {
+      "delete": {
+        "operationId": "revoke_connection_api_v1_cloud_sync_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Connection",
+        "tags": [
+          "cloud-sync"
+        ]
+      },
+      "get": {
+        "operationId": "get_connection_api_v1_cloud_sync_connections__connection_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Connection",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/connections/{connection_id}/authorize": {
+      "post": {
+        "operationId": "authorize_connection_api_v1_cloud_sync_connections__connection_id__authorize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Authorize Connection",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/connections/{connection_id}/live/{family}": {
+      "get": {
+        "operationId": "live_grants_api_v1_cloud_sync_connections__connection_id__live__family__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "family",
+            "required": true,
+            "schema": {
+              "enum": [
+                "live_documents",
+                "mail"
+              ],
+              "title": "Family",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Live Grants",
+        "tags": [
+          "cloud-sync"
+        ]
+      },
+      "post": {
+        "operationId": "enable_live_family_api_v1_cloud_sync_connections__connection_id__live__family__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "family",
+            "required": true,
+            "schema": {
+              "enum": [
+                "live_documents",
+                "mail"
+              ],
+              "title": "Family",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Enable Live Family",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/connections/{connection_id}/usage": {
+      "get": {
+        "operationId": "connection_usage_api_v1_cloud_sync_connections__connection_id__usage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connection Usage",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules": {
+      "post": {
+        "operationId": "create_schedule_api_v1_cloud_sync_knowledge__knowledge_id__schedules_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Schedule",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}": {
+      "delete": {
+        "operationId": "delete_schedule_api_v1_cloud_sync_knowledge__knowledge_id__schedules__schedule_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Schedule",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/cancel": {
+      "post": {
+        "operationId": "cancel_schedule_api_v1_cloud_sync_knowledge__knowledge_id__schedules__schedule_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Schedule",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/resume": {
+      "post": {
+        "operationId": "resume_schedule_api_v1_cloud_sync_knowledge__knowledge_id__schedules__schedule_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resume Schedule",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/run": {
+      "post": {
+        "operationId": "run_schedule_api_v1_cloud_sync_knowledge__knowledge_id__schedules__schedule_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Schedule",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/skipped": {
+      "get": {
+        "operationId": "skipped_items_api_v1_cloud_sync_knowledge__knowledge_id__schedules__schedule_id__skipped_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Skipped Items",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/suspend": {
+      "post": {
+        "operationId": "suspend_schedule_api_v1_cloud_sync_knowledge__knowledge_id__schedules__schedule_id__suspend_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Suspend Schedule",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/knowledge/{knowledge_id}/sync": {
+      "get": {
+        "operationId": "sync_status_api_v1_cloud_sync_knowledge__knowledge_id__sync_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sync Status",
+        "tags": [
+          "cloud-sync"
+        ]
+      },
+      "post": {
+        "operationId": "sync_all_api_v1_cloud_sync_knowledge__knowledge_id__sync_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sync All",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
+    "/api/v1/cloud-sync/policy": {
+      "get": {
+        "operationId": "get_policy_api_v1_cloud_sync_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncPolicy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Policy",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
     "/api/v1/configs/2fa": {
       "get": {
         "operationId": "get_2fa_config_api_v1_configs_2fa_get",
@@ -32986,31 +32835,6 @@
         ]
       }
     },
-    "/api/v1/configs/cloud-sync/status": {
-      "get": {
-        "description": "Per-provider cloud-sync status summary for the admin Cloud Sync panel.\n\nCheap (one KB query per provider + one grouped file-count query) so it can\nbe polled while syncs run. Providers with no KBs return zero-state entries.",
-        "operationId": "get_cloud_sync_status_api_v1_configs_cloud_sync_status_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Cloud Sync Status",
-        "tags": [
-          "configs"
-        ]
-      }
-    },
     "/api/v1/configs/code_execution": {
       "get": {
         "operationId": "get_code_execution_config_api_v1_configs_code_execution_get",
@@ -33076,72 +32900,6 @@
           }
         ],
         "summary": "Set Code Execution Config",
-        "tags": [
-          "configs"
-        ]
-      }
-    },
-    "/api/v1/configs/confluence": {
-      "get": {
-        "operationId": "get_confluence_config_api_v1_configs_confluence_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Confluence Config",
-        "tags": [
-          "configs"
-        ]
-      },
-      "post": {
-        "operationId": "set_confluence_config_api_v1_configs_confluence_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfluenceConfigForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Set Confluence Config",
         "tags": [
           "configs"
         ]
@@ -33492,72 +33250,6 @@
           }
         ],
         "summary": "Set External Agents Config",
-        "tags": [
-          "configs"
-        ]
-      }
-    },
-    "/api/v1/configs/google_drive": {
-      "get": {
-        "operationId": "get_google_drive_config_api_v1_configs_google_drive_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Google Drive Config",
-        "tags": [
-          "configs"
-        ]
-      },
-      "post": {
-        "operationId": "set_google_drive_config_api_v1_configs_google_drive_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GoogleDriveConfigForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Set Google Drive Config",
         "tags": [
           "configs"
         ]
@@ -34009,72 +33701,6 @@
           }
         ],
         "summary": "Register Oauth Client",
-        "tags": [
-          "configs"
-        ]
-      }
-    },
-    "/api/v1/configs/onedrive": {
-      "get": {
-        "operationId": "get_onedrive_config_api_v1_configs_onedrive_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Onedrive Config",
-        "tags": [
-          "configs"
-        ]
-      },
-      "post": {
-        "operationId": "set_onedrive_config_api_v1_configs_onedrive_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OneDriveConfigForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Set Onedrive Config",
         "tags": [
           "configs"
         ]
@@ -34558,828 +34184,6 @@
         "summary": "Verify Tool Servers Config",
         "tags": [
           "configs"
-        ]
-      }
-    },
-    "/api/v1/confluence/auth/initiate": {
-      "get": {
-        "description": "Initiate OAuth auth code flow for Confluence.",
-        "operationId": "initiate_auth_api_v1_confluence_auth_initiate_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "knowledge_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Knowledge Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Initiate Auth",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/auth/revoke/{knowledge_id}": {
-      "post": {
-        "description": "Revoke and delete stored Confluence token for a user's KBs.",
-        "operationId": "revoke_token_api_v1_confluence_auth_revoke__knowledge_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Revoke Token",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/auth/test": {
-      "post": {
-        "description": "Probe a service-account Confluence credential by listing one space.\n\nAdmin-only. Builds a basic- or scoped-mode client from the submitted\ncredentials (falling back to stored config for blank fields) and lists a\nsingle space. Returns ``{ok, reason, detail, space_count?}`` \u2014 ``reason`` is\na stable machine code the frontend localizes; ``detail`` is an English debug\nfallback. Scoped mode resolves the gateway cloudId first (``missing_cloud_id``\nwhen it can't) and maps an under-scoped token (``401 \"scope does not match\"``)\nto ``scope_mismatch`` so the admin knows to add the missing read scope.",
-        "operationId": "test_connection_api_v1_confluence_auth_test_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfluenceTestConnectionForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Test Connection",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/auth/token-status/{knowledge_id}": {
-      "get": {
-        "description": "Check if a stored token exists and is valid for a KB.\n\nIn the service modes (basic/scoped) there is no per-user OAuth token \u2014\nreport 'connected' whenever the global service credential is configured,\nso the picker can proceed without an OAuth authorization step.",
-        "operationId": "get_token_status_api_v1_confluence_auth_token_status__knowledge_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Token Status",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/browse/pages": {
-      "get": {
-        "description": "List top-level pages in a space or children of a given page.\n\nProvide either space_id (to list the space's root pages) or parent_id\n(to expand a page's children).",
-        "operationId": "browse_pages_api_v1_confluence_browse_pages_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "cloud_id",
-            "required": true,
-            "schema": {
-              "title": "Cloud Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "space_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Space Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "parent_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Parent Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Browse Pages",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/browse/sites": {
-      "get": {
-        "description": "List the Confluence sites available for browsing.\n\nIn a service mode (basic/scoped) this is the single configured site; in\noauth mode it is every site the authenticated user's token can reach.",
-        "operationId": "browse_sites_api_v1_confluence_browse_sites_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Browse Sites",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/browse/spaces": {
-      "get": {
-        "description": "List spaces for a given Confluence site.",
-        "operationId": "browse_spaces_api_v1_confluence_browse_spaces_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "cloud_id",
-            "required": true,
-            "schema": {
-              "title": "Cloud Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Browse Spaces",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/page/{cloud_id}/{page_id}/content": {
-      "get": {
-        "description": "Fetch one Confluence page rendered as Markdown \u2014 for ad-hoc chat attach.\n\nUsed by the chat ``+`` menu Confluence picker: the user picks pages and\neach is fetched + HTML\u2192Markdown rendered here, then attached to the chat\nas a one-off file. Reuses the picker's per-user/basic client resolution.",
-        "operationId": "get_page_content_api_v1_confluence_page__cloud_id___page_id__content_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "cloud_id",
-            "required": true,
-            "schema": {
-              "title": "Cloud Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "page_id",
-            "required": true,
-            "schema": {
-              "title": "Page Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Page Content Api V1 Confluence Page  Cloud Id   Page Id  Content Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Page Content",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/shared": {
-      "delete": {
-        "description": "Soft-delete the shared Confluence KB (admin-only).\n\nThe shared KB is blocked from deletion via the workspace Knowledge UI\n(see ``knowledge.py`` ``_assert_not_managed_shared_kb``) \u2014 this admin\nendpoint is the only managed way to remove it. The cleanup worker purges\nits files and vectors afterwards.",
-        "operationId": "delete_shared_kb_api_v1_confluence_shared_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Delete Shared Kb Api V1 Confluence Shared Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Delete Shared Kb",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/shared/provision": {
-      "post": {
-        "description": "Create (or update) the single shared, public-read Confluence KB.\n\nAdmin-only. Stamps ``shared`` / ``auth_mode`` and the admin-selected\n``spaces`` into the KB meta and grants ``user:*:read`` directly via\n``AccessGrants`` \u2014 bypassing the non-local-type guards in the user\nknowledge router by not going through it, leaving those guards intact\nfor normal user KBs.",
-        "operationId": "provision_shared_kb_api_v1_confluence_shared_provision_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfluenceProvisionForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Provision Shared Kb Api V1 Confluence Shared Provision Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Provision Shared Kb",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/shared/spaces": {
-      "get": {
-        "description": "List the Confluence spaces available for the shared KB (admin).\n\nPre-synced mode. In a service mode (basic/scoped), enumerates every space\nthe service account sees. In OAuth, enumerates spaces the configured\nowner's token can reach \u2014 the owner's token is what the scheduler syncs\nwith, so the picker shows exactly what the sync can fetch.",
-        "operationId": "list_shared_kb_spaces_api_v1_confluence_shared_spaces_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Shared Kb Spaces Api V1 Confluence Shared Spaces Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Shared Kb Spaces",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/shared/status": {
-      "get": {
-        "description": "Report shared-KB provisioning state and last sync result (admin).",
-        "operationId": "get_shared_kb_status_api_v1_confluence_shared_status_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Shared Kb Status Api V1 Confluence Shared Status Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Shared Kb Status",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/shared/sync": {
-      "post": {
-        "description": "Trigger an immediate full sync of the shared Confluence KB (admin).",
-        "operationId": "sync_shared_kb_api_v1_confluence_shared_sync_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Sync Shared Kb Api V1 Confluence Shared Sync Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Sync Shared Kb",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/sync/items": {
-      "post": {
-        "description": "Start Confluence sync for multiple items (spaces and/or pages).",
-        "operationId": "sync_items_api_v1_confluence_sync_items_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__confluence_sync__SyncItemsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Sync Items",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/sync/{knowledge_id}": {
-      "get": {
-        "description": "Get sync status for a Knowledge base.",
-        "operationId": "get_sync_status_api_v1_confluence_sync__knowledge_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SyncStatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Sync Status",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/sync/{knowledge_id}/cancel": {
-      "post": {
-        "description": "Cancel an ongoing Confluence sync for a Knowledge base.",
-        "operationId": "cancel_sync_api_v1_confluence_sync__knowledge_id__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Cancel Sync",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/sync/{knowledge_id}/sources/remove": {
-      "post": {
-        "description": "Remove a source from a KB's Confluence sync configuration.",
-        "operationId": "remove_source_api_v1_confluence_sync__knowledge_id__sources_remove_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RemoveSourceRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Remove Source",
-        "tags": [
-          "confluence"
-        ]
-      }
-    },
-    "/api/v1/confluence/synced-collections": {
-      "get": {
-        "description": "List all Knowledge bases with Confluence sync enabled for current user.",
-        "operationId": "list_synced_collections_api_v1_confluence_synced_collections_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response List Synced Collections Api V1 Confluence Synced Collections Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Synced Collections",
-        "tags": [
-          "confluence"
         ]
       }
     },
@@ -36552,6 +35356,62 @@
         ]
       }
     },
+    "/api/v1/files/onedrive/attach": {
+      "post": {
+        "operationId": "attach_onedrive_api_v1_files_onedrive_attach_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickerAttachment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Attach Onedrive",
+        "tags": [
+          "files"
+        ]
+      }
+    },
     "/api/v1/files/search": {
       "get": {
         "description": "Search for files by filename with support for wildcard patterns.\nUses SQL-based filtering with pagination for better performance.",
@@ -36899,6 +35759,59 @@
         "tags": [
           "files"
         ]
+      },
+      "head": {
+        "operationId": "get_file_content_by_id_api_v1_files__id__content_head",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attachment",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Attachment",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get File Content By Id",
+        "tags": [
+          "files"
+        ]
       }
     },
     "/api/v1/files/{id}/content/html": {
@@ -36956,6 +35869,15 @@
             "required": true,
             "schema": {
               "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_name",
+            "required": true,
+            "schema": {
+              "title": "File Name",
               "type": "string"
             }
           }
@@ -38667,403 +37589,6 @@
         ]
       }
     },
-    "/api/v1/google-drive/auth/access-token": {
-      "get": {
-        "description": "Get a valid Google Drive access token, refreshing if needed.\n\nUsed by the frontend for the Google Drive picker and file downloads.\nReturns 401 if no stored token exists (user must authorize first).",
-        "operationId": "get_access_token_api_v1_google_drive_auth_access_token_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Access Token",
-        "tags": [
-          "google-drive"
-        ]
-      }
-    },
-    "/api/v1/google-drive/auth/initiate": {
-      "get": {
-        "description": "Initiate OAuth auth code flow for Google Drive.\n\nknowledge_id is optional \u2014 if provided, validates KB ownership.\nUsed for both knowledge base background sync auth and general picker auth.",
-        "operationId": "initiate_auth_api_v1_google_drive_auth_initiate_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "knowledge_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Knowledge Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Initiate Auth",
-        "tags": [
-          "google-drive"
-        ]
-      }
-    },
-    "/api/v1/google-drive/auth/revoke/{knowledge_id}": {
-      "post": {
-        "description": "Revoke and delete stored token for a KB.",
-        "operationId": "revoke_token_api_v1_google_drive_auth_revoke__knowledge_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Revoke Token",
-        "tags": [
-          "google-drive"
-        ]
-      }
-    },
-    "/api/v1/google-drive/auth/token-status/{knowledge_id}": {
-      "get": {
-        "description": "Check if a stored token exists and is valid for a KB.",
-        "operationId": "get_token_status_api_v1_google_drive_auth_token_status__knowledge_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Token Status",
-        "tags": [
-          "google-drive"
-        ]
-      }
-    },
-    "/api/v1/google-drive/sync/items": {
-      "post": {
-        "description": "Start Google Drive sync for multiple items (files and folders).",
-        "operationId": "sync_items_api_v1_google_drive_sync_items_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__google_drive_sync__SyncItemsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Sync Items",
-        "tags": [
-          "google-drive"
-        ]
-      }
-    },
-    "/api/v1/google-drive/sync/{knowledge_id}": {
-      "get": {
-        "description": "Get sync status for a Knowledge base.",
-        "operationId": "get_sync_status_api_v1_google_drive_sync__knowledge_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SyncStatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Sync Status",
-        "tags": [
-          "google-drive"
-        ]
-      }
-    },
-    "/api/v1/google-drive/sync/{knowledge_id}/cancel": {
-      "post": {
-        "description": "Cancel an ongoing Google Drive sync for a Knowledge base.",
-        "operationId": "cancel_sync_api_v1_google_drive_sync__knowledge_id__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Cancel Sync",
-        "tags": [
-          "google-drive"
-        ]
-      }
-    },
-    "/api/v1/google-drive/sync/{knowledge_id}/sources/remove": {
-      "post": {
-        "description": "Remove a source from a KB's Google Drive sync configuration.",
-        "operationId": "remove_source_api_v1_google_drive_sync__knowledge_id__sources_remove_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RemoveSourceRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Remove Source",
-        "tags": [
-          "google-drive"
-        ]
-      }
-    },
-    "/api/v1/google-drive/synced-collections": {
-      "get": {
-        "description": "List all Knowledge bases with Google Drive sync enabled for current user.",
-        "operationId": "list_synced_collections_api_v1_google_drive_synced_collections_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response List Synced Collections Api V1 Google Drive Synced Collections Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Synced Collections",
-        "tags": [
-          "google-drive"
-        ]
-      }
-    },
     "/api/v1/groups/": {
       "get": {
         "operationId": "get_groups_api_v1_groups__get",
@@ -39899,38 +38424,6 @@
               "title": "Source Id",
               "type": "string"
             }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-Provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-Provider"
-            }
           }
         ],
         "responses": {
@@ -40018,84 +38511,6 @@
         ]
       }
     },
-    "/api/v1/integrations/file-status/{file_id}": {
-      "get": {
-        "description": "Return the File's current processing status for the loader poll\n(``processing`` \u2192 ``completed`` / ``error``). Status is dual-written by\n``Files.set_status`` into both meta and data; meta is the cheap read.",
-        "operationId": "get_file_status_api_v1_integrations_file_status__file_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "file_id",
-            "required": true,
-            "schema": {
-              "title": "File Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-Provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-Provider"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get File Status",
-        "tags": [
-          "integrations"
-        ]
-      }
-    },
     "/api/v1/integrations/openapi.json": {
       "get": {
         "description": "Return OpenAPI spec scoped to integration endpoints only.",
@@ -40116,164 +38531,6 @@
           }
         ],
         "summary": "Get Integration Openapi",
-        "tags": [
-          "integrations"
-        ]
-      }
-    },
-    "/api/v1/integrations/stage": {
-      "post": {
-        "description": "Find-or-create the ``File`` row for a cloud-synced file at its canonical\nS3 key and hand back a presigned PUT the loader-worker uses to upload the\noriginal bytes over plain HTTPS.\n\nThe canonical key is the one wiring invariant: the PUT MUST target the same\nkey ``File.path`` records and warren's later presigned GET (issued in\n``submit_existing_file_to_pipeline``) reads. Both the key derivation and its\ninverse live in the storage provider (``get_object_path`` mirrors\n``upload_file``), so the path is never string-assembled here.",
-        "operationId": "stage_file_api_v1_integrations_stage_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-Provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-Provider"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StageRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Stage File",
-        "tags": [
-          "integrations"
-        ]
-      }
-    },
-    "/api/v1/integrations/submit": {
-      "post": {
-        "description": "Submit an already-staged ``File`` to warren via the shared\n``submit_existing_file_to_pipeline`` body (presign GET + submit job + link +\nmark 'processing'). The acting user is the loader-resolved principal user.",
-        "operationId": "submit_file_api_v1_integrations_submit_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-Provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-Provider"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SubmitRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Submit File",
         "tags": [
           "integrations"
         ]
@@ -40340,77 +38597,6 @@
           }
         ],
         "summary": "List Accessible Files",
-        "tags": [
-          "internal-retrieval"
-        ]
-      }
-    },
-    "/api/v1/internal/retrieval/accessible-kbs": {
-      "get": {
-        "description": "List the KBs the acting user may read, plus the meta-collection name.\n\nShaped for agents that prefer to query the per-tenant Weaviate directly:\n``collection_name`` is the sanitised class name as it lives in the vector\nDB; ``kb_index_collection_name`` points at the meta-collection where each\nKB has a ``(name, description)`` embedding indexed by\n``metadata.knowledge_base_id``. Open-webui owns the ACL pass; the agent\nowns the query construction.\n\n:param kb_ids: Optional comma-separated subset filter. KBs not in the\n    subset are dropped before the suspended-KB filter runs.",
-        "operationId": "list_accessible_kbs_api_v1_internal_retrieval_accessible_kbs_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "kb_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Kb Ids"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccessibleKBsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Accessible Kbs",
         "tags": [
           "internal-retrieval"
         ]
@@ -40674,7 +38860,7 @@
     },
     "/api/v1/internal/retrieval/knowledge/{knowledge_id}/files": {
       "get": {
-        "description": "List files in a knowledge base for the acting user.\n\nAgent-bearer counterpart to ``GET /api/v1/knowledge/{id}/files`` (which\nis session-cookie-gated and therefore unreachable from external agents\nthat only hold the shared agent bearer). Same listing payload \u2014 both\nroutes ultimately go through :meth:`Knowledges.search_files_by_id` \u2014 but\nauth is agent bearer + ``X-Acting-User-Id`` and the ACL skips the admin\ncross-user shortcut (tenant-isolated agents do not get that cone).\n\nUsed by soev-agents' ``OwuiKnowledgeFilesClient`` (the source of truth\nfor ``list_documents`` / ``find_documents`` in the OpenWebUI retrieval\nprovider). Returns the same ``{items, total}`` shape that client expects.\n\nA suspended KB returns HTTP 403 for everyone; there is no admin bypass\non this surface \u2014 tenant-isolated agents must not circumvent suspension.",
+        "description": "List files in a knowledge base for the acting user.\n\nAgent-bearer counterpart to ``GET /api/v1/knowledge/{id}/files`` (which\nis session-cookie-gated and therefore unreachable from external agents\nthat only hold the shared agent bearer). Same listing payload \u2014 both\nroutes ultimately go through :meth:`Knowledges.search_files_by_id` \u2014 but\nauth is agent bearer + ``X-Acting-User-Id`` and the ACL skips the admin\ncross-user shortcut (tenant-isolated agents do not get that cone).\n\nUsed by soev-agents' ``OwuiKnowledgeFilesClient`` (the source of truth\nfor ``list_documents`` / ``find_documents`` in the OpenWebUI retrieval\nprovider). Returns the same ``{items, total}`` shape that client expects.",
         "operationId": "list_knowledge_files_api_v1_internal_retrieval_knowledge__knowledge_id__files_get",
         "parameters": [
           {
@@ -40778,7 +38964,7 @@
     "/api/v1/internal/retrieval/query": {
       "post": {
         "deprecated": true,
-        "description": "**Deprecated** \u2014 kept for compatibility with the rev-2 simple-default path.\n\nThe canonical agent retrieval flow is ``GET /accessible-kbs`` followed by\ndirect Weaviate access from the agent (rev-3 amendment in\n`2026-04-25-shared-services-loader-worker.md`). All current Gradient agents\nuse that path; nothing in the soev monorepo calls ``/query`` today. The\nendpoint stays on the wire so an external simple-agent integration that\nprefers a single open-webui call doesn't have to be rewritten, but new\nagents should not target it.",
+        "description": "**Deprecated** \u2014 kept for compatibility with the rev-2 simple-default path.\n\nAgents read through the remaining internal retrieval routes, acting as\nthe user supplied in ``X-Acting-User-Id``. This endpoint stays on the wire\nfor external simple-agent integrations that prefer a single open-webui\ncall, but new agents should use the remaining retrieval routes.",
         "operationId": "agent_query_api_v1_internal_retrieval_query_post",
         "parameters": [
           {
@@ -42007,18 +40193,6 @@
             }
           },
           {
-            "description": "Include file content in search (expensive).",
-            "in": "query",
-            "name": "include_content",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "Include file content in search (expensive).",
-              "title": "Include Content",
-              "type": "boolean"
-            }
-          },
-          {
             "in": "query",
             "name": "page",
             "required": false,
@@ -42248,38 +40422,6 @@
             "schema": {
               "title": "Id",
               "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-Provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-Provider"
             }
           }
         ],
@@ -42893,18 +41035,6 @@
             }
           },
           {
-            "description": "Include file content in search (expensive).",
-            "in": "query",
-            "name": "include_content",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "Include file content in search (expensive).",
-              "title": "Include Content",
-              "type": "boolean"
-            }
-          },
-          {
             "description": "Filter by directory ID. Pass empty string for root.",
             "in": "query",
             "name": "directory_id",
@@ -43147,184 +41277,6 @@
         ]
       }
     },
-    "/api/v1/knowledge/{id}/sync/cleanup": {
-      "post": {
-        "description": "Remove stale files and orphaned directories from a knowledge base\nafter an incremental sync.",
-        "operationId": "sync_knowledge_cleanup_api_v1_knowledge__id__sync_cleanup_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-Provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-Provider"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SyncCleanupForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Sync Knowledge Cleanup",
-        "tags": [
-          "knowledge"
-        ]
-      }
-    },
-    "/api/v1/knowledge/{id}/sync/diff": {
-      "post": {
-        "description": "Compare a local file manifest against the knowledge base to determine\nwhich files need uploading, removing, and which directories to create/remove.",
-        "operationId": "sync_knowledge_diff_api_v1_knowledge__id__sync_diff_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "title": "Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-Provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-Provider"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SyncDiffForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SyncDiffResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Sync Knowledge Diff",
-        "tags": [
-          "knowledge"
-        ]
-      }
-    },
     "/api/v1/knowledge/{id}/update": {
       "post": {
         "operationId": "update_knowledge_by_id_api_v1_knowledge__id__update_post",
@@ -43387,6 +41339,352 @@
         "summary": "Update Knowledge By Id",
         "tags": [
           "knowledge"
+        ]
+      }
+    },
+    "/api/v1/meetings": {
+      "get": {
+        "operationId": "list_meetings_api_v1_meetings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "pattern": "^[a-z_,]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Include"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Meetings",
+        "tags": [
+          "meetings"
+        ]
+      },
+      "post": {
+        "operationId": "start_meeting_api_v1_meetings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeetingInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Meeting",
+        "tags": [
+          "meetings"
+        ]
+      }
+    },
+    "/api/v1/meetings/agents": {
+      "get": {
+        "operationId": "list_agents_api_v1_meetings_agents_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Agents",
+        "tags": [
+          "meetings"
+        ]
+      }
+    },
+    "/api/v1/meetings/audio": {
+      "post": {
+        "operationId": "upload_audio_api_v1_meetings_audio_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload Audio",
+        "tags": [
+          "meetings"
+        ]
+      }
+    },
+    "/api/v1/meetings/{meeting_id}": {
+      "delete": {
+        "operationId": "delete_meeting_api_v1_meetings__meeting_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "meeting_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Meeting Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Meeting",
+        "tags": [
+          "meetings"
+        ]
+      },
+      "get": {
+        "operationId": "get_meeting_api_v1_meetings__meeting_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "meeting_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Meeting Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Meeting",
+        "tags": [
+          "meetings"
+        ]
+      }
+    },
+    "/api/v1/meetings/{meeting_id}/inputs": {
+      "post": {
+        "operationId": "send_input_api_v1_meetings__meeting_id__inputs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "meeting_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Meeting Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeetingInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Send Input",
+        "tags": [
+          "meetings"
         ]
       }
     },
@@ -45782,371 +44080,6 @@
         "summary": "Test Notification Target",
         "tags": [
           "notifications"
-        ]
-      }
-    },
-    "/api/v1/onedrive/auth/initiate": {
-      "get": {
-        "description": "Initiate OAuth auth code flow for background sync.",
-        "operationId": "initiate_auth_api_v1_onedrive_auth_initiate_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Initiate Auth",
-        "tags": [
-          "onedrive"
-        ]
-      }
-    },
-    "/api/v1/onedrive/auth/revoke/{knowledge_id}": {
-      "post": {
-        "description": "Revoke and delete stored token for a KB.",
-        "operationId": "revoke_token_api_v1_onedrive_auth_revoke__knowledge_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Revoke Token",
-        "tags": [
-          "onedrive"
-        ]
-      }
-    },
-    "/api/v1/onedrive/auth/token-status/{knowledge_id}": {
-      "get": {
-        "description": "Check if a stored token exists and is valid for a KB.",
-        "operationId": "get_token_status_api_v1_onedrive_auth_token_status__knowledge_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Token Status",
-        "tags": [
-          "onedrive"
-        ]
-      }
-    },
-    "/api/v1/onedrive/sync/items": {
-      "post": {
-        "description": "Start OneDrive sync for multiple items (files and folders).",
-        "operationId": "sync_items_api_v1_onedrive_sync_items_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__onedrive_sync__SyncItemsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Sync Items",
-        "tags": [
-          "onedrive"
-        ]
-      }
-    },
-    "/api/v1/onedrive/sync/{knowledge_id}": {
-      "get": {
-        "description": "Get sync status for a Knowledge base.",
-        "operationId": "get_sync_status_api_v1_onedrive_sync__knowledge_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SyncStatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Sync Status",
-        "tags": [
-          "onedrive"
-        ]
-      }
-    },
-    "/api/v1/onedrive/sync/{knowledge_id}/cancel": {
-      "post": {
-        "description": "Cancel an ongoing OneDrive sync for a Knowledge base.",
-        "operationId": "cancel_sync_api_v1_onedrive_sync__knowledge_id__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Cancel Sync",
-        "tags": [
-          "onedrive"
-        ]
-      }
-    },
-    "/api/v1/onedrive/sync/{knowledge_id}/sources/remove": {
-      "post": {
-        "description": "Remove a source from a KB's OneDrive sync configuration.",
-        "operationId": "remove_source_api_v1_onedrive_sync__knowledge_id__sources_remove_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RemoveSourceRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Remove Source",
-        "tags": [
-          "onedrive"
-        ]
-      }
-    },
-    "/api/v1/onedrive/synced-collections": {
-      "get": {
-        "description": "List all Knowledge bases with OneDrive sync enabled for current user.",
-        "operationId": "list_synced_collections_api_v1_onedrive_synced_collections_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response List Synced Collections Api V1 Onedrive Synced Collections Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "List Synced Collections",
-        "tags": [
-          "onedrive"
         ]
       }
     },
@@ -48716,219 +46649,6 @@
         "summary": "Get Skill List",
         "tags": [
           "skills"
-        ]
-      }
-    },
-    "/api/v1/sync-daemon/config/{provider}": {
-      "get": {
-        "description": "Per-provider admin sync config + the KB registry (D-2 scheduler feed).\n\nService-level auth (bearer only): the scheduler reads config before it\nknows any KB owner, so there is no acting user to require here.",
-        "operationId": "get_provider_sync_config_api_v1_sync_daemon_config__provider__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider",
-            "required": true,
-            "schema": {
-              "title": "Provider",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Provider Sync Config",
-        "tags": [
-          "sync-daemon"
-        ]
-      }
-    },
-    "/api/v1/sync-daemon/runs/{knowledge_id}/summary": {
-      "post": {
-        "description": "Persist a daemon run-state report onto the KB's sync meta (D-3).\n\nHeartbeat on every call; ``last_sync_at``/``last_result`` on terminal\nstatuses; the ``sources`` cursor only on clean terminal runs (R8, enforced\nserver-side here). On terminal statuses also fail-marks staged files the\nrun left non-terminal and emits the provider's ``{prefix}:sync:progress``\nsocket event.",
-        "operationId": "post_run_summary_api_v1_sync_daemon_runs__knowledge_id__summary_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "knowledge_id",
-            "required": true,
-            "schema": {
-              "title": "Knowledge Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-Provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-Provider"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RunSummaryForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Post Run Summary",
-        "tags": [
-          "sync-daemon"
-        ]
-      }
-    },
-    "/api/v1/sync-daemon/token": {
-      "post": {
-        "description": "Token broker: hand the daemon a short-lived provider access token.\n\nReuses the provider's TokenManager (refresh-on-expiry, needs_reauth\nfan-out). Never returns refresh tokens. 404 ``{\"needs_reauth\": true}``\nwhen no valid token exists or the refresh failed.",
-        "operationId": "issue_provider_token_api_v1_sync_daemon_token_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-Acting-User-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-User-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Acting-Provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Acting-Provider"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TokenRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Issue Provider Token",
-        "tags": [
-          "sync-daemon"
         ]
       }
     },
@@ -52205,51 +49925,6 @@
           }
         ],
         "summary": "Export Document As Docx",
-        "tags": [
-          "utils"
-        ]
-      }
-    },
-    "/api/v1/utils/document/pdf": {
-      "post": {
-        "description": "Export a single markdown document as a PDF.",
-        "operationId": "export_document_as_pdf_api_v1_utils_document_pdf_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DocumentExportForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Export Document As Pdf",
         "tags": [
           "utils"
         ]
