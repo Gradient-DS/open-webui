@@ -200,7 +200,6 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/backend
           WEBUI_SECRET_KEY: test-secret-key
-          STATIC_DIR: ${{ runner.temp }}/owui-static
           BACKEND_TEST_DATABASE_URL: postgresql+psycopg://postgres:backend-test@127.0.0.1:5432/backend_tests
         # Only live HTTP attack passes and their hits-file gates are excluded.
         run: ../.venv/bin/python -m pytest open_webui/test/ --ignore-glob='**/security/test_live_*.py' --ignore-glob='**/security/attack/test_live_*.py' -n auto --tb=short -q
