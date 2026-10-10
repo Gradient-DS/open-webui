@@ -7,8 +7,7 @@
 # (path template, parameter) using name + the longest segment-boundary prefix.
 # Prefixes match literal OpenAPI templates, not concrete request URLs.
 # `key` is only a dependency label, never a global parameter-name binding.
-# More-specific overrides matter: files/{id}/attachments has a different
-# parent seed from files/{id}. New routes are checked against the spec offline.
+# New routes are checked against the spec offline.
 #
 # Each entry has exactly one of via/body/extract (one HTTP endpoint), same_as,
 # seeded_by (an allowlisted Python callable), or unseedable (written reason).
@@ -17,7 +16,6 @@
 # multipart filenames/content, and dictionary keys. Call once per pass.
 # fresh=false marks immutable inputs/environment selectors, not shared fixtures.
 # actor=admin avoids feature permissions during setup; dependent owner checks use the same actor.
-# Attachment bytes require an externally created render artefact.
 # Configuration setup enables the creation gates it names, and integration/
 # terminal setup merges existing configuration. Resolution is serial.
 #
@@ -400,20 +398,6 @@ name = "document_source_id"
 prefix = "/api/v1/integrations/collections/{source_id}/documents/{document_source_id}"
 description = "integrations.py:delete_document prefixes this external source_id with the provider; it is NOT the File UUID."
 unseedable = "POST /integrations/ingest was removed; no remaining HTTP route creates a provider-owned integration collection and document."
-
-[[parameter]]
-key = "attachment_file"
-name = "id"
-prefix = "/api/v1/files/{id}/attachments"
-description = "Attachment listing uses a real uploaded parent file; bytes additionally require a render artefact."
-same_as = "file"
-
-[[parameter]]
-key = "attachment"
-name = "attachment_id"
-prefix = "/api/v1/files/{id}/attachments/{attachment_id}"
-description = "Attachment bytes resolve a persisted render artefact belonging to the parent file."
-unseedable = "The ingest callback and its attachment persistence were removed; there is no HTTP endpoint that creates render artefacts."
 
 [[parameter]]
 key = "note"
