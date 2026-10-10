@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -494,14 +493,6 @@ class FilesTable:
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
     async def delete_file_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
-        # FileAttachments has no FK CASCADE — cascade-clean orphan rows
-        # before the File delete. The sync attachments API runs in a
-        # thread to bridge into this async path; lazy import breaks the
-        # file_attachments → storage → config → ... → files.py cycle.
-        from open_webui.models.file_attachments import FileAttachments
-
-        await asyncio.to_thread(FileAttachments.delete_attachments_by_file_id, id)
-
         async with get_async_db_context(db) as db:
             try:
                 await db.execute(delete(File).filter_by(id=id))
@@ -511,10 +502,6 @@ class FilesTable:
                 return False
 
     async def delete_files_by_ids(self, ids: list[str], db: AsyncSession | None = None) -> bool:
-        from open_webui.models.file_attachments import FileAttachments
-
-        await asyncio.to_thread(FileAttachments.delete_attachments_by_file_ids, ids)
-
         async with get_async_db_context(db) as db:
             try:
                 await db.execute(delete(File).filter(File.id.in_(ids)))
@@ -524,10 +511,6 @@ class FilesTable:
                 return False
 
     async def delete_all_files(self, db: AsyncSession | None = None) -> bool:
-        from open_webui.models.file_attachments import FileAttachments
-
-        await asyncio.to_thread(FileAttachments.delete_all_attachments)
-
         async with get_async_db_context(db) as db:
             try:
                 await db.execute(delete(File))
