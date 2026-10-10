@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import HTTPException
+from open_webui.soev.client import ChatEvent
 from open_webui.test.soev.test_jobs import env  # noqa: F401
 
 
@@ -23,11 +24,37 @@ def attachment():
     }
 
 
+def document():
+    """[Claude] The `attached-document` element the agent's attach tool records for `attachment()`."""
+    record = attachment()
+    return {
+        'type': 'attached-document',
+        'id': record['collection_key'] + '/' + record['source_id'],
+        'title': 'Quarterly plan',
+        'filename': record['name'],
+        'source_id': record['source_id'],
+        'source_url': record['web_url'],
+        'collection_key': record['collection_key'],
+        'file_id': record['source_id'],
+        'job_id': record['job_id'],
+        'document_ref': record['provider_ref'],
+        'provider': record['provider'],
+        'web_url': record['web_url'],
+        'content_type': record['content_type'],
+        'ready': True,
+        'readable': True,
+    }
+
+
+def attached(*documents):
+    """[Claude] The root `tool_output` event of an attach call whose result records `documents`."""
+    return ChatEvent('tool_output', {'stream': 'root', 'payload': {'call_id': 'attach', 'elements': list(documents)}})
+
+
 @pytest.mark.asyncio
 async def test_event_poll_and_next_turn(env, monkeypatch):  # noqa: F811
     """Replaying an event preserves one File and a completed job supplies next-turn identity."""
     from open_webui.soev import live_documents
-    from open_webui.soev.client import ChatEvent
     from open_webui.utils import agent_v2
 
     messages = {'user_id': 'alice'}
@@ -39,20 +66,21 @@ async def test_event_poll_and_next_turn(env, monkeypatch):  # noqa: F811
     monkeypatch.setattr(agent_v2.Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
     turn = agent_v2.AgentTurn(env.client, {'user_id': 'alice', 'chat_id': 'chat', 'message_id': 'm'}, 'owui:user:alice')
     turn.emitter = AsyncMock()
-    event = ChatEvent('attached', {'stream': 'root', 'payload': {'attachments': [attachment()]}})
+    event = attached(document())
     await turn.render_event(event)
     await turn.render_event(event)
     rows = await env.files.Files.get_files_with_soev_jobs()
     assert len(rows) == 1
     assert rows[0].id == attachment()['source_id'] and rows[0].path == ''
     assert len(messages['files']) == 1
-    assert await agent_v2._attachments(messages) == {'attachment_notes': ['still processing: Quarterly plan.pdf']}
+    next_turn = {'user_id': 'alice', 'files': messages['files']}
+    assert await agent_v2._attachments(next_turn) == {'attachment_notes': ['still processing: Quarterly plan.pdf']}
     client = SimpleNamespace(get=AsyncMock(return_value={'status': 'SUCCEEDED'}), send=AsyncMock())
     assert await env.jobs.poll_once(client, now=rows[0].meta['soev_job']['submitted_at']) == 1
     client.send.assert_not_awaited()
     row = await env.files.Files.get_file_by_id(rows[0].id)
     assert row.meta['status'] == 'completed' and row.meta['soev_job'] is None
-    assert await agent_v2._attachments(messages) == {
+    assert await agent_v2._attachments(next_turn) == {
         'attachments': [
             {
                 'collection_key': attachment()['collection_key'],
@@ -240,7 +268,7 @@ async def test_mismatched_agent_event_is_skipped(env):  # noqa: F811
 
     turn = AgentTurn(env.client, {'user_id': 'alice'}, 'owui:user:alice')
     turn.emitter = AsyncMock()
-    await turn.attached({'attachments': [{**attachment(), 'collection_key': 'foreign'}]})
+    await turn.attached({'elements': [{**document(), 'collection_key': 'foreign'}]})
     turn.emitter.assert_not_awaited()
 
 
@@ -250,7 +278,6 @@ async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  
     import json
     from pathlib import Path
 
-    from open_webui.soev.client import ChatEvent
     from open_webui.utils import agent_v2
 
     payload = json.loads((Path(__file__).parent / 'fixtures' / 'live_document_processing.json').read_text())
@@ -263,10 +290,11 @@ async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  
     monkeypatch.setattr(agent_v2.Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
     turn = agent_v2.AgentTurn(env.client, {'user_id': 'alice', 'chat_id': 'slow', 'message_id': 'm'}, 'owui:user:alice')
     turn.emitter = AsyncMock()
-    await turn.render_event(ChatEvent('attached', {'stream': 'root', 'payload': payload}))
-    row = await env.files.Files.get_file_by_id(payload['attachments'][0]['source_id'])
+    await turn.render_event(ChatEvent('tool_output', {'stream': 'root', 'payload': payload}))
+    (document,) = payload['elements']
+    row = await env.files.Files.get_file_by_id(document['file_id'])
     assert row.meta['status'] == 'processing'
-    assert row.meta['content_type'] == payload['attachments'][0]['content_type']
+    assert row.meta['content_type'] == document['content_type']
     monkeypatch.setattr(agent_v2, '_live_documents_allowed', AsyncMock(return_value=False))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=False))
     next_turn = SimpleNamespace(client=env.client, as_user='owui:user:alice', run=Mock(return_value='stream'))
@@ -278,7 +306,7 @@ async def test_real_agent_processing_event_allows_next_turn(env, monkeypatch):  
     )
     sent = next_turn.run.call_args.args[0]['input']
     assert 'attachments' not in sent
-    assert 'still processing: ' + payload['attachments'][0]['name'] in sent['text']
+    assert 'still processing: ' + document['filename'] in sent['text']
 
 
 @pytest.mark.asyncio
@@ -321,8 +349,8 @@ async def test_reference_citation_provider_survives_thread_replay(env, monkeypat
         await live_documents.register_attachment('alice', record)
         payload = {'elements': elements}
     else:
-        payload = {'elements': elements, 'attachments': [record]}
-    await turn.record_output(payload, attached=attached_by == 'agent')
+        payload = {'elements': [*elements, document()]}
+    await turn.record_output(payload)
     assert turn.citations.sources['passage']['source']['provider'] == 'onedrive'
     assert turn.citations.sources['passage']['metadata'][0]['file_id'] == record['source_id']
 

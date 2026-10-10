@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anyio
 from open_webui.models.access_grants import AccessGrants
@@ -48,6 +49,10 @@ _ROOT = '/v1/chat/threads'
 _PLACEHOLDER = re.compile(r'{{(\w+)}}')
 # [Claude] The name and call id a summary of the conversation is shown under, as the agents' tool statuses name it.
 _COMPACTION = 'compaction'
+# [Claude] The thread states in which the last turn is over: the agent finished it, or the user cancelled it.
+_ENDED = frozenset({'finished', 'cancelled'})
+# [Claude] The element type of a file attached to the chat; in a root tool output, the agent attached it.
+_ATTACHED = 'attached-document'
 # [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
 TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
 
@@ -292,6 +297,21 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
         **({'attachments': attached} if attached else {}),
         **({'attachment_notes': notes} if notes else {}),
         **({'skipped': unavailable} if unavailable else {}),
+    }
+
+
+def _attachment(document: dict[str, Any]) -> dict[str, Any]:
+    """[Claude] The record `register_attachment` takes, of an `attached-document` element an agent tool recorded."""
+    return {
+        'source_id': document['file_id'],
+        'collection_key': document['collection_key'],
+        'job_id': document['job_id'],
+        'name': document['filename'],
+        'web_url': document.get('web_url'),
+        'provider': document['provider'],
+        'provider_ref': document['document_ref'],
+        'attached_by': 'agent',
+        'content_type': document.get('content_type'),
     }
 
 
@@ -548,6 +568,19 @@ def _instructions(metadata: dict[str, Any]) -> dict[str, str]:
     return {field: text for field, key in fields.items() if isinstance(text := metadata.get(key), str) and text.strip()}
 
 
+def _zone(metadata: dict[str, Any]) -> dict[str, str]:
+    """[Claude] The browser's IANA time zone from the request's prompt variables, sent only when zoneinfo knows it."""
+    variables = metadata.get('variables')
+    name = variables.get('{{CURRENT_TIMEZONE}}') if isinstance(variables, dict) else None
+    if not isinstance(name, str) or not name:
+        return {}
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return {}
+    return {'zone': name}
+
+
 def _tools(
     metadata: dict[str, Any], web_search_allowed: bool, live_documents_allowed: bool, live_mail_allowed: bool
 ) -> dict[str, dict[str, str]]:
@@ -738,8 +771,8 @@ def _error(
         'thread_active': 'The agent thread is already running or needs recovery.',
         'invalid_field': 'The agent could not accept this input or collection selection.',
         'service_unavailable': 'The agent service is unavailable. Please try again.',
-        'halted': 'The agent stopped because a step failed.',
-        'orphaned': 'The agent turn was interrupted and needs recovery.',
+        'failed': 'The agent stopped because a step failed.',
+        'interrupted': 'The agent turn was interrupted and needs recovery.',
     }
     message = messages.get(code, 'The agent request failed.')
     if code == 'invalid_field' and constraint is not None:
@@ -1036,7 +1069,7 @@ class AgentTurn:
         for event in events:
             if event['position'] > position or event.get('stream') != 'root':
                 continue
-            if event['type'] in {'tool_output', 'attached'}:
+            if event['type'] == 'tool_output':
                 await self.keep(event['payload'])
             elif event['type'] == 'input':
                 self.keep_texts((event['payload'].get('payload') or {}).get('texts') or [])
@@ -1138,9 +1171,14 @@ class AgentTurn:
         return anchors
 
     async def summary(self, event: ChatEvent) -> list[dict[str, Any]]:
-        """[Claude] Show the agent summarising the conversation as a call named `compaction`: running on
-        `compacting`, done when the root stream's `compaction` event lands. It is not counted as a tool call."""
-        if event.event == 'compacting':
+        """[Claude] Show the agent summarising the conversation as a call named `compaction`: running from a
+        `calling` that produces a `compaction`, done at the next `calling`, when the answer written from the summary
+        starts, or when the root stream's `compaction` event lands, whichever comes first. It is not counted as a
+        tool call."""
+        if event.event == 'calling':
+            if event.data.get('produces') != _COMPACTION:
+                self.end_tool({'call_id': _COMPACTION})
+                return []
             self.running[_COMPACTION] = (_COMPACTION, {})
             status = self.tool_status(_COMPACTION, {})
             await self.emit('status', {**status, 'call_id': _COMPACTION, 'done': False})
@@ -1243,10 +1281,12 @@ class AgentTurn:
         self.running.clear()
 
     async def attached(self, payload: dict) -> None:
+        """[Claude] Add the documents a tool output attached to the message's files."""
         files = {}
-        for attachment in payload['attachments']:
+        documents = [element for element in payload.get('elements') or [] if element.get('type') == _ATTACHED]
+        for document in documents:
             try:
-                file = await live_documents.register_attachment(self.metadata['user_id'], attachment)
+                file = await live_documents.register_attachment(self.metadata['user_id'], _attachment(document))
             except live_documents.AttachmentMismatch as error:
                 log.warning('Skipping mismatched attachment event (%s)', error.status)
                 continue
@@ -1265,10 +1305,9 @@ class AgentTurn:
         # The full list, stored above: a `files` event would be appended to the stored files again.
         await self.emit('chat:message:files', update)
 
-    async def record_output(self, payload: dict, *, attached: bool = False) -> None:
+    async def record_output(self, payload: dict) -> None:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
-        if attached:
-            await self.attached(payload)
+        await self.attached(payload)
         await self.keep(payload)
         for element in payload.get('elements') or []:
             if element.get('type') == 'action-required' and element.get('kind') == 'connect':
@@ -1306,12 +1345,11 @@ class AgentTurn:
                     raise SoevApiError(503, event.data.get('code', 'service_unavailable'), 'Recovery failed')
                 if event.position is not None:
                     self.position = event.position
-                if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
-                    if event.event == 'attached':
-                        await self.attached(event.data['payload'])
+                if event.event == 'tool_output' and event.data.get('stream') == 'root':
+                    await self.attached(event.data['payload'])
                     for source in await self.keep(event.data['payload']):
                         await self.emit('source', source)
-                if event.event == 'status' and event.data['state'] not in {'idle', 'waiting'}:
+                if event.event == 'status' and event.data['state'] not in {*_ENDED, 'waiting'}:
                     raise SoevApiError(409, 'thread_active', 'Recovery did not finish')
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
@@ -1329,7 +1367,7 @@ class AgentTurn:
                 or self.input_position is not None
                 or error.status != 409
                 or error.code != 'thread_active'
-                or 'orphaned' not in error.detail
+                or 'interrupted' not in error.detail
             ):
                 raise
             await self.resume()
@@ -1382,10 +1420,10 @@ class AgentTurn:
             return [_chunk({'content': marker})] if marker else []
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
-        if event.event in {'tool_output', 'attached'} and event.data.get('stream') == 'root':
-            await self.record_output(payload, attached=event.event == 'attached')
+        if event.event == 'tool_output' and event.data.get('stream') == 'root':
+            await self.record_output(payload)
             return []
-        if event.event in {'compacting', 'compaction'}:
+        if event.event in {'calling', 'compaction'}:
             return await self.summary(event)
         if event.event == 'budget_exceeded' and event.data.get('stream') == 'root':
             self.stop_tools()
@@ -1444,7 +1482,7 @@ class AgentTurn:
         await self.persist()
         chunks: list[dict[str, Any]] = []
         state = event.data.get('state')
-        if state != 'idle':
+        if state not in _ENDED:
             await self.emit('status', {'description': state or 'error', 'done': True})
         else:
             await self.summarize()
@@ -1461,7 +1499,7 @@ class AgentTurn:
                     language=self.metadata.get('user_language'),
                 )
             )
-        elif state not in {'idle', 'waiting'}:
+        elif state not in {*_ENDED, 'waiting'}:
             chunks.append(_error(state or 'service_unavailable'))
         return chunks
 
@@ -1601,6 +1639,7 @@ async def _sent(
             **attachments,
             **_urls(metadata),
             **_instructions(metadata),
+            **_zone(metadata),
             **tools,
             'documents': documents,
         }

@@ -4,30 +4,37 @@
   "actor": "tool",
   "origin": "tools",
   "ts": "2026-10-04T16:42:07.231157Z",
-  "type": "attached",
+  "type": "tool_output",
   "call_id": "c1",
   "data": null,
   "text": "Attachment is processing.",
-  "elements": [],
-  "citations": [],
-  "error": null,
-  "attachments": [
+  "elements": [
     {
+      "type": "attached-document",
+      "id": "owui-attachments-alice/slow-source",
+      "ref": null,
+      "properties": {},
+      "title": "Q3 plan",
+      "filename": "Q3 plan.txt",
+      "modified": null,
       "source_id": "slow-source",
+      "source_url": "https://documents.example.test/q3",
       "collection_key": "owui-attachments-alice",
+      "file_id": "slow-source",
       "job_id": "slow-job",
-      "name": "Q3 plan.txt",
-      "web_url": "https://documents.example.test/q3",
-      "provider": "stub_documents",
-      "attached_by": "agent",
-      "provider_ref": {
+      "document_ref": {
         "grant_id": "grant",
         "drive_id": "fixture",
         "item_id": "q3",
         "etag": "v1"
       },
-      "status": "processing",
-      "content_type": "text/plain"
+      "provider": "stub_documents",
+      "web_url": "https://documents.example.test/q3",
+      "content_type": "text/plain",
+      "ready": false,
+      "readable": true
     }
-  ]
+  ],
+  "citations": [],
+  "error": null
 }
