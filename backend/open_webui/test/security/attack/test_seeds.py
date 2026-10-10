@@ -175,6 +175,50 @@ def response(status, body):
     return result
 
 
+def test_synchronous_file_processing_does_not_poll():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(200, {'status': True, 'content': 'text'})
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    ctx.request('POST', '/api/v1/retrieval/process/file', json={'file_id': 'file-ci'})
+    assert client.request.call_count == 1
+
+
+def test_file_seeding_waits_for_completion_and_cleared_job(monkeypatch):
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(200, {'job_id': 'job-ci'}),
+        response(200, {'meta': {'status': 'processing', 'soev_job': {'job_id': 'job-ci'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': {'job_id': 'job-ci'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': None}}),
+    ]
+    monkeypatch.setattr(seeds.time, 'sleep', Mock())
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    result = ctx.request('POST', '/api/v1/retrieval/process/file', json={'file_id': 'file-ci'})
+    assert result == {'job_id': 'job-ci'}
+    assert [call.args for call in client.request.call_args_list[1:]] == [('GET', '/api/v1/files/file-ci')] * 3
+
+
+def test_file_seeding_surfaces_ingest_failure():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(200, {'job_id': 'job-ci'}),
+        response(200, {'meta': {'status': 'failed', 'error': 'bundle invalid'}}),
+    ]
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    with pytest.raises(RuntimeError, match='bundle invalid'):
+        ctx.request('POST', '/api/v1/retrieval/process/file', json={'file_id': 'file-ci'})
+
+
+def test_file_seeding_times_out_without_reporting_success(monkeypatch):
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(200, {'meta': {'status': 'processing'}})
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    monkeypatch.setattr(seeds.time, 'monotonic', Mock(side_effect=[0, 0, 121]))
+    monkeypatch.setattr(seeds.time, 'sleep', Mock())
+    with pytest.raises(RuntimeError, match='did not complete within 120s'):
+        ctx.wait_for_file('file-ci')
+
+
 def tiny_surface(*entries):
     return {'parameter': list(entries), 'destructive': seeds.SURFACE['destructive']}
 

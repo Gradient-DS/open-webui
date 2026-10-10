@@ -188,7 +188,26 @@ class SeedContext:
         body = json_body(response)
         if body is None:
             raise RuntimeError(f'Seeding {method} {path} returned no JSON')
+        # Local processing is synchronous; a soev-backed deployment returns a job
+        # instead, and the next fixture step must not race that ingestion.
+        if method == 'POST' and path == '/api/v1/retrieval/process/file' and body.get('job_id'):
+            self.wait_for_file(kwargs['json']['file_id'], actor=actor)
         return body
+
+    def wait_for_file(self, file_id, *, actor=None, timeout=120):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            file = self.request('GET', f'/api/v1/files/{quote(file_id, safe="")}', actor=actor)
+            meta = file.get('meta') or {}
+            status = meta.get('status')
+            if status == 'failed':
+                raise RuntimeError(f'Seeding file {file_id} failed: {meta.get("error")}')
+            # The poller writes status before clearing the job. Wait for both,
+            # or the next process/file call is refused as an in-flight ingest.
+            if status == 'completed' and meta.get('soev_job') is None:
+                return
+            time.sleep(0.5)
+        raise RuntimeError(f'Seeding file {file_id} did not complete within {timeout}s')
 
 
 def prepare_configuration(ctx, parameter):
