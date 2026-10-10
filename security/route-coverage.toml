@@ -96,4 +96,277 @@ reason = "Never attempted: every owner pass skips it because `token` is declared
 id = "GET /openai/models/{url_idx}/download/status/{job_id}"
 reason = "Never attempted: every owner pass skips it because `job_id` is declared unseedable (attack-surface.toml, key model_download_job). routers/openai.py:get_provider_model_download_status reads a job an actual provider model download created; the CI stub serves model metadata but has no download-job lifecycle. Closes when the stub grows one."
 
-# --- Shared Confluence knowledge base: cannot be provisioned without Atlassian ---
+[[waived]]
+id = "GET /api/v1/files/{id}/attachments/{attachment_id}"
+reason = "Removed in chore/remove-file-attachment-route. Never attempted meanwhile: `attachment_id` is unseedable (attack-surface.toml, key attachment) because nothing creates render attachments any more."
+
+[[waived]]
+id = "GET /cache/{path}"
+reason = "Never attempted: `path` is unseedable (attack-surface.toml, key cache). The only cache file the API creates is a data export, and services/export/service.py reads knowledge through soev-api, so the export fails without it. Closes when the export works without soev-api or another route writes a cache file."
+
+# --- Backed by soev-solutions: security tested there -------------------------
+# soev-api, soev-sync and soev-agents-api are closed source and never run in this
+# open-source repository's CI, not even as a stub. The plane skips every route
+# marked backed_by = "soev-solutions" (attack/seeds.py:SOEV_BACKED), and
+# test_live_crossuser.py still checks that each one refuses an anonymous caller.
+# Grep: backed_by = "soev-solutions"
+
+[[waived]]
+id = "DELETE /api/v1/knowledge/external/connections/{id}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "DELETE /api/v1/knowledge/{id}/delete"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "DELETE /api/v1/knowledge/{id}/dirs/{dir_id}/delete"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/knowledge/"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/knowledge/search"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/knowledge/search/files"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/knowledge/{id}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/knowledge/{id}/export"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/knowledge/{id}/files"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/knowledge/{id}/files/pending"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "PATCH /api/v1/knowledge/external/source/{id}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/create"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/external/knowledge/create"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/external/source/create"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/metadata/reindex"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/reindex"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/access/update"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/dirs/create"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/dirs/{dir_id}/update"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/file/add"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/file/move"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/file/remove"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/file/update"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/files/batch/add"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/reset"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/update"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/knowledge.py reads or writes knowledge bases through models/knowledge.py:SoevKnowledgeTable, which keeps no local store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "DELETE /api/v1/cloud-sync/connections/{connection_id}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "DELETE /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/cloud-sync/connections"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/cloud-sync/connections/{connection_id}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/cloud-sync/connections/{connection_id}/live/{family}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/cloud-sync/connections/{connection_id}/usage"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/skipped"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/cloud-sync/knowledge/{knowledge_id}/sync"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/connections"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/connections/{connection_id}/authorize"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/connections/{connection_id}/live/{family}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/cancel"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/resume"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/run"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/suspend"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/sync"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "DELETE /api/v1/meetings/{meeting_id}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/meetings.py stores meetings as soev-api chat threads and answers 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/meetings"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/meetings.py stores meetings as soev-api chat threads and answers 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/meetings/agents"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/meetings.py stores meetings as soev-api chat threads and answers 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/meetings/{meeting_id}"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/meetings.py stores meetings as soev-api chat threads and answers 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/meetings"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/meetings.py stores meetings as soev-api chat threads and answers 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/meetings/audio"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/meetings.py stores meetings as soev-api chat threads and answers 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/meetings/{meeting_id}/inputs"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/meetings.py stores meetings as soev-api chat threads and answers 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/files/onedrive/attach"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/live_documents.py attaches OneDrive items through a soev-api live grant. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/internal/retrieval/knowledge/{knowledge_id}/files"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/internal_retrieval.py lists a knowledge base's files through the soev knowledge store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."

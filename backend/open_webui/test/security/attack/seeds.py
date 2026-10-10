@@ -26,6 +26,13 @@ SURFACE = tomllib.loads(SURFACE_PATH.read_text())
 SPEC = json.loads((ROOT / 'security/openapi.json').read_text())
 METHODS = {'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'}
 DESTRUCTIVE = {entry['id']: entry['reason'] for entry in SURFACE['destructive']}
+#: Routes that only work with soev-solutions, which never runs in this repo's CI.
+#: Every pass skips them; their waivers in route-coverage.toml carry the reason.
+SOEV_BACKED = {
+    entry['id']: entry['reason']
+    for entry in tomllib.loads((ROOT / 'security/route-coverage.toml').read_text()).get('waived', [])
+    if entry.get('backed_by') == 'soev-solutions'
+}
 
 
 def _extract(payload, dotted: str, *, name: str, via: str) -> str:
@@ -345,40 +352,6 @@ def seed_active_function(ctx, parameter):
     return _create_active_function(ctx, parameter, f'attack_active_{ctx.token}')
 
 
-def seed_removable_knowledge(ctx, parameter):
-    # file/remove deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION
-    # is on, so it gets a KB and a file nothing else uses; the shared {file} and
-    # {knowledge} stay in place for add, move and update.
-    upload = ctx.request(
-        'POST',
-        '/api/v1/files/',
-        actor=ctx.admin,
-        params={'process': False},
-        files=[('file', (f'attack-removable-{ctx.token}.txt', f'Attack removable file {ctx.token}', 'text/plain'))],
-    )
-    file_id = _extract(upload, 'id', name=parameter['key'], via='POST /api/v1/files/')
-    # file/add refuses a file with no extracted content.
-    ctx.request('POST', '/api/v1/retrieval/process/file', actor=ctx.admin, json={'file_id': file_id}, timeout=120)
-    knowledge = ctx.request(
-        'POST',
-        '/api/v1/knowledge/create',
-        actor=ctx.admin,
-        json={'name': f'attack-removable-{ctx.token}', 'description': 'Attack knowledge for file/remove'},
-    )
-    knowledge_id = _extract(knowledge, 'id', name=parameter['key'], via='POST /api/v1/knowledge/create')
-    added = ctx.request(
-        'POST',
-        f'/api/v1/knowledge/{quote(knowledge_id, safe="")}/file/add',
-        actor=ctx.admin,
-        json={'file_id': file_id},
-        timeout=120,
-    )
-    if not any(isinstance(item, dict) and item.get('id') == file_id for item in added.get('files') or []):
-        raise RuntimeError(f'{parameter["key"]}: the file did not join its knowledge base')
-    ctx.provide(parameter, 'removable_file', file_id)
-    return knowledge_id
-
-
 def seed_totp_user(ctx, parameter):
     # A user of its own: the shared {user} is also the exporter, which signs in
     # with its password, and an enrolled account answers that with a 2FA challenge.
@@ -473,7 +446,6 @@ _SEEDERS = {
         seed_model,
         seed_task,
         seed_active_function,
-        seed_removable_knowledge,
         seed_totp_user,
     )
 }

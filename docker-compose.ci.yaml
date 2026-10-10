@@ -2,6 +2,8 @@
 # Build-time downloads are allowed; the running application has only `internal`.
 # Recreate the stack for a fresh run: service databases are intentionally ephemeral.
 # Tenant feature values and explicit divergences: security/deployed-config.md.
+# No soev-solutions image runs here (soev-api, soev-sync, soev-agents-api): routes
+# that need one are waived in security/route-coverage.toml (backed_by = "soev-solutions").
 services:
   postgres:
     image: postgres:15-alpine

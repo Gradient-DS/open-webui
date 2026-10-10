@@ -205,12 +205,11 @@ def test_fixture_resolution_is_private_and_tracks_both_seed_markers(offline, mon
     assert '{token}' in str(seeds.SURFACE)
 
 
-def test_owner_mapping_includes_aliases_integrations_task_and_disposable_export():
+def test_owner_mapping_includes_aliases_integrations_and_task():
     for path, expected in [
         ('/api/v1/chats/folder/{folder_id}', 'admin'),
         ('/api/v1/files/{id}/attachments/{attachment_id}', 'user'),
         ('/api/tasks/stop/{task_id}', 'admin'),
-        ('/cache/{path}', 'exporter'),
     ]:
         assert crossuser._owner_key(path, seeds.SURFACE) == expected
 

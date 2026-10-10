@@ -54,7 +54,7 @@ from . import client as transport
 from .configuration import preserve_configuration
 from .hits_path import hits_path
 from .identities import PASSWORD
-from .seeds import DESTRUCTIVE, METHODS, SPEC, parameter_for
+from .seeds import DESTRUCTIVE, METHODS, SOEV_BACKED, SPEC, parameter_for
 
 
 @dataclass(frozen=True)
@@ -440,6 +440,9 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
 
 def _target(route_id, parameters, tally):
     tally.fixture_failures.update(getattr(parameters, 'failures', {}))
+    if route_id in SOEV_BACKED:
+        tally.skipped[route_id] = f'BACKED BY SOEV-SOLUTIONS: {SOEV_BACKED[route_id]}'
+        return None
     if route_id in getattr(parameters, 'blocked', {}):
         tally.skipped[route_id] = f'FAILED FIXTURE: {parameters.blocked[route_id]}'
         return None

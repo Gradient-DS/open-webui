@@ -470,7 +470,6 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
     for chain in [
         ('folder', 'chat', 'chat_message', 'share'),
         ('channel', 'channel_message', 'channel_webhook', 'webhook_token'),
-        ('knowledge', 'directory'),
         ('calendar', 'event'),
         ('prompt', 'prompt_history'),
         ('file', 'filename'),
@@ -537,33 +536,6 @@ def test_active_function_serves_chat_actions_and_user_valves():
         declaration = seeds.parameter_for(path, name)
         key = declaration.get('same_as', declaration['key'])
         assert key == 'active_function', path
-
-
-def test_removable_knowledge_seeder_adds_a_file_nothing_else_uses():
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
-    ctx.request = Mock(
-        side_effect=[
-            {'id': 'own-file'},
-            {'status': True},
-            {'id': 'own-kb'},
-            {'id': 'own-kb', 'files': [{'id': 'own-file'}]},
-        ]
-    )
-    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'removable_knowledge')
-    assert seeds.seed_removable_knowledge(ctx, parameter) == 'own-kb'
-    assert ctx.values['removable_file'] == 'own-file'
-    upload, process, create, add = ctx.request.call_args_list
-    assert upload.args == ('POST', '/api/v1/files/') and upload.kwargs['params'] == {'process': False}
-    assert process.kwargs['json'] == {'file_id': 'own-file'}
-    assert add.args == ('POST', '/api/v1/knowledge/own-kb/file/add')
-    assert add.kwargs['json'] == {'file_id': 'own-file'}
-    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
-    assert not seeds.is_destructive('POST', '/api/v1/knowledge/{id}/file/remove')
-    ctx.request = Mock(
-        side_effect=[{'id': 'own-file'}, {'status': True}, {'id': 'own-kb'}, {'id': 'own-kb', 'files': []}]
-    )
-    with pytest.raises(RuntimeError, match='did not join'):
-        seeds.seed_removable_knowledge(ctx, parameter)
 
 
 def test_totp_code_matches_rfc_6238_sha1_vectors():
@@ -802,11 +774,9 @@ LIVE_READS = [
     '/api/v1/channels/{id}',
     '/api/v1/channels/{id}/messages/{message_id}',
     '/api/v1/channels/{id}/webhooks',
-    '/api/v1/knowledge/{id}',
     '/api/v1/knowledge/external/connections/{id}',
     '/api/v1/files/{id}',
     '/api/v1/files/{id}/content/{file_name}',
-    '/api/v1/files/{id}/attachments/{attachment_id}',
     '/api/v1/notes/{id}',
     '/api/v1/calendars/{calendar_id}',
     '/api/v1/calendars/events/{event_id}',
@@ -823,7 +793,6 @@ LIVE_READS = [
     '/api/v1/agent-configs/{slug}',
     '/api/v1/configs/namespace/{namespace}',
     '/api/v1/terminals/{server_id}/{path}',
-    '/cache/{path}',
 ]
 
 
