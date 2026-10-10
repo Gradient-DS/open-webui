@@ -19,7 +19,7 @@ def live_seeding():
     identities = ensure_identities()
     parameters = None
     try:
-        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin)
+        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin, collect_failures=True)
         yield plane.seed_every_writable_field(identities.admin, parameters)
     finally:
         try:
@@ -36,7 +36,7 @@ def live_drive(live_seeding):
     identities = ensure_identities()
     parameters = None
     try:
-        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin)
+        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin, collect_failures=True)
         yield plane.drive_every_route(identities.admin, parameters)
     finally:
         try:

@@ -86,6 +86,7 @@ class Seeding:
     unanswered: dict[str, str] = field(default_factory=dict)
     config_unverified: dict[str, str] = field(default_factory=dict)
     config_restore_verified: bool = False
+    fixture_failures: dict[str, str] = field(default_factory=dict)
 
     @property
     def unentered(self):
@@ -204,6 +205,7 @@ def flush_hits():
             'unanswered': tally.unanswered,
             'config_unverified': tally.config_unverified,
             'crashes': tally.crashes,
+            'fixture_failures': tally.fixture_failures,
             'body_failures': tally.body_failures,
             'config_findings': tally.config_findings,
             'config_keys': sorted({item['key'] for item in tally.config_findings}),
@@ -347,7 +349,7 @@ def _payload_batches(route_id, fields, payloads, *, full):
 def _read_before_destroy(route_id):
     method = route_id.split(' ', 1)[0]
     group = 0 if method in {'GET', 'HEAD', 'OPTIONS', 'TRACE'} else 2 if method == 'DELETE' else 1
-    return (3 if route_id in DESTRUCTIVE else group, route_id)
+    return (3 if route_id in DESTRUCTIVE else group, -route_id.count('/') if method == 'DELETE' else 0, route_id)
 
 
 def operations(spec=SPEC):
@@ -437,6 +439,10 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
 
 
 def _target(route_id, parameters, tally):
+    tally.fixture_failures.update(getattr(parameters, 'failures', {}))
+    if route_id in getattr(parameters, 'blocked', {}):
+        tally.skipped[route_id] = f'FAILED FIXTURE: {parameters.blocked[route_id]}'
+        return None
     try:
         return _fill(route_id.split(' ', 1)[1], parameters)
     except UnseedableRoute as error:
@@ -501,7 +507,8 @@ def _report(name, tally):
     print(
         f'{name}: {len(tally.entered)}/{len(tally.expected)} routes reached; '
         f'{len(tally.statuses)} driven; {len(tally.unentered)} unentered; '
-        f'{len(tally.skipped)} explicitly unseedable; '
+        f'{len(tally.skipped)} blocked or unseedable; '
+        f'{len(tally.fixture_failures)} fixture failures; '
         f'{len(tally.unanswered)} never answered; '
         f'{len(tally.config_unverified)} unverified for configuration'
     )

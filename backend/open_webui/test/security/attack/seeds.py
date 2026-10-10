@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
 
-from .client import AttackClient, json_body, totp_code
+from .client import AttackClient, AuthenticationError, json_body, totp_code
 from .configuration import recover_configuration
 
 ROOT = Path(__file__).resolve().parents[5]
@@ -494,9 +494,11 @@ class Resolved(dict):
     A dict, so every caller that only wants path parameters is unaffected.
     """
 
-    def __init__(self, *args, fields=None, **kwargs):
+    def __init__(self, *args, fields=None, failures=None, blocked=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields = fields or {}
+        self.failures = failures or {}
+        self.blocked = blocked or {}
 
 
 def _fill_field(value, ctx, *, path=False):
@@ -517,10 +519,10 @@ def _fill_field(value, ctx, *, path=False):
     return re.sub(r'\{([A-Za-z_][A-Za-z0-9_]*)\}', substitute, _fill_token(value, ctx.token))
 
 
-def resolve_fields(ctx):
+def resolve_fields(ctx, *, entries=None):
     """Fill every [[field]] from seeded values, making its setup requests first, in order."""
     fields = {}
-    for entry in ctx.surface.get('field', []):
+    for entry in ctx.surface.get('field', []) if entries is None else entries:
         for step in entry.get('setup', []):
             method, path = step['via'].split(' ', 1)
             ctx.request(
@@ -539,7 +541,9 @@ def resolve_fields(ctx):
     return fields
 
 
-def resolve_parameters(client: AttackClient, *, admin: AttackClient | None = None, surface=SURFACE, spec=SPEC):
+def resolve_parameters(
+    client: AttackClient, *, admin: AttackClient | None = None, surface=SURFACE, spec=SPEC, collect_failures=False
+):
     ordered = dependency_order(surface)
     ctx = SeedContext(client, admin or client, surface)
     if surface.get('preserve_configuration'):
@@ -547,24 +551,48 @@ def resolve_parameters(client: AttackClient, *, admin: AttackClient | None = Non
     # After recovery: an interrupted pass's snapshot would otherwise turn it back off.
     if surface.get('stack_configuration'):
         apply_stack_configuration(ctx)
+    failures, blocked = {}, {}
     for p in ordered:
         key = p['key']
         if 'unseedable' in p:
             continue
-        if 'same_as' in p:
-            value = ctx.values[p['same_as']]
-        elif 'seeded_by' in p:
-            value = _SEEDERS[p['seeded_by']](ctx, p)
-            missing = [name for name in p.get('provides', []) if name not in ctx.values]
-            if missing:
-                raise RuntimeError(f'{key}: seeder did not provide {missing}')
-        else:
-            value = _seed_endpoint(ctx, p)
-        ctx.values[key] = _extract({'value': value}, 'value', name=key, via=p.get('via', p.get('seeded_by', 'alias')))
+        dependencies = [name for name in _dependencies(p) if name in failures]
+        if dependencies:
+            failures[key] = f'Failed dependencies: {dependencies}'
+            continue
+        try:
+            if 'same_as' in p:
+                value = ctx.values[p['same_as']]
+            elif 'seeded_by' in p:
+                value = _SEEDERS[p['seeded_by']](ctx, p)
+                missing = [name for name in p.get('provides', []) if name not in ctx.values]
+                if missing:
+                    raise RuntimeError(f'{key}: seeder did not provide {missing}')
+            else:
+                value = _seed_endpoint(ctx, p)
+            ctx.values[key] = _extract(
+                {'value': value}, 'value', name=key, via=p.get('via', p.get('seeded_by', 'alias'))
+            )
+        except RuntimeError as error:
+            if not collect_failures or isinstance(error, AuthenticationError):
+                raise
+            failures[key] = str(error)
     resolved = {}
     for path in spec['paths']:
         for name in re.findall(r'\{([^}]+)\}', path):
             p = parameter_for(path, name, surface)
-            if 'unseedable' not in p:
+            if p['key'] in failures:
+                for method in spec['paths'][path].keys() & METHODS:
+                    blocked[f'{method.upper()} {path}'] = failures[p['key']]
+            elif 'unseedable' not in p:
                 resolved[path, name] = ctx.values[p['key']]
-    return Resolved(resolved, fields=resolve_fields(ctx))
+    fields = {}
+    for entry in surface.get('field', []):
+        try:
+            fields.update(resolve_fields(ctx, entries=[entry]))
+        except RuntimeError as error:
+            if not collect_failures or isinstance(error, AuthenticationError):
+                raise
+            failures[entry['route']] = str(error)
+            blocked[entry['route']] = str(error)
+    return Resolved(resolved, fields=fields, failures=failures, blocked=blocked)

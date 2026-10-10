@@ -128,6 +128,36 @@ def test_extract_reads_objects_and_lists_without_losing_zero(payload, path, expe
     assert seeds._extract(payload, path, name='fixture', via='POST /create') == expected
 
 
+def test_collecting_seed_failures_preserves_independent_resources_and_blocks_dependents(monkeypatch):
+    entries = [
+        {'key': 'broken', 'name': 'id', 'prefix': '/broken', 'via': 'POST /broken', 'extract': 'id'},
+        {'key': 'child', 'name': 'id', 'prefix': '/child', 'same_as': 'broken'},
+        {'key': 'healthy', 'name': 'id', 'prefix': '/healthy', 'via': 'POST /healthy', 'extract': 'id'},
+    ]
+    surface = {'parameter': entries, 'field': [{'route': 'POST /body', 'json': {'id': '{broken}'}}]}
+    spec = {'paths': {f'/{name}/{{id}}': {'get': {}} for name in ('broken', 'child', 'healthy')}}
+
+    def create(ctx, entry):
+        if entry['key'] == 'broken':
+            raise RuntimeError('HTTP 500: product bug')
+        return 'real-created-id'
+
+    monkeypatch.setattr(seeds, '_seed_endpoint', create)
+    with pytest.raises(RuntimeError, match='product bug'):
+        seeds.resolve_parameters(Mock(), surface=surface, spec=spec)
+    resolved = seeds.resolve_parameters(Mock(), surface=surface, spec=spec, collect_failures=True)
+    assert dict(resolved) == {('/healthy/{id}', 'id'): 'real-created-id'}
+    assert set(resolved.failures) == {'broken', 'child', 'POST /body'}
+    assert set(resolved.blocked) == {'GET /broken/{id}', 'GET /child/{id}', 'POST /body'}
+    from . import plane
+
+    tally = plane.Seeding()
+    assert plane._target('GET /broken/{id}', resolved, tally) is None
+    assert tally.fixture_failures == resolved.failures
+    assert tally.skipped['GET /broken/{id}'].startswith('FAILED FIXTURE:')
+    assert not tally.entered
+
+
 def test_fill_token_handles_nested_values_and_message_dictionary_keys_without_mutating():
     body = {'messages': {'message_{token}': {'id': 'message_{token}'}}, 'values': ['{token}', 0, False, None]}
     original = json.loads(json.dumps(body))

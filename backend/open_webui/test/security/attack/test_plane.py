@@ -389,6 +389,14 @@ def test_drive_uses_returned_status_for_crashes_and_html_reflection():
     assert plane._PASSES['drive'].crashes == {'GET /item': html.text}
 
 
+def test_child_deletes_precede_parents_and_bulk_deletes_are_last():
+    child = 'DELETE /api/v1/chats/{id}/messages/{message_id}'
+    parent = 'DELETE /api/v1/chats/{id}'
+    bulk = 'DELETE /api/v1/chats/'
+    assert sorted([bulk, parent, child], key=plane._read_before_destroy) == [child, parent, bulk]
+    assert 'DELETE /api/v1/files/all' in plane.DESTRUCTIVE
+
+
 def timing_out_client():
     client = Mock(spec=plane.transport.AttackClient)
     client.request.side_effect = requests.exceptions.ReadTimeout('Read timed out. (read timeout=60)')

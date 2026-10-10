@@ -752,6 +752,22 @@ id = "POST /api/v1/auths/signout"
 reason = "Revokes the caller JWT jti when Redis is present. CI runs real Redis; the same bearer cannot drive subsequent routes."
 
 [[destructive]]
+id = "DELETE /api/v1/files/all"
+reason = "Deletes every uploaded file and resets vector storage. Run after individual file and knowledge controls."
+
+[[destructive]]
+id = "DELETE /api/v1/chats/"
+reason = "Soft-deletes every chat of the driving user; running before per-chat deletes destroys their fixtures."
+
+[[destructive]]
+id = "DELETE /api/v1/chats/share/all"
+reason = "Removes every shared chat of the caller, including per-chat share fixtures."
+
+[[destructive]]
+id = "DELETE /api/v1/models/delete/all"
+reason = "Deletes the model registry; individual model controls must run first."
+
+[[destructive]]
 id = "DELETE /api/v1/auths/api_key"
 reason = "Deletes the caller API key and invalidates an API-key driving identity."
 
@@ -803,6 +819,26 @@ unseedable = "routers/openai.py:get_provider_model_download_status reads a job c
 route = "GET /api/v1/files/search"
 description = "routers/files.py:search_files answers 404 when no file matches the pattern; the seeded file's own name matches."
 params = { "filename" = "{filename}" }
+
+[[field]]
+route = "GET /api/v1/calendars/events"
+description = "The event query requires both bounds; the fixture event is inside this interval."
+params = { start = "2033-05-18T00:00:00Z", end = "2033-05-19T00:00:00Z", calendar_ids = "{calendar}" }
+
+[[field]]
+route = "GET /api/v1/chats/search"
+description = "Search needs a text query; the fixture token identifies this pass's chats."
+params = { text = "{token}" }
+
+[[field]]
+route = "GET /api/v1/utils/gravatar"
+description = "The handler requires an email query parameter."
+params = { email = "attack-{token}@example.com" }
+
+[[field]]
+route = "POST /api/v1/models/model/toggle"
+description = "Toggle resolves the actual registered model from the required id query."
+params = { id = "{model}" }
 
 [[field]]
 route = "GET /api/v1/models/model"
@@ -1040,6 +1076,11 @@ form = { "urlIdx" = "{openai_index}" }
 [[field]]
 route = "POST /ollama/models/upload"
 description = "Multipart: routers/ollama.py:upload_model streams the file to the Ollama upstream as a blob, then creates a model from it."
+files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]
+
+[[field]]
+route = "POST /ollama/models/upload/{url_idx}"
+description = "The indexed upload has the same multipart contract as the default upstream route."
 files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]
 
 # ---------------------------------------------------------------------------

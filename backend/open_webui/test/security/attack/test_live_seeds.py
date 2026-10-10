@@ -15,7 +15,7 @@ def live_seeds():
     identities = ensure_identities()
     resolved = None
     try:
-        resolved = seeds.resolve_parameters(identities.user, admin=identities.admin)
+        resolved = seeds.resolve_parameters(identities.user, admin=identities.admin, collect_failures=True)
         yield identities, resolved
     finally:
         try:
@@ -27,6 +27,7 @@ def live_seeds():
 
 def test_live_resolution_returns_every_seedable_route_parameter(live_seeds):
     _, resolved = live_seeds
+    assert not resolved.failures, resolved.failures
     expected = {
         (path, name) for _, path, name in path_parameters() if 'unseedable' not in seeds.parameter_for(path, name)
     }
@@ -62,7 +63,7 @@ def test_live_seeded_models_are_visible_and_stub_completes_for_both_identities(l
 
 def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):
     identities, first = live_seeds
-    second = seeds.resolve_parameters(identities.user, admin=identities.admin)
+    second = seeds.resolve_parameters(identities.user, admin=identities.admin, collect_failures=True)
     try:
         for pair, value in first.items():
             p = seeds.parameter_for(*pair)
