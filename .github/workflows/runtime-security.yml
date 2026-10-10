@@ -90,13 +90,12 @@ jobs:
         open_webui/test/security/attack/test_live_crossuser.py
         open_webui/test/security/test_live_route_coverage.py
         -v
-      # Findings are reported, not enforced. Flipping this to true is a separate,
-      # deliberate change that pairs with adding `runtime-gate` to the branch
-      # ruleset: a required check that cannot report red protects nothing, and an
-      # enforcing check nobody is required to look at changes nothing. Both
-      # halves land together, after the open findings in
-      # security/plane-findings.md have been triaged.
-      enforce: false
+      # Fail the audit on runtime findings; runtime-gate propagates that result.
+      enforce: true
+      # No cache-scope: INSTALL_SECURITY_CI_DEPS installs private security-ci
+      # packages in the image. The reusable workflow exports all built services
+      # with mode=max, and this public repository's GHA cache is fork-readable.
+      # A BuildKit secret protects the token, not the installed private code.
 
   runtime-gate:
     name: runtime-gate

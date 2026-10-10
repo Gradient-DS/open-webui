@@ -64,6 +64,36 @@ def test_partial_object_disclosure_does_not_need_the_marker_or_identical_owner_b
     assert result.violations
 
 
+def test_head_success_discloses_access_even_without_a_response_body():
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        'HEAD /api/v1/files/{id}/content',
+        plane.Outcome(200, True, ''),
+        plane.Outcome(200, True, ''),
+        [],
+        admin_only=False,
+        control=True,
+    )
+    assert result.violations[0]['reason'].endswith('through HEAD')
+
+
+def test_reset_control_uses_the_actual_owner(offline, monkeypatch):
+    spec = {'paths': {'/api/v1/knowledge/{id}/reset': {'post': {}}}}
+    identities, order = setup_pass(monkeypatch, spec, {'intruder': (403, {'detail': 'refused'})})
+    flags = []
+
+    @contextmanager
+    def actor(admin, owner, disposable):
+        flags.append(disposable)
+        yield owner
+
+    monkeypatch.setattr(crossuser, '_actor', actor)
+    crossuser.drive_crossuser(identities, spec=spec, payloads=['one'])
+    assert flags == [False, False]
+    assert [entry[0] for entry in order] == ['intruder', 'admin']
+
+
 def test_both_404_cannot_pass_the_positive_control_gate():
     from .test_live_crossuser import test_live_crossuser_owner_controls_are_positive
 
@@ -158,7 +188,8 @@ def test_fixture_resolution_is_private_and_tracks_both_seed_markers(offline, mon
     identities = SimpleNamespace(admin=Mock(), user=Mock())
     maps = []
 
-    def resolve(client, *, admin, surface, spec):
+    def resolve(client, *, admin, surface, spec, collect_failures):
+        assert collect_failures
         assert client is identities.user and admin is identities.admin
         maps.append(surface)
         return {('/api/v1/configs/namespace/{namespace}', 'namespace'): 'attack_procedural-token'}
@@ -174,12 +205,11 @@ def test_fixture_resolution_is_private_and_tracks_both_seed_markers(offline, mon
     assert '{token}' in str(seeds.SURFACE)
 
 
-def test_owner_mapping_includes_aliases_integrations_task_and_disposable_export():
+def test_owner_mapping_includes_aliases_integrations_and_task():
     for path, expected in [
         ('/api/v1/chats/folder/{folder_id}', 'admin'),
         ('/api/v1/files/{id}/attachments/{attachment_id}', 'user'),
         ('/api/tasks/stop/{task_id}', 'admin'),
-        ('/cache/{path}', 'exporter'),
     ]:
         assert crossuser._owner_key(path, seeds.SURFACE) == expected
 

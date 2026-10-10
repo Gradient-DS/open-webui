@@ -251,6 +251,11 @@ class AttackClient:
             )
         finally:
             self.session.cookies.clear()
+        if result.status_code >= 500:
+            # Uvicorn closes the connection after an unhandled ASGI exception.
+            # Keep this response as evidence, but do not race that close by
+            # reusing its socket for the next independent request.
+            self.session.close()
         return result
 
     def authenticate(self, response: requests.Response, email: str, *, role: str | None = None):

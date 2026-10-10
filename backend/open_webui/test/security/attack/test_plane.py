@@ -271,7 +271,7 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 637
+    assert len(plane.operations()) == 635
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
 
 
@@ -387,6 +387,14 @@ def test_drive_uses_returned_status_for_crashes_and_html_reflection():
     assert outcomes['GET /item'].entered
     assert outcomes['GET /item'].reflected
     assert plane._PASSES['drive'].crashes == {'GET /item': html.text}
+
+
+def test_child_deletes_precede_parents_and_bulk_deletes_are_last():
+    child = 'DELETE /api/v1/chats/{id}/messages/{message_id}'
+    parent = 'DELETE /api/v1/chats/{id}'
+    bulk = 'DELETE /api/v1/chats/'
+    assert sorted([bulk, parent, child], key=plane._read_before_destroy) == [child, parent, bulk]
+    assert 'DELETE /api/v1/files/all' in plane.DESTRUCTIVE
 
 
 def timing_out_client():

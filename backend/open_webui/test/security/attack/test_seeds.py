@@ -128,6 +128,36 @@ def test_extract_reads_objects_and_lists_without_losing_zero(payload, path, expe
     assert seeds._extract(payload, path, name='fixture', via='POST /create') == expected
 
 
+def test_collecting_seed_failures_preserves_independent_resources_and_blocks_dependents(monkeypatch):
+    entries = [
+        {'key': 'broken', 'name': 'id', 'prefix': '/broken', 'via': 'POST /broken', 'extract': 'id'},
+        {'key': 'child', 'name': 'id', 'prefix': '/child', 'same_as': 'broken'},
+        {'key': 'healthy', 'name': 'id', 'prefix': '/healthy', 'via': 'POST /healthy', 'extract': 'id'},
+    ]
+    surface = {'parameter': entries, 'field': [{'route': 'POST /body', 'json': {'id': '{broken}'}}]}
+    spec = {'paths': {f'/{name}/{{id}}': {'get': {}} for name in ('broken', 'child', 'healthy')}}
+
+    def create(ctx, entry):
+        if entry['key'] == 'broken':
+            raise RuntimeError('HTTP 500: product bug')
+        return 'real-created-id'
+
+    monkeypatch.setattr(seeds, '_seed_endpoint', create)
+    with pytest.raises(RuntimeError, match='product bug'):
+        seeds.resolve_parameters(Mock(), surface=surface, spec=spec)
+    resolved = seeds.resolve_parameters(Mock(), surface=surface, spec=spec, collect_failures=True)
+    assert dict(resolved) == {('/healthy/{id}', 'id'): 'real-created-id'}
+    assert set(resolved.failures) == {'broken', 'child', 'POST /body'}
+    assert set(resolved.blocked) == {'GET /broken/{id}', 'GET /child/{id}', 'POST /body'}
+    from . import plane
+
+    tally = plane.Seeding()
+    assert plane._target('GET /broken/{id}', resolved, tally) is None
+    assert tally.fixture_failures == resolved.failures
+    assert tally.skipped['GET /broken/{id}'].startswith('FAILED FIXTURE:')
+    assert not tally.entered
+
+
 def test_fill_token_handles_nested_values_and_message_dictionary_keys_without_mutating():
     body = {'messages': {'message_{token}': {'id': 'message_{token}'}}, 'values': ['{token}', 0, False, None]}
     original = json.loads(json.dumps(body))
@@ -143,6 +173,50 @@ def response(status, body):
     result.status_code = status
     result._content = json.dumps(body).encode()
     return result
+
+
+def test_synchronous_file_processing_does_not_poll():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(200, {'status': True, 'content': 'text'})
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    ctx.request('POST', '/api/v1/retrieval/process/file', json={'file_id': 'file-ci'})
+    assert client.request.call_count == 1
+
+
+def test_file_seeding_waits_for_completion_and_cleared_job(monkeypatch):
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(200, {'job_id': 'job-ci'}),
+        response(200, {'meta': {'status': 'processing', 'soev_job': {'job_id': 'job-ci'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': {'job_id': 'job-ci'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': None}}),
+    ]
+    monkeypatch.setattr(seeds.time, 'sleep', Mock())
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    result = ctx.request('POST', '/api/v1/retrieval/process/file', json={'file_id': 'file-ci'})
+    assert result == {'job_id': 'job-ci'}
+    assert [call.args for call in client.request.call_args_list[1:]] == [('GET', '/api/v1/files/file-ci')] * 3
+
+
+def test_file_seeding_surfaces_ingest_failure():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(200, {'job_id': 'job-ci'}),
+        response(200, {'meta': {'status': 'failed', 'error': 'bundle invalid'}}),
+    ]
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    with pytest.raises(RuntimeError, match='bundle invalid'):
+        ctx.request('POST', '/api/v1/retrieval/process/file', json={'file_id': 'file-ci'})
+
+
+def test_file_seeding_times_out_without_reporting_success(monkeypatch):
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(200, {'meta': {'status': 'processing'}})
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    monkeypatch.setattr(seeds.time, 'monotonic', Mock(side_effect=[0, 0, 121]))
+    monkeypatch.setattr(seeds.time, 'sleep', Mock())
+    with pytest.raises(RuntimeError, match='did not complete within 120s'):
+        ctx.wait_for_file('file-ci')
 
 
 def tiny_surface(*entries):
@@ -396,7 +470,6 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
     for chain in [
         ('folder', 'chat', 'chat_message', 'share'),
         ('channel', 'channel_message', 'channel_webhook', 'webhook_token'),
-        ('knowledge', 'directory'),
         ('calendar', 'event'),
         ('prompt', 'prompt_history'),
         ('file', 'filename'),
@@ -463,33 +536,6 @@ def test_active_function_serves_chat_actions_and_user_valves():
         declaration = seeds.parameter_for(path, name)
         key = declaration.get('same_as', declaration['key'])
         assert key == 'active_function', path
-
-
-def test_removable_knowledge_seeder_adds_a_file_nothing_else_uses():
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
-    ctx.request = Mock(
-        side_effect=[
-            {'id': 'own-file'},
-            {'status': True},
-            {'id': 'own-kb'},
-            {'id': 'own-kb', 'files': [{'id': 'own-file'}]},
-        ]
-    )
-    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'removable_knowledge')
-    assert seeds.seed_removable_knowledge(ctx, parameter) == 'own-kb'
-    assert ctx.values['removable_file'] == 'own-file'
-    upload, process, create, add = ctx.request.call_args_list
-    assert upload.args == ('POST', '/api/v1/files/') and upload.kwargs['params'] == {'process': False}
-    assert process.kwargs['json'] == {'file_id': 'own-file'}
-    assert add.args == ('POST', '/api/v1/knowledge/own-kb/file/add')
-    assert add.kwargs['json'] == {'file_id': 'own-file'}
-    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
-    assert not seeds.is_destructive('POST', '/api/v1/knowledge/{id}/file/remove')
-    ctx.request = Mock(
-        side_effect=[{'id': 'own-file'}, {'status': True}, {'id': 'own-kb'}, {'id': 'own-kb', 'files': []}]
-    )
-    with pytest.raises(RuntimeError, match='did not join'):
-        seeds.seed_removable_knowledge(ctx, parameter)
 
 
 def test_totp_code_matches_rfc_6238_sha1_vectors():
@@ -728,11 +774,9 @@ LIVE_READS = [
     '/api/v1/channels/{id}',
     '/api/v1/channels/{id}/messages/{message_id}',
     '/api/v1/channels/{id}/webhooks',
-    '/api/v1/knowledge/{id}',
     '/api/v1/knowledge/external/connections/{id}',
     '/api/v1/files/{id}',
     '/api/v1/files/{id}/content/{file_name}',
-    '/api/v1/files/{id}/attachments/{attachment_id}',
     '/api/v1/notes/{id}',
     '/api/v1/calendars/{calendar_id}',
     '/api/v1/calendars/events/{event_id}',
@@ -749,7 +793,6 @@ LIVE_READS = [
     '/api/v1/agent-configs/{slug}',
     '/api/v1/configs/namespace/{namespace}',
     '/api/v1/terminals/{server_id}/{path}',
-    '/cache/{path}',
 ]
 
 

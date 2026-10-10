@@ -614,7 +614,10 @@ class SoevKnowledgeTable:
 
     async def search_files_by_id(self, knowledge_id, user_id, filter, skip=0, limit=30, metadata_only=False, db=None):
         filters = filter or {}
-        path = self._directory_path(knowledge_id, filters.get('directory_id'))
+        try:
+            path = self._directory_path(knowledge_id, filters.get('directory_id'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid directory identifier') from None
         collection, members, schedules = await asyncio.gather(
             self._collection(knowledge_id, user_id=user_id),
             self._members(knowledge_id, user_id=user_id),
@@ -786,9 +789,12 @@ class SoevKnowledgeTable:
         return sorted(real + virtual, key=lambda row: (row.name.casefold(), row.id))
 
     async def create_directory(self, knowledge_id, name, user_id, parent_id=None, db=None):
-        path = self._directory_path(knowledge_id, parent_id) + (name,)
-        self._assert_writable_path(path)
-        self._projection.directory_id(knowledge_id, path)
+        try:
+            path = self._directory_path(knowledge_id, parent_id) + (name,)
+            self._assert_writable_path(path)
+            self._projection.directory_id(knowledge_id, path)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid directory name or parent') from None
         collection = await self._collection(knowledge_id, user_id=user_id)
         if collection is None:
             return None
@@ -817,7 +823,10 @@ class SoevKnowledgeTable:
         ] + list(virtual.values())
 
     async def _directory(self, directory_id, *, user_id=None, view=None):
-        key, path = self._projection.directory_of(directory_id)
+        try:
+            key, path = self._projection.directory_of(directory_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid directory identifier') from None
         if not path:
             return None
         rows = await self._directory_models(key, path[:-1], user_id=user_id, view=view)
