@@ -33,6 +33,31 @@ export function relinkPrompt(error: unknown): string | null {
 	return code === 'subject_not_linked' ? SUBJECT_NOT_LINKED_PROMPT : null;
 }
 
+const ATTACH_ERRORS: Record<string, string> = {
+	too_large: 'This file is too large to attach.',
+	not_readable: 'This file cannot be read. It may be encrypted or protected.',
+	not_found: 'This file is no longer available.',
+	changed: 'This file changed while attaching. Try again.',
+	connection_required: 'Reconnect OneDrive and try again.',
+	reauth_required: 'Reconnect OneDrive and try again.',
+	grant_disabled: 'Attaching this file is not allowed.',
+	op_not_granted: 'Attaching this file is not allowed.',
+	out_of_scope: 'Attaching this file is not allowed.',
+	policy_forbids: 'Attaching this file is not allowed.',
+	scope_insufficient: 'Attaching this file is not allowed.',
+	budget_spent: 'Too many files at once. Try again in a minute.',
+	provider_throttled: 'Too many files at once. Try again in a minute.',
+	file_limit_exceeded: 'You have reached the maximum number of files.',
+	soev_not_configured: 'Attaching OneDrive files is unavailable right now.',
+	service_unavailable: 'Attaching OneDrive files is unavailable right now.'
+};
+
+/** The i18n key for a failed picker attach; unknown codes fall back to a generic message. */
+export function attachErrorMessage(error: unknown): string {
+	const code = error instanceof Error ? error.message : '';
+	return relinkPrompt(error) ?? ATTACH_ERRORS[code] ?? 'Could not attach OneDrive file';
+}
+
 export type LiveConnection = {
 	connection: Awaited<ReturnType<typeof listConnections>>[number];
 	grantId?: string;
