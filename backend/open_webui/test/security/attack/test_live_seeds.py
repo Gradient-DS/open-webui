@@ -59,7 +59,10 @@ def test_live_seeded_models_are_visible_and_stub_completes_for_both_identities(l
         },
     )
     assert result.status_code == 200, result.text
-    assert result.json()['choices'][0]['message']['content'] == 'stub response'
+    # Drive mode routes every chat to the v2 agent, which streams the stub's answer
+    # over its thread events even when the caller asked for one JSON completion.
+    expected = 'stub streamed response' if seeds.runtime_soev_backed() == 'drive' else 'stub response'
+    assert result.json().get('choices', [{}])[0].get('message', {}).get('content') == expected, result.text
 
 
 def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):

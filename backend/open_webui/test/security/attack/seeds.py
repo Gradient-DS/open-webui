@@ -360,21 +360,23 @@ def register_readable_model(ctx, model_id):
         all(item.get(key) == value for key, value in grant.items()) for item in body.get('access_grants', [])
     ):
         raise RuntimeError(f'Model {model_id} did not acquire public read access')
+    # The owner control for POST /models/model/toggle deactivates this row, and an
+    # inactive override hides its base model from the registry (utils/models.py).
+    if body.get('is_active') is False:
+        toggled = ctx.request('POST', '/api/v1/models/model/toggle', actor=ctx.admin, params={'id': model_id})
+        if toggled.get('is_active') is not True:
+            raise RuntimeError(f'Model {model_id} could not be reactivated')
 
 
 def catalog_default_model(ctx, parameter):
     # Drive mode runs the v2 runtime, where soev-api's catalog is the only source of
     # registry models (utils/models.py:get_all_base_models); upstream ids never list.
-    registry = ctx.request('GET', '/api/models', actor=ctx.admin, params={'refresh': True})
-    defaults = [
-        model['id']
-        for model in registry.get('data', [])
-        if model.get('owned_by') == 'soev'
-        and ((model.get('info') or {}).get('meta') or {}).get('soev', {}).get('default')
-    ]
-    if len(defaults) != 1:
-        raise RuntimeError(f'{parameter["key"]}: expected one soev catalog default model, found {defaults}')
-    return defaults[0]
+    # /api/config names the catalog default (soev/model_catalog.default_models) even
+    # while an earlier pass's toggle has hidden it from /api/models.
+    default = ctx.request('GET', '/api/config', actor=ctx.admin).get('default_models')
+    if not isinstance(default, str) or not default or ',' in default:
+        raise RuntimeError(f'{parameter["key"]}: expected one soev catalog default model, found {default!r}')
+    return default
 
 
 def seed_model(ctx, parameter):
@@ -557,6 +559,34 @@ def seed_cloud_connection(ctx, parameter):
     return connection
 
 
+def seed_external_source(ctx, parameter):
+    # A connection of its own: delete_external_knowledge_connection answers 400 while
+    # a KB still uses one, so on {connection} this KB would refuse the owner's DELETE.
+    connection = ctx.request(
+        'POST',
+        '/api/v1/knowledge/external/connections',
+        actor=ctx.admin,
+        json={
+            'name': f'attack-source-{ctx.token}',
+            'provider': 'qdrant',
+            'endpoint': 'http://stub:8000',
+            'auth_config': {},
+        },
+    )
+    connection_id = _extract(connection, 'id', name=parameter['key'], via='POST external/connections')
+    body = ctx.request(
+        'POST',
+        '/api/v1/knowledge/external/knowledge/create',
+        actor=ctx.admin,
+        json={
+            'name': f'attack-external-{ctx.token}',
+            'connection_id': connection_id,
+            'source': {'name': f'attack-{ctx.token}', 'config': {'content_field': 'text'}},
+        },
+    )
+    return _extract(body, 'id', name=parameter['key'], via='POST external/knowledge/create')
+
+
 _SEEDERS = {
     function.__name__: function
     for function in (
@@ -573,6 +603,7 @@ _SEEDERS = {
         seed_cloud_connection,
         seed_cloud_family,
         seed_knowledge_file,
+        seed_external_source,
     )
 }
 

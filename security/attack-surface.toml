@@ -303,11 +303,9 @@ backed_by = "soev-solutions"
 key = "external_source"
 name = "id"
 prefix = "/api/v1/knowledge/external/source/{id}"
-description = "routers/knowledge.py:create_external_knowledge inserts a KB with meta.external referencing the connection. update_external_knowledge_source reads that KB id; /external/source/create additionally tests retrieval and is unnecessary for planting the row."
-via = "POST /api/v1/knowledge/external/knowledge/create"
-body = { "name" = "attack-external-{token}", "connection_id" = "{connection}", "source" = { "name" = "attack-{token}", "config" = { "content_field" = "text" } } }
-extract = "id"
-depends_on = ["connection"]
+description = "routers/knowledge.py:create_external_knowledge inserts a KB with meta.external referencing the connection. update_external_knowledge_source reads that KB id; /external/source/create additionally tests retrieval and is unnecessary for planting the row. seed_external_source creates the KB's own connection: delete_external_knowledge_connection answers 400 while a KB uses one, so sharing {connection} made the owner's DELETE control fail (observed in drive mode)."
+seeded_by = "seed_external_source"
+depends_on = []
 actor = "admin"
 
 [[parameter]]

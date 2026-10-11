@@ -829,52 +829,73 @@ def test_model_seed_registers_the_upstream_selector_on_each_pass(monkeypatch):
         assert registration.kwargs['json'] == {'id': 'stub-model', 'access_grants': [PUBLIC_MODEL_READ]}
 
 
-def _catalog_entry(model_id, *, default):
-    return {'id': model_id, 'owned_by': 'soev', 'info': {'meta': {'soev': {'default': default}}}}
-
-
 def test_drive_model_seed_registers_the_soev_catalog_default(monkeypatch):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
     ctx.values['openai_index'] = '0'
-    registry = {
-        'data': [
-            {'id': 'attack_task_x', 'owned_by': 'openai', 'info': {'meta': {'soev': {'default': True}}}},
-            _catalog_entry('ci/other', default=False),
-            _catalog_entry('ci/chat', default=True),
-        ]
-    }
     ctx.request = Mock(
         side_effect=[
             {'data': [{'id': 'stub-model'}]},
-            registry,
-            {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ]},
+            {'default_models': 'ci/chat'},
+            {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ], 'is_active': True},
         ]
     )
     assert seeds.seed_model(ctx, {'key': 'model'}) == 'ci/chat'
     assert ctx.values['upstream_model'] == 'stub-model'
-    discovery, listing, registration = ctx.request.call_args_list
+    discovery, config, registration = ctx.request.call_args_list
     assert discovery.args == ('GET', '/openai/models/0')
-    assert listing.args == ('GET', '/api/models')
-    assert listing.kwargs == {'actor': ctx.admin, 'params': {'refresh': True}}
+    assert config.args == ('GET', '/api/config')
+    assert config.kwargs == {'actor': ctx.admin}
     assert registration.kwargs['json'] == {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ]}
 
 
-@pytest.mark.parametrize(
-    'entries',
-    [
-        [],
-        [_catalog_entry('ci/chat', default=False)],
-        [_catalog_entry('a/b', default=True), _catalog_entry('c/d', default=True)],
-    ],
-)
-def test_drive_model_seed_needs_exactly_one_catalog_default(monkeypatch, entries):
+@pytest.mark.parametrize('default', [None, '', 'a/b,c/d', ['ci/chat']])
+def test_drive_model_seed_needs_exactly_one_catalog_default(monkeypatch, default):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
     ctx.values['openai_index'] = '0'
-    ctx.request = Mock(side_effect=[{'data': [{'id': 'stub-model'}]}, {'data': entries}])
+    ctx.request = Mock(side_effect=[{'data': [{'id': 'stub-model'}]}, {'default_models': default}])
     with pytest.raises(RuntimeError, match='expected one soev catalog default model'):
         seeds.seed_model(ctx, {'key': 'model'})
+
+
+def test_model_registration_reactivates_a_row_an_earlier_toggle_disabled():
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.request = Mock(
+        side_effect=[
+            {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ], 'is_active': False},
+            {'id': 'ci/chat', 'is_active': True},
+        ]
+    )
+    seeds.register_readable_model(ctx, 'ci/chat')
+    toggle = ctx.request.call_args_list[1]
+    assert toggle.args == ('POST', '/api/v1/models/model/toggle')
+    assert toggle.kwargs == {'actor': ctx.admin, 'params': {'id': 'ci/chat'}}
+
+
+def test_model_registration_fails_when_the_row_stays_inactive():
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.request = Mock(
+        side_effect=[
+            {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ], 'is_active': False},
+            {'id': 'ci/chat', 'is_active': False},
+        ]
+    )
+    with pytest.raises(RuntimeError, match='could not be reactivated'):
+        seeds.register_readable_model(ctx, 'ci/chat')
+
+
+def test_external_source_uses_a_connection_no_other_fixture_shares():
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.values['connection'] = 'shared-connection'
+    ctx.request = Mock(side_effect=[{'id': 'own-connection'}, {'id': 'external-kb'}])
+    assert seeds.seed_external_source(ctx, {'key': 'external_source'}) == 'external-kb'
+    created, kb = ctx.request.call_args_list
+    assert created.args == ('POST', '/api/v1/knowledge/external/connections')
+    assert kb.args == ('POST', '/api/v1/knowledge/external/knowledge/create')
+    assert kb.kwargs['json']['connection_id'] == 'own-connection'
+    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'external_source')
+    assert entry['seeded_by'] == 'seed_external_source' and 'connection' not in entry['depends_on']
 
 
 def test_connection_proxy_fields_use_the_upstream_model():
