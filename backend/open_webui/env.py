@@ -1107,12 +1107,9 @@ else:
 ####################################
 
 AGENT_API_ENABLED = os.environ.get('AGENT_API_ENABLED', 'False').lower() == 'true'
-AGENT_API_RUNTIME = os.environ.get('AGENT_API_RUNTIME', 'v1').strip()
-AGENT_API_BASE_URL = os.environ.get('AGENT_API_BASE_URL', '').strip().rstrip('/')
-AGENT_API_KEY = os.environ.get('AGENT_API_KEY', '').strip()
 # Optional list of agent identifiers the admin can pick from in the
 # "External Agents" admin tab. When set, the admin's selection is
-# forwarded as ``AgentPayload.agent`` — an override hint. When empty
+# forwarded as the v2 agent selection — an override hint. When empty
 # (or no selection), the payload omits ``agent`` and the agents service
 # falls back to its configured ``default_agent``.
 AGENT_API_AGENTS = [a.strip() for a in os.environ.get('AGENT_API_AGENTS', '').split(',') if a.strip()]
@@ -1150,20 +1147,6 @@ AGENT_API_AGENTS_CONFIG_OVERWRITE = os.environ.get('AGENT_API_AGENTS_CONFIG_OVER
 # empty-state cards). Defaults OFF. Layered on top of AGENT_API_ENABLED — both
 # must be true for users to see the agent picker on the empty state.
 FEATURE_AGENT_PICKER = os.environ.get('FEATURE_AGENT_PICKER', 'False').lower() == 'true'
-
-
-####################################
-# SEARCH API (RAG discovery proxy)
-# [Gradient] Document catalog consumed by the RAG filter panel. The
-# backend at /api/v1/discovery/* reverse-proxies to the upstream's
-# GET /v1/discovery/documents with X-API-Key injected server-side.
-# That route lives on the agents-api, so these normally hold the same
-# values as AGENT_API_BASE_URL / AGENT_API_KEY; the names are kept
-# because the Helm chart is wired for them.
-####################################
-
-SEARCH_API_BASE_URL = os.environ.get('SEARCH_API_BASE_URL', '').strip().rstrip('/')
-SEARCH_API_KEY = os.environ.get('SEARCH_API_KEY', '').strip()
 
 
 ####################################

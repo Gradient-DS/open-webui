@@ -50,13 +50,12 @@ async def test_dependency_and_registered_global_handler(soev_state, monkeypatch)
 @pytest.mark.asyncio
 async def test_knowledge_routes_require_soev(monkeypatch):
     from open_webui.main import app as main_app
-    from open_webui.routers import cloud_sync, internal_retrieval, knowledge, live_documents
+    from open_webui.routers import cloud_sync, knowledge, live_documents
 
     monkeypatch.setattr(config, 'SOEV_API_URL', '')
     app = FastAPI(exception_handlers={SoevNotConfigured: main_app.exception_handlers[SoevNotConfigured]})
     for prefix, router in [
         ('/knowledge', knowledge.router),
-        ('/internal', internal_retrieval.router),
         ('/live', live_documents.router),
         ('/cloud', cloud_sync.router),
     ]:
@@ -64,8 +63,6 @@ async def test_knowledge_routes_require_soev(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app), base_url='http://test') as client:
         for method, path in [
             ('GET', '/knowledge/'),
-            ('GET', '/internal/knowledge/kb/files'),
-            ('POST', '/internal/query'),
             ('POST', '/live/onedrive/attach'),
             ('GET', '/cloud/knowledge/kb/sync'),
         ]:

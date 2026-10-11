@@ -15,7 +15,7 @@ offline = test_shapes.offline
 def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
     inventory = source_operations()
     assert set(plane.operations()) <= inventory.keys()
-    assert len(admin_gated_operations()) == 210
+    assert len(admin_gated_operations()) == 208
     assert 'GET /api/v1/functions/' in inventory
     assert 'GET /api/v1/files/{id}/content' in inventory
     assert 'POST /api/v1/files/onedrive/attach' in inventory
@@ -429,7 +429,6 @@ def test_an_ordinary_route_keeps_its_users():
 def test_every_service_declaration_covers_a_route_and_names_its_key():
     paths = {route.split(' ', 1)[1] for route in plane.operations(seeds.SPEC)}
     declarations = seeds.SURFACE.get('service', [])
-    assert declarations
     for entry in declarations:
         assert any(p == entry['prefix'] or p.startswith(entry['prefix'] + '/') for p in paths), entry['prefix']
         assert entry['token'] and entry['reason'].strip(), entry

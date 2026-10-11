@@ -37,13 +37,6 @@ SOEV_BACKED = {
     for entry in tomllib.loads((ROOT / 'security/route-coverage.toml').read_text()).get('waived', [])
     if entry.get('backed_by') == 'soev-solutions'
 }
-#: Routes forwarding to the legacy v1 agents-api, which neither stack runs.
-#: Waived in both modes.
-LEGACY_BACKED = {
-    entry['id']: entry['reason']
-    for entry in tomllib.loads((ROOT / 'security/route-coverage.toml').read_text()).get('waived', [])
-    if entry.get('backed_by') == 'legacy-agents-api'
-}
 
 
 def runtime_soev_backed():
@@ -62,7 +55,7 @@ def backed_seed_waived(entry):
 
 
 def route_waived(route):
-    return route in LEGACY_BACKED or (runtime_soev_backed() == 'waive' and route in SOEV_BACKED)
+    return runtime_soev_backed() == 'waive' and route in SOEV_BACKED
 
 
 def seed_enabled(entry):

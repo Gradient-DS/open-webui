@@ -42,8 +42,6 @@ preserve_configuration = true
 # (routers/auths.py:signup), and identity bootstrap is that signup, so an
 # ENABLE_SIGNUP environment variable cannot keep it on.
 "ui.enable_signup" = true
-# PersistentConfig a tenant admin flips in the admin UI (mkbot runs it); discovery/* answered 503 without it.
-"rag.enable_filter_ui" = true
 # PersistentConfig; the model-path pass drives tasks/auto/completions as a control.
 "task.autocomplete.enable" = true
 
@@ -314,14 +312,6 @@ depends_on = ["connection"]
 actor = "admin"
 
 [[parameter]]
-backed_by = "soev-solutions"
-key = "internal_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/internal/retrieval/knowledge/{knowledge_id}"
-description = "internal_retrieval.py reads the same Knowledge row; its service credential is a separate driving-identity requirement."
-same_as = "knowledge"
-
-[[parameter]]
 key = "file"
 name = "id"
 prefix = "/api/v1/files/{id}"
@@ -341,13 +331,6 @@ via = "GET /api/v1/files/{file}"
 extract = "filename"
 depends_on = ["file"]
 actor = "admin"
-
-[[parameter]]
-key = "internal_file"
-name = "file_id"
-prefix = "/api/v1/internal/retrieval/files/{file_id}"
-description = "Handler resolves Files.id; service authentication is independent of the existence of the File row."
-same_as = "file"
 
 [[parameter]]
 key = "attachment_file"
@@ -1364,16 +1347,3 @@ route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
 status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
-
-# ---------------------------------------------------------------------------
-# Service callers
-#
-# Route families the agents-api and the sync daemon call with a service key and
-# an acting user (utils/service_auth.py). The crossuser pass drives both sides
-# as the service: acting for the owner is the owner control, acting for the
-# intruder is the isolation check. The keys are CI's (docker-compose.ci.yaml).
-
-[[service]]
-prefix = "/api/v1/internal/retrieval"
-token = "ci-stub-key"
-reason = "utils/service_auth.py:get_agent_principal: the AGENT_API_KEY bearer, acting for the user in X-Acting-User-Id. A user's own bearer is refused outright (401)."
