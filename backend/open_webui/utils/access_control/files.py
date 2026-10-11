@@ -9,6 +9,7 @@ from open_webui.models.groups import Groups
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.availability import configured
 from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.utils.access_control import can_bypass_access_control
 
@@ -47,7 +48,7 @@ async def has_access_to_file(
     # An object (knowledge base or workspace model) confers write/delete on a file only when
     # the object's OWNER owns that file; otherwise a read-only file laundered into an object
     # the user controls would gain write/delete on it (CWE-863). Read access is unaffected.
-    knowledge_bases = await Knowledges.get_knowledges_by_file_id(file_id, db=db)
+    knowledge_bases = await Knowledges.get_knowledges_by_file_id(file_id, db=db) if configured() else []
     if user_group_ids is None:
         user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
     for knowledge_base in knowledge_bases:
@@ -65,7 +66,7 @@ async def has_access_to_file(
             return True
 
     knowledge_base_id = file.meta.get('collection_name') if file.meta else None
-    if knowledge_base_id:
+    if configured() and knowledge_base_id:
         # Fetch the one referenced knowledge base instead of listing every
         # knowledge base the user can access just to scan for this id.
         knowledge_base = await Knowledges.get_knowledge_by_id(knowledge_base_id, db=db)
@@ -157,7 +158,7 @@ async def get_accessible_folder_files(
             if await has_access_to_file(entry_id, 'read', user, db=db, user_group_ids=user_group_ids):
                 accessible.append(entry)
         elif entry_type == 'collection':
-            if await Knowledges.check_access_by_user_id(
+            if configured() and await Knowledges.check_access_by_user_id(
                 entry_id, user.id, 'read', db=db, user_group_ids=user_group_ids
             ):
                 accessible.append(entry)

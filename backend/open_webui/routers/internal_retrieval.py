@@ -32,6 +32,7 @@ from open_webui.services.retrieval.agent_search import (
 )
 from open_webui.socket.main import sio
 from open_webui.soev import ingest
+from open_webui.soev.availability import require_soev
 from open_webui.storage.provider import Storage
 from open_webui.services.email.graph_mail_client import render_document_email, send_mail
 from open_webui.utils.access_control.files import has_access_to_file
@@ -114,6 +115,7 @@ async def list_accessible_files(
 
 @router.get(
     '/knowledge/{knowledge_id}/files',
+    dependencies=[Depends(require_soev)],
     response_model=KnowledgeFileListResponse,
 )
 async def list_knowledge_files(
@@ -321,6 +323,7 @@ async def file_raw(
 
 @router.post(
     '/query',
+    dependencies=[Depends(require_soev)],
     response_model=AgentSearchResponse,
     deprecated=True,
     summary='[Deprecated] Run a search via open-webui (legacy single-call path)',

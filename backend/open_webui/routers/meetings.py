@@ -10,8 +10,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from open_webui import config
 from open_webui.soev import identity
+from open_webui.soev.availability import require_soev
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MeetingUnavailable, latest_state, thread_path
 from open_webui.utils.auth import get_verified_user
@@ -47,8 +47,7 @@ def _http_error(error: SoevApiError) -> HTTPException:
 async def require_meetings(user=Depends(get_verified_user)):
     if not is_feature_enabled('meetings'):
         raise HTTPException(status_code=403, detail="Feature 'meetings' is not available in your plan")
-    if not config.SOEV_API_URL:
-        raise HTTPException(status_code=503, detail='Meetings need soev-api, which is not configured')
+    require_soev()
     return user
 
 

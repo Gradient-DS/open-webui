@@ -51,6 +51,7 @@ from open_webui.models.models import Models
 from open_webui.models.notes import Notes
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.retrieval.utils import get_sources_from_items
 from open_webui.routers.images import (
     CreateImageForm,
@@ -1651,6 +1652,8 @@ async def chat_completion_tools_handler(
                         tool_function = tool['callable']
                         tool_result = await tool_function(**tool_function_params)
 
+                except SoevNotConfigured:
+                    raise
                 except Exception as e:
                     tool_result = {'error': str(e)}
 
@@ -1725,9 +1728,13 @@ async def chat_completion_tools_handler(
             else:
                 await tool_call_handler(result)
 
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.debug('Error: %s', e)
             content = None
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.debug('Error: %s', e)
         content = None
@@ -2316,6 +2323,8 @@ async def chat_completion_files_handler(
                 full_context=all_full_context or rag_config.get('rag.full_context'),
                 user=user,
             )
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.exception(e)
 
@@ -3596,6 +3605,8 @@ async def execute_tool_call_for_output(request, form_data, user, metadata, event
                 },
             )
             result = await function(**params)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         result = {'error': str(e)}
 
@@ -6116,6 +6127,8 @@ async def streaming_chat_response_handler(response, ctx):
                                     },
                                 )
                                 result = await function(**params)
+                        except SoevNotConfigured:
+                            raise
                         except Exception as e:
                             result = {'error': str(e)}
                         return params, result, tool, tool_type, direct_tool

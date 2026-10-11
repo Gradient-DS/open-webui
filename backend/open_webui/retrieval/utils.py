@@ -42,6 +42,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
 from open_webui.models.config import Config
 from open_webui.models.users import UserModel
+from open_webui.soev.availability import configured
 from open_webui.retrieval.loaders.youtube import YoutubeLoader
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.retrieval.external import retrieve_external_knowledge
@@ -1333,6 +1334,8 @@ async def filter_accessible_collections(
             # ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS:
             #   False (default) — deny (closes the unscoped namespace)
             #   True  — allow (preserves legacy behaviour)
+            if not configured():
+                continue
             if await Knowledges.check_access_by_user_id(name, user.id, permission=access_type):
                 validated.add(name)
             elif ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS and not await Knowledges.get_knowledge_by_id(name):

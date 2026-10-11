@@ -3,6 +3,7 @@
 from .test_route_coverage import (
     assert_every_route_is_driven_or_waived,
     assert_no_waiver_covers_a_route_the_plane_actually_reached,
+    evidence,
 )
 
 
@@ -12,3 +13,10 @@ def test_every_route_is_driven_or_waived():
 
 def test_no_waiver_covers_a_route_the_plane_actually_reached():
     assert_no_waiver_covers_a_route_the_plane_actually_reached()
+
+
+def test_no_fixture_failure_is_hidden_by_other_routes_hits():
+    failures = {
+        name: data['fixture_failures'] for name, data in evidence()['passes'].items() if data['fixture_failures']
+    }
+    assert not failures, f'Failed fixture creation (independent fixtures still ran): {failures}'

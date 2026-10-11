@@ -46,6 +46,7 @@ from open_webui.routers.retrieval import (
 from open_webui.storage.provider import Storage
 from open_webui.services.deletion import DeletionService
 from open_webui.models.knowledge import is_synced_kb  # [Gradient]
+from open_webui.soev.availability import SoevNotConfigured, require_soev
 from open_webui.utils.features import require_feature
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
@@ -59,7 +60,7 @@ from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_soev)])
 
 ############################
 # getKnowledgeBases
@@ -479,11 +480,15 @@ async def reindex_knowledge_files(
                         user=user,
                         db=db,
                     )
+                except SoevNotConfigured:
+                    raise
                 except Exception as e:
                     log.error(f'Error processing file {file.filename} (ID: {file.id}): {str(e)}')
                     failed_files.append({'file_id': file.id, 'error': str(e)})
                     continue
 
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.error(f'Error processing knowledge base {knowledge_base.id}: {str(e)}')
             # Don't raise, just continue
@@ -1593,6 +1598,8 @@ async def add_file_to_knowledge_by_id(
             directory_id=form_data.directory_id,
             db=db,
         )
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.debug(e)
         raise HTTPException(
@@ -1681,6 +1688,8 @@ async def update_file_from_knowledge_by_id(
             user=user,
             db=db,
         )
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1870,6 +1879,8 @@ async def remove_file_from_knowledge_by_id(
                         f'{len(individual_sources)} individual file sources '
                         f'after removing {form_data.file_id} from knowledge {id}'
                     )
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.warning(f'Failed to update OneDrive sources: {e}')
 
@@ -2180,6 +2191,8 @@ async def add_files_to_knowledge_batch(
             user=user,
             db=db,
         )
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.error(f'add_files_to_knowledge_batch: Exception occurred: {e}', exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

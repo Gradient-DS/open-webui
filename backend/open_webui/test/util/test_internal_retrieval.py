@@ -12,6 +12,11 @@ from open_webui.routers import internal_retrieval as internal_retrieval_router
 from open_webui.utils.service_auth import AgentPrincipal, get_agent_principal
 
 
+@pytest.fixture(autouse=True)
+def soev_configured(monkeypatch):
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
+
+
 @pytest.fixture
 def fake_principal():
     user = MagicMock()

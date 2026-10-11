@@ -85,10 +85,7 @@ class ChatCompletionsRequest(BaseModel):
 async def _find_kb_by_integration_source_id(provider: str, source_id: str):
     """Return the KB whose ``meta.integration.source_id`` matches ``source_id``.
 
-    Mirrors ``routers/integrations._find_kb_by_source_id`` but kept inline
-    so the agent proxy stays self-contained — the integrations router
-    holds the canonical writer; this is the read-side lookup the proxy
-    needs to translate caller-supplied source ids to KB UUIDs.
+    Translate caller-supplied legacy integration source ids to KB UUIDs.
     """
     for kb in await Knowledges.get_knowledge_bases_by_type(provider):
         meta = kb.meta or {}

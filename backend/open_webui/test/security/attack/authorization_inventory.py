@@ -146,3 +146,15 @@ def admin_gated_operations(spec=SPEC):
     if missing:
         raise ValueError(f'Authorization inventory cannot resolve registered operations: {sorted(missing)}')
     return [route for route in operations(spec) if inventory[route][2]]
+
+
+def platform_operations(spec=SPEC):
+    """Subject-scoped platform routes, including operations without a path id."""
+    from .plane import operations
+
+    return [
+        route
+        for route in operations(spec)
+        if route.split(' ', 1)[1].startswith(('/api/v1/cloud-sync/', '/api/v1/meetings'))
+        or route in {'POST /api/v1/files/onedrive/attach', 'HEAD /api/v1/files/{id}/content'}
+    ]

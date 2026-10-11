@@ -122,6 +122,7 @@ from open_webui.services.model_request_bodies import chat_completion_body, embed
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
 from open_webui.soev import model_catalog
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -735,6 +736,11 @@ install(app)
 
 # Used by readiness checks to gate traffic until startup work is done.
 app.state.startup_complete = False
+
+
+@app.exception_handler(SoevNotConfigured)
+async def soev_not_configured_handler(request, exc: SoevNotConfigured):
+    return JSONResponse(status_code=503, content={'detail': {'code': exc.code, 'detail': exc.detail}})
 
 
 # [Gradient] Surface the OTel trace id on HTTP error responses so a feedback
@@ -2111,6 +2117,8 @@ async def chat_completion(
             except Exception:
                 pass
             raise  # re-raise to ensure proper task cancellation handling
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             error_detail = e.detail if isinstance(e, HTTPException) else str(e)
             log.error('Error processing chat payload: %s', error_detail)

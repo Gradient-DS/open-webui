@@ -44,6 +44,7 @@ from open_webui.routers.live_documents import router as live_documents_router
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
 from open_webui.soev import ingest
+from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
 from open_webui.soev.live_documents import stream_original
 from open_webui.storage.provider import Storage
@@ -270,6 +271,8 @@ async def process_uploaded_file(
                 collection_name=collection_name,
             )
 
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.error(f'Error processing file: {file_item.id}')
             error_msg = str(e.detail) if hasattr(e, 'detail') else str(e)
@@ -937,6 +940,8 @@ async def update_file_data_content_by_id(
                 db=db,
             )
             file = await Files.get_file_by_id(id=id, db=db)
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.exception(e)
             log.error(f'Error processing file: {file.id}')
@@ -944,7 +949,7 @@ async def update_file_data_content_by_id(
         # Propagate content change to all knowledge collections referencing
         # this file.  Without this the old embeddings remain in the knowledge
         # collection and RAG returns both stale and current data (#20558).
-        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
+        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db) if configured() else []
         for knowledge in knowledges:
             try:
                 await process_file(
@@ -953,6 +958,8 @@ async def update_file_data_content_by_id(
                     user=user,
                     db=db,
                 )
+            except SoevNotConfigured:
+                raise
             except Exception as e:
                 log.warning(f'Failed to update knowledge {knowledge.id} after content change for file {id}: {e}')
 
@@ -1295,11 +1302,11 @@ async def delete_file_by_id(
         )
 
     if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'write', user, db=db):
-        if (file.meta or {}).get('soev_job') is not None:
+        if configured() and (file.meta or {}).get('soev_job') is not None:
             await ingest.cancel(file)
 
         # Remove knowledge memberships before deleting the file.
-        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
+        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db) if configured() else []
         for knowledge in knowledges:
             # Remove KB-file relationship
             await Knowledges.remove_file_from_knowledge_by_id(knowledge.id, id, db=db)

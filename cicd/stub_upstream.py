@@ -17,7 +17,6 @@ from urllib.parse import parse_qs, urlsplit
 MODEL = 'stub-model'
 EMBEDDING_MODEL = 'text-embedding-3-small'
 EMBEDDING_DIMENSION = 1536
-AGENTS = ('soev_chat_manual', 'assistant_onboarding')
 # A complete one-pixel PNG, returned inline so image generation needs no fetch.
 PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC'
 STREAM_DELTAS = ('stub ', 'streamed ', 'response')
@@ -90,35 +89,6 @@ class Handler(BaseHTTPRequestHandler):
                     ],
                 }
             )
-        elif path == '/v1/gradient_agent_meta':
-            self._send(
-                {
-                    'id': AGENTS[0],
-                    'name': AGENTS[0],
-                    'description': 'CI agent',
-                    'config': {'welcome_message': 'Welcome to the CI agent.'},
-                }
-            )
-        elif path == '/openapi.json':
-            self._send(
-                {
-                    'openapi': '3.1.0',
-                    'info': {'title': 'CI agents-api', 'version': '1.0.0'},
-                    'paths': {
-                        route: {method: {'responses': {'200': {'description': 'Success'}}}}
-                        for route, method in (
-                            ('/v1/models', 'get'),
-                            ('/v1/chat/completions', 'post'),
-                            ('/v1/gradient_agent_meta', 'get'),
-                            ('/openapi.json', 'get'),
-                        )
-                    },
-                }
-            )
-        elif path == '/v1/discovery/documents':
-            self._send({'collections': [], 'total_collections': 0, 'database': {}})
-        elif path.startswith('/jobs/'):
-            self._send({'job_id': path.rsplit('/', 1)[-1], 'status': 'completed'})
         elif path == '/api/tags':
             self._send(
                 {
@@ -268,7 +238,6 @@ class Handler(BaseHTTPRequestHandler):
             '/extract',
             '/v1/rerank',
             '/v1/images/generations',
-            '/jobs',
         } and not isinstance(payload, dict):
             self._send({'error': 'expected a JSON object'}, 400)
             return
@@ -346,11 +315,6 @@ class Handler(BaseHTTPRequestHandler):
             # The external-knowledge connection fixture is a Qdrant endpoint on this stub;
             # the client reads result.points and returns None for anything else.
             self._send({'result': {'points': []}, 'status': 'ok', 'time': 0})
-        elif path == '/sync/run':
-            # services/sync/daemon_client.py treats only 202 or 409 as a started run.
-            self._send({'status': 'accepted'}, status=202)
-        elif path == '/jobs':
-            self._send({'job_id': 'ci-document-job', 'status': 'pending'}, status=201)
         elif path == '/api/show':
             self._send({'model_info': {}, 'details': {'family': 'stub'}, 'capabilities': ['completion']})
         else:
