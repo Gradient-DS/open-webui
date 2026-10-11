@@ -1,4 +1,3 @@
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
@@ -35,11 +34,8 @@ def test_lock_connection_is_discarded_on_acquire_or_release_failure(failure_at):
 
 
 @pytest.fixture
-def postgres_engine():
-    url = os.environ.get('MIGRATION_LOCK_TEST_DATABASE_URL')
-    if not url:
-        pytest.skip('Set MIGRATION_LOCK_TEST_DATABASE_URL to an isolated PostgreSQL test database')
-    engine = create_engine(url, connect_args={'application_name': 'owui-migration-lock-test'})
+def postgres_engine(postgres_database):
+    engine = create_engine(postgres_database, connect_args={'application_name': 'owui-migration-lock-test'})
     try:
         yield engine
     finally:

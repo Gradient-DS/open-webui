@@ -363,7 +363,7 @@ async def test_v2_streamed_task_streams_through(v2: FakeSoevApi) -> None:
 @pytest.mark.asyncio
 async def test_v2_task_refusal_is_an_http_error(v2: FakeSoevApi) -> None:
     [model] = [m for m in await model_catalog.base_models() if m['id'] == 'glm-5-3']
-    v2.capabilities['test-runtime-key'] = {'mint'}
+    v2.capabilities['soev_test_cred-runtime_test-secret'] = {'mint'}
     with pytest.raises(Exception) as raised:
         await chat_utils.generate_chat_completion(
             task_request(model), json.loads(json.dumps(TASK_FORM)), SimpleNamespace(id='alice', role='admin')

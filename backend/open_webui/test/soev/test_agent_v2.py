@@ -2038,7 +2038,11 @@ async def test_web_calls_carry_the_addresses_they_found_and_read() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('failure', [False, True])
-async def test_turn_end_closes_with_the_summary_or_the_failure(chat: Chat, failure: bool) -> None:
+async def test_turn_end_closes_with_the_summary_or_the_failure(
+    chat: Chat, failure: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A frozen clock keeps the duration wording independent of machine load.
+    monkeypatch.setattr(agent_v2, 'time', SimpleNamespace(monotonic=lambda: 0.0))
     chat.api.chat.turns = [
         [
             ('model_output', {'content': '', 'tool_calls': [{'id': 'c1', 'name': 'search'}]}),
