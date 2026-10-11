@@ -42,7 +42,7 @@ from open_webui.utils.mail_status import mail_search_status
 from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.misc import get_content_from_message, get_message_list
 from open_webui.utils.tool_state import tool_state
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
 
 log = logging.getLogger(__name__)
@@ -56,6 +56,11 @@ _ENDED = frozenset({'finished', 'cancelled'})
 _ATTACHED = 'attached-document'
 # [Gradient] How the agents show their tool calls (GET /v1/chat/tools), per process for five minutes.
 TOOL_STATUS_CACHE: dict[str, Any] = {'expires_at': 0.0, 'statuses': {}}
+# [Claude] Yielded once by a turn when soev-api accepted it: an error before it gets an HTTP status, not a stream.
+_ACCEPTED: dict[str, Any] = {}
+# [Claude] Upstream statuses the user can act on, passed through; any other failure maps by code, else 502.
+_USER_STATUSES = frozenset({403, 404, 409, 413, 415, 422, 429})
+_CODE_STATUSES = {'invalid_field': 422, 'not_found': 404, 'thread_active': 409, 'service_unavailable': 503}
 
 
 async def _tool_statuses(client: SoevClient) -> dict[str, dict[str, Any]]:
@@ -778,18 +783,41 @@ def _error(
     detail: str | None = None,
     language: str | None = None,
 ) -> dict[str, Any]:
-    messages = {
+    dutch = (language or '').lower().startswith('nl')
+    message = _ERRORS['nl' if dutch else 'en'].get(code) or _ERRORS['nl' if dutch else 'en']['']
+    if code == 'invalid_field' and constraint is not None:
+        message = _refusal(constraint, model=model, detail=detail, language=language) or message
+    return {'error': {'code': code, 'message': message}}
+
+
+# [Claude] What the user sees when a turn fails, by error code; '' for any other code. Never upstream text.
+_ERRORS = {
+    'en': {
         'not_found': 'The agent thread is unavailable.',
         'thread_active': 'The agent thread is already running or needs recovery.',
         'invalid_field': 'The agent could not accept this input or collection selection.',
         'service_unavailable': 'The agent service is unavailable. Please try again.',
         'failed': 'The agent stopped because a step failed.',
         'interrupted': 'The agent turn was interrupted and needs recovery.',
-    }
-    message = messages.get(code, 'The agent request failed.')
-    if code == 'invalid_field' and constraint is not None:
-        message = _refusal(constraint, model=model, detail=detail, language=language) or message
-    return {'error': {'code': code, 'message': message}}
+        '': 'The agent request failed.',
+    },
+    'nl': {
+        'not_found': 'Dit gesprek met de assistent is niet meer beschikbaar.',
+        'thread_active': 'De assistent is nog bezig met dit gesprek of moet eerst worden hersteld.',
+        'invalid_field': 'De assistent kon deze invoer of kennisbankselectie niet accepteren.',
+        'service_unavailable': 'De assistent is niet beschikbaar. Probeer het opnieuw.',
+        'failed': 'De assistent is gestopt omdat een stap mislukte.',
+        'interrupted': 'Het antwoord van de assistent is onderbroken en moet worden hersteld.',
+        '': 'Het verzoek aan de assistent is mislukt.',
+    },
+}
+
+
+def _http_status(code: str, upstream: int | None = None) -> int:
+    """[Claude] The HTTP status of a failed turn: the user's own 4xx passes through, else by code, else 502."""
+    if upstream in _USER_STATUSES:
+        return upstream
+    return _CODE_STATUSES.get(code, 502)
 
 
 # [Gradient] Why the agent refused a turn, by soev-api's `chat:<reason>` constraint. `{model}` is the chosen model;
@@ -1036,6 +1064,41 @@ class AgentTurn:
         # dropped because they were deleted.
         self.notices: list[str] = []
         self.removed: list[str] = []
+        # [Claude] Whether soev-api accepted the turn, and the HTTP status of its failure, if it failed.
+        self.accepted = False
+        self.status: int | None = None
+
+    def fail(self, status: int, code: str, *, upstream: int | None = None, constraint: str | None = None) -> None:
+        """[Claude] Keep the failure's HTTP status and log it once: ids and codes only, never content (GRA-219)."""
+        self.status = status
+        log.log(
+            logging.ERROR if status == 500 else logging.WARNING,
+            'v2 agent turn failed: chat=%s message=%s thread=%s status=%s upstream=%s code=%s constraint=%s',
+            self.metadata.get('chat_id'),
+            self.metadata.get('message_id'),
+            self.thread_id,
+            status,
+            upstream,
+            code,
+            constraint,
+        )
+
+    def failed(self, error: Exception) -> dict[str, Any]:
+        """[Claude] The error chunk for a turn that raised; soev-api's detail reaches a refusal only on a 4xx."""
+        language = self.metadata.get('user_language')
+        if not isinstance(error, SoevApiError):
+            self.fail(500, type(error).__name__)
+            return _error('service_unavailable', language=language)
+        self.fail(
+            _http_status(error.code, error.status), error.code, upstream=error.status, constraint=error.constraint
+        )
+        return _error(
+            error.code,
+            constraint=error.constraint,
+            model=self.model,
+            detail=error.detail if error.status < 500 else None,
+            language=language,
+        )
 
     def left_out(self, skipped: list[Skipped]) -> None:
         self.notices = _notices(skipped, self.metadata.get('user_language'))
@@ -1498,9 +1561,10 @@ class AgentTurn:
             await self.emit('status', {'description': state or 'error', 'done': True})
         else:
             await self.summarize()
+        language = self.metadata.get('user_language')
         if event.event == 'error':
             code, constraint = event.data.get('code', 'service_unavailable'), event.data.get('constraint')
-            log.warning('v2 agent turn refused: code=%s constraint=%s', code, constraint)
+            self.fail(_http_status(code), code, constraint=constraint)
             detail = event.data.get('detail')
             chunks.append(
                 _error(
@@ -1508,11 +1572,12 @@ class AgentTurn:
                     constraint=constraint,
                     model=self.model,
                     detail=detail if isinstance(detail, str) else None,
-                    language=self.metadata.get('user_language'),
+                    language=language,
                 )
             )
         elif state not in {*_ENDED, 'waiting'}:
-            chunks.append(_error(state or 'service_unavailable'))
+            self.fail(_http_status(state or 'service_unavailable'), state or 'service_unavailable')
+            chunks.append(_error(state or 'service_unavailable', language=language))
         return chunks
 
     async def summarize(self) -> None:
@@ -1547,6 +1612,9 @@ class AgentTurn:
                 async for event in events:
                     for chunk in await self.render(event):
                         yield chunk
+                    if event.event == 'connection' and not self.accepted:
+                        self.accepted = True
+                        yield _ACCEPTED
                     for chunk in await self.start_pending_tools():
                         yield chunk
         except (asyncio.CancelledError, GeneratorExit):
@@ -1554,20 +1622,7 @@ class AgentTurn:
             raise
         except Exception as error:
             await self.cancel()
-            if isinstance(error, SoevApiError):
-                # [Gradient] Code and constraint only: the detail can name the user's files.
-                log.warning(
-                    'v2 agent turn refused: status=%s code=%s constraint=%s', error.status, error.code, error.constraint
-                )
-                yield _error(
-                    error.code,
-                    constraint=error.constraint,
-                    model=self.model,
-                    detail=error.detail,
-                    language=self.metadata.get('user_language'),
-                )
-            else:
-                yield _error('service_unavailable')
+            yield self.failed(error)
 
 
 async def call_agent_v2(
@@ -1576,24 +1631,47 @@ async def call_agent_v2(
     """Submit one user message; the thread owns the conversation history."""
     user_ref = acting.acting_ref() or f'owui:user:{metadata["user_id"]}'
     turn = AgentTurn(identity.build_client(), metadata, user_ref)
-    chunks = await _sent(turn, _input_text(metadata, form_data), metadata, agent=agent, model=model)
+    text = _input_text(metadata, form_data)
+    try:
+        chunks = await _sent(turn, text, metadata, agent=agent, model=model)
+    except Exception as error:
+        chunks = _refused(turn.failed(error))
+    early = await _opened(chunks)
+    if isinstance(early, dict):
+        return JSONResponse(early, status_code=turn.status or 502)
     if not form_data.get('stream', True):
         message = {'role': 'assistant', 'content': '', 'reasoning_content': ''}
         async with aclosing(chunks):
-            async for chunk in chunks:
-                if 'error' in chunk:
-                    return chunk
-                for key, value in chunk['choices'][0]['delta'].items():
-                    message[key] += value
+            rest = [chunk async for chunk in chunks]
+        for chunk in early + rest:
+            if 'error' in chunk:
+                return JSONResponse(chunk, status_code=turn.status or 502)
+            for key, value in chunk['choices'][0]['delta'].items():
+                message[key] += value
         return {'object': 'chat.completion', 'choices': [{'index': 0, 'message': message, 'finish_reason': 'stop'}]}
 
     async def stream_body() -> AsyncIterator[str]:
         async with aclosing(chunks):
+            for chunk in early:
+                yield f'data: {json.dumps(chunk)}\n\n'
             async for chunk in chunks:
                 yield f'data: {json.dumps(chunk)}\n\n'
         yield 'data: [DONE]\n\n'
 
     return StreamingResponse(stream_body(), media_type='text/event-stream')
+
+
+async def _opened(chunks: AsyncIterator[dict[str, Any]]) -> list[dict[str, Any]] | dict[str, Any]:
+    """[Claude] The chunks before soev-api accepted the turn, or the error chunk that ended it before then."""
+    early: list[dict[str, Any]] = []
+    async for chunk in chunks:
+        if chunk is _ACCEPTED:
+            return early
+        if 'error' in chunk:
+            await chunks.aclose()
+            return chunk
+        early.append(chunk)
+    return early
 
 
 async def _sent(
@@ -1607,6 +1685,7 @@ async def _sent(
             if (metadata.get('user_language') or '').lower().startswith('nl')
             else 'Attach at most 10 notes or chats.'
         )
+        turn.fail(422, 'attachments_unavailable')
         return _refused({'error': {'code': 'attachments_unavailable', 'message': message}})
     try:
         knowledge, skipped = await _knowledge(metadata)
@@ -1614,6 +1693,7 @@ async def _sent(
         texts, skipped_texts = await _texts(entries, metadata['user_id'])
         images = await _images(metadata, turn.as_user)
     except ImagesUnavailable as unavailable:
+        turn.fail({'size': 413, 'type': 415}.get(unavailable.reason, 422), 'images_unavailable')
         return _refused(_unimaged(unavailable, metadata.get('user_language')))
     skipped += attachments.pop('skipped', []) + skipped_texts
     if skipped:
