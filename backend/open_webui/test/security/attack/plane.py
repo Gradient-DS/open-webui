@@ -55,7 +55,7 @@ from . import client as transport
 from .configuration import preserve_configuration
 from .hits_path import hits_path
 from .identities import PASSWORD
-from .seeds import DESTRUCTIVE, METHODS, SOEV_BACKED, SPEC, parameter_for, route_waived
+from .seeds import DESTRUCTIVE, METHODS, SOEV_BACKED, SPEC, parameter_for, route_waived, runtime_soev_backed
 
 
 @dataclass(frozen=True)
@@ -116,7 +116,8 @@ def _count(histogram, route, status):
 
 
 def soev_not_configured(status, body):
-    if status != 503:
+    # In drive mode soev is configured, so this answer is a crash like any 5xx.
+    if status != 503 or runtime_soev_backed() == 'drive':
         return False
     if isinstance(body, requests.Response):
         body = transport.json_body(body)

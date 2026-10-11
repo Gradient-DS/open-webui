@@ -826,7 +826,8 @@ def test_the_drive_pass_sends_declared_json_alone_on_a_seeded_route():
         (503, {'detail': {'code': 'soev_not_configured', 'detail': 'x' * 3000}}, True),
     ],
 )
-def test_only_exact_soev_unconfigured_response_is_driven_without_a_crash(status, body, unavailable):
+def test_only_exact_soev_unconfigured_response_is_driven_without_a_crash(status, body, unavailable, monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'waive')
     client = Mock()
     client.request.return_value = response(status, body)
     outcome = plane._drive_response(client, 'GET /local', '/local', 'drive')
@@ -835,3 +836,11 @@ def test_only_exact_soev_unconfigured_response_is_driven_without_a_crash(status,
     assert outcome.crashed is (not unavailable)
     assert bool(plane._PASSES['drive'].crashes) is (not unavailable)
     assert bool(plane.drive_report({'GET /local': outcome})) is (not unavailable)
+
+
+def test_soev_unconfigured_is_a_crash_in_drive_mode(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    client = Mock()
+    client.request.return_value = response(503, {'detail': {'code': 'soev_not_configured'}})
+    outcome = plane._drive_response(client, 'GET /local', '/local', 'drive')
+    assert outcome.crashed
