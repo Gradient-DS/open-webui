@@ -61,13 +61,12 @@ def test_every_declaration_matches_and_wins_for_at_least_one_parameter():
     assert len(selectors) == len(set(selectors))
 
 
-def test_route_scoping_distinguishes_resources_and_attachment_parent():
+def test_route_scoping_distinguishes_resources():
     for path, key in [
         ('/api/v1/chats/{id}', 'chat'),
         ('/api/v1/knowledge/{id}/files', 'knowledge'),
         ('/api/v1/knowledge/external/connections/{id}', 'connection'),
         ('/api/v1/files/{id}/content', 'file'),
-        ('/api/v1/files/{id}/attachments/{attachment_id}', 'attachment_file'),
         ('/api/v1/chats/shared/{id}/access', 'shared_access'),
         ('/api/v1/chats/{id}/clone/shared', 'shared_clone'),
     ]:

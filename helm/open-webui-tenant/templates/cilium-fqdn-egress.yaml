@@ -1,0 +1,42 @@
+{{- if and .Values.networkPolicy.enabled .Values.networkPolicy.egress.fqdn.enabled }}
+{{- include "open-webui-tenant.validateEgress" . }}
+{{- $selectors := include "open-webui-tenant.fqdnSelectors" . }}
+{{- if not (trim $selectors) }}
+{{- fail "networkPolicy.egress.fqdn.enabled but no hostname derives from the config; set fqdn.extraNames" }}
+{{- end }}
+# Public HTTPS by hostname. With fqdn.enforce this is the only public egress;
+# without it the Kubernetes policies still admit all public 443, so this only
+# routes DNS through Cilium's proxy and records what the pods resolve.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "open-webui-tenant.fullname" . }}-fqdn-egress
+  labels:
+    {{- include "open-webui-tenant.labels" . | nindent 4 }}
+spec:
+  {{- if eq .Values.networkPolicy.scope "release" }}
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- else }}
+  endpointSelector: {}
+  {{- end }}
+  egress:
+    # DNS through the proxy, which is what teaches Cilium the names below.
+    - toEndpoints:
+        - matchLabels:
+            {{- toYaml .Values.networkPolicy.egress.fqdn.dnsSelector | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        {{- $selectors | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+{{- end }}

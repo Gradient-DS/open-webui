@@ -28,12 +28,9 @@ def bypass(request, seeded, monkeypatch):
         '/content/html',
         '/data/content',
         '/process/status',
-        '/attachments',
-        '/attachments/attachment',
     ],
 )
 def test_file_content(seeded, monkeypatch, tmp_path, bypass, suffix):
-    from open_webui.models.file_attachments import FileAttachment
     from open_webui.models.files import File
     from open_webui.models.users import User
     from open_webui.routers import files
@@ -44,18 +41,6 @@ def test_file_content(seeded, monkeypatch, tmp_path, bypass, suffix):
     with Session(seeded.engine) as db:
         db.execute(update(File).where(File.id == 'target').values(path=str(path), data={'status': 'completed'}))
         db.execute(update(User).where(User.id == 'owner').values(role='admin'))
-        db.add(
-            FileAttachment(
-                id='attachment',
-                file_id='target',
-                kind='image',
-                index=0,
-                content_type='text/plain',
-                caption='',
-                path=str(path),
-                created_at=1,
-            )
-        )
         db.commit()
     monkeypatch.setattr(files.Storage, 'get_file', lambda value: value)
     monkeypatch.setattr(files.ingest, 'rendition_of', AsyncMock(return_value='private file'))

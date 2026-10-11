@@ -35,6 +35,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "open-webui-tenant.openWebui.selectorLabels" . | nindent 14 }}
+      {{- if .Values.networkPolicy.egress.strict }}
+      ports:
+        - protocol: TCP
+          port: 8080
+      {{- end }}
     # Tenant Postgres for the loader_worker DB.
     - to:
         - podSelector:
@@ -44,6 +49,9 @@ spec:
         - protocol: TCP
           port: {{ include "open-webui-tenant.postgres.port" . }}
     # Shared services: doc-processor + LiteLLM.
+    {{- if .Values.networkPolicy.egress.strict }}
+    {{- include "open-webui-tenant.egressAllow" (list . .Values.loaderWorker.networkPolicy.egressAllow) | nindent 4 }}
+    {{- else }}
     - to:
         - namespaceSelector:
             matchLabels:
@@ -53,6 +61,7 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ . }}
+    {{- end }}
     {{- end }}
     # DNS
     - to:
@@ -64,12 +73,8 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    {{- if not .Values.networkPolicy.egress.fqdn.enforce }}
     # External cloud APIs (OneDrive, Google Drive) — public internet only.
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
+    {{- include "open-webui-tenant.publicEgress" . | nindent 4 }}
+    {{- end }}
 {{- end }}
