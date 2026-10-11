@@ -78,9 +78,10 @@ depends_on = ["namespace"]
 key = "model"
 name = "model_id"
 prefix = "/api/v1/analytics/models/{model_id}"
-description = "Select from the configured upstream registry so a previous task Pipe cannot become the base fixture. Register the selected CI model through models/model/access/update with public read access: listing an unconfigured model as admin does not make it chat-usable. Reuse the upstream selector and Models row across passes."
+description = "Select from the configured upstream registry so a previous task Pipe cannot become the base fixture. Register the selected CI model through models/model/access/update with public read access: listing an unconfigured model as admin does not make it chat-usable. Reuse the upstream selector and Models row across passes. The upstream's first id is also {upstream_model}, for routes that proxy to a connection directly. RUNTIME_SOEV_BACKED=drive runs v2, whose registry lists only soev-api's catalog, so there {model} is the catalog default."
 seeded_by = "seed_model"
 depends_on = ["openai_index"]
+provides = ["upstream_model"]
 fresh = false
 actor = "admin"
 
@@ -916,12 +917,12 @@ params = { "from_id" = "{prompt_history}", "to_id" = "{prompt_history}" }
 [[field]]
 route = "POST /api/models/unload"
 description = "main.py:unload_model walks the model's base_model_id chain to an upstream model and answers 404 for an unknown id."
-json = { "model" = "{model}" }
+json = { "model" = "{upstream_model}" }
 
 [[field]]
 route = "POST /openai/chat/completions"
 description = "routers/openai.py:generate_chat_completion answers 404 MODEL_NOT_FOUND unless the model resolves to a configured upstream model (404 x389 measured with sampled ids)."
-json = { "model" = "{model}" }
+json = { "model" = "{upstream_model}" }
 
 [[field]]
 route = "POST /api/v1/calendars/events/create"
@@ -992,7 +993,7 @@ setup = [
 
 [[field]]
 route = "POST /api/embeddings"
-description = "utils/embeddings.py:generate_embeddings answers 404 for a model outside the registry (PLANE-004); the seeded model is the CI upstream's, which embeds."
+description = "utils/embeddings.py:generate_embeddings answers 404 for a model outside the registry (PLANE-004); the seeded model is the CI upstream's, which embeds. In drive mode it is a soev catalog id, absent from OPENAI_MODELS, so routers/openai.py:embeddings keeps idx 0 and sends it to the first connection (the stub)."
 json = { "model" = "{model}" }
 
 [[field]]
@@ -1003,27 +1004,27 @@ json = { "model" = "{model}" }
 [[field]]
 route = "POST /ollama/api/chat/{url_idx}"
 description = "routers/ollama.py:generate_chat_completion validates the body as GenerateChatCompletionForm (a model and role/content messages) and answers 400 otherwise, so no owner control succeeded. The stub's /api/tags lists the CI model."
-json = { "model" = "{model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
+json = { "model" = "{upstream_model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
 
 [[field]]
 route = "POST /ollama/v1/chat/completions/{url_idx}"
 description = "The OpenAI-compatible Ollama proxy resolves the model and forwards the messages; the schema-derived body carries neither."
-json = { "model" = "{model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
+json = { "model" = "{upstream_model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
 
 [[field]]
 route = "POST /ollama/v1/messages/{url_idx}"
 description = "The Anthropic-compatible Ollama proxy answers 400 without a model (PLANE-019); the stub's /api/tags lists the CI model."
-json = { "model" = "{model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
+json = { "model" = "{upstream_model}", "messages[].role" = "user", "messages[].content" = "Attack probe {token}" }
 
 [[field]]
 route = "POST /ollama/v1/completions/{url_idx}"
 description = "The completions proxy needs a model the Ollama connection lists and a prompt."
-json = { "model" = "{model}", "prompt" = "Attack probe {token}" }
+json = { "model" = "{upstream_model}", "prompt" = "Attack probe {token}" }
 
 [[field]]
 route = "POST /ollama/v1/embeddings/{url_idx}"
 description = "The embeddings proxy needs a model the Ollama connection lists and an input."
-json = { "model" = "{model}", "input" = "Attack probe {token}" }
+json = { "model" = "{upstream_model}", "input" = "Attack probe {token}" }
 
 [[field]]
 route = "POST /api/v1/channels/{id}/members/active"
