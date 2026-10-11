@@ -374,25 +374,25 @@ reason = "Backed by soev-solutions; security tested there. routers/internal_retr
 
 [[waived]]
 id = "GET /api/v1/agent/models"
-backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/agent_proxy.py:list_models forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."
+backed_by = "legacy-agents-api"
+reason = "Backed by the legacy v1 agents-api (soev-solutions legacy/agents), which neither stack runs; the platform agents host serves no such surface. routers/agent_proxy.py:list_models forwards to AGENT_API_BASE_URL, unset here. Waived in both RUNTIME_SOEV_BACKED modes; anonymous refusal is checked live. Closes when the v1 proxy is removed."
 
 [[waived]]
 id = "GET /api/v1/agent/gradient_agent_meta"
-backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/agent_proxy.py:gradient_agent_meta forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."
+backed_by = "legacy-agents-api"
+reason = "Backed by the legacy v1 agents-api (soev-solutions legacy/agents), which neither stack runs; the platform agents host serves no such surface. routers/agent_proxy.py:gradient_agent_meta forwards to AGENT_API_BASE_URL, unset here. Waived in both RUNTIME_SOEV_BACKED modes; anonymous refusal is checked live. Closes when the v1 proxy is removed."
 
 [[waived]]
 id = "GET /api/v1/agent/openapi.json"
-backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/agent_proxy.py:openapi_spec forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."
+backed_by = "legacy-agents-api"
+reason = "Backed by the legacy v1 agents-api (soev-solutions legacy/agents), which neither stack runs; the platform agents host serves no such surface. routers/agent_proxy.py:openapi_spec forwards to AGENT_API_BASE_URL, unset here. Waived in both RUNTIME_SOEV_BACKED modes; anonymous refusal is checked live. Closes when the v1 proxy is removed."
 
 [[waived]]
 id = "POST /api/v1/agent/chat/completions"
-backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/agent_proxy.py:chat_completions forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."
+backed_by = "legacy-agents-api"
+reason = "Backed by the legacy v1 agents-api (soev-solutions legacy/agents), which neither stack runs; the platform agents host serves no such surface. routers/agent_proxy.py:chat_completions forwards to AGENT_API_BASE_URL, unset here. Waived in both RUNTIME_SOEV_BACKED modes; anonymous refusal is checked live. Closes when the v1 proxy is removed."
 
 [[waived]]
 id = "GET /api/v1/discovery/documents"
-backed_by = "soev-solutions"
-reason = "Backed by soev-solutions; security tested there. routers/discovery.py:list_documents forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."
+backed_by = "legacy-agents-api"
+reason = "Backed by the legacy v1 agents-api (soev-solutions legacy/agents), which neither stack runs; the platform agents host serves no such surface. routers/discovery.py:list_documents forwards to SEARCH_API_BASE_URL, unset here. Waived in both RUNTIME_SOEV_BACKED modes; anonymous refusal is checked live. Closes when the v1 proxy is removed."

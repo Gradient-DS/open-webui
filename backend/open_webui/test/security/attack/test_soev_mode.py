@@ -165,3 +165,14 @@ reason = "Unrelated waiver"
         hits['hits'].append('GET /other')
         with pytest.raises(AssertionError, match='GET /other'):
             coverage.assert_no_waiver_covers_a_route_the_plane_actually_reached()
+
+
+@pytest.mark.parametrize('mode', ['waive', 'drive'])
+def test_legacy_agents_api_routes_stay_waived_in_both_modes(monkeypatch, mode):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', mode)
+    assert seeds.LEGACY_BACKED and not seeds.LEGACY_BACKED.keys() & seeds.SOEV_BACKED.keys()
+    for route in seeds.LEGACY_BACKED:
+        tally = plane.Seeding()
+        assert plane._target(route, {}, tally) is None
+        assert tally.skipped[route].startswith('BACKED BY LEGACY AGENTS-API')
+        assert route in coverage.waivers()

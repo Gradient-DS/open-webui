@@ -8,10 +8,10 @@ from .benign_requests import benign_request
 from .client import AttackClient
 from .identities import ensure_identities
 from .pass_support import crash_details
-from .seeds import SOEV_BACKED
+from .seeds import LEGACY_BACKED, SOEV_BACKED
 
 
-@pytest.mark.parametrize('route', sorted(SOEV_BACKED))
+@pytest.mark.parametrize('route', sorted(SOEV_BACKED.keys() | LEGACY_BACKED.keys()))
 def test_soev_backed_routes_refuse_anonymous_callers(route):
     # OWUI's own authentication runs before any soev-api call, so this check
     # needs no soev service. A refusal is not recorded as a route hit.
