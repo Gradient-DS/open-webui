@@ -637,7 +637,7 @@ def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
         # [Gradient] Outside v2 mode no model is offered by the soev catalog.
         'model_catalog': SimpleNamespace(is_unconfigured=lambda model: False, is_offered=AsyncMock(return_value=False)),
         'MODEL_WHITELIST': [],
-        'BYPASS_ADMIN_ACCESS_CONTROL': False,
+        'can_bypass_access_control': lambda user: False,
         'BYPASS_MODEL_ACCESS_CONTROL': False,
     }
     tree = ast.parse((ROOT / 'backend/open_webui/utils/models.py').read_text())

@@ -10,6 +10,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel, Users
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ async def get_accessible_folder_files(
         for entry in entries
         if isinstance(entry, dict) and entry.get('type') in FOLDER_FILE_TYPES and entry.get('id')
     ]
-    if user.role == 'admin':
+    if can_bypass_access_control(user):
         return entries
 
     if user_group_ids is None:

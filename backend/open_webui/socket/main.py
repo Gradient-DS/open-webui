@@ -47,6 +47,7 @@ from open_webui.utils.redis import (
     get_redis_connection,
     get_sentinels_from_env,
 )
+from open_webui.utils.access_control import can_bypass_access_control
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -553,7 +554,7 @@ async def join_note(sid, data):
         return
 
     if (
-        user.role != 'admin'
+        not can_bypass_access_control(user)
         and user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -687,7 +688,7 @@ async def ydoc_document_join(sid, data):
                 return
 
             if (
-                user.get('role') != 'admin'
+                not can_bypass_access_control(user)
                 and user.get('id') != note.user_id
                 and not await AccessGrants.has_access(
                     user_id=user.get('id'),
@@ -760,7 +761,7 @@ async def document_save_handler(document_id, data, user):
             return
 
         if (
-            user.get('role') != 'admin'
+            not can_bypass_access_control(user)
             and user.get('id') != note.user_id
             and not await AccessGrants.has_access(
                 user_id=user.get('id'),
@@ -844,7 +845,7 @@ async def yjs_document_update(sid, data):
                 return
 
             if (
-                user.get('role') != 'admin'
+                not can_bypass_access_control(user)
                 and user.get('id') != note.user_id
                 and not await AccessGrants.has_access(
                     user_id=user.get('id'),
