@@ -362,10 +362,29 @@ def register_readable_model(ctx, model_id):
         raise RuntimeError(f'Model {model_id} did not acquire public read access')
 
 
+def catalog_default_model(ctx, parameter):
+    # Drive mode runs the v2 runtime, where soev-api's catalog is the only source of
+    # registry models (utils/models.py:get_all_base_models); upstream ids never list.
+    registry = ctx.request('GET', '/api/models', actor=ctx.admin, params={'refresh': True})
+    defaults = [
+        model['id']
+        for model in registry.get('data', [])
+        if model.get('owned_by') == 'soev'
+        and ((model.get('info') or {}).get('meta') or {}).get('soev', {}).get('default')
+    ]
+    if len(defaults) != 1:
+        raise RuntimeError(f'{parameter["key"]}: expected one soev catalog default model, found {defaults}')
+    return defaults[0]
+
+
 def seed_model(ctx, parameter):
     path = f'/openai/models/{quote(ctx.values["openai_index"], safe="")}'
-    registry = ctx.request('GET', path, actor=ctx.admin)
-    model_id = _extract(registry, 'data.0.id', name=parameter['key'], via=f'GET {path}')
+    upstream = ctx.request('GET', path, actor=ctx.admin)
+    ctx.values['upstream_model'] = _extract(upstream, 'data.0.id', name=parameter['key'], via=f'GET {path}')
+    if runtime_soev_backed() == 'drive':
+        model_id = catalog_default_model(ctx, parameter)
+    else:
+        model_id = ctx.values['upstream_model']
     register_readable_model(ctx, model_id)
     return model_id
 
