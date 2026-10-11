@@ -399,3 +399,146 @@ v2-migrate Job so it runs with exactly the app's credentials.
 {{- toYaml . | nindent 0 }}
 {{- end }}
 {{- end }}
+
+{{/*
+Non-public IPv4 ranges excluded from every public-egress rule: this network,
+RFC1918, CGNAT, loopback, link-local (cloud metadata), IETF protocol
+assignments, documentation, 6to4 relay, benchmarking, multicast and reserved.
+*/}}
+{{- define "open-webui-tenant.nonPublicIPv4" -}}
+- 0.0.0.0/8
+- 10.0.0.0/8
+- 100.64.0.0/10
+- 127.0.0.0/8
+- 169.254.0.0/16
+- 172.16.0.0/12
+- 192.0.0.0/24
+- 192.0.2.0/24
+- 192.88.99.0/24
+- 192.168.0.0/16
+- 198.18.0.0/15
+- 198.51.100.0/24
+- 203.0.113.0/24
+- 224.0.0.0/4
+- 240.0.0.0/4
+{{- end }}
+
+{{/*
+Fails on egress settings that would silently open more than they say.
+*/}}
+{{- define "open-webui-tenant.validateEgress" -}}
+{{- $egress := .Values.networkPolicy.egress -}}
+{{- if $egress.strict -}}
+{{- if .Values.networkPolicy.extraEgressNamespaces -}}
+{{- fail "networkPolicy.extraEgressNamespaces opens whole namespaces; with egress.strict list the services in networkPolicy.egress.allow" -}}
+{{- end -}}
+{{- if not $egress.publicPorts -}}
+{{- fail "networkPolicy.egress.publicPorts must not be empty with egress.strict (an empty list would admit every port)" -}}
+{{- end -}}
+{{- end -}}
+{{- if and $egress.fqdn.enforce (not $egress.strict) -}}
+{{- fail "networkPolicy.egress.fqdn.enforce needs egress.strict" -}}
+{{- end -}}
+{{- if and $egress.fqdn.enforce (not $egress.fqdn.enabled) -}}
+{{- fail "networkPolicy.egress.fqdn.enforce needs fqdn.enabled" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Public IPv4 egress, shared by the tenant, loader-worker and sync-daemon
+policies; strict mode limits it to publicPorts. Callers omit it when the FQDN
+allowlist is enforced.
+*/}}
+{{- define "open-webui-tenant.publicEgress" -}}
+{{- $egress := .Values.networkPolicy.egress -}}
+- to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+          {{- include "open-webui-tenant.nonPublicIPv4" . | nindent 10 }}
+  {{- if $egress.strict }}
+  ports:
+    {{- range $egress.publicPorts }}
+    - protocol: TCP
+      port: {{ . }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+
+{{/*
+Egress rules for {name, namespace, podLabels, ports} entries.
+Usage: include "open-webui-tenant.egressAllow" (list $ $entries)
+*/}}
+{{- define "open-webui-tenant.egressAllow" -}}
+{{- $root := index . 0 -}}
+{{- range index . 1 }}
+- to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: {{ .namespace | default $root.Release.Namespace }}
+      {{- with .podLabels }}
+      podSelector:
+        matchLabels:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+  ports:
+    {{- range required (printf "egress allow entry %q needs ports" (.name | default "")) .ports }}
+    - protocol: TCP
+      port: {{ . }}
+    {{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Strict-mode rule to this release's own pods, on the ports they serve.
+*/}}
+{{- define "open-webui-tenant.releaseEgress" -}}
+{{- $ports := list 8080 -}}
+{{- if .Values.postgres.enabled }}{{ $ports = append $ports (include "open-webui-tenant.postgres.port" . | int) }}{{ end -}}
+{{- if .Values.weaviate.enabled }}{{ $ports = concat $ports (list 8080 50051) }}{{ end -}}
+{{- if .Values.redis.enabled }}{{ $ports = append $ports 6379 }}{{ end -}}
+{{- if .Values.loaderWorker.enabled }}{{ $ports = append $ports (.Values.loaderWorker.config.port | default 8002 | int) }}{{ end -}}
+{{- if .Values.syncDaemon.enabled }}{{ $ports = append $ports (.Values.syncDaemon.service.port | default 8010 | int) }}{{ end }}
+- to:
+    - podSelector:
+        matchLabels:
+          {{- include "open-webui-tenant.selectorLabels" . | nindent 10 }}
+  ports:
+    {{- range $ports | uniq }}
+    - protocol: TCP
+      port: {{ . }}
+    {{- end }}
+{{- end }}
+
+{{/*
+Hostnames for the FQDN egress allowlist, derived from the enabled integrations.
+Output: YAML list of {matchName} / {matchPattern}.
+*/}}
+{{- define "open-webui-tenant.fqdnSelectors" -}}
+{{- $c := .Values.openWebui.config -}}
+{{- $fqdn := .Values.networkPolicy.egress.fqdn -}}
+{{- $names := list -}}
+{{- $patterns := list -}}
+{{- with $c.openidProviderUrl }}{{ $names = append $names (urlParse .).host }}{{ end -}}
+{{- if or $c.microsoftClientId (eq (toString $c.enableEmailInvites) "true") (eq (toString $c.enableOnedriveIntegration) "true") }}
+{{- $names = concat $names (list "login.microsoftonline.com" "graph.microsoft.com") -}}
+{{- end -}}
+{{- if eq (toString $c.enableOnedriveIntegration) "true" }}{{ $patterns = append $patterns "*.sharepoint.com" }}{{ end -}}
+{{- if eq (toString $c.enableGoogleDriveIntegration) "true" }}
+{{- $names = concat $names (list "accounts.google.com" "oauth2.googleapis.com" "www.googleapis.com") -}}
+{{- end -}}
+{{- if eq (toString $c.enableConfluenceIntegration) "true" }}
+{{- $names = concat $names (list "auth.atlassian.com" "api.atlassian.com") -}}
+{{- with $c.confluenceSiteUrl }}{{ $names = append $names (urlParse .).host }}{{ end -}}
+{{- end -}}
+{{- if and (eq (toString $c.storageProvider) "s3") $c.s3EndpointUrl }}{{ $names = append $names (urlParse $c.s3EndpointUrl).host }}{{ end -}}
+{{- if or .Values.secrets.feedbackReportSlackWebhookUrl .Values.externalSecrets.onepassword.fields.feedbackReportSlackWebhookUrl }}{{ $names = append $names "hooks.slack.com" }}{{ end -}}
+{{- $names = concat $names $fqdn.extraNames -}}
+{{- $patterns = concat $patterns $fqdn.extraPatterns -}}
+{{- range $names | uniq | sortAlpha }}
+- matchName: {{ (splitList ":" .) | first | quote }}
+{{- end }}
+{{- range $patterns | uniq | sortAlpha }}
+- matchPattern: {{ . | quote }}
+{{- end }}
+{{- end }}
