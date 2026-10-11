@@ -62,6 +62,7 @@ from open_webui.routers.memories import (
 )
 from open_webui.routers.retrieval import search_web as _search_web
 from open_webui.socket.main import sio
+from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.tasks import stop_item_tasks
 from open_webui.tools.knowledge_fs import kb_exec  # noqa: F401 — re-exported
 from open_webui.utils.chat_id import is_saved_chat_id
@@ -2086,6 +2087,8 @@ async def list_knowledge_bases(
             )
 
         return JSONCodec.dumps(knowledge_bases, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'list_knowledge_bases error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2146,6 +2149,8 @@ async def search_knowledge_bases(
             )
 
         return JSONCodec.dumps(knowledge_bases, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'search_knowledge_bases error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2311,6 +2316,8 @@ async def search_knowledge_files(
             files.append(file_info)
 
         return JSONCodec.dumps(files, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'search_knowledge_files error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2609,6 +2616,8 @@ async def query_chat_files(
                 chunks.append(chunk)
 
         return JSONCodec.dumps(chunks[:count], ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'query_chat_files error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2729,6 +2738,8 @@ async def grep_knowledge_files(
 
         return _grep_file_models(files_to_search, pattern, case_insensitive, count_only)
 
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'grep_knowledge_files error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2904,7 +2915,7 @@ async def view_knowledge_file(
             return JSONCodec.dumps({'error': 'File not found'})
 
         # Check access via any KB containing this file
-        knowledges = await Knowledges.get_knowledges_by_file_id(file_id)
+        knowledges = await Knowledges.get_knowledges_by_file_id(file_id) if configured() else []
         has_knowledge_access = False
         knowledge_info = None
 
@@ -2988,6 +2999,8 @@ async def view_knowledge_file(
                 result['next_offset'] = offset + len(sliced)
 
         return JSONCodec.dumps(result, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'view_knowledge_file error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -3130,6 +3143,8 @@ async def list_knowledge(
             },
             ensure_ascii=False,
         )
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'list_knowledge error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -3240,7 +3255,7 @@ async def query_knowledge_files(
                         collection_names.append(file_collection)
                         continue
 
-                    kb = await Knowledges.get_knowledge_by_file_id(file_id=item_id)
+                    kb = await Knowledges.get_knowledge_by_file_id(file_id=item_id) if configured() else None
                     if kb and (
                         user_role == 'admin'
                         or kb.user_id == user_id
@@ -3373,6 +3388,8 @@ async def query_knowledge_files(
         chunks = chunks[:count]
 
         return JSONCodec.dumps(chunks, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'query_knowledge_files error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -3478,6 +3495,8 @@ async def query_knowledge_bases(
 
         return JSONCodec.dumps(matching_knowledge_bases, ensure_ascii=False)
 
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'query_knowledge_bases error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -3741,7 +3760,7 @@ async def create_automation(
         return JSONCodec.dumps({'error': 'User context not available'})
 
     try:
-        from open_webui.models.automations import AutomationData, AutomationForm, AutomationTarget, Automations
+        from open_webui.models.automations import AutomationData, AutomationForm, Automations, AutomationTarget
         from open_webui.models.users import Users
         from open_webui.routers.automations import check_automation_limits
         from open_webui.utils.automations import next_n_runs_ns, next_run_ns, validate_rrule
@@ -3840,7 +3859,7 @@ async def update_automation(
         return JSONCodec.dumps({'error': 'User context not available'})
 
     try:
-        from open_webui.models.automations import AutomationData, AutomationForm, AutomationTarget, Automations
+        from open_webui.models.automations import AutomationData, AutomationForm, Automations, AutomationTarget
         from open_webui.models.users import Users
         from open_webui.routers.automations import check_automation_limits
         from open_webui.utils.automations import next_n_runs_ns, next_run_ns, validate_rrule

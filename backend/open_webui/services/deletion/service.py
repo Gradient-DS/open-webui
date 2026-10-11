@@ -1,12 +1,13 @@
 import asyncio
-from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional
 import logging
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set
 
 from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
-from open_webui.storage.provider import Storage
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
+from open_webui.soev.availability import SoevNotConfigured, configured
+from open_webui.storage.provider import Storage
 
 log = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class DeletionService:
             return report
 
         # 1. Find all knowledge bases containing this file and remove vectors
-        knowledge_files = await Knowledges.get_knowledge_files_by_file_id(file_id)
+        knowledge_files = await Knowledges.get_knowledge_files_by_file_id(file_id) if configured() else []
         for kf in knowledge_files:
             try:
                 # Delete vectors by file_id from the knowledge collection
@@ -143,7 +144,7 @@ class DeletionService:
         else:
             from open_webui.models.chats import Chats
 
-            kb_referenced = await Knowledges.get_referenced_file_ids(file_ids)
+            kb_referenced = await Knowledges.get_referenced_file_ids(file_ids) if configured() else set()
             chat_referenced = await Chats.get_referenced_file_ids(file_ids)
             referenced_ids = kb_referenced | chat_referenced
             orphaned_ids = [fid for fid in file_ids if fid not in referenced_ids]
@@ -413,6 +414,8 @@ class DeletionService:
                 report.add_db('knowledge')
             else:
                 report.add_error(f'Failed to delete knowledge {knowledge_id}')
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             report.add_error(f'Database error deleting knowledge {knowledge_id}: {e}')
 
@@ -466,21 +469,21 @@ class DeletionService:
         - Chat file cleanup (vectors, storage, DB)
         """
         from open_webui.models.auths import Auths
-        from open_webui.models.users import Users
-        from open_webui.models.chats import Chats
-        from open_webui.models.groups import Groups
-        from open_webui.soev.agent_threads import delete_threads, user_thread_ids
-        from open_webui.models.tags import Tags
-        from open_webui.models.folders import Folders
-        from open_webui.models.prompts import Prompts
-        from open_webui.models.tools import Tools
-        from open_webui.models.functions import Functions
-        from open_webui.models.models import Models
-        from open_webui.models.feedbacks import Feedbacks
-        from open_webui.models.notes import Notes
         from open_webui.models.channels import Channels
+        from open_webui.models.chats import Chats
+        from open_webui.models.feedbacks import Feedbacks
+        from open_webui.models.folders import Folders
+        from open_webui.models.functions import Functions
+        from open_webui.models.groups import Groups
         from open_webui.models.messages import Messages
+        from open_webui.models.models import Models
+        from open_webui.models.notes import Notes
         from open_webui.models.oauth_sessions import OAuthSessions
+        from open_webui.models.prompts import Prompts
+        from open_webui.models.tags import Tags
+        from open_webui.models.tools import Tools
+        from open_webui.models.users import Users
+        from open_webui.soev.agent_threads import delete_threads, user_thread_ids
 
         report = DeletionReport()
 
@@ -499,8 +502,10 @@ class DeletionService:
 
         # 2. Soft-delete all knowledge bases (instant — cleanup worker handles the rest)
         try:
-            kb_count = await Knowledges.soft_delete_by_user_id(user_id)
+            kb_count = await Knowledges.soft_delete_by_user_id(user_id) if configured() else 0
             report.add_db('knowledge_soft_deleted', kb_count)
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             report.add_error(f'Failed to soft-delete knowledge bases: {e}')
 

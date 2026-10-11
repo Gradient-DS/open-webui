@@ -14,6 +14,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from open_webui.soev.acting import acting_ref
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.request_cache import memoized
 
@@ -563,6 +564,8 @@ class SoevKnowledgeTable:
                 ):
                     await self._delete_folder(id, folder['path'])
             return await self.get_knowledge_by_id(id)
+        except SoevNotConfigured:
+            raise
         except SoevApiError:
             return None
 
@@ -928,6 +931,8 @@ class SoevKnowledgeTable:
                     'POST', self._path(key) + '/folders/move', {'from': '/'.join(old), 'to': '/'.join(new)}
                 )
             return await self._directory(identifier)
+        except SoevNotConfigured:
+            raise
         except (SoevApiError, ValueError):
             return None
 
@@ -947,6 +952,8 @@ class SoevKnowledgeTable:
                     await self.remove_file_from_knowledge_by_id(key, source_id)
             await self._delete_folder(key, '/'.join(path))
             return True
+        except SoevNotConfigured:
+            raise
         except SoevApiError:
             return False
 
@@ -963,6 +970,8 @@ class SoevKnowledgeTable:
         try:
             await self._move_document(knowledge_id, file_id, self._directory_path(knowledge_id, directory_id))
             return True
+        except SoevNotConfigured:
+            raise
         except (SoevApiError, ValueError):
             return False
 

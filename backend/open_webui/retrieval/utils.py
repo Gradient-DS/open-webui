@@ -36,18 +36,19 @@ from open_webui.env import (
 )
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import Chats
+from open_webui.models.config import Config
 from open_webui.models.files import Files
 from open_webui.models.folders import Folders
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
-from open_webui.models.config import Config
 from open_webui.models.users import UserModel
+from open_webui.retrieval.external import retrieve_external_knowledge
 from open_webui.retrieval.loaders.youtube import YoutubeLoader
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.retrieval.external import retrieve_external_knowledge
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.retrieval.vector.main import GetResult, SearchResult
 from open_webui.retrieval.web.utils import get_web_loader
+from open_webui.soev.availability import configured
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files, has_access_to_file
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.headers import get_json_bearer_headers, include_user_info_headers
@@ -247,7 +248,7 @@ async def get_content_from_url(request, url: str) -> str:
 
 
 def _get_content_from_url_sync(request, url: str, loader_config):
-    from open_webui.retrieval.web.utils import validate_url, get_ssrf_safe_requests_session
+    from open_webui.retrieval.web.utils import get_ssrf_safe_requests_session, validate_url
 
     # Validate URL before making any request (blocks private IPs, non-HTTP, filter list)
     validate_url(url)
@@ -1332,6 +1333,8 @@ async def filter_accessible_collections(
             # ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS:
             #   False (default) — deny (closes the unscoped namespace)
             #   True  — allow (preserves legacy behaviour)
+            if not configured():
+                continue
             if await Knowledges.check_access_by_user_id(name, user.id, permission=access_type):
                 validated.add(name)
             elif ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS and not await Knowledges.get_knowledge_by_id(name):

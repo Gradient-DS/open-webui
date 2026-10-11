@@ -27,9 +27,13 @@ from open_webui.config import (
     DEFAULT_CODE_INTERPRETER_PROMPT,
     DEFAULT_TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
     DEFAULT_VOICE_MODE_PROMPT_TEMPLATE,
+    FEATURE_BUILTIN_TOOLS,
+    FEATURE_SKILL_FILES,
+    FEATURE_STRICT_DATA_SEPARATION,
 )
 from open_webui.constants import TASKS
 from open_webui.env import (
+    AGENT_API_ENABLED,  # Agent API bypass flag
     BYPASS_MODEL_ACCESS_CONTROL,
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
     CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
@@ -78,16 +82,21 @@ from open_webui.socket.main import (
     get_event_call,
     get_event_emitter,
 )
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.tasks import clear_response_stream, save_response_stream
 from open_webui.utils.access_control import has_connection_access, has_permission
-from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
+
+# [Gradient] Fork-only imports (upstream equivalents already imported above).
+from open_webui.utils.agent_routing import agent_owns_tool_execution
 from open_webui.utils.ask_user import stage_ask_user_tool_calls
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.utils.context_compaction import compact_messages_for_request
+from open_webui.utils.data_separation import request_mixes_data_sources
+from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.files import (
     convert_markdown_base64_images,
     get_file_url_from_base64,
@@ -114,8 +123,8 @@ from open_webui.utils.misc import (
     get_last_user_message_item,
     get_message_list,
     get_output_text,
-    get_response_error_detail,
     get_reasoning_details,
+    get_response_error_detail,
     get_system_message,
     is_string_allowed,
     merge_system_messages,
@@ -128,6 +137,7 @@ from open_webui.utils.payload import apply_params_to_form_data, apply_system_pro
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.response import merge_usage, normalize_usage
 from open_webui.utils.sanitize import sanitize_code
+from open_webui.utils.skill_bundles import resolve_skill_bundle_files
 from open_webui.utils.task import (
     get_task_model_id,
     rag_template,
@@ -142,17 +152,6 @@ from open_webui.utils.tools import (
     get_updated_tool_function,
 )
 from open_webui.utils.webhook import post_webhook
-
-# [Gradient] Fork-only imports (upstream equivalents already imported above).
-from open_webui.utils.agent_routing import agent_owns_tool_execution
-from open_webui.utils.skill_bundles import resolve_skill_bundle_files
-from open_webui.utils.data_separation import request_mixes_data_sources
-from open_webui.config import (
-    FEATURE_BUILTIN_TOOLS,
-    FEATURE_STRICT_DATA_SEPARATION,
-    FEATURE_SKILL_FILES,
-)
-from open_webui.env import AGENT_API_ENABLED  # Agent API bypass flag
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -1650,6 +1649,8 @@ async def chat_completion_tools_handler(
                         tool_function = tool['callable']
                         tool_result = await tool_function(**tool_function_params)
 
+                except SoevNotConfigured:
+                    raise
                 except Exception as e:
                     tool_result = {'error': str(e)}
 
@@ -1724,9 +1725,13 @@ async def chat_completion_tools_handler(
             else:
                 await tool_call_handler(result)
 
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.debug('Error: %s', e)
             content = None
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.debug('Error: %s', e)
         content = None
@@ -2315,6 +2320,8 @@ async def chat_completion_files_handler(
                 full_context=all_full_context or rag_config.get('rag.full_context'),
                 user=user,
             )
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.exception(e)
 
@@ -3591,6 +3598,8 @@ async def execute_tool_call_for_output(request, form_data, user, metadata, event
                 },
             )
             result = await function(**params)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         result = {'error': str(e)}
 
@@ -6111,6 +6120,8 @@ async def streaming_chat_response_handler(response, ctx):
                                     },
                                 )
                                 result = await function(**params)
+                        except SoevNotConfigured:
+                            raise
                         except Exception as e:
                             result = {'error': str(e)}
                         return params, result, tool, tool_type, direct_tool

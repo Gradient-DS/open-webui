@@ -10,10 +10,12 @@ from typing import List, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.config import (
+    BYPASS_ADMIN_ACCESS_CONTROL,
     ENABLE_KNOWLEDGE_FILE_RETENTION,
+    KNOWLEDGE_MAX_FILE_COUNT,
     RAG_EMBEDDING_CONTENT_PREFIX,
 )
 from open_webui.constants import ERROR_MESSAGES
@@ -21,8 +23,7 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
-from open_webui.services.remaining_request_bodies import access_grants_body
-from open_webui.models.files import FileMetadataResponse, FileModel, FileModelResponse, Files
+from open_webui.models.files import FileMetadataResponse, FileModel, FileModelResponse, Files, FileUpdateForm
 from open_webui.models.groups import Groups
 from open_webui.models.knowledge import (
     KNOWLEDGE_SORTABLE_FIELDS,
@@ -33,8 +34,8 @@ from open_webui.models.knowledge import (
     KnowledgeResponse,
     Knowledges,
     KnowledgeUserResponse,
+    is_synced_kb,  # [Gradient]
 )
-from open_webui.models.files import FileUpdateForm
 from open_webui.models.models import ModelForm, Models
 from open_webui.retrieval.external import retrieve_external_knowledge, retrieve_external_knowledge_for_connection
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
@@ -44,22 +45,21 @@ from open_webui.routers.retrieval import (
     process_file,
     process_files_batch,
 )
-from open_webui.storage.provider import Storage
 from open_webui.services.deletion import DeletionService
-from open_webui.models.knowledge import is_synced_kb  # [Gradient]
-from open_webui.utils.features import require_feature
-from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
+from open_webui.services.remaining_request_bodies import access_grants_body
+from open_webui.soev.availability import SoevNotConfigured, require_soev
+from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from fastapi.concurrency import run_in_threadpool
+from open_webui.utils.features import require_feature
 from open_webui.utils.json_codec import JSONCodec
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_soev)])
 
 ############################
 # getKnowledgeBases
@@ -479,11 +479,15 @@ async def reindex_knowledge_files(
                         user=user,
                         db=db,
                     )
+                except SoevNotConfigured:
+                    raise
                 except Exception as e:
                     log.error(f'Error processing file {file.filename} (ID: {file.id}): {str(e)}')
                     failed_files.append({'file_id': file.id, 'error': str(e)})
                     continue
 
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.error(f'Error processing knowledge base {knowledge_base.id}: {str(e)}')
             # Don't raise, just continue
@@ -1587,6 +1591,8 @@ async def add_file_to_knowledge_by_id(
             directory_id=form_data.directory_id,
             db=db,
         )
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.debug(e)
         raise HTTPException(
@@ -1675,6 +1681,8 @@ async def update_file_from_knowledge_by_id(
             user=user,
             db=db,
         )
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1864,6 +1872,8 @@ async def remove_file_from_knowledge_by_id(
                         f'{len(individual_sources)} individual file sources '
                         f'after removing {form_data.file_id} from knowledge {id}'
                     )
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.warning(f'Failed to update OneDrive sources: {e}')
 
@@ -2174,6 +2184,8 @@ async def add_files_to_knowledge_batch(
             user=user,
             db=db,
         )
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.error(f'add_files_to_knowledge_batch: Exception occurred: {e}', exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
