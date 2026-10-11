@@ -1,6 +1,7 @@
 """Structural positive-control bodies from OpenAPI; semantic refusals stay visible."""
 
 from copy import deepcopy
+from uuid import uuid4
 
 from .seeds import SPEC
 
@@ -40,6 +41,8 @@ def value_for(schema, spec, parameters, path, name='', seen=()):
         return max(1, schema.get('minimum', 1))
     if kind == 'null':
         return None
+    if schema.get('format') in {'uri', 'url'}:
+        return 'https://example.invalid/document'
     return parameters.get((path, name), 'attack-control')
 
 
@@ -55,10 +58,19 @@ def benign_request(route, parameters, spec=SPEC):
         result['data'] = value_for(schema, spec, parameters, path)
         # A file upload must contain a file, even when OpenAPI marks it optional.
         result['files'] = {'file': ('attack-control.txt', b'Attack control.', 'text/plain')}
-    params = {}
+    params, headers = {}, {}
     for item in [*spec['paths'][path].get('parameters', []), *operation.get('parameters', [])]:
         if item.get('in') == 'query' and item.get('required'):
             params[item['name']] = value_for(item.get('schema', {}), spec, parameters, path, item['name'])
+        elif item.get('in') == 'header' and item.get('required'):
+            schema = item.get('schema', {})
+            headers[item['name']] = (
+                str(uuid4())
+                if schema.get('format') == 'uuid'
+                else str(value_for(schema, spec, parameters, path, item['name']))
+            )
     if params:
         result['params'] = params
+    if headers:
+        result['headers'] = headers
     return result

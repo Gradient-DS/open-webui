@@ -43,6 +43,7 @@ from open_webui.models.users import User
 async def db_session(monkeypatch):
     """In-memory SQLite session; patches get_async_db_context for the
     knowledge AND files modules (DeletionService goes through both)."""
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     engine = create_async_engine(
         'sqlite+aiosqlite:///:memory:',
         connect_args={'check_same_thread': False},

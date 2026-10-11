@@ -62,12 +62,14 @@ from open_webui.routers.memories import (
 )
 from open_webui.routers.retrieval import search_web as _search_web
 from open_webui.socket.main import sio
+from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.tasks import stop_item_tasks
 from open_webui.tools.knowledge_fs import kb_exec  # noqa: F401 — re-exported
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.notifications import notify_target
 from open_webui.utils.sanitize import sanitize_code
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +111,7 @@ async def _has_read_access_to_file(
     """Check if a user can read a file via ownership, admin role, model attachment, or access grants."""
     user_id = user.get('id')
     user_role = user.get('role', 'user')
-    if file.user_id == user_id or user_role == 'admin':
+    if file.user_id == user_id or can_bypass_access_control({'role': user_role}):
         return True
     if model_knowledge and any(item.get('type') == 'file' and item.get('id') == file.id for item in model_knowledge):
         return True
@@ -1249,7 +1251,7 @@ async def view_note(
         from open_webui.models.access_grants import AccessGrants
 
         if (
-            __user__.get('role') != 'admin'
+            not can_bypass_access_control(__user__)
             and note.user_id != user_id
             and not await AccessGrants.has_access(
                 user_id=user_id,
@@ -1364,7 +1366,7 @@ async def replace_note_content(
             return JSONCodec.dumps({'error': 'Note not found', 'code': 'not_found'})
 
         user_id = __user__.get('id')
-        if __user__.get('role') != 'admin' and not await _has_write_access_to_note(note, user_id):
+        if not can_bypass_access_control(__user__) and not await _has_write_access_to_note(note, user_id):
             return JSONCodec.dumps({'error': 'Write access denied', 'code': 'write_access_denied'})
 
         current_content = ((note.data or {}).get('content') or {}).get('md') or ''
@@ -2086,6 +2088,8 @@ async def list_knowledge_bases(
             )
 
         return JSONCodec.dumps(knowledge_bases, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'list_knowledge_bases error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2146,6 +2150,8 @@ async def search_knowledge_bases(
             )
 
         return JSONCodec.dumps(knowledge_bases, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'search_knowledge_bases error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2214,7 +2220,7 @@ async def search_knowledge_files(
                     continue
 
                 if not (
-                    user_role == 'admin'
+                    can_bypass_access_control({'role': user_role})
                     or knowledge.user_id == user_id
                     or await AccessGrants.has_access(
                         user_id=user_id,
@@ -2268,7 +2274,7 @@ async def search_knowledge_files(
             # search_files_by_id does not enforce knowledge_id ownership; mirror the attached-KB check above.
             knowledge = await Knowledges.get_knowledge_by_id(knowledge_id)
             if not knowledge or not (
-                user_role == 'admin'
+                can_bypass_access_control({'role': user_role})
                 or knowledge.user_id == user_id
                 or await AccessGrants.has_access(
                     user_id=user_id,
@@ -2311,6 +2317,8 @@ async def search_knowledge_files(
             files.append(file_info)
 
         return JSONCodec.dumps(files, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'search_knowledge_files error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2609,6 +2617,8 @@ async def query_chat_files(
                 chunks.append(chunk)
 
         return JSONCodec.dumps(chunks[:count], ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'query_chat_files error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2681,7 +2691,7 @@ async def grep_knowledge_files(
                         continue
                     # Verify user can access this KB
                     if not (
-                        user_role == 'admin'
+                        can_bypass_access_control({'role': user_role})
                         or knowledge.user_id == user_id
                         or await AccessGrants.has_access(
                             user_id=user_id,
@@ -2729,6 +2739,8 @@ async def grep_knowledge_files(
 
         return _grep_file_models(files_to_search, pattern, case_insensitive, count_only)
 
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'grep_knowledge_files error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2904,13 +2916,13 @@ async def view_knowledge_file(
             return JSONCodec.dumps({'error': 'File not found'})
 
         # Check access via any KB containing this file
-        knowledges = await Knowledges.get_knowledges_by_file_id(file_id)
+        knowledges = await Knowledges.get_knowledges_by_file_id(file_id) if configured() else []
         has_knowledge_access = False
         knowledge_info = None
 
         for knowledge_base in knowledges:
             if (
-                user_role == 'admin'
+                can_bypass_access_control({'role': user_role})
                 or knowledge_base.user_id == user_id
                 or await AccessGrants.has_access(
                     user_id=user_id,
@@ -2925,7 +2937,7 @@ async def view_knowledge_file(
                 break
 
         if not has_knowledge_access:
-            if file.user_id != user_id and user_role != 'admin':
+            if file.user_id != user_id and not can_bypass_access_control({'role': user_role}):
                 return JSONCodec.dumps({'error': 'Access denied'})
 
         content = ''
@@ -2988,6 +3000,8 @@ async def view_knowledge_file(
                 result['next_offset'] = offset + len(sliced)
 
         return JSONCodec.dumps(result, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'view_knowledge_file error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -3060,7 +3074,7 @@ async def list_knowledge(
             if item_type == 'collection':
                 knowledge = await Knowledges.get_knowledge_by_id(item_id)
                 if knowledge and (
-                    user_role == 'admin'
+                    can_bypass_access_control({'role': user_role})
                     or knowledge.user_id == user_id
                     or await AccessGrants.has_access(
                         user_id=user_id,
@@ -3106,7 +3120,7 @@ async def list_knowledge(
             elif item_type == 'note':
                 note = await Notes.get_note_by_id(item_id)
                 if note and (
-                    user_role == 'admin'
+                    can_bypass_access_control({'role': user_role})
                     or note.user_id == user_id
                     or await AccessGrants.has_access(
                         user_id=user_id,
@@ -3130,6 +3144,8 @@ async def list_knowledge(
             },
             ensure_ascii=False,
         )
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'list_knowledge error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -3209,7 +3225,7 @@ async def query_knowledge_files(
                     # Knowledge base - use KB ID as collection name
                     knowledge = await Knowledges.get_knowledge_by_id(item_id)
                     if knowledge and (
-                        user_role == 'admin'
+                        can_bypass_access_control({'role': user_role})
                         or knowledge.user_id == user_id
                         or await AccessGrants.has_access(
                             user_id=user_id,
@@ -3240,9 +3256,9 @@ async def query_knowledge_files(
                         collection_names.append(file_collection)
                         continue
 
-                    kb = await Knowledges.get_knowledge_by_file_id(file_id=item_id)
+                    kb = await Knowledges.get_knowledge_by_file_id(file_id=item_id) if configured() else None
                     if kb and (
-                        user_role == 'admin'
+                        can_bypass_access_control({'role': user_role})
                         or kb.user_id == user_id
                         or await AccessGrants.has_access(
                             user_id=user_id,
@@ -3258,7 +3274,7 @@ async def query_knowledge_files(
                     # Note - always return full content as context
                     note = await Notes.get_note_by_id(item_id)
                     if note and (
-                        user_role == 'admin'
+                        can_bypass_access_control({'role': user_role})
                         or note.user_id == user_id
                         or await AccessGrants.has_access(
                             user_id=user_id,
@@ -3282,7 +3298,7 @@ async def query_knowledge_files(
             for knowledge_id in knowledge_ids:
                 knowledge = await Knowledges.get_knowledge_by_id(knowledge_id)
                 if knowledge and (
-                    user_role == 'admin'
+                    can_bypass_access_control({'role': user_role})
                     or knowledge.user_id == user_id
                     or await AccessGrants.has_access(
                         user_id=user_id,
@@ -3373,6 +3389,8 @@ async def query_knowledge_files(
         chunks = chunks[:count]
 
         return JSONCodec.dumps(chunks, ensure_ascii=False)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'query_knowledge_files error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -3478,6 +3496,8 @@ async def query_knowledge_bases(
 
         return JSONCodec.dumps(matching_knowledge_bases, ensure_ascii=False)
 
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.exception(f'query_knowledge_bases error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -3520,7 +3540,7 @@ async def view_skill(
 
         # Check user access
         user_role = __user__.get('role', 'user')
-        if user_role != 'admin' and skill.user_id != user_id:
+        if not can_bypass_access_control({'role': user_role}) and skill.user_id != user_id:
             user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
             if not await AccessGrants.has_access(
                 user_id=user_id,
@@ -4288,7 +4308,7 @@ async def create_calendar_event(
         cal = await Calendars.get_calendar_by_id(calendar_id)
         if not cal:
             return JSONCodec.dumps({'error': 'Calendar not found'})
-        if cal.user_id != user_id and __user__.get('role') != 'admin':
+        if cal.user_id != user_id and not can_bypass_access_control(__user__):
             from open_webui.models.access_grants import AccessGrants
             from open_webui.models.groups import Groups
 
@@ -4408,7 +4428,7 @@ async def update_calendar_event(
             return JSONCodec.dumps({'error': 'Event not found'})
 
         # Check write access to the event's calendar
-        if event.user_id != user_id and __user__.get('role') != 'admin':
+        if event.user_id != user_id and not can_bypass_access_control(__user__):
             cal = await Calendars.get_calendar_by_id(event.calendar_id)
             if not cal:
                 return JSONCodec.dumps({'error': 'Access denied'})
@@ -4512,7 +4532,7 @@ async def delete_calendar_event(
             return JSONCodec.dumps({'error': 'Event not found'})
 
         # Check write access
-        if event.user_id != user_id and __user__.get('role') != 'admin':
+        if event.user_id != user_id and not can_bypass_access_control(__user__):
             cal = await Calendars.get_calendar_by_id(event.calendar_id)
             if not cal:
                 return JSONCodec.dumps({'error': 'Access denied'})

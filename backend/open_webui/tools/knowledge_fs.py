@@ -23,6 +23,7 @@ from open_webui.env import (
     KB_EXEC_MAX_OUTPUT_CHARS,
     KNOWLEDGE_GREP_MAX_MATCHES,
 )
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -330,7 +331,7 @@ async def _get_accessible_kb_ids(
 
     async def _has_access(kb):
         return (
-            user_role == 'admin'
+            can_bypass_access_control({'role': user_role})
             or kb.user_id == user_id
             or await AccessGrants.has_access(
                 user_id=user_id,

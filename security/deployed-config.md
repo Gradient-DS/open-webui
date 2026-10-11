@@ -1,7 +1,9 @@
 # Deployed configuration snapshot
 
 Source: Gradient-DS/soev-gitops, read 2026-09-08.
-This snapshot must be re-synced when tenant config changes.
+Legacy agent settings were removed for the v2-only release on 2026-10-11.
+The remaining historical snapshot must be re-synced against tenant config;
+platform credentials and URLs are specified in docs/agent-api-deployment.md.
 - fleet defaults: tenants/base/values.yaml
 - representative tenant: tenants/previder-prod/gradient/helmrelease.yaml
 - chart defaults: open-webui/helm/open-webui-tenant/values.yaml
@@ -9,18 +11,16 @@ This snapshot must be re-synced when tenant config changes.
 
 Every production tenant (demo, gradient, haagsebeek, datafryslan, staging, kwink,
 haute-equipe, afk, kompanen, gemeente-zuidplas, bzk-ministerie) sets
-agentApiEnabled=true and enableAgentProxy=true.
+agentApiEnabled=true; this release moves them all to v2.
 
 ## Flags that decide which request paths exist
 
 | Helm value | Env var | Chart default | Deployed | Notes |
 |---|---|---|---|---|
 | agentApiEnabled | AGENT_API_ENABLED | "false" | "true" | gates the whole agent block in the configmap |
-| agentApiBaseUrl | AGENT_API_BASE_URL | "" | http://gradient-agent-agents-api:8080 | in-cluster |
 | agentApiAgents | AGENT_API_AGENTS | "" | soev_chat_manual,assistant_onboarding | |
 | agentApiPickerDefaultSlug | AGENT_API_PICKER_DEFAULT_SLUG | — | soev_chat_manual | |
 | featureAgentPicker | FEATURE_AGENT_PICKER | "false" | "false" | |
-| enableAgentProxy | ENABLE_AGENT_PROXY | "false" | "true" | external-facing agent API |
 | enableCodeExecution | ENABLE_CODE_EXECUTION | "false" | "true" | Jupyter sink |
 | enableCodeInterpreter | ENABLE_CODE_INTERPRETER | "false" | "true" | Jupyter sink |
 | codeExecutionEngine (unset) | CODE_EXECUTION_ENGINE | pyodide (app default) | pyodide | set by no tenant and no chart value, so production runs the app default (`config.py:402`); a tenant setting `jupyter` activates a server-side HTTP+WebSocket sink and will show here as drift |
@@ -48,18 +48,18 @@ agentApiEnabled=true and enableAgentProxy=true.
 | bypassAdminAccessControl | BYPASS_ADMIN_ACCESS_CONTROL | "false" | "false" | admins follow access control |
 | enableWeaviateMultitenancyMode | ENABLE_WEAVIATE_MULTITENANCY_MODE | "false" | "true" | |
 | telemetry.otel.enabled | ENABLE_OTEL | — | true (alloy.observability.svc:4317) | |
-| agentSearch.enabled | AGENT_SEARCH_ENABLED | — | true (doc-processor) | |
 
 ## CI divergences and coverage limits
 
 The table above is the source snapshot, not an assertion of full integration
 coverage. `TestCiMatchesDeployedConfig` checks every row, including the three
 Helm rows whose env names are supplied by the chart configmap. Boolean feature
-flags cannot be waived; telemetry is the sole boolean exception.
+flags must match except telemetry and the explicitly absent private soev services.
+OWUI-local agent-config CRUD still uses `AGENT_API_AGENTS`; CI runs no soev server.
 
 | Setting | CI value | Reason / coverage limit |
 |---|---|---|
-| AGENT_API_BASE_URL | http://stub:8000 | Replace the production agents-api hostname with the sealed stub. |
+| AGENT_API_ENABLED, AGENT_API_PICKER_DEFAULT_SLUG, FEATURE_AGENT_PICKER | absent | Private soev services and stand-ins never run here; platform-backed routes have soev-solutions waivers. |
 | OPENAI_API_BASE_URL, RAG_OPENAI_API_BASE_URL | http://stub:8000/v1 | Replace the production LiteLLM hostname with the sealed stub. |
 | RAG_EXTERNAL_RERANKER_URL | http://stub:8000/v1/rerank | Replace the production reranker hostname with the sealed stub. |
 | S3_ENDPOINT_URL | http://s3:9000 | The endpoint hostname remains a divergence: the in-network S3 gateway replaces object.previder.nl. CI drives the same S3 provider code path, but does not cover production TLS or Previder-specific behavior. |
@@ -84,9 +84,6 @@ Caller contracts verified in this checkout:
   signatures against its root key, which the app's credentials must match.
   Recreate the stack together for each fresh run so the bucket is created again
   after ephemeral data is discarded.
-- Agent proxy uses `/v1/models`, `/v1/chat/completions` (JSON or SSE),
-  `/v1/gradient_agent_meta` and `/openapi.json`. Metadata exposes
-  `config.welcome_message`, as consumed by the chat UI.
 - External document processing sends raw bytes to `PUT /process` and expects
   `page_content` / `metadata` documents. External web loading posts URL batches
   to `/extract` and expects the same document shape.
@@ -94,11 +91,11 @@ Caller contracts verified in this checkout:
   `url`, `title`, `content` and `score`. The legacy external search branch keeps
   its bare list response when that query parameter is absent.
 - External reranking posts to `/v1/rerank` and reads indexed relevance scores.
-- `AGENT_SEARCH_ENABLED` gates inbound `/api/v1/internal/retrieval/*` routes in
-  this checkout; it is not an outbound doc-processor URL. The document pipeline
-  client separately uses `POST /jobs` and `GET /jobs/{id}`. The stub supplies job
-  IDs and terminal status but does not perform asynchronous ingestion callbacks;
-  the snapshot does not specify distributed-pipeline feature flags.
+- `AGENT_API_AGENTS` permits local agent-config fixtures; agent routing is
+  disabled and no private-service URL is configured.
+- Legacy sync-daemon, loader-worker, document-job and `PIPELINE_API_*` settings
+  have no callers in this checkout and are removed. Pipelines management uses
+  the configured OpenAI connections (`routers/pipelines.py`).
 
 The snapshot is mounted read-only at `/app/security` so the same drift test can
 run inside the application container. Docker startup and the runtime egress

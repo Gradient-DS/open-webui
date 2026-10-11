@@ -155,11 +155,8 @@
 	import Image from '../common/Image.svelte';
 	import { getBanners } from '$lib/apis/configs';
 	import { logDataWarningAcceptance } from '$lib/apis/data-warnings';
-	import { showRagFilter } from '$lib/stores/rag-filter';
-	import { getRagFilterForRequest } from '$lib/utils/rag-filter';
 	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
 	import ContextUsageBanner from '$lib/components/chat/ContextUsageBanner.svelte';
-	import RagFilterPanel from './RagFilterPanel.svelte';
 	import FeedbackButton from './FeedbackButton.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import EmbeddedChatHistoryDropdown from './EmbeddedChatHistoryDropdown.svelte';
@@ -4153,7 +4150,6 @@
 				filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
 				tool_ids: toolIds.length > 0 ? toolIds : undefined,
 				skill_ids: skillIds.length > 0 ? skillIds : undefined,
-				rag_filter: getRagFilterForRequest(),
 				terminal_id:
 					terminalEnabled &&
 					supportsComposerFeature('terminal') &&
@@ -4891,9 +4887,7 @@
 		: 'h-screen max-h-[100dvh]'} transition-width duration-200 ease-in-out {$showSidebar &&
 	!embedded
 		? '  md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ' '} {($config?.features?.enable_rag_filter_ui ?? true) && $showRagFilter
-		? 'pr-80'
-		: ''} w-full max-w-full min-w-0 flex flex-col"
+		: ' '} w-full max-w-full min-w-0 flex flex-col"
 	id={chatContainerId}
 >
 	{#if !loading}
@@ -5363,7 +5357,6 @@
 </div>
 
 <!-- RAG Filter Panel -->
-<RagFilterPanel />
 
 <style>
 	::-webkit-scrollbar {

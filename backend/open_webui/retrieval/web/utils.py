@@ -338,10 +338,18 @@ def verify_ssl_cert(url: str) -> bool:
         return True
 
     try:
-        hostname = url.split('://')[-1].split('/')[0]
+        parsed = urllib.parse.urlsplit(url)
+        hostname = parsed.hostname
+        _assert_host_allowed(hostname)
+        addresses = socket.getaddrinfo(hostname, parsed.port or 443, 0, socket.SOCK_STREAM)
+        if not addresses:
+            return False
+        _assert_addresses_allowed([info[4][0] for info in addresses])
+        family, socktype, proto, _, address = addresses[0]
         context = ssl.create_default_context(cafile=certifi.where())
-        with context.wrap_socket(ssl.socket(), server_hostname=hostname) as s:
-            s.connect((hostname, 443))
+        with socket.socket(family, socktype, proto) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as s:
+                s.connect(address)
         return True
     except ssl.SSLError:
         return False

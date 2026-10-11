@@ -8,6 +8,7 @@ import requests
 from fastapi import HTTPException, status
 from langchain_core.documents import Document
 from open_webui.utils.json_codec import JSONCodec
+from open_webui.utils.outbound import guarded_requests_request, is_same_origin
 
 log = logging.getLogger(__name__)
 
@@ -129,12 +130,16 @@ class DatalabMarkerLoader:
             for _ in range(300):  # Up to 10 minutes
                 time.sleep(2)
                 try:
-                    poll_response = requests.get(check_url, headers=headers)
+                    poll_response = guarded_requests_request(
+                        'GET',
+                        check_url,
+                        trusted_url=self.api_base_url,
+                        headers=headers if is_same_origin(check_url, self.api_base_url) else {},
+                    )
                     poll_response.raise_for_status()
                     poll_result = poll_response.json()
-                except (requests.HTTPError, ValueError) as e:
-                    raw_body = poll_response.text
-                    log.error(f'Polling error: {e}, response body: {raw_body}')
+                except (requests.RequestException, ValueError) as e:
+                    log.error(f'Polling error: {e}')
                     raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=f'Polling failed: {e}')
 
                 status_val = poll_result.get('status')

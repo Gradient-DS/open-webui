@@ -36,6 +36,7 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.tasks import has_active_tasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ async def get_folders(
         return current_id == folder_id
 
     user_group_ids = None
-    if user.role != 'admin' and any(folder.data and 'files' in folder.data for folder in folders):
+    if not can_bypass_access_control(user) and any(folder.data and 'files' in folder.data for folder in folders):
         user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
 
     # Verify folder data integrity
@@ -168,7 +169,7 @@ async def create_folder(
         parent = await Folders.get_folder_by_id(form_data.parent_id, db=db)
         if parent and parent.user_id != user.id:
             # Creating subfolder in someone else's shared folder
-            if user.role != 'admin' and not await _has_folder_access(user.id, parent, 'write', db):
+            if not can_bypass_access_control(user) and not await _has_folder_access(user.id, parent, 'write', db):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -300,7 +301,7 @@ async def get_folder_by_id(
 
     # Check shared access
     folder = await Folders.get_folder_by_id(id, db=db)
-    if folder and (user.role == 'admin' or await _has_folder_access(user.id, folder, 'read', db)):
+    if folder and (can_bypass_access_control(user) or await _has_folder_access(user.id, folder, 'read', db)):
         grants = await AccessGrants.get_grants_by_resource('folder', id, db=db)
         return {**folder.model_dump(), 'access_grants': [g.model_dump() for g in grants]}
 
@@ -328,7 +329,9 @@ async def update_folder_name_by_id(
     if not folder:
         # Check shared write access
         folder = await Folders.get_folder_by_id(id, db=db)
-        if not folder or (user.role != 'admin' and not await _has_folder_access(user.id, folder, 'write', db)):
+        if not folder or (
+            not can_bypass_access_control(user) and not await _has_folder_access(user.id, folder, 'write', db)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=ERROR_MESSAGES.NOT_FOUND,
@@ -462,7 +465,7 @@ async def update_folder_is_expanded_by_id(
     folder = await Folders.get_folder_by_id_and_user_id(id, user.id, db=db)
     if not folder:
         folder = await Folders.get_folder_by_id(id, db=db)
-        if folder and (user.role == 'admin' or await _has_folder_access(user.id, folder, 'read', db)):
+        if folder and (can_bypass_access_control(user) or await _has_folder_access(user.id, folder, 'read', db)):
             return folder
 
     if folder:
@@ -511,7 +514,7 @@ async def update_folder_access_by_id(
         )
 
     # Only owner, admin, or write-granted user can update access
-    if user.role != 'admin' and user.id != folder.user_id:
+    if not can_bypass_access_control(user) and user.id != folder.user_id:
         if not await _has_folder_access(user.id, folder, 'write', db):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -568,7 +571,7 @@ async def get_shared_folder_chats(
         )
 
     is_owner = user.id == folder.user_id
-    is_admin = user.role == 'admin'
+    is_admin = can_access_admin_chats(user)
     has_write = is_owner or is_admin or await _has_folder_access(user.id, folder, 'write', db)
     has_read = has_write or await _has_folder_access(user.id, folder, 'read', db)
 
@@ -630,7 +633,7 @@ async def mark_folder_chats_read_by_id(
         )
 
     is_owner = user.id == folder.user_id
-    is_admin = user.role == 'admin'
+    is_admin = can_access_admin_chats(user)
     if not (is_owner or is_admin or await _has_folder_access(user.id, folder, 'read', db)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -676,7 +679,7 @@ async def delete_folder_by_id(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=ERROR_MESSAGES.NOT_FOUND,
             )
-        if user.role != 'admin':
+        if not can_bypass_access_control(user):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -689,7 +692,9 @@ async def delete_folder_by_id(
         chat_delete_permission = await has_permission(
             user.id, 'chat.delete', await Config.get('user.permissions'), db=db
         )
-        if user.role != 'admin' and not chat_delete_permission:
+        if (folder_owner_id != user.id and not can_access_admin_chats(user)) or (
+            user.role != 'admin' and not chat_delete_permission
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,

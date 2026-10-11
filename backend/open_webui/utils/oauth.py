@@ -98,6 +98,7 @@ from open_webui.utils.auth import (
 from open_webui.utils.groups import apply_default_group_assignment
 from open_webui.utils.misc import parse_duration
 from open_webui.utils.oauth_issuer import is_issuer_allowed
+from open_webui.utils.outbound import guarded_request, is_same_origin
 from open_webui.utils.validate import validate_profile_image_url
 from starlette.responses import RedirectResponse
 
@@ -360,6 +361,36 @@ def is_in_blocked_groups(group_name: str, groups: list) -> bool:
     return False
 
 
+async def _assert_metadata_endpoints_allowed(metadata: OAuthMetadata | None, oauth_server_url: str) -> None:
+    """Refuse metadata that points an OAuth endpoint off the MCP server's origin at a non-public address."""
+    if metadata is None:
+        return
+    for endpoint in (metadata.authorization_endpoint, metadata.token_endpoint, metadata.registration_endpoint):
+        if endpoint and not is_same_origin(str(endpoint), oauth_server_url):
+            try:
+                await asyncio.to_thread(validate_url, str(endpoint))
+            except ValueError as e:
+                raise Exception(f'Unsafe OAuth server metadata endpoint for {oauth_server_url}') from e
+
+
+async def _get_mcp_server_url(client_id: str) -> str | None:
+    """The admin-configured URL of the MCP connection behind an 'mcp:<id>' OAuth client."""
+    try:
+        connections = await Config.get('tool_server.connections', [])
+    except Exception:
+        connections = []
+    for connection in connections or []:
+        server_id = (connection.get('info') or {}).get('id')
+        if (
+            server_id
+            and connection.get('type', 'openapi') == 'mcp'
+            and connection.get('auth_type', 'none') in ('oauth_2.1', 'oauth_2.1_static')
+            and client_id == f'mcp:{server_id}'
+        ):
+            return connection.get('url')
+    return None
+
+
 def get_parsed_and_base_url(server_url) -> tuple[urllib.parse.ParseResult, str]:
     parsed = urllib.parse.urlparse(server_url)
     base_url = f'{parsed.scheme}://{parsed.netloc}'
@@ -397,64 +428,63 @@ async def get_protected_resource_metadata(server_url: str) -> ProtectedResourceM
     resource = None
     scopes = []
     try:
-        async with aiohttp.ClientSession(trust_env=True) as session:
-            async with session.post(
-                server_url,
-                json={'jsonrpc': '2.0', 'method': 'initialize', 'params': {}, 'id': 1},
-                headers={'Content-Type': 'application/json'},
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            ) as response:
-                # Discover Protected Resource Metadata regardless of HTTP status.
-                # A 401 carries a WWW-Authenticate header pointing at the PRM, but
-                # some MCP servers (e.g. Google's gmail/drive/calendar remote MCPs)
-                # answer 200 to an anonymous `initialize`, so we must still fall
-                # back to the RFC 9728 well-known URIs when there is no 401/header.
-                resource_metadata_urls = []
-                match = re.search(
-                    r'resource_metadata=(?:"([^"]+)"|([^\s,]+))',
-                    response.headers.get('WWW-Authenticate', ''),
-                )
-                if match:
-                    resource_metadata_urls = [match.group(1) or match.group(2)]
-                    log.debug('Found resource_metadata URL: %s', resource_metadata_urls[0])
-                else:
-                    # Fall back to well-known resource metadata URIs (RFC 9728 §4.2)
-                    parsed, base_url = get_parsed_and_base_url(server_url)
-                    if parsed.path and parsed.path != '/':
-                        path = parsed.path.rstrip('/')
-                        resource_metadata_urls.append(
-                            urllib.parse.urljoin(base_url, f'/.well-known/oauth-protected-resource{path}')
-                        )
+        async with guarded_request(
+            'POST',
+            server_url,
+            trusted_url=server_url,
+            json={'jsonrpc': '2.0', 'method': 'initialize', 'params': {}, 'id': 1},
+            headers={'Content-Type': 'application/json'},
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+        ) as response:
+            # Discover Protected Resource Metadata regardless of HTTP status.
+            # A 401 carries a WWW-Authenticate header pointing at the PRM, but
+            # some MCP servers (e.g. Google's gmail/drive/calendar remote MCPs)
+            # answer 200 to an anonymous `initialize`, so we must still fall
+            # back to the RFC 9728 well-known URIs when there is no 401/header.
+            resource_metadata_urls = []
+            match = re.search(
+                r'resource_metadata=(?:"([^"]+)"|([^\s,]+))',
+                response.headers.get('WWW-Authenticate', ''),
+            )
+            if match:
+                resource_metadata_urls = [match.group(1) or match.group(2)]
+                log.debug('Found resource_metadata URL: %s', resource_metadata_urls[0])
+            else:
+                # Fall back to well-known resource metadata URIs (RFC 9728 §4.2)
+                parsed, base_url = get_parsed_and_base_url(server_url)
+                if parsed.path and parsed.path != '/':
+                    path = parsed.path.rstrip('/')
                     resource_metadata_urls.append(
-                        urllib.parse.urljoin(base_url, '/.well-known/oauth-protected-resource')
+                        urllib.parse.urljoin(base_url, f'/.well-known/oauth-protected-resource{path}')
                     )
-                    log.debug('No resource_metadata in header, trying well-known URIs: %s', resource_metadata_urls)
+                resource_metadata_urls.append(urllib.parse.urljoin(base_url, '/.well-known/oauth-protected-resource'))
+                log.debug('No resource_metadata in header, trying well-known URIs: %s', resource_metadata_urls)
 
-                # Fetch Protected Resource metadata from candidate URLs
-                for resource_metadata_url in resource_metadata_urls:
-                    try:
-                        async with session.get(
-                            resource_metadata_url, ssl=AIOHTTP_CLIENT_SESSION_SSL
-                        ) as resource_response:
-                            if resource_response.status == 200:
-                                resource_metadata = await resource_response.json()
+            # Fetch Protected Resource metadata from candidate URLs
+            for resource_metadata_url in resource_metadata_urls:
+                try:
+                    async with guarded_request(
+                        'GET', resource_metadata_url, trusted_url=server_url, ssl=AIOHTTP_CLIENT_SESSION_SSL
+                    ) as resource_response:
+                        if resource_response.status == 200:
+                            resource_metadata = await resource_response.json()
 
-                                resource = resource_metadata.get('resource') or None
-                                if resource:
-                                    log.debug('Discovered resource indicator: %s', resource)
+                            resource = resource_metadata.get('resource') or None
+                            if resource:
+                                log.debug('Discovered resource indicator: %s', resource)
 
-                                servers = resource_metadata.get('authorization_servers', [])
-                                scopes = resource_metadata.get('scopes_supported', [])
-                                if scopes:
-                                    log.debug('Discovered resource scopes: %s', scopes)
+                            servers = resource_metadata.get('authorization_servers', [])
+                            scopes = resource_metadata.get('scopes_supported', [])
+                            if scopes:
+                                log.debug('Discovered resource scopes: %s', scopes)
 
-                                if servers:
-                                    authorization_servers = servers
-                                    log.debug('Discovered authorization servers: %s', servers)
-                                    break
-                    except Exception as e:
-                        log.debug('Failed to fetch resource metadata from %s: %s', resource_metadata_url, e)
-                        continue
+                            if servers:
+                                authorization_servers = servers
+                                log.debug('Discovered authorization servers: %s', servers)
+                                break
+                except Exception as e:
+                    log.debug('Failed to fetch resource metadata from %s: %s', resource_metadata_url, e)
+                    continue
     except Exception as e:
         log.debug('MCP Protected Resource discovery failed: %s', e)
 
@@ -535,34 +565,32 @@ async def get_oauth_client_info_with_dynamic_client_registration(
 
         discovery_urls = resource_metadata.get_discovery_urls(oauth_server_url)
         for url in discovery_urls:
-            async with aiohttp.ClientSession(trust_env=True) as session:
-                async with session.get(url, ssl=AIOHTTP_CLIENT_SESSION_SSL) as oauth_server_metadata_response:
-                    if oauth_server_metadata_response.status == 200:
-                        try:
-                            oauth_server_metadata = OAuthMetadata.model_validate(
-                                await oauth_server_metadata_response.json()
+            async with guarded_request(
+                'GET', url, trusted_url=oauth_server_url, ssl=AIOHTTP_CLIENT_SESSION_SSL
+            ) as oauth_server_metadata_response:
+                if oauth_server_metadata_response.status == 200:
+                    try:
+                        oauth_server_metadata = OAuthMetadata.model_validate(
+                            await oauth_server_metadata_response.json()
+                        )
+                        oauth_server_metadata_url = url
+                        if oauth_client_metadata.scope is None and oauth_server_metadata.scopes_supported is not None:
+                            oauth_client_metadata.scope = ' '.join(oauth_server_metadata.scopes_supported)
+
+                        if (
+                            oauth_server_metadata.token_endpoint_auth_methods_supported
+                            and oauth_client_metadata.token_endpoint_auth_method
+                            not in oauth_server_metadata.token_endpoint_auth_methods_supported
+                        ):
+                            # Pick the first supported method from the server
+                            oauth_client_metadata.token_endpoint_auth_method = (
+                                oauth_server_metadata.token_endpoint_auth_methods_supported[0]
                             )
-                            oauth_server_metadata_url = url
-                            if (
-                                oauth_client_metadata.scope is None
-                                and oauth_server_metadata.scopes_supported is not None
-                            ):
-                                oauth_client_metadata.scope = ' '.join(oauth_server_metadata.scopes_supported)
 
-                            if (
-                                oauth_server_metadata.token_endpoint_auth_methods_supported
-                                and oauth_client_metadata.token_endpoint_auth_method
-                                not in oauth_server_metadata.token_endpoint_auth_methods_supported
-                            ):
-                                # Pick the first supported method from the server
-                                oauth_client_metadata.token_endpoint_auth_method = (
-                                    oauth_server_metadata.token_endpoint_auth_methods_supported[0]
-                                )
-
-                            break
-                        except Exception as e:
-                            log.error(f'Error parsing OAuth metadata from {url}: {e}')
-                            continue
+                        break
+                    except Exception as e:
+                        log.error(f'Error parsing OAuth metadata from {url}: {e}')
+                        continue
 
         # Fail fast if authorization server metadata discovery did not resolve an
         # authorization endpoint. Otherwise registration can still "succeed" (via
@@ -578,6 +606,8 @@ async def get_oauth_client_info_with_dynamic_client_registration(
                 'resolve where to send users to authorize.'
             )
 
+        await _assert_metadata_endpoints_allowed(oauth_server_metadata, oauth_server_url)
+
         registration_url = None
         if oauth_server_metadata and oauth_server_metadata.registration_endpoint:
             registration_url = str(oauth_server_metadata.registration_endpoint)
@@ -592,48 +622,51 @@ async def get_oauth_client_info_with_dynamic_client_registration(
         )
 
         # Perform dynamic client registration and return client info
-        async with aiohttp.ClientSession(trust_env=True) as session:
-            async with session.post(
-                registration_url, json=registration_data, ssl=AIOHTTP_CLIENT_SESSION_SSL
-            ) as oauth_client_registration_response:
-                try:
-                    registration_response_json = await oauth_client_registration_response.json()
+        async with guarded_request(
+            'POST',
+            registration_url,
+            trusted_url=oauth_server_url,
+            json=registration_data,
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+        ) as oauth_client_registration_response:
+            try:
+                registration_response_json = await oauth_client_registration_response.json()
 
-                    # The mcp package requires optional unset values to be None. If an empty string is passed, it gets validated and fails.
-                    # This replaces all empty strings with None.
-                    registration_response_json = {
-                        k: (None if v == '' else v) for k, v in registration_response_json.items()
+                # The mcp package requires optional unset values to be None. If an empty string is passed, it gets validated and fails.
+                # This replaces all empty strings with None.
+                registration_response_json = {
+                    k: (None if v == '' else v) for k, v in registration_response_json.items()
+                }
+                oauth_client_info = OAuthClientInformationFull.model_validate(
+                    {
+                        **registration_response_json,
+                        'issuer': oauth_server_metadata_url,
+                        'server_metadata': oauth_server_metadata,
+                        'resource': resource,
                     }
-                    oauth_client_info = OAuthClientInformationFull.model_validate(
-                        {
-                            **registration_response_json,
-                            'issuer': oauth_server_metadata_url,
-                            'server_metadata': oauth_server_metadata,
-                            'resource': resource,
-                        }
+                )
+                log.info(
+                    'Dynamic client registration successful at %s, client_id: %s',
+                    registration_url,
+                    oauth_client_info.client_id,
+                )
+                return oauth_client_info
+            except Exception as e:
+                error_text = None
+                try:
+                    error_text = await oauth_client_registration_response.text()
+                    log.error(
+                        f'Dynamic client registration failed at {registration_url}: {oauth_client_registration_response.status} - {error_text}'
                     )
-                    log.info(
-                        'Dynamic client registration successful at %s, client_id: %s',
-                        registration_url,
-                        oauth_client_info.client_id,
-                    )
-                    return oauth_client_info
                 except Exception as e:
-                    error_text = None
-                    try:
-                        error_text = await oauth_client_registration_response.text()
-                        log.error(
-                            f'Dynamic client registration failed at {registration_url}: {oauth_client_registration_response.status} - {error_text}'
-                        )
-                    except Exception as e:
-                        pass
+                    pass
 
-                    log.error(f'Error parsing client registration response: {e}')
-                    raise Exception(
-                        f'Dynamic client registration failed: {error_text}'
-                        if error_text
-                        else 'Error parsing client registration response'
-                    )
+                log.error(f'Error parsing client registration response: {e}')
+                raise Exception(
+                    f'Dynamic client registration failed: {error_text}'
+                    if error_text
+                    else 'Error parsing client registration response'
+                )
         raise Exception('Dynamic client registration failed')
     except Exception as e:
         log.error(f'Exception during dynamic client registration: {e}')
@@ -666,16 +699,19 @@ async def get_oauth_client_info_with_static_credentials(
         resource = resource_metadata.resource
         discovery_urls = resource_metadata.get_discovery_urls(oauth_server_url)
         for url in discovery_urls:
-            async with aiohttp.ClientSession(trust_env=True) as session:
-                async with session.get(url, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
-                    if resp.status == 200:
-                        try:
-                            oauth_server_metadata = OAuthMetadata.model_validate(await resp.json())
-                            oauth_server_metadata_url = url
-                            break
-                        except Exception as e:
-                            log.error(f'Error parsing OAuth metadata from {url}: {e}')
-                            continue
+            async with guarded_request(
+                'GET', url, trusted_url=oauth_server_url, ssl=AIOHTTP_CLIENT_SESSION_SSL
+            ) as resp:
+                if resp.status == 200:
+                    try:
+                        oauth_server_metadata = OAuthMetadata.model_validate(await resp.json())
+                        oauth_server_metadata_url = url
+                        break
+                    except Exception as e:
+                        log.error(f'Error parsing OAuth metadata from {url}: {e}')
+                        continue
+
+        await _assert_metadata_endpoints_allowed(oauth_server_metadata, oauth_server_url)
 
         # Use scopes from the Protected Resource Metadata (RFC 9728) if available.
         # Unlike the Authorization Server's scopes_supported (which is a full catalog
@@ -968,47 +1004,51 @@ class OAuthClientManager:
             return True
 
         try:
-            async with aiohttp.ClientSession(trust_env=True) as session:
-                async with session.get(
-                    authorization_url,
-                    allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS,
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                ) as resp:
-                    if resp.status < 400:
-                        return True
-                    response_text = await resp.text()
+            async with guarded_request(
+                'GET',
+                authorization_url,
+                trusted_url=None,
+                allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as resp:
+                if resp.status < 400:
+                    return True
+                response_text = await resp.text()
 
-                    error = None
-                    error_description = ''
+                error = None
+                error_description = ''
 
-                    content_type = resp.headers.get('content-type', '')
-                    if 'application/json' in content_type:
-                        try:
-                            payload = JSONCodec.loads(response_text)
-                            error = payload.get('error')
-                            error_description = payload.get('error_description', '')
-                        except Exception:
-                            pass
-                    else:
-                        error_description = response_text
+                content_type = resp.headers.get('content-type', '')
+                if 'application/json' in content_type:
+                    try:
+                        payload = JSONCodec.loads(response_text)
+                        error = payload.get('error')
+                        error_description = payload.get('error_description', '')
+                    except Exception:
+                        pass
+                else:
+                    error_description = response_text
 
-                    error_message = f'{error or ""} {error_description or ""}'.lower()
+                error_message = f'{error or ""} {error_description or ""}'.lower()
 
-                    if any(
-                        keyword in error_message
-                        for keyword in (
-                            'invalid_client',
-                            'invalid client',
-                            'client id',
-                            'redirect_uri',
-                            'redirect uri',
-                        )
-                    ):
-                        log.warning(
-                            f'OAuth client preflight detected invalid registration for {client_info.client_id}: {error} {error_description}'
-                        )
+                if any(
+                    keyword in error_message
+                    for keyword in (
+                        'invalid_client',
+                        'invalid client',
+                        'client id',
+                        'redirect_uri',
+                        'redirect uri',
+                    )
+                ):
+                    log.warning(
+                        f'OAuth client preflight detected invalid registration for {client_info.client_id}: {error} {error_description}'
+                    )
 
-                        return False
+                    return False
+        except ValueError as e:
+            log.warning('Skipping blocked OAuth preflight for client %s: %s', client_info.client_id, e)
+            return True
         except Exception as e:
             log.debug('Skipping OAuth preflight network check for client %s: %s', client_info.client_id, e)
 
@@ -1126,14 +1166,17 @@ class OAuthClientManager:
                 log.error(f'No OAuth client found for provider {client_id}')
                 return None
 
+            trusted_url = await _get_mcp_server_url(client_id)
+            server_metadata_url = await self.get_server_metadata_url(client_id)
             token_endpoint = None
-            async with aiohttp.ClientSession(trust_env=True) as session_http:
-                async with session_http.get(await self.get_server_metadata_url(client_id)) as r:
-                    if r.status == 200:
-                        openid_data = await r.json()
-                        token_endpoint = openid_data.get('token_endpoint')
-                    else:
-                        log.error(f'Failed to fetch OpenID configuration for client_id {client_id}')
+            async with guarded_request(
+                'GET', server_metadata_url, trusted_url=trusted_url, ssl=AIOHTTP_CLIENT_SESSION_SSL
+            ) as r:
+                if r.status == 200:
+                    openid_data = await r.json()
+                    token_endpoint = openid_data.get('token_endpoint')
+                else:
+                    log.error(f'Failed to fetch OpenID configuration for client_id {client_id}')
             if not token_endpoint:
                 log.error(f'No token endpoint found for client_id {client_id}')
                 return None
@@ -1160,28 +1203,29 @@ class OAuthClientManager:
                 refresh_data['scope'] = client.client_kwargs['scope']
 
             # Make refresh request
-            async with aiohttp.ClientSession(trust_env=True) as session_http:
-                async with session_http.post(
-                    token_endpoint,
-                    data=refresh_data,
-                    headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                ) as r:
-                    if r.status == 200:
-                        new_token_data = await r.json()
+            async with guarded_request(
+                'POST',
+                token_endpoint,
+                trusted_url=trusted_url,
+                data=refresh_data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as r:
+                if r.status == 200:
+                    new_token_data = await r.json()
 
-                        # Merge with existing token data (preserve refresh_token if not provided)
-                        if 'refresh_token' not in new_token_data:
-                            new_token_data['refresh_token'] = token_data['refresh_token']
+                    # Merge with existing token data (preserve refresh_token if not provided)
+                    if 'refresh_token' not in new_token_data:
+                        new_token_data['refresh_token'] = token_data['refresh_token']
 
-                        _normalize_token_expiry(new_token_data)
+                    _normalize_token_expiry(new_token_data)
 
-                        log.debug('Token refresh successful for client_id %s', client_id)
-                        return new_token_data
-                    else:
-                        error_text = await r.text()
-                        log.error(f'Token refresh failed for client_id {client_id}: {r.status} - {error_text}')
-                        return None
+                    log.debug('Token refresh successful for client_id %s', client_id)
+                    return new_token_data
+                else:
+                    error_text = await r.text()
+                    log.error(f'Token refresh failed for client_id {client_id}: {r.status} - {error_text}')
+                    return None
 
         except Exception as e:
             log.error(f'Exception during token refresh for client_id {client_id}: {e}')
@@ -1456,13 +1500,14 @@ class OAuthManager:
 
             server_metadata_url = self.get_server_metadata_url(provider)
             token_endpoint = None
-            async with aiohttp.ClientSession(trust_env=True) as session_http:
-                async with session_http.get(server_metadata_url) as r:
-                    if r.status == 200:
-                        openid_data = await r.json()
-                        token_endpoint = openid_data.get('token_endpoint')
-                    else:
-                        log.error(f'Failed to fetch OpenID configuration for provider {provider}')
+            async with guarded_request(
+                'GET', server_metadata_url, trusted_url=server_metadata_url, ssl=AIOHTTP_CLIENT_SESSION_SSL
+            ) as r:
+                if r.status == 200:
+                    openid_data = await r.json()
+                    token_endpoint = openid_data.get('token_endpoint')
+                else:
+                    log.error(f'Failed to fetch OpenID configuration for provider {provider}')
             if not token_endpoint:
                 log.error(f'No token endpoint found for provider {provider}')
                 return None
@@ -1486,28 +1531,29 @@ class OAuthManager:
                 refresh_data['scope'] = client.client_kwargs['scope']
 
             # Make refresh request
-            async with aiohttp.ClientSession(trust_env=True) as session_http:
-                async with session_http.post(
-                    token_endpoint,
-                    data=refresh_data,
-                    headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                ) as r:
-                    if r.status == 200:
-                        new_token_data = await r.json()
+            async with guarded_request(
+                'POST',
+                token_endpoint,
+                trusted_url=server_metadata_url,
+                data=refresh_data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as r:
+                if r.status == 200:
+                    new_token_data = await r.json()
 
-                        # Merge with existing token data (preserve refresh_token if not provided)
-                        if 'refresh_token' not in new_token_data:
-                            new_token_data['refresh_token'] = token_data['refresh_token']
+                    # Merge with existing token data (preserve refresh_token if not provided)
+                    if 'refresh_token' not in new_token_data:
+                        new_token_data['refresh_token'] = token_data['refresh_token']
 
-                        _normalize_token_expiry(new_token_data)
+                    _normalize_token_expiry(new_token_data)
 
-                        log.debug('Token refresh successful for provider %s', provider)
-                        return new_token_data
-                    else:
-                        error_text = await r.text()
-                        log.error(f'Token refresh failed for provider {provider}: {r.status} - {error_text}')
-                        return None
+                    log.debug('Token refresh successful for provider %s', provider)
+                    return new_token_data
+                else:
+                    error_text = await r.text()
+                    log.error(f'Token refresh failed for provider {provider}: {r.status} - {error_text}')
+                    return None
 
         except Exception as e:
             log.error(f'Exception during token refresh for provider {provider}: {e}')
@@ -1986,27 +2032,28 @@ class OAuthManager:
                     try:
                         access_token = token.get('access_token')
                         headers = {'Authorization': f'Bearer {access_token}'}
-                        async with aiohttp.ClientSession(trust_env=True) as session:
-                            async with session.get(
-                                'https://api.github.com/user/emails',
-                                headers=headers,
-                                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                            ) as resp:
-                                if resp.ok:
-                                    emails = await resp.json()
-                                    # use the primary email as the user's email
-                                    primary_email = next(
-                                        (e['email'] for e in emails if e.get('primary')),
-                                        None,
-                                    )
-                                    if primary_email:
-                                        email = primary_email
-                                    else:
-                                        log.warning('No primary email found in GitHub response')
-                                        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+                        async with guarded_request(
+                            'GET',
+                            'https://api.github.com/user/emails',
+                            trusted_url=None,
+                            headers=headers,
+                            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                        ) as resp:
+                            if resp.ok:
+                                emails = await resp.json()
+                                # use the primary email as the user's email
+                                primary_email = next(
+                                    (e['email'] for e in emails if e.get('primary')),
+                                    None,
+                                )
+                                if primary_email:
+                                    email = primary_email
                                 else:
-                                    log.warning('Failed to fetch GitHub email')
+                                    log.warning('No primary email found in GitHub response')
                                     raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+                            else:
+                                log.warning('Failed to fetch GitHub email')
+                                raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
                     except Exception as e:
                         log.warning(f'Error fetching GitHub email: {e}')
                         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)

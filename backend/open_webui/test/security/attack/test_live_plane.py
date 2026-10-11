@@ -1,6 +1,7 @@
 """Live sealed-stack checks; run only by runtime-security.yml."""
 
 import pytest
+
 from . import plane, seeds
 
 
@@ -19,7 +20,7 @@ def live_seeding():
     identities = ensure_identities()
     parameters = None
     try:
-        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin)
+        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin, collect_failures=True)
         yield plane.seed_every_writable_field(identities.admin, parameters)
     finally:
         try:
@@ -36,7 +37,7 @@ def live_drive(live_seeding):
     identities = ensure_identities()
     parameters = None
     try:
-        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin)
+        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin, collect_failures=True)
         yield plane.drive_every_route(identities.admin, parameters)
     finally:
         try:
@@ -61,7 +62,7 @@ def test_live_seeding_reports_its_own_reach(live_seeding, record_property):
 
 
 def test_live_drive_has_its_own_5xx_assertion(live_drive):
-    crashes = {route: outcome for route, outcome in live_drive.items() if outcome.status >= 500}
+    crashes = {route: outcome for route, outcome in live_drive.items() if outcome.crashed}
     assert not crashes, f'Drive found server errors:\n{plane.drive_report(live_drive)}'
 
 

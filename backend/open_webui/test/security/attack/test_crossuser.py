@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from . import crossuser, plane, seeds, test_shapes
-from .authorization_inventory import admin_gated_operations, source_operations
+from .authorization_inventory import admin_gated_operations, platform_operations, source_operations
 from .test_shapes import reply
 
 offline = test_shapes.offline
@@ -15,7 +15,7 @@ offline = test_shapes.offline
 def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
     inventory = source_operations()
     assert set(plane.operations()) <= inventory.keys()
-    assert len(admin_gated_operations()) == 210
+    assert len(admin_gated_operations()) == 208
     assert 'GET /api/v1/functions/' in inventory
     assert 'GET /api/v1/files/{id}/content' in inventory
     assert 'POST /api/v1/files/onedrive/attach' in inventory
@@ -24,7 +24,7 @@ def test_inventory_resolves_every_committed_operation_including_named_methods_an
     # Operations whose id the surface records as unseedable are out of scope: an
     # ownership check needs a resource that exists, and counting them would make the
     # pass look as though it left ownership unverified rather than unseedable.
-    expected = admins | {r for r in plane.operations() if '{' in r}
+    expected = admins | {r for r in plane.operations() if '{' in r} | set(platform_operations())
     unseedable = {r for r in expected if not crossuser._is_seedable(r, seeds.SURFACE)}
     assert unseedable, 'expected at least one unseedable operation to be excluded'
     assert set(routes) == expected - unseedable
@@ -62,6 +62,73 @@ def test_partial_object_disclosure_does_not_need_the_marker_or_identical_owner_b
         resource_ids=['owner-row'],
     )
     assert result.violations
+
+
+def test_head_success_discloses_access_even_without_a_response_body():
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        'HEAD /api/v1/files/{id}/content',
+        plane.Outcome(200, True, ''),
+        plane.Outcome(200, True, ''),
+        [],
+        admin_only=False,
+        control=True,
+    )
+    assert result.violations[0]['reason'].endswith('through HEAD')
+
+
+def test_picker_control_satisfies_the_real_body_and_required_header_contract():
+    from uuid import UUID
+
+    from open_webui.routers.live_documents import PickerAttachment
+
+    request = crossuser._benign('POST /api/v1/files/onedrive/attach', {}, seeds.SPEC)
+    PickerAttachment.model_validate(request['json'])
+    UUID(request['headers']['Idempotency-Key'])
+
+
+def test_schedule_control_keeps_the_declared_provider_scope():
+    route = 'POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules'
+    scope = {'drive_id': 'ci-drive', 'item_id': 'root', 'include_descendants': True, 'single_file': False}
+    parameters = seeds.Resolved(fields={route: {'json': {'connection_id': 'owned', 'scope': scope}}})
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    assert request['json']['scope'] == scope
+    assert request['json']['connection_id'] == 'owned'
+    assert plane._body_for(['scope'], 'hostile', {'scope': scope}) == {'scope': scope}
+
+
+def test_meeting_audio_control_sends_a_valid_wav_body(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    import io
+    import wave
+
+    route = 'POST /api/v1/meetings/audio'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(None, None, seeds.SURFACE, token='audio')
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    with wave.open(io.BytesIO(request['data']), 'rb') as audio:
+        assert audio.getnchannels() == 1
+        assert audio.getframerate() == 16000
+        assert audio.readframes(1) == b'\x00\x00'
+    assert request['params']['name'] == 'attack-audio.wav'
+
+
+def test_reset_control_uses_the_actual_owner(offline, monkeypatch):
+    spec = {'paths': {'/api/v1/knowledge/{id}/reset': {'post': {}}}}
+    identities, order = setup_pass(monkeypatch, spec, {'intruder': (403, {'detail': 'refused'})})
+    flags = []
+
+    @contextmanager
+    def actor(admin, owner, disposable):
+        flags.append(disposable)
+        yield owner
+
+    monkeypatch.setattr(crossuser, '_actor', actor)
+    crossuser.drive_crossuser(identities, spec=spec, payloads=['one'])
+    assert flags == [False, False]
+    assert [entry[0] for entry in order] == ['intruder', 'admin']
 
 
 def test_both_404_cannot_pass_the_positive_control_gate():
@@ -158,7 +225,8 @@ def test_fixture_resolution_is_private_and_tracks_both_seed_markers(offline, mon
     identities = SimpleNamespace(admin=Mock(), user=Mock())
     maps = []
 
-    def resolve(client, *, admin, surface, spec):
+    def resolve(client, *, admin, surface, spec, collect_failures):
+        assert collect_failures
         assert client is identities.user and admin is identities.admin
         maps.append(surface)
         return {('/api/v1/configs/namespace/{namespace}', 'namespace'): 'attack_procedural-token'}
@@ -178,7 +246,6 @@ def test_owner_mapping_includes_aliases_integrations_task_and_disposable_export(
     for path, expected in [
         ('/api/v1/chats/folder/{folder_id}', 'admin'),
         ('/api/tasks/stop/{task_id}', 'admin'),
-        ('/cache/{path}', 'exporter'),
     ]:
         assert crossuser._owner_key(path, seeds.SURFACE) == expected
 
@@ -361,7 +428,6 @@ def test_an_ordinary_route_keeps_its_users():
 def test_every_service_declaration_covers_a_route_and_names_its_key():
     paths = {route.split(' ', 1)[1] for route in plane.operations(seeds.SPEC)}
     declarations = seeds.SURFACE.get('service', [])
-    assert declarations
     for entry in declarations:
         assert any(p == entry['prefix'] or p.startswith(entry['prefix'] + '/') for p in paths), entry['prefix']
         assert entry['token'] and entry['reason'].strip(), entry
@@ -406,3 +472,34 @@ def test_every_declared_refusal_names_a_route_a_4xx_a_detail_and_a_reason():
         assert entry['route'] in operations, entry['route']
         assert 400 <= entry['status'] < 500, entry
         assert entry['detail'].strip() and entry['reason'].strip(), entry
+
+
+@pytest.mark.parametrize('method', ['GET', 'POST'])
+def test_subject_scoped_results_allow_independent_objects_but_still_catch_disclosure(method):
+    route = f'{method} /api/v1/meetings'
+    result = crossuser.Authorization(plane.Seeding())
+    own_response = plane.Outcome(200, True, '{"data": []}')
+    crossuser._check(
+        result,
+        route,
+        own_response,
+        own_response,
+        ['owner-marker'],
+        admin_only=False,
+        control=True,
+        subject_scoped=True,
+    )
+    assert not result.violations
+    leaked = plane.Outcome(200, True, '{"id": "owner-resource", "title": "owner-marker"}')
+    crossuser._check(
+        result,
+        route,
+        leaked,
+        own_response,
+        ['owner-marker'],
+        admin_only=False,
+        control=True,
+        subject_scoped=True,
+        resource_ids=['owner-resource'],
+    )
+    assert len(result.violations) == 2

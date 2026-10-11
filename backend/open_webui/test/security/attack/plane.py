@@ -2,7 +2,7 @@
 
 RUN-TAG: owui-phase7a-plane-core
 
-The committed document has 635 operations, 237 writable routes and 2684
+The committed document has 619 operations, 234 writable routes and 2672
 derived string fields. At 63 payloads, all-fields alone costs about 15,000
 requests; unconditional leave-one-out costs another ~170,000 before
 single-field retries.
@@ -55,7 +55,15 @@ from . import client as transport
 from .configuration import preserve_configuration
 from .hits_path import hits_path
 from .identities import PASSWORD
-from .seeds import DESTRUCTIVE, METHODS, SPEC, parameter_for
+from .seeds import (
+    DESTRUCTIVE,
+    METHODS,
+    SOEV_BACKED,
+    SPEC,
+    parameter_for,
+    route_waived,
+    runtime_soev_backed,
+)
 
 
 @dataclass(frozen=True)
@@ -70,6 +78,11 @@ class Outcome:
     #: sixteen fields outruns 2000 characters, and a retry built from half of
     #: one would revert the wrong fields.
     rejected: frozenset = frozenset()
+    unavailable: bool = False
+
+    @property
+    def crashed(self):
+        return self.status >= 500 and not self.unavailable
 
 
 @dataclass
@@ -87,6 +100,7 @@ class Seeding:
     unanswered: dict[str, str] = field(default_factory=dict)
     config_unverified: dict[str, str] = field(default_factory=dict)
     config_restore_verified: bool = False
+    fixture_failures: dict[str, str] = field(default_factory=dict)
 
     @property
     def unentered(self):
@@ -107,6 +121,24 @@ RUN_ID = uuid4().hex
 def _count(histogram, route, status):
     counts = histogram.setdefault(route, {})
     counts[status] = counts.get(status, 0) + 1
+
+
+def soev_not_configured(status, body):
+    # In drive mode soev is configured, so this answer is a crash like any 5xx.
+    if status != 503 or runtime_soev_backed() == 'drive':
+        return False
+    if isinstance(body, requests.Response):
+        body = transport.json_body(body)
+    elif isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except ValueError:
+            return False
+    return (
+        isinstance(body, dict)
+        and isinstance(body.get('detail'), dict)
+        and body['detail'].get('code') == 'soev_not_configured'
+    )
 
 
 def record(route_id, status, body, *, pass_name='manual') -> bool:
@@ -132,7 +164,7 @@ def record(route_id, status, body, *, pass_name='manual') -> bool:
         _count(tally.entered, route_id, status)
     if 200 <= status < 300:
         tally.accepted[route_id] = tally.accepted.get(route_id, 0) + 1
-    if status >= 500:
+    if status >= 500 and not soev_not_configured(status, response):
         tally.crashes.setdefault(route_id, response.text[:2000])
     return entered
 
@@ -182,7 +214,7 @@ def drive_report(outcomes):
     return '\n'.join(
         f'{route}: HTTP {outcome.status}; body={outcome.body!r}'
         for route, outcome in sorted(outcomes.items())
-        if outcome.status >= 500
+        if outcome.crashed
     )
 
 
@@ -205,6 +237,7 @@ def flush_hits():
             'unanswered': tally.unanswered,
             'config_unverified': tally.config_unverified,
             'crashes': tally.crashes,
+            'fixture_failures': tally.fixture_failures,
             'body_failures': tally.body_failures,
             'config_findings': tally.config_findings,
             'config_keys': sorted({item['key'] for item in tally.config_findings}),
@@ -238,9 +271,9 @@ def _tokens(dotted):
     return tokens
 
 
-def _plant(node, tokens, payload):
+def _plant(node, tokens, payload, *, replace=False):
     if not tokens:
-        return node if isinstance(node, (dict, list)) else payload
+        return node if isinstance(node, (dict, list)) and not replace else deepcopy(payload)
     key, *rest = tokens
     if key == 0:
         # `not node` matters once a skeleton is in play: an empty list IS a
@@ -250,7 +283,7 @@ def _plant(node, tokens, payload):
     elif not isinstance(node, dict):
         node = {}
     existing = node[0] if key == 0 else node.get(key)
-    node[key] = _plant(existing, rest, payload)
+    node[key] = _plant(existing, rest, payload, replace=replace)
     return node
 
 
@@ -288,7 +321,9 @@ def _hold_declared(skeleton, fields, declared):
     """
     if not declared:
         return skeleton, []
-    skeleton = _body_for(list(declared), declared, skeleton if skeleton is not None else {})
+    skeleton = deepcopy(skeleton) if skeleton is not None else {}
+    for name, value in declared.items():
+        skeleton = _plant(skeleton, _tokens(name), value, replace=True)
     return skeleton, [name for name in fields if any(_overlaps(name, held) for held in declared)]
 
 
@@ -348,7 +383,7 @@ def _payload_batches(route_id, fields, payloads, *, full):
 def _read_before_destroy(route_id):
     method = route_id.split(' ', 1)[0]
     group = 0 if method in {'GET', 'HEAD', 'OPTIONS', 'TRACE'} else 2 if method == 'DELETE' else 1
-    return (3 if route_id in DESTRUCTIVE else group, route_id)
+    return (3 if route_id in DESTRUCTIVE else group, -route_id.count('/') if method == 'DELETE' else 0, route_id)
 
 
 def operations(spec=SPEC):
@@ -429,6 +464,7 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
                 response.text[:2000],
                 'text/html' in response.headers.get('Content-Type', '').lower() and REFLECTION_PROBE in response.text,
                 rejected=frozenset() if entered else _rejected_fields(transport.json_body(response)),
+                unavailable=soev_not_configured(response.status_code, response),
             )
         finally:
             response.close()
@@ -438,6 +474,13 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
 
 
 def _target(route_id, parameters, tally):
+    tally.fixture_failures.update(getattr(parameters, 'failures', {}))
+    if route_waived(route_id):
+        tally.skipped[route_id] = f'BACKED BY SOEV-SOLUTIONS: {SOEV_BACKED[route_id]}'
+        return None
+    if route_id in getattr(parameters, 'blocked', {}):
+        tally.skipped[route_id] = f'FAILED FIXTURE: {parameters.blocked[route_id]}'
+        return None
     try:
         return _fill(route_id.split(' ', 1)[1], parameters)
     except UnseedableRoute as error:
@@ -502,7 +545,8 @@ def _report(name, tally):
     print(
         f'{name}: {len(tally.entered)}/{len(tally.expected)} routes reached; '
         f'{len(tally.statuses)} driven; {len(tally.unentered)} unentered; '
-        f'{len(tally.skipped)} explicitly unseedable; '
+        f'{len(tally.skipped)} blocked or unseedable; '
+        f'{len(tally.fixture_failures)} fixture failures; '
         f'{len(tally.unanswered)} never answered; '
         f'{len(tally.config_unverified)} unverified for configuration'
     )
@@ -580,6 +624,8 @@ def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
                         body['json'] = _hold_declared(None, (), declared['json'])[0]
                     if declared.get('params'):
                         body['params'] = declared['params']
+                    if 'data' in declared:
+                        body['data'] = declared['data']
                     # Multipart: the derivation models JSON bodies only, so nothing else sends one.
                     if declared.get('files'):
                         body.update(files=declared['files'], data=declared.get('form', {}))
