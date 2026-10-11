@@ -8,6 +8,7 @@ from typing import List, Optional
 import requests
 from fastapi import HTTPException, status
 from langchain_core.documents import Document
+from open_webui.utils.outbound import guarded_requests_request
 
 log = logging.getLogger(__name__)
 
@@ -296,8 +297,10 @@ class MinerULoader:
 
         try:
             with open(self.file_path, 'rb') as f:
-                response = requests.put(
+                response = guarded_requests_request(
+                    'PUT',
                     upload_url,
+                    trusted_url=self.api_url,
                     data=f,
                     timeout=self.timeout,
                 )
@@ -424,7 +427,7 @@ class MinerULoader:
         log.info('Downloading results from: %s', zip_url)
 
         try:
-            response = requests.get(zip_url, timeout=60)
+            response = guarded_requests_request('GET', zip_url, trusted_url=self.api_url, timeout=60)
             response.raise_for_status()
         except requests.HTTPError as e:
             raise HTTPException(

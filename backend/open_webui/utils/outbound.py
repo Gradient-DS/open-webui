@@ -138,6 +138,8 @@ def guarded_requests_request(
                 return response
             try:
                 method, url = _redirect(method, response.url, location, response.status_code, original_url, kwargs)
+                if hasattr(kwargs.get('data'), 'read') or kwargs.get('files'):
+                    raise ValueError('Cannot replay a streamed request body after a redirect')
             finally:
                 response.close()
     raise ValueError(ERROR_MESSAGES.INVALID_URL)
