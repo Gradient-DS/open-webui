@@ -23,7 +23,7 @@ from open_webui.retrieval.web.utils import (
 )
 
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
-_CREDENTIAL_HEADERS = {'authorization', 'proxy-authorization', 'cookie'}
+_CREDENTIAL_HEADERS = {'authorization', 'proxy-authorization', 'cookie', 'x-api-key'}
 _BODY_HEADERS = {'content-length', 'content-type', 'transfer-encoding'}
 
 
