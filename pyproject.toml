@@ -156,7 +156,7 @@ unstructured = [
 ]
 
 all = [
-    "pymongo==4.18.1",
+    "pymongo==4.18.2", # security: GHSA-v4x9-3549-crwv / GHSA-vp6j-j7w5-5xjj / GHSA-qx36-8mw2-4r3x fixed in 4.18.2
     "psycopg2-binary==2.9.12",
     "pgvector==0.4.2",
     "moto[s3]>=5.0.26",
@@ -211,6 +211,12 @@ pattern = '"version":\s*"(?P<version>[^"]+)"'
 # a security fix should be exempted here explicitly via
 # exclude-newer-package, with a comment.
 exclude-newer = "14 days"
+# Exact pins for vulnerable transitive deps whose fixed release is still inside
+# the 14-day window; each has a matching exclude-newer-package exemption below.
+constraint-dependencies = [
+    "oauthlib==4.0.0", # security: GHSA-hj66-6f7g-4r5v / GHSA-xpv3-w29h-x7cv fixed in 4.0.0
+    "werkzeug==3.1.9", # security: GHSA-g6x2-hccm-hh4m fixed in 3.1.9
+]
 
 [tool.uv.exclude-newer-package]
 # Security-fix exemption (2026-08-04): cryptography 50.0.0 (published
@@ -237,6 +243,16 @@ weasyprint = false
 # CVE-2026-101917 / CVE-2026-102265..102274 batch. Remove this exemption once
 # 2.15.0 ages past the 14-day window on 2026-10-07.
 pyjwt = false
+# Security-fix exemption (2026-10-11): oauthlib 4.0.0 (published 2026-09-28) is
+# the first release fixing GHSA-hj66-6f7g-4r5v / GHSA-xpv3-w29h-x7cv — see the
+# pin in constraint-dependencies. Remove this exemption once the pinned version
+# ages past the 14-day window on 2026-10-12.
+oauthlib = false
+# Security-fix exemption (2026-10-11): werkzeug 3.1.9 (published 2026-09-27) is
+# the first release fixing GHSA-g6x2-hccm-hh4m — see the pin in
+# constraint-dependencies. Remove this exemption once the pinned version ages
+# past the 14-day window on 2026-10-11 (18:33 UTC).
+werkzeug = false
 
 [tool.hatch.build.targets.wheel]
 sources = ["backend"]
