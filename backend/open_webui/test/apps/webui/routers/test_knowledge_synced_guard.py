@@ -21,6 +21,7 @@ GRANTS = [
 @pytest.fixture
 def api(monkeypatch):
     """Exercise HTTP handlers with isolated knowledge and grant persistence."""
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     kb = KnowledgeModel(
         id='kb', user_id='owner', name='Research', description='Notes', type='onedrive', created_at=1, updated_at=1
     )

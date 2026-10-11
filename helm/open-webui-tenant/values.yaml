@@ -564,8 +564,6 @@ openWebui:
 
     # Agent API (internal: routes chat UI to external agent service)
     agentApiEnabled: "false"
-    agentApiBaseUrl: ""
-    # agentApiKey is set via secrets (see .Values.secrets.agentApiKey)
     # Comma-separated list of agent identifiers the admin can select from in
     # the External Agents tab. When empty, the agents service uses its own
     # default_agent. When set, the admin's selection is forwarded as an
@@ -603,18 +601,6 @@ openWebui:
     # see the agent picker. Default off so existing tenants are unaffected
     # until they explicitly opt in.
     featureAgentPicker: "false"
-
-    # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
-    enableAgentProxy: "false"
-
-    # Search API (RAG discovery proxy at /api/v1/discovery/*). Gated by
-    # ENABLE_RAG_FILTER_UI (PersistentConfig — flip via admin UI).
-    # Now hosted by the agents-api; name kept for overlay compatibility.
-    searchApi:
-      # Agents-api base URL, no /v1 (e.g. http://soev-agents:8181).
-      # Empty disables the proxy. Read as SEARCH_API_BASE_URL.
-      baseUrl: ""
-      # searchApiKey is set via secrets (see .Values.secrets.searchApiKey)
 
     # Two-Factor Authentication (TOTP)
     enable2fa: "false"
@@ -747,9 +733,6 @@ soevApi:
     # recreates it and the migration runs again (harmless, but not free).
     ttlSecondsAfterFinished: null
     resources: {}
-agentApi:
-  # Unset uses the application's v1 default; explicitly set v1 or v2.
-  runtime: ""
 liveDocuments:
   enabled: null  # Application default false; explicit false is rendered too.
 liveMail:
@@ -904,6 +887,19 @@ loaderWorker:
   service:
     port: 8002
 
+  # With networkPolicy.egress.strict, the only shared-services pods the
+  # loader-worker reaches (replaces the whole-namespace rule).
+  networkPolicy:
+    egressAllow:
+      - name: doc-processor
+        namespace: shared-services
+        podLabels: {app.kubernetes.io/name: gradient-gateway, app.kubernetes.io/component: doc-processor}
+        ports: [8001]
+      - name: litellm
+        namespace: shared-services
+        podLabels: {app.kubernetes.io/name: litellm, app.kubernetes.io/component: litellm}
+        ports: [4000]
+
   resources:
     requests:
       memory: "512Mi"
@@ -1054,13 +1050,6 @@ secrets:
   externalDocumentLoaderApiKey: ""
   ragExternalRerankerApiKey: ""
 
-  # Agent API X-API-Key (must match AGENTS_API_KEY on the agent service)
-  agentApiKey: ""
-
-  # Discovery-proxy X-API-Key (must match the agents-api key — usually
-  # the same value as agentApiKey above)
-  searchApiKey: ""
-
   # Loader-worker → tenant /ingest callback bearer (loader-worker presents this
   # outbound; open-webui validates inbound). Same value, both pods.
   loaderIngestApiKey: ""
@@ -1087,20 +1076,6 @@ secrets:
 
   # PostgreSQL
   postgresPassword: ""
-
-# -----------------------------------------------------------------------------
-# Agent Search (machine-auth retrieval endpoints)
-# -----------------------------------------------------------------------------
-# When enabled, mounts:
-#   GET  /api/v1/internal/retrieval/accessible-kbs
-#   POST /api/v1/internal/retrieval/query
-# on the open-webui pod. The agent authenticates by presenting AGENT_API_KEY
-# (the same secret used for the open-webui → agent outbound path — single
-# shared secret across the per-tenant trust boundary) plus an
-# `X-Acting-User-Id` header. Open-webui resolves the user, applies KB-level
-# ACL, and serves the response. No new ACL state.
-agentSearch:
-  enabled: false
 
 # -----------------------------------------------------------------------------
 # Service Account
@@ -1142,8 +1117,6 @@ externalSecrets:
       confluenceBasicAuthApiToken: false
       externalDocumentLoaderApiKey: false
       ragExternalRerankerApiKey: false
-      agentApiKey: false
-      searchApiKey: false
       loaderIngestApiKey: false
       pipelineApiKey: false
       loaderWorkerDbPassword: false
@@ -1162,7 +1135,39 @@ networkPolicy:
   # sharedServices.namespace). Useful when sharedServices.namespace is set to
   # a per-env value like staging-shared-services but the tenant also needs to
   # reach the cluster-wide shared-services namespace (e.g. LiteLLM).
+  # Not allowed with egress.strict: list the services in egress.allow instead.
   extraEgressNamespaces: []
+  # Public egress never reaches the non-public IPv4 ranges (RFC1918, CGNAT,
+  # link-local/metadata, loopback, multicast, documentation and reserved).
+  egress:
+    # false: every pod in sharedServices.namespace and extraEgressNamespaces,
+    # every pod in this namespace, and public IPv4 on any port.
+    # true: this release's own pods on the ports they serve, the entries in
+    # allow, OTLP to the observability namespace, and public IPv4 on publicPorts.
+    strict: false
+    publicPorts: [443]
+    # Destinations outside this release, strict mode only. Each entry:
+    #   {name, namespace ("" = this namespace), podLabels ({} = every pod), ports}
+    allow: []
+    #  - name: litellm
+    #    namespace: shared-services
+    #    podLabels: {app.kubernetes.io/name: litellm, app.kubernetes.io/component: litellm}
+    #    ports: [4000]
+    # CiliumNetworkPolicy allowing TCP 443 only to the hostnames the tenant's
+    # enabled integrations need (OIDC, Microsoft Graph and SharePoint, Google
+    # Drive, Confluence, the S3 endpoint, the Slack webhook) plus extraNames and
+    # extraPatterns. DNS from these pods then goes through Cilium's DNS proxy.
+    fqdn:
+      enabled: false
+      # false: the CIDR rule above still admits all public 443, so the policy
+      # only records which names the pods resolve. true (needs strict): the
+      # CIDR rule is dropped and only the listed hostnames are reachable.
+      enforce: false
+      extraNames: []
+      extraPatterns: []
+      dnsSelector:
+        k8s:io.kubernetes.pod.namespace: kube-system
+        k8s:k8s-app: kube-dns
 
 # -----------------------------------------------------------------------------
 # Cilium Network Policy

@@ -7,8 +7,7 @@
 # (path template, parameter) using name + the longest segment-boundary prefix.
 # Prefixes match literal OpenAPI templates, not concrete request URLs.
 # `key` is only a dependency label, never a global parameter-name binding.
-# More-specific overrides matter: files/{id}/attachments has a different
-# parent seed from files/{id}. New routes are checked against the spec offline.
+# New routes are checked against the spec offline.
 #
 # Each entry has exactly one of via/body/extract (one HTTP endpoint), same_as,
 # seeded_by (an allowlisted Python callable), or unseedable (written reason).
@@ -17,7 +16,6 @@
 # multipart filenames/content, and dictionary keys. Call once per pass.
 # fresh=false marks immutable inputs/environment selectors, not shared fixtures.
 # actor=admin avoids feature permissions during setup; dependent owner checks use the same actor.
-# Attachment bytes require an externally created render artefact.
 # Configuration setup enables the creation gates it names, and integration/
 # terminal setup merges existing configuration. Resolution is serial.
 #
@@ -25,6 +23,7 @@
 # existence, not guaranteed authorization, body validity, or coverage. Machine
 # credentials and external-provider sessions remain separate prerequisites.
 # No unseedable entry may be silently substituted with a plausible-looking id.
+# backed_by="soev-solutions" seeds and field setup run only with RUNTIME_SOEV_BACKED=drive.
 
 # Full export snapshots protect every pass and every mutating request, without
 # selecting keys or excluding routes. Startup recovers interrupted snapshots and
@@ -41,8 +40,6 @@ preserve_configuration = true
 # (routers/auths.py:signup), and identity bootstrap is that signup, so an
 # ENABLE_SIGNUP environment variable cannot keep it on.
 "ui.enable_signup" = true
-# PersistentConfig a tenant admin flips in the admin UI (mkbot runs it); discovery/* answered 503 without it.
-"rag.enable_filter_ui" = true
 # PersistentConfig; the model-path pass drives tasks/auto/completions as a control.
 "task.autocomplete.enable" = true
 
@@ -257,16 +254,18 @@ description = "main.py:create_event_webhook returns upsert_event_webhook id. Dis
 unseedable = "main.py:create_event_webhook rejects every URL reachable from the sealed CI stack. upsert_event_webhook validates the target through retrieval/web/utils.py:validate_url, which refuses any host resolving to a non-global address unless ENABLE_LOCAL_WEB_FETCH is on. In-network hosts (stub, s3) resolve to private Docker addresses and are refused; external hosts do not resolve at all, because the network is internal:true with no DNS. Enabling ENABLE_LOCAL_WEB_FETCH would seed this parameter by disabling the SSRF guard the gate exists to observe, and would diverge from production, which leaves it unset (verified in soev-gitops and the chart, 2026-09-08). Recorded rather than worked around: this route is unseedable precisely because the guard works."
 
 [[parameter]]
+backed_by = "soev-solutions"
 key = "knowledge"
 name = "id"
 prefix = "/api/v1/knowledge/{id}"
-description = "routers/knowledge.py:create_new_knowledge inserts a local KB without requiring files. Admin avoids workspace.knowledge. The immutable FEATURE_KNOWLEDGE gate defaults true and is not overridden in docker-compose.ci.yaml."
+description = "routers/knowledge.py:create_new_knowledge creates a soev-api KB without requiring files. Admin avoids workspace.knowledge. The immutable FEATURE_KNOWLEDGE gate defaults true and is not overridden in docker-compose.ci.yaml."
 via = "POST /api/v1/knowledge/create"
-body = { "name" = "attack-{token}", "description" = "Attack local knowledge" }
+body = { "name" = "attack-{token}", "description" = "Attack platform knowledge" }
 extract = "id"
 actor = "admin"
 
 [[parameter]]
+backed_by = "soev-solutions"
 key = "knowledge_reset"
 name = "id"
 prefix = "/api/v1/knowledge/{id}/reset"
@@ -277,10 +276,11 @@ extract = "id"
 actor = "admin"
 
 [[parameter]]
+backed_by = "soev-solutions"
 key = "directory"
 name = "dir_id"
 prefix = "/api/v1/knowledge/{id}/dirs/{dir_id}"
-description = "routers/knowledge.py:create_knowledge_directory inserts a directory owned by this KB. Use admin to write the admin-owned local KB; no external provider operation is needed."
+description = "routers/knowledge.py:create_knowledge_directory inserts a directory owned by this KB. Use admin to write the admin-owned soev-api KB."
 via = "POST /api/v1/knowledge/{knowledge}/dirs/create"
 body = { "name" = "attack-{token}" }
 extract = "id"
@@ -298,6 +298,7 @@ extract = "id"
 actor = "admin"
 
 [[parameter]]
+backed_by = "soev-solutions"
 key = "external_source"
 name = "id"
 prefix = "/api/v1/knowledge/external/source/{id}"
@@ -307,50 +308,6 @@ body = { "name" = "attack-external-{token}", "connection_id" = "{connection}", "
 extract = "id"
 depends_on = ["connection"]
 actor = "admin"
-
-[[parameter]]
-key = "confluence_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/confluence"
-description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Confluence."
-via = "POST /api/v1/knowledge/create"
-body = { "name" = "confluence-{token}", "description" = "Attack cloud KB", "type" = "confluence" }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
-key = "google_drive_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/google-drive"
-description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Google."
-via = "POST /api/v1/knowledge/create"
-body = { "name" = "google-drive-{token}", "description" = "Attack cloud KB", "type" = "google_drive" }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
-key = "onedrive_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/onedrive"
-description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Microsoft."
-via = "POST /api/v1/knowledge/create"
-body = { "name" = "onedrive-{token}", "description" = "Attack cloud KB", "type" = "onedrive" }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
-key = "internal_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/internal/retrieval/knowledge/{knowledge_id}"
-description = "internal_retrieval.py reads the same Knowledge row; its service credential is a separate driving-identity requirement."
-same_as = "knowledge"
-
-[[parameter]]
-key = "sync_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/sync-daemon/runs/{knowledge_id}"
-description = "sync_daemon.py:report_run_summary resolves Knowledges.id and the provider type."
-same_as = "confluence_knowledge"
 
 [[parameter]]
 key = "file"
@@ -372,48 +329,6 @@ via = "GET /api/v1/files/{file}"
 extract = "filename"
 depends_on = ["file"]
 actor = "admin"
-
-[[parameter]]
-key = "integration_file_status"
-name = "file_id"
-prefix = "/api/v1/integrations/file-status/{file_id}"
-description = "Handler resolves Files.id; service authentication is independent of the existence of the File row."
-same_as = "file"
-
-[[parameter]]
-key = "internal_file"
-name = "file_id"
-prefix = "/api/v1/internal/retrieval/files/{file_id}"
-description = "Handler resolves Files.id; service authentication is independent of the existence of the File row."
-same_as = "file"
-
-[[parameter]]
-key = "integration_source"
-name = "source_id"
-prefix = "/api/v1/integrations/collections/{source_id}"
-description = "Integration DELETE routes resolve provider-owned external source ids."
-unseedable = "POST /integrations/ingest was removed; no remaining HTTP route creates integration source metadata for these legacy DELETE routes."
-
-[[parameter]]
-key = "integration_document"
-name = "document_source_id"
-prefix = "/api/v1/integrations/collections/{source_id}/documents/{document_source_id}"
-description = "integrations.py:delete_document prefixes this external source_id with the provider; it is NOT the File UUID."
-unseedable = "POST /integrations/ingest was removed; no remaining HTTP route creates a provider-owned integration collection and document."
-
-[[parameter]]
-key = "attachment_file"
-name = "id"
-prefix = "/api/v1/files/{id}/attachments"
-description = "Attachment listing uses a real uploaded parent file; bytes additionally require a render artefact."
-same_as = "file"
-
-[[parameter]]
-key = "attachment"
-name = "attachment_id"
-prefix = "/api/v1/files/{id}/attachments/{attachment_id}"
-description = "Attachment bytes resolve a persisted render artefact belonging to the parent file."
-unseedable = "The ingest callback and its attachment persistence were removed; there is no HTTP endpoint that creates render artefacts."
 
 [[parameter]]
 key = "note"
@@ -684,25 +599,12 @@ key = "cache"
 name = "path"
 prefix = "/cache/{path}"
 description = "routers/export.py:trigger_data_export -> get_export_status creates exports/<user>/<file>.zip under CACHE_DIR. Use the fresh disposable user session from auths.add so repeat passes cannot reuse an old export."
-seeded_by = "seed_export"
-depends_on = ["user"]
+unseedable = "The only cache file the API creates is a data export, and services/export/service.py reads knowledge through soev-api, so without soev-api the export fails and never becomes ready. Not a soev route: GET /cache/{path} is waived in route-coverage.toml until the export works without soev-api."
 
 # Removed 2026-09-08: this entry seeded GET /api/v1/retrieval/ef/{text}, which
 # routers/retrieval.py:3006 registers only under ENV=dev. The committed document is
 # generated under ENV=prod, the configuration the gate actually measures, so the route
 # and its seed no longer exist. Restore both together if the dev route is ever gated in.
-
-[[parameter]]
-key = "sync_provider"
-name = "provider"
-prefix = "/api/v1/sync-daemon/config/{provider}"
-description = "sync_daemon.py:_PROVIDERS uses built-in provider names. Verify confluence config through its public admin endpoint; the daemon route separately requires its machine credential."
-seeded_by = "upstream_path"
-depends_on = []
-actor = "admin"
-probe = "/api/v1/configs/confluence"
-value = "confluence"
-fresh = false
 
 [[parameter]]
 key = "reset_token"
@@ -740,20 +642,6 @@ description = "main.py:oauth_client_authorize requires a registered OAuth client
 unseedable = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
 
 [[parameter]]
-key = "confluence_cloud"
-name = "cloud_id"
-prefix = "/api/v1/confluence/page/{cloud_id}"
-description = "confluence_sync.py:_browse_client requires a real authorized Atlassian site. Its browse/content endpoints are read-only; no app HTTP endpoint creates a Confluence cloud/site or grants external access."
-unseedable = "confluence_sync.py:_browse_client requires a real authorized Atlassian site. Its browse/content endpoints are read-only; no app HTTP endpoint creates a Confluence cloud/site or grants external access."
-
-[[parameter]]
-key = "confluence_page"
-name = "page_id"
-prefix = "/api/v1/confluence/page/{cloud_id}/{page_id}"
-description = "confluence_sync.py:get_page_content fetches an existing provider page. This app exposes no Confluence page-creation endpoint and the CI stub has no Confluence page store."
-unseedable = "confluence_sync.py:get_page_content fetches an existing provider page. This app exposes no Confluence page-creation endpoint and the CI stub has no Confluence page store."
-
-[[parameter]]
 key = "pipeline"
 name = "pipeline_id"
 prefix = "/api/v1/pipelines/{pipeline_id}"
@@ -764,9 +652,9 @@ unseedable = "pipelines.py:/upload and /add delegate creation to an external Pip
 key = "task"
 name = "task_id"
 prefix = "/api/tasks/stop/{task_id}"
-description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh custom model inherits the readable upstream fixture and has public read access. Its model-scoped inlet Filter waits asynchronously for at most one hour before agent routing, keeping the id live until tasks.stop cancels it. A Pipe would be skipped by CI's production-matching agent routing. Seed late, cancel after the pass, and re-seed each pass. The finite wait bounds leaked fixtures if a driver crashes."
+description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh custom model inherits the readable upstream fixture and has public read access. Its model-scoped inlet Filter waits asynchronously for at most one hour before agent routing, keeping the id live until tasks.stop cancels it. The inlet also works in private stacks with agent routing enabled. Seed late, cancel after the pass, and re-seed each pass. The finite wait bounds leaked fixtures if a driver crashes."
 seeded_by = "seed_task"
-depends_on = ["model", "chat", "cache", "prompt_history", "channel_message", "external_source", "terminal_path"]
+depends_on = ["model", "chat", "prompt_history", "channel_message", "terminal_path"]
 content = """
 import asyncio
 
@@ -777,13 +665,25 @@ class Filter:
 """
 
 [[parameter]]
+backed_by = "soev-solutions"
 key = "removable_knowledge"
 name = "id"
 prefix = "/api/v1/knowledge/{id}/file/remove"
-description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400 unless the file is in this KB, and deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION is on (measured: the file reads 404 afterwards). Sharing {file} and {knowledge} made it break add, move and update, or, declared destructive, find the KB already gone. seed_removable_knowledge uploads, processes and adds a file of its own and provides its id as {removable_file}."
-seeded_by = "seed_removable_knowledge"
+description = "routers/knowledge.py:remove_file_from_knowledge_by_id answers 400 unless the file is in this KB, and deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION is on (measured: the file reads 404 afterwards). Sharing {file} and {knowledge} made it break add, move and update, or, declared destructive, find the KB already gone. seed_knowledge_file uploads, processes and adds a file of its own and provides its id as {removable_file}."
+seeded_by = "seed_knowledge_file"
 depends_on = []
 provides = ["removable_file"]
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "update_knowledge"
+name = "id"
+prefix = "/api/v1/knowledge/{id}/file/update"
+description = "The positive update control needs a settled file untouched by earlier file/add and content-update requests."
+seeded_by = "seed_knowledge_file"
+depends_on = []
+provides = ["update_file"]
 actor = "admin"
 
 [[parameter]]
@@ -796,9 +696,92 @@ depends_on = []
 password = "Attack-Fixture-Passw0rd!"
 actor = "admin"
 
+[[parameter]]
+backed_by = "soev-solutions"
+key = "cloud_connection"
+name = "connection_id"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}"
+description = "routers/cloud_sync.py resolves an owned connection through soev-api."
+seeded_by = "seed_cloud_connection"
+depends_on = []
+provides = ["cloud_grant"]
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "cloud_authorize_connection"
+name = "connection_id"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}/authorize"
+description = "Starting consent suspends an enabled connection. Use a separate pending connection so this control cannot revoke the live grant and schedule fixtures' consent."
+via = "POST /api/v1/cloud-sync/connections"
+body = { provider = "onedrive" }
+extract = "connection_id"
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "cloud_family"
+name = "family"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}/live/{family}"
+description = "The family selects the live capability on the consented CI connection."
+seeded_by = "seed_cloud_family"
+depends_on = ["cloud_connection"]
+fresh = false
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "cloud_knowledge"
+name = "knowledge_id"
+prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}"
+description = "Use a separate KB: subscribing makes it cloud-synced and must not change the ordinary KB's reset or file controls."
+via = "POST /api/v1/knowledge/create"
+body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture" }
+extract = "id"
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "cloud_schedule"
+name = "schedule_id"
+prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}"
+description = "Schedules belong to a soev-api collection and an authorized provider connection."
+via = "POST /api/v1/cloud-sync/knowledge/{cloud_knowledge}/schedules"
+body = { connection_id = "{cloud_connection}", kind = "content", scope = { drive_id = "ci-drive-{token}", item_id = "root", include_descendants = true, single_file = false }, label = "attack-schedule-{token}" }
+extract = "id"
+depends_on = ["cloud_connection", "cloud_knowledge"]
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
+key = "meeting"
+name = "meeting_id"
+prefix = "/api/v1/meetings/{meeting_id}"
+description = "routers/meetings.py stores meetings exclusively as soev-api chat threads."
+via = "POST /api/v1/meetings"
+body = { input = { type = "start", title = "attack-meeting-{token}", consent = { text_version = "ci-fixture-v1", at = "2026-01-01T00:00:00Z" } } }
+extract = "id"
+actor = "admin"
+
 [[destructive]]
 id = "POST /api/v1/auths/signout"
 reason = "Revokes the caller JWT jti when Redis is present. CI runs real Redis; the same bearer cannot drive subsequent routes."
+
+[[destructive]]
+id = "DELETE /api/v1/files/all"
+reason = "Deletes every uploaded file and resets vector storage. Run after individual file and knowledge controls."
+
+[[destructive]]
+id = "DELETE /api/v1/chats/"
+reason = "Soft-deletes every chat of the driving user; running before per-chat deletes destroys their fixtures."
+
+[[destructive]]
+id = "DELETE /api/v1/chats/share/all"
+reason = "Removes every shared chat of the caller, including per-chat share fixtures."
+
+[[destructive]]
+id = "DELETE /api/v1/models/delete/all"
+reason = "Deletes the model registry; individual model controls must run first."
 
 [[destructive]]
 id = "DELETE /api/v1/auths/api_key"
@@ -849,9 +832,71 @@ unseedable = "routers/openai.py:get_provider_model_download_status reads a job c
 # so without these no pass sends a body and the route reads 422 in every pass.
 
 [[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/files/onedrive/attach"
+description = "Inspect and ingest the fixed provider document using the owner's real live grant."
+json = { grant_id = "{cloud_grant}", drive_id = "ci-picker-drive", item_id = "ci-document", name = "ci-document.txt", web_url = "https://ci.example.invalid/document", size = 59 }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules"
+description = "Use the consented connection and a provider scope; the fixture provider enumerates an empty folder."
+json = { connection_id = "{cloud_connection}", kind = "content", scope = { drive_id = "ci-control-drive-{token}", item_id = "root", include_descendants = true, single_file = false } }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/meetings"
+description = "Create a real meeting with the agent's required consent record."
+json = { input = { type = "start", title = "attack-meeting-{token}", consent = { text_version = "ci-fixture-v1", at = "2026-01-01T00:00:00Z" } } }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/meetings/{meeting_id}/inputs"
+description = "Rename the existing real meeting through its agent input contract."
+json = { input = { type = "set_title", title = "attack-renamed-{token}" } }
+
+[[field]]
 route = "GET /api/v1/files/search"
 description = "routers/files.py:search_files answers 404 when no file matches the pattern; the seeded file's own name matches."
 params = { "filename" = "{filename}" }
+
+[[field]]
+route = "GET /api/v1/calendars/events"
+description = "The event query requires both bounds; the fixture event is inside this interval."
+params = { start = "2033-05-18T00:00:00Z", end = "2033-05-19T00:00:00Z", calendar_ids = "{calendar}" }
+
+[[field]]
+route = "GET /api/v1/chats/search"
+description = "Search needs a text query; the fixture token identifies this pass's chats."
+params = { text = "{token}" }
+
+[[field]]
+route = "GET /api/v1/cloud-sync/connect/done"
+description = "routers/cloud_sync.py:connect_done renders the OAuth popup page locally and reflects `connection` into a script; it calls no soev service."
+params = { connection = "attack-connection-{token}", result = "pending" }
+
+[[field]]
+route = "GET /api/v1/utils/gravatar"
+description = "The handler requires an email query parameter."
+params = { email = "attack-{token}@example.com" }
+
+[[field]]
+route = "POST /api/v1/models/model/toggle"
+description = "Toggle resolves the actual registered model from the required id query."
+params = { id = "{model}" }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/retrieval/query/doc"
+description = "Authorize a real knowledge collection before entering vector retrieval."
+json = { collection_name = "{knowledge}", query = "Attack knowledge" }
+
+[[field]]
+backed_by = "soev-solutions"
+route = "POST /api/v1/meetings/audio"
+description = "A valid mono 16-bit PCM WAV with one silent frame at 16 kHz exercises the platform's owner-scoped audio upload."
+params = { name = "attack-{token}.wav" }
+body_base64 = "UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAA=="
 
 [[field]]
 route = "GET /api/v1/models/model"
@@ -894,26 +939,18 @@ description = "utils/tool_approval.py:resolve_tool_call_output answers 404 'Tool
 json = { "call_id" = "call_{token}", "action" = "reject" }
 
 [[field]]
-route = "POST /api/v1/google-drive/sync/items"
-description = "The sync handler answers 404 'Knowledge base not found' for an unknown knowledge_id; the provider-typed KB fixture exists."
-json = { "knowledge_id" = "{google_drive_knowledge}", "items[].type" = "file", "items[].item_id" = "attack-item-{token}", "items[].item_path" = "/attack", "items[].name" = "attack" }
-
-[[field]]
-route = "POST /api/v1/onedrive/sync/items"
-description = "The sync handler answers 404 'Knowledge base not found' for an unknown knowledge_id; the provider-typed KB fixture exists."
-json = { "knowledge_id" = "{onedrive_knowledge}", "items[].type" = "file", "items[].item_id" = "attack-item-{token}", "items[].item_path" = "/attack", "items[].name" = "attack", "items[].drive_id" = "attack-drive" }
-
-[[field]]
 route = "POST /api/v1/images/edit"
 description = "routers/images.py:image_edits resolves a non-URL image as a file id through get_file_content_by_id, which answers 404 for an unknown id."
 json = { "image" = "{file}" }
 
 [[field]]
+backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/external/knowledge/create"
 description = "Creating an external KB needs an existing connection; the connection fixture exists."
 json = { "connection_id" = "{connection}" }
 
 [[field]]
+backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/move"
 description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. Setup processes the seeded file first -- file/add refuses a file with no extracted content, and the file fixture uploads with process=false to avoid an ingestion race -- then adds it to the KB."
 json = { "file_id" = "{file}" }
@@ -929,13 +966,13 @@ json = { "file_id" = "{file}" }
 
 [[field]]
 route = "POST /api/v1/retrieval/process/files/batch"
-description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot write; a KB's collection is its id. Each file must also exist."
-json = { "collection_name" = "{knowledge}", "files[].id" = "{file}" }
+description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot write. A file's own collection is file-<id>, authorized locally; knowledge collections need soev-api. Each file must also exist."
+json = { "collection_name" = "file-{file}", "files[].id" = "{file}" }
 
 [[field]]
 route = "POST /api/v1/retrieval/query/collection"
-description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot read; a KB's collection is its id."
-json = { "collection_names[]" = "{knowledge}" }
+description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot read. A file's own collection is file-<id>, authorized locally; knowledge collections need soev-api."
+json = { "collection_names[]" = "file-{file}" }
 
 [[field]]
 route = "POST /api/v1/auths/signin"
@@ -1019,6 +1056,7 @@ description = "The benign provider placeholder answered 400 'Unsupported externa
 json = { "name" = "attack-{token}", "provider" = "qdrant", "endpoint" = "http://stub:8000" }
 
 [[field]]
+backed_by = "soev-solutions"
 route = "PATCH /api/v1/knowledge/external/source/{id}"
 description = "As the connection PATCH: the provider must be one the app supports, and the fixture is Qdrant on the stub."
 json = { "name" = "attack-{token}", "connection.name" = "attack-{token}", "connection.provider" = "qdrant", "connection.endpoint" = "http://stub:8000", "source.name" = "attack", "source.config.content_field" = "text" }
@@ -1061,36 +1099,25 @@ class Tools:
 ''' }
 
 [[field]]
-route = "POST /api/v1/google-drive/sync/{knowledge_id}/sources/remove"
-description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed. sync/items has no path parameter, so the crossuser pass never sends it as the owner: setup starts the sync at fixture time, as the drive pass's declared body does (200)."
-json = { "item_id" = "attack-item-{token}" }
-
-[[field]]
-route = "POST /api/v1/onedrive/sync/{knowledge_id}/sources/remove"
-description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed. sync/items has no path parameter, so the crossuser pass never sends it as the owner: setup starts the sync at fixture time, as the drive pass's declared body does (200)."
-json = { "item_id" = "attack-item-{token}" }
-
-[[field]]
-route = "POST /api/v1/sync-daemon/runs/{knowledge_id}/summary"
-description = "routers/sync_daemon.py validates the run status against the daemon's run states and answered 400 to the placeholder; a completed google_drive run is one the daemon reports."
-json = { "status" = "completed", "provider" = "google_drive" }
-
-[[field]]
+backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/add"
 description = "add_file_to_knowledge_by_id needs a real, processed file; the file/move setup processes the seeded file and adds it to this KB."
 json = { "file_id" = "{file}" }
 
 [[field]]
+backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/update"
-description = "file/update answers 404 unless the file is in this KB; the file/move setup adds it."
-json = { "file_id" = "{file}" }
+description = "The isolated processed file belongs to the update-only KB and has no earlier in-flight mutation."
+json = { "file_id" = "{update_file}" }
 
 [[field]]
+backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/remove"
-description = "file/remove answers 400 unless the file is in this KB; seed_removable_knowledge adds its own file to its own KB."
+description = "file/remove answers 400 unless the file is in this KB; seed_knowledge_file adds its own file to its own KB."
 json = { "file_id" = "{removable_file}" }
 
 [[field]]
+backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/files/batch/add"
 description = "Each batch entry must name a real, processed file; the file/move setup processes the seeded one."
 json = { "[].file_id" = "{file}" }
@@ -1114,6 +1141,11 @@ form = { "urlIdx" = "{openai_index}" }
 [[field]]
 route = "POST /ollama/models/upload"
 description = "Multipart: routers/ollama.py:upload_model streams the file to the Ollama upstream as a blob, then creates a model from it."
+files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]
+
+[[field]]
+route = "POST /ollama/models/upload/{url_idx}"
+description = "The indexed upload has the same multipart contract as the default upstream route."
 files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]
 
 # ---------------------------------------------------------------------------
@@ -1250,25 +1282,8 @@ route = "DELETE /openai/{path}"
 allow = ["same-object", "write"]
 reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configured upstream for any verified user (CI turns it on; no tenant does yet). The answer is the upstream's, and the call changes nothing an owner holds."
 
-[[shared]]
-route = "GET /api/v1/sync-daemon/config/{provider}"
-allow = ["same-object"]
-reason = "utils/service_auth.py:get_sync_service_principal authenticates the daemon with no acting user: the provider config is the tenant's, read the same whoever the daemon acts for."
-
-[[shared]]
-route = "GET /api/v1/integrations/file-status/{file_id}"
-allow = ["same-object"]
-reason = "routers/integrations.py:get_file_status requires the loader-worker credential and returns a file's processing status by id, not checked against the acting user: the loader is a tenant-wide machine credential. Recorded in CROSSUSER-001 as a choice to confirm."
-
-# ---------------------------------------------------------------------------
-# Owner refusals that are a guard working
-#
-# The crossuser owner control proves isolation only where the owner's own request
-# succeeds. Where the owner is refused by a guard working, or for want of a system
-# the sealed stack lacks, [[control]] names the refusal (status and a fragment of
-# its detail) and why; a different answer is still a gap, and a declared route
-# that starts succeeding fails the test until its declaration goes.
-
+# Owner refusals that are a guard working. A declared route that starts
+# succeeding fails the gate until its declaration is removed.
 [[control]]
 route = "DELETE /api/v1/agent-configs/{slug}"
 status = 400
@@ -1280,12 +1295,6 @@ route = "POST /api/v1/agent-configs/{slug}"
 status = 409
 detail = "already exists"
 reason = "Creation refuses a slug that already has a configuration; the in-environment slug has one."
-
-[[control]]
-route = "DELETE /api/v1/knowledge/external/connections/{id}"
-status = 400
-detail = "still used by knowledge bases"
-reason = "A connection a knowledge base still uses cannot be deleted, and the external knowledge fixture uses this one."
 
 [[control]]
 route = "POST /api/v1/invites/{token}/accept"
@@ -1306,30 +1315,6 @@ detail = "could not find"
 reason = "OAuth sessions come from an identity provider's code exchange, which the sealed stack has none of."
 
 [[control]]
-route = "POST /api/v1/google-drive/sync/{knowledge_id}/cancel"
-status = 400
-detail = "No active sync"
-reason = "Google Drive needs an OAuth identity provider the sealed stack lacks, so a knowledge base never has an active Drive sync to cancel."
-
-[[control]]
-route = "POST /api/v1/google-drive/sync/{knowledge_id}/sources/remove"
-status = 404
-detail = "Source not found"
-reason = "As Drive cancel: no Drive, so no synced source to remove."
-
-[[control]]
-route = "POST /api/v1/onedrive/sync/{knowledge_id}/cancel"
-status = 400
-detail = "No active sync"
-reason = "OneDrive needs an OAuth identity provider the sealed stack lacks, so a knowledge base never has an active OneDrive sync to cancel."
-
-[[control]]
-route = "POST /api/v1/onedrive/sync/{knowledge_id}/sources/remove"
-status = 404
-detail = "Source not found"
-reason = "As OneDrive cancel: no OneDrive, so no synced source to remove."
-
-[[control]]
 route = "POST /api/v1/calendars/events/{event_id}/rsvp"
 status = 404
 detail = "Not an attendee of this event"
@@ -1342,44 +1327,7 @@ detail = "Test query returned no results"
 reason = "Updating an external source validates it with a retrieval test query that must return content; the CI stub's Qdrant has nothing indexed, so the query returns none. A real vector store with data is what the sealed stack lacks."
 
 [[control]]
-route = "POST /api/v1/confluence/sync/{knowledge_id}/cancel"
-status = 400
-detail = "No active sync"
-reason = "A Confluence sync needs Atlassian, which the sealed stack lacks; ENABLE_CONFLUENCE_INTEGRATION stays off for the egress test."
-
-[[control]]
-route = "POST /api/v1/confluence/sync/{knowledge_id}/sources/remove"
-status = 404
-detail = "Source not found"
-reason = "As Confluence cancel: no Atlassian, so no synced source to remove."
-
-[[control]]
 route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
 status = 400
 detail = "active production version"
 reason = "The owner control for update/version makes the history fixture the active version, and the active version cannot be deleted."
-
-# ---------------------------------------------------------------------------
-# Service callers
-#
-# Route families the agents-api and the sync daemon call with a service key and
-# an acting user (utils/service_auth.py). The crossuser pass drives both sides
-# as the service: acting for the owner is the owner control, acting for the
-# intruder is the isolation check. The keys are CI's (docker-compose.ci.yaml).
-
-[[service]]
-prefix = "/api/v1/internal/retrieval"
-token = "ci-stub-key"
-reason = "utils/service_auth.py:get_agent_principal: the AGENT_API_KEY bearer, acting for the user in X-Acting-User-Id. A user's own bearer is refused outright (401)."
-
-[[service]]
-prefix = "/api/v1/sync-daemon"
-token = "ci-stub-key"
-headers = { "X-Acting-Provider" = "google_drive" }
-reason = "utils/service_auth.py:get_sync_principal: the SYNC_API_KEY bearer, acting for X-Acting-User-Id through X-Acting-Provider. A user's own bearer is refused outright (401)."
-
-[[service]]
-prefix = "/api/v1/integrations/file-status"
-token = "ci-stub-key"
-headers = { "X-Acting-Provider" = "google_drive" }
-reason = "utils/service_auth.py:get_integration_principal: the loader-worker's LOADER_INGEST_API_KEY bearer, acting for X-Acting-User-Id through X-Acting-Provider (routers/integrations.py:_require_loader). A user's own bearer is refused (403)."

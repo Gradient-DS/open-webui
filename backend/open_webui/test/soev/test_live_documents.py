@@ -57,7 +57,7 @@ async def test_event_poll_and_next_turn(env, monkeypatch):  # noqa: F811
     from open_webui.soev import live_documents
     from open_webui.utils import agent_v2
 
-    messages = {}
+    messages = {'user_id': 'alice'}
 
     async def upsert(chat, message, update):
         messages.update(update)

@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
@@ -28,6 +27,7 @@ from open_webui.utils.access_control import filter_allowed_access_grants, has_pe
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 
 class PromptVersionUpdateForm(BaseModel):
@@ -54,7 +54,7 @@ PAGE_ITEM_COUNT = 30
 
 @router.get('/', response_model=list[PromptModel])
 async def get_prompts(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if can_bypass_access_control(user):
         prompts = await Prompts.get_prompts(db=db)
     else:
         prompts = await Prompts.get_prompts_by_user_id(user.id, 'read', db=db)
@@ -64,7 +64,7 @@ async def get_prompts(user=Depends(get_verified_user), db: AsyncSession = Depend
 
 @router.get('/tags', response_model=list[str])
 async def get_prompt_tags(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if can_bypass_access_control(user):
         return await Prompts.get_tags(db=db)
     return await Prompts.get_tags_by_user_id(user.id, db=db)
 
@@ -101,7 +101,7 @@ async def get_prompt_list(
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL):
+    if not can_bypass_access_control(user):
         if groups:
             filter['group_ids'] = [group.id for group in groups]
 
@@ -125,9 +125,7 @@ async def get_prompt_list(
             PromptAccessResponse(
                 **prompt.model_dump(),
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
-                    or user.id == prompt.user_id
-                    or prompt.id in writable_prompt_ids
+                    can_bypass_access_control(user) or user.id == prompt.user_id or prompt.id in writable_prompt_ids
                 ),
             )
             for prompt in result.items
@@ -211,7 +209,7 @@ async def get_prompt_by_id(
 
     if prompt:
         if (
-            user.role == 'admin'
+            can_bypass_access_control(user)
             or prompt.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -224,7 +222,7 @@ async def get_prompt_by_id(
             return PromptAccessResponse(
                 **prompt.model_dump(),
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    can_bypass_access_control(user)
                     or user.id == prompt.user_id
                     or await AccessGrants.has_access(
                         user_id=user.id,
@@ -274,7 +272,7 @@ async def update_prompt_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -347,7 +345,7 @@ async def update_prompt_metadata(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -406,7 +404,7 @@ async def set_prompt_version(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -463,7 +461,7 @@ async def update_prompt_access_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -520,7 +518,7 @@ async def toggle_prompt_active(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -573,7 +571,7 @@ async def delete_prompt_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and not can_bypass_access_control(user)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -617,7 +615,7 @@ async def get_prompt_history(
 
     # Check read access
     if not (
-        user.role == 'admin'
+        can_bypass_access_control(user)
         or prompt.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -655,7 +653,7 @@ async def get_prompt_diff(
 
     # Check read access
     if not (
-        user.role == 'admin'
+        can_bypass_access_control(user)
         or prompt.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -698,7 +696,7 @@ async def get_prompt_history_entry(
 
     # Check read access
     if not (
-        user.role == 'admin'
+        can_bypass_access_control(user)
         or prompt.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -741,7 +739,7 @@ async def delete_prompt_history_entry(
 
     # Check write access
     if not (
-        user.role == 'admin'
+        can_bypass_access_control(user)
         or prompt.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,

@@ -15,7 +15,14 @@ ENV_MAPPING = {
 }
 # Exact replacement values prevent a waiver from admitting arbitrary drift.
 DIVERGENCES = {
-    'AGENT_API_BASE_URL': ('http://stub:8000', 'Production agents-api hostname replaced by the sealed stub.'),
+    **{
+        name: (None, 'Private soev service is absent; its routes are covered in soev-solutions.')
+        for name in (
+            'AGENT_API_ENABLED',
+            'AGENT_API_PICKER_DEFAULT_SLUG',
+            'FEATURE_AGENT_PICKER',
+        )
+    },
     'RAG_OPENAI_API_BASE_URL': ('http://stub:8000/v1', 'Production LiteLLM hostname replaced by the sealed stub.'),
     'RAG_EXTERNAL_RERANKER_URL': (
         'http://stub:8000/v1/rerank',
@@ -33,6 +40,9 @@ DIVERGENCES = {
         'and application request coverage does not require exports.',
     ),
 }
+
+
+SOEV_SETTINGS = {name for name, (value, _) in DIVERGENCES.items() if value is None}
 
 
 def deployed_values():
@@ -60,15 +70,18 @@ def config_mismatches(deployed, env, divergences=DIVERGENCES):
         if name in divergences:
             replacement, reason = divergences[name]
             assert reason.strip(), name
-            # Only telemetry may waive a boolean: never disable a tenant feature.
-            assert expected.lower() not in {'true', 'false'} or name == 'ENABLE_OTEL', name
+            assert (
+                expected.lower() not in {'true', 'false'}
+                or name == 'ENABLE_OTEL'
+                or (replacement is None and name in SOEV_SETTINGS)
+            ), name
             expected_ci = replacement
         else:
             expected_ci = expected
         matches = actual == expected_ci
-        if isinstance(actual, str) and expected_ci.lower() in {'true', 'false'}:
+        if isinstance(actual, str) and isinstance(expected_ci, str) and expected_ci.lower() in {'true', 'false'}:
             matches = actual.lower() == expected_ci.lower()
-        if not isinstance(actual, str) or not matches:
+        if not matches:
             errors.append(f'{name}: deployed={expected!r}, CI={actual!r}, required CI={expected_ci!r}')
     return errors
 
@@ -84,7 +97,7 @@ class TestCiMatchesDeployedConfig:
     @pytest.mark.parametrize('bad_value', [None, '', 'false'])
     def test_enabled_features_cannot_disappear(self, bad_value):
         for name, value in deployed_values().items():
-            if value.lower() == 'true' and name != 'ENABLE_OTEL':
+            if value.lower() == 'true' and name != 'ENABLE_OTEL' and name not in SOEV_SETTINGS:
                 assert config_mismatches({name: value}, {name: bad_value})
                 assert config_mismatches({name: value}, {})
                 with pytest.raises(AssertionError):

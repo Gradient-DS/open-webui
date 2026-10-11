@@ -42,6 +42,7 @@ from open_webui.utils.images.comfyui import (
     comfyui_upload_image,
 )
 from open_webui.utils.json_codec import JSONCodec
+from open_webui.utils.outbound import guarded_request, is_same_origin
 from open_webui.utils.session_pool import get_session
 from PIL import Image, ImageOps
 from pydantic import BaseModel
@@ -455,45 +456,19 @@ class CreateImageForm(BaseModel):
 GenerateImageForm = CreateImageForm  # Alias for backward compatibility
 
 
-def _is_same_origin(url: str, base_url: str) -> bool:
-    """Compare scheme + hostname + port of two URLs.
-
-    Pure string-prefix matching (``startswith``) is vulnerable to
-    userinfo injection (``http://host:port@evil.com/``) and suffix
-    confusion (``http://host:portevil.com/``).  Parsing both URLs
-    and comparing the three origin components eliminates those
-    attack vectors.
-    """
-
-    def _default_port(scheme: str) -> int:
-        return 443 if scheme == 'https' else 80
-
-    parsed = urlparse(url)
-    trusted = urlparse(base_url)
-    return (
-        parsed.scheme == trusted.scheme
-        and parsed.hostname == trusted.hostname
-        and (parsed.port or _default_port(parsed.scheme)) == (trusted.port or _default_port(trusted.scheme))
-    )
-
-
 async def get_image_data(data: str, headers=None, trusted_base_url: str | None = None):
     try:
         if data.startswith('http://') or data.startswith('https://'):
-            # Defense-in-depth: gate before fetch (mirrors load_url_image).
-            # For URLs originating from an admin-configured backend (e.g.
-            # ComfyUI on a private network), skip SSRF validation only when
-            # the URL shares the exact same origin (scheme + host + port)
-            # as the admin-configured base.  This avoids both the global
-            # ENABLE_LOCAL_WEB_FETCH hammer and a blanket trust flag
-            # that would follow arbitrary redirects.
-            if trusted_base_url and _is_same_origin(data, trusted_base_url):
+            if trusted_base_url and is_same_origin(data, trusted_base_url):
                 log.debug('Skipping URL validation for trusted backend: %s', data)
             else:
                 await asyncio.to_thread(validate_url, data)
-            session = await get_session()
-            async with session.get(
+                if headers:
+                    headers = {k: v for k, v in headers.items() if k.lower() != 'authorization'}
+            async with guarded_request(
+                'GET',
                 data,
+                trusted_url=trusted_base_url,
                 headers=headers,
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
             ) as r:
@@ -675,6 +650,7 @@ async def image_generations(
                     image_data, content_type = await get_image_data(
                         image_url,
                         {k: v for k, v in headers.items() if k != 'Content-Type'},
+                        trusted_base_url=image_config.IMAGES_OPENAI_API_BASE_URL,
                     )
                 else:
                     image_data, content_type = await get_image_data(image['b64_json'])
@@ -833,7 +809,9 @@ async def image_generations(
             images = []
 
             for image in res['images']:
-                image_data, content_type = await get_image_data(image)
+                image_data, content_type = await get_image_data(
+                    image, trusted_base_url=image_config.AUTOMATIC1111_BASE_URL
+                )
                 _, image_file = await upload_image(
                     request,
                     image_data,
@@ -1057,6 +1035,7 @@ async def image_edits(
                     image_data, content_type = await get_image_data(
                         image_url,
                         {k: v for k, v in headers.items() if k != 'Content-Type'},
+                        trusted_base_url=image_config.IMAGES_EDIT_OPENAI_API_BASE_URL,
                     )
                 else:
                     image_data, content_type = await get_image_data(image['b64_json'])

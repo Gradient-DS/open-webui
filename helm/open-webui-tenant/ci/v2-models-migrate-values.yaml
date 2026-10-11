@@ -16,8 +16,6 @@ soevApi:
     modelMap:
       glm-5-3: zai-org/glm-5.3
       glm-5-2-fp8: zai-org/glm-5.3
-agentApi:
-  runtime: v2
 liveDocuments:
   enabled: true
 liveMail:

@@ -14,6 +14,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from open_webui.soev.acting import acting_ref
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.request_cache import memoized
 
@@ -563,6 +564,8 @@ class SoevKnowledgeTable:
                 ):
                     await self._delete_folder(id, folder['path'])
             return await self.get_knowledge_by_id(id)
+        except SoevNotConfigured:
+            raise
         except SoevApiError:
             return None
 
@@ -614,7 +617,10 @@ class SoevKnowledgeTable:
 
     async def search_files_by_id(self, knowledge_id, user_id, filter, skip=0, limit=30, metadata_only=False, db=None):
         filters = filter or {}
-        path = self._directory_path(knowledge_id, filters.get('directory_id'))
+        try:
+            path = self._directory_path(knowledge_id, filters.get('directory_id'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid directory identifier') from None
         collection, members, schedules = await asyncio.gather(
             self._collection(knowledge_id, user_id=user_id),
             self._members(knowledge_id, user_id=user_id),
@@ -786,9 +792,12 @@ class SoevKnowledgeTable:
         return sorted(real + virtual, key=lambda row: (row.name.casefold(), row.id))
 
     async def create_directory(self, knowledge_id, name, user_id, parent_id=None, db=None):
-        path = self._directory_path(knowledge_id, parent_id) + (name,)
-        self._assert_writable_path(path)
-        self._projection.directory_id(knowledge_id, path)
+        try:
+            path = self._directory_path(knowledge_id, parent_id) + (name,)
+            self._assert_writable_path(path)
+            self._projection.directory_id(knowledge_id, path)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid directory name or parent') from None
         collection = await self._collection(knowledge_id, user_id=user_id)
         if collection is None:
             return None
@@ -817,7 +826,10 @@ class SoevKnowledgeTable:
         ] + list(virtual.values())
 
     async def _directory(self, directory_id, *, user_id=None, view=None):
-        key, path = self._projection.directory_of(directory_id)
+        try:
+            key, path = self._projection.directory_of(directory_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid directory identifier') from None
         if not path:
             return None
         rows = await self._directory_models(key, path[:-1], user_id=user_id, view=view)
@@ -919,6 +931,8 @@ class SoevKnowledgeTable:
                     'POST', self._path(key) + '/folders/move', {'from': '/'.join(old), 'to': '/'.join(new)}
                 )
             return await self._directory(identifier)
+        except SoevNotConfigured:
+            raise
         except (SoevApiError, ValueError):
             return None
 
@@ -938,6 +952,8 @@ class SoevKnowledgeTable:
                     await self.remove_file_from_knowledge_by_id(key, source_id)
             await self._delete_folder(key, '/'.join(path))
             return True
+        except SoevNotConfigured:
+            raise
         except SoevApiError:
             return False
 
@@ -954,6 +970,8 @@ class SoevKnowledgeTable:
         try:
             await self._move_document(knowledge_id, file_id, self._directory_path(knowledge_id, directory_id))
             return True
+        except SoevNotConfigured:
+            raise
         except (SoevApiError, ValueError):
             return False
 

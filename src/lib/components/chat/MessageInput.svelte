@@ -97,7 +97,7 @@
 		webSearchState,
 		type ToolState
 	} from '$lib/utils/toolState';
-	import { uploadFile, getFileAttachments } from '$lib/apis/files';
+	import { uploadFile } from '$lib/apis/files';
 	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
 	import { generateAutoCompletion } from '$lib/apis';
 	import { getChatById } from '$lib/apis/chats';
@@ -161,8 +161,6 @@
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
-	import Filter from '../icons/Filter.svelte';
-	import { showRagFilter } from '$lib/stores/rag-filter';
 
 	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
@@ -1357,19 +1355,6 @@
 					}
 
 					files = files;
-
-					// Pre-load render attachments (e.g. IFC plan PNGs) so the chat-side
-					// image-builder in Chat.svelte can inline them as first-turn vision
-					// for the BIM agent. Non-blocking; on error the file silently has
-					// no attachments.
-					getFileAttachments(localStorage.token, uploadedFile.id)
-						.then((manifest) => {
-							fileItem.attachments = manifest;
-							files = files; // trigger Svelte reactivity
-						})
-						.catch(() => {
-							fileItem.attachments = [];
-						});
 				} else {
 					fileItem.status = 'error';
 					fileItem.error = $i18n.t('Failed to upload file.');
@@ -2590,18 +2575,6 @@
 												<PlusAlt className="size-5" />
 											</button>
 										</InputMenu>
-									{/if}
-									<!-- [Gradient] RAG filters remain a dedicated composer action. -->
-									{#if $config?.features?.enable_rag_filter_ui ?? true}
-										<Tooltip content={$i18n.t('RAG Filters')} placement="top"
-											><button
-												type="button"
-												class="size-[1.875rem] shrink-0 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
-												on:click={() => showRagFilter.update((v) => !v)}
-												aria-label={$i18n.t('RAG Filters')}
-												><Filter className="size-4.5" strokeWidth="1.5" /></button
-											></Tooltip
-										>
 									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">

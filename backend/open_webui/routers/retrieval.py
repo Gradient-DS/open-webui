@@ -115,6 +115,7 @@ from open_webui.retrieval.web.yacy import search_yacy
 from open_webui.retrieval.web.yandex import search_yandex
 from open_webui.retrieval.web.ydc import search_youcom
 from open_webui.soev import identity, ingest
+from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.soev.client import SoevApiError
 from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
@@ -127,6 +128,7 @@ from open_webui.utils.misc import (
 )
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -1894,7 +1896,7 @@ async def process_file(
     The session is committed before external API calls, and updates use a fresh session.
     """
     config = await get_rag_config_state()
-    if user.role == 'admin':
+    if can_bypass_access_control(user):
         file = await Files.get_file_by_id(form_data.file_id, db=db)
     else:
         file = await Files.get_file_by_id_and_user_id(form_data.file_id, user.id, db=db)
@@ -1917,6 +1919,8 @@ async def process_file(
                     job_id = await ingest.submit(
                         file, collection_key=collection_key, user_id=user.id, text=form_data.content
                     )
+                except SoevNotConfigured:
+                    raise
                 except SoevApiError as e:
                     raise ValueError(f'{e.code}: {e.detail}') from e
                 return {
@@ -2134,6 +2138,8 @@ async def process_file(
 
         except ingest.IngestBusy as e:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='file is being processed') from e
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.exception(e)
             # Fresh session for error status update.
@@ -2384,6 +2390,8 @@ async def process_url(
             'collection_name': (file_data.get('meta') or {}).get('collection_name'),
             'file': file_data,
         }
+    except SoevNotConfigured:
+        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -3177,6 +3185,7 @@ async def delete_entries_from_collection(
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    await _validate_collection_access([form_data.collection_name], user, access_type='write')
     try:
         if await ASYNC_VECTOR_DB_CLIENT.has_collection(collection_name=form_data.collection_name):
             file = await Files.get_file_by_id(form_data.file_id, db=db)
@@ -3223,12 +3232,17 @@ async def delete_entries_from_collection(
 
 @router.post('/reset/db')
 async def reset_vector_db(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+    if not can_bypass_access_control(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     await ASYNC_VECTOR_DB_CLIENT.reset()
-    await Knowledges.delete_all_knowledge(db=db)
+    if configured():
+        await Knowledges.delete_all_knowledge(db=db)
 
 
 @router.post('/reset/uploads')
 async def reset_upload_dir(request: Request, user=Depends(get_admin_user)) -> bool:
+    if not can_bypass_access_control(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     folder = f'{UPLOAD_DIR}'
     try:
         # Check if the directory exists
@@ -3263,7 +3277,7 @@ async def reset_upload_dir(request: Request, user=Depends(get_admin_user)) -> bo
 if ENV == 'dev':
 
     @router.get('/ef/{text}')
-    async def get_embeddings(request: Request, text: Optional[str] = 'Hello World!'):
+    async def get_embeddings(request: Request, text: Optional[str] = 'Hello World!', user=Depends(get_admin_user)):
         return {'result': await request.app.state.EMBEDDING_FUNCTION(text, prefix=RAG_EMBEDDING_QUERY_PREFIX)}
 
 
@@ -3325,7 +3339,7 @@ async def process_files_batch(
                     )
                 )
                 continue
-            if db_file.user_id != user.id and user.role != 'admin':
+            if db_file.user_id != user.id and not can_bypass_access_control(user):
                 file_errors.append(
                     BatchProcessFilesResult(
                         file_id=file.id,
@@ -3338,6 +3352,8 @@ async def process_files_batch(
             if soev_config.SOEV_API_URL:
                 try:
                     await ingest.submit(db_file, collection_key=collection_name, user_id=user.id)
+                except SoevNotConfigured:
+                    raise
                 except (SoevApiError, ingest.IngestBusy) as e:
                     error = f'{e.code}: {e.detail}' if isinstance(e, SoevApiError) else 'file is being processed'
                     file_errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error=error))
@@ -3369,6 +3385,8 @@ async def process_files_batch(
             )
             file_results.append(BatchProcessFilesResult(file_id=file.id, status='prepared'))
 
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.error(f'process_files_batch: Error processing file {file.id}: {str(e)}')
             file_errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error=str(e)))

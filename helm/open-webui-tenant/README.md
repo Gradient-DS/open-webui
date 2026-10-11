@@ -5,6 +5,10 @@ For v2 in a shared `soev-<client>` namespace, set `networkPolicy.scope: release`
 and `secretStoreRef` to the platform's existing SecretStore or ClusterSecretStore.
 See [ci/v2-values.yaml](ci/v2-values.yaml) for a complete rendering example.
 
+Agent chat uses v2 exclusively. Set `openWebui.config.agentApiEnabled: "true"`
+and configure the platform settings and credentials below. All tenants move to
+v2 with this release; there is no runtime selector or v1 proxy.
+
 ## Platform settings
 
 These values are at the chart root. Unset values emit no environment variable;
@@ -16,7 +20,6 @@ is rendered as `"false"`.
 | `soevApi.url` | `SOEV_API_URL` | Empty |
 | `soevApi.audience` | `SOEV_API_AUDIENCE` | Empty |
 | `soevApi.servicePrincipal` | `SOEV_API_SERVICE_PRINCIPAL` | Empty |
-| `agentApi.runtime` | `AGENT_API_RUNTIME` | `v1`; accepts `v1` or `v2` |
 | `liveDocuments.enabled` | `ENABLE_LIVE_DOCUMENTS` | `false` |
 | `liveMail.enabled` | `ENABLE_LIVE_MAIL` | `false` |
 | `webuiUrl` | `WEBUI_URL` | Empty |
@@ -69,6 +72,37 @@ and sync-daemon. Ingress and egress rules are identical in both modes.
 Keep namespace scope for existing dedicated tenant namespaces: the sibling
 `agent-stack` chart has its own NetworkPolicy, but `tenant-backup` and
 `tenant-deactivation` do not and can rely on this chart's namespace policy.
+
+## Egress
+
+Every public-egress rule (tenant, loader-worker, sync-daemon) excludes the
+non-public IPv4 ranges: RFC1918, CGNAT, loopback, link-local (cloud metadata),
+documentation, benchmarking, multicast and reserved.
+
+`networkPolicy.egress.strict: false` (default) keeps the old reach: every pod
+in `sharedServices.namespace` and `extraEgressNamespaces`, every pod in the
+namespace, and public IPv4 on any port. `strict: true` allows only:
+
+- this release's own pods on the ports they serve (Open WebUI 8080 and, when
+  enabled, PostgreSQL, Weaviate 8080/50051, Redis 6379, loader-worker, sync-daemon);
+- each `networkPolicy.egress.allow` entry `{name, namespace, podLabels, ports}`
+  (`namespace: ""` is this namespace);
+- the loader-worker's `loaderWorker.networkPolicy.egressAllow` (doc-processor, LiteLLM);
+- OTLP to the observability namespace on the collector port, when telemetry is on;
+- kube-system DNS, and public IPv4 on `publicPorts` (default `[443]`).
+
+Strict mode refuses `extraEgressNamespaces`. In namespace scope the policy also
+selects the `agent-stack` pods, so their shared-services ports (SearXNG,
+Crawl4AI) must be in `allow` too.
+
+`networkPolicy.egress.fqdn.enabled` adds a CiliumNetworkPolicy allowing TCP 443
+to the hostnames the enabled integrations need (OIDC provider, Microsoft login
+and Graph, `*.sharepoint.com`, Google Drive, Confluence, the S3 endpoint, the
+Slack webhook) plus `extraNames`/`extraPatterns`, and sends the pods' DNS
+through Cilium's DNS proxy. Without `fqdn.enforce` the CIDR rule still admits
+all public 443, so the policy only observes; with `fqdn.enforce` (requires
+`strict`) the CIDR rule is dropped. See
+[ci/strict-egress-values.yaml](ci/strict-egress-values.yaml).
 
 ## Database migrations
 

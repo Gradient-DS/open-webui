@@ -24,7 +24,7 @@ _TASK_FIELDS = ('temperature', 'top_p', 'response_format', 'stop')
 
 def is_v2() -> bool:
     """The agent runtime is v2 and soev-api is configured."""
-    return bool(env.AGENT_API_ENABLED and env.AGENT_API_RUNTIME == 'v2' and config.SOEV_API_URL)
+    return bool(env.AGENT_API_ENABLED and config.SOEV_API_URL)
 
 
 async def catalog() -> list[dict]:

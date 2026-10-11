@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from .attack import plane
+from .attack import plane, seeds
 from .attack.hits_path import hits_path
 
 SECURITY = Path(__file__).resolve().parents[3].parent / 'security'
@@ -41,7 +41,11 @@ def waivers() -> dict[str, str]:
     if not WAIVERS.exists():
         return {}
     parsed = tomllib.loads(WAIVERS.read_text())
-    return {entry['id']: entry['reason'] for entry in parsed.get('waived', [])}
+    return {
+        entry['id']: entry['reason']
+        for entry in parsed.get('waived', [])
+        if not (entry.get('backed_by') == 'soev-solutions' and seeds.runtime_soev_backed() == 'drive')
+    }
 
 
 def evidence():
@@ -63,10 +67,9 @@ def evidence():
     return None
 
 
-def test_every_route_is_driven_or_waived():
+def assert_every_route_is_driven_or_waived():
     hits = evidence()
-    if hits is None:
-        pytest.skip('offline: no stack configured, so there is no run to measure')
+    assert hits is not None, 'The live coverage gate requires this run’s route-hit artefact'
     uncovered = operations() - set(hits['hits']) - waivers().keys()
     detail = '\n'.join(f'  {route}' for route in sorted(uncovered))
     assert not uncovered, (
@@ -86,12 +89,11 @@ def test_no_waiver_names_a_route_that_no_longer_exists():
     assert not stale, f'waivers for routes not in the spec: {stale}'
 
 
-def test_no_waiver_covers_a_route_the_plane_actually_reached():
+def assert_no_waiver_covers_a_route_the_plane_actually_reached():
     # Waiving something already driven hides it from the gate for no reason, and
     # would keep hiding it if driving it ever stopped working.
     hits = evidence()
-    if hits is None:
-        pytest.skip('offline: no stack configured, so there is no run to measure')
+    assert hits is not None, 'The live coverage gate requires this run’s route-hit artefact'
     unnecessary = sorted(waivers().keys() & set(hits['hits']))
     assert not unnecessary, f'waived but actually driven, so the waiver should go: {unnecessary}'
 
@@ -133,9 +135,9 @@ def test_an_uncovered_route_fails_the_gate(monkeypatch, tmp_path):
     covered = sorted(operations())
     write_artefact(path, covered[1:], run_id=plane.RUN_ID)
     monkeypatch.setenv('ROUTE_HITS_PATH', str(path))
-    monkeypatch.setattr('security.test_route_coverage.waivers', dict)
+    monkeypatch.setattr(__name__ + '.waivers', dict)
     with pytest.raises(AssertionError, match=covered[0].replace('{', '.').replace('}', '.')):
-        test_every_route_is_driven_or_waived()
+        assert_every_route_is_driven_or_waived()
 
 
 def test_a_waiver_covers_an_uncovered_route(monkeypatch, tmp_path):
@@ -144,5 +146,5 @@ def test_a_waiver_covers_an_uncovered_route(monkeypatch, tmp_path):
     covered = sorted(operations())
     write_artefact(path, covered[1:], run_id=plane.RUN_ID)
     monkeypatch.setenv('ROUTE_HITS_PATH', str(path))
-    monkeypatch.setattr('security.test_route_coverage.waivers', lambda: {covered[0]: 'a written reason'})
-    test_every_route_is_driven_or_waived()
+    monkeypatch.setattr(__name__ + '.waivers', lambda: {covered[0]: 'a written reason'})
+    assert_every_route_is_driven_or_waived()

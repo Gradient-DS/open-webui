@@ -4,6 +4,7 @@ from urllib.parse import parse_qs, urlparse
 from xml.etree.ElementTree import ParseError
 
 from langchain_core.documents import Document
+from open_webui.retrieval.web.utils import get_ssrf_safe_requests_session
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +121,9 @@ class YoutubeLoader:
         else:
             youtube_proxies = None
 
-        transcript_api = YouTubeTranscriptApi(proxy_config=youtube_proxies)
+        transcript_api = YouTubeTranscriptApi(
+            proxy_config=youtube_proxies, http_client=get_ssrf_safe_requests_session()
+        )
         try:
             transcript_list = transcript_api.list(self.video_id)
         except Exception as e:

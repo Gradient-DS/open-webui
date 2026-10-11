@@ -30,7 +30,6 @@
 	import MessageInput from './MessageInput.svelte';
 	import FolderPlaceholder from './Placeholder/FolderPlaceholder.svelte';
 	import FolderTitle from './Placeholder/FolderTitle.svelte';
-	import WelcomeMessage from './WelcomeMessage.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -264,10 +263,6 @@
 					</div>
 				</div>
 			{/if}
-
-			<div class="@md:max-w-3xl w-full text-left">
-				<WelcomeMessage />
-			</div>
 
 			<div class="text-base font-normal @md:max-w-3xl w-full py-3 {atSelectedModel ? 'mt-2' : ''}">
 				{#if !($selectedFolder && folderReadOnly)}
