@@ -370,3 +370,28 @@ reason = "Backed by soev-solutions; security tested there. routers/live_document
 id = "GET /api/v1/internal/retrieval/knowledge/{knowledge_id}/files"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/internal_retrieval.py lists a knowledge base's files through the soev knowledge store. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/agent/models"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/agent_proxy.py:list_models forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/agent/gradient_agent_meta"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/agent_proxy.py:gradient_agent_meta forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/agent/openapi.json"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/agent_proxy.py:openapi_spec forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."
+
+[[waived]]
+id = "POST /api/v1/agent/chat/completions"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/agent_proxy.py:chat_completions forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."
+
+[[waived]]
+id = "GET /api/v1/discovery/documents"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/discovery.py:list_documents forwards to soev-agents-api and cannot serve its upstream response without that service. Not driven: the sealed stack runs no soev-solutions service or stand-in. Anonymous refusal is checked live."

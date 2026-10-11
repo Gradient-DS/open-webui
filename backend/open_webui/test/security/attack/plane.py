@@ -70,6 +70,11 @@ class Outcome:
     #: sixteen fields outruns 2000 characters, and a retry built from half of
     #: one would revert the wrong fields.
     rejected: frozenset = frozenset()
+    unavailable: bool = False
+
+    @property
+    def crashed(self):
+        return self.status >= 500 and not self.unavailable
 
 
 @dataclass
@@ -110,6 +115,23 @@ def _count(histogram, route, status):
     counts[status] = counts.get(status, 0) + 1
 
 
+def soev_not_configured(status, body):
+    if status != 503:
+        return False
+    if isinstance(body, requests.Response):
+        body = transport.json_body(body)
+    elif isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except ValueError:
+            return False
+    return (
+        isinstance(body, dict)
+        and isinstance(body.get('detail'), dict)
+        and body['detail'].get('code') == 'soev_not_configured'
+    )
+
+
 def record(route_id, status, body, *, pass_name='manual') -> bool:
     """Record a response, delegating entry classification to the client.
 
@@ -133,7 +155,7 @@ def record(route_id, status, body, *, pass_name='manual') -> bool:
         _count(tally.entered, route_id, status)
     if 200 <= status < 300:
         tally.accepted[route_id] = tally.accepted.get(route_id, 0) + 1
-    if status >= 500:
+    if status >= 500 and not soev_not_configured(status, response):
         tally.crashes.setdefault(route_id, response.text[:2000])
     return entered
 
@@ -183,7 +205,7 @@ def drive_report(outcomes):
     return '\n'.join(
         f'{route}: HTTP {outcome.status}; body={outcome.body!r}'
         for route, outcome in sorted(outcomes.items())
-        if outcome.status >= 500
+        if outcome.crashed
     )
 
 
@@ -431,6 +453,7 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
                 response.text[:2000],
                 'text/html' in response.headers.get('Content-Type', '').lower() and REFLECTION_PROBE in response.text,
                 rejected=frozenset() if entered else _rejected_fields(transport.json_body(response)),
+                unavailable=soev_not_configured(response.status_code, response),
             )
         finally:
             response.close()

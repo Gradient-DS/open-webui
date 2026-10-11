@@ -146,7 +146,7 @@ def test_capture_is_thread_safe_and_keeps_recent_requests(stub):
     assert get_json(stub, '/_recorded')['requests'][-1]['body'] == {'index': 'last'}
 
 
-@pytest.mark.parametrize('path', ['/webhook', '/unmodelled', '/sync/cancel'])
+@pytest.mark.parametrize('path', ['/webhook', '/unmodelled'])
 def test_unmodelled_upstreams_have_the_planned_catch_all(stub, path):
     assert get_json(stub, path, payload={'action': 'CI probe'}) == {'status': 'ok'}
 
@@ -173,19 +173,6 @@ def test_head_answers_headers_without_a_body(stub):
     head, _, body = data.partition(b'\r\n\r\n')
     assert b' 200 ' in head.split(b'\r\n')[0]
     assert body == b''
-
-
-def test_the_sync_daemon_accepts_a_run(stub):
-    # services/sync/daemon_client.py treats only 202 or 409 as a started run; the
-    # catch-all 200 made every sync/items answer 502 "sync service unreachable".
-    req = Request(
-        stub[1] + '/sync/run',
-        data=json.dumps({'knowledge_id': 'k', 'provider': 'google_drive', 'user_id': 'u'}).encode(),
-        method='POST',
-        headers={'Content-Type': 'application/json'},
-    )
-    with build_opener(ProxyHandler({})).open(req, timeout=5) as response:
-        assert response.status == 202
 
 
 def test_qdrant_point_queries_get_an_empty_result(stub):

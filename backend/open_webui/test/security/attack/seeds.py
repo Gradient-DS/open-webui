@@ -385,8 +385,7 @@ def seed_totp_user(ctx, parameter):
 
 def seed_task(ctx, parameter):
     model_id = _create_active_function(ctx, parameter, f'attack_task_{ctx.token}')
-    # Inlets run before agent routing. A Pipe's wait is skipped by CI's
-    # production-matching AGENT_API_ENABLED=true / FEATURE_AGENT_PICKER=false.
+    # Inlets run before routing, including private stacks with agent routing on.
     ctx.request(
         'POST',
         '/api/v1/models/create',

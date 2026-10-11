@@ -55,11 +55,13 @@ agentApiEnabled=true and enableAgentProxy=true.
 The table above is the source snapshot, not an assertion of full integration
 coverage. `TestCiMatchesDeployedConfig` checks every row, including the three
 Helm rows whose env names are supplied by the chart configmap. Boolean feature
-flags cannot be waived; telemetry is the sole boolean exception.
+flags must match except telemetry and the explicitly absent private soev services.
+OWUI-local agent-config CRUD and inbound file authorization still use
+`AGENT_API_AGENTS`, `AGENT_API_KEY` and `AGENT_SEARCH_ENABLED`; none runs a soev server.
 
 | Setting | CI value | Reason / coverage limit |
 |---|---|---|
-| AGENT_API_BASE_URL | http://stub:8000 | Replace the production agents-api hostname with the sealed stub. |
+| AGENT_API_BASE_URL, AGENT_API_ENABLED, AGENT_API_PICKER_DEFAULT_SLUG, FEATURE_AGENT_PICKER, ENABLE_AGENT_PROXY | absent | Private soev services and stand-ins never run here; proxy routes have soev-solutions waivers. |
 | OPENAI_API_BASE_URL, RAG_OPENAI_API_BASE_URL | http://stub:8000/v1 | Replace the production LiteLLM hostname with the sealed stub. |
 | RAG_EXTERNAL_RERANKER_URL | http://stub:8000/v1/rerank | Replace the production reranker hostname with the sealed stub. |
 | S3_ENDPOINT_URL | http://s3:9000 | The endpoint hostname remains a divergence: the in-network S3 gateway replaces object.previder.nl. CI drives the same S3 provider code path, but does not cover production TLS or Previder-specific behavior. |
@@ -84,9 +86,6 @@ Caller contracts verified in this checkout:
   signatures against its root key, which the app's credentials must match.
   Recreate the stack together for each fresh run so the bucket is created again
   after ephemeral data is discarded.
-- Agent proxy uses `/v1/models`, `/v1/chat/completions` (JSON or SSE),
-  `/v1/gradient_agent_meta` and `/openapi.json`. Metadata exposes
-  `config.welcome_message`, as consumed by the chat UI.
 - External document processing sends raw bytes to `PUT /process` and expects
   `page_content` / `metadata` documents. External web loading posts URL batches
   to `/extract` and expects the same document shape.
@@ -94,11 +93,13 @@ Caller contracts verified in this checkout:
   `url`, `title`, `content` and `score`. The legacy external search branch keeps
   its bare list response when that query parameter is absent.
 - External reranking posts to `/v1/rerank` and reads indexed relevance scores.
-- `AGENT_SEARCH_ENABLED` gates inbound `/api/v1/internal/retrieval/*` routes in
-  this checkout; it is not an outbound doc-processor URL. The document pipeline
-  client separately uses `POST /jobs` and `GET /jobs/{id}`. The stub supplies job
-  IDs and terminal status but does not perform asynchronous ingestion callbacks;
-  the snapshot does not specify distributed-pipeline feature flags.
+- `AGENT_SEARCH_ENABLED` and the inbound `AGENT_API_KEY` exercise OWUI's own
+  `/api/v1/internal/retrieval/*` authorization and local files. The soev knowledge
+  listing remains waived. `AGENT_API_AGENTS` permits local agent-config fixtures;
+  agent routing is disabled and no private-service URL is configured.
+- Legacy sync-daemon, loader-worker, document-job and `PIPELINE_API_*` settings
+  have no callers in this checkout and are removed. Pipelines management uses
+  the configured OpenAI connections (`routers/pipelines.py`).
 
 The snapshot is mounted read-only at `/app/security` so the same drift test can
 run inside the application container. Docker startup and the runtime egress
