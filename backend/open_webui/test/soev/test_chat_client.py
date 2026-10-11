@@ -34,7 +34,7 @@ async def test_reconnected_tail_close_reads_terminality_without_a_status_frame(
         timeout=2,
     )
     assert frames[-1].event == 'status'
-    assert frames[-1].data['state'] == 'idle'
+    assert frames[-1].data['state'] == 'finished'
     assert all(b'event: status' not in tail.content for tail in chat_http.chat.tails)
     assert sum(request.url.path == '/v1/chat/threads/thr-1' for request in chat_http.chat.requests) == 1
 
@@ -85,7 +85,7 @@ async def test_reconnected_tail_waits_for_lease_release_after_last_output(
         timeout=7,
     )
     assert frames[-1].event == 'status'
-    assert frames[-1].data['state'] == 'idle'
+    assert frames[-1].data['state'] == 'finished'
     assert len(reads) == 2
 
 
@@ -145,7 +145,7 @@ async def test_stream_keeps_relay_error_codes(
     requests, responses = identity_http
     responses.append(
         httpx.Response(
-            status, json={'code': code, 'detail': 'orphaned'}, headers={'Content-Type': 'application/problem+json'}
+            status, json={'code': code, 'detail': 'interrupted'}, headers={'Content-Type': 'application/problem+json'}
         )
     )
     with pytest.raises(SoevApiError) as caught:
