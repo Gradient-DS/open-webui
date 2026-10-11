@@ -564,8 +564,6 @@ openWebui:
 
     # Agent API (internal: routes chat UI to external agent service)
     agentApiEnabled: "false"
-    agentApiBaseUrl: ""
-    # agentApiKey is set via secrets (see .Values.secrets.agentApiKey)
     # Comma-separated list of agent identifiers the admin can select from in
     # the External Agents tab. When empty, the agents service uses its own
     # default_agent. When set, the admin's selection is forwarded as an
@@ -603,18 +601,6 @@ openWebui:
     # see the agent picker. Default off so existing tenants are unaffected
     # until they explicitly opt in.
     featureAgentPicker: "false"
-
-    # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
-    enableAgentProxy: "false"
-
-    # Search API (RAG discovery proxy at /api/v1/discovery/*). Gated by
-    # ENABLE_RAG_FILTER_UI (PersistentConfig — flip via admin UI).
-    # Now hosted by the agents-api; name kept for overlay compatibility.
-    searchApi:
-      # Agents-api base URL, no /v1 (e.g. http://soev-agents:8181).
-      # Empty disables the proxy. Read as SEARCH_API_BASE_URL.
-      baseUrl: ""
-      # searchApiKey is set via secrets (see .Values.secrets.searchApiKey)
 
     # Two-Factor Authentication (TOTP)
     enable2fa: "false"
@@ -747,9 +733,6 @@ soevApi:
     # recreates it and the migration runs again (harmless, but not free).
     ttlSecondsAfterFinished: null
     resources: {}
-agentApi:
-  # Unset uses the application's v1 default; explicitly set v1 or v2.
-  runtime: ""
 liveDocuments:
   enabled: null  # Application default false; explicit false is rendered too.
 liveMail:
@@ -1054,13 +1037,6 @@ secrets:
   externalDocumentLoaderApiKey: ""
   ragExternalRerankerApiKey: ""
 
-  # Agent API X-API-Key (must match AGENTS_API_KEY on the agent service)
-  agentApiKey: ""
-
-  # Discovery-proxy X-API-Key (must match the agents-api key — usually
-  # the same value as agentApiKey above)
-  searchApiKey: ""
-
   # Loader-worker → tenant /ingest callback bearer (loader-worker presents this
   # outbound; open-webui validates inbound). Same value, both pods.
   loaderIngestApiKey: ""
@@ -1087,20 +1063,6 @@ secrets:
 
   # PostgreSQL
   postgresPassword: ""
-
-# -----------------------------------------------------------------------------
-# Agent Search (machine-auth retrieval endpoints)
-# -----------------------------------------------------------------------------
-# When enabled, mounts:
-#   GET  /api/v1/internal/retrieval/accessible-kbs
-#   POST /api/v1/internal/retrieval/query
-# on the open-webui pod. The agent authenticates by presenting AGENT_API_KEY
-# (the same secret used for the open-webui → agent outbound path — single
-# shared secret across the per-tenant trust boundary) plus an
-# `X-Acting-User-Id` header. Open-webui resolves the user, applies KB-level
-# ACL, and serves the response. No new ACL state.
-agentSearch:
-  enabled: false
 
 # -----------------------------------------------------------------------------
 # Service Account
@@ -1142,8 +1104,6 @@ externalSecrets:
       confluenceBasicAuthApiToken: false
       externalDocumentLoaderApiKey: false
       ragExternalRerankerApiKey: false
-      agentApiKey: false
-      searchApiKey: false
       loaderIngestApiKey: false
       pipelineApiKey: false
       loaderWorkerDbPassword: false
