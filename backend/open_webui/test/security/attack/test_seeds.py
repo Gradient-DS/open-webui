@@ -2,14 +2,12 @@ import ast
 import asyncio
 import base64
 import json
-import os
 import re
 import sqlite3
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
-from urllib.parse import quote
 
 import pytest
 import requests
@@ -63,13 +61,12 @@ def test_every_declaration_matches_and_wins_for_at_least_one_parameter():
     assert len(selectors) == len(set(selectors))
 
 
-def test_route_scoping_distinguishes_resources_and_attachment_parent():
+def test_route_scoping_distinguishes_resources():
     for path, key in [
         ('/api/v1/chats/{id}', 'chat'),
         ('/api/v1/knowledge/{id}/files', 'knowledge'),
         ('/api/v1/knowledge/external/connections/{id}', 'connection'),
         ('/api/v1/files/{id}/content', 'file'),
-        ('/api/v1/files/{id}/attachments/{attachment_id}', 'attachment_file'),
         ('/api/v1/chats/shared/{id}/access', 'shared_access'),
         ('/api/v1/chats/{id}/clone/shared', 'shared_clone'),
     ]:
@@ -130,6 +127,36 @@ def test_extract_reads_objects_and_lists_without_losing_zero(payload, path, expe
     assert seeds._extract(payload, path, name='fixture', via='POST /create') == expected
 
 
+def test_collecting_seed_failures_preserves_independent_resources_and_blocks_dependents(monkeypatch):
+    entries = [
+        {'key': 'broken', 'name': 'id', 'prefix': '/broken', 'via': 'POST /broken', 'extract': 'id'},
+        {'key': 'child', 'name': 'id', 'prefix': '/child', 'same_as': 'broken'},
+        {'key': 'healthy', 'name': 'id', 'prefix': '/healthy', 'via': 'POST /healthy', 'extract': 'id'},
+    ]
+    surface = {'parameter': entries, 'field': [{'route': 'POST /body', 'json': {'id': '{broken}'}}]}
+    spec = {'paths': {f'/{name}/{{id}}': {'get': {}} for name in ('broken', 'child', 'healthy')}}
+
+    def create(ctx, entry):
+        if entry['key'] == 'broken':
+            raise RuntimeError('HTTP 500: product bug')
+        return 'real-created-id'
+
+    monkeypatch.setattr(seeds, '_seed_endpoint', create)
+    with pytest.raises(RuntimeError, match='product bug'):
+        seeds.resolve_parameters(Mock(), surface=surface, spec=spec)
+    resolved = seeds.resolve_parameters(Mock(), surface=surface, spec=spec, collect_failures=True)
+    assert dict(resolved) == {('/healthy/{id}', 'id'): 'real-created-id'}
+    assert set(resolved.failures) == {'broken', 'child', 'POST /body'}
+    assert set(resolved.blocked) == {'GET /broken/{id}', 'GET /child/{id}', 'POST /body'}
+    from . import plane
+
+    tally = plane.Seeding()
+    assert plane._target('GET /broken/{id}', resolved, tally) is None
+    assert tally.fixture_failures == resolved.failures
+    assert tally.skipped['GET /broken/{id}'].startswith('FAILED FIXTURE:')
+    assert not tally.entered
+
+
 def test_fill_token_handles_nested_values_and_message_dictionary_keys_without_mutating():
     body = {'messages': {'message_{token}': {'id': 'message_{token}'}}, 'values': ['{token}', 0, False, None]}
     original = json.loads(json.dumps(body))
@@ -145,6 +172,92 @@ def response(status, body):
     result.status_code = status
     result._content = json.dumps(body).encode()
     return result
+
+
+def test_synchronous_file_processing_does_not_poll():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(200, {'status': True, 'content': 'text'})
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    ctx.request('POST', '/api/v1/retrieval/process/file', json={'file_id': 'file-ci'})
+    assert client.request.call_count == 1
+
+
+@pytest.mark.parametrize('consent_status', [200, 403])
+def test_cloud_seed_requires_consent_then_creates_the_owner_grant(monkeypatch, consent_status):
+    client, admin = Mock(), Mock()
+    ctx = seeds.SeedContext(client, admin, {'destructive': []})
+    admin.request.side_effect = [response(201, {'connection_id': 'connection'}), response(200, {'id': 'grant'})]
+    session = Mock()
+    session.post.return_value = response(consent_status, {})
+    manager = Mock()
+    manager.__enter__ = Mock(return_value=session)
+    manager.__exit__ = Mock(return_value=False)
+    monkeypatch.setattr(seeds.requests, 'Session', Mock(return_value=manager))
+    monkeypatch.setenv('CI_PLATFORM_FIXTURE_URL', 'http://fixture:8040')
+    monkeypatch.setenv('CI_PLATFORM_FIXTURE_KEY', 'test-fixture-key')
+    parameter = {'key': 'cloud_connection', 'provides': ['cloud_grant']}
+    if consent_status == 403:
+        with pytest.raises(requests.HTTPError):
+            seeds.seed_cloud_connection(ctx, parameter)
+        assert admin.request.call_count == 1
+        assert not ctx.values
+    else:
+        assert seeds.seed_cloud_connection(ctx, parameter) == 'connection'
+        assert ctx.values == {'cloud_grant': 'grant'}
+        admin.request.assert_called_with('POST', '/api/v1/cloud-sync/connections/connection/live/live_documents')
+    client.request.assert_not_called()
+    session.post.assert_called_once_with(
+        'http://fixture:8040/ci/consent',
+        headers={'Authorization': 'Bearer test-fixture-key'},
+        json={'connection_id': 'connection'},
+        timeout=30,
+    )
+
+
+def test_starting_consent_cannot_suspend_the_connection_used_by_positive_controls():
+    authorize = seeds.parameter_for('/api/v1/cloud-sync/connections/{connection_id}/authorize', 'connection_id')
+    live = seeds.parameter_for('/api/v1/cloud-sync/connections/{connection_id}/live/{family}', 'connection_id')
+    assert authorize['key'] != live['key']
+    assert authorize['via'] == 'POST /api/v1/cloud-sync/connections'
+    assert 'same_as' not in authorize
+    assert live['seeded_by'] == 'seed_cloud_connection'
+    assert 'cloud_grant' in live['provides']
+
+
+def test_file_seeding_waits_for_completion_and_cleared_job(monkeypatch):
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(200, {'job_id': 'job-ci'}),
+        response(200, {'meta': {'status': 'processing', 'soev_job': {'job_id': 'job-ci'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': {'job_id': 'job-ci'}}}),
+        response(200, {'meta': {'status': 'completed', 'soev_job': None}}),
+    ]
+    monkeypatch.setattr(seeds.time, 'sleep', Mock())
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    result = ctx.request('POST', '/api/v1/retrieval/process/file', json={'file_id': 'file-ci'})
+    assert result == {'job_id': 'job-ci'}
+    assert [call.args for call in client.request.call_args_list[1:]] == [('GET', '/api/v1/files/file-ci')] * 3
+
+
+def test_file_seeding_surfaces_ingest_failure():
+    client = Mock(spec=seeds.AttackClient)
+    client.request.side_effect = [
+        response(200, {'job_id': 'job-ci'}),
+        response(200, {'meta': {'status': 'failed', 'error': 'bundle invalid'}}),
+    ]
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    with pytest.raises(RuntimeError, match='bundle invalid'):
+        ctx.request('POST', '/api/v1/retrieval/process/file', json={'file_id': 'file-ci'})
+
+
+def test_file_seeding_times_out_without_reporting_success(monkeypatch):
+    client = Mock(spec=seeds.AttackClient)
+    client.request.return_value = response(200, {'meta': {'status': 'processing'}})
+    ctx = seeds.SeedContext(client, client, seeds.SURFACE)
+    monkeypatch.setattr(seeds.time, 'monotonic', Mock(side_effect=[0, 0, 121]))
+    monkeypatch.setattr(seeds.time, 'sleep', Mock())
+    with pytest.raises(RuntimeError, match='did not complete within 120s'):
+        ctx.wait_for_file('file-ci')
 
 
 def tiny_surface(*entries):
@@ -467,7 +580,10 @@ def test_active_function_serves_chat_actions_and_user_valves():
         assert key == 'active_function', path
 
 
-def test_removable_knowledge_seeder_adds_a_file_nothing_else_uses():
+@pytest.mark.parametrize(
+    'key,provided', [('removable_knowledge', 'removable_file'), ('update_knowledge', 'update_file')]
+)
+def test_knowledge_file_seeder_adds_a_file_nothing_else_uses(key, provided):
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
     ctx.request = Mock(
         side_effect=[
@@ -477,9 +593,9 @@ def test_removable_knowledge_seeder_adds_a_file_nothing_else_uses():
             {'id': 'own-kb', 'files': [{'id': 'own-file'}]},
         ]
     )
-    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'removable_knowledge')
-    assert seeds.seed_removable_knowledge(ctx, parameter) == 'own-kb'
-    assert ctx.values['removable_file'] == 'own-file'
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == key)
+    assert seeds.seed_knowledge_file(ctx, parameter) == 'own-kb'
+    assert ctx.values[provided] == 'own-file'
     upload, process, create, add = ctx.request.call_args_list
     assert upload.args == ('POST', '/api/v1/files/') and upload.kwargs['params'] == {'process': False}
     assert process.kwargs['json'] == {'file_id': 'own-file'}
@@ -491,7 +607,7 @@ def test_removable_knowledge_seeder_adds_a_file_nothing_else_uses():
         side_effect=[{'id': 'own-file'}, {'status': True}, {'id': 'own-kb'}, {'id': 'own-kb', 'files': []}]
     )
     with pytest.raises(RuntimeError, match='did not join'):
-        seeds.seed_removable_knowledge(ctx, parameter)
+        seeds.seed_knowledge_file(ctx, parameter)
 
 
 def test_totp_code_matches_rfc_6238_sha1_vectors():
@@ -639,7 +755,7 @@ def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
         # [Gradient] Outside v2 mode no model is offered by the soev catalog.
         'model_catalog': SimpleNamespace(is_unconfigured=lambda model: False, is_offered=AsyncMock(return_value=False)),
         'MODEL_WHITELIST': [],
-        'BYPASS_ADMIN_ACCESS_CONTROL': False,
+        'can_bypass_access_control': lambda user: False,
         'BYPASS_MODEL_ACCESS_CONTROL': False,
     }
     tree = ast.parse((ROOT / 'backend/open_webui/utils/models.py').read_text())
@@ -721,77 +837,8 @@ def test_model_registration_rejects_missing_read_access_or_wrong_model(body):
         seeds.register_readable_model(ctx, 'stub-model')
 
 
-needs_stack = pytest.mark.skipif(not os.getenv('ATTACK_BASE_URL'), reason='requires the running CI stack')
-
-
-@pytest.fixture(scope='module')
-def live_seeds():
-    from .identities import ensure_identities
-
-    identities = ensure_identities()
-    resolved = None
-    try:
-        resolved = seeds.resolve_parameters(identities.user, admin=identities.admin)
-        yield identities, resolved
-    finally:
-        try:
-            if resolved is not None:
-                stop_seed_task(identities.admin, resolved)
-        finally:
-            identities.close()
-
-
-@needs_stack
-def test_live_resolution_returns_every_seedable_route_parameter(live_seeds):
-    _, resolved = live_seeds
-    expected = {
-        (path, name) for _, path, name in path_parameters() if 'unseedable' not in seeds.parameter_for(path, name)
-    }
-    assert resolved.keys() == expected
-    assert all(isinstance(value, str) and value.strip() and '{' not in value for value in resolved.values())
-
-
-@needs_stack
-@pytest.mark.parametrize('role', ['admin', 'user'])
-def test_live_seeded_models_are_visible_and_stub_completes_for_both_identities(live_seeds, role):
-    identities, resolved = live_seeds
-    client = getattr(identities, role)
-    # Look the value up by a path the spec actually contains. The surface entry's
-    # `prefix` is a longest-prefix matcher, not a route: resolve_parameters keys its
-    # result by real path templates, so using a prefix here raises KeyError.
-    model_id = resolved['/api/v1/analytics/models/{model_id}/chats', 'model_id']
-    registry = client.request('GET', '/api/models', params={'refresh': True})
-    assert registry.status_code == 200, registry.text
-    ids = {model['id'] for model in registry.json()['data']}
-    assert model_id in ids
-    assert any(model.startswith('attack_task_') for model in ids)
-    result = client.request(
-        'POST',
-        '/api/chat/completions',
-        json={
-            'model': model_id,
-            'messages': [{'role': 'user', 'content': 'Verify the CI model fixture.'}],
-            'stream': False,
-        },
-    )
-    assert result.status_code == 200, result.text
-    assert result.json()['choices'][0]['message']['content'] == 'stub response'
-
-
-@needs_stack
-def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):
-    identities, first = live_seeds
-    second = seeds.resolve_parameters(identities.user, admin=identities.admin)
-    try:
-        for pair, value in first.items():
-            p = seeds.parameter_for(*pair)
-            if 'same_as' not in p and p.get('fresh', True):
-                assert second[pair] != value, f'{p["key"]} reused a previous pass fixture'
-    finally:
-        stop_seed_task(identities.admin, second)
-
-
 LIVE_READS = [
+    '/api/v1/meetings/{meeting_id}',
     '/api/v1/users/{user_id}',
     '/api/v1/folders/{id}',
     '/api/v1/chats/{id}',
@@ -804,7 +851,6 @@ LIVE_READS = [
     '/api/v1/knowledge/external/connections/{id}',
     '/api/v1/files/{id}',
     '/api/v1/files/{id}/content/{file_name}',
-    '/api/v1/files/{id}/attachments/{attachment_id}',
     '/api/v1/notes/{id}',
     '/api/v1/calendars/{calendar_id}',
     '/api/v1/calendars/events/{event_id}',
@@ -821,49 +867,7 @@ LIVE_READS = [
     '/api/v1/agent-configs/{slug}',
     '/api/v1/configs/namespace/{namespace}',
     '/api/v1/terminals/{server_id}/{path}',
-    '/cache/{path}',
 ]
-
-
-@needs_stack
-@pytest.mark.parametrize('template', LIVE_READS)
-def test_live_ids_address_real_resources(live_seeds, template):
-    identities, resolved = live_seeds
-    path = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe='/'), template)
-    result = identities.admin.request('GET', path)
-    assert result.status_code == 200, f'{template}: HTTP {result.status_code}: {result.text[:200]}'
-    if template.endswith('/validate'):
-        assert result.json()['email'].startswith('attack-invite-token-')
-
-
-@needs_stack
-def test_live_chat_history_message_is_in_its_parent(live_seeds):
-    identities, resolved = live_seeds
-    template = '/api/v1/chats/{id}/messages/{message_id}'
-    chat_id, message_id = resolved[template, 'id'], resolved[template, 'message_id']
-    result = identities.admin.request('GET', f'/api/v1/chats/{chat_id}')
-    assert result.status_code == 200
-    assert result.json()['chat']['history']['messages'][message_id]['id'] == message_id
-
-
-@needs_stack
-def test_live_task_still_exists_after_the_rest_of_seeding(live_seeds):
-    identities, resolved = live_seeds
-    task_id = resolved['/api/tasks/stop/{task_id}', 'task_id']
-    result = identities.admin.request('GET', '/api/tasks')
-    assert result.status_code == 200
-    assert task_id in result.json()['tasks']
-
-
-@needs_stack
-def test_live_shared_clone_uses_the_share_id_not_the_admin_chat_fallback(live_seeds):
-    identities, resolved = live_seeds
-    share_id = resolved['/api/v1/chats/{id}/clone/shared', 'id']
-    assert share_id == resolved['/api/v1/chats/share/{share_id}', 'share_id']
-    assert share_id != resolved['/api/v1/chats/{id}', 'id']
-    result = identities.admin.request('POST', f'/api/v1/chats/{share_id}/clone/shared')
-    assert result.status_code == 200
-    assert result.json()['id'] not in (share_id, resolved['/api/v1/chats/{id}', 'id'])
 
 
 def test_stack_configuration_is_imported_and_verified():

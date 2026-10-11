@@ -321,30 +321,7 @@ v2-migrate Job so it runs with exactly the app's credentials.
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
       key: soev-api-signing-key
 {{- end }}
-# Agent API key — single shared secret used by both:
-#   - open-webui → agent (outbound; the agent-proxy / chat path)
-#   - agent → open-webui (inbound; gates /api/v1/internal/retrieval/*)
-# Mounted whenever either direction is enabled and a value exists
-# in the tenant secret store.
-{{- if and (or (eq .Values.openWebui.config.agentApiEnabled "true") .Values.agentSearch.enabled) (or .Values.secrets.agentApiKey .Values.externalSecrets.onepassword.fields.agentApiKey) }}
-- name: AGENT_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: agent-api-key
-{{- end }}
-# Search API X-API-Key — outbound credential for the discovery proxy
-# at /api/v1/discovery/*. Mounted whenever a value exists in either
-# secret path, regardless of baseUrl (router gates on baseUrl at
-# request time).
-{{- if or .Values.secrets.searchApiKey .Values.externalSecrets.onepassword.fields.searchApiKey }}
-- name: SEARCH_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: search-api-key
-{{- end }}
-# Loader-worker → /ingest callback bearer (validated by service_auth.LoaderPrincipal)
+# Loader-worker → /ingest callback bearer
 {{- if or .Values.secrets.loaderIngestApiKey .Values.externalSecrets.onepassword.fields.loaderIngestApiKey }}
 - name: LOADER_INGEST_API_KEY
   valueFrom:

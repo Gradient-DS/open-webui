@@ -16,7 +16,6 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from open_webui import env
 from open_webui.models.agent_configs import AgentConfigs
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import ChatForm, Chats
@@ -84,7 +83,6 @@ class Chat:
                     'model': {'info': {'base_model_id': 'llm'}},
                     **metadata,
                 },
-                {},
                 override_agent=override_agent,
             )
 
@@ -112,7 +110,6 @@ class Chat:
 @pytest.fixture
 def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> Chat:
     result = Chat(chat_http)
-    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v1')
 
     async def get(chat_id: str, message_id: str) -> dict | None:
         return copy.deepcopy(result.messages.get((chat_id, message_id)))
@@ -1491,7 +1488,6 @@ async def test_resolved_picker_model_wins_over_agent_model(
 async def test_v2_deployment_replaces_a_v1_agent_binding_with_the_configured_agent(
     chat: Chat, monkeypatch: pytest.MonkeyPatch, meta: dict | None, sent: str
 ) -> None:
-    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v2')
     monkeypatch.setattr(agent.Config, 'get', AsyncMock(return_value='soev_react'))
     monkeypatch.setattr(
         AgentConfigs,
@@ -1508,7 +1504,6 @@ async def test_v2_deployment_replaces_a_v1_agent_binding_with_the_configured_age
 async def test_environment_routes_every_turn_to_v2(
     chat: Chat, monkeypatch: pytest.MonkeyPatch, meta: dict | None, selected_agent: str | None
 ) -> None:
-    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v2')
     monkeypatch.setattr(agent.Config, 'get', AsyncMock(return_value=selected_agent))
     monkeypatch.setattr(
         AgentConfigs,
@@ -2038,7 +2033,11 @@ async def test_web_calls_carry_the_addresses_they_found_and_read() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('failure', [False, True])
-async def test_turn_end_closes_with_the_summary_or_the_failure(chat: Chat, failure: bool) -> None:
+async def test_turn_end_closes_with_the_summary_or_the_failure(
+    chat: Chat, failure: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A frozen clock keeps the duration wording independent of machine load.
+    monkeypatch.setattr(agent_v2, 'time', SimpleNamespace(monotonic=lambda: 0.0))
     chat.api.chat.turns = [
         [
             ('model_output', {'content': '', 'tool_calls': [{'id': 'c1', 'name': 'search'}]}),
@@ -2104,17 +2103,6 @@ async def test_missing_user_message_sends_only_the_last_user_message(chat: Chat,
 def test_missing_or_invalid_last_user_message_is_rejected(messages: list[dict]) -> None:
     with pytest.raises(ValueError, match='A v2 agent turn requires user_message text'):
         agent_v2._input_text({}, {'messages': messages})
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('meta', [{}, {'runtime': 'v1'}])
-async def test_legacy_agent_keeps_existing_route(chat: Chat, monkeypatch: pytest.MonkeyPatch, meta: dict) -> None:
-    monkeypatch.setattr(AgentConfigs, 'get_agent_config_by_id', AsyncMock(return_value=SimpleNamespace(meta=meta)))
-    legacy = AsyncMock(return_value={'legacy': True})
-    monkeypatch.setattr(agent, '_call_agent_api_non_streaming', legacy)
-    assert await chat.response('question', 'a1', stream=False) == {'legacy': True}
-    assert legacy.call_args.args[0]['messages'][0]['content'] == 'HISTORY MUST NOT LEAVE'
-    assert not chat.api.chat.requests
 
 
 class InterruptedStream(httpx.AsyncByteStream):
@@ -2217,38 +2205,6 @@ async def test_the_turn_after_a_stop_continues_without_rerunning_the_stopped_ans
 
 
 @pytest.mark.asyncio
-async def test_legacy_stream_preserves_socket_events_and_message_extras(
-    chat: Chat, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    events = [
-        agent.SSEEvent(kind, {'value': kind})
-        for kind in ('status', 'source', 'present_ui', 'subagent', 'context_usage', 'panel_filter')
-    ]
-    emitted = []
-
-    async def stream(*args: Any) -> Any:
-        for event in events:
-            yield event
-        yield agent.SSEEvent('data', {'choices': [{'delta': {'content': 'legacy answer'}}]})
-        yield agent.SSEEvent('done', '[DONE]')
-
-    async def emit(event: dict) -> None:
-        emitted.append(event)
-
-    monkeypatch.setattr(agent, 'stream_agent_response', stream)
-    monkeypatch.setattr(agent, 'get_event_emitter', AsyncMock(return_value=emit))
-    response = agent._build_streaming_response(None, {}, {'chat_id': 'chat', 'message_id': 'a1'})
-    async with asyncio.timeout(8):
-        raw = ''.join([part async for part in response.body_iterator])
-    assert raw == 'data: {"choices": [{"delta": {"content": "legacy answer"}}]}\n\ndata: [DONE]\n\n'
-    assert emitted == [{'type': event.event_type, 'data': event.data} for event in events]
-    assert chat.messages['chat', 'a1'] == {
-        'subagents': [{'value': 'subagent'}],
-        'contextUsage': {'value': 'context_usage'},
-    }
-
-
-@pytest.mark.asyncio
 async def test_split_body_sends_picked_llm(chat: Chat) -> None:
     """Split metadata leaves LLM resolution to the explicit body model."""
     await chat.turn(
@@ -2279,7 +2235,6 @@ async def test_a_follow_up_continues_the_thread_in_real_chat_storage(
     chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stored = Chat(chat_http)
-    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v1')
     monkeypatch.setattr(
         AgentConfigs, 'get_agent_config_by_id', AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2'}))
     )

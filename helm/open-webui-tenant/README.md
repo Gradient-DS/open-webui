@@ -5,6 +5,10 @@ For v2 in a shared `soev-<client>` namespace, set `networkPolicy.scope: release`
 and `secretStoreRef` to the platform's existing SecretStore or ClusterSecretStore.
 See [ci/v2-values.yaml](ci/v2-values.yaml) for a complete rendering example.
 
+Agent chat uses v2 exclusively. Set `openWebui.config.agentApiEnabled: "true"`
+and configure the platform settings and credentials below. All tenants move to
+v2 with this release; there is no runtime selector or v1 proxy.
+
 ## Platform settings
 
 These values are at the chart root. Unset values emit no environment variable;
@@ -16,7 +20,6 @@ is rendered as `"false"`.
 | `soevApi.url` | `SOEV_API_URL` | Empty |
 | `soevApi.audience` | `SOEV_API_AUDIENCE` | Empty |
 | `soevApi.servicePrincipal` | `SOEV_API_SERVICE_PRINCIPAL` | Empty |
-| `agentApi.runtime` | `AGENT_API_RUNTIME` | `v1`; accepts `v1` or `v2` |
 | `liveDocuments.enabled` | `ENABLE_LIVE_DOCUMENTS` | `false` |
 | `liveMail.enabled` | `ENABLE_LIVE_MAIL` | `false` |
 | `webuiUrl` | `WEBUI_URL` | Empty |

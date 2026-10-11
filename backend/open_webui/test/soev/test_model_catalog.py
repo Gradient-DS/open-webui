@@ -1,4 +1,4 @@
-"""v2 mode takes models, the default and task completions from soev-api; v1 mode is unchanged."""
+"""v2 mode takes models, the default and task completions from soev-api; stock mode is unchanged."""
 
 import json
 from types import SimpleNamespace
@@ -52,16 +52,14 @@ CONNECTION_MODEL = {'id': 'zai-org/GLM-5.3', 'name': 'zai-org/GLM-5.3', 'owned_b
 @pytest.fixture
 def v2(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> FakeSoevApi:
     monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
-    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v2')
     monkeypatch.setitem(model_catalog.CATALOG_CACHE, 'expires_at', 0.0)
     chat_http.models = [GLM, GEMMA]
     return chat_http
 
 
 @pytest.fixture
-def v1(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
-    monkeypatch.setattr(env, 'AGENT_API_RUNTIME', 'v1')
+def stock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(env, 'AGENT_API_ENABLED', False)
 
 
 @pytest.fixture
@@ -158,7 +156,7 @@ async def test_unreadable_catalog_is_empty_and_not_cached(v2: FakeSoevApi) -> No
 
 
 @pytest.mark.asyncio
-async def test_v1_base_models_still_come_from_connections(v1, connections: AsyncMock) -> None:
+async def test_stock_base_models_still_come_from_connections(stock, connections: AsyncMock) -> None:
     assert await models_utils.get_all_base_models(app_request()) == [CONNECTION_MODEL]
 
 
@@ -187,10 +185,12 @@ async def test_catalog_meta_survives_admin_rows_and_assistants_keep_catalog_base
 @pytest.fixture
 def access(monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, ModelModel], set[str]]:
     """Access control on, with model rows and the caller's read grants by model id."""
+    from open_webui import config
+
     rows: dict[str, ModelModel] = {}
     granted: set[str] = set()
     monkeypatch.setattr(models_utils, 'BYPASS_MODEL_ACCESS_CONTROL', False)
-    monkeypatch.setattr(models_utils, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
     monkeypatch.setattr(models_utils.Groups, 'get_groups_by_member_id', AsyncMock(return_value=[]))
     monkeypatch.setattr(models_utils.Models, 'get_model_by_id', AsyncMock(side_effect=lambda id, db=None: rows.get(id)))
     monkeypatch.setattr(
@@ -271,7 +271,7 @@ async def test_v2_row_less_models_outside_the_catalog_stay_admin_only(v2: FakeSo
 
 
 @pytest.mark.asyncio
-async def test_v1_row_less_models_stay_admin_only(v1, access) -> None:
+async def test_stock_row_less_models_stay_admin_only(stock, access) -> None:
     model = {'id': 'glm-5-3', 'owned_by': 'openai'}
     assert await models_utils.get_filtered_models([model], USER) == []
     assert await models_utils.get_filtered_models([model], ADMIN) == [model]
@@ -291,7 +291,7 @@ async def test_v2_default_comes_from_the_catalog_and_ignores_ui_default_models(v
 
 
 @pytest.mark.asyncio
-async def test_v1_default_is_ui_default_models(v1) -> None:
+async def test_stock_default_is_ui_default_models(stock) -> None:
     assert await model_catalog.default_models('zai-org/GLM-5.3') == 'zai-org/GLM-5.3'
 
 
@@ -363,7 +363,7 @@ async def test_v2_streamed_task_streams_through(v2: FakeSoevApi) -> None:
 @pytest.mark.asyncio
 async def test_v2_task_refusal_is_an_http_error(v2: FakeSoevApi) -> None:
     [model] = [m for m in await model_catalog.base_models() if m['id'] == 'glm-5-3']
-    v2.capabilities['test-runtime-key'] = {'mint'}
+    v2.capabilities['soev_test_cred-runtime_test-secret'] = {'mint'}
     with pytest.raises(Exception) as raised:
         await chat_utils.generate_chat_completion(
             task_request(model), json.loads(json.dumps(TASK_FORM)), SimpleNamespace(id='alice', role='admin')
@@ -372,7 +372,7 @@ async def test_v2_task_refusal_is_an_http_error(v2: FakeSoevApi) -> None:
 
 
 @pytest.mark.asyncio
-async def test_v1_task_keeps_the_connection_route(v1, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stock_task_keeps_the_connection_route(stock, monkeypatch: pytest.MonkeyPatch) -> None:
     openai = AsyncMock(return_value={'choices': []})
     monkeypatch.setattr(chat_utils, 'generate_openai_chat_completion', openai)
     request = task_request(CONNECTION_MODEL)

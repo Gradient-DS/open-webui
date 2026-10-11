@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from open_webui import config
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.availability import require_soev
 from open_webui.soev.client import SoevApiError, SoevClient
 
 log = logging.getLogger(__name__)
@@ -155,6 +156,7 @@ async def link_proven(user: UserModel, *, source: str, id_token: str | None, cli
 
 
 def build_client(*, timeout: float = 30.0) -> SoevClient:
+    require_soev()
     return SoevClient(
         config.SOEV_API_URL,
         config.SOEV_API_KEY,

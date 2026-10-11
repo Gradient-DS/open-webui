@@ -30,7 +30,7 @@ def fresh_surface():
     identities = ensure_identities()
     parameters = None
     try:
-        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin)
+        parameters = seeds.resolve_parameters(identities.admin, admin=identities.admin, collect_failures=True)
         yield identities, parameters
     finally:
         try:

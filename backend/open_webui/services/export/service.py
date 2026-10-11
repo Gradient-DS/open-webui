@@ -21,6 +21,7 @@ from open_webui.models.tags import Tags
 from open_webui.models.tools import Tools
 from open_webui.models.users import Users
 from open_webui.services.export.events import emit_export_status
+from open_webui.soev.availability import configured
 from open_webui.storage.provider import Storage
 
 log = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ class ExportService:
         data['files'] = [ExportService._serialize(f) for f in files]
 
         # Knowledge bases metadata
-        knowledge_bases = await Knowledges.get_knowledge_bases_by_user_id(user_id)
+        knowledge_bases = await Knowledges.get_knowledge_bases_by_user_id(user_id) if configured() else []
         data['knowledge_bases'] = [ExportService._serialize(kb) for kb in knowledge_bases]
 
         return data

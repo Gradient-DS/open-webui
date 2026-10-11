@@ -17,7 +17,6 @@ from fastapi import (
 from pydantic import BaseModel
 from starlette.responses import Response, StreamingResponse
 
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, ENABLE_PLUGINS, GLOBAL_LOG_LEVEL
 from open_webui.models.functions import Functions
@@ -27,7 +26,7 @@ from open_webui.socket.main import (
     get_event_call,
     get_event_emitter,
 )
-from open_webui.utils.access_control import check_model_access
+from open_webui.utils.access_control import check_model_access, can_bypass_access_control
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.misc import (
     add_or_update_system_message,
@@ -286,7 +285,7 @@ async def generate_function_chat_completion(request, form_data, user, models: di
             form_data['model'] = model_info.base_model_id
 
         if not BYPASS_MODEL_ACCESS_CONTROL:
-            bypass = isinstance(user, UserModel) and user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL
+            bypass = isinstance(user, UserModel) and can_bypass_access_control(user)
             await check_model_access(user if isinstance(user, UserModel) else UserModel(**user), model_info, bypass)
 
         params = model_info.params.model_dump()

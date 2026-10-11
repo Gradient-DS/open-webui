@@ -53,9 +53,8 @@ Helm `openWebui.config.agentApiEnabled`, default `"false"`). The routing decisio
 itself is a pure function isolated from upstream code in
 `backend/open_webui/utils/agent_routing.py` (`resolve_agent_route`,
 `agent_owns_tool_execution`) so the delta stays one-liners at the call sites in
-`main.py`. The client — payload build, SSE streaming, error redaction — is
-`backend/open_webui/utils/agent.py` (`build_agent_payload`, `call_agent_api`,
-`stream_agent_response`). Routing matrix: bound `chat.meta.agent_id` → agent
+`main.py`. `backend/open_webui/utils/agent.py:call_agent_api` resolves the agent and model
+and always calls `utils/agent_v2.py`, which owns server threads and streamed events. Routing matrix: bound `chat.meta.agent_id` → agent
 route; no agent id + picker off + `AGENT_API_ENABLED` → agent route (legacy
 bypass); otherwise the stock route.
 
@@ -64,20 +63,6 @@ automations out of agent-routed turns. The agent still owns tool execution and
 the post-tool continuation loop. The model editor hides the subagents builtin
 unconditionally because `/api/config` exposes no subagents feature flag; memory
 capabilities and tools use upstream's `enable_memories` flag.
-
-## Agent proxy (inbound API surface, separate from the above)
-
-`backend/open_webui/routers/agent_proxy.py`, mounted at `/api/v1/agent`
-(`main.py:1066`), reverse-proxies the agent service's OpenAI-compatible API
-(`GET /models`, `POST /chat/completions`, `GET /openapi.json`) to callers holding
-an **OWUI API key**. Why: the agent service has no auth of its own — OWUI owns
-auth, the agent service owns inference. It also resolves knowledge-base
-collection refs before forwarding (`_resolve_collection_refs`).
-
-Gated separately from the chat integration by the persisted config key
-`agent_proxy.enable` (Helm `enableAgentProxy`, default `"false"`). Do not
-conflate the two flags: `agentApiEnabled` is outbound (OWUI → agent),
-`enableAgentProxy` is inbound (client → OWUI → agent).
 
 ## Agent picker (replaces the model selector)
 

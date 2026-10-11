@@ -11,6 +11,7 @@ from open_webui.socket.main import get_event_call, get_event_emitter
 from open_webui.utils.middleware import process_tool_result
 from open_webui.utils.models import check_model_access, get_all_models
 from open_webui.utils.plugin import get_function_module_from_cache
+from open_webui.utils.access_control import can_bypass_access_control
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
 
     # Direct connections carry a client-supplied model the caller already owns,
     # so scope the model-bound checks to server-resolved models.
-    if not getattr(request.state, 'direct', False) and user.role != 'admin':
+    if not getattr(request.state, 'direct', False) and not can_bypass_access_control(user):
         await check_model_access(user, model)
         # model['actions'] entries are '<function_id>' or '<function_id>.<sub_id>';
         # the function id is always the prefix.
