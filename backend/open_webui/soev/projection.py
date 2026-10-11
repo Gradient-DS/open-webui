@@ -20,6 +20,10 @@ from open_webui.models.knowledge import (
 )
 
 
+#: The key under the collection's client-owned ``meta`` that holds OWUI's knowledge meta; other clients own the rest.
+META_NAMESPACE = 'owui'
+
+
 def types_from_schedules(schedules: list[dict]) -> dict[str, str]:
     types = {}
     # If providers conflict for a collection, the first eligible schedule by id wins.
@@ -39,12 +43,27 @@ def knowledge_of(collection: dict, *, service_principal: str, types: dict[str, s
         type=subscriptions[0] if subscriptions else (types or {}).get(collection['key'], 'local'),
         name=collection['name'],
         description=collection['description'] or '',
-        meta={},
+        meta=collection['meta'].get(META_NAMESPACE, {}),
         access_grants=grants_of(collection, service_principal=service_principal),
         created_at=int(dt.datetime.fromisoformat(collection['created_at']).timestamp()),
         updated_at=int(dt.datetime.fromisoformat(collection['updated_at']).timestamp()),
         deleted_at=None,
     )
+
+
+def meta_patch(current: dict, desired: dict) -> dict:
+    """The RFC 7396 merge patch that turns ``current`` into ``desired``.
+
+    Merge patch cannot store null, so a None in ``desired`` reads as an absent key."""
+    patch = {key: None for key in current if key not in desired}
+    for key, value in desired.items():
+        before = current.get(key)
+        if isinstance(value, dict) and isinstance(before, dict):
+            if nested := meta_patch(before, value):
+                patch[key] = nested
+        elif value != before:
+            patch[key] = value
+    return patch
 
 
 def collection_create_body(form: KnowledgeForm, *, service_principal: str) -> dict:

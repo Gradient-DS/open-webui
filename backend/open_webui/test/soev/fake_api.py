@@ -369,6 +369,7 @@ class FakeSoevApi:
             'created_by': subject,
             'retention_days': None,
             'tags': body.get('tags', []),
+            'meta': copy.deepcopy(body.get('meta', {})),
             'created_at': self.now,
             'updated_at': self.now,
         }
