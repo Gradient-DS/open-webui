@@ -554,19 +554,24 @@ def test_a_seeder_must_provide_what_it_declares_and_only_that(monkeypatch):
 
 def test_active_function_seeder_turns_its_own_function_on():
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
-    ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': True}])
+    ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': True}, {'is_global': True}, {}])
     parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'active_function')
     assert seeds.seed_active_function(ctx, parameter) == 'attack_active_fixture'
-    create, toggle = ctx.request.call_args_list
+    create, toggle, made_global, registry = ctx.request.call_args_list
     assert create.args == ('POST', '/api/v1/functions/create')
     assert create.kwargs['json']['content'] == parameter['content']
     assert toggle.args == ('POST', '/api/v1/functions/id/attack_active_fixture/toggle')
+    assert made_global.args == ('POST', '/api/v1/functions/id/attack_active_fixture/toggle/global')
+    assert registry.args == ('GET', '/api/models')
     assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
     # The passes toggle the shared {function}; this one must never be its target.
     function = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'function')
     assert seeds.parameter_for('/api/v1/functions/id/{id}/toggle', 'id') is function
     ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': False}])
     with pytest.raises(RuntimeError, match='not activated'):
+        seeds.seed_active_function(ctx, parameter)
+    ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': True}, {'is_global': False}])
+    with pytest.raises(RuntimeError, match='not made global'):
         seeds.seed_active_function(ctx, parameter)
 
 

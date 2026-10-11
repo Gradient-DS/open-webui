@@ -430,7 +430,7 @@ class Action:
 key = "action"
 name = "action_id"
 prefix = "/api/chat/actions/{action_id}"
-description = "utils/actions.py:chat_action resolves Functions.id and refuses 'Action not available' unless the function is an active Action, so it takes the always-active one."
+description = "utils/actions.py:chat_action resolves Functions.id and refuses 'Action not available' unless the function is an active Action the model surfaces (admins included without the bypass), so it takes the always-active one, which seed_active_function also makes global."
 same_as = "active_function"
 
 [[parameter]]
@@ -886,10 +886,14 @@ description = "Toggle resolves the actual registered model from the required id 
 params = { id = "{model}" }
 
 [[field]]
-backed_by = "soev-solutions"
 route = "POST /api/v1/retrieval/query/doc"
-description = "Authorize a real knowledge collection before entering vector retrieval."
-json = { collection_name = "{knowledge}", query = "Attack knowledge" }
+description = "routers/retrieval.py:_validate_collection_access answers 403 for a collection the caller cannot read, admins included without the bypass. The seeded file's own collection is the caller's, so the handler is entered without soev-api."
+json = { collection_name = "file-{file}", query = "Attack knowledge" }
+
+[[field]]
+route = "POST /api/v1/retrieval/delete"
+description = "routers/retrieval.py:delete_entries_from_collection checks write access to the collection first (403 otherwise, admins included without the bypass). The seeded file's own collection is the caller's; file_id names that file."
+json = { collection_name = "file-{file}", file_id = "{file}" }
 
 [[field]]
 backed_by = "soev-solutions"

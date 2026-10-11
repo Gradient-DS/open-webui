@@ -100,6 +100,33 @@ reason = "Never attempted: every owner pass skips it because `job_id` is declare
 id = "GET /cache/{path}"
 reason = "Never attempted: `path` is unseedable (attack-surface.toml, key cache). The only cache file the API creates is a data export, and services/export/service.py reads knowledge through soev-api, so the export fails without it. Closes when the export works without soev-api or another route writes a cache file."
 
+# --- Admin bypass: refused to every caller where admins follow access control --
+# BYPASS_ADMIN_ACCESS_CONTROL is environment-only (config.py), "false" on every
+# tenant (deployed-config.md) and in docker-compose.ci.yaml. These handlers
+# answer 403 to every caller, admins included, before doing anything, so no
+# configuration a tenant admin can reach enters them. Each closes if the bypass
+# is ever turned on for a tenant; drive it then with the flag on in CI.
+
+[[waived]]
+id = "POST /api/v1/models/sync"
+reason = "Not entered: routers/models.py:sync_models answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
+
+[[waived]]
+id = "DELETE /api/v1/models/delete/all"
+reason = "Not entered: routers/models.py:delete_all_models answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
+
+[[waived]]
+id = "DELETE /api/v1/files/all"
+reason = "Not entered: routers/files.py:delete_all_files answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
+
+[[waived]]
+id = "POST /api/v1/retrieval/reset/db"
+reason = "Not entered: routers/retrieval.py:reset_vector_db answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
+
+[[waived]]
+id = "POST /api/v1/retrieval/reset/uploads"
+reason = "Not entered: routers/retrieval.py:reset_upload_dir answers 403 unless utils/access_control:can_bypass_access_control, which needs BYPASS_ADMIN_ACCESS_CONTROL. It is off on every tenant and in the sealed stack, so the admin owner pass is refused like every other caller (observed live: 403 or 401, never entered). Closes if a tenant turns the bypass on."
+
 # --- Backed by soev-solutions: security tested there -------------------------
 # soev-api, soev-sync and soev-agents-api are closed source and never run in this
 # open-source repository's CI, not even as a stub. The plane skips every route
