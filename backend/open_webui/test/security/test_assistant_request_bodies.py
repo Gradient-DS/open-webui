@@ -28,6 +28,7 @@ def application(tmp_path_factory):
 @pytest.fixture
 def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O doubles share fixture state.
     """Use actual model access checks with explicit in-memory grants and rows."""
+    from open_webui import config as webui_config
     from open_webui.models.models import ModelModel
     from open_webui.utils import assistant_requests, models
     from open_webui.utils.agent_routing import AgentRoute
@@ -126,7 +127,7 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     monkeypatch.setattr(models.Groups, 'get_groups_by_member_id', groups)
     monkeypatch.setattr(application.Config, 'get', config)
     monkeypatch.setattr(application, 'BYPASS_MODEL_ACCESS_CONTROL', False)
-    monkeypatch.setattr(application, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+    monkeypatch.setattr(webui_config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
     monkeypatch.setattr(application, 'check_model_access', models.check_model_access)
     monkeypatch.setattr(application, 'resolve_agent_route', lambda **kwargs: AgentRoute(to_agent=True))
     monkeypatch.setattr(application, 'FEATURE_AGENT_PICKER', False)

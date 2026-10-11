@@ -177,7 +177,8 @@ async def test_reset_always_resets_vectors(soev_state, monkeypatch):
 
     monkeypatch.setattr(retrieval.ASYNC_VECTOR_DB_CLIENT, 'reset', AsyncMock())
     monkeypatch.setattr(retrieval.Knowledges, 'delete_all_knowledge', AsyncMock())
-    await retrieval.reset_vector_db(user=None, db=None)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    await retrieval.reset_vector_db(user=SimpleNamespace(role='admin'), db=None)
     retrieval.ASYNC_VECTOR_DB_CLIENT.reset.assert_awaited_once()
     assert retrieval.Knowledges.delete_all_knowledge.await_count == int(soev_state)
 
