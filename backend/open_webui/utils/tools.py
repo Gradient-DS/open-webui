@@ -109,6 +109,7 @@ from open_webui.utils.headers import (
 )
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.misc import is_string_allowed
+from open_webui.utils.outbound import guarded_request, is_same_origin
 from open_webui.utils.plugin import get_tool_contents_cache, get_tools_cache, load_tool_module_by_id
 from open_webui.utils.terminals import (
     TERMINAL_CONTEXT_HEADER,
@@ -1484,23 +1485,31 @@ async def get_tool_server_data(url: str, headers: dict | None) -> dict[str, Any]
     error = None
     try:
         timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA)
-        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-            async with session.get(url, headers=_headers, ssl=AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL) as response:
-                if response.status != 200:
-                    error_body = await response.json()
-                    raise Exception(error_body)
+        async with guarded_request(
+            'GET',
+            url,
+            trusted_url=url,
+            allow_redirects=True,
+            timeout=timeout,
+            trust_env=True,
+            headers=_headers,
+            ssl=AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL,
+        ) as response:
+            if response.status != 200:
+                error_body = await response.json()
+                raise Exception(error_body)
 
-                text_content = await response.text()
+            text_content = await response.text()
 
-                # Check if URL ends with .yaml or .yml to determine format
-                if url.lower().endswith(('.yaml', '.yml')):
+            # Check if URL ends with .yaml or .yml to determine format
+            if url.lower().endswith(('.yaml', '.yml')):
+                res = yaml.safe_load(text_content)
+            else:
+                try:
+                    res = JSONCodec.loads(text_content)
+                except JSONCodec.JSONDecodeError:
+                    # Fall back to YAML for non-.yml URLs that aren't valid JSON
                     res = yaml.safe_load(text_content)
-                else:
-                    try:
-                        res = JSONCodec.loads(text_content)
-                    except JSONCodec.JSONDecodeError:
-                        # Fall back to YAML for non-.yml URLs that aren't valid JSON
-                        res = yaml.safe_load(text_content)
 
     except (aiohttp.ClientConnectionError, TimeoutError) as err:
         error = str(err) or type(err).__name__
@@ -1649,6 +1658,8 @@ async def execute_tool_server(
             raise Exception(f'No matching route found for operationId: {name}')
 
         route_path, methods = matching_route
+        if not route_path.startswith('/'):
+            raise Exception('Tool route path must start with /')
 
         method_entry = None
         for http_method, operation in methods.items():
@@ -1707,66 +1718,72 @@ async def execute_tool_server(
         if query_params:
             final_url = f'{final_url}?{urlencode(query_params)}'
 
+        if not is_same_origin(final_url, url):
+            raise Exception('Tool route must stay on the configured server origin')
+
         if operation.get('requestBody', {}).get('content'):
             if params:
                 body_params = params
 
-        async with aiohttp.ClientSession(
-            trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER)
-        ) as session:
-            request_method = getattr(session, http_method.lower())
+        request_method = partial(
+            guarded_request,
+            http_method,
+            trusted_url=url,
+            trust_env=True,
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER),
+        )
 
-            if http_method in ['post', 'put', 'patch', 'delete']:
-                async with request_method(
-                    final_url,
-                    json=body_params,
-                    headers=headers,
-                    cookies=cookies,
-                    ssl=AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL,
-                    allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS,
-                ) as response:
-                    if response.status >= 400:
-                        text = await response.text()
-                        raise Exception(f'HTTP error {response.status}: {text}')
+        if http_method in ['post', 'put', 'patch', 'delete']:
+            async with request_method(
+                final_url,
+                json=body_params,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL,
+                allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS,
+            ) as response:
+                if response.status >= 400:
+                    text = await response.text()
+                    raise Exception(f'HTTP error {response.status}: {text}')
 
-                    try:
-                        response_data = await response.json()
-                    except Exception:
-                        content_type = response.headers.get('Content-Type', '').split(';')[0].strip()
-                        if content_type.startswith('text/') or not content_type:
-                            response_data = await response.text()
-                        else:
-                            raw = await response.read()
-                            b64 = base64.b64encode(raw).decode()
-                            response_data = f'data:{content_type};base64,{b64}'
+                try:
+                    response_data = await response.json()
+                except Exception:
+                    content_type = response.headers.get('Content-Type', '').split(';')[0].strip()
+                    if content_type.startswith('text/') or not content_type:
+                        response_data = await response.text()
+                    else:
+                        raw = await response.read()
+                        b64 = base64.b64encode(raw).decode()
+                        response_data = f'data:{content_type};base64,{b64}'
 
-                    response_headers = response.headers
-                    return (response_data, response_headers)
-            else:
-                async with request_method(
-                    final_url,
-                    headers=headers,
-                    cookies=cookies,
-                    ssl=AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL,
-                    allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS,
-                ) as response:
-                    if response.status >= 400:
-                        text = await response.text()
-                        raise Exception(f'HTTP error {response.status}: {text}')
+                response_headers = response.headers
+                return (response_data, response_headers)
+        else:
+            async with request_method(
+                final_url,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL,
+                allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS,
+            ) as response:
+                if response.status >= 400:
+                    text = await response.text()
+                    raise Exception(f'HTTP error {response.status}: {text}')
 
-                    try:
-                        response_data = await response.json()
-                    except Exception:
-                        content_type = response.headers.get('Content-Type', '').split(';')[0].strip()
-                        if content_type.startswith('text/') or not content_type:
-                            response_data = await response.text()
-                        else:
-                            raw = await response.read()
-                            b64 = base64.b64encode(raw).decode()
-                            response_data = f'data:{content_type};base64,{b64}'
+                try:
+                    response_data = await response.json()
+                except Exception:
+                    content_type = response.headers.get('Content-Type', '').split(';')[0].strip()
+                    if content_type.startswith('text/') or not content_type:
+                        response_data = await response.text()
+                    else:
+                        raw = await response.read()
+                        b64 = base64.b64encode(raw).decode()
+                        response_data = f'data:{content_type};base64,{b64}'
 
-                    response_headers = response.headers
-                    return (response_data, response_headers)
+                response_headers = response.headers
+                return (response_data, response_headers)
 
     except Exception as err:
         error = str(err)

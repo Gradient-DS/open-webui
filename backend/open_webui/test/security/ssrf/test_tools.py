@@ -29,7 +29,9 @@ async def test_tool_server_redirect_is_guarded(sink, attack, http_boundary, offl
     http_boundary.responses[INTERNAL] = (200, {'Content-Type': 'application/json'}, b'{}')
     http_boundary.responses[PUBLIC + 'next'] = (200, {'Content-Type': 'application/json'}, b'{}')
     if sink == 'spec':
-        await tools.get_tool_server_data(PUBLIC, {})
+        # The spec fetch surfaces the refused hop, so the admin check reports it instead of an empty spec.
+        with pytest.raises(Exception):
+            await tools.get_tool_server_data(PUBLIC, {})
     else:
         spec = {'openapi': {'paths': {'/': {'get': {'operationId': 'fetch'}}}}}
         await tools.execute_tool_server(PUBLIC.rstrip('/'), {}, {}, 'fetch', {}, spec)
