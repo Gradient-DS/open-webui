@@ -389,7 +389,15 @@ def _create_active_function(ctx, parameter, function_id):
 
 
 def seed_active_function(ctx, parameter):
-    return _create_active_function(ctx, parameter, f'attack_active_{ctx.token}')
+    function_id = _create_active_function(ctx, parameter, f'attack_active_{ctx.token}')
+    # utils/actions.py:chat_action runs only an action the model surfaces, admins included
+    # unless they bypass access control; a global action is surfaced on every model.
+    made_global = ctx.request('POST', f'/api/v1/functions/id/{function_id}/toggle/global', actor=ctx.admin)
+    if made_global.get('is_global') is not True:
+        raise RuntimeError(f'{parameter["key"]}: function was not made global')
+    # The model registry is cached; rebuilding it attaches the action to the seeded model.
+    ctx.request('GET', '/api/models', actor=ctx.admin)
+    return function_id
 
 
 def seed_totp_user(ctx, parameter):

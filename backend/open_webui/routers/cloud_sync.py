@@ -8,14 +8,14 @@ from fastapi.responses import HTMLResponse
 from open_webui import config
 from open_webui.config import CORS_ALLOW_ORIGIN
 from open_webui.soev import identity
-from open_webui.soev.availability import require_soev
+from open_webui.soev.availability import SoevRoute, require_soev
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import CloudSync
 from open_webui.soev.request_cache import request_cache
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-router = APIRouter()
+router = APIRouter(route_class=SoevRoute)
 
 
 async def cloud_sync(user=Depends(get_verified_user)):

@@ -8,13 +8,13 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.config import Config
 from open_webui.models.files import Files
 from open_webui.soev import identity, ingest
-from open_webui.soev.availability import require_soev
+from open_webui.soev.availability import SoevRoute, require_soev
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.live_documents import AttachmentMismatch, chat_file, register_attachment
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
-router = APIRouter(dependencies=[Depends(require_soev)])
+router = APIRouter(route_class=SoevRoute, dependencies=[Depends(require_soev)])
 
 
 class PickerAttachment(BaseModel):

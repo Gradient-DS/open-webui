@@ -46,7 +46,7 @@ from open_webui.routers.retrieval import (
 from open_webui.storage.provider import Storage
 from open_webui.services.deletion import DeletionService
 from open_webui.models.knowledge import is_synced_kb  # [Gradient]
-from open_webui.soev.availability import SoevNotConfigured, require_soev
+from open_webui.soev.availability import SoevNotConfigured, SoevRoute, require_soev
 from open_webui.utils.features import require_feature
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
@@ -60,7 +60,9 @@ from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(dependencies=[Depends(require_soev)])
+router = APIRouter(route_class=SoevRoute, dependencies=[Depends(require_soev)])
+# External connections are stored in OWUI's own config; only the routes that read knowledge bases need soev-api.
+connections_router = APIRouter()
 
 ############################
 # getKnowledgeBases
@@ -737,13 +739,13 @@ async def _get_knowledge_base_count_for_external_connection(
     return count
 
 
-@router.get('/external/connections', response_model=ExternalKnowledgeConnectionListResponse)
+@connections_router.get('/external/connections', response_model=ExternalKnowledgeConnectionListResponse)
 async def get_external_knowledge_connections(user=Depends(get_admin_user)):
     connections = [_get_sanitized_external_connection(connection) for connection in await _get_external_connections()]
     return ExternalKnowledgeConnectionListResponse(items=connections, total=len(connections))
 
 
-@router.post('/external/connections', response_model=dict)
+@connections_router.post('/external/connections', response_model=dict)
 async def create_external_knowledge_connection(
     request: Request,
     form_data: ExternalKnowledgeConnectionForm,
@@ -764,7 +766,7 @@ async def create_external_knowledge_connection(
     return sanitized
 
 
-@router.get('/external/connections/{id}', response_model=dict)
+@connections_router.get('/external/connections/{id}', response_model=dict)
 async def get_external_knowledge_connection(
     id: str,
     user=Depends(get_admin_user),
@@ -775,7 +777,7 @@ async def get_external_knowledge_connection(
     return _get_sanitized_external_connection(connection)
 
 
-@router.patch('/external/connections/{id}', response_model=dict)
+@connections_router.patch('/external/connections/{id}', response_model=dict)
 async def update_external_knowledge_connection(
     request: Request,
     id: str,
@@ -830,7 +832,7 @@ async def delete_external_knowledge_connection(
     return True
 
 
-@router.post('/external/connections/{id}/test', response_model=dict)
+@connections_router.post('/external/connections/{id}/test', response_model=dict)
 async def test_external_knowledge_connection(
     id: str,
     user=Depends(get_admin_user),
@@ -908,7 +910,7 @@ async def _get_external_source_test_result(
     }
 
 
-@router.post('/external/source/test', response_model=dict)
+@connections_router.post('/external/source/test', response_model=dict)
 async def test_external_knowledge_source(
     request: Request,
     form_data: ExternalKnowledgeSourceTestForm,
@@ -932,7 +934,7 @@ async def test_external_knowledge_source(
     )
 
 
-@router.post('/external/connections/{id}/retrieve-test', response_model=dict)
+@connections_router.post('/external/connections/{id}/retrieve-test', response_model=dict)
 async def test_external_knowledge_retrieval(
     request: Request,
     id: str,
