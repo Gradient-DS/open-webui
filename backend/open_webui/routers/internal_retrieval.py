@@ -11,18 +11,21 @@ from __future__ import annotations
 
 import base64
 import logging
-from pathlib import Path
 from typing import Optional
+
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from open_webui.internal.db import get_async_session
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
 from open_webui.models.files import Files
 from open_webui.models.knowledge import KnowledgeFileListResponse, Knowledges
 from open_webui.routers.files import upload_file_handler
-from open_webui.services.email.graph_mail_client import render_document_email, send_mail
 from open_webui.services.retrieval.agent_search import (
     resolve_accessible_kb,
     run_agent_search,
@@ -31,10 +34,9 @@ from open_webui.socket.main import sio
 from open_webui.soev import ingest
 from open_webui.soev.availability import require_soev
 from open_webui.storage.provider import Storage
+from open_webui.services.email.graph_mail_client import render_document_email, send_mail
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.service_auth import AgentPrincipal, get_agent_principal
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 log = logging.getLogger(__name__)

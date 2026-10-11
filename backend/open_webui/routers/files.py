@@ -155,10 +155,11 @@ async def process_uploaded_file(
             content_type = content_type_for(file.filename, file.content_type)
 
             # Detect mis-labeled text files (e.g. .ts → video/mp2t)
-            if content_type and content_type.startswith(('image/', 'video/')) and _is_text_file(file_path):
-                # [Gradient]
-                content_type = content_type_for(file.filename, 'text/plain')
-                await Files.update_file_metadata_by_id(file_item.id, {'content_type': content_type}, db=db_session)
+            if content_type and content_type.startswith(('image/', 'video/')):
+                if _is_text_file(file_path):
+                    # [Gradient]
+                    content_type = content_type_for(file.filename, 'text/plain')
+                    await Files.update_file_metadata_by_id(file_item.id, {'content_type': content_type}, db=db_session)
 
             # If destined for a KB, embed directly into the KB collection so
             # we never create a redundant `file-<id>` collection.

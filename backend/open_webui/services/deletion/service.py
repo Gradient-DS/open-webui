@@ -1,13 +1,13 @@
 import asyncio
-import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Set, Optional
+import logging
 
 from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
-from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.storage.provider import Storage
+from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 
 log = logging.getLogger(__name__)
 
@@ -469,21 +469,21 @@ class DeletionService:
         - Chat file cleanup (vectors, storage, DB)
         """
         from open_webui.models.auths import Auths
-        from open_webui.models.channels import Channels
-        from open_webui.models.chats import Chats
-        from open_webui.models.feedbacks import Feedbacks
-        from open_webui.models.folders import Folders
-        from open_webui.models.functions import Functions
-        from open_webui.models.groups import Groups
-        from open_webui.models.messages import Messages
-        from open_webui.models.models import Models
-        from open_webui.models.notes import Notes
-        from open_webui.models.oauth_sessions import OAuthSessions
-        from open_webui.models.prompts import Prompts
-        from open_webui.models.tags import Tags
-        from open_webui.models.tools import Tools
         from open_webui.models.users import Users
+        from open_webui.models.chats import Chats
+        from open_webui.models.groups import Groups
         from open_webui.soev.agent_threads import delete_threads, user_thread_ids
+        from open_webui.models.tags import Tags
+        from open_webui.models.folders import Folders
+        from open_webui.models.prompts import Prompts
+        from open_webui.models.tools import Tools
+        from open_webui.models.functions import Functions
+        from open_webui.models.models import Models
+        from open_webui.models.feedbacks import Feedbacks
+        from open_webui.models.notes import Notes
+        from open_webui.models.channels import Channels
+        from open_webui.models.messages import Messages
+        from open_webui.models.oauth_sessions import OAuthSessions
 
         report = DeletionReport()
 

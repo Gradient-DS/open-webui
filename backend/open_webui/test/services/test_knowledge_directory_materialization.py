@@ -16,6 +16,11 @@ from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
 from open_webui.models import files as files_module
 from open_webui.models import knowledge as knowledge_module
 from open_webui.models.access_grants import AccessGrantsTable
@@ -28,10 +33,6 @@ from open_webui.models.knowledge import (
     _directory_segments_for_link,
 )
 from open_webui.models.users import User
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 # ---------------------------------------------------------------------------
 # Fixtures
