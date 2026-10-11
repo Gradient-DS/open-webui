@@ -1,6 +1,6 @@
 **Status: 6 open findings (PLANE-001 in part, PLANE-002, PLANE-010, PLANE-012,
 PLANE-013, PLANE-018); 13 fixed (PLANE-003–009, PLANE-011, PLANE-014–017,
-PLANE-019), PLANE-007 as a CI-stack gap; BLOCKER-001 resolved; CI-stack gaps:
+PLANE-019), PLANE-007 now retired with the v2-only release; BLOCKER-001 resolved; CI-stack gaps:
 1 open (CI-004), 1 fixed in part (CI-005), 4 fixed (CI-001–003, CI-006); harness
 gaps: 1 open (COVERAGE-001); CROSSUSER-001 addressed.**
 
@@ -128,7 +128,7 @@ Quick comparison for a red gate:
 | `POST /api/embeddings`, `POST /api/v1/embeddings` | PLANE-004 | Open application bug; latest run |
 | `POST /api/v1/data-warnings/accept` | PLANE-005 | Open application bug; latest run |
 | `POST /api/v1/images/generations` | PLANE-006 | Open application bug; newly recorded from latest run |
-| `GET /api/v1/discovery/documents` | PLANE-007 | Open, cause unresolved; newly recorded from latest run |
+| Removed legacy discovery catalog | PLANE-007 | Retired with the v2-only release |
 | `GET /api/v1/chats/archived`, `GET /api/v1/chats/shared`, `GET /api/v1/chats/list/user/{user_id}` | PLANE-008 | Open; shared sorting failure path, live traceback needed |
 | `POST /api/v1/tasks/{follow_up,title,tags,image_prompt}/completions` | PLANE-009 | Open; shared message-template failure path, live traceback needed |
 | `GET /api/v1/utils/gravatar` | PLANE-010 | Open; cause unresolved |
@@ -142,8 +142,8 @@ the full failure set. This file accumulates findings across runs; absence from
 the latest run does not close a finding. A listed route with the documented
 failure signature is known-open; an unlisted route, a different cause/status/body,
 or a recurrence of CI-001 needs investigation as potentially new evidence.
-PLANE-007 is a known observation, not a settled cause. A matching total of
-failed tests alone cannot distinguish old failures from new ones.
+PLANE-007 describes a retired route. A matching total of failed tests alone
+cannot distinguish old failures from new ones.
 
 RUN-TAG: owui-phase7b-fix-live-defects
 
@@ -439,60 +439,10 @@ and a ValueError at line `611`. No state repair is needed for this request.
 Capture the actual request size, configured `IMAGE_SIZE`, and final traceback
 line to pin the original sampled input. This HTTP reproduction was not run here.
 
-## PLANE-007: Discovery document catalog returns an unexplained HTTP 500
+## PLANE-007: Legacy discovery catalog
 
-Status: **resolved 2026-09-11: a CI-stack gap, not an application defect.** The route answers 503 until `rag.enable_filter_ui` is on. That is a PersistentConfig a tenant admin flips in the admin UI (mkbot runs it), so CI now turns it on in `[stack_configuration]` and the stub answers the agents-api catalog (CI-006). Originally: open, cause unresolved. This is a known failing application route,
-not yet a demonstrated application defect or CI-stack gap. The latest reviewer
-run reported `GET /api/v1/discovery/documents` returning **500**. Only
-`Exception in ASGI application` was recoverable from the logs; no handler frame,
-exception type/message, response body, or exact sampled request was supplied.
-
-Source review of the fork-owned `routers/discovery.py` does **not** establish
-the cause:
-
-- `list_documents` at `141-148` declares no request body or query parameters;
-  it checks config and proxies a fixed `/v1/discovery/documents` path. There is
-  no visible hostile-string conversion analogous to the image or notes bugs.
-- `_get_base_url` at `43-60` awaits the implemented `Config.get` method
-  (`models/config.py:157-163`). Disabled `rag.enable_filter_ui` or an empty
-  `SEARCH_API_BASE_URL` raises explicit **503**, not the observed 500. Compose
-  supplies `SEARCH_API_BASE_URL=http://stub:8000`; the live persisted flag still
-  needs inspection. Do not relabel this 500 as the disabled-feature response.
-- `_proxy_get_json` at `78-137` maps connection/client errors during the request
-  to 502 and timeouts to 504; upstream 401 and JSON decode failures become 502.
-  Other upstream error statuses pass through. The current stub already serves
-  `/v1/discovery/documents` with HTTP 200 and
-  `{"collections":[],"total_collections":0,"database":{}}`.
-- Exceptions in config lookup, session construction, response-body reading,
-  or session close are not all covered by those handlers. Those are possible
-  investigation points, not evidence that any one occurred on the live run.
-
-Offline execution of the actual `_proxy_get_json` and `_auth_headers`
-definitions against a temporary loopback instance of the current stub returned
-the catalog JSON successfully. This bypasses authentication, the config DB,
-application middleware, and the container network/environment; it cannot settle
-the live failure. There is no source-supported stub fix to make here.
-
-To settle it, replay the recorded GET with the same bearer and sampled request
-in the existing stack and capture the complete exception chain, including the
-first application frame and final exception type/message. Save the response
-status/body, request timestamp/pass, and deployed revision alongside it. Inspect
-`rag.enable_filter_ui` through config export and the running process's
-`SEARCH_API_BASE_URL`; request `http://stub:8000/v1/discovery/documents` from the
-application container to record the actual upstream status/body and connectivity.
-Do not include API keys or bearer values in the report.
-
-```sh
-curl -i "$ATTACK_BASE_URL/api/v1/discovery/documents" \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-```
-
-This is a baseline probe, not an established exact reproduction of the sampled
-failure. With the flag enabled and healthy config/auth/network, the reviewed
-source and current stub should return the catalog JSON. A 503 with the documented
-feature-disabled message is a separate configuration condition. If the original
-500 does not recur, retain this finding until its recorded request and stack
-state explain it; a passing probe alone does not close it.
+Status: **retired 2026-10-11.** The v1 discovery router and its UI were removed
+with the v2-only release. This route is no longer part of the attack surface.
 
 ## PLANE-008: Chat list sorting inputs raise uncaught exceptions
 
@@ -1047,8 +997,8 @@ Status: **fixed 2026-09-11.**
   `SYNC_DAEMON_URL` without `SYNC_DAEMON_API_KEY`, so the client sent `Bearer `
   and httpx refused the header. The stub also answered `/sync/run` with the
   catch-all 200, where the client accepts only 202 or 409.
-- `rag.enable_filter_ui` (PLANE-007) and `task.autocomplete.enable` are
-  PersistentConfig a tenant admin can turn on; CI-005's rule puts both in
+- `task.autocomplete.enable` is
+  PersistentConfig a tenant admin can turn on; CI-005's rule puts it in
   `[stack_configuration]`.
 
 ## CROSSUSER-001: sharing by design needed a declaration, not silence

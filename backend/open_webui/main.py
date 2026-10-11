@@ -46,7 +46,6 @@ from starsessions import (
 from starsessions.stores.redis import RedisStore
 
 from open_webui.config import (
-    BYPASS_ADMIN_ACCESS_CONTROL,
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
     DEFAULT_LOCALE,
@@ -123,6 +122,7 @@ from open_webui.services.model_request_bodies import chat_completion_body, embed
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
 from open_webui.soev import model_catalog
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -198,7 +198,6 @@ from open_webui.models.models import Models, normalize_model_tags
 from open_webui.models.users import Users
 from open_webui.routers import (
     agent_configs,
-    agent_proxy,
     analytics,
     archives,
     audio,
@@ -210,7 +209,6 @@ from open_webui.routers import (
     configs,
     cloud_sync,
     data_warnings,
-    discovery,
     evaluations,
     export,
     feedback_report,
@@ -221,7 +219,6 @@ from open_webui.routers import (
     groups,
     images,
     integrations,
-    internal_retrieval,
     invites,
     knowledge,
     memories,
@@ -349,6 +346,7 @@ from open_webui.utils.tool_approval import (
 from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
 from open_webui.services.email.auth import is_mail_configured  # [Gradient]
+from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')
@@ -737,6 +735,11 @@ install(app)
 app.state.startup_complete = False
 
 
+@app.exception_handler(SoevNotConfigured)
+async def soev_not_configured_handler(request, exc: SoevNotConfigured):
+    return JSONResponse(status_code=503, content={'detail': {'code': exc.code, 'detail': exc.detail}})
+
+
 # [Gradient] Surface the OTel trace id on HTTP error responses so a feedback
 # "Report this problem" can deep-link to the Tempo trace. Purely additive —
 # FastAPI has no custom HTTPException handler otherwise; this replicates the
@@ -1099,14 +1102,7 @@ app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
-app.include_router(
-    internal_retrieval.router,
-    prefix='/api/v1/internal/retrieval',
-    tags=['internal-retrieval'],
-)
-app.include_router(agent_proxy.router, prefix='/api/v1/agent', tags=['agent-proxy'])
 app.include_router(agent_configs.router, prefix='/api/v1/agent-configs', tags=['agents'])
-app.include_router(discovery.router, prefix='/api/v1/discovery', tags=['discovery'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
@@ -1410,7 +1406,7 @@ async def chat_completion(
                     fallback_model = request.app.state.MODELS.get(fallback_model_id)
 
             # Check if user has access to the model
-            if not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
+            if not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user):
                 try:
                     access_model_info = (
                         model_info.model_copy(update={'base_model_id': None})
@@ -1437,8 +1433,7 @@ async def chat_completion(
                 model,
                 model_info,
                 user,
-                check_access=not BYPASS_MODEL_ACCESS_CONTROL
-                and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL),
+                check_access=not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user),
                 chat_id=form_data.get('chat_id'),
                 message_ids=form_data.get('message_ids'),
             )
@@ -1617,7 +1612,7 @@ async def chat_completion(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=ERROR_MESSAGES.NOT_FOUND,
                     )
-                if user.role != 'admin':
+                if not can_bypass_access_control(user):
                     if channel.type in ['group', 'dm']:
                         if not await Channels.is_user_channel_member(channel.id, user.id):
                             raise HTTPException(
@@ -1643,7 +1638,7 @@ async def chat_completion(
                     if target_message and (
                         target_message.channel_id != channel.id
                         # Write access is not authorship — block cross-member edits.
-                        or (user.role != 'admin' and target_message.user_id != user.id)
+                        or (not can_bypass_access_control(user) and target_message.user_id != user.id)
                     ):
                         raise HTTPException(
                             status_code=status.HTTP_403_FORBIDDEN,
@@ -1794,7 +1789,7 @@ async def chat_completion(
                         asyncio.create_task(run_initial_title_generation())
                 else:
                     # Existing chat — verify ownership
-                    if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':
+                    if not await Chats.is_chat_owner(chat_id, user.id) and not can_access_admin_chats(user):
                         raise HTTPException(
                             status_code=status.HTTP_404_NOT_FOUND,
                             detail=ERROR_MESSAGES.DEFAULT(),
@@ -2021,7 +2016,7 @@ async def chat_completion(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail='This chat is bound to an agent that is no longer available.',
                     )
-                if user.role != 'admin':
+                if not can_bypass_access_control(user):
                     user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id)}
                     accessible = await AccessGrants.get_accessible_resource_ids(
                         user_id=user.id,
@@ -2068,7 +2063,6 @@ async def chat_completion(
                     request,
                     form_data,
                     metadata,
-                    metadata.get('features', {}),
                     override_agent=chat_agent_id,
                 )
             else:
@@ -2112,6 +2106,8 @@ async def chat_completion(
             except Exception:
                 pass
             raise  # re-raise to ensure proper task cancellation handling
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             error_detail = e.detail if isinstance(e, HTTPException) else str(e)
             log.error('Error processing chat payload: %s', error_detail)
@@ -2514,7 +2510,7 @@ async def verify_chat_ownership(chat_id: str | None, user) -> None:
             detail='Channel chats are not supported on this endpoint',
         )
 
-    if user.role != 'admin' and not await Chats.is_chat_owner(chat_id, user.id):
+    if not can_access_admin_chats(user) and not await Chats.is_chat_owner(chat_id, user.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.DEFAULT(),
@@ -2582,11 +2578,11 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     socket_id = get_temporary_chat_session_id(chat_id)
     if socket_id:
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and user.role != 'admin':
+        if owner_id != user.id and not can_access_admin_chats(user):
             return {'task_ids': []}
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        if chat is None or (chat.user_id != user.id and not can_access_admin_chats(user)):
             return {'task_ids': []}
 
     task_ids = await list_task_ids_by_item_id(request.app.state.redis, chat_id)
@@ -2601,11 +2597,11 @@ async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     chat = None
     if socket_id:
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and user.role != 'admin':
+        if owner_id != user.id and not can_access_admin_chats(user):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        if chat is None or (chat.user_id != user.id and not can_access_admin_chats(user)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     result = await stop_item_tasks(request.app.state.redis, chat_id)
 
@@ -2816,7 +2812,6 @@ async def get_app_config(request: Request):
         'onedrive.client_id_business',
         'onedrive.sharepoint_url',
         'onedrive.sharepoint_tenant_id',
-        'agent_proxy.enable',
         'agent_api.picker_default_slug',
         'features.enable_data_warnings',
         'admin.data_retention_ttl_days',
@@ -2968,7 +2963,6 @@ async def get_app_config(request: Request):
                         else {}
                     ),
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
-                    'enable_agent_proxy': config.get('agent_proxy.enable'),  # [Gradient]
                     'enable_live_mail': AGENT_API_ENABLED and config.get('live_mail.enable'),
                     'enable_live_documents': AGENT_API_ENABLED and config.get('live_documents.enable'),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]

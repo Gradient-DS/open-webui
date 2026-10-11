@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from open_webui.models.chat_messages import ChatMessageModel, ChatMessages
 from open_webui.soev import identity
+from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
 from open_webui.utils.chat_id import get_temporary_chat_session_id
 
@@ -54,7 +55,7 @@ async def delete_threads(user_id: str, thread_ids: Collection[str]) -> list[str]
 
 
 async def _delete(as_user: str, thread_ids: Collection[str]) -> list[str]:
-    if not thread_ids:
+    if not configured() or not thread_ids:
         return []
     client = identity.build_client()
     kept = []

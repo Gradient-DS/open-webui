@@ -15,6 +15,7 @@ from open_webui.soev.client import SoevClient, close_client
 @pytest.fixture
 def api(monkeypatch):
     """Exercise the real client against queued HTTP responses without network access."""
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     requests, responses = [], []
     refs = []
 

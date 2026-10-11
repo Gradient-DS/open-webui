@@ -13,8 +13,6 @@ soevApi:
     mode: uploads
     image:
       tag: v2-migrate-test
-agentApi:
-  runtime: v2
 liveDocuments:
   enabled: true
 liveMail:

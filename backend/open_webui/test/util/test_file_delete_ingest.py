@@ -7,6 +7,11 @@ import pytest
 from open_webui.routers import files as router
 
 
+@pytest.fixture(autouse=True)
+def soev_configured(monkeypatch):
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('job', [None, {'job_id': 'job-1'}])
 async def test_delete_cancels_ingest_before_removing_memberships_row_and_bytes(monkeypatch, job):

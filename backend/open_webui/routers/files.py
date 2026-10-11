@@ -21,7 +21,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, StreamingResponse
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STORAGE_LOCAL_CACHE, STORAGE_PROVIDER, UPLOAD_DIR
+from open_webui.config import STORAGE_LOCAL_CACHE, STORAGE_PROVIDER, UPLOAD_DIR
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_db_context, get_async_session
@@ -44,6 +44,7 @@ from open_webui.routers.live_documents import router as live_documents_router
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
 from open_webui.soev import ingest
+from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
 from open_webui.soev.live_documents import stream_original
 from open_webui.storage.provider import Storage
@@ -53,6 +54,7 @@ from open_webui.utils.misc import strict_match_mime_type
 from open_webui.utils.upload_guard import check_upload
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -269,6 +271,8 @@ async def process_uploaded_file(
                 collection_name=collection_name,
             )
 
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.error(f'Error processing file: {file_item.id}')
             error_msg = str(e.detail) if hasattr(e, 'detail') else str(e)
@@ -381,7 +385,7 @@ async def upload_file_handler(
     #
     # count_cap_guard defaults True so the user route is always covered;
     # server-generated upload paths (image/audio generation, agent-internal
-    # blobs — see images.py/utils/files.py/internal_retrieval.py) pass
+    # blobs — see images.py/utils/files.py) pass
     # count_cap_guard=False since they aren't a user-initiated upload the
     # cap is meant to bound, mirroring the sniff_guard opt-out precedent.
     if count_cap_guard and user.role != 'admin':
@@ -427,7 +431,7 @@ async def upload_file_handler(
                 permission='write',
                 db=db,
             )
-            and user.role != 'admin'
+            and not can_bypass_access_control(user)
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -658,7 +662,7 @@ async def list_files(
     db: AsyncSession = Depends(get_async_session),
 ):
     skip = (page - 1) * PAGE_SIZE
-    user_id = None if (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
+    user_id = None if can_bypass_access_control(user) else user.id
 
     result = await Files.get_file_list(user_id=user_id, skip=skip, limit=PAGE_SIZE, db=db)
 
@@ -692,7 +696,7 @@ async def search_files(
     Uses SQL-based filtering with pagination for better performance.
     """
     # Determine user_id: null for admin with bypass (search all), user.id otherwise
-    user_id = None if (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
+    user_id = None if can_bypass_access_control(user) else user.id
 
     # Use optimized database query with pagination
     files = await Files.search_files(
@@ -727,7 +731,7 @@ async def count_files(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    user_id = None if (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
+    user_id = None if can_bypass_access_control(user) else user.id
     return await Files.count_files_by_user_id(user_id=user_id, db=db)
 
 
@@ -740,6 +744,9 @@ async def count_files(
 async def delete_all_files(
     request: Request, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
 ):
+    if not can_bypass_access_control(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
     result = await Files.delete_all_files(db=db)
     if result:
         try:
@@ -782,7 +789,7 @@ async def get_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncSess
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
         # [Gradient] soev-api holds the extracted text; serve it on the row without persisting it.
         if not (file.data or {}).get('content'):
             rendition = await ingest.rendition_of(file, user.id)
@@ -814,7 +821,7 @@ async def get_file_process_status(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user):
         if stream:
             MAX_FILE_PROCESSING_DURATION = 3600 * 2
 
@@ -872,7 +879,7 @@ async def get_file_data_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
         return {'content': await ingest.rendition_of(file, user.id) or ''}
     else:
         raise HTTPException(
@@ -918,7 +925,7 @@ async def update_file_data_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'write', user, db=db):
         max_size = await Config.get('rag.file.max_size')
         if max_size and len(form_data.content.encode('utf-8')) > int(max_size) * 1024 * 1024:
             raise HTTPException(
@@ -933,6 +940,8 @@ async def update_file_data_content_by_id(
                 db=db,
             )
             file = await Files.get_file_by_id(id=id, db=db)
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.exception(e)
             log.error(f'Error processing file: {file.id}')
@@ -940,7 +949,7 @@ async def update_file_data_content_by_id(
         # Propagate content change to all knowledge collections referencing
         # this file.  Without this the old embeddings remain in the knowledge
         # collection and RAG returns both stale and current data (#20558).
-        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
+        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db) if configured() else []
         for knowledge in knowledges:
             try:
                 await process_file(
@@ -949,6 +958,8 @@ async def update_file_data_content_by_id(
                     user=user,
                     db=db,
                 )
+            except SoevNotConfigured:
+                raise
             except Exception as e:
                 log.warning(f'Failed to update knowledge {knowledge.id} after content change for file {id}: {e}')
 
@@ -996,7 +1007,7 @@ async def get_file_content_by_id_inline(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
         if (file.meta or {}).get('source'):
             return await stream_original(file, user, attachment=attachment)
         try:
@@ -1060,7 +1071,9 @@ async def list_file_attachments(
     file = await Files.get_file_by_id(id, db=db)
     if not file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    if not (file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db)):
+    if not (
+        file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db)
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     return await asyncio.to_thread(FileAttachments.get_attachments_by_file_id, id)
 
@@ -1080,7 +1093,9 @@ async def get_file_attachment_bytes(
     file = await Files.get_file_by_id(id, db=db)
     if not file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    if not (file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db)):
+    if not (
+        file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db)
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     attachment = await asyncio.to_thread(FileAttachments.get_attachment_by_id, attachment_id)
@@ -1127,7 +1142,7 @@ async def get_html_file_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
         try:
             file_path = await asyncio.to_thread(Storage.get_file, file.path)
             file_path = Path(file_path)
@@ -1178,7 +1193,7 @@ async def get_file_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
         if (file.meta or {}).get('source'):
             return await stream_original(file, user, attachment=True)
         file_path = file.path
@@ -1246,7 +1261,7 @@ async def rename_file_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'write', user, db=db):
         result = await Files.update_file_name_by_id(id, form_data.filename, db=db)
         if result:
             await publish_event(
@@ -1286,12 +1301,12 @@ async def delete_file_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
-        if (file.meta or {}).get('soev_job') is not None:
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'write', user, db=db):
+        if configured() and (file.meta or {}).get('soev_job') is not None:
             await ingest.cancel(file)
 
         # Remove knowledge memberships before deleting the file.
-        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
+        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db) if configured() else []
         for knowledge in knowledges:
             # Remove KB-file relationship
             await Knowledges.remove_file_from_knowledge_by_id(knowledge.id, id, db=db)

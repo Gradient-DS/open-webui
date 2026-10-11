@@ -1090,35 +1090,6 @@ async def set_integrations_config(
 
 
 ####################################
-# Agent Proxy Config
-####################################
-
-
-AGENT_PROXY_CONFIG_KEYS = {
-    'ENABLE_AGENT_PROXY': 'agent_proxy.enable',
-}
-
-
-class AgentProxyConfigForm(BaseModel):
-    ENABLE_AGENT_PROXY: bool
-
-
-@router.get('/agent_proxy')
-async def get_agent_proxy_config(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(AGENT_PROXY_CONFIG_KEYS)
-
-
-@router.post('/agent_proxy')
-async def set_agent_proxy_config(
-    request: Request,
-    form_data: AgentProxyConfigForm,
-    user=Depends(get_admin_user),
-):
-    await Config.upsert(config_updates(form_data.model_dump(), AGENT_PROXY_CONFIG_KEYS))
-    return await get_config_values(AGENT_PROXY_CONFIG_KEYS)
-
-
-####################################
 # External Agents Config
 ####################################
 

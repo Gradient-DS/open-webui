@@ -2,9 +2,10 @@
 
 import re
 from urllib.parse import quote
-import pytest
-from . import seeds
 
+import pytest
+
+from . import seeds
 from .test_seeds import LIVE_READS, path_parameters, stop_seed_task
 
 
@@ -15,7 +16,7 @@ def live_seeds():
     identities = ensure_identities()
     resolved = None
     try:
-        resolved = seeds.resolve_parameters(identities.user, admin=identities.admin)
+        resolved = seeds.resolve_parameters(identities.user, admin=identities.admin, collect_failures=True)
         yield identities, resolved
     finally:
         try:
@@ -27,8 +28,9 @@ def live_seeds():
 
 def test_live_resolution_returns_every_seedable_route_parameter(live_seeds):
     _, resolved = live_seeds
+    assert not resolved.failures, resolved.failures
     expected = {
-        (path, name) for _, path, name in path_parameters() if 'unseedable' not in seeds.parameter_for(path, name)
+        (path, name) for _, path, name in path_parameters() if seeds.seed_enabled(seeds.parameter_for(path, name))
     }
     assert resolved.keys() == expected
     assert all(isinstance(value, str) and value.strip() and '{' not in value for value in resolved.values())
@@ -62,7 +64,7 @@ def test_live_seeded_models_are_visible_and_stub_completes_for_both_identities(l
 
 def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):
     identities, first = live_seeds
-    second = seeds.resolve_parameters(identities.user, admin=identities.admin)
+    second = seeds.resolve_parameters(identities.user, admin=identities.admin, collect_failures=True)
     try:
         for pair, value in first.items():
             p = seeds.parameter_for(*pair)
@@ -75,6 +77,8 @@ def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):
 @pytest.mark.parametrize('template', LIVE_READS)
 def test_live_ids_address_real_resources(live_seeds, template):
     identities, resolved = live_seeds
+    if seeds.route_waived(f'GET {template}'):
+        pytest.skip('soev-solutions resource is waived in this runtime mode')
     path = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe='/'), template)
     result = identities.admin.request('GET', path)
     assert result.status_code == 200, f'{template}: HTTP {result.status_code}: {result.text[:200]}'
