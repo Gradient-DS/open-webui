@@ -51,7 +51,7 @@ class FakeChatApi:
         self.close_after: int | None = None
         self.tails: list[Tail] = []
         self.tail_closes = False
-        self.terminal_state = 'idle'
+        self.terminal_state = 'finished'
 
     def handle(self, request: httpx.Request, body: dict | None, owner: tuple[str, str | None]) -> httpx.Response:
         self.requests.append(request)
@@ -77,7 +77,7 @@ class FakeChatApi:
 
     def _new(self, owner: tuple[str, str | None], events: list[dict]) -> dict[str, Any]:
         thread_id = f'thr-{len(self.threads) + 1}'
-        thread = {'thread_id': thread_id, 'owner': owner, 'events': events, 'state': 'idle'}
+        thread = {'thread_id': thread_id, 'owner': owner, 'events': events, 'state': 'finished'}
         self.threads[thread_id] = thread
         return thread
 
@@ -105,14 +105,14 @@ class FakeChatApi:
             branch = self._new(thread['owner'], copy.deepcopy(thread['events'][:at]))
             # As in the runtime: a copied input without its answer leaves work nobody is on.
             if branch['events'][-1]['type'] == 'input':
-                branch['state'] = 'orphaned'
+                branch['state'] = 'interrupted'
             return httpx.Response(201, json=self._view(branch), headers=self._headers(branch))
         if operation == 'inputs':
-            if thread['state'] in {'running', 'orphaned'}:
+            if thread['state'] in {'running', 'interrupted'}:
                 return self.problem(409, 'thread_active', thread['state'])
             return self._run(request, body, thread)
         if operation == 'resume':
-            thread['state'] = 'idle'
+            thread['state'] = 'finished'
             return self._response(request, thread, [])
         if operation == 'cancel':
             return self._cancel(thread, body)
@@ -141,7 +141,7 @@ class FakeChatApi:
         if not inputs or body.get('input') != inputs[-1] or thread['state'] not in {'running', 'waiting'}:
             return self.problem(409, 'thread_active')
         thread['events'].append(frame('cancelled', len(thread['events']) + 1, {}))
-        thread['state'] = 'idle'
+        thread['state'] = 'cancelled'
         return httpx.Response(200, json=self._view(thread))
 
     def _run(self, request: httpx.Request, body: dict, thread: dict, *, opening: bool = False) -> httpx.Response:
