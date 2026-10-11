@@ -113,6 +113,7 @@ def application():
 @pytest.fixture
 def harness(application, monkeypatch):
     from open_webui.routers import ollama, openai, tasks
+    from open_webui.utils.agent_routing import AgentRoute
     from open_webui.utils.auth import get_verified_user
 
     # Mount the actual registered endpoints without app lifespan or unrelated middleware.
@@ -139,7 +140,7 @@ def harness(application, monkeypatch):
     monkeypatch.setattr(application.Models, 'get_model_by_id', AsyncMock(return_value=None))
     for module in (application, ollama, openai):
         monkeypatch.setattr(module, 'check_model_access', AsyncMock())
-    monkeypatch.setattr(application, 'resolve_agent_route', lambda **kwargs: False)
+    monkeypatch.setattr(application, 'resolve_agent_route', lambda **kwargs: AgentRoute(to_agent=False))
     monkeypatch.setattr(ollama, 'get_ollama_url', AsyncMock(return_value=('http://provider.invalid', 0)))
     monkeypatch.setattr(openai, 'get_openai_connection', AsyncMock(return_value=('http://provider.invalid/v1', '', {})))
     monkeypatch.setattr(openai, 'get_headers_and_cookies', AsyncMock(return_value=({}, {})))

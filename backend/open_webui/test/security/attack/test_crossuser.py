@@ -7,9 +7,7 @@ import pytest
 
 from . import crossuser, plane, seeds, test_shapes
 from .authorization_inventory import admin_gated_operations, source_operations
-from .identities import ensure_identities
-from .pass_support import crash_details
-from .test_shapes import needs_stack, reply
+from .test_shapes import reply
 
 offline = test_shapes.offline
 
@@ -17,9 +15,10 @@ offline = test_shapes.offline
 def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
     inventory = source_operations()
     assert set(plane.operations()) <= inventory.keys()
-    assert len(admin_gated_operations()) == 223
+    assert len(admin_gated_operations()) == 210
     assert 'GET /api/v1/functions/' in inventory
     assert 'GET /api/v1/files/{id}/content' in inventory
+    assert 'POST /api/v1/files/onedrive/attach' in inventory
     assert 'PATCH /api/v1/terminals/{server_id}/{path}' in inventory
     routes, admins = crossuser.targets()
     # Operations whose id the surface records as unseedable are out of scope: an
@@ -66,6 +65,8 @@ def test_partial_object_disclosure_does_not_need_the_marker_or_identical_owner_b
 
 
 def test_both_404_cannot_pass_the_positive_control_gate():
+    from .test_live_crossuser import test_live_crossuser_owner_controls_are_positive
+
     result = crossuser.Authorization(plane.Seeding())
     missing = plane.Outcome(404, False, '{}')
     crossuser._check(result, 'DELETE /r/{id}', missing, missing, ['marker'], admin_only=False, control=True)
@@ -220,6 +221,8 @@ def test_ordinary_writes_restore_configuration_using_admin_even_when_request_fai
 
 
 def test_crossuser_5xx_and_entries_are_independent(offline, monkeypatch):
+    from .test_live_crossuser import test_live_crossuser_has_its_own_5xx_assertion
+
     spec = {'paths': {'/r/{id}': {'get': {}}}}
     identities, _ = setup_pass(monkeypatch, spec, {'intruder': (404, {}), 'admin': (404, {})})
     plane.record('GET /r/{id}', 200, {}, pass_name='drive')
@@ -231,15 +234,6 @@ def test_crossuser_5xx_and_entries_are_independent(offline, monkeypatch):
         test_live_crossuser_has_its_own_5xx_assertion(result)
 
 
-@pytest.fixture(scope='module')
-def live_crossuser():
-    identities = ensure_identities()
-    try:
-        yield crossuser.drive_crossuser(identities)
-    finally:
-        identities.close()
-
-
 def test_a_route_that_never_answers_is_not_an_authorization_violation():
     # Status 0 with admin_only would otherwise read as "not refused" and report
     # an authorization finding for a route that simply did not answer.
@@ -248,45 +242,6 @@ def test_a_route_that_never_answers_is_not_an_authorization_violation():
     crossuser._check(result, 'DELETE /api/v1/users/{user_id}', silence, silence, (), admin_only=True, control=True)
     assert result.violations == []
     assert result.tally.body_failures == []
-
-
-@needs_stack
-def test_live_crossuser_has_its_own_5xx_assertion(live_crossuser):
-    assert not live_crossuser.tally.crashes, crash_details(live_crossuser.tally)
-
-
-@needs_stack
-def test_live_crossuser_refuses_other_users_and_admin_operations(live_crossuser):
-    assert not live_crossuser.violations, live_crossuser.violations
-
-
-@needs_stack
-def test_live_crossuser_owner_controls_are_positive(live_crossuser):
-    expected = crossuser.expected_refusals()
-    bodies = live_crossuser.control_bodies
-    gaps = {
-        route: status
-        for route, status in live_crossuser.controls.items()
-        if not 200 <= status < 300
-        and not crossuser.refused_as_expected(expected.get(route), status, bodies.get(route, ''))
-    }
-    stale = sorted(route for route in expected if 200 <= live_crossuser.controls.get(route, 0) < 300)
-    assert not stale, f'Declared refusals now succeed; drop their [[control]] entries: {stale}'
-    reasons = '\n'.join(
-        f'  {route}: HTTP {status} {live_crossuser.control_bodies.get(route, "")}'
-        for route, status in sorted(gaps.items())
-    )
-    assert not gaps, f'Owner positive controls did not succeed; isolation remains unproven:\n{reasons}'
-    assert live_crossuser.controls, 'No owner positive controls ran'
-
-
-@needs_stack
-def test_live_crossuser_reports_its_own_reach(live_crossuser, record_property):
-    tally = live_crossuser.tally
-    assert tally.statuses.keys() | tally.skipped.keys() == tally.expected == set(crossuser.targets()[0])
-    assert tally.config_restore_verified
-    record_property('crossuser_unentered', tally.unentered)
-    assert tally.entered, 'No authorization request entered a handler'
 
 
 def _answer(status, body):

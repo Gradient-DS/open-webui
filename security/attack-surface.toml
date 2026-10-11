@@ -309,48 +309,11 @@ depends_on = ["connection"]
 actor = "admin"
 
 [[parameter]]
-key = "confluence_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/confluence"
-description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Confluence."
-via = "POST /api/v1/knowledge/create"
-body = { "name" = "confluence-{token}", "description" = "Attack cloud KB", "type" = "confluence" }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
-key = "google_drive_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/google-drive"
-description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Google."
-via = "POST /api/v1/knowledge/create"
-body = { "name" = "google-drive-{token}", "description" = "Attack cloud KB", "type" = "google_drive" }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
-key = "onedrive_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/onedrive"
-description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Microsoft."
-via = "POST /api/v1/knowledge/create"
-body = { "name" = "onedrive-{token}", "description" = "Attack cloud KB", "type" = "onedrive" }
-extract = "id"
-actor = "admin"
-
-[[parameter]]
 key = "internal_knowledge"
 name = "knowledge_id"
 prefix = "/api/v1/internal/retrieval/knowledge/{knowledge_id}"
 description = "internal_retrieval.py reads the same Knowledge row; its service credential is a separate driving-identity requirement."
 same_as = "knowledge"
-
-[[parameter]]
-key = "sync_knowledge"
-name = "knowledge_id"
-prefix = "/api/v1/sync-daemon/runs/{knowledge_id}"
-description = "sync_daemon.py:report_run_summary resolves Knowledges.id and the provider type."
-same_as = "confluence_knowledge"
 
 [[parameter]]
 key = "file"
@@ -372,13 +335,6 @@ via = "GET /api/v1/files/{file}"
 extract = "filename"
 depends_on = ["file"]
 actor = "admin"
-
-[[parameter]]
-key = "integration_file_status"
-name = "file_id"
-prefix = "/api/v1/integrations/file-status/{file_id}"
-description = "Handler resolves Files.id; service authentication is independent of the existence of the File row."
-same_as = "file"
 
 [[parameter]]
 key = "internal_file"
@@ -693,18 +649,6 @@ depends_on = ["user"]
 # and its seed no longer exist. Restore both together if the dev route is ever gated in.
 
 [[parameter]]
-key = "sync_provider"
-name = "provider"
-prefix = "/api/v1/sync-daemon/config/{provider}"
-description = "sync_daemon.py:_PROVIDERS uses built-in provider names. Verify confluence config through its public admin endpoint; the daemon route separately requires its machine credential."
-seeded_by = "upstream_path"
-depends_on = []
-actor = "admin"
-probe = "/api/v1/configs/confluence"
-value = "confluence"
-fresh = false
-
-[[parameter]]
 key = "reset_token"
 name = "token"
 prefix = "/api/v1/auths/password/reset/{token}"
@@ -738,20 +682,6 @@ name = "client_id"
 prefix = "/oauth/clients/{client_id}"
 description = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
 unseedable = "main.py:oauth_client_authorize requires a registered OAuth client. configs.py:/oauth/clients/register performs external discovery/registration, and tool-server config persists its result. The CI stub has no OAuth discovery or registration endpoints, so a real client cannot be seeded on this stack."
-
-[[parameter]]
-key = "confluence_cloud"
-name = "cloud_id"
-prefix = "/api/v1/confluence/page/{cloud_id}"
-description = "confluence_sync.py:_browse_client requires a real authorized Atlassian site. Its browse/content endpoints are read-only; no app HTTP endpoint creates a Confluence cloud/site or grants external access."
-unseedable = "confluence_sync.py:_browse_client requires a real authorized Atlassian site. Its browse/content endpoints are read-only; no app HTTP endpoint creates a Confluence cloud/site or grants external access."
-
-[[parameter]]
-key = "confluence_page"
-name = "page_id"
-prefix = "/api/v1/confluence/page/{cloud_id}/{page_id}"
-description = "confluence_sync.py:get_page_content fetches an existing provider page. This app exposes no Confluence page-creation endpoint and the CI stub has no Confluence page store."
-unseedable = "confluence_sync.py:get_page_content fetches an existing provider page. This app exposes no Confluence page-creation endpoint and the CI stub has no Confluence page store."
 
 [[parameter]]
 key = "pipeline"
@@ -795,6 +725,41 @@ seeded_by = "seed_totp_user"
 depends_on = []
 password = "Attack-Fixture-Passw0rd!"
 actor = "admin"
+
+[[parameter]]
+key = "cloud_connection"
+name = "connection_id"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}"
+description = "routers/cloud_sync.py resolves an owned connection through soev-api."
+unseedable = "A real soev-api cloud connection requires the platform credential and provider authorization; the sealed stack has neither SOEV_API_URL nor a cloud grant store. No locally created OWUI id is a connection id."
+
+[[parameter]]
+key = "cloud_family"
+name = "family"
+prefix = "/api/v1/cloud-sync/connections/{connection_id}/live/{family}"
+description = "The family selects a live capability on an existing authorized platform connection."
+unseedable = "The family route requires the same unavailable authorized soev-api connection as connection_id; an enum alone cannot seed that resource."
+
+[[parameter]]
+key = "cloud_knowledge"
+name = "knowledge_id"
+prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}"
+description = "Cloud-sync handlers first authorize the OWUI knowledge base; a platform subscription is a separate prerequisite."
+same_as = "knowledge"
+
+[[parameter]]
+key = "cloud_schedule"
+name = "schedule_id"
+prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}"
+description = "Schedules belong to a soev-api collection and an authorized provider connection."
+unseedable = "Creating a schedule requires a real soev-api provider grant and subscription. The sealed stack has no platform cloud service; do not substitute a local KB id for a schedule."
+
+[[parameter]]
+key = "meeting"
+name = "meeting_id"
+prefix = "/api/v1/meetings/{meeting_id}"
+description = "routers/meetings.py stores meetings exclusively as soev-api chat threads."
+unseedable = "The meeting agent and soev-api thread service are not present in the sealed stack (SOEV_API_URL is empty). The application cannot create a local meeting row to seed these routes."
 
 [[destructive]]
 id = "POST /api/v1/auths/signout"
@@ -892,16 +857,6 @@ json = { "folder_id" = "{folder}" }
 route = "POST /api/v1/chats/{id}/messages/{message_id}/resolve"
 description = "utils/tool_approval.py:resolve_tool_call_output answers 404 'Tool call not found' unless call_id names a function_call in the message output; the chat fixture seeds one, pending. Reject, because approve and answer need a real tool or an ask_user call."
 json = { "call_id" = "call_{token}", "action" = "reject" }
-
-[[field]]
-route = "POST /api/v1/google-drive/sync/items"
-description = "The sync handler answers 404 'Knowledge base not found' for an unknown knowledge_id; the provider-typed KB fixture exists."
-json = { "knowledge_id" = "{google_drive_knowledge}", "items[].type" = "file", "items[].item_id" = "attack-item-{token}", "items[].item_path" = "/attack", "items[].name" = "attack" }
-
-[[field]]
-route = "POST /api/v1/onedrive/sync/items"
-description = "The sync handler answers 404 'Knowledge base not found' for an unknown knowledge_id; the provider-typed KB fixture exists."
-json = { "knowledge_id" = "{onedrive_knowledge}", "items[].type" = "file", "items[].item_id" = "attack-item-{token}", "items[].item_path" = "/attack", "items[].name" = "attack", "items[].drive_id" = "attack-drive" }
 
 [[field]]
 route = "POST /api/v1/images/edit"
@@ -1059,21 +1014,6 @@ class Tools:
     def echo(self, text: str) -> str:
         return text
 ''' }
-
-[[field]]
-route = "POST /api/v1/google-drive/sync/{knowledge_id}/sources/remove"
-description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed. sync/items has no path parameter, so the crossuser pass never sends it as the owner: setup starts the sync at fixture time, as the drive pass's declared body does (200)."
-json = { "item_id" = "attack-item-{token}" }
-
-[[field]]
-route = "POST /api/v1/onedrive/sync/{knowledge_id}/sources/remove"
-description = "services/sync/router.py:handle_remove_source answers 404 unless item_id names a source of this KB; the sync/items declaration adds attack-item-{token}, and cancel (driven first) ends the sync so removal is allowed. sync/items has no path parameter, so the crossuser pass never sends it as the owner: setup starts the sync at fixture time, as the drive pass's declared body does (200)."
-json = { "item_id" = "attack-item-{token}" }
-
-[[field]]
-route = "POST /api/v1/sync-daemon/runs/{knowledge_id}/summary"
-description = "routers/sync_daemon.py validates the run status against the daemon's run states and answered 400 to the placeholder; a completed google_drive run is one the daemon reports."
-json = { "status" = "completed", "provider" = "google_drive" }
 
 [[field]]
 route = "POST /api/v1/knowledge/{id}/file/add"
@@ -1250,25 +1190,8 @@ route = "DELETE /openai/{path}"
 allow = ["same-object", "write"]
 reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configured upstream for any verified user (CI turns it on; no tenant does yet). The answer is the upstream's, and the call changes nothing an owner holds."
 
-[[shared]]
-route = "GET /api/v1/sync-daemon/config/{provider}"
-allow = ["same-object"]
-reason = "utils/service_auth.py:get_sync_service_principal authenticates the daemon with no acting user: the provider config is the tenant's, read the same whoever the daemon acts for."
-
-[[shared]]
-route = "GET /api/v1/integrations/file-status/{file_id}"
-allow = ["same-object"]
-reason = "routers/integrations.py:get_file_status requires the loader-worker credential and returns a file's processing status by id, not checked against the acting user: the loader is a tenant-wide machine credential. Recorded in CROSSUSER-001 as a choice to confirm."
-
-# ---------------------------------------------------------------------------
-# Owner refusals that are a guard working
-#
-# The crossuser owner control proves isolation only where the owner's own request
-# succeeds. Where the owner is refused by a guard working, or for want of a system
-# the sealed stack lacks, [[control]] names the refusal (status and a fragment of
-# its detail) and why; a different answer is still a gap, and a declared route
-# that starts succeeding fails the test until its declaration goes.
-
+# Owner refusals that are a guard working. A declared route that starts
+# succeeding fails the gate until its declaration is removed.
 [[control]]
 route = "DELETE /api/v1/agent-configs/{slug}"
 status = 400
@@ -1306,30 +1229,6 @@ detail = "could not find"
 reason = "OAuth sessions come from an identity provider's code exchange, which the sealed stack has none of."
 
 [[control]]
-route = "POST /api/v1/google-drive/sync/{knowledge_id}/cancel"
-status = 400
-detail = "No active sync"
-reason = "Google Drive needs an OAuth identity provider the sealed stack lacks, so a knowledge base never has an active Drive sync to cancel."
-
-[[control]]
-route = "POST /api/v1/google-drive/sync/{knowledge_id}/sources/remove"
-status = 404
-detail = "Source not found"
-reason = "As Drive cancel: no Drive, so no synced source to remove."
-
-[[control]]
-route = "POST /api/v1/onedrive/sync/{knowledge_id}/cancel"
-status = 400
-detail = "No active sync"
-reason = "OneDrive needs an OAuth identity provider the sealed stack lacks, so a knowledge base never has an active OneDrive sync to cancel."
-
-[[control]]
-route = "POST /api/v1/onedrive/sync/{knowledge_id}/sources/remove"
-status = 404
-detail = "Source not found"
-reason = "As OneDrive cancel: no OneDrive, so no synced source to remove."
-
-[[control]]
 route = "POST /api/v1/calendars/events/{event_id}/rsvp"
 status = 404
 detail = "Not an attendee of this event"
@@ -1340,18 +1239,6 @@ route = "PATCH /api/v1/knowledge/external/source/{id}"
 status = 400
 detail = "Test query returned no results"
 reason = "Updating an external source validates it with a retrieval test query that must return content; the CI stub's Qdrant has nothing indexed, so the query returns none. A real vector store with data is what the sealed stack lacks."
-
-[[control]]
-route = "POST /api/v1/confluence/sync/{knowledge_id}/cancel"
-status = 400
-detail = "No active sync"
-reason = "A Confluence sync needs Atlassian, which the sealed stack lacks; ENABLE_CONFLUENCE_INTEGRATION stays off for the egress test."
-
-[[control]]
-route = "POST /api/v1/confluence/sync/{knowledge_id}/sources/remove"
-status = 404
-detail = "Source not found"
-reason = "As Confluence cancel: no Atlassian, so no synced source to remove."
 
 [[control]]
 route = "DELETE /api/v1/prompts/id/{prompt_id}/history/{history_id}"
@@ -1371,15 +1258,3 @@ reason = "The owner control for update/version makes the history fixture the act
 prefix = "/api/v1/internal/retrieval"
 token = "ci-stub-key"
 reason = "utils/service_auth.py:get_agent_principal: the AGENT_API_KEY bearer, acting for the user in X-Acting-User-Id. A user's own bearer is refused outright (401)."
-
-[[service]]
-prefix = "/api/v1/sync-daemon"
-token = "ci-stub-key"
-headers = { "X-Acting-Provider" = "google_drive" }
-reason = "utils/service_auth.py:get_sync_principal: the SYNC_API_KEY bearer, acting for X-Acting-User-Id through X-Acting-Provider. A user's own bearer is refused outright (401)."
-
-[[service]]
-prefix = "/api/v1/integrations/file-status"
-token = "ci-stub-key"
-headers = { "X-Acting-Provider" = "google_drive" }
-reason = "utils/service_auth.py:get_integration_principal: the loader-worker's LOADER_INGEST_API_KEY bearer, acting for X-Acting-User-Id through X-Acting-Provider (routers/integrations.py:_require_loader). A user's own bearer is refused (403)."

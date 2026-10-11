@@ -93,19 +93,7 @@ id = "GET /api/v1/auths/password/reset/{token}/validate"
 reason = "Never attempted: every owner pass skips it because `token` is declared unseedable (attack-surface.toml, key reset_token). auths.py:forgot_password stores only a hash and sends the raw token by email, the response is deliberately generic, and the plane reads neither mail nor the database. Closes with a mail sink on the CI network that the plane can read."
 
 [[waived]]
-id = "GET /api/v1/confluence/page/{cloud_id}/{page_id}/content"
-reason = "Never attempted: every owner pass skips it because `cloud_id` and `page_id` are declared unseedable (attack-surface.toml, keys confluence_cloud and confluence_page). confluence_sync.py needs a real authorized Atlassian site, and the application exposes no endpoint that creates a site or a page. Confluence is enabled in production (staging tenant). Closes with a Confluence stub."
-
-[[waived]]
 id = "GET /openai/models/{url_idx}/download/status/{job_id}"
 reason = "Never attempted: every owner pass skips it because `job_id` is declared unseedable (attack-surface.toml, key model_download_job). routers/openai.py:get_provider_model_download_status reads a job an actual provider model download created; the CI stub serves model metadata but has no download-job lifecycle. Closes when the stub grows one."
 
 # --- Shared Confluence knowledge base: cannot be provisioned without Atlassian ---
-
-[[waived]]
-id = "POST /api/v1/confluence/shared/sync"
-reason = "Observed 404 'No shared Confluence knowledge base has been provisioned.' on every owner request: the handler runs and finds no shared KB. confluence_sync.py:provision_shared_kb needs a stored Confluence OAuth token (oauth mode, the chart default) or a service site (basic or scoped mode); both require a real Atlassian site, and CI has no Confluence credentials. Confluence is enabled in production (staging tenant). Closes with a Confluence stub."
-
-[[waived]]
-id = "DELETE /api/v1/confluence/shared"
-reason = "Observed 404 'No shared Confluence knowledge base has been provisioned.' on every owner request: the handler runs and finds no shared KB to delete. confluence_sync.py:provision_shared_kb needs a stored Confluence OAuth token (oauth mode, the chart default) or a service site (basic or scoped mode); both require a real Atlassian site, and CI has no Confluence credentials. Confluence is enabled in production (staging tenant). Closes with a Confluence stub."

@@ -131,16 +131,18 @@ def test_md_to_html_keeps_markdown_link():
 def test_pdf_url_fetcher_blocks_non_data(url):
     """WeasyPrint must refuse to dereference anything but a data: URI."""
     with pytest.raises(ValueError):
-        safe_pdf_url_fetcher(url)
+        safe_pdf_url_fetcher()(url)
 
 
 def test_pdf_url_fetcher_allows_data_uri():
     """A data: URI is self-contained and is passed through to WeasyPrint."""
-    pytest.importorskip('weasyprint')
-    result = safe_pdf_url_fetcher(
+    result = safe_pdf_url_fetcher()(
         'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
     )
-    assert isinstance(result, dict)
+    try:
+        assert result.read().startswith(b'\x89PNG\r\n\x1a\n')
+    finally:
+        result.close()
 
 
 # ---------------------------------------------------------------------------
@@ -239,3 +241,17 @@ class TestSurvivingImageCannotFetch:
     def test_ordinary_input_is_left_alone(self):
         html = sanitize_export_html('<input type="text" value="hi">')
         assert 'value="hi"' in html
+
+
+@pytest.mark.parametrize('url', ['http://169.254.169.254/latest/meta-data/', 'file:///etc/passwd'])
+def test_pdf_render_refuses_external_resources(url, monkeypatch):
+    from unittest.mock import Mock
+
+    from weasyprint import HTML
+
+    fetcher = safe_pdf_url_fetcher()
+    opened = Mock(side_effect=AssertionError('Export must not open external resources'))
+    monkeypatch.setattr(fetcher, 'open', opened)
+    pdf = HTML(string=f'<p>Export</p><img src="{url}">', url_fetcher=fetcher).write_pdf()
+    assert pdf.startswith(b'%PDF-')
+    opened.assert_not_called()
