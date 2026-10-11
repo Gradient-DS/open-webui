@@ -24,7 +24,7 @@ from hostile_corpus import fetch_payloads
 from openapi_surface import writable_string_fields
 
 from . import plane, seeds
-from .authorization_inventory import admin_gated_operations
+from .authorization_inventory import admin_gated_operations, platform_operations
 from .benign_requests import benign_request
 from .client import AttackClient, login
 from .identities import PASSWORD
@@ -141,17 +141,18 @@ def _is_seedable(route, surface):
             declaration = seeds.parameter_for(path, name, surface)
         except KeyError:
             return False
-        if 'unseedable' in declaration:
+        if not seeds.seed_enabled(declaration):
             return False
     return True
 
 
 def targets(spec=seeds.SPEC, *, surface=None):
     admins = set(admin_gated_operations(spec))
+    platform = set(platform_operations(spec))
     routes = [
         route
         for route in plane.operations(spec)
-        if ('{' in route or route in admins) and _is_seedable(route, surface or seeds.SURFACE)
+        if ('{' in route or route in admins or route in platform) and _is_seedable(route, surface or seeds.SURFACE)
     ]
     return routes, admins
 
@@ -235,7 +236,7 @@ def _request(admin, actor, route, target, tally, kwargs):
         else nullcontext()
     )
     # Resource deletion needs its actual owner; only credential/account deletion
-    # needs a disposable identity.
+    # needs a disposable identity. Platform admins cannot impersonate a KB owner.
     invalidates_identity = route in seeds.DESTRUCTIVE and route.split(' ', 1)[1].startswith(
         ('/api/v1/auths/', '/api/v1/users/')
     )
@@ -280,7 +281,7 @@ def _same_object(stranger, owner):
     )
 
 
-def _check(result, route, stranger, owner, markers, *, admin_only, control, resource_ids=()):
+def _check(result, route, stranger, owner, markers, *, admin_only, control, resource_ids=(), subject_scoped=False):
     reasons = []
     if stranger.timed_out or (owner is not None and owner.timed_out):
         # No response is not a refusal, a disclosure, or an accepted write.
@@ -299,12 +300,12 @@ def _check(result, route, stranger, owner, markers, *, admin_only, control, reso
         if control:
             result.controls[route] = owner.status
             result.control_bodies[route] = owner.body[:300]
-        if _same_object(stranger, owner):
+        if not subject_scoped and _same_object(stranger, owner):
             reasons.append(('same-object', 'second account received the same nonempty object as the owner'))
         if route == 'HEAD /api/v1/files/{id}/content' and 200 <= stranger.status < 300 and 200 <= owner.status < 300:
             reasons.append(('resource-access', 'second account accessed the owner resource through HEAD'))
         write = route.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
-        if write and 200 <= stranger.status < 300 and not _nothing_happened(stranger):
+        if write and not subject_scoped and 200 <= stranger.status < 300 and not _nothing_happened(stranger):
             reasons.append(('write', 'second account accepted a write to the owner resource'))
     allowed = result.shared.get(route, frozenset())
     for kind, reason in reasons:
@@ -327,6 +328,8 @@ def _benign(route, parameters, spec):
         request['json'] = plane._hold_declared(request.get('json'), (), declared['json'])[0]
     if declared.get('params'):
         request['params'] = {**request.get('params', {}), **declared['params']}
+    if 'data' in declared:
+        request['data'] = declared['data']
     return request
 
 
@@ -343,6 +346,7 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
     payloads = tuple(fetch_payloads() if payloads is None else payloads)
     full = os.getenv('ATTACK_FULL_CORPUS') == '1' if full is None else full
     fields = writable_string_fields(spec)
+    platform = set(platform_operations(spec))
     with own_fixtures(identities, spec=spec) as (parameters, markers, surface, owners):
         with pass_run('crossuser', routes, identities.admin) as tally:
             result = Authorization(tally, shared=_shared())
@@ -356,8 +360,15 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                 if target is None:
                     continue
                 path = route.split(' ', 1)[1]
-                owner = owners[_owner_key(path, surface)] if '{' in path else None
-                resource_ids = [parameters[path, name] for name in re.findall(r'\{([^}]+)\}', path)]
+                subject_scoped = route in platform and '{' not in path
+                owner = (
+                    owners[_owner_key(path, surface)] if '{' in path else owners['admin'] if subject_scoped else None
+                )
+                resource_ids = (
+                    list(parameters.values())
+                    if subject_scoped and route.startswith('GET ')
+                    else [parameters[path, name] for name in re.findall(r'\{([^}]+)\}', path)]
+                )
                 service = _service(path)
                 with _as_service(service, identities.admin.base_url, identities.intruder, owner) as (intruder, owner):
                     for control, kwargs in _requests(route, parameters, spec, fields, payloads, full):
@@ -368,10 +379,11 @@ def drive_crossuser(identities, *, spec=seeds.SPEC, payloads=None, full=None):
                             route,
                             stranger,
                             positive,
-                            _markers_outside(target, markers),
+                            _markers_outside(target + (repr(kwargs) if subject_scoped else ''), markers),
                             admin_only=route in admins,
                             control=control,
                             resource_ids=resource_ids,
+                            subject_scoped=subject_scoped,
                         )
                 plane.flush_hits()
     return result

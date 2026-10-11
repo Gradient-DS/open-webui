@@ -183,6 +183,48 @@ def test_synchronous_file_processing_does_not_poll():
     assert client.request.call_count == 1
 
 
+@pytest.mark.parametrize('consent_status', [200, 403])
+def test_cloud_seed_requires_consent_then_creates_the_owner_grant(monkeypatch, consent_status):
+    client, admin = Mock(), Mock()
+    ctx = seeds.SeedContext(client, admin, {'destructive': []})
+    admin.request.side_effect = [response(201, {'connection_id': 'connection'}), response(200, {'id': 'grant'})]
+    session = Mock()
+    session.post.return_value = response(consent_status, {})
+    manager = Mock()
+    manager.__enter__ = Mock(return_value=session)
+    manager.__exit__ = Mock(return_value=False)
+    monkeypatch.setattr(seeds.requests, 'Session', Mock(return_value=manager))
+    monkeypatch.setenv('CI_PLATFORM_FIXTURE_URL', 'http://fixture:8040')
+    monkeypatch.setenv('CI_PLATFORM_FIXTURE_KEY', 'test-fixture-key')
+    parameter = {'key': 'cloud_connection', 'provides': ['cloud_grant']}
+    if consent_status == 403:
+        with pytest.raises(requests.HTTPError):
+            seeds.seed_cloud_connection(ctx, parameter)
+        assert admin.request.call_count == 1
+        assert not ctx.values
+    else:
+        assert seeds.seed_cloud_connection(ctx, parameter) == 'connection'
+        assert ctx.values == {'cloud_grant': 'grant'}
+        admin.request.assert_called_with('POST', '/api/v1/cloud-sync/connections/connection/live/live_documents')
+    client.request.assert_not_called()
+    session.post.assert_called_once_with(
+        'http://fixture:8040/ci/consent',
+        headers={'Authorization': 'Bearer test-fixture-key'},
+        json={'connection_id': 'connection'},
+        timeout=30,
+    )
+
+
+def test_starting_consent_cannot_suspend_the_connection_used_by_positive_controls():
+    authorize = seeds.parameter_for('/api/v1/cloud-sync/connections/{connection_id}/authorize', 'connection_id')
+    live = seeds.parameter_for('/api/v1/cloud-sync/connections/{connection_id}/live/{family}', 'connection_id')
+    assert authorize['key'] != live['key']
+    assert authorize['via'] == 'POST /api/v1/cloud-sync/connections'
+    assert 'same_as' not in authorize
+    assert live['seeded_by'] == 'seed_cloud_connection'
+    assert 'cloud_grant' in live['provides']
+
+
 def test_file_seeding_waits_for_completion_and_cleared_job(monkeypatch):
     client = Mock(spec=seeds.AttackClient)
     client.request.side_effect = [
@@ -470,6 +512,7 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
     for chain in [
         ('folder', 'chat', 'chat_message', 'share'),
         ('channel', 'channel_message', 'channel_webhook', 'webhook_token'),
+        ('knowledge', 'directory'),
         ('calendar', 'event'),
         ('prompt', 'prompt_history'),
         ('file', 'filename'),
@@ -536,6 +579,36 @@ def test_active_function_serves_chat_actions_and_user_valves():
         declaration = seeds.parameter_for(path, name)
         key = declaration.get('same_as', declaration['key'])
         assert key == 'active_function', path
+
+
+@pytest.mark.parametrize(
+    'key,provided', [('removable_knowledge', 'removable_file'), ('update_knowledge', 'update_file')]
+)
+def test_knowledge_file_seeder_adds_a_file_nothing_else_uses(key, provided):
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
+    ctx.request = Mock(
+        side_effect=[
+            {'id': 'own-file'},
+            {'status': True},
+            {'id': 'own-kb'},
+            {'id': 'own-kb', 'files': [{'id': 'own-file'}]},
+        ]
+    )
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == key)
+    assert seeds.seed_knowledge_file(ctx, parameter) == 'own-kb'
+    assert ctx.values[provided] == 'own-file'
+    upload, process, create, add = ctx.request.call_args_list
+    assert upload.args == ('POST', '/api/v1/files/') and upload.kwargs['params'] == {'process': False}
+    assert process.kwargs['json'] == {'file_id': 'own-file'}
+    assert add.args == ('POST', '/api/v1/knowledge/own-kb/file/add')
+    assert add.kwargs['json'] == {'file_id': 'own-file'}
+    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
+    assert not seeds.is_destructive('POST', '/api/v1/knowledge/{id}/file/remove')
+    ctx.request = Mock(
+        side_effect=[{'id': 'own-file'}, {'status': True}, {'id': 'own-kb'}, {'id': 'own-kb', 'files': []}]
+    )
+    with pytest.raises(RuntimeError, match='did not join'):
+        seeds.seed_knowledge_file(ctx, parameter)
 
 
 def test_totp_code_matches_rfc_6238_sha1_vectors():
@@ -766,6 +839,7 @@ def test_model_registration_rejects_missing_read_access_or_wrong_model(body):
 
 
 LIVE_READS = [
+    '/api/v1/meetings/{meeting_id}',
     '/api/v1/users/{user_id}',
     '/api/v1/folders/{id}',
     '/api/v1/chats/{id}',
@@ -774,6 +848,7 @@ LIVE_READS = [
     '/api/v1/channels/{id}',
     '/api/v1/channels/{id}/messages/{message_id}',
     '/api/v1/channels/{id}/webhooks',
+    '/api/v1/knowledge/{id}',
     '/api/v1/knowledge/external/connections/{id}',
     '/api/v1/files/{id}',
     '/api/v1/files/{id}/content/{file_name}',

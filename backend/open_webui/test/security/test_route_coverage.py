@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from .attack import plane
+from .attack import plane, seeds
 from .attack.hits_path import hits_path
 
 SECURITY = Path(__file__).resolve().parents[3].parent / 'security'
@@ -41,7 +41,11 @@ def waivers() -> dict[str, str]:
     if not WAIVERS.exists():
         return {}
     parsed = tomllib.loads(WAIVERS.read_text())
-    return {entry['id']: entry['reason'] for entry in parsed.get('waived', [])}
+    return {
+        entry['id']: entry['reason']
+        for entry in parsed.get('waived', [])
+        if not (entry.get('backed_by') == 'soev-solutions' and seeds.runtime_soev_backed() == 'drive')
+    }
 
 
 def evidence():

@@ -2,9 +2,10 @@
 
 import re
 from urllib.parse import quote
-import pytest
-from . import seeds
 
+import pytest
+
+from . import seeds
 from .test_seeds import LIVE_READS, path_parameters, stop_seed_task
 
 
@@ -29,7 +30,7 @@ def test_live_resolution_returns_every_seedable_route_parameter(live_seeds):
     _, resolved = live_seeds
     assert not resolved.failures, resolved.failures
     expected = {
-        (path, name) for _, path, name in path_parameters() if 'unseedable' not in seeds.parameter_for(path, name)
+        (path, name) for _, path, name in path_parameters() if seeds.seed_enabled(seeds.parameter_for(path, name))
     }
     assert resolved.keys() == expected
     assert all(isinstance(value, str) and value.strip() and '{' not in value for value in resolved.values())
@@ -76,6 +77,8 @@ def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):
 @pytest.mark.parametrize('template', LIVE_READS)
 def test_live_ids_address_real_resources(live_seeds, template):
     identities, resolved = live_seeds
+    if seeds.route_waived(f'GET {template}'):
+        pytest.skip('soev-solutions resource is waived in this runtime mode')
     path = re.sub(r'\{([^}]+)\}', lambda m: quote(resolved[template, m[1]], safe='/'), template)
     result = identities.admin.request('GET', path)
     assert result.status_code == 200, f'{template}: HTTP {result.status_code}: {result.text[:200]}'

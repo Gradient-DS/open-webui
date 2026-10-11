@@ -1,5 +1,8 @@
 name: Runtime Security
 
+# RUNTIME_SOEV_BACKED=waive (default) skips private-service seeds and routes.
+# The private full-stack runner sets drive to seed them and require their hits.
+#
 # Layer 2 of the security gates: the application is driven over real HTTP inside
 # a stack with no route off-host, while Falco watches syscalls. The static suite
 # in security.yml cannot catch what this catches -- four of the findings this

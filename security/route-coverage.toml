@@ -107,7 +107,8 @@ reason = "Never attempted: `path` is unseedable (attack-surface.toml, key cache)
 # --- Backed by soev-solutions: security tested there -------------------------
 # soev-api, soev-sync and soev-agents-api are closed source and never run in this
 # open-source repository's CI, not even as a stub. The plane skips every route
-# marked backed_by = "soev-solutions" (attack/seeds.py:SOEV_BACKED), and
+# marked backed_by = "soev-solutions" in the default waive mode
+# (attack/seeds.py:SOEV_BACKED). Private drive mode requires their hits, and
 # test_live_crossuser.py still checks that each one refuses an anonymous caller.
 # Grep: backed_by = "soev-solutions"
 

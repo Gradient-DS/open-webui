@@ -55,7 +55,7 @@ from . import client as transport
 from .configuration import preserve_configuration
 from .hits_path import hits_path
 from .identities import PASSWORD
-from .seeds import DESTRUCTIVE, METHODS, SOEV_BACKED, SPEC, parameter_for
+from .seeds import DESTRUCTIVE, METHODS, SOEV_BACKED, SPEC, parameter_for, route_waived
 
 
 @dataclass(frozen=True)
@@ -262,9 +262,9 @@ def _tokens(dotted):
     return tokens
 
 
-def _plant(node, tokens, payload):
+def _plant(node, tokens, payload, *, replace=False):
     if not tokens:
-        return node if isinstance(node, (dict, list)) else payload
+        return node if isinstance(node, (dict, list)) and not replace else deepcopy(payload)
     key, *rest = tokens
     if key == 0:
         # `not node` matters once a skeleton is in play: an empty list IS a
@@ -274,7 +274,7 @@ def _plant(node, tokens, payload):
     elif not isinstance(node, dict):
         node = {}
     existing = node[0] if key == 0 else node.get(key)
-    node[key] = _plant(existing, rest, payload)
+    node[key] = _plant(existing, rest, payload, replace=replace)
     return node
 
 
@@ -312,7 +312,9 @@ def _hold_declared(skeleton, fields, declared):
     """
     if not declared:
         return skeleton, []
-    skeleton = _body_for(list(declared), declared, skeleton if skeleton is not None else {})
+    skeleton = deepcopy(skeleton) if skeleton is not None else {}
+    for name, value in declared.items():
+        skeleton = _plant(skeleton, _tokens(name), value, replace=True)
     return skeleton, [name for name in fields if any(_overlaps(name, held) for held in declared)]
 
 
@@ -464,7 +466,7 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
 
 def _target(route_id, parameters, tally):
     tally.fixture_failures.update(getattr(parameters, 'failures', {}))
-    if route_id in SOEV_BACKED:
+    if route_waived(route_id):
         tally.skipped[route_id] = f'BACKED BY SOEV-SOLUTIONS: {SOEV_BACKED[route_id]}'
         return None
     if route_id in getattr(parameters, 'blocked', {}):
@@ -613,6 +615,8 @@ def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
                         body['json'] = _hold_declared(None, (), declared['json'])[0]
                     if declared.get('params'):
                         body['params'] = declared['params']
+                    if 'data' in declared:
+                        body['data'] = declared['data']
                     # Multipart: the derivation models JSON bodies only, so nothing else sends one.
                     if declared.get('files'):
                         body.update(files=declared['files'], data=declared.get('form', {}))

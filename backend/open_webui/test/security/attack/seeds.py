@@ -8,7 +8,9 @@ Unseedable entries remain in SURFACE and are deliberately absent from results.
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import re
 import secrets
 import time
@@ -16,6 +18,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
+
+import requests
 
 from .client import AttackClient, AuthenticationError, json_body, totp_code
 from .configuration import recover_configuration
@@ -27,12 +31,45 @@ SPEC = json.loads((ROOT / 'security/openapi.json').read_text())
 METHODS = {'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'}
 DESTRUCTIVE = {entry['id']: entry['reason'] for entry in SURFACE['destructive']}
 #: Routes that only work with soev-solutions, which never runs in this repo's CI.
-#: Every pass skips them; their waivers in route-coverage.toml carry the reason.
+#: Public CI waives them; the private full-stack run can drive them.
 SOEV_BACKED = {
     entry['id']: entry['reason']
     for entry in tomllib.loads((ROOT / 'security/route-coverage.toml').read_text()).get('waived', [])
     if entry.get('backed_by') == 'soev-solutions'
 }
+
+
+def runtime_soev_backed():
+    mode = os.environ.get('RUNTIME_SOEV_BACKED', 'waive')
+    if mode not in {'waive', 'drive'}:
+        raise ValueError(f'RUNTIME_SOEV_BACKED must be waive or drive, got {mode!r}')
+    return mode
+
+
+# Validate even when a runner only collects tests or has no private routes.
+runtime_soev_backed()
+
+
+def backed_seed_waived(entry):
+    return runtime_soev_backed() == 'waive' and entry.get('backed_by') == 'soev-solutions'
+
+
+def route_waived(route):
+    return runtime_soev_backed() == 'waive' and route in SOEV_BACKED
+
+
+def seed_enabled(entry):
+    return 'unseedable' not in entry and not backed_seed_waived(entry)
+
+
+def selected_parameters(surface=SURFACE):
+    selected = [entry for entry in dependency_order(surface) if seed_enabled(entry)]
+    keys = {entry['key'] for entry in selected}
+    for entry in selected:
+        missing = set(_dependencies(entry)) - keys
+        if missing:
+            raise ValueError(f'{entry["key"]}: dependencies disabled in this mode: {sorted(missing)}')
+    return selected
 
 
 def _extract(payload, dotted: str, *, name: str, via: str) -> str:
@@ -103,7 +140,8 @@ def ordinary_targets(spec=SPEC, surface=SURFACE):
         for method in item
         if method in METHODS
         and not is_destructive(method, path, surface)
-        and all('unseedable' not in parameter_for(path, name, surface) for name in re.findall(r'\{([^}]+)\}', path))
+        and not route_waived(f'{method.upper()} {path}')
+        and all(seed_enabled(parameter_for(path, name, surface)) for name in re.findall(r'\{([^}]+)\}', path))
     ]
 
 
@@ -198,6 +236,8 @@ class SeedContext:
         # Local processing is synchronous; a soev-backed deployment returns a job
         # instead, and the next fixture step must not race that ingestion.
         if method == 'POST' and path == '/api/v1/retrieval/process/file' and body.get('job_id'):
+            self.wait_for_file(kwargs['json']['file_id'], actor=actor)
+        elif method == 'POST' and re.fullmatch(r'/api/v1/knowledge/[^/]+/file/add', path):
             self.wait_for_file(kwargs['json']['file_id'], actor=actor)
         return body
 
@@ -433,6 +473,63 @@ def seed_task(ctx, parameter):
     return task_id
 
 
+def seed_knowledge_file(ctx, parameter):
+    # Removal and asynchronous reprocessing each need their own settled file.
+    label = f'attack-{parameter["key"]}-{ctx.token}'
+    upload = ctx.request(
+        'POST',
+        '/api/v1/files/',
+        actor=ctx.admin,
+        params={'process': False},
+        files=[('file', (f'{label}.txt', label, 'text/plain'))],
+    )
+    file_id = _extract(upload, 'id', name=parameter['key'], via='POST /api/v1/files/')
+    # file/add refuses a file with no extracted content.
+    ctx.request('POST', '/api/v1/retrieval/process/file', actor=ctx.admin, json={'file_id': file_id}, timeout=120)
+    knowledge = ctx.request(
+        'POST',
+        '/api/v1/knowledge/create',
+        actor=ctx.admin,
+        json={'name': label, 'description': 'Attack knowledge with an isolated processed file'},
+    )
+    knowledge_id = _extract(knowledge, 'id', name=parameter['key'], via='POST /api/v1/knowledge/create')
+    added = ctx.request(
+        'POST',
+        f'/api/v1/knowledge/{quote(knowledge_id, safe="")}/file/add',
+        actor=ctx.admin,
+        json={'file_id': file_id},
+        timeout=120,
+    )
+    if not any(isinstance(item, dict) and item.get('id') == file_id for item in added.get('files') or []):
+        raise RuntimeError(f'{parameter["key"]}: the file did not join its knowledge base')
+    (provided,) = parameter['provides']
+    ctx.provide(parameter, provided, file_id)
+    return knowledge_id
+
+
+def seed_cloud_family(ctx, parameter):
+    return 'live_documents'
+
+
+def seed_cloud_connection(ctx, parameter):
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': 'onedrive'})
+    connection = _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
+    # OAuth cannot return from Microsoft on the sealed network. Only consent
+    # state is seeded; the application must admit the owner and create its grant.
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.post(
+            os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
+            headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
+            json={'connection_id': connection},
+            timeout=30,
+        )
+        response.raise_for_status()
+    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.admin)
+    ctx.provide(parameter, 'cloud_grant', grant['id'])
+    return connection
+
+
 _SEEDERS = {
     function.__name__: function
     for function in (
@@ -446,6 +543,9 @@ _SEEDERS = {
         seed_task,
         seed_active_function,
         seed_totp_user,
+        seed_cloud_connection,
+        seed_cloud_family,
+        seed_knowledge_file,
     )
 }
 
@@ -513,12 +613,16 @@ def resolve_fields(ctx, *, entries=None):
     """Fill every [[field]] from seeded values, making its setup requests first, in order."""
     fields = {}
     for entry in ctx.surface.get('field', []) if entries is None else entries:
+        if backed_seed_waived(entry) or route_waived(entry['route']):
+            continue
         for step in entry.get('setup', []):
             method, path = step['via'].split(' ', 1)
             ctx.request(
                 method, _fill_field(path, ctx, path=True), actor=ctx.admin, json=_fill_field(step.get('body', {}), ctx)
             )
         resolved = {kind: _fill_field(entry[kind], ctx) for kind in ('json', 'params', 'form') if kind in entry}
+        if 'body_base64' in entry:
+            resolved['data'] = base64.b64decode(entry['body_base64'], validate=True)
         if 'files' in entry:
             resolved['files'] = [
                 (
@@ -534,7 +638,7 @@ def resolve_fields(ctx, *, entries=None):
 def resolve_parameters(
     client: AttackClient, *, admin: AttackClient | None = None, surface=SURFACE, spec=SPEC, collect_failures=False
 ):
-    ordered = dependency_order(surface)
+    ordered = selected_parameters(surface)
     ctx = SeedContext(client, admin or client, surface)
     if surface.get('preserve_configuration'):
         recover_configuration(ctx.admin)
@@ -574,7 +678,7 @@ def resolve_parameters(
             if p['key'] in failures:
                 for method in spec['paths'][path].keys() & METHODS:
                     blocked[f'{method.upper()} {path}'] = failures[p['key']]
-            elif 'unseedable' not in p:
+            elif seed_enabled(p):
                 resolved[path, name] = ctx.values[p['key']]
     fields = {}
     for entry in surface.get('field', []):
