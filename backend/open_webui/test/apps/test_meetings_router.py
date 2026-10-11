@@ -50,12 +50,15 @@ class FakeSoev:
 
 
 def _client(monkeypatch, fake=None, *, enabled=True, url='http://soev-api'):
+    from open_webui import config
+    from open_webui.main import soev_not_configured_handler
     from open_webui.routers import meetings
+    from open_webui.soev.availability import SoevNotConfigured
     from open_webui.utils.auth import get_verified_user
 
     monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: enabled if feature == 'meetings' else True)
-    monkeypatch.setattr(meetings.config, 'SOEV_API_URL', url)
-    app = FastAPI()
+    monkeypatch.setattr(config, 'SOEV_API_URL', url)
+    app = FastAPI(exception_handlers={SoevNotConfigured: soev_not_configured_handler})
     app.include_router(meetings.router, prefix='/api/v1/meetings')
     user = SimpleNamespace(id='u1', role='admin', email='u@example.com', name='U')
     app.dependency_overrides[get_verified_user] = lambda: user
@@ -73,7 +76,9 @@ def test_meetings_are_refused_for_admins_when_the_flag_is_off(monkeypatch):
 def test_meetings_need_soev_api(monkeypatch):
     """Without soev-api there is nothing to forward to."""
     client = _client(monkeypatch, url='')
-    assert client.get('/api/v1/meetings/agents').status_code == 503
+    response = client.get('/api/v1/meetings/agents')
+    assert response.status_code == 503
+    assert response.json()['detail']['code'] == 'soev_not_configured'
 
 
 def test_agents_and_list_forward_as_the_caller(monkeypatch):
