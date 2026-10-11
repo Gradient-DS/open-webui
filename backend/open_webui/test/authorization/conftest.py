@@ -152,6 +152,17 @@ def seeded(template, application, monkeypatch, tmp_path):
     monkeypatch.setattr(database, 'AsyncSessionLocal', sessions)
     monkeypatch.setattr(database, 'SessionLocal', sessionmaker(engine, expire_on_commit=False))
     monkeypatch.setattr(Config, 'PERSISTENT_ENABLED', True)
+    # The SQL tables above stand in for soev-api, so knowledge grants must count as configured.
+    from open_webui import config as owui_config
+
+    monkeypatch.setattr(owui_config, 'SOEV_API_URL', 'http://soev-api.test')
+    from open_webui.soev import ingest
+
+    # Renditions live in soev-api; a file read serves its own row, authorization stays real.
+    async def no_remote_rendition(file, user_id, **kwargs):
+        return (file.data or {}).get('content')
+
+    monkeypatch.setattr(ingest, 'rendition_of', no_remote_rendition)
     for feature in ('knowledge', 'models', 'prompts', 'tools', 'skills', 'admin_evaluations'):
         monkeypatch.setitem(features.FEATURE_FLAGS, feature, True)
 

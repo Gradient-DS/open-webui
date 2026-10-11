@@ -55,14 +55,12 @@ def authentication_dependencies():
     from open_webui.routers.scim import get_scim_auth
     from open_webui.routers.totp import get_2fa_setup_user
     from open_webui.utils.auth import get_admin_user, get_current_user, get_verified_user
-    from open_webui.utils.service_auth import get_agent_principal
 
     return {
         get_verified_user,
         get_admin_user,
         get_current_user,  # Real session authentication, also allows pending accounts.
         get_2fa_setup_user,  # Session or signed, purpose-scoped enrollment token.
-        get_agent_principal,  # Service bearer plus a database-resolved acting user.
         get_scim_auth,  # Configured SCIM service bearer.
     }
 

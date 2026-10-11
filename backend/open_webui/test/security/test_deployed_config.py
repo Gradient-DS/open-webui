@@ -18,11 +18,9 @@ DIVERGENCES = {
     **{
         name: (None, 'Private soev service is absent; its routes are covered in soev-solutions.')
         for name in (
-            'AGENT_API_BASE_URL',
             'AGENT_API_ENABLED',
             'AGENT_API_PICKER_DEFAULT_SLUG',
             'FEATURE_AGENT_PICKER',
-            'ENABLE_AGENT_PROXY',
         )
     },
     'RAG_OPENAI_API_BASE_URL': ('http://stub:8000/v1', 'Production LiteLLM hostname replaced by the sealed stub.'),

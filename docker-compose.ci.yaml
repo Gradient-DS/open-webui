@@ -157,8 +157,6 @@ services:
       # OWUI-local agent-config CRUD and inbound file authorization fixtures.
       # These do not configure or run an agents-api server.
       AGENT_API_AGENTS: "soev_chat_manual,assistant_onboarding"
-      AGENT_API_KEY: "ci-stub-key"
-      AGENT_SEARCH_ENABLED: "true"
       # No tenant sets it yet, but it forwards arbitrary requests upstream: the
       # plane drives it rather than leave it unmeasured.
       ENABLE_OPENAI_API_PASSTHROUGH: "true"

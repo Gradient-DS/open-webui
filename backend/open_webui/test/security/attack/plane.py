@@ -2,7 +2,7 @@
 
 RUN-TAG: owui-phase7a-plane-core
 
-The committed document has 637 operations, 237 writable routes and 2684
+The committed document has 621 operations, 234 writable routes and 2672
 derived string fields. At 63 payloads, all-fields alone costs about 15,000
 requests; unconditional leave-one-out costs another ~170,000 before
 single-field retries.
@@ -57,7 +57,6 @@ from .hits_path import hits_path
 from .identities import PASSWORD
 from .seeds import (
     DESTRUCTIVE,
-    LEGACY_BACKED,
     METHODS,
     SOEV_BACKED,
     SPEC,
@@ -477,8 +476,7 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
 def _target(route_id, parameters, tally):
     tally.fixture_failures.update(getattr(parameters, 'failures', {}))
     if route_waived(route_id):
-        backer = 'LEGACY AGENTS-API' if route_id in LEGACY_BACKED else 'SOEV-SOLUTIONS'
-        tally.skipped[route_id] = f'BACKED BY {backer}: {LEGACY_BACKED.get(route_id) or SOEV_BACKED[route_id]}'
+        tally.skipped[route_id] = f'BACKED BY SOEV-SOLUTIONS: {SOEV_BACKED[route_id]}'
         return None
     if route_id in getattr(parameters, 'blocked', {}):
         tally.skipped[route_id] = f'FAILED FIXTURE: {parameters.blocked[route_id]}'

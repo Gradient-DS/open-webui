@@ -198,7 +198,6 @@ from open_webui.models.models import Models, normalize_model_tags
 from open_webui.models.users import Users
 from open_webui.routers import (
     agent_configs,
-    agent_proxy,
     analytics,
     archives,
     audio,
@@ -210,7 +209,6 @@ from open_webui.routers import (
     configs,
     cloud_sync,
     data_warnings,
-    discovery,
     evaluations,
     export,
     feedback_report,
@@ -221,7 +219,6 @@ from open_webui.routers import (
     groups,
     images,
     integrations,
-    internal_retrieval,
     invites,
     knowledge,
     memories,
@@ -1105,14 +1102,7 @@ app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
-app.include_router(
-    internal_retrieval.router,
-    prefix='/api/v1/internal/retrieval',
-    tags=['internal-retrieval'],
-)
-app.include_router(agent_proxy.router, prefix='/api/v1/agent', tags=['agent-proxy'])
 app.include_router(agent_configs.router, prefix='/api/v1/agent-configs', tags=['agents'])
-app.include_router(discovery.router, prefix='/api/v1/discovery', tags=['discovery'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
@@ -2073,7 +2063,6 @@ async def chat_completion(
                     request,
                     form_data,
                     metadata,
-                    metadata.get('features', {}),
                     override_agent=chat_agent_id,
                 )
             else:
@@ -2823,7 +2812,6 @@ async def get_app_config(request: Request):
         'onedrive.client_id_business',
         'onedrive.sharepoint_url',
         'onedrive.sharepoint_tenant_id',
-        'agent_proxy.enable',
         'agent_api.picker_default_slug',
         'features.enable_data_warnings',
         'admin.data_retention_ttl_days',
@@ -2975,7 +2963,6 @@ async def get_app_config(request: Request):
                         else {}
                     ),
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
-                    'enable_agent_proxy': config.get('agent_proxy.enable'),  # [Gradient]
                     'enable_live_mail': AGENT_API_ENABLED and config.get('live_mail.enable'),
                     'enable_live_documents': AGENT_API_ENABLED and config.get('live_documents.enable'),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]

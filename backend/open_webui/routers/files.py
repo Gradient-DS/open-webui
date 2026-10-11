@@ -385,7 +385,7 @@ async def upload_file_handler(
     #
     # count_cap_guard defaults True so the user route is always covered;
     # server-generated upload paths (image/audio generation, agent-internal
-    # blobs — see images.py/utils/files.py/internal_retrieval.py) pass
+    # blobs — see images.py/utils/files.py) pass
     # count_cap_guard=False since they aren't a user-initiated upload the
     # cap is meant to bound, mirroring the sniff_guard opt-out precedent.
     if count_cap_guard and user.role != 'admin':

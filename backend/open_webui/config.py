@@ -3097,9 +3097,6 @@ SOEV_API_JOB_POLL_SECONDS = int(os.environ.get('SOEV_API_JOB_POLL_SECONDS', '5')
 SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS = int(os.environ.get('SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS', '21600'))
 SOEV_API_INLINE_DOCUMENT_BYTES = int(os.environ.get('SOEV_API_INLINE_DOCUMENT_BYTES', '262144'))
 
-ENABLE_AGENT_PROXY = os.environ.get('ENABLE_AGENT_PROXY', 'False').lower() == 'true'
-
-AGENT_SEARCH_ENABLED = os.environ.get('AGENT_SEARCH_ENABLED', 'False').lower() == 'true'
 
 _default_selected_agent = AGENT_API_AGENTS[0] if AGENT_API_AGENTS else ''
 
@@ -3524,8 +3521,6 @@ DEFAULT_CONFIG = {
     'admin.user_inactivity_ttl_days': USER_INACTIVITY_TTL_DAYS,
     'agent_api.picker_default_slug': AGENT_API_PICKER_DEFAULT_SLUG,
     'agent_api.selected_agent': AGENT_API_SELECTED_AGENT,
-    'agent_proxy.enable': ENABLE_AGENT_PROXY,
-    'agent_search.enabled': AGENT_SEARCH_ENABLED,
     'auth.2fa_grace_period_days': TWO_FA_GRACE_PERIOD_DAYS,
     'auth.enable_2fa': ENABLE_2FA,
     'auth.require_2fa': REQUIRE_2FA,

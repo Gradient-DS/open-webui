@@ -29,12 +29,6 @@ data:
   {{- with .Values.soevApi.servicePrincipal }}
   SOEV_API_SERVICE_PRINCIPAL: {{ . | quote }}
   {{- end }}
-  {{- with .Values.agentApi.runtime }}
-  {{- if not (has . (list "v1" "v2")) }}
-  {{- fail "agentApi.runtime must be v1 or v2" }}
-  {{- end }}
-  AGENT_API_RUNTIME: {{ . | quote }}
-  {{- end }}
   {{- if and (ne .Values.liveDocuments.enabled nil) (ne (toString .Values.liveDocuments.enabled) "") }}
   ENABLE_LIVE_DOCUMENTS: {{ .Values.liveDocuments.enabled | quote }}
   {{- end }}
@@ -597,10 +591,8 @@ data:
   {{- end }}
 
   # Agent API (internal: routes chat UI to agent service)
-  # AGENT_API_KEY is set via secrets (see .Values.secrets.agentApiKey)
   {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
   AGENT_API_ENABLED: "true"
-  AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
   AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
   {{- with .Values.openWebui.config.agentApiAgentsConfig }}
   AGENT_API_AGENTS_CONFIG: {{ . | quote }}
@@ -614,23 +606,6 @@ data:
   # [Gradient] Per-chat agent picker UI (Settings → Agents admin tab +
   # new-chat empty-state cards). Layered on top of AGENT_API_ENABLED.
   FEATURE_AGENT_PICKER: {{ .Values.openWebui.config.featureAgentPicker | default "false" | quote }}
-
-  # Agent Proxy (external: exposes agent API to external callers)
-  ENABLE_AGENT_PROXY: {{ .Values.openWebui.config.enableAgentProxy | default "false" | quote }}
-
-  # Search API (RAG discovery proxy at /api/v1/discovery/*). Points at the
-  # agents-api, which hosts GET /v1/discovery/documents.
-  # SEARCH_API_KEY is set via secrets (see .Values.secrets.searchApiKey).
-  # Empty baseUrl disables the discovery proxy at request time.
-  {{- if .Values.openWebui.config.searchApi.baseUrl }}
-  SEARCH_API_BASE_URL: {{ .Values.openWebui.config.searchApi.baseUrl | quote }}
-  {{- end }}
-
-  # Agent Search (machine-auth retrieval endpoint at /api/v1/internal/retrieval/query
-  # and /api/v1/internal/retrieval/accessible-kbs). Inbound bearer is validated
-  # against the same AGENT_API_KEY used for the open-webui → agent outbound
-  # call (single shared secret across the per-tenant trust boundary).
-  AGENT_SEARCH_ENABLED: {{ .Values.agentSearch.enabled | default false | quote }}
 
   # Two-Factor Authentication (TOTP)
   ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}

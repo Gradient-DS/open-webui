@@ -21,8 +21,6 @@ soevApi:
       user.permissions.features: {web_search: true, notes: true}
     modelMap:
       zai-org/GLM-5.3: glm-5-3
-agentApi:
-  runtime: v2
 liveDocuments:
   enabled: true
 liveMail:
