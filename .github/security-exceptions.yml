@@ -174,15 +174,18 @@ exceptions:
       release, and the advisory lists it as still affected, so there is no
       version to upgrade to.
     replacement_considered: >-
-      nltk is pulled in for sentence tokenisation behind langchain's text
-      splitters. Replacing the splitter implementation would change how every
-      existing document was chunked and would invalidate stored embeddings, so
-      it is not a change a security-scanning rollout can make safely.
+      nltk is pulled in by unstructured, which uses it for sentence/word
+      tokenisation and POS tagging during document parsing. unstructured cannot
+      be configured without it, and replacing unstructured would change how
+      every existing document was parsed and chunked.
     usage_analysis: >-
-      The affected APIs download and unpack NLTK model artifacts. This image
-      downloads exactly one artifact, punkt_tab, at build time from NLTK's own
-      distribution, and the runtime never calls a download or unpack API — user
-      input reaches only the tokenizer, not the artifact loader.
+      The affected APIs (TransitionParser.train/parse, AveragedPerceptron
+      save/load, PerceptronTagger.save_to_json, save_maxent_params) read or
+      write model files at a caller-chosen path, bypassing nltk's opt-in
+      pathsec sandbox. The backend never imports nltk; unstructured only calls
+      sent_tokenize, word_tokenize and pos_tag, which load models from nltk's
+      fixed data directories. No code path lets user input choose
+      a model import or export path, and we do not rely on pathsec.
     approved_by: "PENDING second review by @Gradient-DS/security"
     recheck: 2026-12-01
 
