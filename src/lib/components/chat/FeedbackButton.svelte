@@ -5,7 +5,6 @@
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	import { config, showFeedbackModal, feedbackModalContext } from '$lib/stores';
-	import { showRagFilter } from '$lib/stores/rag-filter';
 	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 
 	const openFeedback = () => {
@@ -18,7 +17,7 @@
 </script>
 
 <!-- Hidden while the RAG filter panel is open so it never sits behind it. -->
-{#if ($config?.features?.enable_feedback_report ?? false) && !$showRagFilter}
+{#if $config?.features?.enable_feedback_report ?? false}
 	<button
 		type="button"
 		aria-label={$i18n.t('Send feedback')}
