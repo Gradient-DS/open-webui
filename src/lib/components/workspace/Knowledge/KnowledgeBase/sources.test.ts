@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import type { SchedulePair } from '../utils/cloudSync';
-import { removalTargets, sortSourcePairs, sourcePairItem } from './sources';
+import { removalTargets, sortSourcePairs, sourceMenu, sourcePairItem } from './sources';
 
 const connection: Connection = { id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' };
 const schedule = (id: string, changes: Partial<Schedule> = {}): Schedule => ({
@@ -88,5 +88,41 @@ describe('source selection and removal', () => {
 		expect(removalTargets({ content, acl }).map((item) => item.id)).toEqual(['a1', 'c1']);
 		expect(removalTargets({ content }).map((item) => item.id)).toEqual(['c1']);
 		expect(removalTargets({ acl }).map((item) => item.id)).toEqual(['a1']);
+	});
+});
+
+describe('sourceMenu', () => {
+	const base = { itemPath: '/Docs/a.docx', live: false, lifecycle: 'enabled' };
+
+	it('offers Remove to a KB writer who is not an admin', () => {
+		expect(sourceMenu({ ...base, writeAccess: true, isAdmin: false })).toEqual([
+			'copy_path',
+			'remove'
+		]);
+	});
+
+	it('keeps Remove from a reader, admin or not', () => {
+		expect(sourceMenu({ ...base, writeAccess: false, isAdmin: false })).toEqual(['copy_path']);
+		expect(sourceMenu({ ...base, writeAccess: false, isAdmin: true })).toEqual([
+			'copy_path',
+			'pause'
+		]);
+	});
+
+	it('gives admins pause or resume by lifecycle, and writers cancel while a run is live', () => {
+		expect(sourceMenu({ ...base, writeAccess: true, isAdmin: true })).toEqual([
+			'copy_path',
+			'pause',
+			'remove'
+		]);
+		expect(
+			sourceMenu({
+				itemPath: '',
+				live: true,
+				lifecycle: 'suspended',
+				writeAccess: true,
+				isAdmin: true
+			})
+		).toEqual(['cancel', 'resume', 'remove']);
 	});
 });

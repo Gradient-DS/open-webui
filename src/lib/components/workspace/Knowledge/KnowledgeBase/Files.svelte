@@ -126,19 +126,19 @@
 		const pair = dirPair(dir);
 		return pair ? sourcePairItem(pair) : directoryItem(dir.id, dir.name, dir.child_count ?? 0);
 	};
-	// Sources are removable where their menu offers Remove (admins); other
-	// folders only where the structure is editable. Files inside a synced
-	// folder stay read-only.
+	// Sources are removable where their menu offers Remove (KB writers, who
+	// alone get a selection); other folders only where the structure is
+	// editable. Files inside a synced folder stay read-only.
 	const isDirSelectable = (dir: DirectoryItem) =>
-		!dir.placeholder && (dir.schedule_id ? isAdmin && !!dirPair(dir) : structureEditable);
-	const isSourceSelectable = () => !!selection && isAdmin;
+		!dir.placeholder && (dir.schedule_id ? !!dirPair(dir) : structureEditable);
+	const isSourceSelectable = () => !!selection;
 
 	// Selection order mirrors render order (folders, single-file sources,
 	// files) so Shift-range and drag-paint spans behave predictably.
 	let orderedItems: SelectableItem[] = [];
 	$: {
 		// Rebuild when any selectability gate changes, not just the rows.
-		void [structureEditable, isAdmin, sourcePairs, selection];
+		void [structureEditable, sourcePairs, selection];
 		orderedItems = searchMode
 			? shownFiles.filter(isSelectable).map(buildItem)
 			: [
@@ -246,7 +246,7 @@
 				busy={syncBusy}
 				{isAdmin}
 				selectionActive={!!selection}
-				selectable={!!selection && isAdmin}
+				selectable={!!selection}
 				selected={(selection && $selectedStore?.has(sourcePairItem(pair).key)) ?? false}
 				checkboxVisible={!!$selectionModeStore}
 				onToggleSelect={() => selection?.toggle(sourcePairItem(pair))}

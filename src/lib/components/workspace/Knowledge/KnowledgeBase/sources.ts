@@ -15,6 +15,27 @@ export const sourcePairItem = (pair: SchedulePair) =>
 export const removalTargets = (pair: SchedulePair): Schedule[] =>
 	[pair.content, pair.acl].filter((item): item is Schedule => !!item).reverse();
 
+export type SourceMenuAction = 'copy_path' | 'cancel' | 'pause' | 'resume' | 'remove';
+
+// The ⋯ menu of a source, folder or single file alike. Remove unsubscribes
+// this KB, which soev-api grants any KB writer; pause and resume act on the
+// connection owner's schedule and stay with admins.
+export const sourceMenu = (source: {
+	itemPath: string;
+	writeAccess: boolean;
+	isAdmin: boolean;
+	live: boolean;
+	lifecycle: string;
+}): SourceMenuAction[] => {
+	const actions: SourceMenuAction[] = [];
+	if (source.itemPath) actions.push('copy_path');
+	if (source.writeAccess && source.live) actions.push('cancel');
+	if (source.isAdmin && source.lifecycle === 'enabled') actions.push('pause');
+	if (source.isAdmin && source.lifecycle === 'suspended') actions.push('resume');
+	if (source.writeAccess) actions.push('remove');
+	return actions;
+};
+
 const lastSynced = (pair: SchedulePair) => sourceState(pair, primary(pair).connection).lastSyncedAt;
 
 const byLabel = (a: SchedulePair, b: SchedulePair) =>
