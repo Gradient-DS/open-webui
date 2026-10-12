@@ -24,6 +24,10 @@ beforeEach(() => {
 	popup.location.href = '';
 	vi.stubGlobal('window', {
 		open: vi.fn(() => popup),
+		screenX: 100,
+		screenY: 50,
+		outerWidth: 1400,
+		outerHeight: 900,
 		location: { origin: 'https://app.invalid' },
 		addEventListener: vi.fn((_, listener) => {
 			receive = listener;
@@ -43,9 +47,11 @@ it('reuses an enabled grant without starting authorization', async () => {
 		{ id: 'g', lifecycle: 'enabled', families: ['live_documents'] }
 	]);
 	await prefetchLiveConnections('session');
-	expect(await connectLiveSource('session')).toBe('g');
+	const opened = vi.fn();
+	expect(await connectLiveSource('session', 'onedrive', 'live_documents', opened)).toBe('g');
 	expect(api.authorizeConnection).not.toHaveBeenCalled();
 	expect(window.open).not.toHaveBeenCalled();
+	expect(opened).not.toHaveBeenCalled();
 });
 it('ignores forged completion and grants only after the owned connection is enabled', async () => {
 	vi.mocked(api.listConnections).mockResolvedValue([]);
@@ -128,8 +134,14 @@ it.each(['suspended:reauth', 'enabled'])(
 			authorize_url: 'https://provider.invalid/auth'
 		});
 		await prefetchLiveConnections('session');
-		const pending = connectLiveSource('session');
-		expect(window.open).toHaveBeenCalledOnce();
+		const opened = vi.fn();
+		const pending = connectLiveSource('session', 'onedrive', 'live_documents', opened);
+		expect(window.open).toHaveBeenCalledWith(
+			'about:blank',
+			'soev-live-live_documents',
+			'width=600,height=720,left=500,top=140'
+		);
+		expect(opened).toHaveBeenCalledOnce();
 		await vi.advanceTimersByTimeAsync(0);
 		expect(api.authorizeConnection).toHaveBeenCalledWith('session', 'c');
 		receive({

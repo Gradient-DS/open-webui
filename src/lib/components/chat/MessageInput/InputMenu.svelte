@@ -144,12 +144,22 @@
 		const next = nextToolState(state, LIVE_DOCUMENT_STATES);
 		if (mail) connectingMail = true;
 		else connectingDocuments = true;
+		const provider = mail ? 'Outlook' : 'OneDrive';
+		let consentToast: string | number | undefined;
 		try {
 			if (next !== 'off' && state === 'off')
-				await connectLiveSource(localStorage.token, mail ? 'outlook_mail' : 'onedrive', family);
+				await connectLiveSource(
+					localStorage.token,
+					mail ? 'outlook_mail' : 'onedrive',
+					family,
+					() => (consentToast = toast.loading($i18n.t('Connecting to {{provider}}…', { provider })))
+				);
+			if (consentToast !== undefined)
+				toast.success($i18n.t('{{provider}} connected', { provider }), { id: consentToast });
 			if (mail) liveMailState = next;
 			else liveDocumentsState = next;
 		} catch (error) {
+			if (consentToast !== undefined) toast.dismiss(consentToast);
 			const prompt = relinkPrompt(error);
 			toast.error(prompt ? $i18n.t(prompt) : String(error));
 		} finally {

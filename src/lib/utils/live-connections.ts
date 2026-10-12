@@ -1,6 +1,7 @@
 import type { DocumentReference } from './onedrive-file-picker';
 import type { ChatAttachment } from '$lib/types/chatAttachment';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { centeredPopupFeatures } from './popup';
 import {
 	listConnections,
 	listLiveGrants,
@@ -108,7 +109,8 @@ export function liveConnections(
 export async function connectLiveSource(
 	token: string,
 	provider = 'onedrive',
-	family: LiveFamily = 'live_documents'
+	family: LiveFamily = 'live_documents',
+	onConsentOpened?: () => void
 ): Promise<string> {
 	if (!consentLabels[provider]) throw new Error('Unsupported connection provider');
 	const rows = liveConnections(token, provider, family);
@@ -137,8 +139,9 @@ export async function connectLiveSource(
 			throw error;
 		}
 	}
-	const popup = window.open('about:blank', `soev-live-${family}`, 'width=600,height=720');
+	const popup = window.open('about:blank', `soev-live-${family}`, centeredPopupFeatures(600, 720));
 	if (!popup) throw new Error('Allow popups to connect your account');
+	onConsentOpened?.();
 	try {
 		const authorization = connection
 			? { ...(await authorizeConnection(token, connection.id)), connection_id: connection.id }

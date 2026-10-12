@@ -719,6 +719,7 @@
   "Connected": "",
   "Connected ({{type}})": "",
   "Connected accounts": "Connected accounts",
+  "Connecting to {{provider}}…": "",
   "Connection Type": "",
   "Connection failed": "",
   "Connection lost. Reconnecting...": "",
@@ -4116,6 +4117,7 @@
   "{{percentage}}% of the context window used — older context will be summarized on your next message. For the best results on a new topic, start a new chat.": "",
   "{{percentage}}% of the context window used.": "",
   "{{percentage}}% of the context window used. Start a new chat for unrelated topics.": "",
+  "{{provider}} connected": "",
   "{{user}}'s Chats": "",
   "{{webUIName}} Backend Required": ""
 }
