@@ -6057,24 +6057,6 @@
         "title": "DeletePipelineForm",
         "type": "object"
       },
-      "DocumentExportForm": {
-        "properties": {
-          "markdown": {
-            "title": "Markdown",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "markdown"
-        ],
-        "title": "DocumentExportForm",
-        "type": "object"
-      },
       "EditImageForm": {
         "properties": {
           "background": {
@@ -47979,51 +47961,6 @@
           }
         ],
         "summary": "Export Db Json",
-        "tags": [
-          "utils"
-        ]
-      }
-    },
-    "/api/v1/utils/document/docx": {
-      "post": {
-        "description": "Export a single markdown document as a Word document.",
-        "operationId": "export_document_as_docx_api_v1_utils_document_docx_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DocumentExportForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Export Document As Docx",
         "tags": [
           "utils"
         ]

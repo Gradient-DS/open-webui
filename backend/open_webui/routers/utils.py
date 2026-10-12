@@ -157,35 +157,6 @@ async def export_chat_as_docx(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-class DocumentExportForm(BaseModel):
-    title: str
-    markdown: str
-
-
-@router.post('/document/docx')
-async def export_document_as_docx(
-    form_data: DocumentExportForm,
-    user=Depends(get_verified_user),
-):
-    """Export a single markdown document as a Word document."""
-    if not ENABLE_DOCX_EXPORT:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='DOCX export is disabled')
-    from open_webui.services.document_export import generate_document_docx
-
-    try:
-        docx_bytes = generate_document_docx(form_data.title, form_data.markdown)
-        return Response(
-            content=docx_bytes,
-            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            headers={
-                'Content-Disposition': _safe_filename(form_data.title, 'docx', prefix='document'),
-            },
-        )
-    except Exception as e:
-        log.exception(f'Error generating document DOCX: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get('/db/download')
 async def download_db(user=Depends(get_admin_user)):
     """Download the raw SQLite database file (admin-only, SQLite deployments only)."""
