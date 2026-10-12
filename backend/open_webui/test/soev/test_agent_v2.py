@@ -6,6 +6,7 @@ import copy
 import hashlib
 import html
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,7 +25,7 @@ from open_webui.soev import agent_threads, ingest
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.test.soev.fake_api import FakeSoevApi
 from open_webui.utils import agent, agent_v2
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 # The turn's tools field while the web search control is Uit (or absent).
 WEB_SEARCH_OFF = {
@@ -48,6 +49,8 @@ class Chat:
     api: FakeSoevApi
     messages: dict[tuple[str, str], dict] = field(default_factory=dict)
     socket: list[dict] = field(default_factory=list)
+    # The HTTP status of the last turn refused before its stream.
+    status: int | None = None
 
     async def response(
         self,
@@ -60,7 +63,7 @@ class Chat:
         form_data: dict[str, Any] | None = None,
         override_agent: str | None = 'test',
         **metadata: Any,
-    ) -> StreamingResponse | dict:
+    ) -> StreamingResponse | JSONResponse | dict:
         async with asyncio.timeout(8):
             return await agent.call_agent_api(
                 None,
@@ -87,7 +90,12 @@ class Chat:
             )
 
     async def turn(self, text: Any, message_id: str, parent: str | None = None, **kwargs: Any) -> list[dict]:
+        """The streamed chunks, or the one error a turn refused before its stream answered with."""
         response = await self.response(text, message_id, parent, **kwargs)
+        if isinstance(response, JSONResponse):
+            self.status = response.status_code
+            assert self.status >= 400
+            return [json.loads(response.body)]
         assert isinstance(response, StreamingResponse)
         async with asyncio.timeout(8):
             raw = ''.join([part async for part in response.body_iterator])
@@ -756,6 +764,7 @@ async def test_more_than_ten_notes_and_chats_refuses_before_sending(chat: Chat, 
     files = [{'type': 'note' if index % 2 else 'chat', 'id': str(index)} for index in range(11)]
     chunks = await chat.turn('read', 'a1', files=files, user_language=language)
     assert chunks == [{'error': {'code': 'attachments_unavailable', 'message': message}}]
+    assert chat.status == 422
     assert chat.mutations() == []
 
 
@@ -990,6 +999,7 @@ async def test_running_input_is_reported_without_resume_or_cancel(chat: Chat) ->
     chat.api.chat.threads['thr-1']['state'] = 'running'
     chunks = await chat.turn('second', 'a2', 'a1')
     assert chunks == [agent_v2._error('thread_active')]
+    assert chat.status == 409
     assert len(chat.mutations()) == 2
 
 
@@ -1548,7 +1558,9 @@ async def test_refused_model_is_named_without_retry_or_default(
     if stream:
         result = (await chat.turn('question', 'a2', 'a1' if continuation else None, **kwargs))[-1]
     else:
-        result = await chat.response('question', 'a2', 'a1' if continuation else None, stream=False, **kwargs)
+        response = await chat.response('question', 'a2', 'a1' if continuation else None, stream=False, **kwargs)
+        assert isinstance(response, JSONResponse) and response.status_code == 422
+        result = json.loads(response.body)
     assert result['error']['code'] == 'invalid_field'
     assert 'refused-model' in result['error']['message']
     assert 'private upstream detail' not in str(result)
@@ -1603,6 +1615,96 @@ async def test_an_agent_refusal_shows_its_reason_localised_and_logs_only_the_cod
     assert 'geheim.pdf' not in caplog.text
 
 
+def fail_turns(chat: Chat, monkeypatch: pytest.MonkeyPatch, response: httpx.Response) -> None:
+    """soev-api answers every new turn with this response."""
+    original = chat.api.chat.handle
+
+    def fail(request: httpx.Request, body: dict | None, owner: tuple[str, str | None]) -> httpx.Response:
+        if request.method == 'POST':
+            chat.api.chat.requests.append(request)
+            return response
+        return original(request, body, owner)
+
+    monkeypatch.setattr(chat.api.chat, 'handle', fail)
+
+
+INTERNALS = ('http', 'agents-host', 'soev-api', 'Traceback')
+
+
+def failures(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.getMessage().startswith('v2 agent turn failed')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stream', [True, False])
+@pytest.mark.parametrize(
+    'upstream,code,status',
+    [(503, 'service_unavailable', 503), (500, 'upstream_error', 502), (400, 'bad_body', 502), (403, 'forbidden', 403)],
+)
+async def test_a_turn_failing_before_its_stream_is_an_http_error_with_a_safe_message_and_one_log(
+    chat: Chat,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    stream: bool,
+    upstream: int,
+    code: str,
+    status: int,
+) -> None:
+    problem = {'code': code, 'detail': 'POST http://agents-host:8000/v1/run failed\nTraceback (most recent call last)'}
+    headers = {'Content-Type': 'application/problem+json'}
+    fail_turns(chat, monkeypatch, httpx.Response(upstream, json=problem, headers=headers))
+    with caplog.at_level('WARNING', logger=agent_v2.log.name):
+        response = await chat.response('geheime vraag', 'a1', stream=stream)
+    assert isinstance(response, JSONResponse) and response.status_code == status
+    body = json.loads(response.body)
+    assert body == agent_v2._error(code)
+    assert not any(internal in body['error']['message'] for internal in INTERNALS)
+    [record] = failures(caplog)
+    assert record.levelname == 'WARNING'
+    assert f'chat=chat message=a1 thread=None status={status} upstream={upstream} code={code}' in record.getMessage()
+    assert 'geheime vraag' not in caplog.text and 'agents-host' not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('language', ['en-US', 'nl-NL'])
+async def test_a_turn_failing_mid_stream_shows_the_error_and_logs_the_thread(
+    chat: Chat, caplog: pytest.LogCaptureFixture, language: str
+) -> None:
+    chat.api.chat.turns = [[('error', {'code': 'failed', 'detail': 'tool crashed at http://agents-host:8000'})]]
+    with caplog.at_level('WARNING', logger=agent_v2.log.name):
+        chunks = await chat.turn('geheime vraag', 'a1', user_language=language)
+    assert chat.status is None
+    assert chunks[-1] == agent_v2._error('failed', language=language)
+    assert ('gestopt' if language == 'nl-NL' else 'stopped') in chunks[-1]['error']['message']
+    assert 'agents-host' not in json.dumps(chunks)
+    [record] = failures(caplog)
+    assert 'chat=chat message=a1 thread=thr-1 status=502 upstream=None code=failed' in record.getMessage()
+    assert 'geheime vraag' not in caplog.text and 'agents-host' not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_turn_failing_mid_stream_without_a_stream_is_an_http_error(chat: Chat) -> None:
+    chat.api.chat.turns = [[('error', {'code': 'service_unavailable', 'detail': 'private'})]]
+    response = await chat.response('question', 'a1', stream=False)
+    assert isinstance(response, JSONResponse) and response.status_code == 503
+    assert json.loads(response.body) == agent_v2._error('service_unavailable')
+
+
+@pytest.mark.asyncio
+async def test_an_internal_failure_is_a_500_logged_by_its_type_only(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(agent_v2, '_tools', lambda *args: (_ for _ in ()).throw(KeyError('geheime vraag')))
+    with caplog.at_level('WARNING', logger=agent_v2.log.name):
+        response = await chat.response('geheime vraag', 'a1')
+    assert isinstance(response, JSONResponse) and response.status_code == 500
+    assert json.loads(response.body) == agent_v2._error('service_unavailable')
+    [record] = failures(caplog)
+    assert record.levelname == 'ERROR' and 'status=500 upstream=None code=KeyError' in record.getMessage()
+    assert 'geheime vraag' not in caplog.text
+    assert chat.mutations() == []
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('constraint', [None, 'chat:a_later_reason'])
 async def test_a_refusal_without_a_known_reason_keeps_the_generic_text(
@@ -1613,7 +1715,7 @@ async def test_a_refusal_without_a_known_reason_keeps_the_generic_text(
         problem['constraint'] = constraint
     refuse_turns(chat, monkeypatch, problem)
     chunks = await chat.turn('question', 'a1', user_language='nl-NL')
-    assert chunks[-1] == agent_v2._error('invalid_field')
+    assert chunks[-1] == agent_v2._error('invalid_field', language='nl-NL')
 
 
 @pytest.mark.asyncio
@@ -3043,14 +3145,13 @@ async def test_image_upload_validation_errors_name_the_file(chat, image_upload, 
 
 
 @pytest.mark.asyncio
-async def test_other_image_upload_errors_propagate(chat, image_upload):
-    error = SoevApiError(503, 'service_unavailable', 'unavailable')
-    image_upload.side_effect = error
-    with pytest.raises(SoevApiError) as caught:
-        await chat.turn(
-            'describe', 'a1', user_message={'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL}]}
-        )
-    assert caught.value is error
+async def test_other_image_upload_errors_refuse_the_turn_as_unavailable(chat, image_upload):
+    image_upload.side_effect = SoevApiError(503, 'service_unavailable', 'soev-api returned HTTP 503')
+    chunks = await chat.turn(
+        'describe', 'a1', user_message={'content': 'describe', 'files': [{'type': 'image', 'url': IMAGE_URL}]}
+    )
+    assert chunks == [agent_v2._error('service_unavailable')]
+    assert chat.status == 503
     assert chat.mutations() == []
 
 
