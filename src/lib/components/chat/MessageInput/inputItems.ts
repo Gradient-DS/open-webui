@@ -26,6 +26,7 @@ export const INPUT_ITEMS: readonly InputItem[] = [
 	{ id: 'image_generation', section: 'tools', pinnable: true },
 	{ id: 'code_interpreter', section: 'tools', pinnable: true },
 	{ id: 'document_writer', section: 'tools', pinnable: true },
+	{ id: 'office', section: 'tools', pinnable: true },
 	{ id: 'filter:*', section: 'tools', pinnable: true },
 	{ id: 'tools', section: 'tools', pinnable: true },
 	{ id: 'skills', section: 'tools', pinnable: true }

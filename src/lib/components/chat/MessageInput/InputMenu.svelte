@@ -55,6 +55,7 @@
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
+	import Grid from '$lib/components/icons/Grid.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import Cube from '$lib/components/icons/Cube.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
@@ -176,6 +177,10 @@
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 	export let showDocumentWriterButton = false;
+	// [Gradient] Office files (Excel on the demo stack): on/off, editing follows creation.
+	export let showOfficeButton = false;
+	export let officeEnabled = false;
+	export let officeEditEnabled = false;
 	export let documentWriterEnabled = true;
 	export let documentWriterRequired = false;
 	export let oauthRedirectHandler: (tool: {
@@ -286,6 +291,7 @@
 		itemAllowed('code_interpreter') && (showCodeInterpreterButton || codeInterpreterEnabled);
 	$: showDocumentWriter =
 		itemAllowed('document_writer') && (showDocumentWriterButton || documentWriterEnabled);
+	$: showOffice = itemAllowed('office') && (showOfficeButton || officeEnabled);
 	$: showToolPermissions =
 		toolPermissionsEnabled && itemAllowed('tools') && isFeatureEnabled('tools');
 
@@ -535,6 +541,7 @@
 	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
 	$: imageGenerationState = (imageGenerationEnabled ? 'required' : 'off') as ToolState;
 	$: codeInterpreterState = (codeInterpreterEnabled ? 'required' : 'off') as ToolState;
+	$: officeState = (officeEnabled ? 'required' : 'off') as ToolState;
 	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
 
 	const stateAriaLabel = (label: string, state: ToolState, description: string) =>
@@ -559,7 +566,9 @@
 	};
 
 	// [Gradient] Document writer cycles Auto, Altijd, Uit; the other tools use Uit and Altijd. Exported for the pinned composer buttons.
-	export const cycleTool = (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => {
+	export const cycleTool = (
+		tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'office'
+	) => {
 		if (tool === 'image_generation') {
 			imageGenerationEnabled =
 				nextToolState(imageGenerationState, BINARY_TOOL_STATES) === 'required';
@@ -573,6 +582,10 @@
 		} else if (tool === 'code_interpreter') {
 			codeInterpreterEnabled =
 				nextToolState(codeInterpreterState, BINARY_TOOL_STATES) === 'required';
+		} else if (tool === 'office') {
+			officeEnabled = nextToolState(officeState, BINARY_TOOL_STATES) === 'required';
+			// Editing follows, so a follow-up turn can change the file; MessageInput clears it where not allowed.
+			officeEditEnabled = officeEnabled;
 		} else {
 			const { enabled, required } = documentWriterFlags(
 				nextToolState(documentWriterToolState, DOCUMENT_WRITER_STATES)
@@ -992,6 +1005,29 @@
 							onClick={() => showDocumentWriterButton && cycleTool('document_writer')}
 						>
 							<Document slot="icon" className="size-3.5" strokeWidth="1.75" />
+						</MenuItem>
+					{/if}
+
+					{#if showOffice}
+						<MenuItem
+							label={$i18n.t('Excel')}
+							pinId="office"
+							toolState={officeState}
+							tooltipPlacement="top-start"
+							tooltip={!showOfficeButton
+								? $i18n.t('Unavailable')
+								: officeEnabled
+									? $i18n.t('Create Office files')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Excel'),
+								officeState,
+								officeEnabled ? $i18n.t('Create Office files') : $i18n.t(TOOL_OFF_DESCRIPTION)
+							)}
+							disabled={!showOfficeButton}
+							onClick={() => showOfficeButton && cycleTool('office')}
+						>
+							<Grid slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
 					{/if}
 

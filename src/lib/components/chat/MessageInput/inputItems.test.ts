@@ -8,6 +8,7 @@ describe('input items', () => {
 		const order = inputItemOrder(['a', 'b']);
 		expect(order.indexOf('attach_meetings')).toBe(order.indexOf('attach_notes') + 1);
 		expect(order.slice(order.indexOf('document_writer') + 1, order.indexOf('tools'))).toEqual([
+			'office',
 			'filter:a',
 			'filter:b'
 		]);

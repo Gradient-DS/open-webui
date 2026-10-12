@@ -142,7 +142,7 @@
 	import Camera from '../icons/Camera.svelte';
 	import Link from '../icons/Link.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
-	import ExcelToggle from './MessageInput/ExcelToggle.svelte';
+	import Grid from '../icons/Grid.svelte';
 	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
 	import { meetingsAvailable } from '$lib/components/meetings/availability';
 	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
@@ -997,6 +997,7 @@
 		image_generation: itemState(imageGenerationEnabled),
 		code_interpreter: itemState(codeInterpreterEnabled),
 		document_writer: itemState(documentWriterToolState),
+		office: itemState(officeEnabled),
 		tools: itemState((selectedToolIds ?? []).length),
 		skills: itemState((selectedSkillIds ?? []).length),
 		...Object.fromEntries(
@@ -1042,7 +1043,9 @@
 				cycleWebSearch: () => void;
 				cycleLiveDocuments: () => Promise<void>;
 				cycleLiveMail: () => Promise<void>;
-				cycleTool: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
+				cycleTool: (
+					tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'office'
+				) => void;
 		  }
 		| undefined;
 	const liveMailTooltipId = `mail-search-${uuidv4()}`;
@@ -2561,6 +2564,7 @@
 											{showImageGenerationButton}
 											{showCodeInterpreterButton}
 											{showDocumentWriterButton}
+											{showOfficeButton}
 											bind:selectedToolIds
 											bind:selectedSkillIds
 											bind:selectedFilterIds
@@ -2570,6 +2574,8 @@
 											bind:codeInterpreterEnabled
 											bind:documentWriterEnabled
 											bind:documentWriterRequired
+											bind:officeEnabled
+											bind:officeEditEnabled
 											oauthRedirectHandler={(tool: {
 												id: string;
 												serverId: string;
@@ -2624,11 +2630,6 @@
 
 										<!-- [Gradient] Scrolls sideways on narrow screens instead of overflowing. -->
 										<div class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none">
-											<!-- [Gradient] Demo: Excel switch for the Office feature. -->
-											{#if showOfficeButton}
-												<ExcelToggle bind:officeEnabled bind:officeEditEnabled />
-											{/if}
-
 											<!-- [Gradient] Pinned or active "+" menu items, same gates as the menu. -->
 											{#each inputBarItems as itemId (itemId)}
 												{#if itemId === 'upload_files' && inputMenuFileUploadEnabled}
@@ -2908,6 +2909,27 @@
 															class={pinnedToggleClass(documentWriterToolState)}
 														>
 															<Document className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'office' && showOfficeButton}
+													<Tooltip
+														content={pinnedStateTooltip(
+															$i18n.t('Excel'),
+															officeEnabled ? 'required' : 'off',
+															officeEnabled
+																? $i18n.t('Create Office files')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={$i18n.t('Excel')}
+															aria-pressed={officeEnabled}
+															on:click|preventDefault={() => inputMenuRef?.cycleTool('office')}
+															class={pinnedToggleClass(officeEnabled)}
+														>
+															<Grid className="size-4" strokeWidth="1.75" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'tools' && showToolsButton}
