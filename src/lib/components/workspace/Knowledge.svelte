@@ -149,6 +149,7 @@
 		if (cached) {
 			items = cached.items;
 			total = cached.total;
+			allItemsLoaded = cached.items.length >= cached.total;
 		}
 		await getItemsPage(true);
 	};
@@ -181,17 +182,14 @@
 				knowledgeListCache.set(cacheKey, { items: pageItems, total: res.total }, cacheRevision);
 			}
 
-			if ((pageItems ?? []).length === 0) {
-				allItemsLoaded = true;
-			} else {
-				allItemsLoaded = false;
-			}
-
 			if (replace || items === null) {
 				items = pageItems;
 			} else {
 				items = [...items, ...pageItems];
 			}
+			// [Gradient] Stop at the total: the loader sentinel fetched an empty extra page otherwise.
+			allItemsLoaded =
+				pageItems.length === 0 || (typeof res.total === 'number' && items.length >= res.total);
 		}
 
 		itemsLoading = false;
