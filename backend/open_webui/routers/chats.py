@@ -113,6 +113,17 @@ async def is_open_shared_chat(shared, db: AsyncSession) -> bool:
     )
 
 
+async def can_share_chats(user, db: AsyncSession) -> bool:
+    """chat.share gates sharing for every role; admins do not bypass it."""
+    return await has_permission(user.id, 'chat.share', await Config.get('user.permissions'), db=db)
+
+
+def _grant_key(grant) -> tuple:
+    if isinstance(grant, dict):
+        return (grant.get('principal_type'), grant.get('principal_id'), grant.get('permission'))
+    return (grant.principal_type, grant.principal_id, grant.permission)
+
+
 async def can_read_shared_chat(user, shared, db: AsyncSession) -> bool:
     if user.role == 'pending':
         return False
@@ -1943,7 +1954,7 @@ async def share_chat_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(user.id, 'chat.share', await Config.get('user.permissions')):
+    if not await can_share_chats(user, db):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
     chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
@@ -2038,6 +2049,12 @@ async def update_shared_chat_access_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
+    # Without chat.share, grants can only be revoked.
+    if not await can_share_chats(user, db):
+        existing = {_grant_key(g) for g in await AccessGrants.get_grants_by_resource('shared_chat', id, db=db)}
+        if any(_grant_key(grant) not in existing for grant in form_data.access_grants):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
     form_data.access_grants = await filter_allowed_access_grants(
         await Config.get('user.permissions'),
         user.id,
@@ -2046,6 +2063,7 @@ async def update_shared_chat_access_by_id(
         'sharing.public_chats',
         'sharing.open_chats',
         db=db,
+        admin_needs_wide_permission=True,
     )
 
     await AccessGrants.set_access_grants('shared_chat', id, form_data.access_grants, db=db)

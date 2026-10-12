@@ -97,6 +97,12 @@ def test_access_grants_keep_nested_extras_and_missing_keys(module_name, mount, m
     monkeypatch.setattr(module.AccessGrants, 'set_access_grants', saved)
     if hasattr(module, 'publish_event'):
         monkeypatch.setattr(module, 'publish_event', AsyncMock())
+    if module_name == 'chats':
+        # Chat sharing binds admins too; grant chat.share and public sharing here.
+        from open_webui.utils import access_control
+
+        monkeypatch.setattr(module, 'has_permission', AsyncMock(return_value=True))
+        monkeypatch.setattr(access_control, 'has_permission', AsyncMock(return_value=True))
     if module_name == 'folders':
         monkeypatch.setattr(module, 'check_folders_permission', AsyncMock())
     if module_name == 'knowledge':
