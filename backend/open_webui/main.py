@@ -1965,10 +1965,10 @@ async def chat_completion(
             # tool resolution (the agent service does its own).
             #
             # Routing matrix (utils/agent_routing.resolve_agent_route):
-            #   chat.meta.agent_id set                                  → that agent
+            #   picker on, chat.meta.agent_id set                       → that agent
             #   no agent_id, picker on, default agent configured        → the default agent
             #   no agent_id, picker on, no default                      → 400, choose an agent
-            #   no agent_id, picker off, AGENT_API_ENABLED=true         → agent route (legacy bypass)
+            #   picker off, AGENT_API_ENABLED=true                      → agent route (legacy bypass)
             #   otherwise                                               → standard route
             chat_id_meta = metadata.get('chat_id')
             chat_agent_id: Optional[str] = None
@@ -2040,7 +2040,7 @@ async def chat_completion(
                         await Chats.bind_chat_agent_by_id(chat_id_meta, route.agent_id)
                     except Exception as e:
                         log.warning('Could not bind chat %s to default agent %s: %s', chat_id_meta, route.agent_id, e)
-                chat_agent_id = route.agent_id
+            chat_agent_id = route.agent_id
 
             # [Gradient] Keep the request-local model when saved-chat dispatch reloads the registry.
             if split_assistant_id:

@@ -499,3 +499,31 @@ def test_existing_unbound_chat_binds_without_reading_messages(split_harness):
     assert response.status_code == 200, response.text
     assert h.bindings == [('chat', 'assistant')]
     assert h.message_lookups == []
+
+
+def test_chat_bound_to_an_old_picker_agent_follows_the_picked_model(split_harness, application, monkeypatch):
+    """A pre-v2 chat bound to a v1 agent the user cannot read is not refused without the picker."""
+    from open_webui.utils.agent_routing import resolve_agent_route
+
+    h = split_harness
+    routed = []
+
+    async def call_agent_api(request, form_data, metadata, override_agent=None):
+        routed.append(override_agent)
+        return {'choices': []}
+
+    async def agent_config(slug):
+        return SimpleNamespace(id=slug, is_active=True, meta={})
+
+    async def no_grants(**kwargs):
+        return []
+
+    monkeypatch.setattr(application, 'resolve_agent_route', resolve_agent_route)
+    monkeypatch.setattr(application, 'AGENT_API_ENABLED', True)
+    monkeypatch.setattr(application, 'call_agent_api', call_agent_api)
+    monkeypatch.setattr(application.AgentConfigs, 'get_agent_config_by_id', agent_config)
+    monkeypatch.setattr(application.AccessGrants, 'get_accessible_resource_ids', no_grants)
+    h.chats['chat'] = SimpleNamespace(meta={'agent_id': 'offertemachine'}, chat={}, variables={})
+    response = send(h, chat_id='chat')
+    assert response.status_code == 200, response.text
+    assert routed == [None]

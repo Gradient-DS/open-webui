@@ -5,6 +5,7 @@ import {
 	isAdminSettingsEnabled,
 	isAdminSettingsTabEnabled,
 	getFirstAvailableAdminSettingsTab,
+	isAgentRouted,
 	type Feature
 } from './features';
 import { get } from 'svelte/store';
@@ -502,5 +503,19 @@ describe('admin settings features', () => {
 			});
 			expect(getFirstAvailableAdminSettingsTab()).toBe(null);
 		});
+	});
+});
+
+describe('isAgentRouted', () => {
+	it.each([
+		[true, false, true],
+		[true, true, true],
+		[false, false, false],
+		[false, true, false]
+	])('a bound chat follows the backend matrix (api %s, picker %s)', (api, picker, routed) => {
+		vi.mocked(get).mockReturnValue({
+			features: { feature_agent_api_enabled: api, feature_agent_picker: picker }
+		});
+		expect(isAgentRouted('offertemachine')).toBe(routed);
 	});
 });
