@@ -526,16 +526,6 @@ extract = "token"
 actor = "admin"
 
 [[parameter]]
-key = "agent"
-name = "slug"
-prefix = "/api/v1/agent-configs/{slug}"
-description = "routers/agent_configs.py:detect -> create (if absent) -> get. Slugs are environment selectors: reuse an in-env slug, never fabricate a new one. DELETE refuses while the slug remains in AGENT_API_AGENTS."
-seeded_by = "seed_agent_config"
-depends_on = []
-actor = "admin"
-fresh = false
-
-[[parameter]]
 key = "ollama_index"
 name = "url_idx"
 prefix = "/ollama"
@@ -1287,18 +1277,6 @@ reason = "ENABLE_OPENAI_API_PASSTHROUGH forwards the method to the admin-configu
 
 # Owner refusals that are a guard working. A declared route that starts
 # succeeding fails the gate until its declaration is removed.
-[[control]]
-route = "DELETE /api/v1/agent-configs/{slug}"
-status = 400
-detail = "still in AGENT_API_AGENTS"
-reason = "routers/agent_configs.py refuses to delete a configuration whose slug the environment still lists, and agent slugs are in-environment selectors by design (seed_agent_config)."
-
-[[control]]
-route = "POST /api/v1/agent-configs/{slug}"
-status = 409
-detail = "already exists"
-reason = "Creation refuses a slug that already has a configuration; the in-environment slug has one."
-
 [[control]]
 route = "POST /api/v1/invites/{token}/accept"
 status = 410

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import Optional, Union
+from typing import Union
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -1096,18 +1096,14 @@ async def set_integrations_config(
 
 class ExternalAgentsConfigForm(BaseModel):
     AGENT_API_SELECTED_AGENT: str
-    # Empty string clears the picker default (no pre-selection on first load).
-    AGENT_API_PICKER_DEFAULT_SLUG: Optional[str] = None
 
 
 @router.get('/external_agents')
 async def get_external_agents_config(request: Request, user=Depends(get_admin_user)):
-    values = await Config.get_many('agent_api.selected_agent', 'agent_api.picker_default_slug')
     return {
         'AGENT_API_ENABLED': AGENT_API_ENABLED,
         'AGENT_API_AGENTS': AGENT_API_AGENTS,
-        'AGENT_API_SELECTED_AGENT': values.get('agent_api.selected_agent'),
-        'AGENT_API_PICKER_DEFAULT_SLUG': values.get('agent_api.picker_default_slug'),
+        'AGENT_API_SELECTED_AGENT': await Config.get('agent_api.selected_agent'),
     }
 
 
@@ -1128,24 +1124,9 @@ async def set_external_agents_config(
             detail='Selected agent is not in the configured AGENT_API_AGENTS list',
         )
 
-    updates: dict = {'agent_api.selected_agent': selected}
+    await Config.upsert({'agent_api.selected_agent': selected})
 
-    if form_data.AGENT_API_PICKER_DEFAULT_SLUG is not None:
-        picker_default = form_data.AGENT_API_PICKER_DEFAULT_SLUG.strip()
-        if picker_default and agents and picker_default not in agents:
-            raise HTTPException(
-                status_code=400,
-                detail='Picker default slug is not in the configured AGENT_API_AGENTS list',
-            )
-        updates['agent_api.picker_default_slug'] = picker_default
-
-    await Config.upsert(updates)
-    values = await Config.get_many('agent_api.selected_agent', 'agent_api.picker_default_slug')
-
-    return {
-        'AGENT_API_SELECTED_AGENT': values.get('agent_api.selected_agent'),
-        'AGENT_API_PICKER_DEFAULT_SLUG': values.get('agent_api.picker_default_slug'),
-    }
+    return {'AGENT_API_SELECTED_AGENT': await Config.get('agent_api.selected_agent')}
 
 
 ####################################

@@ -17,7 +17,6 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from open_webui.models.agent_configs import AgentConfigs
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.socket import main as socket_main
@@ -61,7 +60,6 @@ class Chat:
         chat_id: str = 'chat',
         stream: bool = True,
         form_data: dict[str, Any] | None = None,
-        override_agent: str | None = 'test',
         **metadata: Any,
     ) -> StreamingResponse | JSONResponse | dict:
         async with asyncio.timeout(8):
@@ -86,7 +84,6 @@ class Chat:
                     'model': {'info': {'base_model_id': 'llm'}},
                     **metadata,
                 },
-                override_agent=override_agent,
             )
 
     async def turn(self, text: Any, message_id: str, parent: str | None = None, **kwargs: Any) -> list[dict]:
@@ -130,9 +127,7 @@ def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> Chat:
 
     monkeypatch.setattr(Chats, 'get_message_by_id_and_message_id', get)
     monkeypatch.setattr(Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
-    monkeypatch.setattr(
-        AgentConfigs, 'get_agent_config_by_id', AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2'}))
-    )
+    monkeypatch.setattr(agent, 'Config', SimpleNamespace(get=AsyncMock(return_value='test')))
     monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=emit))
     monkeypatch.setattr(agent_v2, '_web_search_allowed', AsyncMock(return_value=True))
     monkeypatch.setattr(agent_v2, '_documents_allowed', AsyncMock(return_value=True))
@@ -1500,16 +1495,8 @@ async def test_the_panel_lists_what_this_turn_cited_with_cumulative_numbers(chat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('model', [None, '', 123, 'host-inference-endpoint'])
 @pytest.mark.parametrize('picked', [{}, {'info': {'base_model_id': 'llm'}}])
-async def test_resolved_picker_model_wins_over_agent_model(
-    chat: Chat, monkeypatch: pytest.MonkeyPatch, model: Any, picked: dict
-) -> None:
-    monkeypatch.setattr(
-        AgentConfigs,
-        'get_agent_config_by_id',
-        AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2', 'model': model})),
-    )
+async def test_resolved_picker_model_is_sent_on_every_turn(chat: Chat, picked: dict) -> None:
     await chat.turn('first', 'a1', model=picked)
     await chat.turn('second', 'a2', 'a1', model=picked)
     await chat.turn('regenerated', 'retry', 'a1', model=picked)
@@ -1520,42 +1507,13 @@ async def test_resolved_picker_model_wins_over_agent_model(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ('meta', 'sent'),
-    [
-        ({}, 'soev_react'),
-        ({'runtime': 'v1'}, 'soev_react'),
-        (None, 'soev_chat_manual'),
-        ({'runtime': 'v2'}, 'soev_chat_manual'),
-    ],
-)
-async def test_v2_deployment_replaces_a_v1_agent_binding_with_the_configured_agent(
-    chat: Chat, monkeypatch: pytest.MonkeyPatch, meta: dict | None, sent: str
-) -> None:
-    monkeypatch.setattr(agent.Config, 'get', AsyncMock(return_value='soev_react'))
-    monkeypatch.setattr(
-        AgentConfigs,
-        'get_agent_config_by_id',
-        AsyncMock(return_value=SimpleNamespace(meta=meta) if meta is not None else None),
-    )
-    await chat.turn('first', 'a1', override_agent='soev_chat_manual')
-    assert [body['agent'] for path, body in chat.mutations() if path == '/v1/chat/threads'] == [sent]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('meta', [None, {}, {'runtime': 'v1'}, {'runtime': 'v2', 'model': 'agent-model'}])
 @pytest.mark.parametrize('selected_agent', [None, 'test'])
 async def test_environment_routes_every_turn_to_v2(
-    chat: Chat, monkeypatch: pytest.MonkeyPatch, meta: dict | None, selected_agent: str | None
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, selected_agent: str | None
 ) -> None:
     monkeypatch.setattr(agent.Config, 'get', AsyncMock(return_value=selected_agent))
-    monkeypatch.setattr(
-        AgentConfigs,
-        'get_agent_config_by_id',
-        AsyncMock(return_value=SimpleNamespace(meta=meta) if meta is not None else None),
-    )
     for index in range(1, 3):
-        chunks = await chat.turn(f'turn {index}', f'a{index}', 'a1' if index == 2 else None, override_agent=None)
+        chunks = await chat.turn(f'turn {index}', f'a{index}', 'a1' if index == 2 else None)
         assert content(chunks) == f'Answer: turn {index}'
     assert [path for path, _ in chat.mutations()] == ['/v1/chat/threads', '/v1/chat/threads/thr-1/inputs']
     for _, body in chat.mutations():
@@ -2355,25 +2313,11 @@ async def test_split_body_sends_picked_llm(chat: Chat) -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_model_is_default_without_resolved_llm(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Agent configuration supplies a model only when the request resolves none."""
-    monkeypatch.setattr(
-        AgentConfigs,
-        'get_agent_config_by_id',
-        AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2', 'model': 'agent-default'})),
-    )
-    await chat.turn('default turn', 'a1', form_data={'model': ''}, model={})
-    assert chat.mutations()[0][1]['model'] == 'agent-default'
-
-
-@pytest.mark.asyncio
 async def test_a_follow_up_continues_the_thread_in_real_chat_storage(
     chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stored = Chat(chat_http)
-    monkeypatch.setattr(
-        AgentConfigs, 'get_agent_config_by_id', AsyncMock(return_value=SimpleNamespace(meta={'runtime': 'v2'}))
-    )
+    monkeypatch.setattr(agent, 'Config', SimpleNamespace(get=AsyncMock(return_value='test')))
     monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=AsyncMock()))
     chat_id = str(uuid4())
     await Chats.insert_new_chat(chat_id, 'alice', ChatForm(chat={'title': 'Chat', 'history': {'messages': {}}}))

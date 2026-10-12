@@ -19,8 +19,6 @@ agentApiEnabled=true; this release moves them all to v2.
 |---|---|---|---|---|
 | agentApiEnabled | AGENT_API_ENABLED | "false" | "true" | gates the whole agent block in the configmap |
 | agentApiAgents | AGENT_API_AGENTS | "" | soev_chat_manual,assistant_onboarding | |
-| agentApiPickerDefaultSlug | AGENT_API_PICKER_DEFAULT_SLUG | — | soev_chat_manual | |
-| featureAgentPicker | FEATURE_AGENT_PICKER | "false" | "false" | |
 | enableCodeExecution | ENABLE_CODE_EXECUTION | "false" | "true" | Jupyter sink |
 | enableCodeInterpreter | ENABLE_CODE_INTERPRETER | "false" | "true" | Jupyter sink |
 | codeExecutionEngine (unset) | CODE_EXECUTION_ENGINE | pyodide (app default) | pyodide | set by no tenant and no chart value, so production runs the app default (`config.py:402`); a tenant setting `jupyter` activates a server-side HTTP+WebSocket sink and will show here as drift |
@@ -55,11 +53,11 @@ The table above is the source snapshot, not an assertion of full integration
 coverage. `TestCiMatchesDeployedConfig` checks every row, including the three
 Helm rows whose env names are supplied by the chart configmap. Boolean feature
 flags must match except telemetry and the explicitly absent private soev services.
-OWUI-local agent-config CRUD still uses `AGENT_API_AGENTS`; CI runs no soev server.
+CI runs no soev server.
 
 | Setting | CI value | Reason / coverage limit |
 |---|---|---|
-| AGENT_API_ENABLED, AGENT_API_PICKER_DEFAULT_SLUG, FEATURE_AGENT_PICKER | absent | Private soev services and stand-ins never run here; platform-backed routes have soev-solutions waivers. |
+| AGENT_API_ENABLED | absent | Private soev services and stand-ins never run here; platform-backed routes have soev-solutions waivers. |
 | OPENAI_API_BASE_URL, RAG_OPENAI_API_BASE_URL | http://stub:8000/v1 | Replace the production LiteLLM hostname with the sealed stub. |
 | RAG_EXTERNAL_RERANKER_URL | http://stub:8000/v1/rerank | Replace the production reranker hostname with the sealed stub. |
 | S3_ENDPOINT_URL | http://s3:9000 | The endpoint hostname remains a divergence: the in-network S3 gateway replaces object.previder.nl. CI drives the same S3 provider code path, but does not cover production TLS or Previder-specific behavior. |
@@ -91,8 +89,8 @@ Caller contracts verified in this checkout:
   `url`, `title`, `content` and `score`. The legacy external search branch keeps
   its bare list response when that query parameter is absent.
 - External reranking posts to `/v1/rerank` and reads indexed relevance scores.
-- `AGENT_API_AGENTS` permits local agent-config fixtures; agent routing is
-  disabled and no private-service URL is configured.
+- `AGENT_API_AGENTS` matches the deployed list; agent routing is disabled and
+  no private-service URL is configured.
 - Legacy sync-daemon, loader-worker, document-job and `PIPELINE_API_*` settings
   have no callers in this checkout and are removed. Pipelines management uses
   the configured OpenAI connections (`routers/pipelines.py`).

@@ -137,8 +137,7 @@ skipped on later runs with the same `soevApi.migrate.id`.
 The Job runs `python -m open_webui.soev.migrate --<mode>` with the app's
 ConfigMap, secrets, `extraEnv` and data volume, plus `ENABLE_DB_MIGRATIONS=true`
 so the app schema is current. The migration keeps its own state outside
-Alembic (schema `owui_v2_migration`), so the database stays at the v1 Alembic
-head. `soevApi.migrate.config` becomes `SOEV_V2_CONFIG` and `modelMap` becomes
+Alembic (schema `owui_v2_migration`). `soevApi.migrate.config` becomes `SOEV_V2_CONFIG` and `modelMap` becomes
 `SOEV_V2_MODEL_MAP`. Exit 1 (soev-api unreachable, collection mismatch) and 75
 (ingest still running) are retried with Kubernetes' capped exponential backoff
 up to `backoffLimit`; exit 2 (invalid input) fails the Job at once. The
@@ -147,9 +146,8 @@ Helm upgrade recreates it and the migration runs again. Redis must be enabled
 for the final sign-out. With an RWO data PVC the Job pod must land on the
 app's node; v2 tenants run without one.
 
-Rollback: set `mode: restore` first (the Job puts back the config snapshot and
-model ids), then revert the image and values to v1. The steps are in
-`docs/agent-api-deployment.md`.
+Rollback to v1: redeploy the previous image set and values and restore the
+database backup taken before the cutover; see `docs/agent-api-deployment.md`.
 
 `mode: models` runs `--apply --models`: it rewrites only the stored model ids by
 `modelMap` (old catalog id to new) under its own `id`, with no config switch,

@@ -60,7 +60,6 @@
 		showFileNavPath,
 		showFileNavDir,
 		chatRequestQueues,
-		pendingAgentId,
 		submitPromptSignal,
 		desktopEvent
 	} from '$lib/stores';
@@ -841,14 +840,6 @@
 			return true;
 		});
 	};
-
-	// [Gradient] Picker visibility is independent of the agent runtime bypass.
-	$: agentSelectorActive =
-		!embedded &&
-		isFeatureEnabled('agent_picker') &&
-		Boolean($config?.features?.feature_agent_api_enabled) &&
-		(!chat?.id || Boolean(chat?.meta?.agent_id));
-	$: agentBinding = !embedded && $pendingAgentId ? { agent_id: $pendingAgentId } : null;
 
 	// [Gradient] A draft restores text and files only. Tool states come from the chat's saved
 	// features or the user's last choice: a remounted composer writes its defaults into the
@@ -2069,7 +2060,7 @@
 		// ingested into a Weaviate collection the agent cannot see (GRA-222).
 		// YouTube links and document URLs keep the ingest path — see
 		// `routeWebAttachment` for why.
-		const agentRouted = isAgentRouted(chat?.id ? chat?.meta?.agent_id : $pendingAgentId);
+		const agentRouted = isAgentRouted();
 
 		// Create file items first
 		const fileItems = urls.map((url) => {
@@ -2620,8 +2611,6 @@
 
 			const chatContent = chat.chat;
 			chatVariables = chat?.variables ?? {};
-			// [Gradient] The composer picker reads the shared pending-agent binding.
-			if (!embedded && chat?.meta?.agent_id) pendingAgentId.set(chat.meta.agent_id);
 
 			if (chatContent) {
 				noteChatDebug('chat payload found', {
@@ -3558,14 +3547,6 @@
 			toast.error($i18n.t('Model not selected'));
 			return;
 		}
-		// [Gradient] A new chat under the picker must name an agent: the
-		// binding is written once, at creation, and a chat created without
-		// one would run on the raw model. The server refuses such a request
-		// too; this keeps the user from ever seeing that error.
-		if (agentSelectorActive && !chat?.id && !$pendingAgentId) {
-			toast.error($i18n.t('Choose an agent before sending a message.'));
-			return;
-		}
 		const form = getChatVariablesForm(selectedModelIds, chatVariables, $models);
 		if (form.conflicts.length > 0) {
 			showChatVariablesModal = true;
@@ -3727,11 +3708,10 @@
 		saveSessionSelectedModels();
 
 		// [Gradient] Pre-create the chat record before dispatching the first
-		// message so any pendingAgentId binding lands on the server before the
+		// message so the chat row (with its assistant binding) exists before the
 		// LLM completion request kicks off. Upstream v0.9.5 moved chat
-		// creation to the /chat/completions code path, but that path has no
-		// hook for `agent_binding`. initChatHandler calls createNewChat with
-		// the binding and sets $chatId; sendMessage then forwards that
+		// creation to the /chat/completions code path. initChatHandler calls
+		// createNewChat and sets $chatId; sendMessage then forwards that
 		// chat_id so the backend appends to the existing row instead of
 		// creating a duplicate.
 		if (!$chatId && !embedded) {
@@ -4527,12 +4507,6 @@
 		const selectedFolderId = $selectedFolder?.id;
 
 		if (!$temporaryChatEnabled) {
-			// [Gradient] If the user picked an agent on the empty state,
-			// bind this chat to that agent for its lifetime via meta.agent_id.
-			// The pendingAgentId store is sticky — we do NOT clear it after
-			// use, so the next "New Chat" defaults to the same agent until
-			// the user changes or clears the pick.
-
 			chat = await createNewChat(
 				localStorage.token,
 				{
@@ -4550,7 +4524,7 @@
 				$selectedFolder?.id,
 				chatVariables ?? null,
 				// [Gradient]
-				{ ...agentBinding, ...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}) }
+				$activeAssistantId ? { assistant_id: $activeAssistantId } : null
 			);
 
 			_chatId = chat.id;
@@ -4963,13 +4937,7 @@
 									history: history,
 									timestamp: Date.now()
 								},
-								meta: $chatId
-									? (chat?.meta ?? {})
-									: embedded
-										? {}
-										: $pendingAgentId
-											? { agent_id: $pendingAgentId }
-											: {}
+								meta: $chatId ? (chat?.meta ?? {}) : {}
 							}}
 							{history}
 							title={$chatTitle}
@@ -5003,10 +4971,7 @@
 										null,
 										chatVariables ?? null,
 										// [Gradient] Persist the independent assistant binding.
-										{
-											...agentBinding,
-											...($activeAssistantId ? { assistant_id: $activeAssistantId } : {})
-										}
+										$activeAssistantId ? { assistant_id: $activeAssistantId } : null
 									);
 
 									if (savedChat) {
@@ -5106,8 +5071,7 @@
 								>
 									<MessageInput
 										bind:this={messageInput}
-										agentRouted={isAgentRouted($pendingAgentId)}
-										agentPickerActive={agentSelectorActive}
+										agentRouted={isAgentRouted()}
 										{history}
 										{taskIds}
 										bind:selectedModels

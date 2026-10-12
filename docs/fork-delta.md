@@ -49,14 +49,17 @@ auth boundary; retrieval and agentic control flow belong in soev-agents, not in
 a fork of a chat frontend.
 
 Gated by `AGENT_API_ENABLED` (`backend/open_webui/env.py:1007`, default `False`;
-Helm `openWebui.config.agentApiEnabled`, default `"false"`). The routing decision
-itself is a pure function isolated from upstream code in
-`backend/open_webui/utils/agent_routing.py` (`resolve_agent_route`,
-`agent_owns_tool_execution`) so the delta stays one-liners at the call sites in
-`main.py`. `backend/open_webui/utils/agent.py:call_agent_api` resolves the agent and model
-and always calls `utils/agent_v2.py`, which owns server threads and streamed events. Routing matrix: bound `chat.meta.agent_id` → agent
-route; no agent id + picker off + `AGENT_API_ENABLED` → agent route (legacy
-bypass); otherwise the stock route.
+Helm `openWebui.config.agentApiEnabled`, default `"false"`). With the flag on,
+every chat turn takes the agent route; otherwise the stock route.
+`backend/open_webui/utils/agent_routing.py:agent_owns_tool_execution` keeps the
+tool-loop decision isolated from upstream code.
+`backend/open_webui/utils/agent.py:call_agent_api` sends the admin-selected agent
+(`agent_api.selected_agent`) and the picked model, and always calls
+`utils/agent_v2.py`, which owns server threads and streamed events. The v1 agent
+picker is removed, and migration `ee54ed095346` drops the `agent_config` table
+with its `access_grant` rows. Stale `chat.meta.agent_id` values stay and are
+ignored. A rollback to v1 redeploys the previous image set and restores the
+database backup.
 
 D-Runtime keeps upstream's sub-agents, tool approval, ask-user, timers, and
 automations out of agent-routed turns. The agent still owns tool execution and
@@ -64,16 +67,12 @@ the post-tool continuation loop. The model editor hides the subagents builtin
 unconditionally because `/api/config` exposes no subagents feature flag; memory
 capabilities and tools use upstream's `enable_memories` flag.
 
-## Agent picker (replaces the model selector)
+## Composer model selector
 
-The v0.11.3 merge moves the picker from the navbar into the composer's right
-slot (Q7). `agentPickerActive` is computed in `Chat.svelte` / `Placeholder.svelte`
-and passed to `MessageInput.svelte`: `FEATURE_AGENT_PICKER` and
-`feature_agent_api_enabled` must be on, and the chat must be new or agent-bound
-(`!chat?.id || chat?.meta?.agent_id`). The slot renders `AgentSelector` when
-active, otherwise `ModelSelector` whenever there is anything to pick. Why: picker
-tenants choose an assistant; non-picker tenants using the legacy agent bypass
-still need their model selector. `agentRouted` does not control this slot.
+The v0.11.3 merge moves the model selector from the navbar into the composer's
+right slot (Q7); it renders whenever there is anything to pick. The v1 agent
+picker that could take this slot (`AgentSelector`, `FEATURE_AGENT_PICKER`) is
+removed.
 
 The selector's list excludes assistants (models carrying `info.base_model_id`)
 unless one is currently selected, so the trigger can still name an assistant-bound
@@ -82,10 +81,8 @@ AI-assistants workspace instead; the workspace is therefore the only pin surface
 for them. The list is not gated on a minimum model count: on a single-model tenant
 the selector still carries model info, set-as-default and the pin toggle.
 
-The navbar keeps upstream's title block; the new-chat greeting remains suppressed
-under the picker. Both flags default off (`FEATURE_AGENT_PICKER` / Helm
-`featureAgentPicker`, `AGENT_API_ENABLED` / Helm `agentApiEnabled`). The same pair
-swaps the admin tabs `external-agents` and `agents` through
+The navbar keeps upstream's title block. The admin tab `external-agents` is shown
+when `AGENT_API_ENABLED` (Helm `agentApiEnabled`) is on, through
 `src/lib/utils/features.ts:isAdminSettingsTabEnabled`.
 
 ## Two-menu composer and retired input pins
@@ -107,11 +104,8 @@ back to user settings and admin defaults; it was never a session-long default.
 ## Chat attachments and loading
 
 `MessageInput.svelte` hides per-file retrieval controls with `edit={!agentRouted}`.
-Its callers now pass `isAgentRouted($pendingAgentId)`; the bound-id argument is
-narrowed to the pending selection, rather than also resolving saved-chat metadata
-there. The helper still covers the legacy bypass when the agent API is enabled
-and the picker is off. This UI hint does not replace backend routing from
-`chat.meta.agent_id`. Why: retrieval on an agent turn is owned by the agent.
+Its callers pass `isAgentRouted()`, true whenever the agent API is enabled, as
+on the backend. Why: retrieval on an agent turn is owned by the agent.
 
 GRA-184 keeps `skipUpload` conditional on both temporary-chat mode and the agent
 API flag: temporary agent chats still upload real attachments. GRA-222 keeps
@@ -275,8 +269,8 @@ Files: `backend/open_webui/routers/feedback_report.py`,
 A "Keep in Sidebar" / "Hide from Sidebar" toggle inside the simple assistant
 editor, writing per-user `settings.pinnedModels` with the same handler shape as
 the workspace list's `pinModelHandler`. Why: upstream's only pin surface is the
-model selector, which the agent picker hides — without this there is no way to
-pin an assistant in picker tenants.
+model selector, which lists no assistants — without this there is no way to
+pin an assistant from the simple editor.
 
 Files: `src/lib/components/workspace/Models/SimpleModelEditor.svelte` (~65–81,
 ~320–330). Commit `1f61ab3b0`. Visible only where the simple builder is used,
@@ -318,8 +312,9 @@ archive retention.
 ## Admin settings in the settings modal
 
 Q13 adopts `chat/SettingsModal.svelte` as the host and retires
-`admin/Settings.svelte`. The six fork tabs are `cloud-sync`, `email`, `security`,
-`acceptance`, `external-agents`, and `agents`, with their existing save behavior.
+`admin/Settings.svelte`. The five fork tabs are `cloud-sync`, `email`, `security`,
+`acceptance` and `external-agents`, with their existing save behavior (the v1
+`agents` tab is removed).
 `isAdminSettingsEnabled` / `isAdminSettingsTabEnabled` filter discovery, search,
 and deep links; old settings routes redirect through those gates. Why: keep
 tenant feature restrictions while following upstream's unified settings host.

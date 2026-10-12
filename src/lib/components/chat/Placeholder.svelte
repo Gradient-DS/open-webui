@@ -16,12 +16,12 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { config, user, temporaryChatEnabled, selectedFolder, pendingAgentId } from '$lib/stores';
+	import { config, user, temporaryChatEnabled, selectedFolder } from '$lib/stores';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { sanitizeResponseContent } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
 	import { isAssistant } from '$lib/utils/assistants';
-	import { isAgentRouted, isFeatureEnabled } from '$lib/utils/features';
+	import { isAgentRouted } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import Suggestions from './Suggestions.svelte';
@@ -102,13 +102,10 @@
 
 	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
 
-	// Agent picker adds a content block below the input, welcome message adds
-	// one above — either way, shrink the placeholder's vertical padding so the
-	// screen still fits without scrolling.
-	$: agentPickerEnabled =
-		isFeatureEnabled('agent_picker') && Boolean($config?.features?.feature_agent_api_enabled);
+	// The welcome message adds a content block above the input; shrink the
+	// placeholder's vertical padding so the screen still fits without scrolling.
 	$: welcomeMessageEnabled = $config?.features?.enable_welcome_message === true;
-	$: compactPlaceholder = agentPickerEnabled || welcomeMessageEnabled;
+	$: compactPlaceholder = welcomeMessageEnabled;
 
 	// True when viewing a shared folder the current user doesn't own AND lacks write access
 	$: folderReadOnly =
@@ -151,48 +148,42 @@
 				/>
 			{:else}
 				<div class="flex flex-row justify-center gap-2.5 @sm:gap-3 w-fit px-5 max-w-xl">
-					<!-- [Gradient] With the agent picker owning routing, the model
-					     behind the chat is an implementation detail — suppress the
-					     model avatar/name greeting (raw model ids and favicon
-					     fallbacks read as noise) in favor of the plain hello. -->
-					{#if !agentPickerEnabled}
-						<div class="flex shrink-0 justify-center">
-							<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
-								{#each models as model, modelIdx}
-									<Tooltip
-										content={(models[modelIdx]?.info?.meta?.tags ?? [])
-											.map((tag) => tag.name.toUpperCase())
-											.join(', ')}
-										placement="top"
+					<div class="flex shrink-0 justify-center">
+						<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
+							{#each models as model, modelIdx}
+								<Tooltip
+									content={(models[modelIdx]?.info?.meta?.tags ?? [])
+										.map((tag) => tag.name.toUpperCase())
+										.join(', ')}
+									placement="top"
+								>
+									<button
+										aria-hidden={models.length <= 1}
+										aria-label={$i18n.t('Get information on {{name}} in the UI', {
+											name: ($activeAssistant ?? models[modelIdx])?.name
+										})}
+										on:click={() => {
+											selectedModelIdx = modelIdx;
+										}}
 									>
-										<button
-											aria-hidden={models.length <= 1}
-											aria-label={$i18n.t('Get information on {{name}} in the UI', {
-												name: ($activeAssistant ?? models[modelIdx])?.name
-											})}
-											on:click={() => {
-												selectedModelIdx = modelIdx;
+										<img
+											alt=""
+											src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${($activeAssistant ?? model)?.id}&lang=${$i18n.language}`}
+											class=" size-9 @sm:size-10 rounded-2xl"
+											aria-hidden="true"
+											draggable="false"
+											on:error={(e) => {
+												// LICENSE covers this Open WebUI fallback logo.
+												// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+												// https://docs.openwebui.com/license.
+												e.currentTarget.src = '/favicon.png';
 											}}
-										>
-											<img
-												alt=""
-												src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${($activeAssistant ?? model)?.id}&lang=${$i18n.language}`}
-												class=" size-9 @sm:size-10 rounded-2xl"
-												aria-hidden="true"
-												draggable="false"
-												on:error={(e) => {
-													// LICENSE covers this Open WebUI fallback logo.
-													// Do not alter, remove, obscure, or replace it except as LICENSE permits:
-													// https://docs.openwebui.com/license.
-													e.currentTarget.src = '/favicon.png';
-												}}
-											/>
-										</button>
-									</Tooltip>
-								{/each}
-							</div>
+										/>
+									</button>
+								</Tooltip>
+							{/each}
 						</div>
-					{/if}
+					</div>
 
 					<div
 						class=" text-2xl @sm:text-2xl line-clamp-1 flex items-center"
@@ -203,7 +194,7 @@
 								'{{name}}',
 								$user?.name ?? ''
 							)}
-						{:else if !agentPickerEnabled && greetingModel?.name}
+						{:else if greetingModel?.name}
 							<Tooltip
 								content={greetingModel?.name}
 								placement="top"
@@ -268,8 +259,7 @@
 				{#if !($selectedFolder && folderReadOnly)}
 					<MessageInput
 						bind:this={messageInput}
-						agentRouted={isAgentRouted($pendingAgentId)}
-						agentPickerActive={agentPickerEnabled}
+						agentRouted={isAgentRouted()}
 						{history}
 						bind:selectedModels
 						bind:files

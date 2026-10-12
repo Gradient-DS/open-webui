@@ -563,8 +563,6 @@ def test_no_private_upstream_is_configured_or_run(compose):
     absent = {
         'SOEV_API_URL',
         'AGENT_API_ENABLED',
-        'AGENT_API_PICKER_DEFAULT_SLUG',
-        'FEATURE_AGENT_PICKER',
         'SYNC_DAEMON_URL',
         'SYNC_DAEMON_API_KEY',
         'SYNC_API_KEY',

@@ -267,23 +267,6 @@ def prepare_configuration(ctx, parameter):
     return namespace
 
 
-def seed_agent_config(ctx, parameter):
-    rows = ctx.request('GET', '/api/v1/agent-configs/detect', actor=ctx.admin)
-    row = next((row for row in rows if row.get('in_env')), None)
-    if row is None:
-        raise RuntimeError('No environment-declared agent slug; cannot create one over HTTP')
-    slug = _extract(row, 'slug', name=parameter['key'], via='GET /api/v1/agent-configs/detect')
-    if not row.get('configured'):
-        ctx.request(
-            'POST',
-            f'/api/v1/agent-configs/{quote(slug, safe="")}',
-            actor=ctx.admin,
-            json={'name': f'Attack agent {ctx.token}'},
-        )
-    body = ctx.request('GET', f'/api/v1/agent-configs/{quote(slug, safe="")}', actor=ctx.admin)
-    return _extract(body, 'id', name=parameter['key'], via='GET agent config')
-
-
 def connection_index(ctx, parameter):
     body = ctx.request('GET', parameter['config_via'], actor=ctx.admin)
     urls = body.get(parameter['urls_field'])
@@ -591,7 +574,6 @@ _SEEDERS = {
     function.__name__: function
     for function in (
         prepare_configuration,
-        seed_agent_config,
         connection_index,
         upstream_path,
         seed_terminal,

@@ -958,7 +958,6 @@ LIVE_READS = [
     '/api/v1/evaluations/feedback/{id}',
     '/api/v1/archives/{archive_id}',
     '/api/v1/invites/{token}/validate',
-    '/api/v1/agent-configs/{slug}',
     '/api/v1/configs/namespace/{namespace}',
     '/api/v1/terminals/{server_id}/{path}',
 ]

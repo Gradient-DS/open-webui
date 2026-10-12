@@ -6,8 +6,6 @@
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isAssistant, isLLM } from '$lib/utils/assistants';
 	import AssistantChip from './AssistantChip.svelte';
-	import AgentSelector from './AgentSelector.svelte';
-	import { pendingAgentId } from '$lib/stores';
 	import DOMPurify from 'dompurify';
 	import { toast } from 'svelte-sonner';
 
@@ -221,8 +219,6 @@
 	// [Gradient] True when this chat routes to the agent service, which owns
 	// retrieval — hides per-file retrieval controls that would be no-ops there.
 	export let agentRouted = false;
-	// [Gradient] Picker visibility is independent of agent runtime routing.
-	export let agentPickerActive = false;
 
 	// [Gradient] The picker shows whenever there is anything to pick, including
 	// single-model tenants — it also hosts model info, set-as-default and the pin
@@ -2984,10 +2980,7 @@
 									<!-- [Gradient] Assistant identity sits beside the independent LLM picker. -->
 									<AssistantChip editable={!history?.currentId} />
 									<div class="flex min-w-0 max-w-[10rem] items-center sm:max-w-[13rem]">
-										<!-- [Gradient] Agent-only picker tenants; model selector for other multi-model tenants. -->
-										{#if agentPickerActive}
-											<AgentSelector agentId={$pendingAgentId} editable={!history?.currentId} />
-										{:else if pickerModels.length > 0}
+										{#if pickerModels.length > 0}
 											<ModelSelector
 												bind:this={modelSelector}
 												bind:selectedModels
