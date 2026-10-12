@@ -242,10 +242,13 @@ tool output continue. The Document Writer feature gate controls the surface;
 the desktop panel starts at 600px and then respects the saved width.
 
 Word download is gated separately by `ENABLE_DOCX_EXPORT`
-(`backend/open_webui/config.py:2912`, default `True`; Helm `enableDocxExport`).
-It hides every `.docx` button in the UI *and* returns 403 from `/utils/chat/docx`
-and `/utils/document/docx` (`backend/open_webui/routers/utils.py:143,192`) — the
-switch is enforced server-side, not just visually.
+(`backend/open_webui/config.py`, default `True`; Helm `enableDocxExport`).
+It hides every `.docx` button in the UI and returns 403 from `/utils/chat/docx`.
+A writer document's Word file is built in the browser (`src/lib/utils/documentDocx.ts`,
+`docx` npm package): citations become Word footnotes and only `data:` images are kept,
+so model-written documents are never rendered on the server. Its PDF is the browser
+print of a sanitised, CSP-locked frame (`documentPrint.ts`) with Inter inlined as a
+`data:` font and page numbers in the footer.
 
 ## Feedback report → Slack / notification router
 

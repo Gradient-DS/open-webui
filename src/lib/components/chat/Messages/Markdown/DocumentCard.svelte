@@ -15,7 +15,6 @@
 		documentContents,
 		selectedDocumentIndex
 	} from '$lib/stores';
-	import { exportDocumentAsDocx } from '$lib/apis/utils';
 	import { getExportMarkdown } from '$lib/utils/documentCitations';
 	import { printDocument } from '$lib/utils/documentPrint';
 
@@ -83,20 +82,22 @@
 
 	const downloadPdf = async () => {
 		if (!content) return;
+		// Close first: the print dialog blocks the page, and the menu must not outlive it.
+		downloadOpen = false;
 		try {
 			await printDocument(displayTitle, exportContent, format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
 		}
-		downloadOpen = false;
 	};
 
 	const downloadDocx = async () => {
 		if (!content) return;
 		try {
-			const blob = await exportDocumentAsDocx(localStorage.token, displayTitle, exportContent);
-			if (blob) saveAs(blob, `${sanitizeFilename(displayTitle)}.docx`);
+			const { buildDocumentDocx } = await import('$lib/utils/documentDocx');
+			const blob = await buildDocumentDocx(displayTitle, content, sources, $i18n.t('Sources'));
+			saveAs(blob, `${sanitizeFilename(displayTitle)}.docx`);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export Word document'));

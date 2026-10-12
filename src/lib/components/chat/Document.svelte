@@ -18,7 +18,6 @@
 		selectedDocumentIndex
 	} from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
-	import { exportDocumentAsDocx } from '$lib/apis/utils';
 	import { printDocument } from '$lib/utils/documentPrint';
 
 	import ContentRenderer from './Messages/ContentRenderer.svelte';
@@ -52,11 +51,11 @@
 		return cleaned.length > 0 ? cleaned : 'document';
 	};
 
-	const getExportMarkdown = (superscript = false) => {
+	const getExportMarkdown = () => {
 		if (!current) return '';
 		return current.format === 'html'
 			? current.content
-			: exportMarkdown(current.content, current.sources ?? [], $i18n.t('Sources'), superscript);
+			: exportMarkdown(current.content, current.sources ?? [], $i18n.t('Sources'));
 	};
 
 	const downloadMd = () => {
@@ -82,7 +81,7 @@
 		// Close first: the print dialog blocks the page, and the menu must not outlive it.
 		downloadOpen = false;
 		try {
-			await printDocument(current.title, getExportMarkdown(true), current.format);
+			await printDocument(current.title, getExportMarkdown(), current.format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
@@ -92,12 +91,14 @@
 	const downloadDocx = async () => {
 		if (!current) return;
 		try {
-			const blob = await exportDocumentAsDocx(
-				localStorage.token,
+			const { buildDocumentDocx } = await import('$lib/utils/documentDocx');
+			const blob = await buildDocumentDocx(
 				current.title,
-				getExportMarkdown()
+				current.content,
+				current.sources ?? [],
+				$i18n.t('Sources')
 			);
-			if (blob) saveAs(blob, `${sanitizeFilename(current.title)}.docx`);
+			saveAs(blob, `${sanitizeFilename(current.title)}.docx`);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export Word document'));
