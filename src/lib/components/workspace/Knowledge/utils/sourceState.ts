@@ -142,7 +142,11 @@ export function runProgress(schedule: Schedule): FolderProgress | null {
 	return {
 		total: counts.planned,
 		transferred: Math.min(counts.fetched ?? 0, counts.planned),
-		processed: Math.min(counts.landed ?? 0, counts.planned),
+		// [Gradient] Skipped and failed items are done too, so a finished run reads N of N.
+		processed: Math.min(
+			(counts.landed ?? 0) + (counts.skipped ?? 0) + (counts.failed ?? 0),
+			counts.planned
+		),
 		failed: counts.failed ?? 0
 	};
 }

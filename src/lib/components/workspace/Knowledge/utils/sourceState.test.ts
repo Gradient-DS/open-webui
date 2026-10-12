@@ -328,6 +328,19 @@ describe('run progress', () => {
 			)
 		).toEqual({ total: 40, transferred: 12, processed: 3, failed: 0 });
 	});
+	it('counts skipped and failed items as processed', () => {
+		expect(
+			runProgress(
+				schedule({
+					last_run: {
+						...run,
+						outcome: null,
+						counts: { planned: 65, fetched: 65, landed: 60, skipped: 3, failed: 2 }
+					}
+				})
+			)
+		).toEqual({ total: 65, transferred: 65, processed: 65, failed: 2 });
+	});
 	it('includes failures and caps transfer and processing counts at planned work', () => {
 		expect(
 			runProgress(
