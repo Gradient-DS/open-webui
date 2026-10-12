@@ -594,18 +594,7 @@ data:
   {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
   AGENT_API_ENABLED: "true"
   AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
-  {{- with .Values.openWebui.config.agentApiAgentsConfig }}
-  AGENT_API_AGENTS_CONFIG: {{ . | quote }}
   {{- end }}
-  AGENT_API_AGENTS_CONFIG_OVERWRITE: {{ .Values.openWebui.config.agentApiAgentsConfigOverwrite | default "false" | quote }}
-  {{- with .Values.openWebui.config.agentApiPickerDefaultSlug }}
-  AGENT_API_PICKER_DEFAULT_SLUG: {{ . | quote }}
-  {{- end }}
-  {{- end }}
-
-  # [Gradient] Per-chat agent picker UI (Settings → Agents admin tab +
-  # new-chat empty-state cards). Layered on top of AGENT_API_ENABLED.
-  FEATURE_AGENT_PICKER: {{ .Values.openWebui.config.featureAgentPicker | default "false" | quote }}
 
   # Two-Factor Authentication (TOTP)
   ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}
