@@ -29,6 +29,7 @@
 	import Document from './Document.svelte';
 	import Embeds from './ChatControls/Embeds.svelte';
 	import CitationPanel from './ChatControls/CitationPanel.svelte'; // [Gradient]
+	import { citationPaneVisible } from '$lib/stores/citations'; // [Gradient]
 	import SourcesTabButton from './ChatControls/SourcesTabButton.svelte'; // [Gradient]
 	import SourcesTabController from './ChatControls/SourcesTabController.svelte'; // [Gradient]
 	import SourcesSheet, { sourcesSheetClass } from './ChatControls/SourcesSheet.svelte'; // [Gradient]
@@ -64,6 +65,7 @@
 	let controlsWidth = 600;
 	let sheetExpanded = false; // [Gradient]
 	$: if (activeTab !== 'sources' || !$showControls) sheetExpanded = false; // [Gradient]
+	$: citationPaneVisible.set($showControls && activeTab === 'sources'); // [Gradient]
 
 	// Tab state for Controls+Files panel
 	let activeTab = savedTab;
