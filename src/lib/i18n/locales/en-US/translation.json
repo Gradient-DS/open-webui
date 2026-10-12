@@ -1370,6 +1370,7 @@
   "Example: ou=users,dc=foo,dc=example": "",
   "Example: sAMAccountName or uid or userPrincipalName": "",
   "Exceeded the number of seats in your license. Please contact support to increase the number of seats.": "",
+  "Excel": "Excel",
   "Exclude": "",
   "Execute code": "",
   "Execute code for analysis": "",

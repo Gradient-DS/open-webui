@@ -1370,6 +1370,7 @@
   "Example: ou=users,dc=foo,dc=example": "Voorbeeld: ou=users,dc=foo,dc=example",
   "Example: sAMAccountName or uid or userPrincipalName": "Voorbeeld: sAMAccountName or uid or userPrincipalName",
   "Exceeded the number of seats in your license. Please contact support to increase the number of seats.": "Het aantal seats in uw licentie is overschreden. Neem contact op met support om het aantal seats te verhogen.",
+  "Excel": "Excel",
   "Exclude": "Sluit uit",
   "Execute code": "Code uitvoeren",
   "Execute code for analysis": "Voer code uit voor analyse",

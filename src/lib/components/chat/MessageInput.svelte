@@ -142,7 +142,7 @@
 	import Camera from '../icons/Camera.svelte';
 	import Link from '../icons/Link.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
-	import PagePlus from '../icons/PagePlus.svelte';
+	import ExcelToggle from './MessageInput/ExcelToggle.svelte';
 	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
 	import { meetingsAvailable } from '$lib/components/meetings/availability';
 	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
@@ -2624,6 +2624,11 @@
 
 										<!-- [Gradient] Scrolls sideways on narrow screens instead of overflowing. -->
 										<div class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none">
+											<!-- [Gradient] Demo: Excel switch for the Office feature. -->
+											{#if showOfficeButton}
+												<ExcelToggle bind:officeEnabled bind:officeEditEnabled />
+											{/if}
+
 											<!-- [Gradient] Pinned or active "+" menu items, same gates as the menu. -->
 											{#each inputBarItems as itemId (itemId)}
 												{#if itemId === 'upload_files' && inputMenuFileUploadEnabled}
@@ -2974,52 +2979,6 @@
 											{/each}
 
 											<!-- [Gradient] Active capabilities show in the bar above, pinned or not. -->
-
-											{#if officeEnabled && showOfficeButton}
-												<Tooltip content={$i18n.t('Create Office files')} placement="top">
-													<button
-														aria-label={$i18n.t('Create Office files')}
-														aria-pressed={officeEnabled}
-														on:click|preventDefault={() => (officeEnabled = !officeEnabled)}
-														type="button"
-														class=" group p-[0.375rem] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {officeEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
-														false)
-															? 'm-1'
-															: 'focus:outline-hidden rounded-full'}"
-													>
-														<PagePlus className="size-3.5" strokeWidth="2" />
-
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
-
-											{#if officeEditEnabled && showOfficeEditButton}
-												<Tooltip content={$i18n.t('Edit Office files')} placement="top">
-													<button
-														aria-label={$i18n.t('Edit Office files')}
-														aria-pressed={officeEditEnabled}
-														on:click|preventDefault={() => (officeEditEnabled = !officeEditEnabled)}
-														type="button"
-														class=" group p-[0.375rem] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {officeEditEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
-														false)
-															? 'm-1'
-															: 'focus:outline-hidden rounded-full'}"
-													>
-														<PageEdit className="size-3.5" strokeWidth="2" />
-
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
 
 											{#each pendingOAuthTools as pendingTool (pendingTool.id)}
 												<Tooltip content={$i18n.t('Click to connect')} placement="top">
