@@ -45,7 +45,7 @@ describe('web search flags', () => {
 	});
 });
 
-describe('PDF writer flags', () => {
+describe('Document writer flags', () => {
 	it('cycles Auto, Always, Off and round-trips the request flags', () => {
 		expect(DOCUMENT_WRITER_STATES).toEqual(['auto', 'required', 'off']);
 		for (const [index, state] of DOCUMENT_WRITER_STATES.entries()) {

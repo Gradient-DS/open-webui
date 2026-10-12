@@ -272,10 +272,10 @@
 					</AdminSettingField>
 				{/if}
 			</AdminSettingSection>
-			<!-- [Gradient] PDF writer remains tenant gated. -->
+			<!-- [Gradient] Document writer remains tenant gated. -->
 			{#if isFeatureEnabled('document_writer')}
-				<AdminSettingSection title={$i18n.t('PDF writer')}>
-					<AdminSettingRow label={$i18n.t('Enable PDF writer')} let:labelId
+				<AdminSettingSection title={$i18n.t('Document writer')}>
+					<AdminSettingRow label={$i18n.t('Enable document writer')} let:labelId
 						><Switch
 							bind:state={config.ENABLE_DOCUMENT_WRITER}
 							ariaLabelledbyId={labelId}

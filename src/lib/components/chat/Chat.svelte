@@ -1146,7 +1146,7 @@
 				webSearchRequired = Boolean(webSearchAllowed && always);
 			}
 
-			// [Gradient] PDF writer reads no external data, including under strict separation.
+			// [Gradient] Document writer reads no external data, including under strict separation.
 			if (!history?.currentId) {
 				documentWriterEnabled = true;
 				documentWriterRequired = false;
@@ -3337,7 +3337,7 @@
 					knowledge_external: $i18n.t('External Knowledge Base'),
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
-					document_writer: $i18n.t('PDF writer'),
+					document_writer: $i18n.t('Document writer'),
 					image_generation: $i18n.t('Image Generation')
 				};
 				const capabilityLabels = warning.capabilities.map(

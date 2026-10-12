@@ -22,8 +22,8 @@
 			description: $i18n.t('Model can execute code and perform calculations')
 		},
 		document_writer: {
-			label: $i18n.t('PDF writer'),
-			description: $i18n.t('Model can write and create downloadable PDFs')
+			label: $i18n.t('Document writer'),
+			description: $i18n.t('Model can write and create downloadable documents')
 		}
 	};
 
