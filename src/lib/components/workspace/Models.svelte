@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -167,7 +166,6 @@
 			if (res) {
 				models = res.items;
 				total = res.total;
-				setWorkspaceCount('models', total);
 
 				// get tags
 				tags = await getModelTags(localStorage.token).catch((error) => {

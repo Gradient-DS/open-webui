@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -154,8 +153,6 @@
 
 			return direction * ((a.updated_at ?? 0) - (b.updated_at ?? 0));
 		});
-
-		setWorkspaceCount('tools', filteredItems.length);
 	};
 
 	const setSortKey = (key: string) => {

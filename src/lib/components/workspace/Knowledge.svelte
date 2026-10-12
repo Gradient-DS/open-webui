@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { prefetchKnowledge } from './Knowledge/utils/prefetch';
 	import { knowledgeListCache, type KnowledgeListItem } from './Knowledge/utils/listCache';
-	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import { enabledProviders } from '$lib/sources/policy';
 	import { providerFor } from '$lib/sources/registry';
 	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
@@ -177,7 +176,6 @@
 
 		if (res) {
 			total = res.total;
-			setWorkspaceCount('knowledge', total);
 			const pageItems: KnowledgeListItem[] = res.items ?? [];
 			if (requestedPage === 1 && typeof res.total === 'number') {
 				knowledgeListCache.set(cacheKey, { items: pageItems, total: res.total }, cacheRevision);

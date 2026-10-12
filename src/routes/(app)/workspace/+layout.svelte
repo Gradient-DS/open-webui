@@ -4,16 +4,10 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_NAME, config, showSidebar, user, mobile, workspaceActions } from '$lib/stores';
-	import { registerWorkspaceCountLoaders } from '$lib/stores/workspace-counts';
 	import { page } from '$app/stores';
 	// [Gradient] Tenant feature gates also apply to administrators.
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { goto } from '$app/navigation';
-	import { getModelItems } from '$lib/apis/models';
-	import { searchKnowledgeBases } from '$lib/apis/knowledge';
-	import { getPromptItems } from '$lib/apis/prompts';
-	import { getSkillItems } from '$lib/apis/skills';
-	import { getToolList } from '$lib/apis/tools';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
 
@@ -26,43 +20,6 @@
 		lastPath = $page.url.pathname;
 		workspaceActions.set([]);
 	}
-
-	const loadWorkspaceCounts = () => {
-		const canViewModels =
-			isFeatureEnabled('models') &&
-			($user?.role === 'admin' || $user?.permissions?.workspace?.models);
-		const canViewKnowledge =
-			isFeatureEnabled('knowledge') &&
-			($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge);
-		const canViewPrompts =
-			isFeatureEnabled('prompts') &&
-			($user?.role === 'admin' || $user?.permissions?.workspace?.prompts);
-		const canViewSkills =
-			isFeatureEnabled('skills') &&
-			($user?.role === 'admin' || $user?.permissions?.workspace?.skills);
-		const canViewTools =
-			isFeatureEnabled('tools') &&
-			$config?.features?.enable_plugins &&
-			($user?.role === 'admin' || $user?.permissions?.workspace?.tools);
-
-		return registerWorkspaceCountLoaders({
-			models: () =>
-				canViewModels
-					? getModelItems(localStorage.token, null, null, null, null, null, 1)
-					: Promise.resolve(null),
-			knowledge: () =>
-				canViewKnowledge
-					? searchKnowledgeBases(localStorage.token, null, null, 1, null, null, null, null)
-					: Promise.resolve(null),
-			prompts: () =>
-				canViewPrompts
-					? getPromptItems(localStorage.token, null, null, null, null, null, 1)
-					: Promise.resolve(null),
-			skills: () =>
-				canViewSkills ? getSkillItems(localStorage.token, null, null, 1) : Promise.resolve(null),
-			tools: () => (canViewTools ? getToolList(localStorage.token) : Promise.resolve(null))
-		});
-	};
 
 	onMount(() => {
 		void loadSourcePolicy(localStorage.token);
@@ -114,7 +71,6 @@
 		}
 
 		loaded = true;
-		return loadWorkspaceCounts();
 	});
 </script>
 

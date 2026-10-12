@@ -1,4 +1,3 @@
-import { notifyWorkspaceMutation } from '$lib/stores/workspace-counts';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const createNewTool = async (token: string, tool: object) => {
@@ -28,8 +27,6 @@ export const createNewTool = async (token: string, tool: object) => {
 	if (error) {
 		throw error;
 	}
-
-	if (res) notifyWorkspaceMutation('tools');
 
 	return res;
 };
@@ -288,8 +285,6 @@ export const deleteToolById = async (token: string, id: string) => {
 	if (error) {
 		throw error;
 	}
-
-	if (res) notifyWorkspaceMutation('tools');
 
 	return res;
 };
