@@ -2,6 +2,7 @@ import type { AccountInfo, PopupRequest, PublicClientApplication } from '@azure/
 import { v4 as uuidv4 } from 'uuid';
 import { WEBUI_BASE_URL } from '$lib/constants';
 import { fetchOneDriveHost } from './onedrive-host';
+import { centeredPopupFeatures } from './popup';
 
 class OneDriveConfig {
 	private static instance: OneDriveConfig;
@@ -491,7 +492,7 @@ export async function openOneDrivePicker(): Promise<PickerResult | null> {
 					return reject(new Error('Failed to acquire access token'));
 				}
 
-				pickerWindow = window.open('', 'OneDrivePicker', 'width=800,height=600');
+				pickerWindow = window.open('', 'OneDrivePicker', centeredPopupFeatures(800, 600));
 				if (!pickerWindow) {
 					return reject(new Error('Failed to open OneDrive picker window'));
 				}
