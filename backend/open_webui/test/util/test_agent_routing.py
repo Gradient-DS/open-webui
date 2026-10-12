@@ -36,16 +36,32 @@ def test_agent_owns_tool_execution_false_when_flag_absent_or_falsy():
     assert agent_owns_tool_execution(None) is False
 
 
-def test_resolve_agent_route_agent_id_wins():
-    # An explicit per-chat agent always routes to that agent, regardless
-    # of the picker / legacy-bypass flags and of any default.
+def test_resolve_agent_route_agent_id_wins_under_the_picker():
     route = resolve_agent_route(
         chat_agent_id='a1',
-        agent_api_enabled=False,
+        agent_api_enabled=True,
         feature_agent_picker=True,
         default_agent_id='fallback',
     )
     assert route == AgentRoute(to_agent=True, agent_id='a1')
+
+
+@pytest.mark.parametrize(
+    ('agent_api_enabled', 'feature_agent_picker', 'expected'),
+    [
+        (True, False, AgentRoute(to_agent=True, agent_id=None)),
+        (False, True, AgentRoute(to_agent=False, agent_id=None)),
+        (False, False, AgentRoute(to_agent=False, agent_id=None)),
+    ],
+)
+def test_resolve_agent_route_ignores_a_binding_without_the_picker(agent_api_enabled, feature_agent_picker, expected):
+    """A chat bound by the old picker routes like an unbound chat once the picker is gone."""
+    route = resolve_agent_route(
+        chat_agent_id='offertemachine',
+        agent_api_enabled=agent_api_enabled,
+        feature_agent_picker=feature_agent_picker,
+    )
+    assert route == expected
 
 
 def test_resolve_agent_route_legacy_bypass():

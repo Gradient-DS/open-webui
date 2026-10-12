@@ -66,7 +66,9 @@
 		type QueuedRun,
 		shouldRefetchSyncItems,
 		finishedRuns,
-		runIsLive
+		runIsLive,
+		syncableSources,
+		syncAllNotice
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
 	import { runProgress, skippedRunKey } from './utils/sourceState';
@@ -98,6 +100,8 @@
 	let queuedRuns = new Map<string, QueuedRun>();
 	let connecting: Connection | null = null;
 	let cloudActionBusy = false;
+	// [Gradient] Sync-all keeps its own flag so other source actions never block it.
+	let syncAllBusy = false;
 	let syncPoll: ReturnType<typeof setTimeout> | undefined;
 	let destroyed = false;
 	let closeAuthorization: (() => void) | undefined;
@@ -106,7 +110,8 @@
 	$: activeProvider = requestedProvider ?? (knowledge?.type ? providers[knowledge.type] : null);
 	$: activeProviderEnabled =
 		!!activeProvider && $enabledProviders.some((item) => item.kind === activeProvider.kind);
-	$: isSyncBusy = cloudActionBusy || schedules.some((schedule) => runIsLive(schedule.last_run));
+	$: isSyncBusy =
+		cloudActionBusy || syncAllBusy || schedules.some((schedule) => runIsLive(schedule.last_run));
 	$: reconnectNeeded = reconnectConnections(schedules, connecting);
 	// [Gradient] Sources render inside the listing: folder sources on the
 	// directory row their schedule writes, single-file sources as loose rows.
@@ -1141,29 +1146,28 @@
 
 	// [Gradient] Sync every source of this knowledge base in one call. Each source
 	// keeps its own cooldown, so refusals come back per source and never fail the rest.
-	$: syncableSources = schedules.filter(
-		(schedule) => schedule.kind === 'content' && schedule.lifecycle !== 'revoked'
-	);
+	$: hasSyncableSources = syncableSources(schedules).length > 0;
 	const runAllSources = async (quiet = false) => {
 		if (!knowledge) return;
 		try {
 			const { data } = await cloudSync.syncKnowledge(localStorage.token, knowledge.id);
-			const startedIds = data.filter((run) => run.job_id).map((run) => run.schedule_id);
-			queuedRuns = queueRuns(queuedRuns, schedules, startedIds);
-			const started = startedIds.length;
-			const codes = new Set(data.map((run) => run.code));
-			if (started) toast.success($i18n.t('Sync started for {{count}} sources', { count: started }));
-			else if (quiet) return;
-			else if (!data.length) toast.info($i18n.t('Only the person who added a source can sync it.'));
-			else if (codes.has('connection_pending'))
+			const notice = syncAllNotice(data);
+			if (notice.kind === 'started') {
+				queuedRuns = queueRuns(queuedRuns, schedules, notice.ids);
+				toast.success($i18n.t('Sync started for {{count}} sources', { count: notice.ids.length }));
+			} else if (quiet) return;
+			else if (notice.kind === 'not_owner')
+				toast.info($i18n.t('Only the person who added a source can sync it.'));
+			else if (notice.kind === 'reconnect')
 				toast.info(
 					$i18n.t('Reconnect {{provider}} to resume syncing.', {
 						provider: $i18n.t(activeProvider?.label ?? '')
 					})
 				);
-			else if (codes.has('run_too_soon'))
+			else if (notice.kind === 'too_soon')
 				toast.info($i18n.t('Sync was started recently. Try again in a moment.'));
-			else toast.info($i18n.t('A sync is already running.'));
+			else if (notice.kind === 'running') toast.info($i18n.t('A sync is already running.'));
+			else toast.info($i18n.t('Paused sources are skipped. Resume a source to sync it.'));
 		} catch (error) {
 			reportCloudError(error);
 		}
@@ -1173,12 +1177,12 @@
 		repollCloudSyncSoon();
 	};
 	const syncAllSources = async () => {
-		if (cloudActionBusy) return;
-		cloudActionBusy = true;
+		if (syncAllBusy) return;
+		syncAllBusy = true;
 		try {
 			await runAllSources();
 		} finally {
-			cloudActionBusy = false;
+			syncAllBusy = false;
 		}
 	};
 
@@ -2299,7 +2303,7 @@
 							}}
 						/>
 
-						{#if knowledge?.write_access && syncableSources.length > 1}
+						{#if knowledge?.write_access && hasSyncableSources}
 							<!-- [Gradient] Keep the standard gap before "Add source". -->
 							<Tooltip
 								content={$i18n.t('Check every source of this knowledge base for changes now')}
@@ -2307,8 +2311,7 @@
 							>
 								<button
 									type="button"
-									class="py-1.5 px-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
-									disabled={cloudActionBusy}
+									class="py-1.5 px-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm whitespace-nowrap"
 									on:click={syncAllSources}>{$i18n.t('Sync all now')}</button
 								>
 							</Tooltip>
@@ -2481,7 +2484,7 @@
 												{uploadProgress}
 												skippedProvider={currentSourceProvider}
 												syncAccess={!!knowledge?.write_access}
-												syncBusy={cloudActionBusy}
+												syncBusy={cloudActionBusy || syncAllBusy}
 												isAdmin={$user?.role === 'admin'}
 												onSourceAction={(targets, action) => sourceAction(targets, action)}
 												onReconnect={(connection) => reconnect(connection)}

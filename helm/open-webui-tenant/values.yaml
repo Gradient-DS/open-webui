@@ -441,7 +441,7 @@ openWebui:
     userPermissionsChatDelete: "true"
     userPermissionsChatDeleteMessage: "true"
     userPermissionsChatEdit: "true"
-    userPermissionsChatShare: "true"
+    userPermissionsChatShare: "false"  # Chat sharing is opt-in per tenant; binds admins too.
     userPermissionsChatExport: "true"
     userPermissionsChatContinueResponse: "true"
     userPermissionsChatRegenerateResponse: "true"

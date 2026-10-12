@@ -68,17 +68,20 @@ def resolve_agent_route(
 
     Routing matrix:
 
-    - chat bound to an agent (``chat_agent_id`` set)          → that agent
+    - picker on, API enabled, chat bound (``chat_agent_id``)  → that agent
     - no agent_id, picker on, API enabled, default configured → the default agent
     - no agent_id, picker on, API enabled, no default         → refused
-    - no agent_id, picker off, API enabled                    → agent route (legacy bypass)
+    - picker off, API enabled                                 → agent route (legacy bypass)
     - otherwise                                               → standard route
+
+    Without the picker a binding is ignored: chats bound by an earlier
+    picker would otherwise be refused against agents no longer offered.
 
     Access-control / DB lookups (verifying the user may use the resolved
     agent, reading the default from config) stay at the call site; this
     only encodes the decision matrix.
 
-    :param chat_agent_id: Per-chat bound agent id, or ``None``.
+    :param chat_agent_id: Per-chat bound agent id, or ``None``; read only under the picker.
     :param agent_api_enabled: The ``AGENT_API_ENABLED`` bypass flag.
     :param feature_agent_picker: The ``FEATURE_AGENT_PICKER`` master flag.
     :param default_agent_id: The admin-configured picker default, already
@@ -86,12 +89,12 @@ def resolve_agent_route(
     :raises AgentSelectionRequired: When the picker is on and neither the
         chat nor the deployment names an agent.
     """
-    if chat_agent_id:
-        return AgentRoute(to_agent=True, agent_id=chat_agent_id)
     if not agent_api_enabled:
         return AgentRoute(to_agent=False)
     if not feature_agent_picker:
         return AgentRoute(to_agent=True)
+    if chat_agent_id:
+        return AgentRoute(to_agent=True, agent_id=chat_agent_id)
     if default_agent_id:
         return AgentRoute(to_agent=True, agent_id=default_agent_id)
     raise AgentSelectionRequired()

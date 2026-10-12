@@ -5,10 +5,11 @@
 		composerFromFeatures,
 		type ComposerPreferences
 	} from '$lib/utils/composerPreferences';
-	import { type ToolState } from '$lib/utils/toolState';
+	import { type ToolState, seedsLiveDefault } from '$lib/utils/toolState';
 	import { getHistorySide } from '$lib/utils/dataSeparation';
 	import { turnNotices, withoutRemoved } from '$lib/utils/turnNotices';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
+	import { applyFileStatus, applyUploadResult, isAwaitingUpload } from '$lib/utils/messageQueue';
 	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
@@ -1146,7 +1147,7 @@
 				webSearchRequired = Boolean(webSearchAllowed && always);
 			}
 
-			// [Gradient] PDF writer reads no external data, including under strict separation.
+			// [Gradient] Document writer reads no external data, including under strict separation.
 			if (!history?.currentId) {
 				documentWriterEnabled = true;
 				documentWriterRequired = false;
@@ -1252,6 +1253,20 @@
 							documentWriterEnabled = true;
 							documentWriterRequired = true;
 						}
+					}
+
+					// [Gradient] Live tools start on Auto; consent waits for the user's own click.
+					if (
+						seedsLiveDefault(
+							model.info.meta,
+							'live_documents',
+							$config?.features?.enable_live_documents
+						)
+					) {
+						liveDocumentsState = 'auto';
+					}
+					if (seedsLiveDefault(model.info.meta, 'live_mail', $config?.features?.enable_live_mail)) {
+						liveMailState = 'auto';
 					}
 				}
 
@@ -1388,6 +1403,8 @@
 			if (message.files) message.files = message.files.map(update);
 		}
 		history = history;
+		chatRequestQueues.update((q) => applyFileStatus(q, data));
+		processNextInQueue($chatId);
 		const idx = files.findIndex((f) => f.id === data.file_id);
 		if (idx < 0) return;
 
@@ -2143,14 +2160,7 @@
 		if (file?.itemId) {
 			chatRequestQueues.update((q) => ({
 				...q,
-				[$chatId]: (q[$chatId] ?? []).map((message) =>
-					(message.files ?? []).some((item) => item.itemId === file.itemId)
-						? {
-								...message,
-								files: message.files.map((item) => (item.itemId === file.itemId ? file : item))
-							}
-						: message
-				)
+				[$chatId]: applyUploadResult(q[$chatId] ?? [], file)
 			}));
 		}
 
@@ -2866,9 +2876,7 @@
 		const lastMessage = history.currentId ? history.messages[history.currentId] : null;
 		if (
 			(lastMessage && lastMessage.role === 'assistant' && !lastMessage.done) ||
-			queue.some((m) =>
-				(m.files ?? []).some((file) => ['uploading', 'error'].includes(file.status))
-			)
+			queue.some((m) => isAwaitingUpload(m.files))
 		) {
 			return;
 		}
@@ -3337,7 +3345,7 @@
 					knowledge_external: $i18n.t('External Knowledge Base'),
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
-					document_writer: $i18n.t('PDF writer'),
+					document_writer: $i18n.t('Document writer'),
 					image_generation: $i18n.t('Image Generation')
 				};
 				const capabilityLabels = warning.capabilities.map(
@@ -3592,10 +3600,8 @@
 		}
 
 		if (
-			($chatRequestQueues[$chatId] ?? []).some((m) =>
-				(m.files ?? []).some((file) => ['uploading', 'error'].includes(file.status))
-			) ||
-			(files.length > 0 && files.some((file) => ['uploading', 'error'].includes(file.status)))
+			($chatRequestQueues[$chatId] ?? []).some((m) => isAwaitingUpload(m.files)) ||
+			isAwaitingUpload(files)
 		) {
 			chatRequestQueues.update((q) => ({
 				...q,

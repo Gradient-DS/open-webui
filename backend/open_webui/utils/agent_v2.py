@@ -206,8 +206,8 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
 @dataclass(frozen=True)
 class Skipped:
     """[Claude] An item of the chat or assistant this turn runs without: `kind` is knowledge, file, note, chat or meeting;
-    `reason` gone (deleted), denied (exists, not for this user), failed or processing. `in_chat` is False for an
-    assistant's own knowledge base, which the chat cannot drop."""
+    `reason` gone (deleted), denied (exists, not for this user), failed, processing or unmigrated (a v1 upload never
+    ingested for v2). `in_chat` is False for an assistant's own knowledge base, which the chat cannot drop."""
 
     kind: str
     reason: str
@@ -261,7 +261,8 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
 
     The collection is the one the file's own record names (a live document, or an upload the v2 migration ingested),
     else where chat uploads go; the agent checks access. A chat entry's `collection_name` is never read: a v1 entry
-    names the per-file vector collection `file-<id>`, which soev-api does not have.
+    names the per-file vector collection `file-<id>`, which soev-api does not have. A record that still names it is
+    an upload the migration left behind, skipped as `unmigrated`.
     A file picked from a knowledge base (`knowledge_id`) is that KB's document, read there as the user: synced
     documents have no File row, and an uploaded one's row does not name the KB. A file the agent cannot read is
     left out under `skipped`; a processing one is also noted for the agent.
@@ -294,6 +295,10 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
                 unavailable.append(Skipped('file', status or 'gone', file_id, name))
             continue
         key = (file.meta or {}).get('collection_name') or ingest.attachments_collection_key(file.user_id)
+        if key == f'file-{file.id}':
+            # [Claude] Still in the v1 per-file collection: `migrate --uploads` did not ingest it.
+            unavailable.append(Skipped('file', 'unmigrated', file_id, name))
+            continue
         item = {'collection_key': key, 'file_id': file_id, 'name': name}
         if (file.meta or {}).get('source'):
             item['document_ref'] = file.meta['source']['ref']
@@ -682,12 +687,14 @@ _WHY = {
         'denied': '{subject} is not accessible and was skipped.',
         'failed': '{subject} could not be processed and was skipped.',
         'processing': '{subject} is still being processed and was skipped this time.',
+        'unmigrated': '{subject} was uploaded before an update and cannot be read. Upload the file again.',
     },
     'nl': {
         'gone': '{subject} bestaat niet meer en is uit deze chat gehaald.',
         'denied': '{subject} is niet toegankelijk en is overgeslagen.',
         'failed': '{subject} kon niet worden verwerkt en is overgeslagen.',
         'processing': '{subject} wordt nog verwerkt en is deze keer overgeslagen.',
+        'unmigrated': '{subject} is vóór een update geüpload en kan niet worden gelezen. Upload het bestand opnieuw.',
     },
 }
 # [Claude] Knowledge bases the user cannot see are only counted: their names may themselves be confidential. An

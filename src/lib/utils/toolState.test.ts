@@ -7,6 +7,7 @@ import {
 	documentWriterState,
 	WEB_SEARCH_STATES,
 	nextToolState,
+	seedsLiveDefault,
 	webSearchFlags,
 	webSearchState
 } from './toolState';
@@ -45,7 +46,7 @@ describe('web search flags', () => {
 	});
 });
 
-describe('PDF writer flags', () => {
+describe('Document writer flags', () => {
 	it('cycles Auto, Always, Off and round-trips the request flags', () => {
 		expect(DOCUMENT_WRITER_STATES).toEqual(['auto', 'required', 'off']);
 		for (const [index, state] of DOCUMENT_WRITER_STATES.entries()) {
@@ -61,5 +62,24 @@ describe('PDF writer flags', () => {
 	it('reads enabled-only saved state as Auto and ignores required when off', () => {
 		expect(documentWriterState(true, false)).toBe('auto');
 		expect(documentWriterState(false, true)).toBe('off');
+	});
+});
+
+describe('seedsLiveDefault', () => {
+	const meta = {
+		capabilities: { live_documents: true, live_mail: false },
+		defaultFeatureIds: ['live_documents', 'live_mail']
+	};
+	it('seeds a default feature when the model has the capability and the tenant flag is on', () => {
+		expect(seedsLiveDefault(meta, 'live_documents', true)).toBe(true);
+	});
+	it('does not seed without the tenant flag', () => {
+		expect(seedsLiveDefault(meta, 'live_documents', false)).toBe(false);
+		expect(seedsLiveDefault(meta, 'live_documents', undefined)).toBe(false);
+	});
+	it('does not seed without the model capability or default feature', () => {
+		expect(seedsLiveDefault(meta, 'live_mail', true)).toBe(false);
+		expect(seedsLiveDefault({ capabilities: { live_mail: true } }, 'live_mail', true)).toBe(false);
+		expect(seedsLiveDefault(undefined, 'live_mail', true)).toBe(false);
 	});
 });

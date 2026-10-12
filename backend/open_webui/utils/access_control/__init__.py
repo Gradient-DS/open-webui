@@ -233,18 +233,22 @@ async def filter_allowed_access_grants(
     public_permission_key: str,
     anyone_permission_key: str | None = None,
     db: AsyncSession | None = None,
+    admin_needs_wide_permission: bool = False,
 ) -> list:
     """
     Checks if the user has the required permissions to grant access to a resource.
     Returns the filtered list of access grants if permissions are missing.
+    With admin_needs_wide_permission, admins also need the anyone/public keys.
     """
     if not access_grants:
         return access_grants
 
+    admin_exempt = user_role == 'admin' and not admin_needs_wide_permission
+
     if has_anyone_read_access_grant(access_grants) and (
         not anyone_permission_key
         or (
-            user_role != 'admin'
+            not admin_exempt
             and not await has_permission(
                 user_id,
                 anyone_permission_key,
@@ -255,7 +259,7 @@ async def filter_allowed_access_grants(
     ):
         access_grants = strip_anyone_access_grants(access_grants)
 
-    if user_role == 'admin':
+    if admin_exempt:
         return access_grants
 
     # Check if user can share publicly
@@ -277,6 +281,9 @@ async def filter_allowed_access_grants(
                 == '*'
             )
         ]
+
+    if user_role == 'admin':
+        return access_grants
 
     # Strip individual user sharing if user lacks permission
     if has_user_access_grant(access_grants) and not await has_permission(

@@ -464,6 +464,40 @@ async def test_the_file_record_names_the_collection_and_a_chat_entry_never_does(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'language,expected',
+    [
+        (
+            'en-US',
+            "File 'oud.pdf' was uploaded before an update and cannot be read. Upload the file again.",
+        ),
+        (
+            'nl-NL',
+            "Bestand 'oud.pdf' is vóór een update geüpload en kan niet worden gelezen. Upload het bestand opnieuw.",
+        ),
+    ],
+)
+async def test_an_upload_the_v2_migration_left_in_its_v1_collection_is_left_out_with_a_notice(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, language: str, expected: str
+) -> None:
+    """Its record still names the v1 per-file collection `file-<id>`, which soev-api does not have."""
+    records = {
+        'old': SimpleNamespace(
+            id='old', user_id='alice', filename='oud.pdf', meta={'status': 'completed', 'collection_name': 'file-old'}
+        ),
+        'ok': SimpleNamespace(id='ok', user_id='alice', filename='goed.pdf', meta={'status': 'completed'}),
+    }
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', AsyncMock(side_effect=records.get))
+    files = [{'type': 'file', 'id': 'old', 'name': 'oud.pdf'}, {'type': 'file', 'id': 'ok', 'name': 'goed.pdf'}]
+    chunks = await chat.turn('question', 'a1', files=files, user_language=language)
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert [item['file_id'] for item in sent['attachments']] == ['ok']
+    assert sent['text'] == 'question\n\nAttachment status:\nnot available, left out: oud.pdf'
+    assert notices(chat) == [{'notices': [expected], 'removed': []}]
+
+
+@pytest.mark.asyncio
 async def test_a_file_picked_from_a_knowledge_base_is_sent_as_that_kb_document(
     chat: Chat, monkeypatch: pytest.MonkeyPatch
 ) -> None:

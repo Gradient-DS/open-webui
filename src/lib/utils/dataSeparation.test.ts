@@ -85,7 +85,7 @@ describe('getActiveSide', () => {
 	});
 });
 
-it('PDF writer does not select either data side', () => {
+it('Document writer does not select either data side', () => {
 	expect(classifyFileItem({ type: 'document_writer' })).toBeNull();
 	expect(
 		getActiveSide({

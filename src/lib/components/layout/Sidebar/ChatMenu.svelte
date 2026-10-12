@@ -33,6 +33,7 @@
 	import ShareIcon from './icons/Share.svelte';
 	import TrashIcon from './icons/Trash.svelte';
 	import ChatCheckIcon from '$lib/components/icons/ChatCheck.svelte';
+	import { chatSharing } from '$lib/utils/chatSharing';
 
 	const i18n = getContext('i18n');
 
@@ -282,7 +283,7 @@
 
 	<div slot="content">
 		<DropdownMenu className="select-none min-w-[12.5rem] transition">
-			{#if $user?.role === 'admin' || ($user.permissions?.chat?.share ?? true)}
+			{#if chatSharing($user).share}
 				<button
 					draggable="false"
 					class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"

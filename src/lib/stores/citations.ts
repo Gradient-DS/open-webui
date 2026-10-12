@@ -12,9 +12,14 @@ export const citationPanel = writable<null | {
 	messageId: string;
 	chatId: string;
 }>(null);
-// [Gradient] Inline badges share the cumulative index of the selected source.
-export const activeCitationIndex = derived(citationPanel, (panel) => {
-	if (!panel?.citation || panel.level === 'list') return null;
-	const index = panel.citations.indexOf(panel.citation) + 1;
-	return index > 0 ? { messageId: panel.messageId, index } : null;
-});
+// [Gradient] Whether the sources pane is on screen; the panel state outlives it so reopening resumes.
+export const citationPaneVisible = writable(false);
+// [Gradient] Inline badges share the cumulative index of the selected source, only while it is shown.
+export const activeCitationIndex = derived(
+	[citationPanel, citationPaneVisible],
+	([panel, visible]) => {
+		if (!visible || !panel?.citation || panel.level === 'list') return null;
+		const index = panel.citations.indexOf(panel.citation) + 1;
+		return index > 0 ? { messageId: panel.messageId, index } : null;
+	}
+);

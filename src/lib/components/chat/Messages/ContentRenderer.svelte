@@ -20,6 +20,7 @@
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
 	import { createMessagesList, replaceOutsideCode } from '$lib/utils';
+	import { sourceLabels } from './Markdown/sourceLabels'; // [Gradient]
 
 	/**
 	 * Extracts all top-level <details>...</details> blocks from content,
@@ -141,26 +142,10 @@
 		}
 	}
 
+	// [Gradient] One label per document, as the agent numbers them: a name shared by two documents no longer
+	// shifts the later chips onto the wrong (or no) source.
 	const getSourceIds = (sources) => {
-		const result = [];
-		for (const source of sources ?? []) {
-			for (let index = 0; index < (source.document ?? []).length; index++) {
-				if (model?.info?.meta?.capabilities?.citations == false) {
-					result.push('N/A');
-					continue;
-				}
-				const metadata = source.metadata?.[index];
-				const id = metadata?.source ?? 'N/A';
-				if (metadata?.name) {
-					result.push(metadata.name);
-				} else if (id.startsWith('http://') || id.startsWith('https://')) {
-					result.push(id);
-				} else {
-					result.push(source?.source?.name ?? id);
-				}
-			}
-		}
-		sourceIds = [...new Set(result)];
+		sourceIds = sourceLabels(sources, model?.info?.meta?.capabilities?.citations == false);
 	};
 
 	/** @param {string} messageContent */

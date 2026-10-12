@@ -49,7 +49,7 @@ export const DEFAULT_PERMISSIONS = {
 		regenerate_response: true,
 		rate_response: true,
 		edit: true,
-		share: true,
+		share: false,
 		export: true,
 		import: true,
 		stt: true,

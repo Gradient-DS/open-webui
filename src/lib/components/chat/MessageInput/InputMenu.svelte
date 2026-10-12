@@ -558,7 +558,7 @@
 		if (wasOff !== !webSearchEnabled) onWebSearchToggle(webSearchEnabled);
 	};
 
-	// [Gradient] PDF writer cycles Auto, Altijd, Uit; the other tools use Uit and Altijd. Exported for the pinned composer buttons.
+	// [Gradient] Document writer cycles Auto, Altijd, Uit; the other tools use Uit and Altijd. Exported for the pinned composer buttons.
 	export const cycleTool = (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => {
 		if (tool === 'image_generation') {
 			imageGenerationEnabled =
@@ -976,7 +976,7 @@
 
 					{#if showDocumentWriter}
 						<MenuItem
-							label={$i18n.t('PDF writer')}
+							label={$i18n.t('Document writer')}
 							pinId="document_writer"
 							toolState={documentWriterToolState}
 							tooltipPlacement="top-start"
@@ -984,7 +984,7 @@
 								? $i18n.t('Unavailable')
 								: $i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])}
 							ariaLabel={stateAriaLabel(
-								$i18n.t('PDF writer'),
+								$i18n.t('Document writer'),
 								documentWriterToolState,
 								$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
 							)}

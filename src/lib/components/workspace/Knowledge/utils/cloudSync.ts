@@ -1,6 +1,6 @@
 import { reconnectCodes } from '$lib/sources/registry';
 import equal from 'fast-deep-equal';
-import type { Connection, RunOutcome, Schedule, SyncRun } from '$lib/apis/cloudSync';
+import type { Connection, KnowledgeRun, RunOutcome, Schedule, SyncRun } from '$lib/apis/cloudSync';
 
 export function trustedConnectOrigins(location: string, apiBase: string): Set<string> {
 	const origins = new Set([location]);
@@ -138,6 +138,31 @@ export function settleQueuedRuns(
 			next.set(id, entry);
 	}
 	return next;
+}
+
+// The sources "Sync all now" covers; the button shows whenever there is one,
+// whatever their runs are doing.
+export function syncableSources(schedules: Schedule[]): Schedule[] {
+	return schedules.filter(
+		(schedule) => schedule.kind === 'content' && schedule.lifecycle !== 'revoked'
+	);
+}
+
+export type SyncAllNotice =
+	| { kind: 'started'; ids: string[] }
+	| { kind: 'not_owner' | 'reconnect' | 'too_soon' | 'running' | 'paused' };
+
+// Sync-all skips sources soev-api refused (already running, cooling down,
+// paused); the reason only surfaces when no source started at all.
+export function syncAllNotice(runs: KnowledgeRun[]): SyncAllNotice {
+	const ids = runs.filter((run) => run.job_id).map((run) => run.schedule_id);
+	if (ids.length) return { kind: 'started', ids };
+	const codes = new Set(runs.map((run) => run.code));
+	if (!runs.length) return { kind: 'not_owner' };
+	if (codes.has('connection_pending')) return { kind: 'reconnect' };
+	if (codes.has('run_too_soon')) return { kind: 'too_soon' };
+	if (codes.has('run_active')) return { kind: 'running' };
+	return { kind: 'paused' };
 }
 
 export function pairSchedules(

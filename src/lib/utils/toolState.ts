@@ -2,7 +2,7 @@
  * [Gradient] Per-chat state of a composer tool, mirroring the soev agent's tool contract
  * (`off` = not offered, `auto` = offered for the model to decide, `required` = must use).
  *
- * Web search and PDF writer have all three. Image generation and Code Interpreter have
+ * Web search and document writer have all three. Image generation and Code Interpreter have
  * no real auto path, so they cycle between `off` and `required` only.
  *
  * Web search travels as two booleans: `webSearchEnabled` (auto or required, i.e. web
@@ -54,12 +54,26 @@ export const LIVE_DOCUMENT_STATES: ToolState[] = ['off', 'auto'];
 export function liveDocumentState(value: unknown): ToolState {
 	return value === 'auto' || value === 'required' ? value : 'off';
 }
-// [Gradient] PDF writer shares web search's state contract, without its data restrictions.
+
+/** Whether a model's default features start a live tool on `auto` while its tenant flag is on. */
+export function seedsLiveDefault(
+	meta: { capabilities?: object; defaultFeatureIds?: string[] } | undefined,
+	feature: 'live_documents' | 'live_mail',
+	enabled: boolean | undefined
+): boolean {
+	return (
+		!!enabled &&
+		!!(meta?.capabilities as Record<string, unknown> | undefined)?.[feature] &&
+		!!meta?.defaultFeatureIds?.includes(feature)
+	);
+}
+
+// [Gradient] Document writer shares web search's state contract, without its data restrictions.
 export const DOCUMENT_WRITER_STATES: ToolState[] = ['auto', 'required', 'off'];
 export const documentWriterState = webSearchState;
 export const documentWriterFlags = webSearchFlags;
 export const DOCUMENT_WRITER_STATE_DESCRIPTIONS: Record<ToolState, string> = {
-	off: 'Does not write PDFs',
-	auto: 'The model decides whether to write a PDF',
-	required: 'Writes a PDF for every message'
+	off: 'Does not write documents',
+	auto: 'The model decides whether to write a document',
+	required: 'Writes a document for every message'
 };

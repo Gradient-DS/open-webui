@@ -1005,7 +1005,7 @@
 	$: if (!documentWriterEnabled) documentWriterRequired = false;
 	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
 	$: documentWriterTooltip = pinnedStateTooltip(
-		$i18n.t('PDF writer'),
+		$i18n.t('Document writer'),
 		documentWriterToolState,
 		$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
 	);

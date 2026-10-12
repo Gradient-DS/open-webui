@@ -251,6 +251,11 @@ services:
       TWO_FA_GRACE_PERIOD_DAYS: "7"
       ENABLE_FORGOT_PASSWORD: "true"
       ENABLE_USER_WEBHOOKS: "true"
+      # Chat sharing is opt-in per tenant (default off since 2026-10-12) and binds
+      # admins too; a tenant admin can turn it on at runtime, so the plane drives
+      # the share routes with it on. The refusal with it off is covered by
+      # test/authorization/test_chat_share_gate.py. CI-005.
+      USER_PERMISSIONS_CHAT_SHARE: "true"
       AUDIO_TTS_ENGINE: "openai"
       AUDIO_STT_ENGINE: "openai" # Empty means local Whisper, which the slim image does not ship.
       ENABLE_IMAGE_EDIT: "true"
