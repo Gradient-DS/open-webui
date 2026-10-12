@@ -193,6 +193,7 @@ it('keeps mail consent separate from document consent', async () => {
 		prefetchLiveConnections('mail-session', 'onedrive', 'live_documents'),
 		prefetchLiveConnections('mail-session', 'outlook_mail', 'mail')
 	]);
+	expect(api.listConnections).toHaveBeenCalledTimes(1);
 	expect(await connectLiveSource('mail-session', 'outlook_mail', 'mail')).toBe('m-grant');
 	expect(await connectLiveSource('mail-session', 'onedrive', 'live_documents')).toBe('c-grant');
 	expect(window.open).not.toHaveBeenCalled();

@@ -74,13 +74,25 @@ function snapshotKey(token: string, provider: string, family: LiveFamily): strin
 	return `${provider}:${family}`;
 }
 
+// The composer prefetches every provider/family pair at once; they share one connection list.
+let listing: { token: string; request: ReturnType<typeof listConnections> } | null = null;
+function sharedConnections(token: string): ReturnType<typeof listConnections> {
+	if (listing?.token !== token) {
+		const request = listConnections(token).finally(() => {
+			if (listing?.request === request) listing = null;
+		});
+		listing = { token, request };
+	}
+	return listing.request;
+}
+
 export async function prefetchLiveConnections(
 	token: string,
 	provider = 'onedrive',
 	family: LiveFamily = 'live_documents'
 ): Promise<LiveConnection[]> {
 	const key = snapshotKey(token, provider, family);
-	const connections = (await listConnections(token)).filter(
+	const connections = (await sharedConnections(token)).filter(
 		(c) => c.source_kind === provider && c.lifecycle !== 'revoked'
 	);
 	const rows = await Promise.all(
