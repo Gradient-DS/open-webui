@@ -325,18 +325,18 @@
 	};
 
 	const initSidebarData = async () => {
-		// Only fetch channels if the feature is enabled and user has permission
-		if (
-			$config?.features?.enable_channels &&
-			($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))
-		) {
-			await initChannels();
-		}
-
 		// [Gradient] Hidden unless soev-api lists the meeting agent; failures keep it hidden.
 		checkMeetingsAvailable(localStorage.token);
 
-		await initChatList();
+		// [Gradient] Channels and chats load together instead of channels first.
+		await Promise.all([
+			// Only fetch channels if the feature is enabled and user has permission
+			$config?.features?.enable_channels &&
+			($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))
+				? initChannels()
+				: null,
+			initChatList()
+		]);
 	};
 
 	const refreshChatRows = async () => {
