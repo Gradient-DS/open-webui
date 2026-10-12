@@ -37,6 +37,10 @@ Migrations live in `backend/open_webui/migrations/versions/`. **Gotcha (hit more
 
 Set `down_revision` to the current head. `alembic heads` needs a live DB connection, so with no DB find the head statically: the one `revision` no other file lists as its `down_revision` (watch both `down_revision = '...'` and typed/tuple forms).
 
+## Running against a soev stack
+
+To develop this fork against the soev platform, run it from your checkout (commands above) and point it at a running local stack's soev-api, `http://api.<slug>.soev.localhost`: set `AGENT_API_ENABLED=true` plus the `SOEV_API_*` variables in [docs/agent-api-deployment.md](docs/agent-api-deployment.md). Starting a stack, its naming and where its credentials come from: `soev-docs/architecture/local-development.md`. `docker-compose.soev-dev.yaml` and `docker-compose.soev-stack.yaml` belong to the retired stack tooling; do not use them.
+
 ## Architecture
 
 - `src/` — SvelteKit frontend: `lib/apis/` (API clients), `lib/components/` (grouped by feature: admin/, chat/, workspace/), `lib/stores/` (global state), `routes/`

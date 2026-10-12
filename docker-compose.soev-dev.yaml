@@ -1,7 +1,7 @@
-# NEO NL Open WebUI Deployment with Weaviate RAG
-# Usage: docker compose -f docker-compose.neo.yaml up -d
-#
-# Requires: .env.neo file with configuration (see .env.neo.example)
+# Legacy: Weaviate + Postgres for an Open WebUI backend run on the host.
+# Belonged to the retired soev stack tooling; nothing in CI or docs uses it.
+# Running against a soev stack: see CLAUDE.md "Running against a soev stack".
+# Usage: docker compose -f docker-compose.soev-dev.yaml up -d
 
 services:
 
