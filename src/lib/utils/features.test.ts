@@ -508,14 +508,11 @@ describe('admin settings features', () => {
 
 describe('isAgentRouted', () => {
 	it.each([
-		[true, false, true],
-		[true, true, true],
-		[false, false, false],
-		[false, true, false]
-	])('a bound chat follows the backend matrix (api %s, picker %s)', (api, picker, routed) => {
-		vi.mocked(get).mockReturnValue({
-			features: { feature_agent_api_enabled: api, feature_agent_picker: picker }
-		});
-		expect(isAgentRouted('offertemachine')).toBe(routed);
+		[true, true],
+		[false, false],
+		[undefined, false]
+	])('follows the agent API flag (%s)', (api, routed) => {
+		vi.mocked(get).mockReturnValue({ features: { feature_agent_api_enabled: api } });
+		expect(isAgentRouted()).toBe(routed);
 	});
 });

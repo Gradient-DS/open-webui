@@ -72,9 +72,6 @@
 	// [Gradient] Fork admin tab migrated from the route host.
 	import AdminExternalAgents from '$lib/components/admin/Settings/ExternalAgents.svelte';
 
-	// [Gradient] Fork admin tab migrated from the route host.
-	import AdminAgents from '$lib/components/admin/Settings/Agents.svelte';
-
 	const i18n: Writable<I18n> = getContext('i18n');
 
 	export let show: boolean | string | SettingsModalRequest = false;
@@ -182,7 +179,6 @@
 		'admin:email': 'System',
 		'admin:connections': 'AI',
 		'admin:models': 'AI',
-		'admin:agents': 'AI',
 		'admin:external-agents': 'AI',
 		'admin:interface': 'Experience',
 		'admin:audio': 'Experience',
@@ -765,11 +761,6 @@
 				'import',
 				'export'
 			]
-		},
-		{
-			id: 'admin:agents',
-			title: 'AI-agents',
-			keywords: ['agent', 'agents', 'ai-agents', 'beta', 'external', 'chatbot', 'picker']
 		},
 		{
 			id: 'admin:external-agents',
@@ -1362,12 +1353,6 @@
 				<AdminExternalAgents
 					saveHandler={() => {
 						toast.success($i18n.t('Agent selection saved'));
-					}}
-				/>
-			{:else if selectedTab === 'admin:agents'}
-				<AdminAgents
-					saveHandler={() => {
-						toast.success($i18n.t('Settings saved successfully!'));
 					}}
 				/>
 			{:else if selectedTab === 'admin:general'}
