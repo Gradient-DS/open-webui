@@ -8,11 +8,12 @@ const PAGE_MARGIN_BOXES = `@page { ${[
 	'top-center',
 	'top-right',
 	'bottom-left',
-	'bottom-center',
-	'bottom-right'
+	'bottom-center'
 ]
 	.map((box) => `@${box} { content: ""; }`)
-	.join(' ')} }`;
+	.join(
+		' '
+	)} @bottom-right { content: counter(page) " / " counter(pages); font: 9pt Arial, sans-serif; color: #888; } }`;
 export const DOCUMENT_PURIFY_CONFIG: Config = {
 	WHOLE_DOCUMENT: true,
 	RETURN_DOM: true,
@@ -70,7 +71,10 @@ const resourceCSS = (value: string): boolean => {
 export function sanitizeDocumentHtml(
 	content: string,
 	title: string,
-	{ stripCitations = false }: { stripCitations?: boolean } = {}
+	{
+		stripCitations = false,
+		trustedStyle = ''
+	}: { stripCitations?: boolean; trustedStyle?: string } = {}
 ): string {
 	const root = DOMPurify.sanitize(content, DOCUMENT_PURIFY_CONFIG) as unknown as HTMLElement;
 	for (const element of [root, ...Array.from(root.querySelectorAll('*'))]) {
@@ -94,10 +98,10 @@ export function sanitizeDocumentHtml(
 	const titleElement = doc.createElement('title');
 	titleElement.textContent = title;
 	csp.after(titleElement);
-	// Empty margin boxes replace the browser's own print header (date, title) and footer (URL, page).
+	// Our margin boxes replace the browser's own print header (date, title) and footer (URL), with a page number.
 	const pageBoxes = doc.createElement('style');
 	pageBoxes.dataset.pageBoxes = '';
-	pageBoxes.textContent = PAGE_MARGIN_BOXES;
+	pageBoxes.textContent = PAGE_MARGIN_BOXES + trustedStyle;
 	head.append(pageBoxes);
 	if (stripCitations) {
 		const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
