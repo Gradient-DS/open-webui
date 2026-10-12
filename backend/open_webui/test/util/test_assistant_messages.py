@@ -29,14 +29,13 @@ async def test_chat_binding_updates_only_meta():
     """Assistant binding preserves chat JSON and all unrelated metadata."""
     chat_id = str(uuid4())
     created = await Chats.insert_new_chat(
-        chat_id, 'user', ChatForm(chat={'title': 'Original', 'history': {'messages': {}}})
+        chat_id, 'user', ChatForm(chat={'title': 'Original', 'history': {'messages': {}}}, meta={'kept': 'value'})
     )
-    await Chats.bind_chat_agent_by_id(chat_id, 'agent')
     assert await Chats.bind_chat_assistant_by_id(chat_id, 'assistant') is True
     updated = await Chats.get_chat_by_id(chat_id)
     assert updated.chat == created.chat
     assert updated.meta['assistant_id'] == 'assistant'
-    assert updated.meta['agent_id'] == 'agent'
+    assert updated.meta['kept'] == 'value'
     assert await Chats.bind_chat_assistant_by_id(str(uuid4()), 'assistant') is False
 
 

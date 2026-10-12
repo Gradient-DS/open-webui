@@ -260,9 +260,7 @@ class ChatFileModel(BaseModel):
 class ChatForm(BaseModel):
     chat: dict
     folder_id: Optional[str] = None
-    # [Gradient] Optional meta dict set on creation. Used by the per-chat
-    # agent picker to bind a new chat to an external agent via
-    # ``meta.agent_id``. When omitted, meta defaults to {}.
+    # [Gradient] Optional meta dict set on creation. When omitted, meta defaults to {}.
     meta: Optional[dict] = None
     variables: Optional[dict] = None
 
@@ -887,24 +885,6 @@ class ChatTable:
                 return ChatModel.model_validate(chat_item)
         except Exception:
             return None
-
-    async def bind_chat_agent_by_id(self, id: str, agent_id: str) -> bool:
-        """[Gradient] Record which agent a chat runs on, in ``meta.agent_id``.
-
-        Written when a chat without a binding falls back to the picker
-        default, so the row says what actually served it and later turns
-        and the navbar agree. Only the meta column is touched.
-
-        :return: Whether a row was updated.
-        """
-        async with get_async_db_context() as session:
-            row = (await session.execute(select(Chat.meta).filter_by(id=id))).one_or_none()
-            if row is None:
-                return False
-            meta = row[0] or {}
-            await session.execute(update(Chat).filter_by(id=id).values(meta={**meta, 'agent_id': agent_id}))
-            await session.commit()
-            return True
 
     # [Gradient] Assistant bindings live only in chat metadata.
     async def bind_chat_assistant_by_id(self, id: str, assistant_id: str) -> bool:
