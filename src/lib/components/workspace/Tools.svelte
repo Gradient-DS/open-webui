@@ -242,8 +242,13 @@
 	};
 
 	const init = async () => {
-		tools = await getToolList(localStorage.token);
-		_tools.set(await getTools(localStorage.token));
+		// [Gradient] Both lists load at once instead of one after the other.
+		const [list, all] = await Promise.all([
+			getToolList(localStorage.token),
+			getTools(localStorage.token)
+		]);
+		tools = list;
+		_tools.set(all);
 	};
 
 	onMount(async () => {
