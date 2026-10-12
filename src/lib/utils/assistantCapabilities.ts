@@ -29,6 +29,24 @@ export const FEATURE_TOGGLES = [
 	'live_mail'
 ] as const;
 
+/** Tenant flags (`$config.features`) a capability needs before an editor offers it. */
+const CAPABILITY_GATES: Record<string, string[]> = {
+	memory: ['enable_memories'],
+	web_search: ['enable_web_search'],
+	image_generation: ['enable_image_generation'],
+	code_interpreter: ['enable_code_interpreter'],
+	document_writer: ['enable_document_writer', 'feature_document_writer'],
+	live_documents: ['enable_live_documents'],
+	live_mail: ['enable_live_mail'],
+	builtin_tools: ['feature_builtin_tools']
+};
+
+/** Whether the tenant enables every flag the capability needs. */
+export function capabilityOffered(capability: string, features: object | undefined): boolean {
+	const flags = features as Record<string, unknown> | undefined;
+	return (CAPABILITY_GATES[capability] ?? []).every((flag) => !!flags?.[flag]);
+}
+
 /** Toggles that are also built-in function-calling tools (meta.builtinTools). */
 const BUILTIN_TOGGLES = ['web_search', 'image_generation', 'code_interpreter'] as const;
 

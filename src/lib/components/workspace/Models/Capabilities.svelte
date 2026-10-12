@@ -6,20 +6,9 @@
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { marked } from 'marked';
+	import { capabilityOffered } from '$lib/utils/assistantCapabilities';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
-
-	// [Gradient] Map capability keys to config feature flags
-	const capabilityConfigGuards: Record<string, string> = {
-		memory: 'enable_memories',
-		web_search: 'enable_web_search',
-		image_generation: 'enable_image_generation',
-		code_interpreter: 'enable_code_interpreter',
-		document_writer: 'enable_document_writer',
-		live_documents: 'enable_live_documents',
-		live_mail: 'enable_live_mail',
-		builtin_tools: 'feature_builtin_tools'
-	};
 
 	const capabilityLabels = {
 		vision: {
@@ -104,11 +93,7 @@
 		if (cap === 'file_context' && !capabilities.file_upload) {
 			return false;
 		}
-		const configKey = capabilityConfigGuards[cap];
-		if (configKey && !$config?.features?.[configKey]) {
-			return false;
-		}
-		return true;
+		return capabilityOffered(cap, $config?.features);
 	});
 </script>
 

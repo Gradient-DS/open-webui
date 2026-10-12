@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { togglesFromMeta, applyToggles, type AssistantToggles } from './assistantCapabilities';
+import {
+	togglesFromMeta,
+	applyToggles,
+	capabilityOffered,
+	type AssistantToggles
+} from './assistantCapabilities';
 
 const ALL_ON: AssistantToggles = {
 	web_search: true,
@@ -90,5 +95,28 @@ describe('togglesFromMeta', () => {
 			...ALL_OFF,
 			vision: true
 		});
+	});
+});
+
+describe('capabilityOffered', () => {
+	it('needs every tenant flag of a gated capability', () => {
+		expect(capabilityOffered('live_documents', { enable_live_documents: true })).toBe(true);
+		expect(capabilityOffered('live_mail', { enable_live_documents: true })).toBe(false);
+		expect(capabilityOffered('web_search', undefined)).toBe(false);
+	});
+
+	it('needs both document writer flags', () => {
+		expect(capabilityOffered('document_writer', { enable_document_writer: true })).toBe(false);
+		expect(capabilityOffered('document_writer', { feature_document_writer: true })).toBe(false);
+		expect(
+			capabilityOffered('document_writer', {
+				enable_document_writer: true,
+				feature_document_writer: true
+			})
+		).toBe(true);
+	});
+
+	it('offers ungated capabilities always', () => {
+		expect(capabilityOffered('vision', {})).toBe(true);
 	});
 });

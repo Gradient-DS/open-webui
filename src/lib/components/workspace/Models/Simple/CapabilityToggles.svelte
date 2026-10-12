@@ -13,23 +13,11 @@
 	import Eye from '$lib/components/icons/Eye.svelte';
 	import Clip from '$lib/components/icons/Clip.svelte';
 	import Link from '$lib/components/icons/Link.svelte';
-	import type { AssistantToggles } from '$lib/utils/assistantCapabilities';
+	import { capabilityOffered, type AssistantToggles } from '$lib/utils/assistantCapabilities';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
 	export let toggles: AssistantToggles;
-
-	// Capabilities gated behind an instance feature flag — only shown
-	// when the deployment has that feature enabled (mirrors the gating
-	// in the advanced editor's Capabilities.svelte).
-	const configGuards: Partial<Record<keyof AssistantToggles, string>> = {
-		web_search: 'enable_web_search',
-		image_generation: 'enable_image_generation',
-		code_interpreter: 'enable_code_interpreter',
-		document_writer: 'enable_document_writer',
-		live_documents: 'enable_live_documents',
-		live_mail: 'enable_live_mail'
-	};
 
 	// Labels and icons of composer tools match the chat + menu.
 	const allRows: { key: keyof AssistantToggles; icon: ComponentType; label: string }[] = [
@@ -44,11 +32,7 @@
 		{ key: 'citations', icon: Link, label: 'Show sources' }
 	];
 
-	// Drop any capability whose instance feature flag is off.
-	$: rows = allRows.filter((row) => {
-		const guard = configGuards[row.key];
-		return !guard || !!($config?.features as any)?.[guard];
-	});
+	$: rows = allRows.filter((row) => capabilityOffered(row.key, $config?.features));
 </script>
 
 <div class="flex flex-col gap-2.5">
