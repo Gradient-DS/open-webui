@@ -3,6 +3,7 @@ import {
 	togglesFromMeta,
 	applyToggles,
 	capabilityOffered,
+	simpleCapabilityOffered,
 	type AssistantToggles
 } from './assistantCapabilities';
 
@@ -118,5 +119,25 @@ describe('capabilityOffered', () => {
 
 	it('offers ungated capabilities always', () => {
 		expect(capabilityOffered('vision', {})).toBe(true);
+	});
+});
+
+describe('simpleCapabilityOffered', () => {
+	const features = {
+		enable_image_generation: true,
+		enable_code_interpreter: true,
+		enable_web_search: true
+	};
+
+	it('hides image generation and code interpreter on agent-routed tenants', () => {
+		const agent = { ...features, feature_agent_api_enabled: true };
+		expect(simpleCapabilityOffered('image_generation', agent)).toBe(false);
+		expect(simpleCapabilityOffered('code_interpreter', agent)).toBe(false);
+		expect(simpleCapabilityOffered('web_search', agent)).toBe(true);
+	});
+
+	it('keeps them on tenants without the agent', () => {
+		expect(simpleCapabilityOffered('image_generation', features)).toBe(true);
+		expect(simpleCapabilityOffered('code_interpreter', features)).toBe(true);
 	});
 });

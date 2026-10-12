@@ -13,7 +13,7 @@
 	import Eye from '$lib/components/icons/Eye.svelte';
 	import Clip from '$lib/components/icons/Clip.svelte';
 	import Link from '$lib/components/icons/Link.svelte';
-	import { capabilityOffered, type AssistantToggles } from '$lib/utils/assistantCapabilities';
+	import { simpleCapabilityOffered, type AssistantToggles } from '$lib/utils/assistantCapabilities';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -32,7 +32,7 @@
 		{ key: 'citations', icon: Link, label: 'Show sources' }
 	];
 
-	$: rows = allRows.filter((row) => capabilityOffered(row.key, $config?.features));
+	$: rows = allRows.filter((row) => simpleCapabilityOffered(row.key, $config?.features));
 </script>
 
 <div class="flex flex-col gap-2.5">

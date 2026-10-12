@@ -47,6 +47,17 @@ export function capabilityOffered(capability: string, features: object | undefin
 	return (CAPABILITY_GATES[capability] ?? []).every((flag) => !!flags?.[flag]);
 }
 
+/** Capabilities the v2 agent never receives; the advanced editor still offers them. */
+const AGENT_UNSERVED = ['image_generation', 'code_interpreter'];
+
+/** Whether the simple builder offers the capability on this tenant. */
+export function simpleCapabilityOffered(capability: string, features: object | undefined): boolean {
+	const agentRouted = !!(features as Record<string, unknown> | undefined)
+		?.feature_agent_api_enabled;
+	if (agentRouted && AGENT_UNSERVED.includes(capability)) return false;
+	return capabilityOffered(capability, features);
+}
+
 /** Toggles that are also built-in function-calling tools (meta.builtinTools). */
 const BUILTIN_TOGGLES = ['web_search', 'image_generation', 'code_interpreter'] as const;
 
