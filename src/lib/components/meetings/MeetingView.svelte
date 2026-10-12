@@ -41,6 +41,7 @@
 	import { attachesLeft, hasChanges, wordDiff, type DiffOp } from './diff';
 	import { finishMeeting } from './finish';
 	import { interruptedActions, nextChunkSeq, nextPart, partStore } from './parts';
+	import { forgetMeeting } from './list';
 	import {
 		CONSENT_TEXT_VERSION,
 		dayjsLocale,
@@ -378,7 +379,13 @@
 			await load();
 			return;
 		}
-		if (meetingId) await deleteMeeting(localStorage.token, meetingId).catch(() => {});
+		if (meetingId) {
+			const id = meetingId;
+			await deleteMeeting(localStorage.token, id).then(
+				() => forgetMeeting(id),
+				() => {}
+			);
+		}
 		goto('/meetings');
 	};
 
@@ -503,6 +510,7 @@
 		if (!meetingId) return;
 		try {
 			await deleteMeeting(localStorage.token, meetingId);
+			forgetMeeting(meetingId);
 			await partStore().remove(meetingId);
 			toast.success($i18n.t('Meeting deleted'));
 			goto('/meetings');

@@ -1,4 +1,3 @@
-import { notifyWorkspaceMutation } from '$lib/stores/workspace-counts';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 type PromptItem = {
@@ -74,8 +73,6 @@ export const createNewPrompt = async (token: string, prompt: PromptItem) => {
 	if (error) {
 		throw error;
 	}
-
-	if (res) notifyWorkspaceMutation('prompts');
 
 	return res;
 };
@@ -420,8 +417,6 @@ export const deletePromptById = async (token: string, promptId: string) => {
 	if (error) {
 		throw error;
 	}
-
-	if (res) notifyWorkspaceMutation('prompts');
 
 	return res;
 };

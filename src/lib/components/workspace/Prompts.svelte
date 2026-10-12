@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -160,31 +159,32 @@
 		const currentFetchId = ++fetchId;
 		loading = true;
 		try {
-			const res = await getPromptItems(
-				localStorage.token,
-				query,
-				viewOption,
-				selectedTag,
-				sortKey,
-				sortDirection,
-				page
-			).catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
+			// [Gradient] Tags load alongside the page instead of after it.
+			const [res, nextTags] = await Promise.all([
+				getPromptItems(
+					localStorage.token,
+					query,
+					viewOption,
+					selectedTag,
+					sortKey,
+					sortDirection,
+					page
+				).catch((error) => {
+					toast.error(`${error}`);
+					return null;
+				}),
+				getPromptTags(localStorage.token).catch((error) => {
+					toast.error(`${error}`);
+					return [];
+				})
+			]);
 
 			if (currentFetchId !== fetchId) return; // Stale response, discard
 
 			if (res) {
 				prompts = res.items;
 				total = res.total;
-				setWorkspaceCount('prompts', total);
-
-				// get tags
-				tags = await getPromptTags(localStorage.token).catch((error) => {
-					toast.error(`${error}`);
-					return [];
-				});
+				tags = nextTags;
 			}
 		} catch (err) {
 			console.error(err);

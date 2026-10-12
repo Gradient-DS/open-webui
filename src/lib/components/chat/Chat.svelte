@@ -526,23 +526,27 @@
 
 	const handleToolApprovalModeChange = async (mode: string) => {
 		const tool_approval_mode = mode === 'ask' ? 'ask' : 'full';
+		// [Gradient] Restoring a draft re-applies its mode on every new chat; write only what changes.
+		const chatChanged = params?.tool_approval_mode !== tool_approval_mode;
 		params = {
 			...params,
 			tool_approval_mode
 		};
 
-		settings.set({
-			...$settings,
-			params: {
-				...($settings?.params ?? {}),
-				tool_approval_mode
-			}
-		});
-		await updateUserSettings(localStorage.token, { ui: $settings }).catch((err) => {
-			console.error('[tool permissions settings]', err);
-		});
+		if ($settings?.params?.tool_approval_mode !== tool_approval_mode) {
+			settings.set({
+				...$settings,
+				params: {
+					...($settings?.params ?? {}),
+					tool_approval_mode
+				}
+			});
+			await updateUserSettings(localStorage.token, { ui: $settings }).catch((err) => {
+				console.error('[tool permissions settings]', err);
+			});
+		}
 
-		if ($chatId && !$temporaryChatEnabled && !isTemporaryChatId($chatId)) {
+		if (chatChanged && $chatId && !$temporaryChatEnabled && !isTemporaryChatId($chatId)) {
 			const res = await updateChatById(localStorage.token, $chatId, { params }).catch((err) => {
 				console.error('[tool permissions chat]', err);
 				return null;

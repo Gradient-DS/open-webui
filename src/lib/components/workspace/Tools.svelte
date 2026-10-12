@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -154,8 +153,6 @@
 
 			return direction * ((a.updated_at ?? 0) - (b.updated_at ?? 0));
 		});
-
-		setWorkspaceCount('tools', filteredItems.length);
 	};
 
 	const setSortKey = (key: string) => {
@@ -245,8 +242,13 @@
 	};
 
 	const init = async () => {
-		tools = await getToolList(localStorage.token);
-		_tools.set(await getTools(localStorage.token));
+		// [Gradient] Both lists load at once instead of one after the other.
+		const [list, all] = await Promise.all([
+			getToolList(localStorage.token),
+			getTools(localStorage.token)
+		]);
+		tools = list;
+		_tools.set(all);
 	};
 
 	onMount(async () => {

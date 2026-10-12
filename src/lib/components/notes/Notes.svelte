@@ -227,12 +227,6 @@
 			total = res.total;
 			const pageItems = res.items;
 
-			if ((pageItems ?? []).length === 0) {
-				allItemsLoaded = true;
-			} else {
-				allItemsLoaded = false;
-			}
-
 			if (items) {
 				const existingIds = new Set(items.map((item) => item.id));
 				const newItems = pageItems.filter((item) => !existingIds.has(item.id));
@@ -240,6 +234,10 @@
 			} else {
 				items = pageItems;
 			}
+			// [Gradient] Stop at the total: the loader sentinel fetched an empty extra page otherwise.
+			allItemsLoaded =
+				(pageItems ?? []).length === 0 ||
+				(typeof res.total === 'number' && items.length >= res.total);
 		}
 
 		itemsLoading = false;

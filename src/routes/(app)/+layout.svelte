@@ -300,9 +300,15 @@
 						}
 					}
 				})().catch((e) => console.error('Failed to check 2FA status:', e)),
-				setUserSettings(async () => {
-					await setModels().catch((e) => console.error('Failed to load models:', e));
-				})
+				// [Gradient] Models wait for user settings only when direct connections need them.
+				$config?.features?.enable_direct_connections
+					? setUserSettings(async () => {
+							await setModels().catch((e) => console.error('Failed to load models:', e));
+						})
+					: Promise.all([
+							setUserSettings(),
+							setModels().catch((e) => console.error('Failed to load models:', e))
+						])
 			]);
 		} catch (e) {
 			console.error('Failed to load user settings:', e);

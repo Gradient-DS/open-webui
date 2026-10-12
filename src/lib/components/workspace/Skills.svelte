@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -130,7 +129,6 @@
 			if (res) {
 				filteredItems = res.items;
 				total = res.total;
-				setWorkspaceCount('skills', total);
 			}
 		} catch (err) {
 			console.error(err);

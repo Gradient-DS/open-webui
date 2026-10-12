@@ -75,8 +75,6 @@ export const tools = writable(null);
 export const skills = writable(null);
 export const functions = writable(null);
 
-export { workspaceCounts } from './workspace-counts';
-export type { WorkspaceSection } from './workspace-counts';
 export type WorkspaceAction = {
 	id: string;
 	label: string;

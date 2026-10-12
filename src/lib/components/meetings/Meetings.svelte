@@ -10,7 +10,7 @@
 	import dayjs from '$lib/dayjs';
 	import { mobile, showSidebar } from '$lib/stores';
 	import { formatNumber, getTimeRange } from '$lib/utils';
-	import { deleteMeeting, getMeetings } from '$lib/apis/meetings';
+	import { deleteMeeting } from '$lib/apis/meetings';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -21,6 +21,7 @@
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 	import MeetingMenu from './MeetingMenu.svelte';
 	import { partStore } from './parts';
+	import { forgetMeeting, meetingList, refreshMeetings } from './list';
 	import {
 		dayjsLocale,
 		groupByRange,
@@ -33,8 +34,9 @@
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
-	let meetings = $state<MeetingSummary[] | null>(null);
 	let failed = $state(false);
+	// A revisit shows the kept list at once; the refresh on mount updates it.
+	const meetings = $derived($meetingList ?? (failed ? [] : null));
 	let query = $state('');
 	let deleting = $state<MeetingSummary | null>(null);
 	let showDelete = $state(false);
@@ -52,12 +54,11 @@
 
 	const load = async () => {
 		try {
-			meetings = (await getMeetings(localStorage.token)).data ?? [];
+			await refreshMeetings(localStorage.token);
 			failed = false;
 		} catch (error) {
 			console.error(error);
 			failed = true;
-			meetings = [];
 		}
 	};
 
@@ -67,7 +68,7 @@
 		try {
 			await deleteMeeting(localStorage.token, target.thread_id);
 			await partStore().remove(target.thread_id);
-			meetings = (meetings ?? []).filter((meeting) => meeting.thread_id !== target.thread_id);
+			forgetMeeting(target.thread_id);
 			toast.success($i18n.t('Meeting deleted'));
 		} catch (error) {
 			toast.error(`${(error as Error)?.message ?? error}`);

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { prefetchKnowledge } from './Knowledge/utils/prefetch';
 	import { knowledgeListCache, type KnowledgeListItem } from './Knowledge/utils/listCache';
-	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import { enabledProviders } from '$lib/sources/policy';
 	import { providerFor } from '$lib/sources/registry';
 	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
@@ -150,6 +149,7 @@
 		if (cached) {
 			items = cached.items;
 			total = cached.total;
+			allItemsLoaded = cached.items.length >= cached.total;
 		}
 		await getItemsPage(true);
 	};
@@ -177,16 +177,9 @@
 
 		if (res) {
 			total = res.total;
-			setWorkspaceCount('knowledge', total);
 			const pageItems: KnowledgeListItem[] = res.items ?? [];
 			if (requestedPage === 1 && typeof res.total === 'number') {
 				knowledgeListCache.set(cacheKey, { items: pageItems, total: res.total }, cacheRevision);
-			}
-
-			if ((pageItems ?? []).length === 0) {
-				allItemsLoaded = true;
-			} else {
-				allItemsLoaded = false;
 			}
 
 			if (replace || items === null) {
@@ -194,6 +187,9 @@
 			} else {
 				items = [...items, ...pageItems];
 			}
+			// [Gradient] Stop at the total: the loader sentinel fetched an empty extra page otherwise.
+			allItemsLoaded =
+				pageItems.length === 0 || (typeof res.total === 'number' && items.length >= res.total);
 		}
 
 		itemsLoading = false;
