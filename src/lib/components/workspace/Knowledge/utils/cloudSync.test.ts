@@ -13,7 +13,9 @@ import {
 	reconnectConnections,
 	runCounts,
 	runIsLive,
-	runStatus
+	runStatus,
+	syncableSources,
+	syncAllNotice
 } from './cloudSync';
 
 describe('connect popup messages', () => {
@@ -324,5 +326,33 @@ describe('finished runs', () => {
 		const after = [{ ...scheduleFixture('folder', 'content'), last_run: { ...done, id: 'r2' } }];
 		expect(finishedRuns(before, after)).toEqual([]);
 		expect(finishedRuns([], after)).toEqual([]);
+	});
+});
+
+describe('sync all now', () => {
+	const live = { id: 'r', started_at: '2026-10-12T11:00:00Z', outcome: null };
+	it('covers every live content source, including one already syncing', () => {
+		const syncing = { ...scheduleFixture('a', 'content'), last_run: live };
+		const revoked = { ...scheduleFixture('b', 'content'), lifecycle: 'revoked' };
+		const acl = scheduleFixture('c', 'acl_refresh');
+		expect(syncableSources([syncing, revoked, acl])).toEqual([syncing]);
+		expect(syncableSources([acl])).toEqual([]);
+	});
+	it('starts the idle sources and skips those refused as running', () => {
+		expect(
+			syncAllNotice([
+				{ schedule_id: 'a', job_id: null, code: 'run_active' },
+				{ schedule_id: 'b', job_id: 'j', code: null }
+			])
+		).toEqual({ kind: 'started', ids: ['b'] });
+	});
+	it('names why nothing started', () => {
+		const refused = (...codes: string[]) =>
+			syncAllNotice(codes.map((code, i) => ({ schedule_id: `${i}`, job_id: null, code }))).kind;
+		expect(refused()).toBe('not_owner');
+		expect(refused('run_active', 'connection_pending')).toBe('reconnect');
+		expect(refused('run_active', 'run_too_soon')).toBe('too_soon');
+		expect(refused('run_active', 'schedule_suspended')).toBe('running');
+		expect(refused('schedule_suspended')).toBe('paused');
 	});
 });

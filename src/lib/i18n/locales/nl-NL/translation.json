@@ -2529,6 +2529,7 @@
   "Pause": "Pauzeren",
   "Pause a response to ask the user a clarifying question": "",
   "Paused": "Gepauzeerd",
+  "Paused sources are skipped. Resume a source to sync it.": "Gepauzeerde bronnen worden overgeslagen. Hervat een bron om deze te synchroniseren.",
   "Paused: syncing is paused; synced files stay searchable": "Gepauzeerd: synchronisatie is gepauzeerd; gesynchroniseerde bestanden blijven doorzoekbaar",
   "Peak tokens": "",
   "Pending": "In afwachting",
