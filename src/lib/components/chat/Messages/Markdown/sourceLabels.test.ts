@@ -45,6 +45,13 @@ describe('sourceLabels', () => {
 		expect(sourceLabels([titled, bare])).toEqual(['Example', 'https://example.org/b']);
 	});
 
+	it('labels each marker by the stored number, not the arrival order', () => {
+		expect(sourceLabels([source('deck', 'Quickscan.pptx', 2), source('note', 'Note', 1)])).toEqual([
+			'Note',
+			'Quickscan.pptx'
+		]);
+	});
+
 	it('labels every source N/A when citations are off', () => {
 		expect(sourceLabels([source('a', 'A', 1), source('b', 'B', 2)], true)).toEqual(['N/A', 'N/A']);
 	});

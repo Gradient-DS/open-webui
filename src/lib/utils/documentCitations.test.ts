@@ -16,6 +16,12 @@ describe('markdown exports', () => {
 			'Claim [1] then [2, 1].\n\n---\n\nSources:\n[1] Third.pdf\n[2] First.pdf\n'
 		);
 	});
+	it('resolves markers by the stored number, not the arrival order', () => {
+		const numbered = sources.map((source, index) => ({ ...source, n: 3 - index }));
+		expect(getExportMarkdown('Claim [1].', numbered, 'Sources')).toBe(
+			'Claim [1].\n\n---\n\nSources:\n[1] Third.pdf\n'
+		);
+	});
 	it('preserves the legacy full-list fallback when there are no inline citations', () => {
 		expect(getExportMarkdown('Text', sources, 'Bronnen')).toContain('[3] Third.pdf');
 	});

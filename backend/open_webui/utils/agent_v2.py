@@ -341,13 +341,30 @@ def _document_label(match: re.Match[str]) -> str:
     return f'[document: {html.unescape(attributes.get("title", ""))}]'
 
 
+# [Gradient] A citation marker the agent would read as a number of this turn: `[3]`, `[3, 4]`, `[#3]`, `[3#p2]`,
+# `【3】`, `【3†source】`; with the space OWUI puts before it. Code spans and blocks are left alone.
+_MARKER_NUMBER = r'#?\d+(?:#[^\]\s]*)?'
+_CITATION_MARKER = re.compile(
+    r'[ \t]*(?:\[\s*' + _MARKER_NUMBER + r'(?:\s*[,;]\s*' + _MARKER_NUMBER + r')*\s*\]'
+    r'|【\s*\d+(?:\s*[,;]\s*\d+)*(?:†[^】]*)?\s*】)'
+)
+_CODE = re.compile(r'(```.*?(?:```|\Z)|~~~.*?(?:~~~|\Z)|`[^`\n]*`)', re.DOTALL)
+
+
+def _uncited(text: str) -> str:
+    """[Gradient] `text` without citation markers outside code: numbers from another turn or chat, which the
+    agent would resolve against this turn's sources. To cite such a document the model reads it again."""
+    parts = _CODE.split(text)
+    return ''.join(part if index % 2 else _CITATION_MARKER.sub('', part) for index, part in enumerate(parts))
+
+
 def _conversation(chat: Any, message_id: str | None) -> list[str]:
     """[Gradient] A chat's branch up to a message as `role: content` blocks, without tool, reasoning and document
-    bodies."""
+    bodies or citation markers."""
     blocks = []
     for message in get_message_list(chat.chat.get('history', {}).get('messages', {}), message_id):
         text = _DETAILS.sub('', get_content_from_message(message) or '')
-        text = _DOCUMENT.sub(_document_label, text).strip()
+        text = _uncited(_DOCUMENT.sub(_document_label, text)).strip()
         if text:
             blocks.append(f'{message.get("role", "user")}: {text}')
     return blocks
@@ -1608,10 +1625,11 @@ class AgentTurn:
             self.keep_attachments(body['input'].get('attachments') or [])
             if not self.thread_id and (earlier := await _earlier(self.metadata)):
                 body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
-            # Earlier turns' sources, so their numbers resolve; the panel lists only the ones this answer cites.
+            self.keep_texts(body['input'].get('texts') or [])
+            # Earlier turns' sources and this turn's attached texts, so their numbers resolve, sent in number order
+            # before any tool output numbers more; the panel lists only the ones this answer cites.
             for source_id in self.citations.sources:
                 await self.show_source(source_id)
-            self.keep_texts(body['input'].get('texts') or [])
             if not self.thread_id:
                 body = {**body, 'agent': agent}
             events = self.events(body)

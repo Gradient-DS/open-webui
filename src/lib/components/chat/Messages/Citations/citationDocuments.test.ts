@@ -20,7 +20,8 @@ const citation: DisplayCitation = {
 		{ file_id: 'file', page: 8 },
 		{ file_id: 'file', page: 2 }
 	],
-	distances: [0.4, 0.9]
+	distances: [0.4, 0.9],
+	n: 1
 };
 afterEach(() => vi.unstubAllGlobals());
 describe('shared citation documents', () => {
