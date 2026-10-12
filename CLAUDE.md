@@ -184,6 +184,7 @@ OneDrive and Outlook logos (`icons/OneDrive.svelte`, `icons/Outlook.svelte`) thr
 favicon/document fallback; names and URLs never identify providers. Previously
 saved source payloads without provider metadata are not retroactively classified.
 Document-text sources from open_document or attach_live_document carry metadata.granularity=document for whole-document citations; chunk citations remain passage-level.
+Web search results (`search-result` elements) are citable for their snippet and carry metadata.granularity=snippet; `Citations/SearchSnippetNote.svelte` shows their title and address, says the page was not opened, and links to it.
 
 Composer choices persist in chat.features, including the initial chat creation, and
 ui.composerTools user settings for new chats. Model defaults seed only unsaved choices;

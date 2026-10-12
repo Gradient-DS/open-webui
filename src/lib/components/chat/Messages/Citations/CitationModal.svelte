@@ -1,5 +1,6 @@
 <script lang="ts">
 	import SourceIcon from './SourceIcon.svelte';
+	import SearchSnippetNote from './SearchSnippetNote.svelte';
 	import { getContext, onDestroy, tick } from 'svelte';
 	import type { WorkBook } from 'xlsx';
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -538,6 +539,7 @@
 					>
 						{#each mergedDocuments as document, documentIdx}
 							<div class="flex flex-col w-full gap-2">
+								<SearchSnippetNote {document} />
 								{#if document.metadata?.parameters}
 									<div>
 										<div class="text-sm font-medium dark:text-gray-300 mb-1">
