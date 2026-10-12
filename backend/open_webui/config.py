@@ -3103,8 +3103,6 @@ _default_selected_agent = AGENT_API_AGENTS[0] if AGENT_API_AGENTS else ''
 
 AGENT_API_SELECTED_AGENT = _default_selected_agent
 
-AGENT_API_PICKER_DEFAULT_SLUG = os.environ.get('AGENT_API_PICKER_DEFAULT_SLUG', '').strip()
-
 
 DEFAULT_CONFIG = {
     'direct.enable': ENABLE_DIRECT_CONNECTIONS,
@@ -3520,7 +3518,6 @@ DEFAULT_CONFIG = {
     'admin.enable_user_archival': ENABLE_USER_ARCHIVAL,
     'admin.knowledge_retention_ttl_days': KNOWLEDGE_RETENTION_TTL_DAYS,
     'admin.user_inactivity_ttl_days': USER_INACTIVITY_TTL_DAYS,
-    'agent_api.picker_default_slug': AGENT_API_PICKER_DEFAULT_SLUG,
     'agent_api.selected_agent': AGENT_API_SELECTED_AGENT,
     'auth.2fa_grace_period_days': TWO_FA_GRACE_PERIOD_DAYS,
     'auth.enable_2fa': ENABLE_2FA,

@@ -17,11 +17,7 @@ ENV_MAPPING = {
 DIVERGENCES = {
     **{
         name: (None, 'Private soev service is absent; its routes are covered in soev-solutions.')
-        for name in (
-            'AGENT_API_ENABLED',
-            'AGENT_API_PICKER_DEFAULT_SLUG',
-            'FEATURE_AGENT_PICKER',
-        )
+        for name in ('AGENT_API_ENABLED',)
     },
     'RAG_OPENAI_API_BASE_URL': ('http://stub:8000/v1', 'Production LiteLLM hostname replaced by the sealed stub.'),
     'RAG_EXTERNAL_RERANKER_URL': (
@@ -119,6 +115,6 @@ class TestCiMatchesDeployedConfig:
 
     def test_non_boolean_values_are_compared_exactly(self):
         assert config_mismatches(
-            {'AGENT_API_PICKER_DEFAULT_SLUG': 'soev_chat_manual'},
-            {'AGENT_API_PICKER_DEFAULT_SLUG': 'SOEV_CHAT_MANUAL'},
+            {'AGENT_API_AGENTS': 'soev_chat_manual'},
+            {'AGENT_API_AGENTS': 'SOEV_CHAT_MANUAL'},
         )

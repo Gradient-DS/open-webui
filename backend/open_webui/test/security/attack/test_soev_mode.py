@@ -60,7 +60,7 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
     } == private
     selected_keys = {p['key'] for p in selected}
     assert selected_keys & private == (private if mode == 'drive' else set())
-    assert {'file', 'agent', 'connection', 'task'} <= selected_keys
+    assert {'file', 'connection', 'task'} <= selected_keys
     assert all(set(seeds._dependencies(p)) <= selected_keys for p in selected)
 
 

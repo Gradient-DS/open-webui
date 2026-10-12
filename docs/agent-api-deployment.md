@@ -22,14 +22,11 @@ With External Secrets enabled and a platform URL set, provide `soevApiKey` and
 Startup validates both keys when the platform URL is set. Missing platform
 configuration refuses agent requests; it does not select another transport.
 
-Keep `AGENT_API_AGENTS`, `AGENT_API_AGENTS_CONFIG`,
-`AGENT_API_AGENTS_CONFIG_OVERWRITE`, `FEATURE_AGENT_PICKER` and
-`AGENT_API_PICKER_DEFAULT_SLUG` as needed. Their chart values under
-`openWebui.config` remain `agentApiAgents`, `agentApiAgentsConfig`,
-`agentApiAgentsConfigOverwrite`, `featureAgentPicker` and
-`agentApiPickerDefaultSlug`. The admin-selected agent uses
-`agent_api.selected_agent`; per-chat overrides take precedence. Existing rows
-without v2 runtime metadata resolve to the configured deployment agent.
+`AGENT_API_AGENTS` (chart `agentApiAgents`) lists the agents an admin can
+select in the External Agents tab; the selection (`agent_api.selected_agent`)
+is sent with every turn. There is no per-chat agent: with the agent API on,
+every chat goes to the agent service. A `chat.meta.agent_id` left by the
+retired v1 picker is ignored.
 
 ## Models, default and tasks under the v2 runtime
 

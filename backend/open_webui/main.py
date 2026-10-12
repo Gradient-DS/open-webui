@@ -9,7 +9,6 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from typing import Optional
 from uuid import uuid4
 
 import aiohttp
@@ -137,7 +136,6 @@ from open_webui.env import (
     ENABLE_COMPRESSION_MIDDLEWARE,
     ENABLE_CUSTOM_MODEL_FALLBACK,
     ENABLE_EASTER_EGGS,
-    FEATURE_AGENT_PICKER,  # [Gradient] Master flag for the agent picker UI
     # OAuth Back-Channel Logout
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
     ENABLE_OTEL,
@@ -187,17 +185,14 @@ from open_webui.events import (
 )
 from open_webui.internal.db import engine, get_async_session
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.agent_configs import AgentConfigs  # [Gradient]
 from open_webui.models.channels import Channels
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.config import Config
 from open_webui.models.functions import Functions
-from open_webui.models.groups import Groups  # [Gradient]
 from open_webui.models.messages import Messages
 from open_webui.models.models import Models, normalize_model_tags
 from open_webui.models.users import Users
 from open_webui.routers import (
-    agent_configs,
     analytics,
     archives,
     audio,
@@ -272,7 +267,6 @@ from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.actions import chat_action as chat_action_handler
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
-from open_webui.utils.agent_routing import AgentSelectionRequired, resolve_agent_route  # [Gradient]
 from open_webui.utils.asgi_middleware import AppHTTPMiddleware
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.auth import (
@@ -552,31 +546,6 @@ async def lifespan(app: FastAPI):
     # when the first user lands on the / route.
     log.info('Installing external dependencies of functions and tools...')
     await install_tool_and_function_dependencies()
-
-    # [Gradient] Seed agent_config defaults from AGENT_API_AGENTS_CONFIG env so
-    # ops can pre-configure agents in deployments where the admin panel isn't
-    # reachable. Existing rows are preserved unless OVERWRITE is true.
-    try:
-        from open_webui.env import (
-            AGENT_API_AGENTS,
-            AGENT_API_AGENTS_CONFIG,
-            AGENT_API_AGENTS_CONFIG_OVERWRITE,
-        )
-
-        if AGENT_API_AGENTS_CONFIG:
-            inserted, updated, skipped = await AgentConfigs.seed_from_env(
-                AGENT_API_AGENTS_CONFIG,
-                AGENT_API_AGENTS,
-                overwrite=AGENT_API_AGENTS_CONFIG_OVERWRITE,
-            )
-            log.info(
-                'Seeded agent_config from env: inserted=%d, updated=%d, skipped=%d',
-                inserted,
-                updated,
-                skipped,
-            )
-    except Exception as e:
-        log.warning(f'Failed to seed agent_config from env: {e}')
 
     app.state.redis = get_redis_client(async_mode=True)
 
@@ -1103,7 +1072,6 @@ app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['
 app.include_router(knowledge.connections_router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
-app.include_router(agent_configs.router, prefix='/api/v1/agent-configs', tags=['agents'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
@@ -1960,87 +1928,11 @@ async def chat_completion(
 
     async def process_chat(request, form_data, user, metadata, model, tasks=None):
         try:
-            # [Gradient] Resolve the routing decision BEFORE process_chat_payload
-            # so the middleware knows whether to skip legacy web search / RAG /
-            # tool resolution (the agent service does its own).
-            #
-            # Routing matrix (utils/agent_routing.resolve_agent_route):
-            #   picker on, chat.meta.agent_id set                       → that agent
-            #   no agent_id, picker on, default agent configured        → the default agent
-            #   no agent_id, picker on, no default                      → 400, choose an agent
-            #   picker off, AGENT_API_ENABLED=true                      → agent route (legacy bypass)
-            #   otherwise                                               → standard route
+            # [Gradient] With the agent API on, the agent service handles every
+            # turn; decided before process_chat_payload so the middleware skips
+            # legacy web search / RAG / tool resolution (the agent does its own).
+            route_to_agent = AGENT_API_ENABLED
             chat_id_meta = metadata.get('chat_id')
-            chat_agent_id: Optional[str] = None
-            if chat_id_meta and not chat_id_meta.startswith('local:'):
-                try:
-                    chat_row = await Chats.get_chat_by_id(chat_id_meta)
-                    if chat_row and chat_row.meta:
-                        chat_agent_id = chat_row.meta.get('agent_id') or None
-                except Exception:
-                    chat_agent_id = None
-
-            # [Gradient] Resolve the route first (pure, utils/agent_routing),
-            # then verify access to whatever agent it named. Under the picker
-            # a chat without a binding falls back to the admin-configured
-            # default rather than to the raw model: the standard route is a
-            # bare LLM with stock top-k RAG, which a tenant user only ever
-            # sees as "few sources" and cannot diagnose. An inactive default
-            # counts as no default.
-            default_agent_id: Optional[str] = None
-            if not chat_agent_id and AGENT_API_ENABLED and FEATURE_AGENT_PICKER:
-                default_slug = ((await Config.get('agent_api.picker_default_slug')) or '').strip()
-                default_cfg = await AgentConfigs.get_agent_config_by_id(default_slug) if default_slug else None
-                default_agent_id = default_slug if default_cfg and default_cfg.is_active else None
-            try:
-                route = resolve_agent_route(
-                    chat_agent_id=chat_agent_id,
-                    agent_api_enabled=AGENT_API_ENABLED,
-                    feature_agent_picker=FEATURE_AGENT_PICKER,
-                    default_agent_id=default_agent_id,
-                )
-            except AgentSelectionRequired:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='Choose an agent before sending a message.',
-                )
-            route_to_agent = route.to_agent
-
-            if route.agent_id:
-                # Defense-in-depth: refuse to route to an agent the user no
-                # longer has access to (e.g. admin disabled is_active or
-                # revoked group access mid-chat). Applies to the bound agent
-                # and to the default alike.
-                cfg = await AgentConfigs.get_agent_config_by_id(route.agent_id)
-                if not cfg or not cfg.is_active:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail='This chat is bound to an agent that is no longer available.',
-                    )
-                if not can_bypass_access_control(user):
-                    user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id)}
-                    accessible = await AccessGrants.get_accessible_resource_ids(
-                        user_id=user.id,
-                        resource_type='agent_config',
-                        resource_ids=[route.agent_id],
-                        permission='read',
-                        user_group_ids=user_group_ids,
-                    )
-                    if route.agent_id not in accessible:
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail='You no longer have access to this agent.',
-                        )
-
-            if route.agent_id and route.agent_id != chat_agent_id:
-                # The default fired. Record it on the row so later turns and
-                # the navbar agree with what actually served this chat.
-                if chat_id_meta and not chat_id_meta.startswith('local:'):
-                    try:
-                        await Chats.bind_chat_agent_by_id(chat_id_meta, route.agent_id)
-                    except Exception as e:
-                        log.warning('Could not bind chat %s to default agent %s: %s', chat_id_meta, route.agent_id, e)
-            chat_agent_id = route.agent_id
 
             # [Gradient] Keep the request-local model when saved-chat dispatch reloads the registry.
             if split_assistant_id:
@@ -2050,7 +1942,6 @@ async def chat_completion(
                 await Chats.bind_chat_assistant_by_id(chat_id_meta, split_assistant_id)
 
             metadata['route_to_agent'] = route_to_agent
-            metadata['chat_agent_id'] = chat_agent_id
 
             form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
 
@@ -2060,12 +1951,7 @@ async def chat_completion(
 
             # [Gradient] The agent owns inference and tool execution for routed chats.
             if route_to_agent:
-                response = await call_agent_api(
-                    request,
-                    form_data,
-                    metadata,
-                    override_agent=chat_agent_id,
-                )
+                response = await call_agent_api(request, form_data, metadata)
             else:
                 response = await chat_completion_handler(request, form_data, user)
             if metadata.get('chat_id') and metadata.get('message_id'):
@@ -2813,7 +2699,6 @@ async def get_app_config(request: Request):
         'onedrive.client_id_business',
         'onedrive.sharepoint_url',
         'onedrive.sharepoint_tenant_id',
-        'agent_api.picker_default_slug',
         'features.enable_data_warnings',
         'admin.data_retention_ttl_days',
         'ui.enable_welcome_message',
@@ -2967,8 +2852,6 @@ async def get_app_config(request: Request):
                     'enable_live_mail': AGENT_API_ENABLED and config.get('live_mail.enable'),
                     'enable_live_documents': AGENT_API_ENABLED and config.get('live_documents.enable'),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
-                    'feature_agent_picker': FEATURE_AGENT_PICKER,  # [Gradient]
-                    'agent_picker_default_slug': config.get('agent_api.picker_default_slug'),  # [Gradient]
                     'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
                     'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]
                     'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]

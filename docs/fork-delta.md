@@ -49,14 +49,17 @@ auth boundary; retrieval and agentic control flow belong in soev-agents, not in
 a fork of a chat frontend.
 
 Gated by `AGENT_API_ENABLED` (`backend/open_webui/env.py:1007`, default `False`;
-Helm `openWebui.config.agentApiEnabled`, default `"false"`). The routing decision
-itself is a pure function isolated from upstream code in
-`backend/open_webui/utils/agent_routing.py` (`resolve_agent_route`,
-`agent_owns_tool_execution`) so the delta stays one-liners at the call sites in
-`main.py`. `backend/open_webui/utils/agent.py:call_agent_api` resolves the agent and model
-and always calls `utils/agent_v2.py`, which owns server threads and streamed events. Routing matrix: bound `chat.meta.agent_id` → agent
-route; no agent id + picker off + `AGENT_API_ENABLED` → agent route (legacy
-bypass); otherwise the stock route.
+Helm `openWebui.config.agentApiEnabled`, default `"false"`). With the flag on,
+every chat turn takes the agent route; otherwise the stock route.
+`backend/open_webui/utils/agent_routing.py:agent_owns_tool_execution` keeps the
+tool-loop decision isolated from upstream code.
+`backend/open_webui/utils/agent.py:call_agent_api` sends the admin-selected agent
+(`agent_api.selected_agent`) and the picked model, and always calls
+`utils/agent_v2.py`, which owns server threads and streamed events. The v1 agent
+picker is removed. Its data stays and is ignored: `chat.meta.agent_id` values,
+and the `agent_config` table with its `access_grant` rows, which an Alembic drop
+would take off the v1 head the v2 rollback needs; drop them in the
+post-rollback cleanup.
 
 D-Runtime keeps upstream's sub-agents, tool approval, ask-user, timers, and
 automations out of agent-routed turns. The agent still owns tool execution and

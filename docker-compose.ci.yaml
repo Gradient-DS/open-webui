@@ -154,8 +154,7 @@ services:
       # An explicit URL bypasses the import-time Ollama port probes.
       OLLAMA_BASE_URL: "http://stub:8000"
       OLLAMA_BASE_URLS: "http://stub:8000"
-      # OWUI-local agent-config CRUD and inbound file authorization fixtures.
-      # These do not configure or run an agents-api server.
+      # Matches the deployed list; no agents-api server is configured or run.
       AGENT_API_AGENTS: "soev_chat_manual,assistant_onboarding"
       # No tenant sets it yet, but it forwards arbitrary requests upstream: the
       # plane drives it rather than leave it unmeasured.
