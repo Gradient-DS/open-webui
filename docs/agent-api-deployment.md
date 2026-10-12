@@ -32,8 +32,10 @@ retired v1 picker is ignored.
 
 The fork reads `GET /v1/capabilities` with its existing API credential at startup
 and on demand. The response is `{ "contract": "0.3.0", "features": ["..."] }`.
-Successful and failed reads are cached per process for 60 seconds; an unavailable
-or malformed endpoint disables optional features and logs once per outage.
+Successful reads are cached per process for 60 seconds. An unavailable or malformed
+endpoint retains the last successful feature set for that backend, logs once per
+outage, and retries after 10 seconds. Until the first successful read, optional
+features remain disabled. Changing the backend URL or API key resets the cache.
 
 | Feature name | Controls |
 | --- | --- |

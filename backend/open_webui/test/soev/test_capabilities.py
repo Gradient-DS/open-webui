@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from open_webui.soev import capabilities
+from open_webui.soev.client import SoevApiError
 
 FEATURES = (
     capabilities.LIVE_DOCUMENTS,
@@ -57,7 +58,9 @@ async def test_advertised_features(cache, identity_http, feature, present):
         httpx.ReadTimeout('credential must not be logged'),
     ],
 )
-async def test_failure_disables_features_and_logs_once(cache, identity_http, caplog, failure):
+async def test_first_failure_returns_empty_retries_after_ten_seconds_and_logs_once(
+    cache, identity_http, caplog, failure
+):
     requests, responses = identity_http
 
     async def reply(request):
@@ -69,7 +72,11 @@ async def test_failure_disables_features_and_logs_once(cache, identity_http, cap
     with caplog.at_level(logging.WARNING, logger=capabilities.__name__):
         for _ in range(2):
             assert not await capabilities.refresh()
-            cache[0] += 60
+            request_count = len(requests)
+            cache[0] += 9.9
+            assert not await capabilities.refresh()
+            assert len(requests) == request_count
+            cache[0] += 0.1
     records = [record for record in caplog.records if record.name == capabilities.__name__]
     assert len(records) == 1
     assert 'credential' not in records[0].getMessage()
@@ -77,7 +84,7 @@ async def test_failure_disables_features_and_logs_once(cache, identity_http, cap
 
 
 @pytest.mark.asyncio
-async def test_ttl_refreshes_once_for_concurrent_callers_and_drops_stale_features(cache, identity_http):
+async def test_success_then_failure_keeps_features_and_retries_after_ten_seconds(cache, identity_http):
     requests, responses = identity_http
     responses.extend(
         [
@@ -92,26 +99,81 @@ async def test_ttl_refreshes_once_for_concurrent_callers_and_drops_stale_feature
     assert await capabilities.has('images')
     assert len(requests) == 1
     cache[0] += 0.1
-    assert not any(await asyncio.gather(*(capabilities.has(feature) for feature in FEATURES)))
+    assert all(await asyncio.gather(*(capabilities.has(feature) for feature in FEATURES)))
     assert len(requests) == 2
-    cache[0] += 60
+    cache[0] += 9.9
+    assert all(await asyncio.gather(*(capabilities.has(feature) for feature in FEATURES)))
+    assert len(requests) == 2
+    cache[0] += 0.1
+    assert await capabilities.has('images')
+    assert not await capabilities.has('meetings')
+    assert len(requests) == 3
+    cache[0] += 59.9
     assert await capabilities.has('images')
     assert len(requests) == 3
 
 
 @pytest.mark.asyncio
-async def test_backend_change_invalidates_cache(cache, identity_config, identity_http, monkeypatch):
+@pytest.mark.parametrize('setting,value', [('SOEV_API_URL', 'https://other.invalid'), ('SOEV_API_KEY', 'other-key')])
+async def test_backend_change_resets_last_good_features(
+    cache, identity_config, identity_http, monkeypatch, setting, value
+):
     identity, _ = identity_config
     requests, responses = identity_http
     responses.append(httpx.Response(200, json={'contract': '0.3.0', 'features': ['images']}))
     assert await capabilities.has('images')
-    monkeypatch.setattr(identity.config, 'SOEV_API_URL', '')
-    assert not await capabilities.has('images')
-    monkeypatch.setattr(identity.config, 'SOEV_API_URL', 'https://other.invalid')
-    responses.append(httpx.Response(200, json={'contract': '0.3.0', 'features': []}))
+    monkeypatch.setattr(identity.config, setting, value)
+    responses.append(httpx.Response(503))
     assert not await capabilities.has('images')
     assert len(requests) == 2
-    assert requests[-1].url.host == 'other.invalid'
+    if setting == 'SOEV_API_URL':
+        assert requests[-1].url.host == 'other.invalid'
+    else:
+        assert requests[-1].headers['authorization'] == 'Bearer other-key'
+    cache[0] += 10
+    responses.append(httpx.Response(200, json={'contract': '0.3.0', 'features': ['meetings']}))
+    assert await capabilities.has('meetings')
+    assert not await capabilities.has('images')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'error',
+    [
+        httpx.HTTPError('HTTP failure'),
+        SoevApiError(503, 'upstream_error', 'API failure'),
+        ValueError('invalid payload'),
+    ],
+)
+async def test_expected_client_errors_preserve_last_good_features(cache, monkeypatch, error):
+    from open_webui.soev import identity
+
+    client = AsyncMock()
+    client.get.side_effect = [{'contract': '0.3.0', 'features': ['images']}, error]
+    monkeypatch.setattr(identity, 'build_client', lambda: client)
+    assert await capabilities.has('images')
+    cache[0] += 60
+    assert await capabilities.has('images')
+    assert client.get.await_count == 2
+    cache[0] += 9
+    assert await capabilities.has('images')
+    assert client.get.await_count == 2
+    cache[0] += 1
+    client.get.side_effect = None
+    client.get.return_value = {'contract': '0.3.0', 'features': []}
+    assert not await capabilities.has('images')
+    assert client.get.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_unexpected_programming_errors_are_not_suppressed(cache, monkeypatch):
+    from open_webui.soev import identity
+
+    client = AsyncMock()
+    client.get.side_effect = RuntimeError('unexpected bug')
+    monkeypatch.setattr(identity, 'build_client', lambda: client)
+    with pytest.raises(RuntimeError, match='unexpected bug'):
+        await capabilities.refresh()
 
 
 @pytest.mark.asyncio
