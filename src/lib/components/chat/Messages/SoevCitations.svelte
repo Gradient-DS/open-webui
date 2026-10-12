@@ -7,7 +7,12 @@
 	import { citationPanel, openSourcesTabSignal } from '$lib/stores/citations';
 
 	import Citations from './Citations.svelte';
-	import { reduceSources, type DisplayCitation, type RawSource } from './Citations/reduceSources';
+	import {
+		citationAt,
+		reduceSources,
+		type DisplayCitation,
+		type RawSource
+	} from './Citations/reduceSources';
 	// [Gradient] Share the cited-marker scope with the grouped Sources tab.
 	import { citedCitations } from './Citations/citedSources';
 	import { calculateShowRelevance, shouldShowPercentage } from './Citations/relevanceDisplay';
@@ -49,9 +54,8 @@
 	};
 	export const showSourceModal = (sourceId: string | number) => {
 		if (readOnly) return inner?.showSourceModal(sourceId);
-		const index =
-			typeof sourceId === 'string' ? parseInt(sourceId.split('#')[0]) - 1 : sourceId - 1;
-		if (citations[index]) openPanel(citations[index], 'detail');
+		const citation = citationAt(citations, sourceId);
+		if (citation) openPanel(citation, 'detail');
 	};
 
 	// [Gradient] Inline [N] retains cumulative numbering; the pill lists only the sources the text cites.

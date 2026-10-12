@@ -5,10 +5,10 @@ import type { DisplayCitation } from './reduceSources';
 
 /**
  * [Gradient] A message's sources are the ones its own text cites. Each `[N]`
- * marker outside code resolves to `citations[N - 1]`, as an inline click does
+ * marker outside code resolves to the entry numbered N, as an inline click does
  * (`showSourceModal`), so the pill and the panel's question groups list exactly
  * what the answer cites, in stored order. Inline `[N]` keeps resolving against
- * the full stored list; a marker past its end names nothing.
+ * the full stored list; a marker no entry carries names nothing.
  */
 export function citedCitations(citations: DisplayCitation[], text: string): DisplayCitation[] {
 	const cited = new Set<number>();
@@ -16,7 +16,7 @@ export function citedCitations(citations: DisplayCitation[], text: string): Disp
 		citationIds(segment).forEach((id) => cited.add(id));
 		return segment;
 	});
-	return citations.filter((_, index) => cited.has(index + 1));
+	return citations.filter((citation) => cited.has(citation.n));
 }
 
 // [Gradient] The answer text a message shows: its output items, else its content without `<details>` blocks.

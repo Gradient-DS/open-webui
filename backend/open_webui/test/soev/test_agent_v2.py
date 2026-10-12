@@ -686,7 +686,8 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
         )
     else:
         agent_v2.AccessGrants.has_access.assert_not_awaited()
-    assert not [event for event in chat.socket if event['type'] == 'source']
+    sources = [event['data'] for event in chat.socket if event['type'] == 'source']
+    assert [(source['source']['id'], source['n']) for source in sources] == [(f'{kind}:{item_id}', 1)]
 
 
 @pytest.mark.asyncio
@@ -1081,9 +1082,20 @@ def answered(text: str, *citations: dict, **payload: Any) -> tuple[str, dict]:
     return ('model_output', {'content': text, 'citations': list(citations), **payload})
 
 
+def in_order(socket: list[dict]) -> bool:
+    """[Claude] Whether each document's first `source` event arrives in the order of its number."""
+    numbers = {}
+    for event in socket:
+        if event['type'] == 'source':
+            numbers.setdefault(event['data']['metadata'][0]['source'], event['data']['n'])
+    return list(numbers.values()) == list(range(1, len(numbers) + 1))
+
+
 def panel(chunks: list[dict], socket: list[dict]) -> list[int]:
     """[Claude] The numbers the message's source pill lists, as `citedCitations` does: each `[N]` in the answer
-    that names a source sent to the message."""
+    that names a source sent to the message. The sources must arrive in number order, as stored chats without `n`
+    resolve `[N]` by position."""
+    assert in_order(socket)
     sent = {event['data']['n'] for event in socket if event['type'] == 'source'}
     return sorted({n for marker in re.findall(r'\[(\d+)\]', content(chunks)) if (n := int(marker)) in sent})
 
@@ -1148,6 +1160,16 @@ async def test_attached_text_seeding_ignores_child_streams_and_future_inputs() -
         2,
     )
     assert turn.citations.sources == {}
+
+
+@pytest.mark.asyncio
+async def test_attached_text_is_sent_before_the_tool_sources_numbered_after_it(chat: Chat, stored_texts: dict) -> None:
+    chat.api.chat.turns = [[found(DOCUMENT, CHUNK), answered('From the doc.', cited(12, 'source-a'))]]
+    chunks = await chat.turn('read', 'a1', files=[{'type': 'note', 'id': 'n1'}])
+    assert content(chunks) == 'From the doc [2].'
+    sources = [event['data'] for event in chat.socket if event['type'] == 'source']
+    assert [(source['source']['id'], source['n']) for source in sources] == [('note:n1', 1), ('document', 2)]
+    assert panel(chunks, chat.socket) == [2]
 
 
 @pytest.mark.asyncio

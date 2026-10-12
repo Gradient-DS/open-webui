@@ -1608,10 +1608,11 @@ class AgentTurn:
             self.keep_attachments(body['input'].get('attachments') or [])
             if not self.thread_id and (earlier := await _earlier(self.metadata)):
                 body = {**body, 'input': {**body['input'], 'text': _with_earlier(body['input']['text'], earlier)}}
-            # Earlier turns' sources, so their numbers resolve; the panel lists only the ones this answer cites.
+            self.keep_texts(body['input'].get('texts') or [])
+            # Earlier turns' sources and this turn's attached texts, so their numbers resolve, sent in number order
+            # before any tool output numbers more; the panel lists only the ones this answer cites.
             for source_id in self.citations.sources:
                 await self.show_source(source_id)
-            self.keep_texts(body['input'].get('texts') or [])
             if not self.thread_id:
                 body = {**body, 'agent': agent}
             events = self.events(body)

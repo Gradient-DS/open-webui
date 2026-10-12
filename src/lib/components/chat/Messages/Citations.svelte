@@ -4,7 +4,7 @@
 	import { config, embed, showControls, showEmbeds } from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
-	import { reduceSources } from './Citations/reduceSources';
+	import { citationAt, reduceSources } from './Citations/reduceSources';
 	import { citedCitations } from './Citations/citedSources';
 	import { calculateShowRelevance, shouldShowPercentage } from './Citations/relevanceDisplay';
 
@@ -35,25 +35,14 @@
 	let selectedCitation: any = null;
 
 	export const showSourceModal = (sourceId) => {
-		let index;
-		let suffix = null;
+		// [Gradient] `[N]` opens the entry numbered N (`citationAt`), not the Nth stored one.
+		const citation = citationAt(citations, sourceId);
 
-		if (typeof sourceId === 'string') {
-			const output = sourceId.split('#');
-			index = parseInt(output[0]) - 1;
+		if (citation) {
+			console.log('Showing citation modal for:', citation);
 
-			if (output.length > 1) {
-				suffix = output[1];
-			}
-		} else {
-			index = sourceId - 1;
-		}
-
-		if (citations[index]) {
-			console.log('Showing citation modal for:', citations[index]);
-
-			if (citations[index]?.source?.embed_url) {
-				const embedUrl = citations[index].source.embed_url;
+			if (citation?.source?.embed_url) {
+				const embedUrl = citation.source.embed_url;
 				if (embedUrl) {
 					if (readOnly) {
 						// Open in new tab if readOnly
@@ -64,19 +53,19 @@
 						showEmbeds.set(true);
 						embed.set({
 							url: embedUrl,
-							title: citations[index]?.source?.name || 'Embedded Content',
-							source: citations[index],
+							title: citation?.source?.name || 'Embedded Content',
+							source: citation,
 							chatId: chatId,
 							messageId: id,
 							sourceId: sourceId
 						});
 					}
 				} else {
-					selectedCitation = citations[index];
+					selectedCitation = citation;
 					showCitationModal = true;
 				}
 			} else {
-				selectedCitation = citations[index];
+				selectedCitation = citation;
 				showCitationModal = true;
 			}
 		}
@@ -168,7 +157,7 @@
 				>
 					<SourceIcon source={citation.source} />
 					<div class=" font-normal bg-gray-50 dark:bg-gray-850 rounded-md px-1">
-						{idx + 1}
+						{citation.n}
 					</div>
 					<div
 						class="flex-1 truncate hover:text-black dark:text-white/60 dark:hover:text-white transition text-left"

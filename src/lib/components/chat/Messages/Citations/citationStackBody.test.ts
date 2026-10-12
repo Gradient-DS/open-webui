@@ -26,7 +26,8 @@ describe('citation stack heading', () => {
 					source: { name: 'Plan' },
 					document: documents.map((document) => document.document),
 					metadata: documents.map((document) => document.metadata ?? {}),
-					distances: documents.map(() => undefined)
+					distances: documents.map(() => undefined),
+					n: 1
 				},
 				mergedDocuments: documents,
 				previewAvailable: false
