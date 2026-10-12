@@ -142,7 +142,7 @@
 	import Camera from '../icons/Camera.svelte';
 	import Link from '../icons/Link.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
-	import Grid from '../icons/Grid.svelte';
+	import Excel from '../icons/Excel.svelte';
 	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
 	import { meetingsAvailable } from '$lib/components/meetings/availability';
 	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
@@ -2929,7 +2929,7 @@
 															on:click|preventDefault={() => inputMenuRef?.cycleTool('office')}
 															class={pinnedToggleClass(officeEnabled)}
 														>
-															<Grid className="size-4" strokeWidth="1.75" />
+															<Excel className="size-4" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'tools' && showToolsButton}

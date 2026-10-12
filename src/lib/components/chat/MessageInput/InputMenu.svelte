@@ -55,7 +55,7 @@
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
-	import Grid from '$lib/components/icons/Grid.svelte';
+	import Excel from '$lib/components/icons/Excel.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import Cube from '$lib/components/icons/Cube.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
@@ -1027,7 +1027,7 @@
 							disabled={!showOfficeButton}
 							onClick={() => showOfficeButton && cycleTool('office')}
 						>
-							<Grid slot="icon" className="size-3.5" strokeWidth="1.75" />
+							<Excel slot="icon" className="size-3.5" />
 						</MenuItem>
 					{/if}
 
