@@ -1,5 +1,6 @@
 """Explicit picker selections attach through the platform's user-authorized path."""
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -13,6 +14,8 @@ from open_webui.soev.client import SoevApiError
 from open_webui.soev.live_documents import AttachmentMismatch, chat_file, register_attachment
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(route_class=SoevRoute, dependencies=[Depends(require_soev)])
 
@@ -45,7 +48,10 @@ async def attach_onedrive(
     if user.role != 'admin':
         cap = await Config.get('rag.file.max_count_per_user')
         if cap and int(cap) > 0 and await Files.count_files_by_user_id(user.id) >= int(cap):
-            raise HTTPException(status_code=403, detail=ERROR_MESSAGES.FILE_LIMIT_EXCEEDED(int(cap)))
+            raise HTTPException(
+                status_code=403,
+                detail={'code': 'file_limit_exceeded', 'detail': ERROR_MESSAGES.FILE_LIMIT_EXCEEDED(int(cap))},
+            )
     client = identity.build_client()
     try:
         subject = await identity.acting_ref(user, client)
@@ -59,11 +65,12 @@ async def attach_onedrive(
             idempotency_key=f'picker:{user.id}:{idempotency_key}',
         )
     except SoevApiError as error:
+        # The browser gets only the stable code; the upstream detail stays in the log.
+        log.warning('OneDrive attach refused: status=%s code=%s detail=%s', error.status, error.code, error.detail)
         raise HTTPException(
             status_code=error.status,
             detail={
                 'code': error.code,
-                'detail': error.detail,
                 **({'provider': error.provider} if error.provider is not None else {}),
             },
             headers={'Retry-After': error.retry_after} if error.retry_after is not None else None,

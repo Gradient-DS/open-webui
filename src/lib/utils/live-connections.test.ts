@@ -1,6 +1,11 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import * as api from '$lib/apis/cloudSync';
-import { connectLiveSource, prefetchLiveConnections, relinkPrompt } from './live-connections';
+import {
+	attachErrorMessage,
+	connectLiveSource,
+	prefetchLiveConnections,
+	relinkPrompt
+} from './live-connections';
 vi.mock('$lib/apis/cloudSync', async (original) => ({
 	...(await original<typeof import('$lib/apis/cloudSync')>()),
 	listConnections: vi.fn(),
@@ -188,4 +193,15 @@ it('maps subject_not_linked to the log-in-again prompt, not a generic error', ()
 	);
 	expect(relinkPrompt(new api.CloudSyncError(403, 'policy_forbids', 'Disabled'))).toBeNull();
 	expect(relinkPrompt('subject_not_linked')).toBeNull();
+});
+it('maps picker attach refusals to user messages without upstream detail', () => {
+	expect(attachErrorMessage(new Error('too_large'))).toBe('This file is too large to attach.');
+	expect(attachErrorMessage(new Error('soev_not_configured'))).toBe(
+		'Attaching OneDrive files is unavailable right now.'
+	);
+	expect(attachErrorMessage(new Error('subject_not_linked'))).toBe(
+		'Log in again with Microsoft to connect'
+	);
+	expect(attachErrorMessage(new Error('upstream_error'))).toBe('Could not attach OneDrive file');
+	expect(attachErrorMessage('too_large')).toBe('Could not attach OneDrive file');
 });

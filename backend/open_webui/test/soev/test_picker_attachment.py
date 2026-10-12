@@ -130,6 +130,22 @@ async def test_picker_preserves_typed_platform_refusals(picker, env, code, statu
 
 
 @pytest.mark.asyncio
+async def test_picker_too_large_returns_code_only_and_logs_upstream_detail(picker, caplog):
+    """A soev-api 413 reaches the browser as `too_large` without the upstream detail."""
+    from open_webui.soev.client import SoevApiError
+
+    picker.client.send.side_effect = SoevApiError(413, 'too_large', 'Document attachment refused')
+    with caplog.at_level('WARNING', logger=picker.routes.__name__):
+        async with AsyncClient(transport=httpx.ASGITransport(picker.app), base_url='http://test') as browser:
+            response = await browser.post(
+                '/api/v1/files/onedrive/attach', json=picker.form, headers={'Idempotency-Key': str(uuid4())}
+            )
+    assert response.status_code == 413
+    assert response.json()['detail'] == {'code': 'too_large'}
+    assert 'Document attachment refused' in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_picker_honors_product_file_limit(picker, monkeypatch):
     """A consumer file cap is checked before platform admission."""
     monkeypatch.setattr(picker.routes.Config, 'get', AsyncMock(return_value=1))
@@ -139,6 +155,7 @@ async def test_picker_honors_product_file_limit(picker, monkeypatch):
             '/api/v1/files/onedrive/attach', json=picker.form, headers={'Idempotency-Key': str(uuid4())}
         )
     assert response.status_code == 403
+    assert response.json()['detail']['code'] == 'file_limit_exceeded'
     picker.client.send.assert_not_awaited()
 
 

@@ -37,6 +37,7 @@
 	import {
 		connectLiveSource,
 		attachPickedDocument,
+		attachErrorMessage,
 		liveConnections,
 		matchingPickerConnection,
 		prefetchLiveConnections,
@@ -1121,7 +1122,7 @@
 					);
 				} catch (error) {
 					files = files.filter((file) => file.itemId !== itemId);
-					toast.error($i18n.t(relinkPrompt(error) ?? 'Could not attach OneDrive file'));
+					toast.error($i18n.t(attachErrorMessage(error)));
 				}
 			}
 		} catch (error) {
