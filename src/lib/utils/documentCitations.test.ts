@@ -27,10 +27,11 @@ describe('markdown exports', () => {
 	});
 });
 
-describe('superscript export', () => {
-	it('raises body citations for print and keeps the source list labels plain', () => {
-		const out = getExportMarkdown('Fact [3].', sources, 'Bronnen', true);
-		expect(out).toContain('Fact <sup>[1]</sup>.');
+describe('print export', () => {
+	it('keeps body citations as plain [n] markers matching the source list', () => {
+		const out = getExportMarkdown('Fact [3].', sources, 'Bronnen');
+		expect(out).toContain('Fact [1].');
+		expect(out).not.toContain('<sup>');
 		expect(out).toContain('[1] Third.pdf');
 	});
 });

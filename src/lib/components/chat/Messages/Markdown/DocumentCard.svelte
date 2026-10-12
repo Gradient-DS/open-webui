@@ -82,13 +82,14 @@
 
 	const downloadPdf = async () => {
 		if (!content) return;
+		// Close first: the print dialog blocks the page, and the menu must not outlive it.
+		downloadOpen = false;
 		try {
 			await printDocument(displayTitle, exportContent, format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
 		}
-		downloadOpen = false;
 	};
 
 	const downloadDocx = async () => {

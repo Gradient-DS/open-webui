@@ -1,12 +1,12 @@
 // [Gradient] Word export of a writer document, built in the browser so model output never reaches a
-// server-side renderer. Citations become Word footnotes; only embedded (data:) images are kept.
+// server-side renderer. Citations stay [n] markers with one source list at the end; only embedded
+// (data:) images are kept.
 import {
 	AlignmentType,
 	BorderStyle,
 	Document,
 	ExternalHyperlink,
 	Footer,
-	FootnoteReferenceRun,
 	HeadingLevel,
 	ImageRun,
 	LevelFormat,
@@ -23,11 +23,10 @@ import {
 } from 'docx';
 import { Marked, type Token, type Tokens } from 'marked';
 import type { RawSource } from '$lib/components/chat/Messages/Citations/reduceSources';
-import { buildFullSourceList, normalizeCitations, type SourceInfo } from './citations';
+import { buildFullSourceList, normalizeCitations } from './citations';
 import { withTitle } from './documentPrint';
 
 const markdown = new Marked({ gfm: true, breaks: true });
-const CITATION = /\[(\d+(?:,\s*\d+)*)\]/g;
 const HEADINGS = [
 	HeadingLevel.HEADING_1,
 	HeadingLevel.HEADING_2,
@@ -78,14 +77,9 @@ async function loadImage(href: string): Promise<Image | null> {
 }
 
 class DocxWriter {
-	footnotes: Record<number, { children: Paragraph[] }> = {};
-	private nextFootnote = 1;
 	private nextList = 0;
 
-	constructor(
-		private sources: SourceInfo[],
-		private images: Map<string, Image>
-	) {}
+	constructor(private images: Map<string, Image>) {}
 
 	private run(text: string, style: Style): TextRun {
 		return new TextRun({
@@ -95,29 +89,6 @@ class DocxWriter {
 			strike: style.strike,
 			...(style.code && { font: MONO, size: 20 })
 		});
-	}
-
-	private citedText(text: string, style: Style): ParagraphChild[] {
-		const children: ParagraphChild[] = [];
-		let last = 0;
-		for (const match of text.matchAll(CITATION)) {
-			const numbers = match[1].split(',').map((n) => Number(n.trim()));
-			const cited = numbers.map((n) => this.sources.find((source) => source.index === n));
-			if (cited.some((source) => !source)) continue;
-			const before = text.slice(last, match.index).replace(/ $/, '');
-			if (before) children.push(this.run(before, style));
-			for (const source of cited as SourceInfo[]) {
-				const id = this.nextFootnote++;
-				const label =
-					source.url && source.url !== source.name ? `${source.name} — ${source.url}` : source.name;
-				this.footnotes[id] = { children: [new Paragraph({ children: [new TextRun(label)] })] };
-				children.push(new FootnoteReferenceRun(id));
-			}
-			last = match.index! + match[0].length;
-		}
-		const rest = text.slice(last);
-		if (rest) children.push(this.run(rest, style));
-		return children;
 	}
 
 	inline(tokens: Token[] = [], style: Style = {}): ParagraphChild[] {
@@ -158,7 +129,7 @@ class DocxWriter {
 				case 'escape':
 					return 'tokens' in token && token.tokens?.length
 						? this.inline(token.tokens, style)
-						: this.citedText(unescape(token.text), style);
+						: [this.run(unescape(token.text), style)];
 				default:
 					return 'text' in token && typeof token.text === 'string'
 						? [this.run(unescape(token.text), style)]
@@ -287,7 +258,7 @@ export async function buildDocumentDocx(
 		if (image) images.set(href, image);
 	}
 
-	const writer = new DocxWriter(normalized.sourceList, images);
+	const writer = new DocxWriter(images);
 	const [first, ...rest] = tokens;
 	const children: (Paragraph | Table)[] = [
 		new Paragraph({
@@ -296,13 +267,13 @@ export async function buildDocumentDocx(
 		}),
 		...rest.flatMap((token) => writer.block(token))
 	];
-	// Sources the body never cites inline still get listed, as in the other downloads.
-	const uncited = normalized.sourceList.length ? [] : buildFullSourceList(rawSources);
-	if (uncited.length) {
-		children.push(
-			new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun(sourcesHeading)] })
-		);
-		for (const source of uncited) {
+	// One entry per source, numbered as in the text; a body without markers lists every source.
+	const listed = normalized.sourceList.length
+		? normalized.sourceList
+		: buildFullSourceList(rawSources);
+	if (listed.length) {
+		children.push(new Paragraph({ heading: HEADINGS[1], children: [new TextRun(sourcesHeading)] }));
+		for (const source of listed) {
 			const url = source.url && source.url !== source.name ? ` — ${source.url}` : '';
 			children.push(
 				new Paragraph({ children: [new TextRun(`[${source.index}] ${source.name}${url}`)] })
@@ -326,10 +297,7 @@ export async function buildDocumentDocx(
 					basedOn: 'Normal',
 					next: 'Normal',
 					run: { size: 40, bold: true },
-					paragraph: {
-						spacing: { after: 240 },
-						border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'CCCCCC', space: 6 } }
-					}
+					paragraph: { spacing: { after: 240 } }
 				},
 				{
 					id: 'Heading1',
@@ -371,7 +339,6 @@ export async function buildDocumentDocx(
 				}
 			]
 		},
-		footnotes: writer.footnotes,
 		sections: [
 			{
 				children,
