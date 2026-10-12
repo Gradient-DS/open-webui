@@ -5,7 +5,7 @@
 		composerFromFeatures,
 		type ComposerPreferences
 	} from '$lib/utils/composerPreferences';
-	import { type ToolState } from '$lib/utils/toolState';
+	import { type ToolState, seedsLiveDefault } from '$lib/utils/toolState';
 	import { getHistorySide } from '$lib/utils/dataSeparation';
 	import { turnNotices, withoutRemoved } from '$lib/utils/turnNotices';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
@@ -1253,6 +1253,20 @@
 							documentWriterEnabled = true;
 							documentWriterRequired = true;
 						}
+					}
+
+					// [Gradient] Live tools start on Auto; consent waits for the user's own click.
+					if (
+						seedsLiveDefault(
+							model.info.meta,
+							'live_documents',
+							$config?.features?.enable_live_documents
+						)
+					) {
+						liveDocumentsState = 'auto';
+					}
+					if (seedsLiveDefault(model.info.meta, 'live_mail', $config?.features?.enable_live_mail)) {
+						liveMailState = 'auto';
 					}
 				}
 

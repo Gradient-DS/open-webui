@@ -1,15 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import {
-	togglesFromMeta,
-	applyToggles,
-	type AssistantToggles
-} from './assistantCapabilities';
+import { togglesFromMeta, applyToggles, type AssistantToggles } from './assistantCapabilities';
 
 const ALL_ON: AssistantToggles = {
 	web_search: true,
 	image_generation: true,
 	code_interpreter: true,
 	document_writer: true,
+	live_documents: true,
+	live_mail: true,
 	vision: true,
 	file_upload: true,
 	citations: true
@@ -19,6 +17,8 @@ const ALL_OFF: AssistantToggles = {
 	image_generation: false,
 	code_interpreter: false,
 	document_writer: false,
+	live_documents: false,
+	live_mail: false,
 	vision: false,
 	file_upload: false,
 	citations: false
@@ -39,6 +39,15 @@ describe('applyToggles', () => {
 		expect(meta.builtinTools.document_writer).toBeUndefined();
 	});
 
+	it('maps live_documents and live_mail to capabilities and default features, not builtin tools', () => {
+		const meta = applyToggles({}, { ...ALL_OFF, live_documents: true, live_mail: true });
+		expect(meta.capabilities.live_documents).toBe(true);
+		expect(meta.capabilities.live_mail).toBe(true);
+		expect(meta.defaultFeatureIds).toEqual(['live_documents', 'live_mail']);
+		expect(meta.builtinTools.live_documents).toBeUndefined();
+		expect(meta.builtinTools.live_mail).toBeUndefined();
+	});
+
 	it('maps file_upload to both file_upload and file_context capabilities', () => {
 		const meta = applyToggles({}, { ...ALL_OFF, file_upload: true });
 		expect(meta.capabilities.file_upload).toBe(true);
@@ -46,10 +55,7 @@ describe('applyToggles', () => {
 	});
 
 	it('preserves advanced meta fields it does not own', () => {
-		const meta = applyToggles(
-			{ toolIds: ['t1'], capabilities: { status_updates: true } },
-			ALL_OFF
-		);
+		const meta = applyToggles({ toolIds: ['t1'], capabilities: { status_updates: true } }, ALL_OFF);
 		expect(meta.toolIds).toEqual(['t1']);
 		expect(meta.capabilities.status_updates).toBe(true);
 	});

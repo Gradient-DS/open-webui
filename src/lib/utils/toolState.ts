@@ -54,6 +54,20 @@ export const LIVE_DOCUMENT_STATES: ToolState[] = ['off', 'auto'];
 export function liveDocumentState(value: unknown): ToolState {
 	return value === 'auto' || value === 'required' ? value : 'off';
 }
+
+/** Whether a model's default features start a live tool on `auto` while its tenant flag is on. */
+export function seedsLiveDefault(
+	meta: { capabilities?: object; defaultFeatureIds?: string[] } | undefined,
+	feature: 'live_documents' | 'live_mail',
+	enabled: boolean | undefined
+): boolean {
+	return (
+		!!enabled &&
+		!!(meta?.capabilities as Record<string, unknown> | undefined)?.[feature] &&
+		!!meta?.defaultFeatureIds?.includes(feature)
+	);
+}
+
 // [Gradient] Document writer shares web search's state contract, without its data restrictions.
 export const DOCUMENT_WRITER_STATES: ToolState[] = ['auto', 'required', 'off'];
 export const documentWriterState = webSearchState;

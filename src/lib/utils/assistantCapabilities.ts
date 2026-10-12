@@ -12,17 +12,21 @@ export interface AssistantToggles {
 	image_generation: boolean;
 	code_interpreter: boolean;
 	document_writer: boolean;
+	live_documents: boolean;
+	live_mail: boolean;
 	vision: boolean;
 	file_upload: boolean;
 	citations: boolean;
 }
 
 /** Toggles that are also Open WebUI "default features" (meta.defaultFeatureIds). */
-const FEATURE_TOGGLES = [
+export const FEATURE_TOGGLES = [
 	'web_search',
 	'image_generation',
 	'code_interpreter',
-	'document_writer'
+	'document_writer',
+	'live_documents',
+	'live_mail'
 ] as const;
 
 /** Toggles that are also built-in function-calling tools (meta.builtinTools). */
@@ -36,6 +40,8 @@ export function togglesFromMeta(meta: any): AssistantToggles {
 		image_generation: !!c.image_generation,
 		code_interpreter: !!c.code_interpreter,
 		document_writer: !!c.document_writer,
+		live_documents: !!c.live_documents,
+		live_mail: !!c.live_mail,
 		vision: !!c.vision,
 		file_upload: !!c.file_upload,
 		citations: !!c.citations
@@ -52,6 +58,8 @@ export function applyToggles(meta: any, toggles: AssistantToggles): any {
 	capabilities.image_generation = toggles.image_generation;
 	capabilities.code_interpreter = toggles.code_interpreter;
 	capabilities.document_writer = toggles.document_writer;
+	capabilities.live_documents = toggles.live_documents;
+	capabilities.live_mail = toggles.live_mail;
 	capabilities.vision = toggles.vision;
 	capabilities.file_upload = toggles.file_upload;
 	capabilities.file_context = toggles.file_upload;

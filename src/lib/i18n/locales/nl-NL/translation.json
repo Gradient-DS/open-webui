@@ -2109,6 +2109,8 @@
   "Model can access Open Terminal for command execution and file management": "Model heeft toegang tot Open Terminal voor uitvoeren van opdrachten en bestandsbeheer",
   "Model can execute code and perform calculations": "Model kan code uitvoeren en berekeningen doen",
   "Model can generate images based on text prompts": "Model kan afbeeldingen genereren op basis van tekst",
+  "Model can search the user's OneDrive files": "Model kan de OneDrive-bestanden van de gebruiker doorzoeken",
+  "Model can search the user's mail": "Model kan de e-mail van de gebruiker doorzoeken",
   "Model can search the web for information": "Model kan het web doorzoeken naar informatie",
   "Model can write and create downloadable documents": "Model kan downloadbare documenten schrijven en maken",
   "Model created successfully!": "Model succesvol gecreëerd",

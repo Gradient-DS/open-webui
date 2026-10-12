@@ -2109,6 +2109,8 @@
   "Model can access Open Terminal for command execution and file management": "",
   "Model can execute code and perform calculations": "",
   "Model can generate images based on text prompts": "",
+  "Model can search the user's OneDrive files": "",
+  "Model can search the user's mail": "",
   "Model can search the web for information": "",
   "Model can write and create downloadable documents": "",
   "Model created successfully!": "",

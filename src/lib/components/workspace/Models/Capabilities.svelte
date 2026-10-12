@@ -16,6 +16,8 @@
 		image_generation: 'enable_image_generation',
 		code_interpreter: 'enable_code_interpreter',
 		document_writer: 'enable_document_writer',
+		live_documents: 'enable_live_documents',
+		live_mail: 'enable_live_mail',
 		builtin_tools: 'feature_builtin_tools'
 	};
 
@@ -47,6 +49,14 @@
 		document_writer: {
 			label: $i18n.t('Document writer'),
 			description: $i18n.t('Model can write and create downloadable documents')
+		},
+		live_documents: {
+			label: $i18n.t('OneDrive search'),
+			description: $i18n.t("Model can search the user's OneDrive files")
+		},
+		live_mail: {
+			label: $i18n.t('Mail search'),
+			description: $i18n.t("Model can search the user's mail")
 		},
 		terminal: {
 			label: $i18n.t('Terminal'),
