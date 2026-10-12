@@ -110,11 +110,11 @@
 		return cleaned.length > 0 ? cleaned : 'document';
 	};
 
-	const getExportMarkdown = (superscript = false) => {
+	const getExportMarkdown = () => {
 		if (!current) return '';
 		return current.format === 'html'
 			? current.content
-			: exportMarkdown(current.content, current.sources ?? [], $i18n.t('Sources'), superscript);
+			: exportMarkdown(current.content, current.sources ?? [], $i18n.t('Sources'));
 	};
 
 	const downloadMd = () => {
@@ -140,7 +140,7 @@
 		// Close first: the print dialog blocks the page, and the menu must not outlive it.
 		downloadOpen = false;
 		try {
-			await printDocument(current.title, getExportMarkdown(true), current.format);
+			await printDocument(current.title, getExportMarkdown(), current.format);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));

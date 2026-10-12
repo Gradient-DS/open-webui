@@ -8,7 +8,7 @@ const PRINT_STYLE = `
 @page { size: A4; margin: 22mm 20mm 20mm; }
 body { font-family: Inter, Arial, sans-serif; font-size: 10.5pt; line-height: 1.55; color: #1a1a1a; overflow-wrap: break-word; font-feature-settings: 'tnum'; }
 h1, h2, h3, h4, h5, h6 { line-height: 1.25; font-weight: 600; break-after: avoid; margin: 1.4em 0 0.5em; }
-body > h1:first-child { font-size: 22pt; font-weight: 700; margin: 0 0 8mm; padding-bottom: 4mm; border-bottom: 1px solid #d4d4d4; }
+body > h1:first-child { font-size: 22pt; font-weight: 700; margin: 0 0 6mm; }
 h1 { font-size: 17pt; } h2 { font-size: 14pt; } h3 { font-size: 12pt; } h4, h5, h6 { font-size: 10.5pt; }
 p { margin: 0 0 0.7em; } ul, ol { padding-left: 6mm; } li { margin: 0.15em 0; }
 p, li { orphans: 3; widows: 3; }
@@ -21,7 +21,6 @@ pre { background: #f6f8fa; padding: 4mm; white-space: pre-wrap; border-radius: 2
 pre, code { font-family: 'Courier New', monospace; font-size: 9pt; }
 blockquote { border-left: 3px solid #d4d4d4; padding-left: 4mm; color: #555; margin: 3mm 0; }
 hr { border: 0; border-top: 1px solid #d4d4d4; margin: 6mm 0; }
-sup { font-size: 0.7em; color: #555; }
 `;
 
 // A markdown document opens with its title as a heading, so the first page always carries the title block.

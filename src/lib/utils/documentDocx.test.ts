@@ -17,14 +17,13 @@ async function unzip(blob: Blob) {
 	const read = (name: string) => zip.file(name)?.async('string') ?? Promise.resolve('');
 	return {
 		body: await read('word/document.xml'),
-		notes: await read('word/footnotes.xml'),
 		footer: await read('word/footer1.xml')
 	};
 }
 
 describe('browser Word export', () => {
-	it('turns citations into footnotes and keeps the document structure', async () => {
-		const { body, notes, footer } = await unzip(
+	it('keeps [n] markers, lists each source once and keeps the document structure', async () => {
+		const { body, footer } = await unzip(
 			await buildDocumentDocx(
 				'Memo',
 				'Intro & claim [2] and [1, 2].\n\n## Kop\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n1. een\n2. twee',
@@ -34,10 +33,11 @@ describe('browser Word export', () => {
 		);
 		expect(body).toContain('Memo');
 		expect(body).toContain('Intro &amp; claim');
-		expect(body).not.toContain('[2]');
-		expect(body.match(/w:footnoteReference /g)).toHaveLength(3);
-		expect(notes).toContain('Verslag.pdf');
-		expect(notes).toContain('Wet — https://wetten.overheid.nl/x');
+		// Renumbered by first use: source b is [1], source a is [2].
+		expect(body).toContain('claim [1] and [2, 1].');
+		expect(body).not.toContain('w:footnoteReference');
+		expect(body.match(/\[1\] Wet — https:\/\/wetten.overheid.nl\/x/g)).toHaveLength(1);
+		expect(body.match(/\[2\] Verslag.pdf/g)).toHaveLength(1);
 		expect(body).toContain('<w:tbl>');
 		expect(body).toContain('w:numPr');
 		expect(footer).toContain('PAGE');
