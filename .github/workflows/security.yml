@@ -127,11 +127,13 @@ jobs:
     permissions:
       contents: read
       packages: read
-      issues: write
     with:
       image-name: open-webui-${{ matrix.branch }}
       image-ref: ${{ needs.resolve-published.outputs[matrix.branch] }}
-      notify-on-schedule-failure: true
+      # Issues are disabled on this public fork, so the notifier could only fail
+      # (and would publish CVE lists if they were enabled). The red
+      # security-gate on the scheduled run is the signal.
+      notify-on-schedule-failure: false
 
   # Job id (and thus the status-check name shown to branch protection) must
   # stay exactly "lockfile-age" — it is configured as a required check on
