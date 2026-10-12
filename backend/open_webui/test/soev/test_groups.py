@@ -125,7 +125,7 @@ def directory_http(monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def group_store(identity_config, directory_http, monkeypatch):
+async def group_store(identity_config, directory_http, monkeypatch, platform_capabilities):
     """Exercise the real upstream group methods against isolated SQLite tables."""
     models = importlib.import_module('open_webui.models.groups')
     users = importlib.import_module('open_webui.models.users')
@@ -318,8 +318,8 @@ async def test_repeated_pushes_use_the_same_operation_key(group_store):
 
 
 @pytest.mark.asyncio
-async def test_an_empty_api_url_skips_pushes_and_warns_once(group_store, identity_config, monkeypatch, caplog):
-    """An unconfigured deployment keeps local writes and warns once across table instances."""
+async def test_an_empty_api_url_skips_pushes(group_store, identity_config, monkeypatch, caplog):
+    """An unconfigured deployment keeps local writes without platform calls."""
     store = group_store
     identity, _ = identity_config
     monkeypatch.setattr(identity.config, 'SOEV_API_URL', '')
@@ -330,8 +330,16 @@ async def test_an_empty_api_url_skips_pushes_and_warns_once(group_store, identit
     assert store.http.requests == []
     assert await store.raw.get_group_user_ids_by_id(group.id, db=store.db) == ['bob']
     records = [record for record in caplog.records if record.name == 'open_webui.soev.groups']
-    assert len(records) == 1
-    assert 'SOEV_API_URL' in records[0].getMessage()
+    assert records == []
+
+
+@pytest.mark.asyncio
+async def test_local_group_write_succeeds_without_push_capability(group_store, platform_capabilities):
+    platform_capabilities.discard('groups_push')
+    group = await seed(group_store)
+    await group_store.table.set_group_user_ids_by_id(group.id, ['carol'], db=group_store.db)
+    assert await group_store.raw.get_group_user_ids_by_id(group.id, db=group_store.db) == ['carol']
+    assert group_store.http.requests == []
 
 
 def test_every_mutating_group_method_is_overridden(group_store):

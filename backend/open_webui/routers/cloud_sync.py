@@ -3,11 +3,10 @@
 import json
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
-from open_webui import config
 from open_webui.config import CORS_ALLOW_ORIGIN
-from open_webui.soev import identity
+from open_webui.soev import capabilities, identity
 from open_webui.soev.availability import SoevRoute, require_soev
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import CloudSync
@@ -18,7 +17,21 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 router = APIRouter(route_class=SoevRoute)
 
 
-async def cloud_sync(user=Depends(get_verified_user)):
+async def cloud_sync(request: Request, user=Depends(get_verified_user)):
+    from open_webui.soev.availability import ensure_configured
+
+    ensure_configured()
+    if 'knowledge_id' in request.path_params or request.url.path.endswith('/usage'):
+        await capabilities.require(capabilities.CLOUD_SYNC)
+    elif 'family' in request.path_params:
+        family = request.path_params['family']
+        await capabilities.require(capabilities.LIVE_MAIL if family == 'mail' else capabilities.LIVE_DOCUMENTS)
+    elif not await capabilities.refresh() & {
+        capabilities.CLOUD_SYNC,
+        capabilities.LIVE_DOCUMENTS,
+        capabilities.LIVE_MAIL,
+    }:
+        await capabilities.require(capabilities.CLOUD_SYNC)
     try:
         client = identity.build_client()
         with request_cache():
@@ -39,7 +52,7 @@ class SyncPolicy(BaseModel):
 
 @router.get('/policy', response_model=SyncPolicy)
 async def get_policy(user: object = Depends(get_verified_user)) -> SyncPolicy:
-    if not config.SOEV_API_URL:
+    if not await capabilities.has(capabilities.CLOUD_SYNC):
         return SyncPolicy(
             providers_enabled=[],
             scope_shapes_allowed={},
@@ -110,6 +123,15 @@ async def connect_done(
     result: Literal['pending', 'error', 'invalid'],
     user=Depends(get_verified_user),
 ):
+    from open_webui.soev.availability import ensure_configured
+
+    ensure_configured()
+    if not await capabilities.refresh() & {
+        capabilities.CLOUD_SYNC,
+        capabilities.LIVE_DOCUMENTS,
+        capabilities.LIVE_MAIL,
+    }:
+        await capabilities.require(capabilities.CLOUD_SYNC)
     data = json.dumps({'type': 'soev_connect', 'connection': connection, 'result': result}).replace('<', '\\u003c')
     # The opener may live on another configured origin than this page (a dev
     # stack serves the frontend and the API on different ports); a message to

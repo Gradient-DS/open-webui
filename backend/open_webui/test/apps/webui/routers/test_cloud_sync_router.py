@@ -13,7 +13,7 @@ from open_webui.soev.client import SoevClient, close_client
 
 
 @pytest.fixture
-def api(monkeypatch):
+def api(monkeypatch, platform_capabilities):
     """Exercise the real client against queued HTTP responses without network access."""
     monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     requests, responses = [], []
@@ -547,7 +547,7 @@ def test_skipped_items_require_readable_knowledge(api):
 
 
 def test_policy_uses_runtime_credential_without_linking_a_subject(api, monkeypatch) -> None:
-    monkeypatch.setattr(cloud_sync.config, 'SOEV_API_URL', 'https://soev.invalid')
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     policy = {
         'providers_enabled': ['onedrive', 'confluence'],
         'scope_shapes_allowed': {'onedrive': ['folder', 'file']},
@@ -568,7 +568,7 @@ def test_policy_uses_runtime_credential_without_linking_a_subject(api, monkeypat
 
 
 def test_policy_is_empty_without_soev_api(api, monkeypatch) -> None:
-    monkeypatch.setattr(cloud_sync.config, 'SOEV_API_URL', '')
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', '')
     result = api.browser.get('/api/v1/cloud-sync/policy')
     assert result.status_code == 200
     assert result.json() == {
@@ -579,11 +579,54 @@ def test_policy_is_empty_without_soev_api(api, monkeypatch) -> None:
     }
     cloud_sync.identity.build_client.assert_not_called()
     api.link.assert_not_awaited()
+
+
+def test_policy_is_empty_without_cloud_sync_capability(api, platform_capabilities):
+    platform_capabilities.discard('cloud_sync')
+    result = api.browser.get('/api/v1/cloud-sync/policy')
+    assert result.status_code == 200
+    assert result.json()['providers_enabled'] == []
+    assert not api.requests
+
+
+@pytest.mark.parametrize('feature', ['cloud_sync', 'live_documents', 'live_mail'])
+def test_connections_remain_available_for_each_connection_family(api, platform_capabilities, feature):
+    platform_capabilities.intersection_update({feature})
+    api.responses.append(response({'data': [], 'next_cursor': None}))
+    assert api.browser.get('/api/v1/cloud-sync/connections').status_code == 200
+    assert api.requests[0].url.path == '/v1/connections'
+
+
+@pytest.mark.parametrize(
+    'path,capability',
+    [
+        ('knowledge/kb/sync', 'cloud_sync'),
+        ('connections/c/live/live_documents', 'live_documents'),
+        ('connections/c/live/mail', 'live_mail'),
+        ('connections/c/usage', 'cloud_sync'),
+    ],
+)
+def test_missing_capability_refuses_before_platform_calls(api, platform_capabilities, path, capability):
+    platform_capabilities.discard(capability)
+    result = api.browser.get(f'/api/v1/cloud-sync/{path}')
+    assert result.status_code == 503
+    assert result.json()['detail']['code'] == 'feature_unavailable'
+    assert not api.requests
+    api.link.assert_not_awaited()
+
+
+def test_no_connection_capabilities_refuses_connection_and_popup_routes(api, platform_capabilities):
+    platform_capabilities.clear()
+    for path in ['connections', 'connect/done?connection=c&result=pending']:
+        result = api.browser.get(f'/api/v1/cloud-sync/{path}')
+        assert result.status_code == 503
+        assert result.json()['detail']['code'] == 'feature_unavailable'
+    assert not api.requests
     assert api.requests == []
 
 
 def test_policy_preserves_upstream_forbidden_code(api, monkeypatch) -> None:
-    monkeypatch.setattr(cloud_sync.config, 'SOEV_API_URL', 'https://soev.invalid')
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     api.responses.append(
         httpx.Response(
             403,

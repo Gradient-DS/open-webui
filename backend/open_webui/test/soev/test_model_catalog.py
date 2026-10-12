@@ -50,7 +50,7 @@ CONNECTION_MODEL = {'id': 'zai-org/GLM-5.3', 'name': 'zai-org/GLM-5.3', 'owned_b
 
 
 @pytest.fixture
-def v2(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> FakeSoevApi:
+def v2(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch, platform_capabilities) -> FakeSoevApi:
     monkeypatch.setattr(env, 'AGENT_API_ENABLED', True)
     monkeypatch.setitem(model_catalog.CATALOG_CACHE, 'expires_at', 0.0)
     chat_http.models = [GLM, GEMMA]
@@ -139,6 +139,17 @@ async def test_unknown_vision_counts_as_off(v2: FakeSoevApi) -> None:
     v2.models = [{**GEMMA, 'capabilities': {**GEMMA['capabilities'], 'vision': 'unknown'}}]
     [model] = await model_catalog.base_models()
     assert model['info']['meta']['capabilities'] == {'vision': False}
+
+
+@pytest.mark.asyncio
+async def test_vision_needs_platform_image_admission(v2, platform_capabilities):
+    platform_capabilities.discard('images')
+    models = await model_catalog.base_models()
+    assert all(model['info']['meta']['capabilities']['vision'] is False for model in models)
+    assert models[1]['info']['meta']['soev']['capabilities']['vision'] == 'supported'
+    platform_capabilities.add('images')
+    models = await model_catalog.base_models()
+    assert models[1]['info']['meta']['capabilities']['vision'] is True
 
 
 @pytest.mark.asyncio

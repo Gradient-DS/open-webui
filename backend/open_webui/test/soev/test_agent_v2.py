@@ -113,7 +113,7 @@ class Chat:
 
 
 @pytest.fixture
-def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch) -> Chat:
+def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch, platform_capabilities) -> Chat:
     result = Chat(chat_http)
 
     async def get(chat_id: str, message_id: str) -> dict | None:

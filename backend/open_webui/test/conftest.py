@@ -35,6 +35,27 @@ if not os.environ.get('ATTACK_BASE_URL'):
 
 
 @pytest.fixture
+def platform_capabilities(monkeypatch):
+    from open_webui import config
+    from open_webui.soev import capabilities
+
+    enabled = {
+        capabilities.LIVE_DOCUMENTS,
+        capabilities.LIVE_MAIL,
+        capabilities.CLOUD_SYNC,
+        capabilities.MEETINGS,
+        capabilities.GROUPS_PUSH,
+        capabilities.IMAGES,
+    }
+
+    async def refresh():
+        return frozenset(enabled) if config.SOEV_API_URL else frozenset()
+
+    monkeypatch.setattr(capabilities, 'refresh', refresh)
+    return enabled
+
+
+@pytest.fixture
 def postgres_database():
     """A database per test keeps advisory locks and destructive DDL independent."""
     url = make_url(os.environ['BACKEND_TEST_DATABASE_URL'])

@@ -120,7 +120,7 @@ from open_webui.config import (
 from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
-from open_webui.soev import model_catalog
+from open_webui.soev import capabilities, model_catalog
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
@@ -575,6 +575,7 @@ async def lifespan(app: FastAPI):
     # The poller stays idle when SOEV_API_URL is unset.
     from open_webui.soev.jobs import start_job_poller
 
+    await capabilities.refresh()
     start_job_poller(app)
 
     # [Gradient] Start deletion cleanup worker
@@ -2810,7 +2811,7 @@ async def get_app_config(request: Request):
                     'feature_voice_call': FEATURE_VOICE and FEATURE_VOICE_CALL,
                     'feature_read_aloud': FEATURE_VOICE and FEATURE_READ_ALOUD,
                     'feature_changelog': FEATURE_CHANGELOG,
-                    'feature_meetings': FEATURE_MEETINGS,
+                    'feature_meetings': FEATURE_MEETINGS and await capabilities.has(capabilities.MEETINGS),
                     'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
                     'feature_models': FEATURE_MODELS,
                     'feature_model_meters': FEATURE_MODEL_METERS,
@@ -2838,19 +2839,25 @@ async def get_app_config(request: Request):
                     'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,  # [Gradient]
                     'enable_docx_export': ENABLE_DOCX_EXPORT,  # [Gradient]
                     'enable_google_drive_integration': config.get('google_drive.enable'),
-                    'enable_onedrive_integration': config.get('onedrive.enable'),
+                    'enable_onedrive_integration': config.get('onedrive.enable')
+                    and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                     'enable_memories': config.get('memories.enable'),
                     **(
                         {
                             'enable_onedrive_personal': config.get('onedrive.enable_personal'),
-                            'enable_onedrive_business': config.get('onedrive.enable_business'),
+                            'enable_onedrive_business': config.get('onedrive.enable_business')
+                            and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                         }
                         if config.get('onedrive.enable')
                         else {}
                     ),
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
-                    'enable_live_mail': AGENT_API_ENABLED and config.get('live_mail.enable'),
-                    'enable_live_documents': AGENT_API_ENABLED and config.get('live_documents.enable'),
+                    'enable_live_mail': AGENT_API_ENABLED
+                    and config.get('live_mail.enable')
+                    and await capabilities.has(capabilities.LIVE_MAIL),
+                    'enable_live_documents': AGENT_API_ENABLED
+                    and config.get('live_documents.enable')
+                    and await capabilities.has(capabilities.LIVE_DOCUMENTS),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
                     'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
                     'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]

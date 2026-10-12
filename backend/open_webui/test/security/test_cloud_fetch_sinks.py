@@ -24,7 +24,7 @@ HOSTILE = (
 
 
 @pytest.fixture
-def boundary(monkeypatch):
+def boundary(monkeypatch, platform_capabilities):
     monkeypatch.setattr(config, 'SOEV_API_URL', 'https://platform.invalid')
     sent, replies = [], []
 

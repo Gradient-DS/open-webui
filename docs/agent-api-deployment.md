@@ -28,6 +28,30 @@ is sent with every turn. There is no per-chat agent: with the agent API on,
 every chat goes to the agent service. A `chat.meta.agent_id` left by the
 retired v1 picker is ignored.
 
+## Optional platform capabilities
+
+The fork reads `GET /v1/capabilities` with its existing API credential at startup
+and on demand. The response is `{ "contract": "0.3.0", "features": ["..."] }`.
+Successful and failed reads are cached per process for 60 seconds; an unavailable
+or malformed endpoint disables optional features and logs once per outage.
+
+| Feature name | Controls |
+| --- | --- |
+| `live_documents` | OneDrive live search and explicit picker attachments |
+| `live_mail` | Outlook mail search and reads |
+| `cloud_sync` | Bulk sync policy, schedules, usage and sync actions |
+| `meetings` | Meeting routes, UI availability and meeting attachments |
+| `groups_push` | Publishing local group memberships to the platform directory |
+| `images` | Chat image upload and the catalog's UI vision availability |
+
+The existing deployment and user settings still apply. Capabilities narrow their
+availability without changing saved preferences. Connection and consent routes
+are shared by `cloud_sync`, `live_documents` and `live_mail`; any of these enables
+those routes, while each live family and bulk sync requires its own capability.
+Model discovery, identity, ordinary ingestion, durable job polling and knowledge
+access still depend on the configured backend URL. An open soev-server advertising
+`features: []` can serve core chat and models without optional platform calls.
+
 ## Models, default and tasks under the v2 runtime
 
 v2 mode is on when `AGENT_API_ENABLED=true` and `SOEV_API_URL` is set. soev-api then decides which models exist, which one is the default, and which model runs tasks:
@@ -36,7 +60,7 @@ v2 mode is on when `AGENT_API_ENABLED=true` and `SOEV_API_URL` is set. soev-api 
 - **Default.** `/api/config` serves the catalog entry marked `default` as `default_models`. `ui.default_models` (`DEFAULT_MODELS`) is ignored. A model the user saved or picked still wins.
 - **Tasks.** Titles, tags, follow-ups, emoji, queries, autocomplete, image prompts, MoA, context compaction, memory review and tool selection all go to `POST /v1/completions/task` as the acting user. soev-api runs them on the client's `task` model, so `TASK_MODEL`, `TASK_MODEL_EXTERNAL` and a direct LiteLLM connection are not needed. The prompt templates still come from Open WebUI.
 
-Each catalog model carries its facts (vendor, origin, hosting, tri-state capabilities, lifecycle) under `info.meta.soev`. Vision counts as on only when the catalog says `supported`.
+Each catalog model carries its facts (vendor, origin, hosting, tri-state capabilities, lifecycle) under `info.meta.soev`. Vision counts as on only when the catalog says `supported` and the backend advertises `images`.
 
 ## Turn transport and verification
 
