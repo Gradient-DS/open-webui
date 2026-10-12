@@ -1,4 +1,7 @@
 name: Security Scanning
+# A scheduled run lists under the default branch (dev), but it scans the
+# published dev, test and main images; say so instead of reading as dev's run.
+run-name: ${{ github.event_name == 'schedule' && 'Daily scan of the published dev, test and main images' || '' }}
 
 on:
   push:
@@ -68,7 +71,7 @@ jobs:
 
   # Pull requests only. A push to main/dev/test is scanned by
   # docker-build-soev.yaml's `scan-image`, on the digest it published; the
-  # daily run scans the published digests (`image-published`).
+  # daily run scans the published digests (`published-<branch>`).
   image:
     if: github.event_name == 'pull_request'
     uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
@@ -116,23 +119,46 @@ jobs:
             echo "$branch -> $digest"
           done
 
-  image-published:
+  # One job per branch, not a matrix: the gate can then say which image failed.
+  # Issues are disabled on this public fork, so the notifier could only fail
+  # (and would publish CVE lists if they were enabled); the gate is the signal.
+  published-dev:
+    name: published dev
     needs: resolve-published
-    strategy:
-      fail-fast: false
-      matrix:
-        branch: [dev, test, main]
     uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
       contents: read
       packages: read
     with:
-      image-name: open-webui-${{ matrix.branch }}
-      image-ref: ${{ needs.resolve-published.outputs[matrix.branch] }}
-      # Issues are disabled on this public fork, so the notifier could only fail
-      # (and would publish CVE lists if they were enabled). The red
-      # security-gate on the scheduled run is the signal.
+      image-name: open-webui-dev
+      image-ref: ${{ needs.resolve-published.outputs.dev }}
+      notify-on-schedule-failure: false
+
+  published-test:
+    name: published test
+    needs: resolve-published
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
+    with:
+      image-name: open-webui-test
+      image-ref: ${{ needs.resolve-published.outputs.test }}
+      notify-on-schedule-failure: false
+
+  published-main:
+    name: published main
+    needs: resolve-published
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
+    with:
+      image-name: open-webui-main
+      image-ref: ${{ needs.resolve-published.outputs.main }}
       notify-on-schedule-failure: false
 
   # Job id (and thus the status-check name shown to branch protection) must
@@ -159,7 +185,7 @@ jobs:
   # `runtime-gate` or any other workflow's generic `gate`.
   gate:
     name: security-gate
-    needs: [reuse, source, image, image-published]
+    needs: [reuse, source, image, published-dev, published-test, published-main]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -171,16 +197,26 @@ jobs:
           REUSED: ${{ needs.reuse.outputs.hit }}
           SOURCE: ${{ needs.source.result }}
           IMAGE: ${{ needs.image.result }}
-          PUBLISHED: ${{ needs.image-published.result }}
+          PUBLISHED_DEV: ${{ needs.published-dev.result }}
+          PUBLISHED_TEST: ${{ needs.published-test.result }}
+          PUBLISHED_MAIN: ${{ needs.published-main.result }}
         run: |
-          echo "event=$EVENT  reuse=$REUSE  reused=$REUSED  source=$SOURCE  image=$IMAGE  published=$PUBLISHED"
+          echo "event=$EVENT  reuse=$REUSE  reused=$REUSED  source=$SOURCE  image=$IMAGE  published: dev=$PUBLISHED_DEV test=$PUBLISHED_TEST main=$PUBLISHED_MAIN"
           # A failed tree lookup is red, never a silent pass or skip.
           if [ "$EVENT" = "push" ] && [ "$REUSE" != "success" ]; then echo "tested-tree lookup did not succeed"; exit 1; fi
           # A skipped source scan passes only on an exact-tree reuse.
           [ "$SOURCE" = "success" ] || { [ "$EVENT" = "push" ] && [ "$REUSE" = "success" ] && [ "$REUSED" = "true" ] && [ "$SOURCE" = "skipped" ]; } || exit 1
           case "$EVENT" in
             pull_request) [ "$IMAGE" = "success" ] ;;
-            schedule) [ "$PUBLISHED" = "success" ] ;;
+            schedule)
+              failed=""
+              { echo "| Published image | Scan |"; echo "|---|---|"; } >> "$GITHUB_STEP_SUMMARY"
+              for pair in "dev=$PUBLISHED_DEV" "test=$PUBLISHED_TEST" "main=$PUBLISHED_MAIN"; do
+                branch="${pair%%=*}" result="${pair#*=}"
+                echo "| \`:$branch\` | $result |" >> "$GITHUB_STEP_SUMMARY"
+                [ "$result" = "success" ] || failed="$failed $branch"
+              done
+              [ -z "$failed" ] || { echo "::error::Published image scan failed for:$failed"; exit 1; } ;;
             # The pushed digest is scanned by docker-build-soev.yaml.
             push) true ;;
             *) echo "unexpected event $EVENT"; exit 1 ;;
