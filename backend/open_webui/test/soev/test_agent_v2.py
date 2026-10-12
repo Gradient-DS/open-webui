@@ -2906,6 +2906,26 @@ async def test_mail_sources_link_to_outlook_without_creating_files(chat: Chat):
 
 
 @pytest.mark.asyncio
+async def test_a_cited_search_result_is_a_snippet_source(chat: Chat):
+    url = 'https://quantware.com/product/processors/d-line'
+    result = {
+        'id': url,
+        'ref': url,
+        'type': 'search-result',
+        'url': url,
+        'title': 'D-line QPUs | Build bigger, scale faster',
+        'text': 'Contralto-D21 expands to 21 qubits ... Tenor-D64 introduces a 64-qubit architecture',
+    }
+    chat.api.chat.turns = [[found(result), answered('64 qubits', cited(9, url, url))]]
+    assert content(await chat.turn('How many qubits?', 'a1')) == '64 qubits [1]'
+    source = next(event['data'] for event in chat.socket if event['type'] == 'source')
+    assert source['source'] == {'id': url, 'name': result['title'], 'url': url}
+    assert source['document'] == [result['text']]
+    assert source['metadata'][0]['granularity'] == 'snippet'
+    assert source['metadata'][0]['name'] == result['title']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('success', [True, False])
 async def test_read_mail_status_reports_refusals(success):
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')

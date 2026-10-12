@@ -955,9 +955,13 @@ def _source_metadata(properties: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
+_GRANULARITY = {'document-text': 'document', 'search-result': 'snippet'}
+
+
 async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> dict[str, Any]:
     """[Claude] A text the agent read (a chunk, an opened document's text) with what its document says about it,
-    in the shape `Citations.add` takes. A whole document's text is a document-granularity source."""
+    in the shape `Citations.add` takes. A whole document's text is a document-granularity source, a web search
+    result's snippet a snippet-granularity one: the page itself was not read."""
     whole = whole or {}
     properties = {
         'title': whole.get('title') or whole.get('filename'),
@@ -965,7 +969,7 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
         'source_url': whole.get('source_url'),
         'page_numbers': element.get('pages'),
         'bboxes': element.get('bboxes'),
-        'granularity': 'document' if element.get('type') == 'document-text' else None,
+        'granularity': _GRANULARITY.get(element.get('type')),
     }
     provider = None
     if element.get('type') in {'mail-text', 'mail-reference'}:

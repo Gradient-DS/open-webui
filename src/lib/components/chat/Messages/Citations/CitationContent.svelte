@@ -8,6 +8,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
+	import SearchSnippetNote from './SearchSnippetNote.svelte';
 	import { settings, config } from '$lib/stores';
 	import { injectCsp } from '$lib/utils/csp';
 	import {
@@ -24,6 +25,7 @@
 
 {#each mergedDocuments as document, documentIdx}
 	<div class="flex flex-col w-full gap-2">
+		<SearchSnippetNote {document} />
 		{#if document.metadata?.parameters}
 			<div>
 				<div class="text-sm font-medium dark:text-gray-300 mb-1">
