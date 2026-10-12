@@ -62,7 +62,7 @@ Inputs (environment):
 
 `--apply` runs these steps in order; each is safe to rerun after a partial failure:
 
-1. **Snapshot.** The config rows the next steps change are kept as stored text, once per migration id. The migration's state (snapshot, model id records, step markers) lives outside Alembic, in schema `owui_v2_migration` on PostgreSQL (`owui_v2_migration_*` tables on SQLite), so the database stays at the v1 Alembic head.
+1. **Snapshot.** The config rows the next steps change are kept as stored text, once per migration id. The migration's state (snapshot, model id records, step markers) lives outside Alembic, in schema `owui_v2_migration` on PostgreSQL (`owui_v2_migration_*` tables on SQLite).
 2. **Config switch** (once per id). The OpenAI and Ollama connections, `ui.default_models` and the task models are retired; the `SOEV_V2_CONFIG` values are written.
 3. **Model ids** (once per id). LiteLLM names become catalog ids in message model ids, chat JSON, assistant base models, base-model override rows and their grants, user default and pinned models, automations, `ui.default_pinned_models` and `ui.model_order_list`. Every change is recorded with its path. Unmapped ids are listed and left as they are.
 4. **Directory and KB copy.** Identity links, groups, collections with grants, folders and cloud schedules.
@@ -76,9 +76,6 @@ Inputs (environment):
 
 `--restore` puts the snapshotted config rows back byte for byte (and removes keys that had no row), and puts back every recorded model id that still holds the value written; references changed since are listed and left. Messages added after the cutover stay. soev-api data and the `owui_v2_migration` state are not touched; the state stays for audit until the cleanup PR drops it. A later `--apply` with the same id switches again from the kept snapshot but does not sign users out again.
 
-Rollback procedure:
-
-1. Set `soevApi.migrate.mode: restore`. The new Job restores the config rows and model ids.
-2. Then revert the image and values to v1. The database is still at the v1 Alembic head, so the v1 image's schema upgrade runs as before.
+Rollback: redeploy the previous full image set and values, and restore the database backup taken before the cutover. v2 migrates the schema past the v1 Alembic head (it drops `agent_config`), so a v1 image does not start on a v2 database.
 
 Not migrated: Confluence KBs (Confluence is out of scope), web-search result collections (transient), Weaviate vectors (re-embedded from the originals), and model ids in feedback records. Proven Entra links are never backfilled; they form at login.

@@ -231,7 +231,7 @@ async def test_restore_without_a_snapshot_fails_loudly(env):
         await env.module.restore('never-applied')
 
 
-V1_HEAD = 'e24b7c9d1f63'
+ALEMBIC_VERSION = 'ee54ed095346'
 
 
 @pytest.mark.asyncio
@@ -251,7 +251,7 @@ async def test_restore_is_byte_for_byte_on_postgres_and_state_stays_outside_alem
             await reset(connection)
             await connection.run_sync(lambda sync: config.metadata.create_all(sync, tables=[config]))
             await connection.execute(sa.text('CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)'))
-            await connection.execute(sa.text(f"INSERT INTO alembic_version VALUES ('{V1_HEAD}')"))
+            await connection.execute(sa.text(f"INSERT INTO alembic_version VALUES ('{ALEMBIC_VERSION}')"))
             for key, value in V1_CONFIG.items():
                 await connection.execute(
                     sa.text('INSERT INTO config (key, value, updated_at) VALUES (:key, CAST(:value AS JSON), 1000)'),
@@ -276,36 +276,24 @@ async def test_restore_is_byte_for_byte_on_postgres_and_state_stays_outside_alem
         assert [tuple(row) for row in after] == [tuple(row) for row in before]
         assert public == ['alembic_version', 'config']
         assert state == ['config_backup', 'migration_marker', 'model_id_backup']
-        assert [tuple(row) for row in version] == [(V1_HEAD,)]
+        assert [tuple(row) for row in version] == [(ALEMBIC_VERSION,)]
     finally:
         async with engine.begin() as connection:
             await reset(connection)
         await engine.dispose()
 
 
-def test_the_alembic_head_is_still_the_v1_head():
-    """The migration adds no revision, so a v1 image can still run its schema upgrade."""
-    from pathlib import Path
-
-    from alembic.config import Config as AlembicConfig
-    from alembic.script import ScriptDirectory
-
-    config = AlembicConfig()
-    config.set_main_option('script_location', str(Path(__file__).resolve().parents[2] / 'migrations'))
-    assert ScriptDirectory.from_config(config).get_heads() == [V1_HEAD]
-
-
 @pytest.mark.asyncio
 async def test_apply_leaves_the_alembic_version_and_adds_only_prefixed_tables(env):
     async with env.engine.begin() as connection:
         await connection.execute(sa.text('CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)'))
-        await connection.execute(sa.text(f"INSERT INTO alembic_version VALUES ('{V1_HEAD}')"))
+        await connection.execute(sa.text(f"INSERT INTO alembic_version VALUES ('{ALEMBIC_VERSION}')"))
     names = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
     before = {name for (name,) in await rows(env, names)}
     await env.module.apply(options(env))
     added = {name for (name,) in await rows(env, names)} - before
     assert added == {f'owui_v2_migration_{t}' for t in ('config_backup', 'migration_marker', 'model_id_backup')}
-    assert await rows(env, 'SELECT version_num FROM alembic_version') == [(V1_HEAD,)]
+    assert await rows(env, 'SELECT version_num FROM alembic_version') == [(ALEMBIC_VERSION,)]
 
 
 async def config_value(env, key):

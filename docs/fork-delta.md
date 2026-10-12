@@ -56,10 +56,10 @@ tool-loop decision isolated from upstream code.
 `backend/open_webui/utils/agent.py:call_agent_api` sends the admin-selected agent
 (`agent_api.selected_agent`) and the picked model, and always calls
 `utils/agent_v2.py`, which owns server threads and streamed events. The v1 agent
-picker is removed. Its data stays and is ignored: `chat.meta.agent_id` values,
-and the `agent_config` table with its `access_grant` rows, which an Alembic drop
-would take off the v1 head the v2 rollback needs; drop them in the
-post-rollback cleanup.
+picker is removed, and migration `ee54ed095346` drops the `agent_config` table
+with its `access_grant` rows. Stale `chat.meta.agent_id` values stay and are
+ignored. A rollback to v1 redeploys the previous image set and restores the
+database backup.
 
 D-Runtime keeps upstream's sub-agents, tool approval, ask-user, timers, and
 automations out of agent-routed turns. The agent still owns tool execution and

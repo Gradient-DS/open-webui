@@ -1,7 +1,7 @@
 """Step markers and the config snapshot that --restore puts back byte for byte.
 
 The state lives outside Alembic, in schema owui_v2_migration on PostgreSQL (prefixed
-tables on SQLite), so the database never carries a revision the v1 image does not know.
+tables on SQLite).
 """
 
 import time
