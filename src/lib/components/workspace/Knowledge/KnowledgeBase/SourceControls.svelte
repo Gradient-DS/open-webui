@@ -19,7 +19,7 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import { runIsLive, type SchedulePair } from '../utils/cloudSync';
-	import { removalTargets } from './sources';
+	import { removalTargets, sourceMenu } from './sources';
 	import {
 		runProgress,
 		sourceState,
@@ -104,6 +104,13 @@
 	$: targets = [pair.content, pair.acl].filter((item): item is Schedule => !!item);
 	// A queued run shows as syncing but has no run row to cancel yet.
 	$: liveTargets = targets.filter((item) => runIsLive(item.last_run));
+	$: menu = sourceMenu({
+		itemPath: view.itemPath,
+		writeAccess,
+		isAdmin,
+		live: liveTargets.length > 0,
+		lifecycle: schedule.lifecycle
+	});
 	$: expiry = targets.flatMap((item) =>
 		typeof item.provider_secret_days_to_expiry === 'number'
 			? [item.provider_secret_days_to_expiry]
@@ -227,7 +234,7 @@
 			><Badge type={badge.type} content={$i18n.t(badge.label)} /></button
 		>
 	</Tooltip>
-	{#if view.itemPath || isAdmin || (writeAccess && liveTargets.length > 0)}
+	{#if menu.length > 0}
 		<Dropdown bind:show={showMenu} align="end">
 			<button
 				type="button"
@@ -236,24 +243,24 @@
 			>
 			<div slot="content">
 				<DropdownMenu>
-					{#if view.itemPath}<button on:click={copyPath}>{$i18n.t('Copy Path')}</button>{/if}
-					{#if writeAccess && liveTargets.length > 0}<button
+					{#if menu.includes('copy_path')}<button on:click={copyPath}>{$i18n.t('Copy Path')}</button
+						>{/if}
+					{#if menu.includes('cancel')}<button
 							disabled={busy}
 							on:click={() => action(liveTargets, 'cancel')}>{$i18n.t('Cancel')}</button
 						>{/if}
-					{#if isAdmin}
-						{#if schedule.lifecycle === 'enabled'}<button
-								disabled={busy}
-								on:click={() => action(targets, 'suspend')}>{$i18n.t('Pause')}</button
-							>
-						{:else if schedule.lifecycle === 'suspended'}<button
-								disabled={busy || schedule.connection.lifecycle !== 'enabled'}
-								on:click={() => action(targets, 'resume')}>{$i18n.t('Resume')}</button
-							>{/if}
-						<button disabled={busy} on:click={() => action(removalTargets(pair), 'delete')}
-							>{$i18n.t('Remove')}</button
-						>
-					{/if}
+					{#if menu.includes('pause')}<button
+							disabled={busy}
+							on:click={() => action(targets, 'suspend')}>{$i18n.t('Pause')}</button
+						>{/if}
+					{#if menu.includes('resume')}<button
+							disabled={busy || schedule.connection.lifecycle !== 'enabled'}
+							on:click={() => action(targets, 'resume')}>{$i18n.t('Resume')}</button
+						>{/if}
+					{#if menu.includes('remove')}<button
+							disabled={busy}
+							on:click={() => action(removalTargets(pair), 'delete')}>{$i18n.t('Remove')}</button
+						>{/if}
 				</DropdownMenu>
 			</div>
 		</Dropdown>
