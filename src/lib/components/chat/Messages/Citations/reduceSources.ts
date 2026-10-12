@@ -94,7 +94,7 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 					: (rawMetadata ?? {});
 			const distance = source?.distances?.[index];
 
-			const id = String(metadata?.source ?? source?.source?.id ?? 'N/A');
+			const id = sourceKey(source, metadata);
 			let _source: RawSourceObject = source?.source ?? {};
 
 			if (metadata?.name) {
@@ -143,6 +143,11 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 	}
 
 	return acc;
+}
+
+// [Gradient] The document a chunk belongs to: one citation entry, and one `[N]`, per key.
+export function sourceKey(source: RawSource, metadata: RawSourceMeta | undefined): string {
+	return String(metadata?.source ?? source?.source?.id ?? 'N/A');
 }
 
 function chunkFingerprint(document: string, metadata: RawSourceMeta | undefined): string {
