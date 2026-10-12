@@ -58,6 +58,15 @@ describe('browser Word export', () => {
 		expect(body).toContain('lokaal');
 	});
 
+	it('uses the opening heading as the title when the document starts with a newline', async () => {
+		const { body } = await unzip(
+			await buildDocumentDocx('Memo', '\n# Eigen titel\n\nTekst', [], 'Bronnen')
+		);
+		const firstParagraph = body.match(/<w:body><w:p>[\s\S]*?<\/w:p>/)?.[0] ?? '';
+		expect(firstParagraph).toContain('w:val="Title"');
+		expect(firstParagraph).toContain('Eigen titel');
+	});
+
 	it('lists uncited sources at the end', async () => {
 		const { body } = await unzip(
 			await buildDocumentDocx('Memo', 'Geen markers.', sources, 'Bronnen')

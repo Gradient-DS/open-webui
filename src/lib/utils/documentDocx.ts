@@ -247,7 +247,8 @@ export async function buildDocumentDocx(
 	sourcesHeading: string
 ): Promise<Blob> {
 	const normalized = normalizeCitations(content, rawSources);
-	const tokens = markdown.lexer(withTitle(normalized.content, title));
+	// Trimmed: agent documents open with a newline, and a leading blank token would become an empty title.
+	const tokens = markdown.lexer(withTitle(normalized.content.trimStart(), title));
 	const hrefs = new Set<string>();
 	markdown.walkTokens(tokens, (token) => {
 		if (token.type === 'image') hrefs.add(token.href);
