@@ -89,6 +89,9 @@
 	import CodeIcon from './Sidebar/icons/Code.svelte';
 	import EditPencilIcon from './Sidebar/icons/EditPencil.svelte';
 	import NotesIcon from './Sidebar/icons/Notes.svelte';
+	// [Gradient] Vergadering entry, gated on FEATURE_MEETINGS and the soev-api agent catalog.
+	import MeetingsSidebarEntry from '$lib/components/meetings/SidebarEntry.svelte';
+	import { checkMeetingsAvailable, meetingsAvailable } from '$lib/components/meetings/availability';
 	import SearchIcon from './Sidebar/icons/Search.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import WorkspaceIcon from './Sidebar/icons/Workspace.svelte';
@@ -322,21 +325,27 @@
 	};
 
 	const initSidebarData = async () => {
-		// Only fetch channels if the feature is enabled and user has permission
-		if (
+		// [Gradient] Hidden unless soev-api lists the meeting agent; failures keep it hidden.
+		checkMeetingsAvailable(localStorage.token);
+
+		// [Gradient] Channels and chats load together instead of channels first.
+		await Promise.all([
+			// Only fetch channels if the feature is enabled and user has permission
 			$config?.features?.enable_channels &&
 			($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))
-		) {
-			await initChannels();
-		}
-
-		await initChatList();
+				? initChannels()
+				: null,
+			initChatList()
+		]);
 	};
 
 	const refreshChatRows = async () => {
-		const result = await refreshChatList(localStorage.token, { refreshPinned: true });
+		// [Gradient] Folders load alongside the chat list instead of after it.
+		const [result] = await Promise.all([
+			refreshChatList(localStorage.token, { refreshPinned: true }),
+			initFolders()
+		]);
 		if (result.accepted) {
-			await initFolders();
 			await Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
 			allChatsLoaded = result.allLoaded;
 			chatListReady = true;
@@ -968,6 +977,11 @@
 						</div>
 					{/if}
 
+					<!-- [Gradient] Vergadering (meeting assistant) -->
+					{#if $meetingsAvailable}
+						<MeetingsSidebarEntry collapsed onClick={itemClickHandler} />
+					{/if}
+
 					{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
 						<div class="">
 							<Tooltip content={$i18n.t('Knowledge')} placement="right">
@@ -1315,6 +1329,11 @@
 										</div>
 									</a>
 								</div>
+							{/if}
+
+							<!-- [Gradient] Vergadering (meeting assistant) -->
+							{#if $meetingsAvailable}
+								<MeetingsSidebarEntry onClick={itemClickHandler} />
 							{/if}
 
 							{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}

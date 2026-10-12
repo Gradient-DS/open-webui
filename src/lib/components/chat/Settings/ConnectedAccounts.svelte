@@ -17,6 +17,7 @@
 		trustedConnectOrigins,
 		connectionOutcome
 	} from '$lib/components/workspace/Knowledge/utils/cloudSync';
+	import { relinkPrompt } from '$lib/utils/live-connections';
 
 	const i18n = getContext<Writable<I18n>>('i18n');
 	let accounts: Connection[] = [];
@@ -132,9 +133,9 @@
 				popup.location.href = authorization.authorize_url;
 				ready = true;
 			})
-			.catch(() => {
+			.catch((error) => {
 				if (!finished) {
-					toast.error($i18n.t('Authorization failed'));
+					toast.error($i18n.t(relinkPrompt(error) ?? 'Authorization failed'));
 					finish();
 				}
 			});

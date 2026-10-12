@@ -55,6 +55,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -114,11 +116,15 @@ jobs:
           outputs: type=image,"name=${{ env.BUILD_OUTPUT_NAMES }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=registry,ref=${{ steps.cache-meta.outputs.tags }}
           cache-to: type=registry,ref=${{ steps.cache-meta.outputs.tags }},mode=max
+          # [Gradient] APT_UPGRADE_EPOCH is per run: the Dockerfile's apt upgrade
+          # layer never comes from the registry cache, so every image ships today's
+          # Debian fixes.
           build-args: |
             BUILD_HASH=${{ github.sha }}
             USE_SLIM=true
             UID=1000
             GID=1000
+            APT_UPGRADE_EPOCH=${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Export digest
         run: |
@@ -233,7 +239,7 @@ jobs:
   scan-image:
     if: startsWith(github.ref, 'refs/heads/')
     needs: [merge-slim-images]
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
       contents: read
@@ -254,6 +260,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Helm
         uses: azure/setup-helm@v5

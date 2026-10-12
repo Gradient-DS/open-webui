@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import Optional, Union
+from typing import Union
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -52,7 +52,6 @@ CONNECTIONS_CONFIG_KEYS = {
 }
 CODE_EXECUTION_CONFIG_KEYS = {
     'ENABLE_DOCUMENT_WRITER': 'document_writer.enable',
-    'DOCUMENT_WRITER_PROMPT_TEMPLATE': 'document_writer.prompt_template',
     'ENABLE_OFFICE': 'office.enable',
     'ENABLE_OFFICE_EDIT': 'office_edit.enable',
     'ENABLE_CODE_EXECUTION': 'code_execution.enable',
@@ -720,8 +719,7 @@ async def verify_tool_servers_config(
 # CodeInterpreterConfig
 ############################
 class CodeInterpreterConfigForm(BaseModel):
-    ENABLE_DOCUMENT_WRITER: bool = False
-    DOCUMENT_WRITER_PROMPT_TEMPLATE: str = ''
+    ENABLE_DOCUMENT_WRITER: bool
     ENABLE_OFFICE: bool = True
     ENABLE_OFFICE_EDIT: bool = True
     ENABLE_CODE_EXECUTION: bool
@@ -1103,53 +1101,20 @@ async def set_integrations_config(
 
 
 ####################################
-# Agent Proxy Config
-####################################
-
-
-AGENT_PROXY_CONFIG_KEYS = {
-    'ENABLE_AGENT_PROXY': 'agent_proxy.enable',
-}
-
-
-class AgentProxyConfigForm(BaseModel):
-    ENABLE_AGENT_PROXY: bool
-
-
-@router.get('/agent_proxy')
-async def get_agent_proxy_config(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(AGENT_PROXY_CONFIG_KEYS)
-
-
-@router.post('/agent_proxy')
-async def set_agent_proxy_config(
-    request: Request,
-    form_data: AgentProxyConfigForm,
-    user=Depends(get_admin_user),
-):
-    await Config.upsert(config_updates(form_data.model_dump(), AGENT_PROXY_CONFIG_KEYS))
-    return await get_config_values(AGENT_PROXY_CONFIG_KEYS)
-
-
-####################################
 # External Agents Config
 ####################################
 
 
 class ExternalAgentsConfigForm(BaseModel):
     AGENT_API_SELECTED_AGENT: str
-    # Empty string clears the picker default (no pre-selection on first load).
-    AGENT_API_PICKER_DEFAULT_SLUG: Optional[str] = None
 
 
 @router.get('/external_agents')
 async def get_external_agents_config(request: Request, user=Depends(get_admin_user)):
-    values = await Config.get_many('agent_api.selected_agent', 'agent_api.picker_default_slug')
     return {
         'AGENT_API_ENABLED': AGENT_API_ENABLED,
         'AGENT_API_AGENTS': AGENT_API_AGENTS,
-        'AGENT_API_SELECTED_AGENT': values.get('agent_api.selected_agent'),
-        'AGENT_API_PICKER_DEFAULT_SLUG': values.get('agent_api.picker_default_slug'),
+        'AGENT_API_SELECTED_AGENT': await Config.get('agent_api.selected_agent'),
     }
 
 
@@ -1170,24 +1135,9 @@ async def set_external_agents_config(
             detail='Selected agent is not in the configured AGENT_API_AGENTS list',
         )
 
-    updates: dict = {'agent_api.selected_agent': selected}
+    await Config.upsert({'agent_api.selected_agent': selected})
 
-    if form_data.AGENT_API_PICKER_DEFAULT_SLUG is not None:
-        picker_default = form_data.AGENT_API_PICKER_DEFAULT_SLUG.strip()
-        if picker_default and agents and picker_default not in agents:
-            raise HTTPException(
-                status_code=400,
-                detail='Picker default slug is not in the configured AGENT_API_AGENTS list',
-            )
-        updates['agent_api.picker_default_slug'] = picker_default
-
-    await Config.upsert(updates)
-    values = await Config.get_many('agent_api.selected_agent', 'agent_api.picker_default_slug')
-
-    return {
-        'AGENT_API_SELECTED_AGENT': values.get('agent_api.selected_agent'),
-        'AGENT_API_PICKER_DEFAULT_SLUG': values.get('agent_api.picker_default_slug'),
-    }
+    return {'AGENT_API_SELECTED_AGENT': await Config.get('agent_api.selected_agent')}
 
 
 ####################################

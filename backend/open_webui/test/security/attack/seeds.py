@@ -8,7 +8,9 @@ Unseedable entries remain in SURFACE and are deliberately absent from results.
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import re
 import secrets
 import time
@@ -17,7 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
 
-from .client import AttackClient, json_body, totp_code
+import requests
+
+from .client import AttackClient, AuthenticationError, json_body, totp_code
 from .configuration import recover_configuration
 
 ROOT = Path(__file__).resolve().parents[5]
@@ -26,6 +30,46 @@ SURFACE = tomllib.loads(SURFACE_PATH.read_text())
 SPEC = json.loads((ROOT / 'security/openapi.json').read_text())
 METHODS = {'get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'}
 DESTRUCTIVE = {entry['id']: entry['reason'] for entry in SURFACE['destructive']}
+#: Routes that only work with soev-solutions, which never runs in this repo's CI.
+#: Public CI waives them; the private full-stack run can drive them.
+SOEV_BACKED = {
+    entry['id']: entry['reason']
+    for entry in tomllib.loads((ROOT / 'security/route-coverage.toml').read_text()).get('waived', [])
+    if entry.get('backed_by') == 'soev-solutions'
+}
+
+
+def runtime_soev_backed():
+    mode = os.environ.get('RUNTIME_SOEV_BACKED', 'waive')
+    if mode not in {'waive', 'drive'}:
+        raise ValueError(f'RUNTIME_SOEV_BACKED must be waive or drive, got {mode!r}')
+    return mode
+
+
+# Validate even when a runner only collects tests or has no private routes.
+runtime_soev_backed()
+
+
+def backed_seed_waived(entry):
+    return runtime_soev_backed() == 'waive' and entry.get('backed_by') == 'soev-solutions'
+
+
+def route_waived(route):
+    return runtime_soev_backed() == 'waive' and route in SOEV_BACKED
+
+
+def seed_enabled(entry):
+    return 'unseedable' not in entry and not backed_seed_waived(entry)
+
+
+def selected_parameters(surface=SURFACE):
+    selected = [entry for entry in dependency_order(surface) if seed_enabled(entry)]
+    keys = {entry['key'] for entry in selected}
+    for entry in selected:
+        missing = set(_dependencies(entry)) - keys
+        if missing:
+            raise ValueError(f'{entry["key"]}: dependencies disabled in this mode: {sorted(missing)}')
+    return selected
 
 
 def _extract(payload, dotted: str, *, name: str, via: str) -> str:
@@ -96,7 +140,8 @@ def ordinary_targets(spec=SPEC, surface=SURFACE):
         for method in item
         if method in METHODS
         and not is_destructive(method, path, surface)
-        and all('unseedable' not in parameter_for(path, name, surface) for name in re.findall(r'\{([^}]+)\}', path))
+        and not route_waived(f'{method.upper()} {path}')
+        and all(seed_enabled(parameter_for(path, name, surface)) for name in re.findall(r'\{([^}]+)\}', path))
     ]
 
 
@@ -188,7 +233,28 @@ class SeedContext:
         body = json_body(response)
         if body is None:
             raise RuntimeError(f'Seeding {method} {path} returned no JSON')
+        # Local processing is synchronous; a soev-backed deployment returns a job
+        # instead, and the next fixture step must not race that ingestion.
+        if method == 'POST' and path == '/api/v1/retrieval/process/file' and body.get('job_id'):
+            self.wait_for_file(kwargs['json']['file_id'], actor=actor)
+        elif method == 'POST' and re.fullmatch(r'/api/v1/knowledge/[^/]+/file/add', path):
+            self.wait_for_file(kwargs['json']['file_id'], actor=actor)
         return body
+
+    def wait_for_file(self, file_id, *, actor=None, timeout=120):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            file = self.request('GET', f'/api/v1/files/{quote(file_id, safe="")}', actor=actor)
+            meta = file.get('meta') or {}
+            status = meta.get('status')
+            if status == 'failed':
+                raise RuntimeError(f'Seeding file {file_id} failed: {meta.get("error")}')
+            # The poller writes status before clearing the job. Wait for both,
+            # or the next process/file call is refused as an in-flight ingest.
+            if status == 'completed' and meta.get('soev_job') is None:
+                return
+            time.sleep(0.5)
+        raise RuntimeError(f'Seeding file {file_id} did not complete within {timeout}s')
 
 
 def prepare_configuration(ctx, parameter):
@@ -199,23 +265,6 @@ def prepare_configuration(ctx, parameter):
     if body.get(f'{namespace}.marker') != ctx.token:
         raise RuntimeError('Seeding configuration namespace did not persist')
     return namespace
-
-
-def seed_agent_config(ctx, parameter):
-    rows = ctx.request('GET', '/api/v1/agent-configs/detect', actor=ctx.admin)
-    row = next((row for row in rows if row.get('in_env')), None)
-    if row is None:
-        raise RuntimeError('No environment-declared agent slug; cannot create one over HTTP')
-    slug = _extract(row, 'slug', name=parameter['key'], via='GET /api/v1/agent-configs/detect')
-    if not row.get('configured'):
-        ctx.request(
-            'POST',
-            f'/api/v1/agent-configs/{quote(slug, safe="")}',
-            actor=ctx.admin,
-            json={'name': f'Attack agent {ctx.token}'},
-        )
-    body = ctx.request('GET', f'/api/v1/agent-configs/{quote(slug, safe="")}', actor=ctx.admin)
-    return _extract(body, 'id', name=parameter['key'], via='GET agent config')
 
 
 def connection_index(ctx, parameter):
@@ -294,12 +343,33 @@ def register_readable_model(ctx, model_id):
         all(item.get(key) == value for key, value in grant.items()) for item in body.get('access_grants', [])
     ):
         raise RuntimeError(f'Model {model_id} did not acquire public read access')
+    # The owner control for POST /models/model/toggle deactivates this row, and an
+    # inactive override hides its base model from the registry (utils/models.py).
+    if body.get('is_active') is False:
+        toggled = ctx.request('POST', '/api/v1/models/model/toggle', actor=ctx.admin, params={'id': model_id})
+        if toggled.get('is_active') is not True:
+            raise RuntimeError(f'Model {model_id} could not be reactivated')
+
+
+def catalog_default_model(ctx, parameter):
+    # Drive mode runs the v2 runtime, where soev-api's catalog is the only source of
+    # registry models (utils/models.py:get_all_base_models); upstream ids never list.
+    # /api/config names the catalog default (soev/model_catalog.default_models) even
+    # while an earlier pass's toggle has hidden it from /api/models.
+    default = ctx.request('GET', '/api/config', actor=ctx.admin).get('default_models')
+    if not isinstance(default, str) or not default or ',' in default:
+        raise RuntimeError(f'{parameter["key"]}: expected one soev catalog default model, found {default!r}')
+    return default
 
 
 def seed_model(ctx, parameter):
     path = f'/openai/models/{quote(ctx.values["openai_index"], safe="")}'
-    registry = ctx.request('GET', path, actor=ctx.admin)
-    model_id = _extract(registry, 'data.0.id', name=parameter['key'], via=f'GET {path}')
+    upstream = ctx.request('GET', path, actor=ctx.admin)
+    ctx.values['upstream_model'] = _extract(upstream, 'data.0.id', name=parameter['key'], via=f'GET {path}')
+    if runtime_soev_backed() == 'drive':
+        model_id = catalog_default_model(ctx, parameter)
+    else:
+        model_id = ctx.values['upstream_model']
     register_readable_model(ctx, model_id)
     return model_id
 
@@ -323,41 +393,15 @@ def _create_active_function(ctx, parameter, function_id):
 
 
 def seed_active_function(ctx, parameter):
-    return _create_active_function(ctx, parameter, f'attack_active_{ctx.token}')
-
-
-def seed_removable_knowledge(ctx, parameter):
-    # file/remove deletes the file itself unless ENABLE_KNOWLEDGE_FILE_RETENTION
-    # is on, so it gets a KB and a file nothing else uses; the shared {file} and
-    # {knowledge} stay in place for add, move and update.
-    upload = ctx.request(
-        'POST',
-        '/api/v1/files/',
-        actor=ctx.admin,
-        params={'process': False},
-        files=[('file', (f'attack-removable-{ctx.token}.txt', f'Attack removable file {ctx.token}', 'text/plain'))],
-    )
-    file_id = _extract(upload, 'id', name=parameter['key'], via='POST /api/v1/files/')
-    # file/add refuses a file with no extracted content.
-    ctx.request('POST', '/api/v1/retrieval/process/file', actor=ctx.admin, json={'file_id': file_id}, timeout=120)
-    knowledge = ctx.request(
-        'POST',
-        '/api/v1/knowledge/create',
-        actor=ctx.admin,
-        json={'name': f'attack-removable-{ctx.token}', 'description': 'Attack knowledge for file/remove'},
-    )
-    knowledge_id = _extract(knowledge, 'id', name=parameter['key'], via='POST /api/v1/knowledge/create')
-    added = ctx.request(
-        'POST',
-        f'/api/v1/knowledge/{quote(knowledge_id, safe="")}/file/add',
-        actor=ctx.admin,
-        json={'file_id': file_id},
-        timeout=120,
-    )
-    if not any(isinstance(item, dict) and item.get('id') == file_id for item in added.get('files') or []):
-        raise RuntimeError(f'{parameter["key"]}: the file did not join its knowledge base')
-    ctx.provide(parameter, 'removable_file', file_id)
-    return knowledge_id
+    function_id = _create_active_function(ctx, parameter, f'attack_active_{ctx.token}')
+    # utils/actions.py:chat_action runs only an action the model surfaces, admins included
+    # unless they bypass access control; a global action is surfaced on every model.
+    made_global = ctx.request('POST', f'/api/v1/functions/id/{function_id}/toggle/global', actor=ctx.admin)
+    if made_global.get('is_global') is not True:
+        raise RuntimeError(f'{parameter["key"]}: function was not made global')
+    # The model registry is cached; rebuilding it attaches the action to the seeded model.
+    ctx.request('GET', '/api/models', actor=ctx.admin)
+    return function_id
 
 
 def seed_totp_user(ctx, parameter):
@@ -393,8 +437,7 @@ def seed_totp_user(ctx, parameter):
 
 def seed_task(ctx, parameter):
     model_id = _create_active_function(ctx, parameter, f'attack_task_{ctx.token}')
-    # Inlets run before agent routing. A Pipe's wait is skipped by CI's
-    # production-matching AGENT_API_ENABLED=true / FEATURE_AGENT_PICKER=false.
+    # Inlets run before routing, including private stacks with agent routing on.
     ctx.request(
         'POST',
         '/api/v1/models/create',
@@ -442,11 +485,95 @@ def seed_task(ctx, parameter):
     return task_id
 
 
+def seed_knowledge_file(ctx, parameter):
+    # Removal and asynchronous reprocessing each need their own settled file.
+    label = f'attack-{parameter["key"]}-{ctx.token}'
+    upload = ctx.request(
+        'POST',
+        '/api/v1/files/',
+        actor=ctx.admin,
+        params={'process': False},
+        files=[('file', (f'{label}.txt', label, 'text/plain'))],
+    )
+    file_id = _extract(upload, 'id', name=parameter['key'], via='POST /api/v1/files/')
+    # file/add refuses a file with no extracted content.
+    ctx.request('POST', '/api/v1/retrieval/process/file', actor=ctx.admin, json={'file_id': file_id}, timeout=120)
+    knowledge = ctx.request(
+        'POST',
+        '/api/v1/knowledge/create',
+        actor=ctx.admin,
+        json={'name': label, 'description': 'Attack knowledge with an isolated processed file'},
+    )
+    knowledge_id = _extract(knowledge, 'id', name=parameter['key'], via='POST /api/v1/knowledge/create')
+    added = ctx.request(
+        'POST',
+        f'/api/v1/knowledge/{quote(knowledge_id, safe="")}/file/add',
+        actor=ctx.admin,
+        json={'file_id': file_id},
+        timeout=120,
+    )
+    if not any(isinstance(item, dict) and item.get('id') == file_id for item in added.get('files') or []):
+        raise RuntimeError(f'{parameter["key"]}: the file did not join its knowledge base')
+    (provided,) = parameter['provides']
+    ctx.provide(parameter, provided, file_id)
+    return knowledge_id
+
+
+def seed_cloud_family(ctx, parameter):
+    return 'live_documents'
+
+
+def seed_cloud_connection(ctx, parameter):
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': 'onedrive'})
+    connection = _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
+    # OAuth cannot return from Microsoft on the sealed network. Only consent
+    # state is seeded; the application must admit the owner and create its grant.
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.post(
+            os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
+            headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
+            json={'connection_id': connection},
+            timeout=30,
+        )
+        response.raise_for_status()
+    grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.admin)
+    ctx.provide(parameter, 'cloud_grant', grant['id'])
+    return connection
+
+
+def seed_external_source(ctx, parameter):
+    # A connection of its own: delete_external_knowledge_connection answers 400 while
+    # a KB still uses one, so on {connection} this KB would refuse the owner's DELETE.
+    connection = ctx.request(
+        'POST',
+        '/api/v1/knowledge/external/connections',
+        actor=ctx.admin,
+        json={
+            'name': f'attack-source-{ctx.token}',
+            'provider': 'qdrant',
+            'endpoint': 'http://stub:8000',
+            'auth_config': {},
+        },
+    )
+    connection_id = _extract(connection, 'id', name=parameter['key'], via='POST external/connections')
+    body = ctx.request(
+        'POST',
+        '/api/v1/knowledge/external/knowledge/create',
+        actor=ctx.admin,
+        json={
+            'name': f'attack-external-{ctx.token}',
+            'connection_id': connection_id,
+            'source': {'name': f'attack-{ctx.token}', 'config': {'content_field': 'text'}},
+        },
+    )
+    return _extract(body, 'id', name=parameter['key'], via='POST external/knowledge/create')
+
+
 _SEEDERS = {
     function.__name__: function
     for function in (
         prepare_configuration,
-        seed_agent_config,
         connection_index,
         upstream_path,
         seed_terminal,
@@ -454,8 +581,11 @@ _SEEDERS = {
         seed_model,
         seed_task,
         seed_active_function,
-        seed_removable_knowledge,
         seed_totp_user,
+        seed_cloud_connection,
+        seed_cloud_family,
+        seed_knowledge_file,
+        seed_external_source,
     )
 }
 
@@ -494,9 +624,11 @@ class Resolved(dict):
     A dict, so every caller that only wants path parameters is unaffected.
     """
 
-    def __init__(self, *args, fields=None, **kwargs):
+    def __init__(self, *args, fields=None, failures=None, blocked=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields = fields or {}
+        self.failures = failures or {}
+        self.blocked = blocked or {}
 
 
 def _fill_field(value, ctx, *, path=False):
@@ -517,16 +649,20 @@ def _fill_field(value, ctx, *, path=False):
     return re.sub(r'\{([A-Za-z_][A-Za-z0-9_]*)\}', substitute, _fill_token(value, ctx.token))
 
 
-def resolve_fields(ctx):
+def resolve_fields(ctx, *, entries=None):
     """Fill every [[field]] from seeded values, making its setup requests first, in order."""
     fields = {}
-    for entry in ctx.surface.get('field', []):
+    for entry in ctx.surface.get('field', []) if entries is None else entries:
+        if backed_seed_waived(entry) or route_waived(entry['route']):
+            continue
         for step in entry.get('setup', []):
             method, path = step['via'].split(' ', 1)
             ctx.request(
                 method, _fill_field(path, ctx, path=True), actor=ctx.admin, json=_fill_field(step.get('body', {}), ctx)
             )
         resolved = {kind: _fill_field(entry[kind], ctx) for kind in ('json', 'params', 'form') if kind in entry}
+        if 'body_base64' in entry:
+            resolved['data'] = base64.b64decode(entry['body_base64'], validate=True)
         if 'files' in entry:
             resolved['files'] = [
                 (
@@ -539,32 +675,58 @@ def resolve_fields(ctx):
     return fields
 
 
-def resolve_parameters(client: AttackClient, *, admin: AttackClient | None = None, surface=SURFACE, spec=SPEC):
-    ordered = dependency_order(surface)
+def resolve_parameters(
+    client: AttackClient, *, admin: AttackClient | None = None, surface=SURFACE, spec=SPEC, collect_failures=False
+):
+    ordered = selected_parameters(surface)
     ctx = SeedContext(client, admin or client, surface)
     if surface.get('preserve_configuration'):
         recover_configuration(ctx.admin)
     # After recovery: an interrupted pass's snapshot would otherwise turn it back off.
     if surface.get('stack_configuration'):
         apply_stack_configuration(ctx)
+    failures, blocked = {}, {}
     for p in ordered:
         key = p['key']
         if 'unseedable' in p:
             continue
-        if 'same_as' in p:
-            value = ctx.values[p['same_as']]
-        elif 'seeded_by' in p:
-            value = _SEEDERS[p['seeded_by']](ctx, p)
-            missing = [name for name in p.get('provides', []) if name not in ctx.values]
-            if missing:
-                raise RuntimeError(f'{key}: seeder did not provide {missing}')
-        else:
-            value = _seed_endpoint(ctx, p)
-        ctx.values[key] = _extract({'value': value}, 'value', name=key, via=p.get('via', p.get('seeded_by', 'alias')))
+        dependencies = [name for name in _dependencies(p) if name in failures]
+        if dependencies:
+            failures[key] = f'Failed dependencies: {dependencies}'
+            continue
+        try:
+            if 'same_as' in p:
+                value = ctx.values[p['same_as']]
+            elif 'seeded_by' in p:
+                value = _SEEDERS[p['seeded_by']](ctx, p)
+                missing = [name for name in p.get('provides', []) if name not in ctx.values]
+                if missing:
+                    raise RuntimeError(f'{key}: seeder did not provide {missing}')
+            else:
+                value = _seed_endpoint(ctx, p)
+            ctx.values[key] = _extract(
+                {'value': value}, 'value', name=key, via=p.get('via', p.get('seeded_by', 'alias'))
+            )
+        except RuntimeError as error:
+            if not collect_failures or isinstance(error, AuthenticationError):
+                raise
+            failures[key] = str(error)
     resolved = {}
     for path in spec['paths']:
         for name in re.findall(r'\{([^}]+)\}', path):
             p = parameter_for(path, name, surface)
-            if 'unseedable' not in p:
+            if p['key'] in failures:
+                for method in spec['paths'][path].keys() & METHODS:
+                    blocked[f'{method.upper()} {path}'] = failures[p['key']]
+            elif seed_enabled(p):
                 resolved[path, name] = ctx.values[p['key']]
-    return Resolved(resolved, fields=resolve_fields(ctx))
+    fields = {}
+    for entry in surface.get('field', []):
+        try:
+            fields.update(resolve_fields(ctx, entries=[entry]))
+        except RuntimeError as error:
+            if not collect_failures or isinstance(error, AuthenticationError):
+                raise
+            failures[entry['route']] = str(error)
+            blocked[entry['route']] = str(error)
+    return Resolved(resolved, fields=fields, failures=failures, blocked=blocked)

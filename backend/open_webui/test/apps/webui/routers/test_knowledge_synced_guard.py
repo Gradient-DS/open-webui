@@ -21,6 +21,7 @@ GRANTS = [
 @pytest.fixture
 def api(monkeypatch):
     """Exercise HTTP handlers with isolated knowledge and grant persistence."""
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     kb = KnowledgeModel(
         id='kb', user_id='owner', name='Research', description='Notes', type='onedrive', created_at=1, updated_at=1
     )
@@ -177,6 +178,7 @@ def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, m
         'principals': ['owui:user:owner', 'owui:user:co-writer'],
         'writers': ['owui:user:owner', 'owui:user:co-writer'],
         'subscriptions': ['onedrive'],
+        'meta': {},
         'created_at': '2026-01-01T00:00:00Z',
         'updated_at': '2026-01-01T00:00:00Z',
     }
@@ -208,3 +210,15 @@ def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, m
     api.writes.grants.assert_not_awaited()
     api.writes.delete.assert_not_awaited()
     api.writes.reset.assert_not_awaited()
+
+
+@pytest.mark.parametrize('member', [True, False])
+def test_a_member_without_an_owui_file_row_is_removed(api, monkeypatch, member):
+    """Membership, not an OWUI file row, decides whether a KB file can be removed."""
+    remove = AsyncMock(return_value=True)
+    monkeypatch.setattr(knowledge.Files, 'get_file_by_id', AsyncMock(return_value=None))
+    monkeypatch.setattr(knowledge.Knowledges, 'has_file', AsyncMock(return_value=member))
+    monkeypatch.setattr(knowledge.Knowledges, 'remove_file_from_knowledge_by_id', remove)
+    result = api.browser.post('/knowledge/kb/file/remove', json={'file_id': 'catalog'})
+    assert result.status_code == (200 if member else 400)
+    assert remove.await_count == int(member)

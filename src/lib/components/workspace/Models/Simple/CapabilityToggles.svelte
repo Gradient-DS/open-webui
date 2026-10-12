@@ -1,50 +1,56 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
+	import { getContext, type ComponentType } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { config } from '$lib/stores';
 	import Switch from '$lib/components/common/Switch.svelte';
-	import type { AssistantToggles } from '$lib/utils/assistantCapabilities';
+	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
+	import Photo from '$lib/components/icons/Photo.svelte';
+	import Terminal from '$lib/components/icons/Terminal.svelte';
+	import Document from '$lib/components/icons/Document.svelte';
+	import PagePlus from '$lib/components/icons/PagePlus.svelte';
+	import PageEdit from '$lib/components/icons/PageEdit.svelte';
+	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
+	import MailSearch from '$lib/components/icons/MailSearch.svelte';
+	import Eye from '$lib/components/icons/Eye.svelte';
+	import Clip from '$lib/components/icons/Clip.svelte';
+	import Link from '$lib/components/icons/Link.svelte';
+	import { simpleCapabilityOffered, type AssistantToggles } from '$lib/utils/assistantCapabilities';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<i18nType> = getContext('i18n');
 
 	export let toggles: AssistantToggles;
 
-	// Capabilities gated behind an instance feature flag — only shown
-	// when the deployment has that feature enabled (mirrors the gating
-	// in the advanced editor's Capabilities.svelte).
-	const configGuards: Partial<Record<keyof AssistantToggles, string>> = {
-		web_search: 'enable_web_search',
-		image_generation: 'enable_image_generation',
-		code_interpreter: 'enable_code_interpreter',
-		document_writer: 'enable_document_writer',
-		office: 'enable_office',
-		office_edit: 'enable_office_edit'
-	};
-
-	const allRows: { key: keyof AssistantToggles; icon: string; label: string }[] = [
-		{ key: 'web_search', icon: '🌐', label: 'Search the web' },
-		{ key: 'image_generation', icon: '🎨', label: 'Generate images' },
-		{ key: 'code_interpreter', icon: '💻', label: 'Run code & analyze data' },
-		{ key: 'document_writer', icon: '📝', label: 'Write documents' },
-		{ key: 'office', icon: '📝', label: 'Create Office files' },
-		{ key: 'office_edit', icon: '📝', label: 'Edit Office files' },
-		{ key: 'vision', icon: '👁️', label: 'Understand images' },
-		{ key: 'file_upload', icon: '📎', label: 'Read uploaded files' },
-		{ key: 'citations', icon: '🔗', label: 'Show sources' }
+	// Labels and icons of composer tools match the chat + menu.
+	const allRows: { key: keyof AssistantToggles; icon: ComponentType; label: string }[] = [
+		{ key: 'web_search', icon: GlobeAlt, label: 'Search the web' },
+		{ key: 'image_generation', icon: Photo, label: 'Generate images' },
+		{ key: 'code_interpreter', icon: Terminal, label: 'Run code & analyze data' },
+		{ key: 'document_writer', icon: Document, label: 'Document writer' },
+		{ key: 'office', icon: PagePlus, label: 'Create Office files' },
+		{ key: 'office_edit', icon: PageEdit, label: 'Edit Office files' },
+		{ key: 'live_documents', icon: OneDriveSearch, label: 'OneDrive search' },
+		{ key: 'live_mail', icon: MailSearch, label: 'Mail search' },
+		{ key: 'vision', icon: Eye, label: 'Understand images' },
+		{ key: 'file_upload', icon: Clip, label: 'Read uploaded files' },
+		{ key: 'citations', icon: Link, label: 'Show sources' }
 	];
 
-	// Drop any capability whose instance feature flag is off.
-	$: rows = allRows.filter((row) => {
-		if (row.key === 'office_edit' && !toggles.office) return false;
-		const guard = configGuards[row.key];
-		return !guard || !!($config?.features as any)?.[guard];
-	});
+	$: rows = allRows.filter(
+		(row) =>
+			!(row.key === 'office_edit' && !toggles.office) &&
+			simpleCapabilityOffered(row.key, $config?.features)
+	);
 	$: if (!toggles.office && toggles.office_edit) toggles.office_edit = false;
 </script>
 
 <div class="flex flex-col gap-2.5">
 	{#each rows as row}
 		<div class="flex items-center justify-between">
-			<div class="text-sm">{row.icon}&nbsp; {$i18n.t(row.label)}</div>
+			<div class="flex items-center gap-2 text-sm">
+				<svelte:component this={row.icon} className="size-4" />
+				{$i18n.t(row.label)}
+			</div>
 			<Switch bind:state={toggles[row.key]} />
 		</div>
 	{/each}

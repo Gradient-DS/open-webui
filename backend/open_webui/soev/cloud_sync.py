@@ -24,6 +24,27 @@ class CloudSync:
     async def connection(self, connection_id: str) -> dict:
         return await self._get(f'/v1/connections/{quote(connection_id, safe="")}')
 
+    async def live_grants(self, connection_id: str, family: str) -> list[dict]:
+        await self.connection(connection_id)
+        result = await self._get(f'/v1/connections/{quote(connection_id, safe="")}/live-grants')
+        return [grant for grant in result['data'] if family in grant['families']]
+
+    async def enable_live_family(self, connection_id: str, family: str) -> dict:
+        grants = await self.live_grants(connection_id, family)
+        path = f'/v1/connections/{quote(connection_id, safe="")}/live-grants'
+        for grant in grants:
+            if grant['lifecycle'] == 'enabled':
+                return grant
+            if grant['lifecycle'] == 'suspended':
+                return await self._send('PATCH', f'{path}/{quote(grant["id"], safe="")}', {'enabled': True})
+        return await self.client.send(
+            'POST',
+            path,
+            {'families': [family]},
+            as_user=self.user_ref,
+            idempotency_key=f'live:{family}:{connection_id}',
+        )
+
     async def connection_usage(self, connection_id: str) -> dict:
         await self.connection(connection_id)
         knowledge_ids: set[str] = set()
@@ -58,6 +79,10 @@ class CloudSync:
         if action == 'delete':
             return await self._send('DELETE', f'{path}?collection_key={quote(collection_key, safe="")}')
         return await self._send('POST', f'{path}/{action}')
+
+    async def sync_all(self, collection_key: str) -> dict:
+        """Run every content schedule the user owns in this KB; refusals come back per schedule."""
+        return await self._send('POST', f'/v1/collections/{quote(collection_key, safe="")}/sync')
 
     async def skipped_items(self, collection_key: str, schedule_id: str) -> list[dict]:
         await self._get(f'/v1/collections/{quote(collection_key, safe="")}')

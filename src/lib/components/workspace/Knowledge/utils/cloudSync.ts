@@ -1,6 +1,6 @@
 import { reconnectCodes } from '$lib/sources/registry';
 import equal from 'fast-deep-equal';
-import type { Connection, RunOutcome, Schedule, SyncRun } from '$lib/apis/cloudSync';
+import type { Connection, KnowledgeRun, RunOutcome, Schedule, SyncRun } from '$lib/apis/cloudSync';
 
 export function trustedConnectOrigins(location: string, apiBase: string): Set<string> {
 	const origins = new Set([location]);
@@ -91,9 +91,84 @@ export function runCounts(run: SyncRun): { label: string; count: number }[] {
 export interface SchedulePair {
 	content?: Schedule;
 	acl?: Schedule;
+	// A run was just requested for the content schedule but no worker has
+	// claimed it yet, so the schedule has no live run row to show.
+	queued?: boolean;
 }
 
-export function pairSchedules(schedules: Schedule[]): SchedulePair[] {
+// A requested run is queued until its schedule reports a different last run
+// (claimed, or even finished, between polls), the schedule is gone, or the
+// request is old enough that the worker evidently dropped it.
+export const QUEUED_RUN_MAX_MS = 10 * 60 * 1000;
+
+export interface QueuedRun {
+	runId: string | null;
+	since: number;
+}
+
+export function queueRuns(
+	queued: ReadonlyMap<string, QueuedRun>,
+	schedules: Schedule[],
+	ids: string[],
+	now = Date.now()
+): Map<string, QueuedRun> {
+	const next = new Map(queued);
+	for (const id of ids) {
+		// A schedule created a moment ago is not in the last status yet.
+		const schedule = schedules.find((item) => item.id === id);
+		if (!runIsLive(schedule?.last_run))
+			next.set(id, { runId: schedule?.last_run?.id ?? null, since: now });
+	}
+	return next;
+}
+
+export function settleQueuedRuns(
+	queued: ReadonlyMap<string, QueuedRun>,
+	schedules: Schedule[],
+	now = Date.now()
+): Map<string, QueuedRun> {
+	const next = new Map<string, QueuedRun>();
+	for (const [id, entry] of queued) {
+		const schedule = schedules.find((item) => item.id === id);
+		if (
+			schedule &&
+			(schedule.last_run?.id ?? null) === entry.runId &&
+			now - entry.since < QUEUED_RUN_MAX_MS
+		)
+			next.set(id, entry);
+	}
+	return next;
+}
+
+// The sources "Sync all now" covers; the button shows whenever there is one,
+// whatever their runs are doing.
+export function syncableSources(schedules: Schedule[]): Schedule[] {
+	return schedules.filter(
+		(schedule) => schedule.kind === 'content' && schedule.lifecycle !== 'revoked'
+	);
+}
+
+export type SyncAllNotice =
+	| { kind: 'started'; ids: string[] }
+	| { kind: 'not_owner' | 'reconnect' | 'too_soon' | 'running' | 'paused' };
+
+// Sync-all skips sources soev-api refused (already running, cooling down,
+// paused); the reason only surfaces when no source started at all.
+export function syncAllNotice(runs: KnowledgeRun[]): SyncAllNotice {
+	const ids = runs.filter((run) => run.job_id).map((run) => run.schedule_id);
+	if (ids.length) return { kind: 'started', ids };
+	const codes = new Set(runs.map((run) => run.code));
+	if (!runs.length) return { kind: 'not_owner' };
+	if (codes.has('connection_pending')) return { kind: 'reconnect' };
+	if (codes.has('run_too_soon')) return { kind: 'too_soon' };
+	if (codes.has('run_active')) return { kind: 'running' };
+	return { kind: 'paused' };
+}
+
+export function pairSchedules(
+	schedules: Schedule[],
+	queued: ReadonlyMap<string, unknown> = new Map()
+): SchedulePair[] {
 	const remaining = new Set(schedules.filter((schedule) => schedule.kind === 'acl_refresh'));
 	const pairs: SchedulePair[] = schedules
 		.filter((schedule) => schedule.kind === 'content')
@@ -103,7 +178,7 @@ export function pairSchedules(schedules: Schedule[]): SchedulePair[] {
 					schedule.connection_id === content.connection_id && equal(schedule.scope, content.scope)
 			);
 			if (acl) remaining.delete(acl);
-			return { content, acl };
+			return queued.has(content.id) ? { content, acl, queued: true } : { content, acl };
 		});
 	return [...pairs, ...[...remaining].map((acl) => ({ acl }))];
 }
@@ -114,7 +189,8 @@ export function connectionOutcome(
 ): { status: 'done' | 'waiting' | 'gave_up' } | { status: 'failed'; reason: string } {
 	if (
 		connection.last_error ||
-		connection.lifecycle.startsWith('suspended:') ||
+		(connection.lifecycle.startsWith('suspended:') &&
+			connection.lifecycle !== 'suspended:reauth') ||
 		connection.lifecycle === 'revoked'
 	)
 		return { status: 'failed', reason: connection.last_error ?? connection.lifecycle };

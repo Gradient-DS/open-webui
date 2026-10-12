@@ -107,29 +107,9 @@ openWebui:
     failureThreshold: 30
     periodSeconds: 10
 
-  # ---------------------------------------------------------------------------
-  # Alembic migration Job (Helm pre-upgrade hook)
-  # ---------------------------------------------------------------------------
-  # When enabled, a one-shot Job runs `import open_webui.config` before each
-  # helm upgrade. That triggers run_migrations() at import time against
-  # Postgres, then exits. Helm only proceeds to roll the new Deployment if
-  # the Job succeeds — so the new pods start against an already-migrated
-  # schema and don't race each other.
-  #
-  # The main Deployment sets ENABLE_DB_MIGRATIONS=false when this is on,
-  # so no replica attempts its own migration at startup.
-  #
-  # Required for replicaCount > 1. Leave off for single-replica tenants that
-  # rely on the default "first pod migrates" behavior.
-  migrationJob:
-    enabled: false
-    activeDeadlineSeconds: 600
-    resources:
-      requests:
-        memory: "256Mi"
-        cpu: "100m"
-      limits:
-        memory: "512Mi"
+  # Every pod runs migrations in an init container, on installs and upgrades.
+  # PostgreSQL migrations serialize with an advisory lock. The main container
+  # always has ENABLE_DB_MIGRATIONS=false; init uses this image and resources.
 
   # ---------------------------------------------------------------------------
   # PodDisruptionBudget
@@ -213,7 +193,7 @@ openWebui:
     enableForwardUserInfoHeaders: "false"
     forwardUserInfoHeaderUserId: "X-OpenWebUI-User-Id"  # Header name for user UUID forwarding
 
-    # Vector Database (Weaviate) - uses local Weaviate in tenant namespace
+    # Vector database: weaviate (default) or pgvector (uses postgres below).
     vectorDb: "weaviate"
     # Host of the Weaviate to talk to. Empty means this release's own Weaviate
     # (the `weaviate:` block below). Set both to a Service name reachable from
@@ -291,8 +271,11 @@ openWebui:
     featurePlayground: "False"
     featureChatOverview: "False"
     featureNotesAiControls: "False"
-    featureVoice: "False"
+    featureVoice: "False"  # Dictation (STT); also the master gate for the two below
+    featureVoiceCall: "False"  # Call mode (STT -> model -> TTS loop)
+    featureReadAloud: "False"  # Read-aloud button on answers (TTS)
     featureChangelog: "False"
+    featureMeetings: "False"  # Vergadering page; also needs the meeting agent allowlisted in soev-api
     featureSystemPrompt: "False"
     featureModels: "True"
     # Show the per-model Quality/Speed meters + legend in the model picker.
@@ -458,7 +441,7 @@ openWebui:
     userPermissionsChatDelete: "true"
     userPermissionsChatDeleteMessage: "true"
     userPermissionsChatEdit: "true"
-    userPermissionsChatShare: "true"
+    userPermissionsChatShare: "false"  # Chat sharing is opt-in per tenant; binds admins too.
     userPermissionsChatExport: "true"
     userPermissionsChatContinueResponse: "true"
     userPermissionsChatRegenerateResponse: "true"
@@ -581,57 +564,11 @@ openWebui:
 
     # Agent API (internal: routes chat UI to external agent service)
     agentApiEnabled: "false"
-    agentApiBaseUrl: ""
-    # agentApiKey is set via secrets (see .Values.secrets.agentApiKey)
     # Comma-separated list of agent identifiers the admin can select from in
     # the External Agents tab. When empty, the agents service uses its own
     # default_agent. When set, the admin's selection is forwarded as an
     # override hint in the payload.
     agentApiAgents: ""
-    # [Gradient] Optional JSON array of default agent configs to seed at
-    # startup. Each entry must include ``slug`` (must appear in
-    # agentApiAgents) and ``name``. Optional fields: description, cta_copy,
-    # profile_image_url, is_active (default false), is_beta (default true),
-    # position. Existing rows in the DB are preserved unless
-    # agentApiAgentsConfigOverwrite is true. ``access_grants`` are NOT
-    # seedable — set them via the admin panel.
-    # Example:
-    #   agentApiAgentsConfig: |
-    #     [
-    #       {"slug": "soev_chat_autonomous", "name": "Soev.ai — autonomous",
-    #        "description": "Autonomous knowledge assistant", "is_active": true},
-    #       {"slug": "soev_chat_manual", "name": "Soev.ai — manual tools",
-    #        "is_active": true, "position": 1}
-    #     ]
-    agentApiAgentsConfig: ""
-    # When true, agent_config rows in the DB are overwritten on every boot
-    # with the env values — admin edits will not persist. Use only when env
-    # should be the source of truth.
-    agentApiAgentsConfigOverwrite: "false"
-    # [Gradient] User-facing default agent for the new-chat empty state.
-    # When set to a slug in agentApiAgents, the agent picker pre-selects
-    # that card on first load (no localStorage pick yet). Empty = no
-    # pre-selection. Distinct from the admin override hint forwarded to
-    # the agents service (set via Admin → External Agents).
-    agentApiPickerDefaultSlug: ""
-    # [Gradient] Master kill switch for the per-chat agent picker UI
-    # (Settings → Agents admin tab + new-chat empty-state cards).
-    # Layered on top of agentApiEnabled — both must be true for users to
-    # see the agent picker. Default off so existing tenants are unaffected
-    # until they explicitly opt in.
-    featureAgentPicker: "false"
-
-    # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
-    enableAgentProxy: "false"
-
-    # Search API (RAG discovery proxy at /api/v1/discovery/*). Gated by
-    # ENABLE_RAG_FILTER_UI (PersistentConfig — flip via admin UI).
-    # Now hosted by the agents-api; name kept for overlay compatibility.
-    searchApi:
-      # Agents-api base URL, no /v1 (e.g. http://soev-agents:8181).
-      # Empty disables the proxy. Read as SEARCH_API_BASE_URL.
-      baseUrl: ""
-      # searchApiKey is set via secrets (see .Values.secrets.searchApiKey)
 
     # Two-Factor Authentication (TOTP)
     enable2fa: "false"
@@ -719,6 +656,74 @@ openWebui:
         tenantId: "soev"  # X-Scope-OrgID for observability backends
 
 # -----------------------------------------------------------------------------
+# v2 platform wiring (opt-in; unset values render no environment variables)
+# -----------------------------------------------------------------------------
+# In a shared soev-<client> namespace, set networkPolicy.scope: release and
+# secretStoreRef to the platform's existing SecretStore/ClusterSecretStore.
+soevApi:
+  url: ""
+  audience: ""
+  servicePrincipal: ""
+  # One-shot v1 -> v2 migration (python -m open_webui.soev.migrate). A plain Job named
+  # <release>-v2-migrate-<hash of these values and extraEnv>: changing them starts a new
+  # run (every step is idempotent); an app image bump does not. Needs soevApi.url and Redis.
+  migrate:
+    enabled: false
+    # Pinned separately from openWebui.image.tag: the Job's pod template is immutable.
+    image:
+      tag: ""
+    # apply | restore (puts back the config snapshot and model ids) | models (only rewrites
+    # stored model ids by modelMap, e.g. after catalog ids are renamed; restore with the same id)
+    # | uploads (only ingests the uploads stored chats attach, for tenants applied before that step)
+    mode: apply
+    id: v2  # Snapshot, step markers and the one-time sign-out are kept per id.
+    # SOEV_V2_CONFIG: exactly these keys (the migration refuses others).
+    config: {}
+    #   agent_api.selected_agent: soev
+    #   document_writer.enable: true
+    #   live_documents.enable: true
+    #   live_mail.enable: false
+    #   notes.enable: true
+    #   web.search.enable: true
+    #   webui.url: https://client.soev.ai
+    #   user.permissions.features: {web_search: true, notes: true}
+    # SOEV_V2_MODEL_MAP: stored model id -> soev-api catalog id. For apply, the LiteLLM model
+    # names (take the pairs from the catalog); for models, the old catalog ids.
+    modelMap: {}
+    #   zai-org/GLM-5.3: zai-org/glm-5.3
+    ingestConcurrency: 4
+    # Keep polling running ingest this long before exiting 75 (retry).
+    waitSeconds: 600
+    # Kubernetes retries exit 1 (soev-api unreachable) and 75 (ingest running) with
+    # exponential backoff capped at 6 min; exit 2 (invalid input) fails the Job at once.
+    backoffLimit: 60
+    # Unset keeps the finished Job; once a TTL removes it, the next Helm upgrade
+    # recreates it and the migration runs again (harmless, but not free).
+    ttlSecondsAfterFinished: null
+    resources: {}
+liveDocuments:
+  enabled: null  # Application default false; explicit false is rendered too.
+liveMail:
+  enabled: null  # Application default false; explicit false is rendered too.
+webuiUrl: ""  # Public URL used for callbacks, e.g. https://client.soev.ai.
+
+# Only rendered when openWebui.config.vectorDb is pgvector. PGVECTOR_DB_URL
+# inherits DATABASE_URL. Set openWebui.config.databaseUser/databaseName to match
+# postgres.user/database; a mismatch fails rendering instead of overriding values.
+# CNPG must declare the vector extension; its owner role cannot create it.
+pgvector:
+  maxVectorLength: 1024  # bge-m3 dimensions; match ragEmbeddingModel.
+  createExtension: false
+
+# Appended to the open-webui container env. Supports value and valueFrom.
+extraEnv: []
+# - name: EXAMPLE_SETTING
+#   value: "true"
+# - name: EXAMPLE_SECRET
+#   valueFrom:
+#     secretKeyRef: {name: existing-secret, key: example}
+
+# -----------------------------------------------------------------------------
 # PostgreSQL
 # -----------------------------------------------------------------------------
 postgres:
@@ -727,7 +732,7 @@ postgres:
 
   # External server, e.g. a CloudNativePG `<cluster>-rw` Service such as
   # pg-staging-rw.database-staging.svc.cluster.local. Leave empty for the
-  # bundled StatefulSet. When set, every consumer (Open WebUI, migration job,
+  # bundled StatefulSet. When set, every consumer (Open WebUI, migration init container,
   # loader-worker) connects here and you normally also set `enabled: false`.
   # Cross-namespace hosts need the target namespace in
   # networkPolicy.extraEgressNamespaces. The loader-worker bootstrap Job needs
@@ -766,6 +771,7 @@ postgres:
 # Weaviate (Vector Database)
 # -----------------------------------------------------------------------------
 weaviate:
+  # Must be false when openWebui.config.vectorDb is pgvector; otherwise rendering fails.
   enabled: true
 
   image:
@@ -848,6 +854,19 @@ loaderWorker:
 
   service:
     port: 8002
+
+  # With networkPolicy.egress.strict, the only shared-services pods the
+  # loader-worker reaches (replaces the whole-namespace rule).
+  networkPolicy:
+    egressAllow:
+      - name: doc-processor
+        namespace: shared-services
+        podLabels: {app.kubernetes.io/name: gradient-gateway, app.kubernetes.io/component: doc-processor}
+        ports: [8001]
+      - name: litellm
+        namespace: shared-services
+        podLabels: {app.kubernetes.io/name: litellm, app.kubernetes.io/component: litellm}
+        ports: [4000]
 
   resources:
     requests:
@@ -971,6 +990,9 @@ secrets:
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
   openaiApiKey: ""
   ragOpenaiApiKey: ""
+  # Required when soevApi.url is set and externalSecrets.enabled is false.
+  soevApiKey: ""
+  soevApiSigningKey: ""  # Literal multi-line Ed25519 PEM; use a YAML | block.
 
   # Google Drive / OAuth (leave empty to disable)
   googleClientSecret: ""
@@ -995,13 +1017,6 @@ secrets:
   # External Services API Keys (optional)
   externalDocumentLoaderApiKey: ""
   ragExternalRerankerApiKey: ""
-
-  # Agent API X-API-Key (must match AGENTS_API_KEY on the agent service)
-  agentApiKey: ""
-
-  # Discovery-proxy X-API-Key (must match the agents-api key — usually
-  # the same value as agentApiKey above)
-  searchApiKey: ""
 
   # Loader-worker → tenant /ingest callback bearer (loader-worker presents this
   # outbound; open-webui validates inbound). Same value, both pods.
@@ -1031,20 +1046,6 @@ secrets:
   postgresPassword: ""
 
 # -----------------------------------------------------------------------------
-# Agent Search (machine-auth retrieval endpoints)
-# -----------------------------------------------------------------------------
-# When enabled, mounts:
-#   GET  /api/v1/internal/retrieval/accessible-kbs
-#   POST /api/v1/internal/retrieval/query
-# on the open-webui pod. The agent authenticates by presenting AGENT_API_KEY
-# (the same secret used for the open-webui → agent outbound path — single
-# shared secret across the per-tenant trust boundary) plus an
-# `X-Acting-User-Id` header. Open-webui resolves the user, applies KB-level
-# ACL, and serves the response. No new ACL state.
-agentSearch:
-  enabled: false
-
-# -----------------------------------------------------------------------------
 # Service Account
 # -----------------------------------------------------------------------------
 serviceAccount:
@@ -1056,6 +1057,10 @@ serviceAccount:
 # External Secrets Operator
 # -----------------------------------------------------------------------------
 # When enabled, secrets are fetched from 1Password via ESO SDK provider
+# Use an existing store instead of rendering the chart's own SecretStore.
+# Example: {kind: ClusterSecretStore, name: soev-staging}
+secretStoreRef: {}
+
 externalSecrets:
   enabled: false
   refreshInterval: "1h"
@@ -1067,6 +1072,7 @@ externalSecrets:
     cache: true                                  # Set to false if ESO version doesn't support cache
     cacheTTL: "5m"
     cacheMaxSize: 100
+    # soevApiKey and soevApiSigningKey are always fetched when soevApi.url is set.
     # Toggle optional fields (set to true if the 1P item contains these)
     fields:
       s3AccessKeyId: false
@@ -1079,8 +1085,6 @@ externalSecrets:
       confluenceBasicAuthApiToken: false
       externalDocumentLoaderApiKey: false
       ragExternalRerankerApiKey: false
-      agentApiKey: false
-      searchApiKey: false
       loaderIngestApiKey: false
       pipelineApiKey: false
       loaderWorkerDbPassword: false
@@ -1092,11 +1096,46 @@ externalSecrets:
 # -----------------------------------------------------------------------------
 networkPolicy:
   enabled: true
+  # namespace (legacy isolation) or release (only pods with this release instance label).
+  # Applies to both Kubernetes and Cilium policies; rules are unchanged.
+  scope: namespace
   # Additional namespaces this tenant is allowed to egress to (in addition to
   # sharedServices.namespace). Useful when sharedServices.namespace is set to
   # a per-env value like staging-shared-services but the tenant also needs to
   # reach the cluster-wide shared-services namespace (e.g. LiteLLM).
+  # Not allowed with egress.strict: list the services in egress.allow instead.
   extraEgressNamespaces: []
+  # Public egress never reaches the non-public IPv4 ranges (RFC1918, CGNAT,
+  # link-local/metadata, loopback, multicast, documentation and reserved).
+  egress:
+    # false: every pod in sharedServices.namespace and extraEgressNamespaces,
+    # every pod in this namespace, and public IPv4 on any port.
+    # true: this release's own pods on the ports they serve, the entries in
+    # allow, OTLP to the observability namespace, and public IPv4 on publicPorts.
+    strict: false
+    publicPorts: [443]
+    # Destinations outside this release, strict mode only. Each entry:
+    #   {name, namespace ("" = this namespace), podLabels ({} = every pod), ports}
+    allow: []
+    #  - name: litellm
+    #    namespace: shared-services
+    #    podLabels: {app.kubernetes.io/name: litellm, app.kubernetes.io/component: litellm}
+    #    ports: [4000]
+    # CiliumNetworkPolicy allowing TCP 443 only to the hostnames the tenant's
+    # enabled integrations need (OIDC, Microsoft Graph and SharePoint, Google
+    # Drive, Confluence, the S3 endpoint, the Slack webhook) plus extraNames and
+    # extraPatterns. DNS from these pods then goes through Cilium's DNS proxy.
+    fqdn:
+      enabled: false
+      # false: the CIDR rule above still admits all public 443, so the policy
+      # only records which names the pods resolve. true (needs strict): the
+      # CIDR rule is dropped and only the listed hostnames are reachable.
+      enforce: false
+      extraNames: []
+      extraPatterns: []
+      dnsSelector:
+        k8s:io.kubernetes.pod.namespace: kube-system
+        k8s:k8s-app: kube-dns
 
 # -----------------------------------------------------------------------------
 # Cilium Network Policy

@@ -28,9 +28,9 @@ def application(tmp_path_factory):
 @pytest.fixture
 def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O doubles share fixture state.
     """Use actual model access checks with explicit in-memory grants and rows."""
+    from open_webui import config as webui_config
     from open_webui.models.models import ModelModel
     from open_webui.utils import assistant_requests, models
-    from open_webui.utils.agent_routing import AgentRoute
     from open_webui.utils.auth import get_verified_user
 
     def row(id, base=None, active=True, params=None):
@@ -126,10 +126,9 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     monkeypatch.setattr(models.Groups, 'get_groups_by_member_id', groups)
     monkeypatch.setattr(application.Config, 'get', config)
     monkeypatch.setattr(application, 'BYPASS_MODEL_ACCESS_CONTROL', False)
-    monkeypatch.setattr(application, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
+    monkeypatch.setattr(webui_config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
     monkeypatch.setattr(application, 'check_model_access', models.check_model_access)
-    monkeypatch.setattr(application, 'resolve_agent_route', lambda **kwargs: AgentRoute(to_agent=True))
-    monkeypatch.setattr(application, 'FEATURE_AGENT_PICKER', False)
+    monkeypatch.setattr(application, 'AGENT_API_ENABLED', True)
     monkeypatch.setattr(application, 'process_chat_payload', payload)
     monkeypatch.setattr(application, 'call_agent_api', capture)
     monkeypatch.setattr(application, 'chat_completion_handler', capture)
@@ -325,10 +324,9 @@ def test_openai_router_does_not_replace_picked_llm(split_harness, monkeypatch):
     """The real OpenAI router keeps a base override's model ID in its provider body."""
     from open_webui import main
     from open_webui.routers import openai
-    from open_webui.utils.agent_routing import AgentRoute
 
     h = split_harness
-    monkeypatch.setattr(main, 'resolve_agent_route', lambda **kwargs: AgentRoute(to_agent=False))
+    monkeypatch.setattr(main, 'AGENT_API_ENABLED', False)
 
     async def connection(*args, **kwargs):
         return 'http://provider.invalid/v1', '', {}
@@ -498,3 +496,19 @@ def test_existing_unbound_chat_binds_without_reading_messages(split_harness):
     assert response.status_code == 200, response.text
     assert h.bindings == [('chat', 'assistant')]
     assert h.message_lookups == []
+
+
+def test_chat_bound_to_an_old_picker_agent_routes_like_any_chat(split_harness, application, monkeypatch):
+    """A chat still carrying a v1 picker agent_id goes to the agent service unrefused."""
+    h = split_harness
+    routed = []
+
+    async def call_agent_api(request, form_data, metadata):
+        routed.append(metadata['route_to_agent'])
+        return {'choices': []}
+
+    monkeypatch.setattr(application, 'call_agent_api', call_agent_api)
+    h.chats['chat'] = SimpleNamespace(meta={'agent_id': 'offertemachine'}, chat={}, variables={})
+    response = send(h, chat_id='chat')
+    assert response.status_code == 200, response.text
+    assert routed == [True]

@@ -15,6 +15,7 @@ from open_webui.soev.client import SoevClient, close_client
 @pytest.fixture
 def api(monkeypatch):
     """Exercise the real client against queued HTTP responses without network access."""
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
     requests, responses = [], []
     refs = []
 
@@ -604,3 +605,56 @@ def test_policy_requires_a_verified_user(api) -> None:
     api.app.dependency_overrides[cloud_sync.get_verified_user] = deny
     assert api.browser.get('/api/v1/cloud-sync/policy').status_code == 401
     cloud_sync.identity.build_client.assert_not_called()
+
+
+@pytest.mark.parametrize('provider,family', [('onedrive', 'live_documents'), ('outlook_mail', 'mail')])
+@pytest.mark.parametrize('lifecycle', ['enabled', 'suspended', 'missing'])
+def test_live_document_grant_enable_uses_owned_connection(api, lifecycle, provider, family):
+    """Only a user's OneDrive grant is reused, resumed or created with the document family."""
+    grant = {'id': 'g', 'families': [family], 'lifecycle': lifecycle}
+    api.responses.extend(
+        [
+            response({'id': 'c', 'source_kind': provider}),
+            response({'data': [] if lifecycle == 'missing' else [grant]}),
+        ]
+    )
+    if lifecycle != 'enabled':
+        api.responses.append(response({**grant, 'lifecycle': 'enabled'}))
+    result = api.browser.post(f'/api/v1/cloud-sync/connections/c/live/{family}')
+    assert result.status_code == 200 and result.json()['lifecycle'] == 'enabled'
+    assert all(r.headers.get('X-Soev-Subject') for r in api.requests)
+    if lifecycle == 'missing':
+        assert json.loads(api.requests[-1].content) == {'families': [family]}
+        assert api.requests[-1].headers['Idempotency-Key'] == f'live:{family}:c'
+    elif lifecycle == 'suspended':
+        assert api.requests[-1].method == 'PATCH'
+        assert json.loads(api.requests[-1].content) == {'enabled': True}
+
+
+def test_live_document_grant_is_provider_neutral(api):
+    """The platform decides which providers can grant the document family."""
+    grant = {'id': 'g', 'families': ['live_documents'], 'lifecycle': 'enabled'}
+    api.responses.extend([response({'id': 'c', 'source_kind': 'google_drive'}), response({'data': [grant]})])
+    result = api.browser.post('/api/v1/cloud-sync/connections/c/live/live_documents')
+    assert result.status_code == 200 and result.json() == grant
+
+
+@pytest.mark.parametrize('key', ['kb-1', 'kb: space&plus+?=#é'])
+def test_sync_all_runs_the_kbs_schedules_in_one_call(api, key):
+    """Sync all forwards the KB as collection key and returns per-schedule outcomes."""
+    from urllib.parse import quote
+
+    runs = {
+        'data': [
+            {'schedule_id': 'a', 'job_id': 'j', 'code': None},
+            {'schedule_id': 'b', 'job_id': None, 'code': 'run_too_soon'},
+        ]
+    }
+    api.responses.append(response(runs))
+    result = api.browser.post(f'/api/v1/cloud-sync/knowledge/{quote(key, safe="")}/sync')
+    assert result.status_code == 200
+    assert result.json() == runs
+    assert api.requests[0].method == 'POST'
+    assert api.requests[0].url.raw_path.decode() == f'/v1/collections/{quote(key, safe="")}/sync'
+    assert api.requests[0].headers['Idempotency-Key']
+    assert_assertions(api.requests)

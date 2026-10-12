@@ -20,6 +20,10 @@ from open_webui.models.knowledge import (
 )
 
 
+#: The key under the collection's client-owned ``meta`` that holds OWUI's knowledge meta; other clients own the rest.
+META_NAMESPACE = 'owui'
+
+
 def types_from_schedules(schedules: list[dict]) -> dict[str, str]:
     types = {}
     # If providers conflict for a collection, the first eligible schedule by id wins.
@@ -39,12 +43,27 @@ def knowledge_of(collection: dict, *, service_principal: str, types: dict[str, s
         type=subscriptions[0] if subscriptions else (types or {}).get(collection['key'], 'local'),
         name=collection['name'],
         description=collection['description'] or '',
-        meta={},
+        meta=collection['meta'].get(META_NAMESPACE, {}),
         access_grants=grants_of(collection, service_principal=service_principal),
         created_at=int(dt.datetime.fromisoformat(collection['created_at']).timestamp()),
         updated_at=int(dt.datetime.fromisoformat(collection['updated_at']).timestamp()),
         deleted_at=None,
     )
+
+
+def meta_patch(current: dict, desired: dict) -> dict:
+    """The RFC 7396 merge patch that turns ``current`` into ``desired``.
+
+    Merge patch cannot store null, so a None in ``desired`` reads as an absent key."""
+    patch = {key: None for key in current if key not in desired}
+    for key, value in desired.items():
+        before = current.get(key)
+        if isinstance(value, dict) and isinstance(before, dict):
+            if nested := meta_patch(before, value):
+                patch[key] = nested
+        elif value != before:
+            patch[key] = value
+    return patch
 
 
 def collection_create_body(form: KnowledgeForm, *, service_principal: str) -> dict:
@@ -170,9 +189,15 @@ def knowledge_list_of(items: list, total: int) -> KnowledgeListResponse:
 
 
 def file_response_of(
-    file: dict, document: dict | None, *, metadata_only: bool
+    file: dict, document: dict | None, *, metadata_only: bool, collection: dict | None = None
 ) -> FileUserMetadataResponse | FileUserResponse:
     fields = {key: file[key] for key in ('id', 'user_id', 'hash', 'filename', 'meta', 'created_at', 'updated_at')}
+    if collection is not None:
+        # Cross-KB search names the KB holding each file, so a picked file is attached as that KB's document.
+        fields['collection'] = {'id': collection['key'], 'name': collection['name']}
+    if document and document.get('schedule_ids'):
+        # A synced document belongs to its schedules: it leaves with its source, not on its own.
+        fields['meta'] = {**(fields['meta'] or {}), 'soev_schedule_ids': list(document['schedule_ids'])}
     added_at = int(dt.datetime.fromisoformat(document['ingested_at']).timestamp()) if document else file['created_at']
     fields.update(user=None, added_at=added_at)
     if metadata_only:

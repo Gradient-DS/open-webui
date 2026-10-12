@@ -1,24 +1,8 @@
-# Per-stack OWUI stateful services for soev multi-stack dev mode.
-#
-# One copy per active feature-branch worktree, brought up by
-# scripts/stack/stack.py alongside the soev-solutions per-stack compose.
-#
-# Ports are published to per-stack-allocated host ports so the stack
-# manager works on plain Docker (no OrbStack DNS magic required). Host
-# processes (OWUI BE on host, agent on host) reach these via:
-#   postgres → localhost:${POSTGRES_PORT}
-#   weaviate → localhost:${WEAVIATE_HTTP_PORT}  (HTTP)
-#   weaviate → localhost:${WEAVIATE_GRPC_PORT}  (gRPC)
-#   redis    → localhost:${REDIS_PORT}
-# Port values come from .env.stack-N (env_builder writes them, the
-# stack manager passes the file via `docker compose --env-file`).
-#
-# Image versions and credentials match docker-compose.soev-dev.yaml so
-# the OWUI backend running on the host can use identical DATABASE_URL /
-# Weaviate connection settings — just swap port numbers per stack via
-# the env-builder-generated .env.stack-N.
-#
-# Legacy single-stack flow continues to use docker-compose.soev-dev.yaml.
+# Legacy: per-stack Weaviate, Postgres and Redis for the retired soev
+# multi-stack tooling (stackctl, removed 2026-09-29). Ports came from the
+# generated .env.stack-N files that tooling wrote; nothing in CI or docs
+# uses this file. Running against a soev stack: see CLAUDE.md
+# "Running against a soev stack".
 
 name: stack
 

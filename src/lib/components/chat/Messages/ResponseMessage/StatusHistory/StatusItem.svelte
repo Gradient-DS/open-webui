@@ -35,12 +35,12 @@
 						{#if status?.description?.includes('{{count}}')}
 							{$i18n.t(status?.description, {
 								count: (status?.urls || status?.items).length,
-								...statusI18nParams(status),
+								...statusI18nParams(status, (key) => $i18n.t(key)),
 								query: status?.query
 							})}
 						{:else if status?.description}
 							{$i18n.t(status.description, {
-								...statusI18nParams(status),
+								...statusI18nParams(status, (key) => $i18n.t(key)),
 								query: status?.query
 							})}
 						{/if}
@@ -178,13 +178,30 @@
 					<!-- $i18n.t("Looked back at earlier results") -->
 					<!-- $i18n.t("Searching the knowledge base…") -->
 					<!-- $i18n.t("Running {{tool}}…") -->
+					<!-- $i18n.t("Ran {{tool}}") -->
+					<!-- $i18n.t("Could not open document") -->
+					<!-- Labels utils/agent_v2.py (_GENERIC, _NAMED) gives a tool without a declared status. -->
+					<!-- $i18n.t("Searched the knowledge base") -->
+					<!-- $i18n.t("Finding documents…") -->
+					<!-- $i18n.t("Found documents") -->
+					<!-- $i18n.t("Listing documents…") -->
+					<!-- $i18n.t("Listed documents") -->
+					<!-- $i18n.t("Opening document: {{title}}") -->
+					<!-- $i18n.t("Opened document: {{title}}") -->
+					<!-- $i18n.t("Searching the web…") -->
+					<!-- $i18n.t("Searched the web") -->
+					<!-- $i18n.t("Read web pages") -->
 					{#if status?.description}
 						{$i18n.t(
 							status.description,
 							/* statusI18nParams strips `query` and `count` (both reserved for
 							   per-action branches). Re-add them here for templates in the
 							   generic branch that use them as placeholders. */
-							{ ...statusI18nParams(status), query: status?.query, count: status?.count }
+							{
+								...statusI18nParams(status, (key) => $i18n.t(key)),
+								query: status?.query,
+								count: status?.count
+							}
 						)}
 					{/if}
 				</div>

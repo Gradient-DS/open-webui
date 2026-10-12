@@ -39,6 +39,7 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.tools import Tools
+from open_webui.soev.availability import configured
 from open_webui.socket.main import disconnect_user_sessions  # [Gradient] Revoke deleted users' live sessions.
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
@@ -1219,7 +1220,7 @@ async def get_user_preview(
     )
     accessible_model_ids = owned_model_ids | granted_model_ids
 
-    all_knowledge = await Knowledges.get_knowledge_bases(db=db)
+    all_knowledge = await Knowledges.get_knowledge_bases(db=db) if configured() else []
     owned_knowledge_ids = {k.id for k in all_knowledge if k.user_id == user_id}
     granted_knowledge_ids = await AccessGrants.get_accessible_resource_ids(
         user_id=user_id,

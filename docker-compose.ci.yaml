@@ -2,6 +2,8 @@
 # Build-time downloads are allowed; the running application has only `internal`.
 # Recreate the stack for a fresh run: service databases are intentionally ephemeral.
 # Tenant feature values and explicit divergences: security/deployed-config.md.
+# No soev-solutions service or stand-in runs here (soev-api, soev-sync, soev-agents-api): routes
+# that need one are waived in security/route-coverage.toml (backed_by = "soev-solutions").
 services:
   postgres:
     image: postgres:15-alpine
@@ -152,33 +154,11 @@ services:
       # An explicit URL bypasses the import-time Ollama port probes.
       OLLAMA_BASE_URL: "http://stub:8000"
       OLLAMA_BASE_URLS: "http://stub:8000"
-      # These handler-reachable fork services must all stay in-network.
-      AGENT_API_BASE_URL: "http://stub:8000"
-      AGENT_API_ENABLED: "true"
+      # Matches the deployed list; no agents-api server is configured or run.
       AGENT_API_AGENTS: "soev_chat_manual,assistant_onboarding"
-      AGENT_API_PICKER_DEFAULT_SLUG: "soev_chat_manual"
-      FEATURE_AGENT_PICKER: "false"
-      ENABLE_AGENT_PROXY: "true"
-      AGENT_SEARCH_ENABLED: "true"
-      AGENT_API_KEY: "ci-stub-key"
-      SEARCH_API_BASE_URL: "http://stub:8000"
-      SEARCH_API_KEY: "ci-stub-key"
-      SYNC_DAEMON_URL: "http://stub:8000"
-      # Without a key the client sends "Bearer " and httpx refuses the header, so every
-      # sync/items answered 502 "sync service unreachable" before reaching the stub.
-      SYNC_DAEMON_API_KEY: "ci-stub-key"
-      # The daemon's own calls into open-webui (routers/sync_daemon.py) authenticate
-      # with SYNC_API_KEY (utils/service_auth.py:_sync_key_matches), a different key.
-      SYNC_API_KEY: "ci-stub-key"
-      # The per-tenant sync switch (chart syncDaemon.owuiFlagEnabled; staging runs it).
-      SYNC_DAEMON_ENABLED: "true"
-      # The loader-worker's bearer for the integrations cloud-sync routes.
-      LOADER_INGEST_API_KEY: "ci-stub-key"
       # No tenant sets it yet, but it forwards arbitrary requests upstream: the
       # plane drives it rather than leave it unmeasured.
       ENABLE_OPENAI_API_PASSTHROUGH: "true"
-      PIPELINE_API_BASE_URL: "http://stub:8000"
-      PIPELINE_API_KEY: "ci-stub-key"
       # config.py resets scalar OPENAI_API_BASE_URL after forming the URL list;
       # embedding/audio/image defaults would therefore still point at OpenAI.
       RAG_EMBEDDING_ENGINE: "openai"
@@ -270,6 +250,11 @@ services:
       TWO_FA_GRACE_PERIOD_DAYS: "7"
       ENABLE_FORGOT_PASSWORD: "true"
       ENABLE_USER_WEBHOOKS: "true"
+      # Chat sharing is opt-in per tenant (default off since 2026-10-12) and binds
+      # admins too; a tenant admin can turn it on at runtime, so the plane drives
+      # the share routes with it on. The refusal with it off is covered by
+      # test/authorization/test_chat_share_gate.py. CI-005.
+      USER_PERMISSIONS_CHAT_SHARE: "true"
       AUDIO_TTS_ENGINE: "openai"
       AUDIO_STT_ENGINE: "openai" # Empty means local Whisper, which the slim image does not ship.
       ENABLE_IMAGE_EDIT: "true"

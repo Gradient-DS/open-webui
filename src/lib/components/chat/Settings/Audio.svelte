@@ -3,6 +3,7 @@
 	import { createEventDispatcher, onMount, getContext } from 'svelte';
 
 	import { user, settings, config } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { getVoices as _getVoices } from '$lib/apis/audio';
 
 	import Switch from '$lib/components/common/Switch.svelte';
@@ -239,77 +240,142 @@
 			</UserSettingRow>
 		</UserSettingSection>
 
-		<UserSettingSection title={$i18n.t('TTS Settings')}>
-			<UserSettingRow
-				label={$i18n.t('Text-to-Speech Engine')}
-				description={$i18n.t('Choose the engine used to read assistant responses aloud.')}
-			>
-				<SettingsSelect
-					bind:value={TTSEngine}
-					ariaLabel={$i18n.t('Text-to-Speech Engine')}
-					placeholder={$i18n.t('Select an engine')}
-				>
-					<option value="">{$i18n.t('Default')}</option>
-					<option value="browser-kokoro">{$i18n.t('Kokoro.js (Browser)')}</option>
-				</SettingsSelect>
-			</UserSettingRow>
-
-			{#if TTSEngine === 'browser-kokoro'}
+		<!-- [Gradient] TTS settings only when a speech-output feature is on. -->
+		{#if isFeatureEnabled('read_aloud') || isFeatureEnabled('voice_call')}
+			<UserSettingSection title={$i18n.t('TTS Settings')}>
 				<UserSettingRow
-					label={$i18n.t('Kokoro.js Dtype')}
-					description={$i18n.t('Select the local model precision used by Kokoro.js.')}
+					label={$i18n.t('Text-to-Speech Engine')}
+					description={$i18n.t('Choose the engine used to read assistant responses aloud.')}
 				>
 					<SettingsSelect
-						bind:value={TTSEngineConfig.dtype}
-						ariaLabel={$i18n.t('Kokoro.js Dtype')}
-						placeholder={$i18n.t('Select dtype')}
+						bind:value={TTSEngine}
+						ariaLabel={$i18n.t('Text-to-Speech Engine')}
+						placeholder={$i18n.t('Select an engine')}
 					>
-						<option value="" disabled selected>{$i18n.t('Select dtype')}</option>
-						<option value="fp32">fp32</option>
-						<option value="fp16">fp16</option>
-						<option value="q8">q8</option>
-						<option value="q4">q4</option>
+						<option value="">{$i18n.t('Default')}</option>
+						<option value="browser-kokoro">{$i18n.t('Kokoro.js (Browser)')}</option>
 					</SettingsSelect>
 				</UserSettingRow>
-			{/if}
 
-			<UserSettingRow
-				label={$i18n.t('Auto-Playback Response')}
-				description={$i18n.t('Play assistant responses aloud automatically.')}
-			>
-				<Switch
-					state={responseAutoPlayback}
-					ariaLabel={$i18n.t('Auto-Playback Response')}
-					on:change={(event) => {
-						setResponseAutoPlayback(event.detail);
-					}}
-				/>
-			</UserSettingRow>
+				{#if TTSEngine === 'browser-kokoro'}
+					<UserSettingRow
+						label={$i18n.t('Kokoro.js Dtype')}
+						description={$i18n.t('Select the local model precision used by Kokoro.js.')}
+					>
+						<SettingsSelect
+							bind:value={TTSEngineConfig.dtype}
+							ariaLabel={$i18n.t('Kokoro.js Dtype')}
+							placeholder={$i18n.t('Select dtype')}
+						>
+							<option value="" disabled selected>{$i18n.t('Select dtype')}</option>
+							<option value="fp32">fp32</option>
+							<option value="fp16">fp16</option>
+							<option value="q8">q8</option>
+							<option value="q4">q4</option>
+						</SettingsSelect>
+					</UserSettingRow>
+				{/if}
 
-			<UserSettingRow
-				label={$i18n.t('Speech Playback Speed')}
-				description={$i18n.t('Adjust how quickly spoken responses are played.')}
-			>
-				<div class="relative flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-600">
-					<input
-						type="number"
-						min="0"
-						step="0.01"
-						bind:value={playbackRate}
-						aria-label={$i18n.t('Speech Playback Speed')}
-						class="h-7 w-16 rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 text-right text-xs text-gray-700 outline-hidden transition-colors focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:focus:border-blue-500"
+				<UserSettingRow
+					label={$i18n.t('Auto-Playback Response')}
+					description={$i18n.t('Play assistant responses aloud automatically.')}
+				>
+					<Switch
+						state={responseAutoPlayback}
+						ariaLabel={$i18n.t('Auto-Playback Response')}
+						on:change={(event) => {
+							setResponseAutoPlayback(event.detail);
+						}}
 					/>
-					x
-				</div>
-			</UserSettingRow>
-		</UserSettingSection>
+				</UserSettingRow>
 
-		{#if TTSEngine === 'browser-kokoro'}
-			{#if TTSModel}
+				<UserSettingRow
+					label={$i18n.t('Speech Playback Speed')}
+					description={$i18n.t('Adjust how quickly spoken responses are played.')}
+				>
+					<div class="relative flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-600">
+						<input
+							type="number"
+							min="0"
+							step="0.01"
+							bind:value={playbackRate}
+							aria-label={$i18n.t('Speech Playback Speed')}
+							class="h-7 w-16 rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 text-right text-xs text-gray-700 outline-hidden transition-colors focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:focus:border-blue-500"
+						/>
+						x
+					</div>
+				</UserSettingRow>
+			</UserSettingSection>
+
+			{#if TTSEngine === 'browser-kokoro'}
+				{#if TTSModel}
+					<UserSettingSection title={$i18n.t('Voice')}>
+						<UserSettingField
+							label={$i18n.t('Set Voice')}
+							description={$i18n.t('Choose the Kokoro.js voice used for speech output.')}
+						>
+							<input
+								list="voice-list"
+								class={inputClass}
+								bind:value={voice}
+								aria-label={$i18n.t('Voice')}
+								placeholder={$i18n.t('Select a voice')}
+							/>
+
+							<datalist id="voice-list">
+								{#each voices as voice}
+									<option value={voice.id}>{voice.name}</option>
+								{/each}
+							</datalist>
+						</UserSettingField>
+					</UserSettingSection>
+				{:else}
+					<UserSettingSection title={$i18n.t('Voice')}>
+						<div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+							<Spinner className="size-4" />
+
+							<div class="shimmer">
+								{$i18n.t('Loading Kokoro.js...')}
+								{TTSModelProgress && TTSModelProgress.status === 'progress'
+									? `(${Math.round(TTSModelProgress.progress * 10) / 10}%)`
+									: ''}
+							</div>
+						</div>
+
+						<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
+							{$i18n.t('Please do not close the settings page while loading the model.')}
+						</div>
+					</UserSettingSection>
+				{/if}
+			{:else if $config.audio.tts.engine === ''}
 				<UserSettingSection title={$i18n.t('Voice')}>
 					<UserSettingField
 						label={$i18n.t('Set Voice')}
-						description={$i18n.t('Choose the Kokoro.js voice used for speech output.')}
+						description={$i18n.t('Choose the browser voice used for speech output.')}
+					>
+						<SettingsSelect bind:value={voice} className="w-full" ariaLabel={$i18n.t('Voice')}>
+							<option value="" selected={voice !== ''}>{$i18n.t('Default')}</option>
+							{#each voices.filter((v) => nonLocalVoices || v.localService === true) as _voice}
+								<option
+									value={_voice.name}
+									class="bg-gray-100 dark:bg-gray-700"
+									selected={voice === _voice.name}>{_voice.name}</option
+								>
+							{/each}
+						</SettingsSelect>
+					</UserSettingField>
+					<UserSettingRow
+						label={$i18n.t('Allow non-local voices')}
+						description={$i18n.t('Include voices that are not provided by a local speech service.')}
+					>
+						<Switch bind:state={nonLocalVoices} />
+					</UserSettingRow>
+				</UserSettingSection>
+			{:else if $config.audio.tts.engine !== ''}
+				<UserSettingSection title={$i18n.t('Voice')}>
+					<UserSettingField
+						label={$i18n.t('Set Voice')}
+						description={$i18n.t('Choose the configured text-to-speech service voice.')}
 					>
 						<input
 							list="voice-list"
@@ -326,69 +392,7 @@
 						</datalist>
 					</UserSettingField>
 				</UserSettingSection>
-			{:else}
-				<UserSettingSection title={$i18n.t('Voice')}>
-					<div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-						<Spinner className="size-4" />
-
-						<div class="shimmer">
-							{$i18n.t('Loading Kokoro.js...')}
-							{TTSModelProgress && TTSModelProgress.status === 'progress'
-								? `(${Math.round(TTSModelProgress.progress * 10) / 10}%)`
-								: ''}
-						</div>
-					</div>
-
-					<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
-						{$i18n.t('Please do not close the settings page while loading the model.')}
-					</div>
-				</UserSettingSection>
 			{/if}
-		{:else if $config.audio.tts.engine === ''}
-			<UserSettingSection title={$i18n.t('Voice')}>
-				<UserSettingField
-					label={$i18n.t('Set Voice')}
-					description={$i18n.t('Choose the browser voice used for speech output.')}
-				>
-					<SettingsSelect bind:value={voice} className="w-full" ariaLabel={$i18n.t('Voice')}>
-						<option value="" selected={voice !== ''}>{$i18n.t('Default')}</option>
-						{#each voices.filter((v) => nonLocalVoices || v.localService === true) as _voice}
-							<option
-								value={_voice.name}
-								class="bg-gray-100 dark:bg-gray-700"
-								selected={voice === _voice.name}>{_voice.name}</option
-							>
-						{/each}
-					</SettingsSelect>
-				</UserSettingField>
-				<UserSettingRow
-					label={$i18n.t('Allow non-local voices')}
-					description={$i18n.t('Include voices that are not provided by a local speech service.')}
-				>
-					<Switch bind:state={nonLocalVoices} />
-				</UserSettingRow>
-			</UserSettingSection>
-		{:else if $config.audio.tts.engine !== ''}
-			<UserSettingSection title={$i18n.t('Voice')}>
-				<UserSettingField
-					label={$i18n.t('Set Voice')}
-					description={$i18n.t('Choose the configured text-to-speech service voice.')}
-				>
-					<input
-						list="voice-list"
-						class={inputClass}
-						bind:value={voice}
-						aria-label={$i18n.t('Voice')}
-						placeholder={$i18n.t('Select a voice')}
-					/>
-
-					<datalist id="voice-list">
-						{#each voices as voice}
-							<option value={voice.id}>{voice.name}</option>
-						{/each}
-					</datalist>
-				</UserSettingField>
-			</UserSettingSection>
 		{/if}
 	</div>
 

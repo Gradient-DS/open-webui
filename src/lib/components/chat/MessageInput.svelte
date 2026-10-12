@@ -1,16 +1,11 @@
 <script lang="ts">
-	import PagePlus from '$lib/components/icons/PagePlus.svelte';
-	import PageEdit from '$lib/components/icons/PageEdit.svelte';
-	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
-	import Component from '../icons/Component.svelte';
+	import MailSearch from '$lib/components/icons/MailSearch.svelte';
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
 	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
 	import { selectAssistant } from '$lib/utils/assistantSelection';
 	import { isAssistant, isLLM } from '$lib/utils/assistants';
 	import AssistantChip from './AssistantChip.svelte';
-	import AgentSelector from './AgentSelector.svelte';
-	import { pendingAgentId } from '$lib/stores';
 	import DOMPurify from 'dompurify';
 	import { toast } from 'svelte-sonner';
 
@@ -37,7 +32,20 @@
 		createPicker,
 		initialize as initializeGooglePicker
 	} from '$lib/utils/google-drive-picker';
-	import { pickAndDownloadFilesModal } from '$lib/utils/onedrive-file-picker';
+	import {
+		connectLiveSource,
+		attachPickedDocument,
+		attachErrorMessage,
+		liveConnections,
+		matchingPickerConnection,
+		prefetchLiveConnections,
+		relinkPrompt
+	} from '$lib/utils/live-connections';
+	import { enableLiveFamily } from '$lib/apis/cloudSync';
+	import {
+		beginBusinessDocumentPicker,
+		prepareBusinessDocumentPicker
+	} from '$lib/utils/onedrive-file-picker';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 	const dispatch = createEventDispatcher();
@@ -79,7 +87,16 @@
 		getWeekday
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { uploadFile, getFileAttachments } from '$lib/apis/files';
+	import {
+		TOOL_OFF_DESCRIPTION,
+		TOOL_STATE_LABELS,
+		WEB_SEARCH_STATE_DESCRIPTIONS,
+		DOCUMENT_WRITER_STATE_DESCRIPTIONS,
+		documentWriterState,
+		webSearchState,
+		type ToolState
+	} from '$lib/utils/toolState';
+	import { uploadFile } from '$lib/apis/files';
 	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
 	import { generateAutoCompletion } from '$lib/apis';
 	import { getChatById } from '$lib/apis/chats';
@@ -120,6 +137,21 @@
 	import PlusAlt from '../icons/PlusAlt.svelte';
 	import Terminal from '../icons/Terminal.svelte';
 	import Document from '../icons/Document.svelte';
+	// [Gradient] Icons for items pinned from the "+" menu.
+	import Clip from '../icons/Clip.svelte';
+	import Camera from '../icons/Camera.svelte';
+	import Link from '../icons/Link.svelte';
+	import PageEdit from '../icons/PageEdit.svelte';
+	import PagePlus from '../icons/PagePlus.svelte';
+	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
+	import { meetingsAvailable } from '$lib/components/meetings/availability';
+	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
+	import FolderOpen from '../icons/FolderOpen.svelte';
+	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
+	import DocumentArrowUp from '../icons/DocumentArrowUp.svelte';
+	import GoogleDrive from '../icons/GoogleDrive.svelte';
+	import OneDrive from '../icons/OneDrive.svelte';
+	import OneDriveSearch from '../icons/OneDriveSearch.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import Knobs from '../icons/Knobs.svelte';
@@ -129,8 +161,6 @@
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
-	import Filter from '../icons/Filter.svelte';
-	import { showRagFilter } from '$lib/stores/rag-filter';
 
 	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
@@ -190,8 +220,6 @@
 	// [Gradient] True when this chat routes to the agent service, which owns
 	// retrieval — hides per-file retrieval controls that would be no-ops there.
 	export let agentRouted = false;
-	// [Gradient] Picker visibility is independent of agent runtime routing.
-	export let agentPickerActive = false;
 
 	// [Gradient] The picker shows whenever there is anything to pick, including
 	// single-model tenants — it also hosts model info, set-as-default and the pin
@@ -218,9 +246,14 @@
 	export let selectedFilterIds: string[] = [];
 
 	export let imageGenerationEnabled = false;
+	export let liveDocumentsState: ToolState = 'off';
+	export let liveMailState: ToolState = 'off';
 	export let webSearchEnabled = false;
+	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
+	export let webSearchRequired = false;
 	export let codeInterpreterEnabled = false;
-	export let documentWriterEnabled = false;
+	export let documentWriterEnabled = true;
+	export let documentWriterRequired = false;
 	export let officeEnabled = false;
 	export let officeEditEnabled = false;
 	export let toolApprovalMode = 'full';
@@ -278,10 +311,14 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
+		webSearchRequired,
+		liveDocumentsState,
+		liveMailState,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
 		officeEnabled,
 		officeEditEnabled,
+		documentWriterRequired,
 		toolApprovalMode
 	};
 
@@ -898,36 +935,6 @@
 		officeEnabled &&
 		showOfficeButton;
 	$: if (!showOfficeEditButton) officeEditEnabled = false;
-
-	// Disable code interpreter when terminal is active (mutually exclusive)
-	$: if ($selectedTerminalId && codeInterpreterEnabled) {
-		codeInterpreterEnabled = false;
-	}
-
-	// Auto-disable capability toggles when the selected model(s) no longer support them
-	// (e.g. switching from a web-search-capable model to one without). Mirrors the terminal
-	// guard above and keeps both the active-capability badge and the getFeatures() payload
-	// from carrying a stale capability. A feature stays on only if every selected model
-	// supports it; the `?? true` fallback in the *CapableModels derivations means models that
-	// are still loading (or omit the capability) are treated as capable, so we never flicker.
-	$: selectedModelCount = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length;
-	$: if (webSearchEnabled && webSearchCapableModels.length !== selectedModelCount) {
-		webSearchEnabled = false;
-	}
-	// Clear selected terminal when model doesn't support terminal
-	$: if ($selectedTerminalId && selectedModelIds.length > 0 && terminalCapableModels.length === 0) {
-		selectedTerminalId.set(null);
-	}
-	$: if (imageGenerationEnabled && imageGenerationCapableModels.length !== selectedModelCount) {
-		imageGenerationEnabled = false;
-	}
-	$: if (codeInterpreterEnabled && codeInterpreterCapableModels.length !== selectedModelCount) {
-		codeInterpreterEnabled = false;
-	}
-	$: if (documentWriterEnabled && documentWriterCapableModels.length !== selectedModelCount) {
-		documentWriterEnabled = false;
-	}
-
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
 	// The first side used locks the conversation; the unavailable side is grayed out with a
@@ -941,20 +948,118 @@
 		? getHistorySide(dataSeparationMessages)
 		: null;
 	$: dataSeparationSide = strictDataSeparation
-		? getActiveSide({ messages: dataSeparationMessages, files, webSearchEnabled })
+		? getActiveSide({
+				messages: dataSeparationMessages,
+				files,
+				webSearchEnabled: webSearchEnabled && showWebSearchButton
+			})
 		: null;
 	$: openInternetBlocked = strictDataSeparation && dataSeparationSide === 'internal';
 	$: internalBlocked = strictDataSeparation && dataSeparationSide === 'open_internet';
 	$: dataSeparationMessage = $i18n.t(
 		'Internal documents and the open internet cannot be used in the same conversation.'
 	);
-	// Defensive: a model's defaultFeatureIds could re-enable web search in a conversation already
-	// locked to internal documents. Keyed on the history-only side to avoid a reactive cycle.
-	$: if (dataSeparationHistorySide === 'internal' && webSearchEnabled) {
-		webSearchEnabled = false;
-	}
+	// [Gradient] Pinned-bar buttons for the blocked side are hidden; the "+" menu still
+	// shows them grayed out with the explanatory tooltip.
+	$: dataSeparationBlockedItems = new Set(
+		strictDataSeparation
+			? [
+					...(openInternetBlocked ? ['attach_webpage', 'web_search'] : []),
+					...(internalBlocked
+						? [
+								'upload_files',
+								'capture',
+								'attach_files',
+								'attach_notes',
+								'attach_meetings',
+								'knowledge',
+								'reference_chats',
+								'google_drive',
+								'onedrive'
+							]
+						: [])
+				]
+			: []
+	);
 
-	let inputMenuRef;
+	// [Gradient] "+" menu items shown as buttons in the composer bar: every pinned item and
+	// every item that is on or on Auto, in menu order (inputItems.ts). The "Attach Files"
+	// submenu shares the upload_files restriction key with the menu.
+	$: inputBarAllowed = (id: string) =>
+		(inputMenuRestrictTo === null ||
+			inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
+			(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
+		!dataSeparationBlockedItems.has(id);
+	$: inputItemStates = {
+		live_mail: itemState(liveMailState),
+		live_documents: itemState(liveDocumentsState),
+		web_search: itemState(webSearchToolState),
+		image_generation: itemState(imageGenerationEnabled),
+		code_interpreter: itemState(codeInterpreterEnabled),
+		document_writer: itemState(documentWriterToolState),
+		tools: itemState((selectedToolIds ?? []).length),
+		skills: itemState((selectedSkillIds ?? []).length),
+		...Object.fromEntries(
+			(selectedFilterIds ?? []).map((id: string) => [`filter:${id}`, itemState(true)])
+		)
+	};
+	$: inputBarItems = barItemIds({
+		order: inputItemOrder(toggleFilters.map((filter: { id: string }) => filter.id)),
+		pinned: normalizePins($settings?.pinnedInputItems),
+		states: inputItemStates,
+		allowed: inputBarAllowed
+	});
+	$: inputMenuFileUploadCapableModels = getFilesystemUploadTerminal(
+		$selectedTerminalId,
+		$terminalServers,
+		$settings
+	)
+		? selectedModelIds
+		: fileUploadCapableModels;
+	$: inputMenuFileUploadEnabled =
+		inputMenuFileUploadCapableModels.length === selectedModelIds.length &&
+		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
+	$: webUploadEnabled = $_user?.role === 'admin' || ($_user?.permissions?.chat?.web_upload ?? true);
+
+	// [Gradient] Altijd needs web search to be possible: every rule that turns web search
+	// off (data separation, model capability, image generation, Escape) lands on Uit.
+	$: if (!webSearchEnabled && webSearchRequired) {
+		webSearchRequired = false;
+	}
+	$: if (!documentWriterEnabled) documentWriterRequired = false;
+	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
+	$: documentWriterTooltip = pinnedStateTooltip(
+		$i18n.t('Document writer'),
+		documentWriterToolState,
+		$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
+	);
+	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
+
+	let inputMenuRef:
+		| {
+				openTab: (tab: string) => void;
+				openWebpageModal: () => void;
+				cycleWebSearch: () => void;
+				cycleLiveDocuments: () => Promise<void>;
+				cycleLiveMail: () => Promise<void>;
+				cycleTool: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
+		  }
+		| undefined;
+	const liveMailTooltipId = `mail-search-${uuidv4()}`;
+	const liveDocumentsTooltipId = `onedrive-search-${uuidv4()}`;
+	const pinnedStateTooltip = (label: string, state: ToolState, description: string) =>
+		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
+	const pinnedButtonClass =
+		'p-[0.375rem] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden shrink-0';
+	// Altijd (or an active toggle) gets the accent, Auto a subtle outline, Uit none.
+	const pinnedToggleClass = (active: boolean | ToolState) =>
+		`p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden shrink-0 ${
+			active === true || active === 'required'
+				? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
+				: active === 'auto'
+					? 'border-dashed border-gray-300 dark:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
+					: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+		}`;
 
 	const googleDriveHandler = async () => {
 		let tempItemId: string | null = null;
@@ -1000,62 +1105,57 @@
 		}
 	};
 
-	const oneDriveHandler = async (authorityType) => {
-		const tempItemIds: string[] = [];
+	const oneDriveHandler = async () => {
 		try {
-			const filesData = await pickAndDownloadFilesModal(authorityType, {
-				onFilesSelected: (items) => {
-					for (const item of items) {
-						const tempItemId = uuidv4();
-						tempItemIds.push(tempItemId);
-						files = [
-							...files,
-							{
-								type: 'file',
-								file: '',
-								id: null,
-								url: '',
-								name: item.name,
-								collection_name: '',
-								status: 'uploading',
-								size: 0,
-								error: '',
-								itemId: tempItemId
-							}
-						];
+			const rows = liveConnections(localStorage.token);
+			if (!rows) throw new Error('Connection status is loading. Try again.');
+			if (
+				!rows.some((row) => row.connection.lifecycle === 'enabled' && !row.connection.last_error)
+			) {
+				await connectLiveSource(localStorage.token);
+				toast.info($i18n.t('OneDrive connected. Choose your files again.'));
+				return;
+			}
+			const { references, account } = await beginBusinessDocumentPicker();
+			if (!references.length) return;
+			const row = matchingPickerConnection(rows, account);
+			const grantId =
+				row.grantId ?? (await enableLiveFamily(localStorage.token, row.connection.id)).id;
+			for (const reference of references) {
+				const itemId = uuidv4();
+				files = [
+					...files,
+					{
+						type: 'file',
+						id: null,
+						itemId,
+						name: reference.name,
+						status: 'uploading',
+						size: reference.size
 					}
+				];
+				try {
+					const attached = await attachPickedDocument(
+						localStorage.token,
+						grantId,
+						reference,
+						itemId
+					);
+					files = files.map((file) =>
+						file.itemId === itemId ? { ...attached, itemId, size: reference.size } : file
+					);
+				} catch (error) {
+					files = files.filter((file) => file.itemId !== itemId);
+					toast.error($i18n.t(attachErrorMessage(error)));
 				}
-			});
-			if (filesData.length > 0) {
-				for (let i = 0; i < filesData.length; i++) {
-					const fileData = filesData[i];
-					const file = new File([fileData.blob], fileData.name, {
-						type: fileData.blob.type || 'application/octet-stream'
-					});
-					// Match placeholder by name since download order may differ
-					const matchingItemId = tempItemIds.find((id) => {
-						const item = files.find((f) => f.itemId === id);
-						return item && item.name === fileData.name;
-					});
-					await uploadFileHandler(file, true, {}, matchingItemId || null);
-				}
-				// Clean up any placeholders for files that failed to download
-				const downloadedNames = new Set(filesData.map((f) => f.name));
-				files = files.filter((f) => {
-					if (tempItemIds.includes(f.itemId ?? '') && !downloadedNames.has(f.name ?? '')) {
-						return false;
-					}
-					return true;
-				});
-			} else if (tempItemIds.length > 0) {
-				// All downloads failed
-				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
 			}
 		} catch (error) {
-			if (tempItemIds.length > 0) {
-				files = files.filter((f) => !tempItemIds.includes(f.itemId ?? ''));
-			}
-			console.error('OneDrive Error:', error);
+			toast.error(
+				$i18n.t(
+					relinkPrompt(error) ??
+						(error instanceof Error ? error.message : 'Could not attach OneDrive file')
+				)
+			);
 		}
 	};
 
@@ -1280,19 +1380,6 @@
 					}
 
 					files = files;
-
-					// Pre-load render attachments (e.g. IFC plan PNGs) so the chat-side
-					// image-builder in Chat.svelte can inline them as first-turn vision
-					// for the BIM agent. Non-blocking; on error the file silently has
-					// no attachments.
-					getFileAttachments(localStorage.token, uploadedFile.id)
-						.then((manifest) => {
-							fileItem.attachments = manifest;
-							files = files; // trigger Svelte reactivity
-						})
-						.catch(() => {
-							fileItem.attachments = [];
-						});
 				} else {
 					fileItem.status = 'error';
 					fileItem.error = $i18n.t('Failed to upload file.');
@@ -1600,6 +1687,12 @@
 	};
 
 	onMount(() => {
+		if ($config?.features?.enable_live_mail)
+			void prefetchLiveConnections(localStorage.token, 'outlook_mail', 'mail').catch(() => {});
+		if ($config?.features?.enable_onedrive_business) {
+			void prefetchLiveConnections(localStorage.token).catch(() => {});
+			void prepareBusinessDocumentPicker().catch(() => {});
+		}
 		if ($config?.features?.enable_google_drive_integration)
 			void initializeGooglePicker().catch(() => {});
 		suggestions = [
@@ -2393,15 +2486,6 @@
 														if (e.key === 'Escape') {
 															console.log('Escape');
 															atSelectedModel = undefined;
-															selectedToolIds = [];
-															selectedFilterIds = [];
-
-															webSearchEnabled = false;
-															imageGenerationEnabled = false;
-															codeInterpreterEnabled = false;
-															documentWriterEnabled = false;
-															officeEnabled = false;
-															officeEditEnabled = false;
 														}
 													}}
 													on:paste={async (e) => {
@@ -2449,23 +2533,19 @@
 
 							<div class=" flex justify-between mt-0.5 mb-2 mx-0.5 max-w-full" dir="ltr">
 								<div class="ml-1 self-end flex items-center flex-1 min-w-0">
-									<!-- [Gradient] One tenant flag controls both composer menus. -->
+									<!-- [Gradient] One "+" menu holds context, knowledge and tools. -->
 									{#if isFeatureEnabled('input_menu')}
 										<InputMenu
 											bind:this={inputMenuRef}
+											bind:liveDocumentsState
+											bind:liveMailState
 											restrictTo={inputMenuRestrictTo}
 											{openInternetBlocked}
 											{internalBlocked}
 											{dataSeparationMessage}
 											bind:files
 											selectedModels={selectedModelIds}
-											fileUploadCapableModels={getFilesystemUploadTerminal(
-												$selectedTerminalId,
-												$terminalServers,
-												$settings
-											)
-												? selectedModelIds
-												: fileUploadCapableModels}
+											fileUploadCapableModels={inputMenuFileUploadCapableModels}
 											{toolApprovalMode}
 											{onToolApprovalModeChange}
 											{screenCaptureHandler}
@@ -2476,6 +2556,34 @@
 											uploadGoogleDriveHandler={googleDriveHandler}
 											uploadOneDriveHandler={oneDriveHandler}
 											{onUpload}
+											{toggleFilters}
+											{showWebSearchButton}
+											{showImageGenerationButton}
+											{showCodeInterpreterButton}
+											{showDocumentWriterButton}
+											bind:selectedToolIds
+											bind:selectedSkillIds
+											bind:selectedFilterIds
+											bind:webSearchEnabled
+											bind:webSearchRequired
+											bind:imageGenerationEnabled
+											bind:codeInterpreterEnabled
+											bind:documentWriterEnabled
+											bind:documentWriterRequired
+											oauthRedirectHandler={(tool: {
+												id: string;
+												serverId: string;
+												authType?: string | null;
+											}) => oauthRedirectHandler(tool, chatInputDraft)}
+											{onWebSearchToggle}
+											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
+											onShowValves={(e) => {
+												const { type, id } = e;
+												selectedValvesType = type;
+												selectedValvesItemId = id;
+												showValvesModal = true;
+												integrationsMenuCloseOnOutsideClick = false;
+											}}
 											onClose={async () => {
 												await tick();
 
@@ -2493,79 +2601,8 @@
 											</button>
 										</InputMenu>
 									{/if}
-									<!-- [Gradient] RAG filters remain a dedicated composer action. -->
-									{#if $config?.features?.enable_rag_filter_ui ?? true}
-										<Tooltip content={$i18n.t('RAG Filters')} placement="top"
-											><button
-												type="button"
-												class="size-[1.875rem] shrink-0 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
-												on:click={() => showRagFilter.update((v) => !v)}
-												aria-label={$i18n.t('RAG Filters')}
-												><Filter className="size-4.5" strokeWidth="1.5" /></button
-											></Tooltip
-										>
-									{/if}
-
-									{#if isFeatureEnabled('input_menu') && (showOfficeButton || showOfficeEditButton || showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
-										<div
-											class="flex self-center w-[0.0625rem] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
-										></div>
-									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
-										{#if isFeatureEnabled('input_menu') && (showOfficeButton || showOfficeEditButton || showDocumentWriterButton || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0))}
-											<IntegrationsMenu
-												{showDocumentWriterButton}
-												{showOfficeButton}
-												{showOfficeEditButton}
-												bind:documentWriterEnabled
-												bind:officeEnabled
-												bind:officeEditEnabled
-												{openInternetBlocked}
-												{dataSeparationMessage}
-												selectedModels={selectedModelIds}
-												{toggleFilters}
-												{showWebSearchButton}
-												{showImageGenerationButton}
-												{showCodeInterpreterButton}
-												bind:selectedToolIds
-												bind:selectedSkillIds
-												bind:selectedFilterIds
-												bind:webSearchEnabled
-												bind:imageGenerationEnabled
-												bind:codeInterpreterEnabled
-												oauthRedirectHandler={(tool: {
-													id: string;
-													serverId: string;
-													authType?: string | null;
-												}) => oauthRedirectHandler(tool, chatInputDraft)}
-												{onWebSearchToggle}
-												closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-												onShowValves={(e) => {
-													const { type, id } = e;
-													selectedValvesType = type;
-													selectedValvesItemId = id;
-													showValvesModal = true;
-													integrationsMenuCloseOnOutsideClick = false;
-												}}
-												onClose={async () => {
-													await tick();
-
-													const chatInput = document.getElementById('chat-input');
-													chatInput?.focus();
-												}}
-											>
-												<button
-													type="button"
-													id="integration-menu-button"
-													class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-[1.875rem] flex justify-center items-center outline-hidden focus:outline-hidden shrink-0"
-													aria-label={$i18n.t('Integrations')}
-												>
-													<Component className="size-4.5" strokeWidth="1.5" />
-												</button>
-											</IntegrationsMenu>
-										{/if}
-
 										{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
 											<div class="ml-1 flex gap-1.5 shrink-0">
 												<Tooltip content={$i18n.t('Valves')} placement="top">
@@ -2585,201 +2622,358 @@
 											</div>
 										{/if}
 
-										<div class="ml-1 flex gap-1.5 shrink-0">
-											{#if (selectedToolIds ?? []).length > 0}
-												<Tooltip
-													content={$i18n.t('{{COUNT}} Available Tools', {
-														COUNT: (selectedToolIds ?? []).length
-													})}
-												>
-													<button
-														class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
-														aria-label="Available Tools"
-														type="button"
-														on:click={() => {
-															showTools = !showTools;
-														}}
-													>
-														<Wrench className="size-4" strokeWidth="1.75" />
-
-														<span class="text-sm">
-															{(selectedToolIds ?? []).length}
-														</span>
-													</button>
-												</Tooltip>
-											{/if}
-
-											{#if (selectedSkillIds ?? []).length > 0}
-												<Tooltip
-													content={$i18n.t('{{COUNT}} Available Skills', {
-														COUNT: (selectedSkillIds ?? []).length
-													})}
-												>
-													<button
-														class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
-														aria-label="Available Skills"
-														type="button"
-														on:click={() => {
-															showSkills = !showSkills;
-														}}
-													>
-														<Cube className="size-4" strokeWidth="1.75" />
-
-														<span class="text-sm">
-															{(selectedSkillIds ?? []).length}
-														</span>
-													</button>
-												</Tooltip>
-											{/if}
-
-											{#each selectedFilterIds as filterId (filterId)}
-												{@const filter = toggleFilters.find((f) => f.id === filterId)}
-												{#if filter}
-													<Tooltip content={filter?.name} placement="top">
+										<!-- [Gradient] Scrolls sideways on narrow screens instead of overflowing. -->
+										<div class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none">
+											<!-- [Gradient] Pinned or active "+" menu items, same gates as the menu. -->
+											{#each inputBarItems as itemId (itemId)}
+												{#if itemId === 'upload_files' && inputMenuFileUploadEnabled}
+													<Tooltip content={$i18n.t('Upload Files')} placement="top">
 														<button
-															on:click|preventDefault={() => {
-																if (
-																	filter?.has_user_valves &&
-																	($_user?.role === 'admin' ||
-																		($_user?.permissions?.chat?.valves ?? true))
-																) {
-																	selectedValvesType = 'function';
-																	selectedValvesItemId = filterId;
-																	showValvesModal = true;
-																} else {
-																	selectedFilterIds = selectedFilterIds.filter(
-																		(id) => id !== filterId
-																	);
-																}
-															}}
+															class={pinnedButtonClass}
 															type="button"
-															class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
-																filterId
-															)
-																? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-																: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} capitalize"
+															aria-label={$i18n.t('Upload Files')}
+															on:click={() => filesInputElement.click()}
 														>
-															{#if filter?.icon}
-																<div class="size-4 items-center flex justify-center">
-																	<img
-																		src={filter.icon}
-																		class="size-3.5 {filter.icon.includes('data:image/svg')
-																			? 'dark:invert-[80%]'
-																			: ''}"
-																		style="fill: currentColor;"
-																		alt={filter.name}
-																	/>
-																</div>
-															{:else}
-																<Sparkles className="size-4" strokeWidth="1.75" />
-															{/if}
-															<!-- svelte-ignore a11y-click-events-have-key-events -->
-															<!-- svelte-ignore a11y-no-static-element-interactions -->
-															<div
-																class="hidden group-hover:block"
-																on:click={(e) => {
-																	e.stopPropagation();
-																	e.preventDefault();
-																	selectedFilterIds = selectedFilterIds.filter(
-																		(id) => id !== filterId
-																	);
-																}}
-															>
-																<XMark className="size-4" strokeWidth="1.75" />
-															</div>
+															<Clip className="size-4" />
 														</button>
 													</Tooltip>
+												{:else if itemId === 'capture' && inputMenuFileUploadEnabled && isFeatureEnabled('capture')}
+													<Tooltip content={$i18n.t('Capture')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Capture')}
+															on:click={() => {
+																if (!$mobile) {
+																	screenCaptureHandler();
+																} else {
+																	document.getElementById('camera-input')?.click();
+																}
+															}}
+														>
+															<Camera className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_webpage' && webUploadEnabled && isFeatureEnabled('webpage_url')}
+													<Tooltip content={$i18n.t('Webpage URL')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Webpage URL')}
+															on:click={() => inputMenuRef?.openWebpageModal()}
+														>
+															<Link className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_files' && inputMenuFileUploadEnabled}
+													<Tooltip content={$i18n.t('Attach Files')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Attach Files')}
+															on:click={() => inputMenuRef?.openTab('files')}
+														>
+															<DocumentArrowUp className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_notes' && ($config?.features?.enable_notes ?? false)}
+													<Tooltip content={$i18n.t('Attach Notes')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Attach Notes')}
+															on:click={() => inputMenuRef?.openTab('notes')}
+														>
+															<PageEdit className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_meetings' && $meetingsAvailable}
+													<Tooltip content={$i18n.t('Attach meetings')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Attach meetings')}
+															on:click={() => inputMenuRef?.openTab('meetings')}
+														>
+															<Mic className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'google_drive' && inputMenuFileUploadEnabled && $config?.features?.enable_google_drive_integration}
+													<Tooltip content={$i18n.t('Google Drive')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Google Drive')}
+															on:click={googleDriveHandler}
+														>
+															<GoogleDrive className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'onedrive' && inputMenuFileUploadEnabled && $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
+													<Tooltip content={$i18n.t('OneDrive files')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('OneDrive files')}
+															on:click={() => {
+																oneDriveHandler();
+															}}
+														>
+															<OneDrive className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'knowledge' && isFeatureEnabled('knowledge')}
+													<Tooltip content={$i18n.t('Knowledge database')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Knowledge database')}
+															on:click={() => inputMenuRef?.openTab('knowledge')}
+														>
+															<FolderOpen className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'reference_chats' && isFeatureEnabled('reference_chats')}
+													<Tooltip content={$i18n.t('Reference chats')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Reference chats')}
+															on:click={() => inputMenuRef?.openTab('chats')}
+														>
+															<ClockRotateRight className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'web_search' && showWebSearchButton}
+													<Tooltip
+														content={imageGenerationEnabled
+															? $i18n.t(
+																	'Web search and image generation cannot run in the same turn'
+																)
+															: pinnedStateTooltip(
+																	$i18n.t('Web Search'),
+																	webSearchToolState,
+																	$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+																)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={pinnedStateTooltip(
+																$i18n.t('Web Search'),
+																webSearchToolState,
+																$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+															)}
+															on:click|preventDefault={() => inputMenuRef?.cycleWebSearch()}
+															class={pinnedToggleClass(webSearchToolState)}
+														>
+															<GlobeAlt className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'image_generation' && showImageGenerationButton}
+													<Tooltip
+														content={webSearchEnabled
+															? $i18n.t(
+																	'Web search and image generation cannot run in the same turn'
+																)
+															: pinnedStateTooltip(
+																	$i18n.t('Image'),
+																	imageGenerationEnabled ? 'required' : 'off',
+																	imageGenerationEnabled
+																		? $i18n.t('Generate an image')
+																		: $i18n.t(TOOL_OFF_DESCRIPTION)
+																)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={$i18n.t('Image')}
+															aria-pressed={imageGenerationEnabled}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('image_generation')}
+															class={pinnedToggleClass(imageGenerationEnabled)}
+														>
+															<Photo className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'live_mail' && $config?.features?.enable_live_mail}
+													<Tooltip
+														elementId={liveMailTooltipId}
+														content={pinnedStateTooltip(
+															$i18n.t('Mail search'),
+															liveMailState,
+															liveMailState !== 'off'
+																? $i18n.t('The model decides whether to search your mail')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={`${$i18n.t('Mail search')}: ${$i18n.t(TOOL_STATE_LABELS[liveMailState])}`}
+															aria-pressed={liveMailState !== 'off'}
+															on:click|preventDefault={() => inputMenuRef?.cycleLiveMail()}
+															class={pinnedToggleClass(liveMailState)}
+														>
+															<MailSearch className="size-4" />
+														</button>
+														<div slot="tooltip" class="hidden">
+															<div id={liveMailTooltipId} class="flex items-center gap-2">
+																<MailSearch className="size-4 shrink-0" />
+																<span
+																	>{pinnedStateTooltip(
+																		$i18n.t('Mail search'),
+																		liveMailState,
+																		liveMailState !== 'off'
+																			? $i18n.t('The model decides whether to search your mail')
+																			: $i18n.t(TOOL_OFF_DESCRIPTION)
+																	)}</span
+																>
+															</div>
+														</div>
+													</Tooltip>
+												{:else if itemId === 'live_documents' && $config?.features?.enable_live_documents}
+													<Tooltip
+														elementId={liveDocumentsTooltipId}
+														content={pinnedStateTooltip(
+															$i18n.t('OneDrive search'),
+															liveDocumentsState,
+															liveDocumentsState !== 'off'
+																? $i18n.t('The model decides whether to search OneDrive')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={`${$i18n.t('OneDrive search')}: ${$i18n.t(TOOL_STATE_LABELS[liveDocumentsState])}`}
+															aria-pressed={liveDocumentsState !== 'off'}
+															on:click|preventDefault={() => inputMenuRef?.cycleLiveDocuments()}
+															class={pinnedToggleClass(liveDocumentsState)}
+														>
+															<OneDriveSearch className="size-4" />
+														</button>
+														<div slot="tooltip" class="hidden">
+															<div id={liveDocumentsTooltipId} class="flex items-center gap-2">
+																<OneDriveSearch className="size-4 shrink-0" />
+																<span
+																	>{pinnedStateTooltip(
+																		$i18n.t('OneDrive search'),
+																		liveDocumentsState,
+																		liveDocumentsState !== 'off'
+																			? $i18n.t('The model decides whether to search OneDrive')
+																			: $i18n.t(TOOL_OFF_DESCRIPTION)
+																	)}</span
+																>
+															</div>
+														</div>
+													</Tooltip>
+												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
+													<Tooltip
+														content={pinnedStateTooltip(
+															$i18n.t('Code Interpreter'),
+															codeInterpreterEnabled ? 'required' : 'off',
+															codeInterpreterEnabled
+																? $i18n.t('Execute code for analysis')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={codeInterpreterEnabled
+																? $i18n.t('Disable Code Interpreter')
+																: $i18n.t('Enable Code Interpreter')}
+															aria-pressed={codeInterpreterEnabled}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('code_interpreter')}
+															class={pinnedToggleClass(codeInterpreterEnabled)}
+														>
+															<Terminal className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'document_writer' && showDocumentWriterButton}
+													<Tooltip content={documentWriterTooltip} placement="top">
+														<button
+															type="button"
+															aria-label={documentWriterTooltip}
+															aria-pressed={documentWriterEnabled}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('document_writer')}
+															class={pinnedToggleClass(documentWriterToolState)}
+														>
+															<Document className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'tools' && showToolsButton}
+													<Tooltip content={$i18n.t('Tools')} placement="top">
+														<button
+															type="button"
+															aria-label={$i18n.t('Tools')}
+															on:click|preventDefault={() => inputMenuRef?.openTab('tools')}
+															class={pinnedToggleClass((selectedToolIds ?? []).length > 0)}
+														>
+															<Wrench className="size-4" strokeWidth="1.75" />
+															{#if (selectedToolIds ?? []).length > 0}
+																<span class="text-sm">{selectedToolIds.length}</span>
+															{/if}
+														</button>
+													</Tooltip>
+												{:else if itemId === 'skills' && showSkillsButton}
+													<Tooltip content={$i18n.t('Skills')} placement="top">
+														<button
+															type="button"
+															aria-label={$i18n.t('Skills')}
+															on:click|preventDefault={() => inputMenuRef?.openTab('skills')}
+															class={pinnedToggleClass((selectedSkillIds ?? []).length > 0)}
+														>
+															<Cube className="size-4" strokeWidth="1.75" />
+															{#if (selectedSkillIds ?? []).length > 0}
+																<span class="text-sm">{selectedSkillIds.length}</span>
+															{/if}
+														</button>
+													</Tooltip>
+												{:else if itemId.startsWith('filter:')}
+													{@const pinnedFilterId = itemId.slice('filter:'.length)}
+													{@const pinnedFilter = toggleFilters.find(
+														(f: { id: string }) => f.id === pinnedFilterId
+													)}
+													{#if pinnedFilter}
+														<Tooltip content={pinnedFilter?.name} placement="top">
+															<button
+																type="button"
+																aria-label={pinnedFilter?.name}
+																aria-pressed={selectedFilterIds.includes(pinnedFilterId)}
+																on:click|preventDefault={() => {
+																	selectedFilterIds = selectedFilterIds.includes(pinnedFilterId)
+																		? selectedFilterIds.filter((id) => id !== pinnedFilterId)
+																		: [...selectedFilterIds, pinnedFilterId];
+																}}
+																class={pinnedToggleClass(
+																	selectedFilterIds.includes(pinnedFilterId)
+																)}
+															>
+																{#if pinnedFilter?.icon}
+																	<div class="size-4 items-center flex justify-center">
+																		<img
+																			src={pinnedFilter.icon}
+																			class="size-3.5 {pinnedFilter.icon.includes('data:image/svg')
+																				? 'dark:invert-[80%]'
+																				: ''}"
+																			style="fill: currentColor;"
+																			alt={pinnedFilter.name}
+																		/>
+																	</div>
+																{:else}
+																	<Sparkles className="size-4" strokeWidth="1.75" />
+																{/if}
+															</button>
+														</Tooltip>
+													{/if}
 												{/if}
 											{/each}
 
-											{#if webSearchEnabled && showWebSearchButton}
-												<Tooltip content={$i18n.t('Web Search')} placement="top">
-													<button
-														on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
-														type="button"
-														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
-														($settings?.webSearch ?? false) === 'always'
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
-													>
-														<GlobeAlt className="size-4" strokeWidth="1.75" />
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
-
-											{#if imageGenerationEnabled && showImageGenerationButton}
-												<Tooltip content={$i18n.t('Image')} placement="top">
-													<button
-														on:click|preventDefault={() =>
-															(imageGenerationEnabled = !imageGenerationEnabled)}
-														type="button"
-														class="group p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
-													>
-														<Photo className="size-4" strokeWidth="1.75" />
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
-
-											{#if codeInterpreterEnabled && showCodeInterpreterButton}
-												<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
-													<button
-														aria-label={codeInterpreterEnabled
-															? $i18n.t('Disable Code Interpreter')
-															: $i18n.t('Enable Code Interpreter')}
-														aria-pressed={codeInterpreterEnabled}
-														on:click|preventDefault={() =>
-															(codeInterpreterEnabled = !codeInterpreterEnabled)}
-														type="button"
-														class=" group p-[0.375rem] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
-														false)
-															? 'm-1'
-															: 'focus:outline-hidden rounded-full'}"
-													>
-														<Terminal className="size-3.5" strokeWidth="2" />
-
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
-
-											<!-- [Gradient] Echo the active Document Writer capability. -->
-											{#if documentWriterEnabled && showDocumentWriterButton}
-												<Tooltip content={$i18n.t('Document Writer')} placement="top">
-													<button
-														aria-label={documentWriterEnabled
-															? $i18n.t('Disable Document Writer')
-															: $i18n.t('Enable Document Writer')}
-														aria-pressed={documentWriterEnabled}
-														on:click|preventDefault={() =>
-															(documentWriterEnabled = !documentWriterEnabled)}
-														type="button"
-														class=" group p-[0.375rem] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {documentWriterEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
-														false)
-															? 'm-1'
-															: 'focus:outline-hidden rounded-full'}"
-													>
-														<Document className="size-3.5" strokeWidth="2" />
-
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
-													</button>
-												</Tooltip>
-											{/if}
+											<!-- [Gradient] Active capabilities show in the bar above, pinned or not. -->
 
 											{#if officeEnabled && showOfficeButton}
 												<Tooltip content={$i18n.t('Create Office files')} placement="top">
@@ -2860,10 +3054,7 @@
 									<!-- [Gradient] Assistant identity sits beside the independent LLM picker. -->
 									<AssistantChip editable={!history?.currentId} />
 									<div class="flex min-w-0 max-w-[10rem] items-center sm:max-w-[13rem]">
-										<!-- [Gradient] Agent-only picker tenants; model selector for other multi-model tenants. -->
-										{#if agentPickerActive}
-											<AgentSelector agentId={$pendingAgentId} editable={!history?.currentId} />
-										{:else if pickerModels.length > 0}
+										{#if pickerModels.length > 0}
 											<ModelSelector
 												bind:this={modelSelector}
 												bind:selectedModels
@@ -2960,7 +3151,7 @@
 											{/if}
 										{/if}
 
-										{#if isFeatureEnabled('voice') && !embedded && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
+										{#if isFeatureEnabled('voice_call') && !embedded && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
 											<div class=" flex items-center">
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>

@@ -168,7 +168,7 @@ export function buildFullSourceList(sources: any[]): SourceInfo[] {
 /**
  * Format source list as markdown for plain text clipboard.
  */
-export function formatSourcesAsMarkdown(sources: SourceInfo[]): string {
+export function formatSourcesAsMarkdown(sources: SourceInfo[], heading = 'Bronnen'): string {
 	if (sources.length === 0) return '';
 
 	const lines = sources.map((s) => {
@@ -176,7 +176,7 @@ export function formatSourcesAsMarkdown(sources: SourceInfo[]): string {
 		return `[${s.index}] ${s.name}${urlPart}`;
 	});
 
-	return `Bronnen:\n${lines.join('\n')}`;
+	return `${heading}:\n${lines.join('\n')}`;
 }
 
 /**

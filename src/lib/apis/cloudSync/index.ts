@@ -7,6 +7,8 @@ export type ScheduleAction = 'run' | 'cancel' | 'suspend' | 'resume';
 export interface Connection {
 	id: string;
 	source_kind: string;
+	provider_identity?: string | null;
+	provider_tenant_id?: string | null;
 	lifecycle: string;
 	last_error?: string | null;
 }
@@ -110,6 +112,15 @@ export const deleteSchedule = (token: string, knowledgeId: string, id: string) =
 	request<void>(token, schedulePath(knowledgeId, id), 'DELETE');
 export const getSyncStatus = (token: string, knowledgeId: string) =>
 	request<{ schedules: Schedule[] }>(token, `${knowledgePath(knowledgeId)}/sync`);
+export interface KnowledgeRun {
+	schedule_id: string;
+	job_id: string | null;
+	code: string | null;
+}
+// One call runs every content schedule the user owns in this knowledge base;
+// each keeps its own cooldown and refusals come back per schedule.
+export const syncKnowledge = (token: string, knowledgeId: string) =>
+	request<{ data: KnowledgeRun[] }>(token, `${knowledgePath(knowledgeId)}/sync`, 'POST');
 export const runSchedule = (token: string, knowledgeId: string, id: string) =>
 	request<{ job_id: string }>(token, `${schedulePath(knowledgeId, id)}/run`, 'POST');
 export const cancelSchedule = (token: string, knowledgeId: string, id: string) =>
@@ -137,3 +148,19 @@ export interface SyncPolicy {
 
 export const getPolicy = (token: string): Promise<SyncPolicy> =>
 	request<SyncPolicy>(token, '/policy');
+
+export interface LiveGrant {
+	id: string;
+	lifecycle: string;
+	families: string[];
+}
+export const listLiveGrants = (
+	token: string,
+	id: string,
+	family: 'live_documents' | 'mail' = 'live_documents'
+) => request<LiveGrant[]>(token, `${connectionPath(id)}/live/${family}`);
+export const enableLiveFamily = (
+	token: string,
+	id: string,
+	family: 'live_documents' | 'mail' = 'live_documents'
+) => request<LiveGrant>(token, `${connectionPath(id)}/live/${family}`, 'POST');

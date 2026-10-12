@@ -7,8 +7,6 @@ import pytest
 import requests
 
 from . import model_path, plane, test_shapes
-from .pass_support import crash_details, fresh_surface
-from .test_shapes import needs_stack
 
 offline = test_shapes.offline
 
@@ -89,6 +87,8 @@ def test_drain_continues_past_terminal_and_preserves_complete_utf8_body(offline)
 
 @pytest.mark.parametrize('chunks', [[], [b'data: {"delta":"partial"}\n\n'], [b'data: [DONE]\n']])
 def test_200_with_empty_or_unterminated_stream_is_a_failed_body(offline, chunks):
+    from .test_live_model_path import test_live_model_streams_finish_without_body_failures
+
     result, _ = drive_one(offline, chunks)
     assert result.responses[0]['status'] == 200
     assert not result.responses[0]['terminal']
@@ -190,6 +190,8 @@ def test_fields_content_controls_sampling_full_mode_and_pass_local_entries(offli
 
 
 def test_validation_rejection_does_not_borrow_entries_and_5xx_assertion_is_independent(offline):
+    from .test_live_model_path import test_live_model_path_has_its_own_5xx_assertion
+
     plane.record(CHAT, 200, {}, pass_name='shapes')
     result, _ = drive_one(offline, [b'{"detail":[]}'], status=422, content_type='application/json')
     assert not result.tally.entered
@@ -197,59 +199,3 @@ def test_validation_rejection_does_not_borrow_entries_and_5xx_assertion_is_indep
     plane.record(CHAT, 200, {}, pass_name='model_path')
     with pytest.raises(AssertionError, match='model crash'):
         test_live_model_path_has_its_own_5xx_assertion(result)
-
-
-@pytest.fixture(scope='module')
-def live_model_paths():
-    with fresh_surface() as (identities, parameters):
-        yield model_path.drive_model_paths(identities.admin, parameters)
-
-
-@needs_stack
-def test_live_model_path_has_its_own_5xx_assertion(live_model_paths):
-    assert not live_model_paths.tally.crashes, crash_details(live_model_paths.tally)
-
-
-@needs_stack
-def test_live_model_streams_finish_without_body_failures(live_model_paths):
-    assert not live_model_paths.tally.body_failures, live_model_paths.tally.body_failures
-
-
-@needs_stack
-def test_live_model_controls_produce_output(live_model_paths):
-    controls = [item for item in live_model_paths.responses if item['probe'] == 'control']
-    assert {item['route'] for item in controls} == set(model_path.targets())
-
-    # The control exists to prove this pass reached the model path at all. If it is
-    # wrong or weak every other assertion in the module passes vacuously, so report
-    # per probe what was required and what arrived rather than dumping the records.
-    def _why(item):
-        if item['status'] is None:
-            return 'no response (request never completed)'
-        if not 200 <= item['status'] < 300:
-            return f'status {item["status"]}, wanted 2xx'
-        if item['errors']:
-            return f'stream errors: {item["errors"]}'
-        if not (item['terminal'] or item.get('model_output')):
-            return (
-                f'neither a terminal event nor model output; read {item.get("bytes")} bytes. '
-                'The stub answers SSE for OpenAI-shaped streaming and NDJSON for Ollama, '
-                'so a body with no terminal event is a truncated stream, not a success.'
-            )
-        return None
-
-    broken = [(item['route'], _why(item)) for item in controls]
-    broken = [(route, reason) for route, reason in broken if reason]
-    assert not broken, 'model-path controls produced no usable output:\n' + '\n'.join(
-        f'  {route}: {reason}' for route, reason in broken
-    )
-
-
-@needs_stack
-def test_live_model_path_reports_its_own_reach(live_model_paths, record_property):
-    tally = live_model_paths.tally
-    assert tally.expected == set(model_path.targets()) == tally.statuses.keys()
-    assert tally.config_restore_verified
-    record_property('model_path_unentered', tally.unentered)
-    record_property('model_path_responses', live_model_paths.responses)
-    assert tally.entered, 'No model-path request entered a handler'

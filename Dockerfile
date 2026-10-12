@@ -245,6 +245,15 @@ RUN if [ "$USE_OLLAMA" = "true" ]; then \
     rm -rf /var/lib/apt/lists/*; \
     fi
 
+# [Gradient] Debian security fixes published since the layers above were
+# cached. The registry cache (mode=max) otherwise serves the apt layer above
+# until the base image tag moves, so shipped images stop picking up fixes. CI
+# passes a per-run APT_UPGRADE_EPOCH, so this layer and those below always
+# rebuild while the dependency installs above stay cached. See
+# docs/fork-delta.md, "Fresh OS security fixes on every image build".
+ARG APT_UPGRADE_EPOCH=unset
+RUN echo "apt upgrade epoch: ${APT_UPGRADE_EPOCH}" && apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 # copy embedding weight from build
 # RUN mkdir -p /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2
 # COPY --from=build /app/onnx /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2/onnx

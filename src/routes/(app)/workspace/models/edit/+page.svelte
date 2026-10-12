@@ -109,7 +109,7 @@
 
 {#if model}
 	{#if useSimpleBuilder}
-		<SimpleModelEditor edit={true} {model} draft={null} {onSubmit} onAdvanced={goToAdvanced} />
+		<SimpleModelEditor edit={true} {model} {onSubmit} onAdvanced={goToAdvanced} />
 	{:else}
 		<ModelEditor onBack={() => goto('/workspace/models')} edit={true} {model} {onSubmit} />
 	{/if}

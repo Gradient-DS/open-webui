@@ -2,6 +2,7 @@
 	// [Gradient] Suggestions use effective LLMs; presentation uses assistant identity.
 	import { effectiveModels as _models, activeAssistant } from '$lib/stores/assistant';
 	import type { Model } from '$lib/stores';
+	import type { ToolState } from '$lib/utils/toolState';
 	import type {
 		ChatAttachment,
 		ChatInputCallbacks,
@@ -15,11 +16,12 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { config, user, temporaryChatEnabled, selectedFolder, pendingAgentId } from '$lib/stores';
+	import { config, user, temporaryChatEnabled, selectedFolder } from '$lib/stores';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { sanitizeResponseContent } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
-	import { isAgentRouted, isFeatureEnabled } from '$lib/utils/features';
+	import { isAssistant } from '$lib/utils/assistants';
+	import { isAgentRouted } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import Suggestions from './Suggestions.svelte';
@@ -28,7 +30,6 @@
 	import MessageInput from './MessageInput.svelte';
 	import FolderPlaceholder from './Placeholder/FolderPlaceholder.svelte';
 	import FolderTitle from './Placeholder/FolderTitle.svelte';
-	import WelcomeMessage from './WelcomeMessage.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -54,11 +55,15 @@
 	export let showCommands = false;
 
 	export let imageGenerationEnabled = false;
+	export let liveDocumentsState: ToolState = 'off';
+	export let liveMailState: ToolState = 'off';
 	export let codeInterpreterEnabled = false;
-	export let documentWriterEnabled = false;
+	export let documentWriterEnabled = true;
+	export let documentWriterRequired = false;
 	export let officeEnabled = false;
 	export let officeEditEnabled = false;
 	export let webSearchEnabled = false;
+	export let webSearchRequired = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 	export let oauthRedirectHandler: ChatInputCallbacks['oauthRedirectHandler'] = () => {};
@@ -88,6 +93,10 @@
 	// [Gradient] Keep the LLM id out of assistant avatar URLs and greetings.
 	$: greetingModel =
 		$activeAssistant ?? $_models.find((m) => m.id === selectedModels[selectedModelIdx]);
+	// [Gradient] Only an assistant's description greets; a catalog model shows its handle alone.
+	$: greetingDescription = isAssistant(greetingModel)
+		? (greetingModel?.info?.meta?.description ?? null)
+		: null;
 
 	$: if (selectedModels.length > 0) {
 		selectedModelIdx = models.length - 1;
@@ -95,13 +104,10 @@
 
 	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
 
-	// Agent picker adds a content block below the input, welcome message adds
-	// one above — either way, shrink the placeholder's vertical padding so the
-	// screen still fits without scrolling.
-	$: agentPickerEnabled =
-		isFeatureEnabled('agent_picker') && Boolean($config?.features?.feature_agent_api_enabled);
+	// The welcome message adds a content block above the input; shrink the
+	// placeholder's vertical padding so the screen still fits without scrolling.
 	$: welcomeMessageEnabled = $config?.features?.enable_welcome_message === true;
-	$: compactPlaceholder = agentPickerEnabled || welcomeMessageEnabled;
+	$: compactPlaceholder = welcomeMessageEnabled;
 
 	// True when viewing a shared folder the current user doesn't own AND lacks write access
 	$: folderReadOnly =
@@ -144,48 +150,42 @@
 				/>
 			{:else}
 				<div class="flex flex-row justify-center gap-2.5 @sm:gap-3 w-fit px-5 max-w-xl">
-					<!-- [Gradient] With the agent picker owning routing, the model
-					     behind the chat is an implementation detail — suppress the
-					     model avatar/name greeting (raw model ids and favicon
-					     fallbacks read as noise) in favor of the plain hello. -->
-					{#if !agentPickerEnabled}
-						<div class="flex shrink-0 justify-center">
-							<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
-								{#each models as model, modelIdx}
-									<Tooltip
-										content={(models[modelIdx]?.info?.meta?.tags ?? [])
-											.map((tag) => tag.name.toUpperCase())
-											.join(', ')}
-										placement="top"
+					<div class="flex shrink-0 justify-center">
+						<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
+							{#each models as model, modelIdx}
+								<Tooltip
+									content={(models[modelIdx]?.info?.meta?.tags ?? [])
+										.map((tag) => tag.name.toUpperCase())
+										.join(', ')}
+									placement="top"
+								>
+									<button
+										aria-hidden={models.length <= 1}
+										aria-label={$i18n.t('Get information on {{name}} in the UI', {
+											name: ($activeAssistant ?? models[modelIdx])?.name
+										})}
+										on:click={() => {
+											selectedModelIdx = modelIdx;
+										}}
 									>
-										<button
-											aria-hidden={models.length <= 1}
-											aria-label={$i18n.t('Get information on {{name}} in the UI', {
-												name: ($activeAssistant ?? models[modelIdx])?.name
-											})}
-											on:click={() => {
-												selectedModelIdx = modelIdx;
+										<img
+											alt=""
+											src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${($activeAssistant ?? model)?.id}&lang=${$i18n.language}`}
+											class=" size-9 @sm:size-10 rounded-2xl"
+											aria-hidden="true"
+											draggable="false"
+											on:error={(e) => {
+												// LICENSE covers this Open WebUI fallback logo.
+												// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+												// https://docs.openwebui.com/license.
+												e.currentTarget.src = '/favicon.png';
 											}}
-										>
-											<img
-												alt=""
-												src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${($activeAssistant ?? model)?.id}&lang=${$i18n.language}`}
-												class=" size-9 @sm:size-10 rounded-2xl"
-												aria-hidden="true"
-												draggable="false"
-												on:error={(e) => {
-													// LICENSE covers this Open WebUI fallback logo.
-													// Do not alter, remove, obscure, or replace it except as LICENSE permits:
-													// https://docs.openwebui.com/license.
-													e.currentTarget.src = '/favicon.png';
-												}}
-											/>
-										</button>
-									</Tooltip>
-								{/each}
-							</div>
+										/>
+									</button>
+								</Tooltip>
+							{/each}
 						</div>
-					{/if}
+					</div>
 
 					<div
 						class=" text-2xl @sm:text-2xl line-clamp-1 flex items-center"
@@ -196,7 +196,7 @@
 								'{{name}}',
 								$user?.name ?? ''
 							)}
-						{:else if !agentPickerEnabled && greetingModel?.name}
+						{:else if greetingModel?.name}
 							<Tooltip
 								content={greetingModel?.name}
 								placement="top"
@@ -214,14 +214,12 @@
 
 				<div class="flex mt-1 mb-2">
 					<div in:fade={{ duration: 100, delay: 50 }}>
-						{#if greetingModel?.info?.meta?.description ?? null}
+						{#if greetingDescription}
 							<Tooltip
 								className=" w-fit"
 								content={DOMPurify.sanitize(
 									marked.parse(
-										sanitizeResponseContent(
-											greetingModel?.info?.meta?.description ?? ''
-										).replaceAll('\n', '<br>')
+										sanitizeResponseContent(greetingDescription ?? '').replaceAll('\n', '<br>')
 									)
 								)}
 								placement="top"
@@ -232,9 +230,7 @@
 									<!-- eslint-disable-next-line svelte/no-at-html-tags -- Content is sanitized with DOMPurify. -->
 									{@html DOMPurify.sanitize(
 										marked.parse(
-											sanitizeResponseContent(
-												greetingModel?.info?.meta?.description ?? ''
-											).replaceAll('\n', '<br>')
+											sanitizeResponseContent(greetingDescription ?? '').replaceAll('\n', '<br>')
 										)
 									)}
 								</div>
@@ -261,16 +257,11 @@
 				</div>
 			{/if}
 
-			<div class="@md:max-w-3xl w-full text-left">
-				<WelcomeMessage />
-			</div>
-
 			<div class="text-base font-normal @md:max-w-3xl w-full py-3 {atSelectedModel ? 'mt-2' : ''}">
 				{#if !($selectedFolder && folderReadOnly)}
 					<MessageInput
 						bind:this={messageInput}
-						agentRouted={isAgentRouted($pendingAgentId)}
-						agentPickerActive={agentPickerEnabled}
+						agentRouted={isAgentRouted()}
 						{history}
 						bind:selectedModels
 						bind:files
@@ -280,11 +271,15 @@
 						bind:selectedSkillIds
 						bind:selectedFilterIds
 						bind:imageGenerationEnabled
+						bind:liveDocumentsState
+						bind:liveMailState
 						bind:codeInterpreterEnabled
 						bind:documentWriterEnabled
+						bind:documentWriterRequired
 						bind:officeEnabled
 						bind:officeEditEnabled
 						bind:webSearchEnabled
+						bind:webSearchRequired
 						bind:atSelectedModel
 						bind:showCommands
 						bind:dragged

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI
+from open_webui import config
 from open_webui.models import chats as chat_models
 from open_webui.routers import chats
 from open_webui.soev.client import SoevApiError
@@ -36,7 +37,7 @@ def office(monkeypatch):
         return await lookup(chat_id, db=db) if user_id == 'alice' else None
 
     monkeypatch.setattr(chats.Chats, 'get_chat_by_id_and_user_id', owned)
-    monkeypatch.setattr(chat_models, 'ENABLE_ADMIN_CHAT_ACCESS', True)
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
     monkeypatch.setattr(chat_models.AccessGrants, 'has_access', AsyncMock(return_value=False))
     monkeypatch.setattr(chats.ChatMessages, 'get_files_by_chat_id', messages)
     monkeypatch.setattr(
@@ -150,7 +151,7 @@ async def test_upstream_errors_are_resolved_before_response_headers(office, stat
 
 @pytest.mark.asyncio
 async def test_admin_cannot_download_when_admin_chat_access_is_disabled(office, monkeypatch):
-    monkeypatch.setattr(chat_models, 'ENABLE_ADMIN_CHAT_ACCESS', False)
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', False)
     office.user.id, office.user.role = 'admin', 'admin'
     async with office.client as client:
         response = await client.get('/api/v1/chats/chat/office/element/file')

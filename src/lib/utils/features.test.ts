@@ -5,6 +5,7 @@ import {
 	isAdminSettingsEnabled,
 	isAdminSettingsTabEnabled,
 	getFirstAvailableAdminSettingsTab,
+	isAgentRouted,
 	type Feature
 } from './features';
 import { get } from 'svelte/store';
@@ -502,5 +503,16 @@ describe('admin settings features', () => {
 			});
 			expect(getFirstAvailableAdminSettingsTab()).toBe(null);
 		});
+	});
+});
+
+describe('isAgentRouted', () => {
+	it.each([
+		[true, true],
+		[false, false],
+		[undefined, false]
+	])('follows the agent API flag (%s)', (api, routed) => {
+		vi.mocked(get).mockReturnValue({ features: { feature_agent_api_enabled: api } });
+		expect(isAgentRouted()).toBe(routed);
 	});
 });

@@ -48,7 +48,7 @@ def test_older_settings_clients_preserve_new_fields(client):
     api, values = client
     values.update({'office.enable': False, 'office_edit.enable': False, 'document_writer.enable': True})
     payload = api.get('/code_execution').json()
-    for key in ['ENABLE_OFFICE', 'ENABLE_OFFICE_EDIT', 'ENABLE_DOCUMENT_WRITER', 'DOCUMENT_WRITER_PROMPT_TEMPLATE']:
+    for key in ['ENABLE_OFFICE', 'ENABLE_OFFICE_EDIT']:
         payload.pop(key)
     assert api.post('/code_execution', json=payload).status_code == 200
     assert values['office.enable'] is False
@@ -61,8 +61,6 @@ def test_document_writer_switch_in_the_same_section_round_trips(client):
     payload = {
         **api.get('/code_execution').json(),
         'ENABLE_DOCUMENT_WRITER': True,
-        'DOCUMENT_WRITER_PROMPT_TEMPLATE': 'Write clearly.',
     }
     assert api.post('/code_execution', json=payload).status_code == 200
     assert values['document_writer.enable'] is True
-    assert values['document_writer.prompt_template'] == 'Write clearly.'

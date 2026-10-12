@@ -1,3 +1,5 @@
+import { DOCUMENT_OPEN, readDocument } from '../agentDocument';
+
 // Helper function to find matching closing tag
 function findMatchingClosingTag(src: string, openTag: string, closeTag: string): number {
 	let depth = 1;
@@ -65,6 +67,16 @@ function detailsStart(src: string) {
 
 function lheadingTokenizer(this: any, src: string): any {
 	const cap = this.rules.block.lheading.exec(src);
+	const documentIndex = cap?.[0]?.search(DOCUMENT_OPEN) ?? -1;
+	if (cap && documentIndex > 0) {
+		const raw = src.slice(0, documentIndex);
+		return {
+			type: 'paragraph',
+			raw,
+			text: raw.trimEnd(),
+			tokens: this.lexer.inline(raw.trimEnd())
+		};
+	}
 	const detailsIndex = cap?.[1]?.search(/\n<details[\s>]/) ?? -1;
 	if (!cap || detailsIndex === -1) return false;
 
@@ -102,6 +114,19 @@ function detailsExtension() {
 	};
 }
 
+function documentExtension() {
+	return {
+		name: 'document',
+		level: 'block',
+		start: (src: string) => src.search(DOCUMENT_OPEN),
+		tokenizer(src: string) {
+			const result = readDocument(src);
+			if (result) return { type: 'document', ...result };
+		},
+		renderer: () => ''
+	};
+}
+
 function underlineRenderer(this: any, token: any) {
 	return `<u>${this.parser.parseInline(token.tokens)}</u>`;
 }
@@ -131,6 +156,6 @@ export default function (options = {}) {
 		tokenizer: {
 			lheading: lheadingTokenizer as any
 		},
-		extensions: [detailsExtension(), underlineExtension()]
+		extensions: [detailsExtension(), documentExtension(), underlineExtension()]
 	};
 }

@@ -8,7 +8,7 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
-	import { getFileById, getFileContentById, getFileAttachments } from '$lib/apis/files';
+	import { getFileById, getFileContentById } from '$lib/apis/files';
 
 	import CodeBlock from '$lib/components/chat/Messages/CodeBlock.svelte';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
@@ -35,6 +35,11 @@
 	export let edit = false;
 
 	let loading = false;
+	let fetchedFile: { id: string; file: Awaited<ReturnType<typeof getFileById>> } | null = null;
+	let contentRequest = 0;
+	$: contentId = item?.id;
+	// Streamed message snapshots replace item; keep fetched content owned by the modal.
+	$: previewFile = fetchedFile && fetchedFile.id === contentId ? fetchedFile.file : item?.file;
 
 	let isPDF = false;
 	let isAudio = false;
@@ -44,24 +49,6 @@
 	let isPptx = false;
 
 	let selectedTab = '';
-
-	let attachments: Array<{
-		id: string;
-		kind: string;
-		storey: string | null;
-		index: number;
-		content_type: string;
-		caption: string;
-	}> = [];
-
-	$: hasAttachments = attachments.length > 0;
-	$: planAttachments = attachments
-		.filter((a) => a.kind === 'plan_png')
-		.sort((a, b) => (a.storey ?? '').localeCompare(b.storey ?? '') || a.index - b.index);
-	$: axonAttachments = attachments.filter((a) => a.kind === 'axon_png');
-
-	const attachmentUrl = (fileId: string, attachmentId: string): string =>
-		`${WEBUI_API_BASE_URL}/files/${fileId}/attachments/${attachmentId}`;
 
 	let excelWorkbook: WorkBook | null = null;
 	let excelSheetNames: string[] = [];
@@ -211,7 +198,8 @@
 		}
 	};
 
-	const loadContent = async () => {
+	const loadContent = async (id: string) => {
+		const request = ++contentRequest;
 		// Default to the Preview tab whenever a preview exists, regardless of how
 		// the viewer was opened; '' (Content) is the default only for files with
 		// no preview pane. (Images render without tabs.)
@@ -221,10 +209,11 @@
 		if (item?.type === 'collection') {
 			loading = true;
 
-			const knowledge = await getKnowledgeById(localStorage.token, item.id).catch((e) => {
+			const knowledge = await getKnowledgeById(localStorage.token, id).catch((e) => {
 				console.error('Error fetching knowledge base:', e);
 				return null;
 			});
+			if (request !== contentRequest || id !== item?.id) return;
 
 			if (knowledge) {
 				item.files = knowledge.files || [];
@@ -233,17 +222,18 @@
 		} else if (item?.type === 'file') {
 			loading = true;
 
-			const content = isExcel || isDocx || isPptx ? getFileContentById(item.id) : undefined;
+			const content = isExcel || isDocx || isPptx ? getFileContentById(id) : undefined;
 			// Observe early rejection while metadata is pending; the preview loader still handles it.
 			void content?.catch(() => {});
 
-			const file = await getFileById(localStorage.token, item.id).catch((e) => {
+			const file = await getFileById(localStorage.token, id).catch((e) => {
 				console.error('Error fetching file:', e);
 				return null;
 			});
+			if (request !== contentRequest || id !== item?.id) return;
 
 			if (file) {
-				item.file = file || {};
+				fetchedFile = { id, file };
 			}
 
 			// Load Excel content if it's an Excel file
@@ -257,29 +247,19 @@
 				await loadPptxContent(content);
 			}
 
-			loading = false;
+			if (request === contentRequest && id === item?.id) loading = false;
 		}
 
 		await tick();
 	};
 
-	$: if (show) {
-		loadContent();
+	$: if (show && contentId) {
+		loadContent(contentId);
 	}
 
 	onMount(() => {
 		console.log(item);
 		if (item?.context === 'full') {
-		}
-
-		if (item?.id && item?.type === 'file') {
-			(async () => {
-				try {
-					attachments = await getFileAttachments(localStorage.token, item.id);
-				} catch (err) {
-					console.warn('Failed to load attachments for file', item.id, err);
-				}
-			})();
 		}
 	});
 </script>
@@ -349,7 +329,7 @@
 							•
 						{/if}
 
-						{#if item?.file?.data?.content}
+						{#if previewFile?.data?.content}
 							<div class="capitalize shrink-0">
 								{#if isExcel && rowCount > 0 && selectedTab === 'preview'}
 									{$i18n.t('{{COUNT}} Rows', {
@@ -357,7 +337,7 @@
 									})}
 								{:else}
 									{$i18n.t('{{COUNT}} extracted lines', {
-										COUNT: getLineCount(item?.file?.data?.content ?? '')
+										COUNT: getLineCount(previewFile?.data?.content ?? '')
 									})}
 								{/if}
 							</div>
@@ -394,7 +374,7 @@
 					</div>
 				{/if}
 
-				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx || hasAttachments}
+				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx}
 					<div
 						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 					>
@@ -417,18 +397,6 @@
 								selectedTab = '';
 							}}>{$i18n.t('Content')}</button
 						>
-
-						{#if hasAttachments}
-							<button
-								class="min-w-fit py-1.5 px-4 border-b {selectedTab === 'attachments'
-									? ' '
-									: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								type="button"
-								on:click={() => {
-									selectedTab = 'attachments';
-								}}>{$i18n.t('Renders')}</button
-							>
-						{/if}
 					</div>
 				{/if}
 
@@ -455,8 +423,8 @@
 						</PanzoomContainer>
 					</div>
 				{:else if selectedTab === ''}
-					{#if item?.file?.data}
-						{@const rawContent = (item?.file?.data?.content ?? '').trim() || 'No content'}
+					{#if previewFile?.data}
+						{@const rawContent = (previewFile?.data?.content ?? '').trim() || 'No content'}
 						{@const isTruncated =
 							($settings?.renderMarkdownInPreviews ?? true) &&
 							rawContent.length > CONTENT_PREVIEW_LIMIT &&
@@ -568,7 +536,7 @@
 					{:else if isCode}
 						<div class="max-h-[60vh] overflow-scroll scrollbar-hidden text-sm relative">
 							<CodeBlock
-								code={item.file.data.content}
+								code={previewFile?.data?.content ?? ''}
 								lang={item.name.split('.').pop()}
 								token={null}
 								edit={false}
@@ -580,7 +548,7 @@
 						<div
 							class="max-h-[60vh] overflow-scroll scrollbar-hidden text-sm prose dark:prose-invert max-w-full"
 						>
-							<Markdown content={item.file.data.content} id="markdown-viewer" />
+							<Markdown content={previewFile?.data?.content ?? ''} id="markdown-viewer" />
 						</div>
 					{:else if isDocx}
 						{#if docxError}
@@ -604,45 +572,9 @@
 						{/if}
 					{:else}
 						<div class="max-h-96 overflow-scroll scrollbar-hidden text-xs whitespace-pre-wrap">
-							{(item?.file?.data?.content ?? '').trim() || 'No content'}
+							{(previewFile?.data?.content ?? '').trim() || 'No content'}
 						</div>
 					{/if}
-				{:else if selectedTab === 'attachments'}
-					<div class="flex flex-col gap-4 p-4">
-						{#if planAttachments.length > 0}
-							<section>
-								<h3 class="text-sm font-medium mb-2">{$i18n.t('Floor plans')}</h3>
-								<div class="grid grid-cols-2 gap-3">
-									{#each planAttachments as a (a.id)}
-										<figure class="flex flex-col gap-1">
-											<img
-												src={attachmentUrl(item.id, a.id)}
-												alt={a.caption || a.storey || a.kind}
-												class="rounded border border-gray-200 dark:border-gray-700"
-												loading="lazy"
-											/>
-											<figcaption class="text-xs text-gray-500">
-												{a.storey ?? a.caption ?? ''}
-											</figcaption>
-										</figure>
-									{/each}
-								</div>
-							</section>
-						{/if}
-						{#if axonAttachments.length > 0}
-							<section>
-								<h3 class="text-sm font-medium mb-2">{$i18n.t('Isometric')}</h3>
-								{#each axonAttachments as a (a.id)}
-									<img
-										src={attachmentUrl(item.id, a.id)}
-										alt={a.caption || a.kind}
-										class="rounded border border-gray-200 dark:border-gray-700 max-w-full"
-										loading="lazy"
-									/>
-								{/each}
-							</section>
-						{/if}
-					</div>
 				{/if}
 			{:else}
 				<div class="flex items-center justify-center py-6">

@@ -14,6 +14,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from open_webui.soev.acting import acting_ref
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.request_cache import memoized
 
@@ -23,7 +24,12 @@ def _sort_file_rows(rows, filters, *, default_order='filename', default_descendi
     descending = filters.get('direction') != 'asc' if order else default_descending
     field = order or default_order
     rows.sort(key=lambda row: row['id'])
-    rows.sort(key=lambda row: (row[field] is not None, row[field]), reverse=descending)
+    rows.sort(key=lambda row: (row[field] is not None, _sort_value(row[field])), reverse=descending)
+
+
+# [Gradient] Names sort case-insensitively, as a person reads the list.
+def _sort_value(value):
+    return value.casefold() if isinstance(value, str) else value
 
 
 def _catalog_file_row(document: dict, owner_id: str) -> dict:
@@ -185,6 +191,30 @@ class SoevKnowledgeTable:
         """The current name and description of each knowledge base the user can read, by id."""
         rows = await asyncio.gather(*(self._collection(id, user_id=user_id) for id in ids))
         return {row['key']: (row['name'], row.get('description') or '') for row in rows if row is not None}
+
+    async def existing_knowledge(self, ids):
+        """[Gradient] The ids of the knowledge bases that still exist, read as the service, whose principal reads
+        every knowledge base OWUI creates: one missing here was deleted, not hidden from the user."""
+        rows = await asyncio.gather(*(self._service_collection(id) for id in ids))
+        return {row['key'] for row in rows if row is not None}
+
+    async def _service_collection(self, key):
+        try:
+            return await self._client.get(self._path(key), as_user=None)
+        except SoevApiError as error:
+            if error.status == 404:
+                return None
+            raise
+
+    async def knowledge_document(self, key, source_id, *, user_id=None):
+        """The document `source_id` as the knowledge base `key` holds it for the user, or None where they cannot
+        read it there; synced documents included."""
+        try:
+            return await self._get(self._path(key) + '/documents/' + quote(source_id, safe=''), user_id=user_id)
+        except SoevApiError as error:
+            if error.status == 404:
+                return None
+            raise
 
     async def get_knowledge_by_id_unfiltered(self, id, db=None):
         return await self._knowledge_with_type(await self._collection(id))
@@ -502,6 +532,10 @@ class SoevKnowledgeTable:
             if not landed:
                 await Files.update_file_metadata_by_id(file_id, {'soev_collection_key': None})
                 return True
+        document, _ = (await self._members(knowledge_id)).get(file_id, (None, None))
+        if document and document.get('schedule_ids'):
+            # Deleting it from the KB would leave the corpus copy, and the next sync lands it again.
+            raise HTTPException(status_code=403, detail={'code': 'synced_document_read_only'})
         await self._send(
             'DELETE',
             self._path(knowledge_id) + '/documents/' + quote(file_id, safe=''),
@@ -522,13 +556,16 @@ class SoevKnowledgeTable:
                 else:
                     await Files.update_file_metadata_by_id(file.id, {'soev_collection_key': None})
             for document in await self._documents(id):
-                await self.remove_file_from_knowledge_by_id(id, document['source_id'])
+                if not document.get('schedule_ids'):
+                    await self.remove_file_from_knowledge_by_id(id, document['source_id'])
             if include_directories:
                 for folder in sorted(
                     await self._folder_tree(id), key=lambda row: len(row['path'].split('/')), reverse=True
                 ):
                     await self._delete_folder(id, folder['path'])
             return await self.get_knowledge_by_id(id)
+        except SoevNotConfigured:
+            raise
         except SoevApiError:
             return None
 
@@ -580,7 +617,10 @@ class SoevKnowledgeTable:
 
     async def search_files_by_id(self, knowledge_id, user_id, filter, skip=0, limit=30, metadata_only=False, db=None):
         filters = filter or {}
-        path = self._directory_path(knowledge_id, filters.get('directory_id'))
+        try:
+            path = self._directory_path(knowledge_id, filters.get('directory_id'))
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid directory identifier') from None
         collection, members, schedules = await asyncio.gather(
             self._collection(knowledge_id, user_id=user_id),
             self._members(knowledge_id, user_id=user_id),
@@ -601,7 +641,11 @@ class SoevKnowledgeTable:
         _sort_file_rows(rows, filters)
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
-        directories = await self._directory_models(knowledge_id, path, user_id=user_id, view=view)
+        from open_webui.models.knowledge import order_directories
+
+        directories = order_directories(
+            await self._directory_models(knowledge_id, path, user_id=user_id, view=view), filters
+        )
         rollups = await self._rollups(knowledge_id, [row.id for row in directories], user_id=user_id, view=view)
         breadcrumbs = await self._breadcrumbs(filters.get('directory_id'), user_id=user_id, view=view)
         return self._projection.knowledge_file_list_of(
@@ -635,7 +679,12 @@ class SoevKnowledgeTable:
         total = len(rows)
         rows = rows[skip : skip + limit] if limit else rows[skip:]
         items = [
-            self._projection.file_response_of(row, by_id[row['id']][1], metadata_only=not filter.get('include_content'))
+            self._projection.file_response_of(
+                row,
+                by_id[row['id']][1],
+                metadata_only=not filter.get('include_content'),
+                collection=by_id[row['id']][0],
+            )
             for row in rows
         ]
         return self._projection.knowledge_file_list_of(items, total=total)
@@ -679,6 +728,9 @@ class SoevKnowledgeTable:
             root = ('\0sync:' + schedule_id,)
             model = self._folder_model(collection, {'path': root[0], 'created_at': collection['created_at']})
             model.name = schedule.get('label') or 'Folder'
+            # [Gradient] A folder source sorts by its last sync under "Updated".
+            if schedule.get('last_run_at'):
+                model.updated_at = int(dt.datetime.fromisoformat(schedule['last_run_at']).timestamp())
             directories[root] = model
         for source_id, (document, path) in members.items():
             reach = set((document or {}).get('schedule_ids', []))
@@ -734,15 +786,18 @@ class SoevKnowledgeTable:
         view = await self._directory_view(key, user_id=user_id) if view is None else view
         virtual = [model for location, model in view[0].items() if location[:-1] == path]
         if path and path[0].startswith('\0sync:'):
-            return sorted(virtual, key=lambda row: (row.name, row.id))
+            return sorted(virtual, key=lambda row: (row.name.casefold(), row.id))
         folders, _ = await self._folder_entries(key, path, user_id=user_id)
         real = [self._folder_model(collection, folder) for folder in sorted(folders, key=lambda row: row['path'])]
-        return sorted(real + virtual, key=lambda row: (row.name, row.id))
+        return sorted(real + virtual, key=lambda row: (row.name.casefold(), row.id))
 
     async def create_directory(self, knowledge_id, name, user_id, parent_id=None, db=None):
-        path = self._directory_path(knowledge_id, parent_id) + (name,)
-        self._assert_writable_path(path)
-        self._projection.directory_id(knowledge_id, path)
+        try:
+            path = self._directory_path(knowledge_id, parent_id) + (name,)
+            self._assert_writable_path(path)
+            self._projection.directory_id(knowledge_id, path)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid directory name or parent') from None
         collection = await self._collection(knowledge_id, user_id=user_id)
         if collection is None:
             return None
@@ -771,7 +826,10 @@ class SoevKnowledgeTable:
         ] + list(virtual.values())
 
     async def _directory(self, directory_id, *, user_id=None, view=None):
-        key, path = self._projection.directory_of(directory_id)
+        try:
+            key, path = self._projection.directory_of(directory_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='Invalid directory identifier') from None
         if not path:
             return None
         rows = await self._directory_models(key, path[:-1], user_id=user_id, view=view)
@@ -873,6 +931,8 @@ class SoevKnowledgeTable:
                     'POST', self._path(key) + '/folders/move', {'from': '/'.join(old), 'to': '/'.join(new)}
                 )
             return await self._directory(identifier)
+        except SoevNotConfigured:
+            raise
         except (SoevApiError, ValueError):
             return None
 
@@ -892,6 +952,8 @@ class SoevKnowledgeTable:
                     await self.remove_file_from_knowledge_by_id(key, source_id)
             await self._delete_folder(key, '/'.join(path))
             return True
+        except SoevNotConfigured:
+            raise
         except SoevApiError:
             return False
 
@@ -908,6 +970,8 @@ class SoevKnowledgeTable:
         try:
             await self._move_document(knowledge_id, file_id, self._directory_path(knowledge_id, directory_id))
             return True
+        except SoevNotConfigured:
+            raise
         except (SoevApiError, ValueError):
             return False
 
@@ -947,7 +1011,14 @@ class SoevKnowledgeTable:
         return True
 
     async def update_knowledge_meta_by_id(self, id, meta, db=None):
-        raise NotOnSoev('update_knowledge_meta_by_id', moves_with='cloud sync')
+        """Replace OWUI's meta, kept under its own namespace in the collection's client-owned ``meta``."""
+        current = await self._collection(id)
+        if current is None:
+            return None
+        namespace = self._projection.META_NAMESPACE
+        patch = self._projection.meta_patch(current['meta'].get(namespace, {}), meta)
+        result = await self._send('PATCH', self._path(id), {'meta': {namespace: patch}})
+        return await self._knowledge_with_type(result)
 
     async def update_knowledge_data_by_id(self, id, data, db=None):
         return None

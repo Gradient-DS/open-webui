@@ -13,6 +13,7 @@
 	import Suggestions from './Suggestions.svelte';
 	import { sanitizeResponseContent } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
+	import { isAssistant } from '$lib/utils/assistants';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 
@@ -28,6 +29,10 @@
 	let selectedModelIdx = 0;
 	// [Gradient] Keep the LLM id out of assistant avatar URLs and greetings.
 	$: greetingModel = $activeAssistant ?? $_models.find((m) => m.id === modelIds[selectedModelIdx]);
+	// [Gradient] Only an assistant's description greets; a catalog model shows its handle alone.
+	$: greetingDescription = isAssistant(greetingModel)
+		? (greetingModel?.info?.meta?.description ?? null)
+		: null;
 
 	$: if (modelIds.length > 0) {
 		selectedModelIdx = models.length - 1;
@@ -53,10 +58,7 @@
 						<Tooltip
 							content={DOMPurify.sanitize(
 								marked.parse(
-									sanitizeResponseContent(greetingModel?.info?.meta?.description ?? '').replaceAll(
-										'\n',
-										'<br>'
-									)
+									sanitizeResponseContent(greetingDescription ?? '').replaceAll('\n', '<br>')
 								)
 							)}
 							placement="right"
@@ -109,16 +111,13 @@
 				</div>
 
 				<div in:fade={{ duration: 200, delay: 200 }}>
-					{#if greetingModel?.info?.meta?.description ?? null}
+					{#if greetingDescription}
 						<div
 							class="mt-0.5 text-base font-normal text-gray-500 dark:text-gray-400 line-clamp-3 markdown"
 						>
 							{@html DOMPurify.sanitize(
 								marked.parse(
-									sanitizeResponseContent(greetingModel?.info?.meta?.description ?? '').replaceAll(
-										'\n',
-										'<br>'
-									)
+									sanitizeResponseContent(greetingDescription ?? '').replaceAll('\n', '<br>')
 								)
 							)}
 						</div>

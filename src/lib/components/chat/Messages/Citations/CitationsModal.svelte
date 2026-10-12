@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SourceIcon from './SourceIcon.svelte';
 	import { getContext, onMount, tick } from 'svelte';
 
 	const i18n = getContext('i18n');
@@ -66,6 +67,7 @@
 							selectedCitation = citation;
 						}}
 					>
+						<SourceIcon source={citation.source} />
 						<div class=" font-normal">
 							{idx + 1}.
 						</div>

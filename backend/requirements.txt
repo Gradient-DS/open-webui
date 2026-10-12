@@ -122,7 +122,7 @@ googleapis-common-protos==1.75.0
 google-cloud-storage==3.9.0
 
 ## Databases
-pymongo==4.17.0
+pymongo==4.18.2 # security: GHSA-v4x9-3549-crwv / GHSA-vp6j-j7w5-5xjj / GHSA-qx36-8mw2-4r3x fixed in 4.18.2
 psycopg2-binary==2.9.12
 pgvector==0.4.2
 
@@ -153,11 +153,11 @@ pyotp==2.9.0
 qrcode[pil]==8.0
 
 ## Tests
-docker~=7.1.0
 pytest>=9.0.3,<10
 pytest-asyncio>=1.0.0
-pytest-docker~=3.2.5
+pytest-xdist==3.8.0
 fakeredis>=2.35.0
+moto[s3]==5.2.3
 
 ## LDAP
 ldap3==2.9.1
@@ -179,3 +179,5 @@ opentelemetry-instrumentation-system-metrics==0.63b1
 # security: explicit pins for transitive deps flagged by pip-audit/Trivy
 msgpack==1.2.1 # security: GHSA-6v7p-g79w-8964 (OOB read/crash)
 setuptools>=83.0.0 # security: PYSEC-2026-3447 (image had 70.3.0)
+oauthlib==4.0.0 # security: GHSA-hj66-6f7g-4r5v / GHSA-xpv3-w29h-x7cv fixed in 4.0.0
+werkzeug==3.1.9 # security: GHSA-g6x2-hccm-hh4m fixed in 3.1.9

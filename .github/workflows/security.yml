@@ -1,4 +1,7 @@
 name: Security Scanning
+# A scheduled run lists under the default branch (dev), but it scans the
+# published dev, test and main images; say so instead of reading as dev's run.
+run-name: ${{ github.event_name == 'schedule' && 'Daily scan of the published dev, test and main images' || '' }}
 
 on:
   push:
@@ -31,6 +34,9 @@ jobs:
   # On push: did a pull-request run of this workflow already pass on exactly
   # this git tree? Only then are `source` and `lockfile-age` skipped. Any
   # difference, including another PR landing in between, runs everything.
+  # Public repo: a fork PR's run executes the fork's copy of this file and
+  # could upload a record for any tree. security-ci v7's `check` trusts only
+  # a record uploaded by a pull_request run from a branch of this repository.
   reuse:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -39,38 +45,18 @@ jobs:
       contents: read
       actions: read
     outputs:
-      hit: ${{ steps.trust.outputs.hit }}
+      hit: ${{ steps.check.outputs.hit }}
     steps:
       - id: check
-        uses: Gradient-DS/security-ci/actions/tested-tree/check@323449ab6e138872d5993a86d849cd3697075289 # v6
+        uses: Gradient-DS/security-ci/actions/tested-tree/check@e18c245d84975f79da5c97d1987b83039c13292e # v8
         with:
           workflow-key: security
-
-      # Public repo: a fork PR's run executes the fork's copy of this file and
-      # could upload a record for any tree. Trust only a record made by a
-      # pull_request run from a branch of this repository.
-      - name: Accept only a same-repository pull request's record
-        id: trust
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HIT: ${{ steps.check.outputs.hit }}
-          RUN_URL: ${{ steps.check.outputs.run-url }}
-        run: |
-          set -euo pipefail
-          if [ "$HIT" != "true" ]; then echo "hit=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          origin=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/${RUN_URL##*/}" --jq '.event + " " + .head_repository.full_name')
-          if [ "$origin" = "pull_request $GITHUB_REPOSITORY" ]; then
-            echo "hit=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Ignoring tested-tree record from $RUN_URL ($origin); running everything"
-            echo "hit=false" >> "$GITHUB_OUTPUT"
-          fi
 
   source:
     needs: reuse
     # Every PR and scheduled run; a push unless its exact tree already passed.
     if: ${{ !cancelled() && needs.reuse.result != 'failure' && needs.reuse.outputs.hit != 'true' }}
-    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    uses: Gradient-DS/security-ci/.github/workflows/security-source.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
       contents: read
@@ -85,10 +71,10 @@ jobs:
 
   # Pull requests only. A push to main/dev/test is scanned by
   # docker-build-soev.yaml's `scan-image`, on the digest it published; the
-  # daily run scans the published digests (`image-published`).
+  # daily run scans the published digests (`published-<branch>`).
   image:
     if: github.event_name == 'pull_request'
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
       contents: read
@@ -101,11 +87,14 @@ jobs:
       # is the production one (UID/GID 1000) and its layers match dev's
       # registry cache. A gha cache write would only evict other entries: the
       # repo is over its GHA cache limit, and the registry cache is fresher.
+      # [Gradient] APT_UPGRADE_EPOCH is per run, as in docker-build-soev.yaml, so
+      # the scan sees today's Debian fixes even where dev's cache holds older ones.
       build-args: |
         BUILD_HASH=${{ github.sha }}
         USE_SLIM=true
         UID=1000
         GID=1000
+        APT_UPGRADE_EPOCH=${{ github.run_id }}-${{ github.run_attempt }}
       # Public package: readable without auth, so fork PRs can read it too.
       cache-from: type=registry,ref=ghcr.io/gradient-ds/open-webui:cache-slim-linux-amd64-dev
       cache-write: false
@@ -130,20 +119,47 @@ jobs:
             echo "$branch -> $digest"
           done
 
-  image-published:
+  # One job per branch, not a matrix: the gate can then say which image failed.
+  # Issues are disabled on this public fork, so the notifier could only fail
+  # (and would publish CVE lists if they were enabled); the gate is the signal.
+  published-dev:
+    name: published dev
     needs: resolve-published
-    strategy:
-      fail-fast: false
-      matrix:
-        branch: [dev, test, main]
-    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@323449ab6e138872d5993a86d849cd3697075289 # v6
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
     secrets: inherit
     permissions:
       contents: read
       packages: read
     with:
-      image-name: open-webui-${{ matrix.branch }}
-      image-ref: ${{ needs.resolve-published.outputs[matrix.branch] }}
+      image-name: open-webui-dev
+      image-ref: ${{ needs.resolve-published.outputs.dev }}
+      notify-on-schedule-failure: false
+
+  published-test:
+    name: published test
+    needs: resolve-published
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
+    with:
+      image-name: open-webui-test
+      image-ref: ${{ needs.resolve-published.outputs.test }}
+      notify-on-schedule-failure: false
+
+  published-main:
+    name: published main
+    needs: resolve-published
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
+    with:
+      image-name: open-webui-main
+      image-ref: ${{ needs.resolve-published.outputs.main }}
+      notify-on-schedule-failure: false
 
   # Job id (and thus the status-check name shown to branch protection) must
   # stay exactly "lockfile-age" — it is configured as a required check on
@@ -169,7 +185,7 @@ jobs:
   # `runtime-gate` or any other workflow's generic `gate`.
   gate:
     name: security-gate
-    needs: [reuse, source, image, image-published]
+    needs: [reuse, source, image, published-dev, published-test, published-main]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -181,16 +197,26 @@ jobs:
           REUSED: ${{ needs.reuse.outputs.hit }}
           SOURCE: ${{ needs.source.result }}
           IMAGE: ${{ needs.image.result }}
-          PUBLISHED: ${{ needs.image-published.result }}
+          PUBLISHED_DEV: ${{ needs.published-dev.result }}
+          PUBLISHED_TEST: ${{ needs.published-test.result }}
+          PUBLISHED_MAIN: ${{ needs.published-main.result }}
         run: |
-          echo "event=$EVENT  reuse=$REUSE  reused=$REUSED  source=$SOURCE  image=$IMAGE  published=$PUBLISHED"
+          echo "event=$EVENT  reuse=$REUSE  reused=$REUSED  source=$SOURCE  image=$IMAGE  published: dev=$PUBLISHED_DEV test=$PUBLISHED_TEST main=$PUBLISHED_MAIN"
           # A failed tree lookup is red, never a silent pass or skip.
           if [ "$EVENT" = "push" ] && [ "$REUSE" != "success" ]; then echo "tested-tree lookup did not succeed"; exit 1; fi
           # A skipped source scan passes only on an exact-tree reuse.
           [ "$SOURCE" = "success" ] || { [ "$EVENT" = "push" ] && [ "$REUSE" = "success" ] && [ "$REUSED" = "true" ] && [ "$SOURCE" = "skipped" ]; } || exit 1
           case "$EVENT" in
             pull_request) [ "$IMAGE" = "success" ] ;;
-            schedule) [ "$PUBLISHED" = "success" ] ;;
+            schedule)
+              failed=""
+              { echo "| Published image | Scan |"; echo "|---|---|"; } >> "$GITHUB_STEP_SUMMARY"
+              for pair in "dev=$PUBLISHED_DEV" "test=$PUBLISHED_TEST" "main=$PUBLISHED_MAIN"; do
+                branch="${pair%%=*}" result="${pair#*=}"
+                echo "| \`:$branch\` | $result |" >> "$GITHUB_STEP_SUMMARY"
+                [ "$result" = "success" ] || failed="$failed $branch"
+              done
+              [ -z "$failed" ] || { echo "::error::Published image scan failed for:$failed"; exit 1; } ;;
             # The pushed digest is scanned by docker-build-soev.yaml.
             push) true ;;
             *) echo "unexpected event $EVENT"; exit 1 ;;
@@ -213,6 +239,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: Gradient-DS/security-ci/actions/tested-tree/record@323449ab6e138872d5993a86d849cd3697075289 # v6
+      - uses: Gradient-DS/security-ci/actions/tested-tree/record@e18c245d84975f79da5c97d1987b83039c13292e # v8
         with:
           workflow-key: security

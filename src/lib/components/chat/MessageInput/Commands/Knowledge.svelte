@@ -14,9 +14,8 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
-	import Confluence from '$lib/components/icons/Confluence.svelte';
+	// [Gradient] Cloud collections keep the collection icon plus a provider badge.
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Youtube from '$lib/components/icons/Youtube.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
@@ -165,15 +164,7 @@
 						placement="top"
 					>
 						{#if item?.type === 'collection'}
-							{#if item.knowledge_type === 'onedrive'}
-								<OneDrive className="size-3.5" />
-							{:else if item.knowledge_type === 'google_drive'}
-								<GoogleDrive className="size-3.5" />
-							{:else if item.knowledge_type === 'confluence'}
-								<Confluence className="size-3.5" />
-							{:else}
-								<Database className="size-3.5" />
-							{/if}
+							<SourceItemIcon kind="folder" icon={Database} provider={item.knowledge_type} />
 						{:else if item?.type === 'folder'}
 							<Folder className="size-3.5" />
 						{:else}

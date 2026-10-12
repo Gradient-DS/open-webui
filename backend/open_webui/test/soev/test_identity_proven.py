@@ -107,13 +107,13 @@ async def test_a_microsoft_login_links_the_entra_oid_as_proven(identity_config, 
         assert body['id_token'] == login.token['id_token']
         claims = jwt.decode(body['assertion'], options={'verify_signature': False})
         assert claims['sub'] == 'entra:user:test-entra-oid'
-        assert claims['iss'] == 'runtime-credential'
+        assert claims['iss'] == 'cred-runtime'
         assert claims['aud'] == 'test-tenant'
         header, payload, signature = body['assertion'].split('.')
         key.public_key().verify(base64.urlsafe_b64decode(signature + '=='), f'{header}.{payload}'.encode())
         assert request.method == 'POST'
         assert request.url.path == '/v1/identity/links'
-        assert request.headers['Authorization'] == 'Bearer test-runtime-key'
+        assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
         assert 'X-Soev-Subject' not in request.headers
         return httpx.Response(204)
 

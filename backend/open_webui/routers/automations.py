@@ -29,6 +29,7 @@ from open_webui.utils.automations import (
     validate_rrule,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ async def check_automation_channel_access(form_data: AutomationForm, user, db: A
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if user.role == 'admin':
+    if can_bypass_access_control(user):
         return
     if not await has_permission(user.id, 'features.channels', await Config.get('user.permissions')):
         raise HTTPException(

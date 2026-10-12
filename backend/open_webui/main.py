@@ -9,7 +9,6 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from typing import Optional
 from uuid import uuid4
 
 import aiohttp
@@ -46,7 +45,6 @@ from starsessions import (
 from starsessions.stores.redis import RedisStore
 
 from open_webui.config import (
-    BYPASS_ADMIN_ACCESS_CONTROL,
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
     DEFAULT_LOCALE,
@@ -97,6 +95,9 @@ from open_webui.config import (
     FEATURE_TOOLS,
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_VOICE,
+    FEATURE_VOICE_CALL,
+    FEATURE_READ_ALOUD,
+    FEATURE_MEETINGS,
     FEATURE_WEBPAGE_URL,
     FRONTEND_BUILD_DIR,
     IFRAME_CSP,
@@ -121,6 +122,8 @@ from open_webui.config import (
 from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
+from open_webui.soev import model_catalog
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -135,7 +138,6 @@ from open_webui.env import (
     ENABLE_COMPRESSION_MIDDLEWARE,
     ENABLE_CUSTOM_MODEL_FALLBACK,
     ENABLE_EASTER_EGGS,
-    FEATURE_AGENT_PICKER,  # [Gradient] Master flag for the agent picker UI
     # OAuth Back-Channel Logout
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
     ENABLE_OTEL,
@@ -185,18 +187,14 @@ from open_webui.events import (
 )
 from open_webui.internal.db import engine, get_async_session
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.agent_configs import AgentConfigs  # [Gradient]
 from open_webui.models.channels import Channels
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.config import Config
 from open_webui.models.functions import Functions
-from open_webui.models.groups import Groups  # [Gradient]
 from open_webui.models.messages import Messages
 from open_webui.models.models import Models, normalize_model_tags
 from open_webui.models.users import Users
 from open_webui.routers import (
-    agent_configs,
-    agent_proxy,
     analytics,
     archives,
     audio,
@@ -208,17 +206,16 @@ from open_webui.routers import (
     configs,
     cloud_sync,
     data_warnings,
-    discovery,
     evaluations,
     export,
     feedback_report,
+    meetings,
     files,
     folders,
     functions,
     groups,
     images,
     integrations,
-    internal_retrieval,
     invites,
     knowledge,
     memories,
@@ -272,7 +269,6 @@ from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.actions import chat_action as chat_action_handler
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
-from open_webui.utils.agent_routing import AgentSelectionRequired, resolve_agent_route  # [Gradient]
 from open_webui.utils.asgi_middleware import AppHTTPMiddleware
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.auth import (
@@ -346,6 +342,7 @@ from open_webui.utils.tool_approval import (
 from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
 from open_webui.services.email.auth import is_mail_configured  # [Gradient]
+from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')
@@ -552,31 +549,6 @@ async def lifespan(app: FastAPI):
     log.info('Installing external dependencies of functions and tools...')
     await install_tool_and_function_dependencies()
 
-    # [Gradient] Seed agent_config defaults from AGENT_API_AGENTS_CONFIG env so
-    # ops can pre-configure agents in deployments where the admin panel isn't
-    # reachable. Existing rows are preserved unless OVERWRITE is true.
-    try:
-        from open_webui.env import (
-            AGENT_API_AGENTS,
-            AGENT_API_AGENTS_CONFIG,
-            AGENT_API_AGENTS_CONFIG_OVERWRITE,
-        )
-
-        if AGENT_API_AGENTS_CONFIG:
-            inserted, updated, skipped = await AgentConfigs.seed_from_env(
-                AGENT_API_AGENTS_CONFIG,
-                AGENT_API_AGENTS,
-                overwrite=AGENT_API_AGENTS_CONFIG_OVERWRITE,
-            )
-            log.info(
-                'Seeded agent_config from env: inserted=%d, updated=%d, skipped=%d',
-                inserted,
-                updated,
-                skipped,
-            )
-    except Exception as e:
-        log.warning(f'Failed to seed agent_config from env: {e}')
-
     app.state.redis = get_redis_client(async_mode=True)
 
     if app.state.redis is not None:
@@ -732,6 +704,11 @@ install(app)
 
 # Used by readiness checks to gate traffic until startup work is done.
 app.state.startup_complete = False
+
+
+@app.exception_handler(SoevNotConfigured)
+async def soev_not_configured_handler(request, exc: SoevNotConfigured):
+    return JSONResponse(status_code=503, content={'detail': {'code': exc.code, 'detail': exc.detail}})
 
 
 # [Gradient] Surface the OTel trace id on HTTP error responses so a feedback
@@ -1094,16 +1071,9 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
+app.include_router(knowledge.connections_router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
-app.include_router(
-    internal_retrieval.router,
-    prefix='/api/v1/internal/retrieval',
-    tags=['internal-retrieval'],
-)
-app.include_router(agent_proxy.router, prefix='/api/v1/agent', tags=['agent-proxy'])
-app.include_router(agent_configs.router, prefix='/api/v1/agent-configs', tags=['agents'])
-app.include_router(discovery.router, prefix='/api/v1/discovery', tags=['discovery'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
@@ -1137,6 +1107,9 @@ app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['
 # Mounted unconditionally — gated in-handler on the feedback_report.enable
 # config flag so it can be toggled at runtime without a pod restart.
 app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['feedback'])
+
+# [Gradient] Vergadering: thin forward to soev-api, gated in-handler on FEATURE_MEETINGS.
+app.include_router(meetings.router, prefix='/api/v1/meetings', tags=['meetings'])
 
 
 ##################################
@@ -1393,7 +1366,9 @@ async def chat_completion(
                 fallback_model_id = next(
                     (
                         model_id.strip()
-                        for model_id in ((await Config.get('ui.default_models')) or '').split(',')
+                        for model_id in (
+                            (await model_catalog.default_models(await Config.get('ui.default_models'))) or ''
+                        ).split(',')
                         if model_id.strip()
                     ),
                     None,
@@ -1402,7 +1377,7 @@ async def chat_completion(
                     fallback_model = request.app.state.MODELS.get(fallback_model_id)
 
             # Check if user has access to the model
-            if not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
+            if not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user):
                 try:
                     access_model_info = (
                         model_info.model_copy(update={'base_model_id': None})
@@ -1429,8 +1404,7 @@ async def chat_completion(
                 model,
                 model_info,
                 user,
-                check_access=not BYPASS_MODEL_ACCESS_CONTROL
-                and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL),
+                check_access=not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user),
                 chat_id=form_data.get('chat_id'),
                 message_ids=form_data.get('message_ids'),
             )
@@ -1613,7 +1587,7 @@ async def chat_completion(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=ERROR_MESSAGES.NOT_FOUND,
                     )
-                if user.role != 'admin':
+                if not can_bypass_access_control(user):
                     if channel.type in ['group', 'dm']:
                         if not await Channels.is_user_channel_member(channel.id, user.id):
                             raise HTTPException(
@@ -1639,7 +1613,7 @@ async def chat_completion(
                     if target_message and (
                         target_message.channel_id != channel.id
                         # Write access is not authorship — block cross-member edits.
-                        or (user.role != 'admin' and target_message.user_id != user.id)
+                        or (not can_bypass_access_control(user) and target_message.user_id != user.id)
                     ):
                         raise HTTPException(
                             status_code=status.HTTP_403_FORBIDDEN,
@@ -1790,7 +1764,7 @@ async def chat_completion(
                         asyncio.create_task(run_initial_title_generation())
                 else:
                     # Existing chat — verify ownership
-                    if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':
+                    if not await Chats.is_chat_owner(chat_id, user.id) and not can_access_admin_chats(user):
                         raise HTTPException(
                             status_code=status.HTTP_404_NOT_FOUND,
                             detail=ERROR_MESSAGES.DEFAULT(),
@@ -1960,87 +1934,11 @@ async def chat_completion(
 
     async def process_chat(request, form_data, user, metadata, model, tasks=None):
         try:
-            # [Gradient] Resolve the routing decision BEFORE process_chat_payload
-            # so the middleware knows whether to skip legacy web search / RAG /
-            # tool resolution (the agent service does its own).
-            #
-            # Routing matrix (utils/agent_routing.resolve_agent_route):
-            #   chat.meta.agent_id set                                  → that agent
-            #   no agent_id, picker on, default agent configured        → the default agent
-            #   no agent_id, picker on, no default                      → 400, choose an agent
-            #   no agent_id, picker off, AGENT_API_ENABLED=true         → agent route (legacy bypass)
-            #   otherwise                                               → standard route
+            # [Gradient] With the agent API on, the agent service handles every
+            # turn; decided before process_chat_payload so the middleware skips
+            # legacy web search / RAG / tool resolution (the agent does its own).
+            route_to_agent = AGENT_API_ENABLED
             chat_id_meta = metadata.get('chat_id')
-            chat_agent_id: Optional[str] = None
-            if chat_id_meta and not chat_id_meta.startswith('local:'):
-                try:
-                    chat_row = await Chats.get_chat_by_id(chat_id_meta)
-                    if chat_row and chat_row.meta:
-                        chat_agent_id = chat_row.meta.get('agent_id') or None
-                except Exception:
-                    chat_agent_id = None
-
-            # [Gradient] Resolve the route first (pure, utils/agent_routing),
-            # then verify access to whatever agent it named. Under the picker
-            # a chat without a binding falls back to the admin-configured
-            # default rather than to the raw model: the standard route is a
-            # bare LLM with stock top-k RAG, which a tenant user only ever
-            # sees as "few sources" and cannot diagnose. An inactive default
-            # counts as no default.
-            default_agent_id: Optional[str] = None
-            if not chat_agent_id and AGENT_API_ENABLED and FEATURE_AGENT_PICKER:
-                default_slug = ((await Config.get('agent_api.picker_default_slug')) or '').strip()
-                default_cfg = await AgentConfigs.get_agent_config_by_id(default_slug) if default_slug else None
-                default_agent_id = default_slug if default_cfg and default_cfg.is_active else None
-            try:
-                route = resolve_agent_route(
-                    chat_agent_id=chat_agent_id,
-                    agent_api_enabled=AGENT_API_ENABLED,
-                    feature_agent_picker=FEATURE_AGENT_PICKER,
-                    default_agent_id=default_agent_id,
-                )
-            except AgentSelectionRequired:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='Choose an agent before sending a message.',
-                )
-            route_to_agent = route.to_agent
-
-            if route.agent_id:
-                # Defense-in-depth: refuse to route to an agent the user no
-                # longer has access to (e.g. admin disabled is_active or
-                # revoked group access mid-chat). Applies to the bound agent
-                # and to the default alike.
-                cfg = await AgentConfigs.get_agent_config_by_id(route.agent_id)
-                if not cfg or not cfg.is_active:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail='This chat is bound to an agent that is no longer available.',
-                    )
-                if user.role != 'admin':
-                    user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id)}
-                    accessible = await AccessGrants.get_accessible_resource_ids(
-                        user_id=user.id,
-                        resource_type='agent_config',
-                        resource_ids=[route.agent_id],
-                        permission='read',
-                        user_group_ids=user_group_ids,
-                    )
-                    if route.agent_id not in accessible:
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail='You no longer have access to this agent.',
-                        )
-
-            if route.agent_id and route.agent_id != chat_agent_id:
-                # The default fired. Record it on the row so later turns and
-                # the navbar agree with what actually served this chat.
-                if chat_id_meta and not chat_id_meta.startswith('local:'):
-                    try:
-                        await Chats.bind_chat_agent_by_id(chat_id_meta, route.agent_id)
-                    except Exception as e:
-                        log.warning('Could not bind chat %s to default agent %s: %s', chat_id_meta, route.agent_id, e)
-                chat_agent_id = route.agent_id
 
             # [Gradient] Keep the request-local model when saved-chat dispatch reloads the registry.
             if split_assistant_id:
@@ -2050,7 +1948,6 @@ async def chat_completion(
                 await Chats.bind_chat_assistant_by_id(chat_id_meta, split_assistant_id)
 
             metadata['route_to_agent'] = route_to_agent
-            metadata['chat_agent_id'] = chat_agent_id
 
             form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
 
@@ -2060,13 +1957,7 @@ async def chat_completion(
 
             # [Gradient] The agent owns inference and tool execution for routed chats.
             if route_to_agent:
-                response = await call_agent_api(
-                    request,
-                    form_data,
-                    metadata,
-                    metadata.get('features', {}),
-                    override_agent=chat_agent_id,
-                )
+                response = await call_agent_api(request, form_data, metadata)
             else:
                 response = await chat_completion_handler(request, form_data, user)
             if metadata.get('chat_id') and metadata.get('message_id'):
@@ -2108,6 +1999,8 @@ async def chat_completion(
             except Exception:
                 pass
             raise  # re-raise to ensure proper task cancellation handling
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             error_detail = e.detail if isinstance(e, HTTPException) else str(e)
             log.error('Error processing chat payload: %s', error_detail)
@@ -2510,7 +2403,7 @@ async def verify_chat_ownership(chat_id: str | None, user) -> None:
             detail='Channel chats are not supported on this endpoint',
         )
 
-    if user.role != 'admin' and not await Chats.is_chat_owner(chat_id, user.id):
+    if not can_access_admin_chats(user) and not await Chats.is_chat_owner(chat_id, user.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.DEFAULT(),
@@ -2578,11 +2471,11 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     socket_id = get_temporary_chat_session_id(chat_id)
     if socket_id:
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and user.role != 'admin':
+        if owner_id != user.id and not can_access_admin_chats(user):
             return {'task_ids': []}
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        if chat is None or (chat.user_id != user.id and not can_access_admin_chats(user)):
             return {'task_ids': []}
 
     task_ids = await list_task_ids_by_item_id(request.app.state.redis, chat_id)
@@ -2597,11 +2490,11 @@ async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     chat = None
     if socket_id:
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and user.role != 'admin':
+        if owner_id != user.id and not can_access_admin_chats(user):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        if chat is None or (chat.user_id != user.id and not can_access_admin_chats(user)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     result = await stop_item_tasks(request.app.state.redis, chat_id)
 
@@ -2760,6 +2653,8 @@ async def get_app_config(request: Request):
         'users.enable_status',
         'google_drive.enable',
         'onedrive.enable',
+        'live_documents.enable',
+        'live_mail.enable',
         'memories.enable',
         'ui.default_models',
         'ui.default_pinned_models',
@@ -2812,8 +2707,6 @@ async def get_app_config(request: Request):
         'onedrive.client_id_business',
         'onedrive.sharepoint_url',
         'onedrive.sharepoint_tenant_id',
-        'agent_proxy.enable',
-        'agent_api.picker_default_slug',
         'features.enable_data_warnings',
         'admin.data_retention_ttl_days',
         'ui.enable_welcome_message',
@@ -2870,7 +2763,8 @@ async def get_app_config(request: Request):
                     'enable_pyodide_file_persistence': ENABLE_PYODIDE_FILE_PERSISTENCE,
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
-                    'enable_direct_connections': config.get('direct.enable'),
+                    # [Gradient] v2 mode keeps the picker to the soev-api catalog.
+                    'enable_direct_connections': config.get('direct.enable') and not model_catalog.is_v2(),
                     'enable_plugins': ENABLE_PLUGINS,
                     'enable_folders': config.get('folders.enable'),
                     'folder_max_file_count': config.get('folders.max_file_count'),
@@ -2928,7 +2822,10 @@ async def get_app_config(request: Request):
                     'feature_chat_overview': FEATURE_CHAT_OVERVIEW,
                     'feature_notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
                     'feature_voice': FEATURE_VOICE,
+                    'feature_voice_call': FEATURE_VOICE and FEATURE_VOICE_CALL,
+                    'feature_read_aloud': FEATURE_VOICE and FEATURE_READ_ALOUD,
                     'feature_changelog': FEATURE_CHANGELOG,
+                    'feature_meetings': FEATURE_MEETINGS,
                     'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
                     'feature_models': FEATURE_MODELS,
                     'feature_model_meters': FEATURE_MODEL_METERS,
@@ -2967,10 +2864,9 @@ async def get_app_config(request: Request):
                         else {}
                     ),
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
-                    'enable_agent_proxy': config.get('agent_proxy.enable'),  # [Gradient]
+                    'enable_live_mail': AGENT_API_ENABLED and config.get('live_mail.enable'),
+                    'enable_live_documents': AGENT_API_ENABLED and config.get('live_documents.enable'),
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
-                    'feature_agent_picker': FEATURE_AGENT_PICKER,  # [Gradient]
-                    'agent_picker_default_slug': config.get('agent_api.picker_default_slug'),  # [Gradient]
                     'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
                     'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]
                     'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]
@@ -3000,7 +2896,8 @@ async def get_app_config(request: Request):
         'model_profiles': _parse_model_profiles(MODEL_PROFILES),
         **(
             {
-                'default_models': config.get('ui.default_models'),
+                # [Gradient] The catalog default replaces ui.default_models in v2 mode.
+                'default_models': await model_catalog.default_models(config.get('ui.default_models')),
                 'default_pinned_models': config.get('ui.default_pinned_models'),
                 'default_prompt_suggestions': config.get('ui.prompt_suggestions'),
                 **({'user_count': user_count} if user_count is not None else {}),

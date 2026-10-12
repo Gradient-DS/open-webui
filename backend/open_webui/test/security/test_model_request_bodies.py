@@ -139,7 +139,7 @@ def harness(application, monkeypatch):
     monkeypatch.setattr(application.Models, 'get_model_by_id', AsyncMock(return_value=None))
     for module in (application, ollama, openai):
         monkeypatch.setattr(module, 'check_model_access', AsyncMock())
-    monkeypatch.setattr(application, 'resolve_agent_route', lambda **kwargs: False)
+    monkeypatch.setattr(application, 'AGENT_API_ENABLED', False)
     monkeypatch.setattr(ollama, 'get_ollama_url', AsyncMock(return_value=('http://provider.invalid', 0)))
     monkeypatch.setattr(openai, 'get_openai_connection', AsyncMock(return_value=('http://provider.invalid/v1', '', {})))
     monkeypatch.setattr(openai, 'get_headers_and_cookies', AsyncMock(return_value=({}, {})))

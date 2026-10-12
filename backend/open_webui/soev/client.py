@@ -115,12 +115,26 @@ def _chat_thread_id(response: httpx.Response) -> str:
 class SoevApiError(Exception):
     """A soev-api problem or a sanitized upstream failure."""
 
-    def __init__(self, status: int, code: str, detail: str, constraint: str | None = None) -> None:
+    def __init__(
+        self,
+        status: int,
+        code: str,
+        detail: str,
+        constraint: str | None = None,
+        *,
+        provider: str | None = None,
+        retry_after: str | None = None,
+    ) -> None:
         super().__init__(detail)
         self.status = status
         self.code = code
         self.detail = detail
         self.constraint = constraint
+        self.provider = provider
+        self.retry_after = retry_after
+        # [Gradient] The failing call, without query, body or credentials; set where _request raises.
+        self.method: str | None = None
+        self.path: str | None = None
 
 
 def _response_error(response: httpx.Response) -> SoevApiError:
@@ -139,7 +153,15 @@ def _response_error(response: httpx.Response) -> SoevApiError:
         return fallback
     if constraint is not None and not isinstance(constraint, str):
         return fallback
-    return SoevApiError(status, code, fallback.detail if status >= 500 else detail, constraint)
+    provider = problem.get('provider')
+    return SoevApiError(
+        status,
+        code,
+        fallback.detail if status >= 500 else detail,
+        constraint,
+        provider=provider if isinstance(provider, str) else None,
+        retry_after=response.headers.get('Retry-After'),
+    )
 
 
 class SoevClient:
@@ -167,6 +189,45 @@ class SoevClient:
         if path.endswith('/fork'):
             result['thread_id'] = _chat_thread_id(response)
         return result
+
+    async def post_bytes(self, path: str, body: bytes, *, as_user: str, params: dict | None = None) -> dict:
+        if not as_user:
+            raise ValueError('Uploading bytes requires an acting user')
+        response = await self._request('POST', path, content=body, as_user=as_user, params=params)
+        return self._json_object(response)
+
+    async def complete_task(self, body: dict, *, as_user: str) -> dict:
+        """Run one task completion on the client's task model; tasks carry no replay key."""
+        if not as_user:
+            raise ValueError('A task completion requires an acting user')
+        response = await self._request('POST', '/v1/completions/task', body=body, as_user=as_user)
+        return self._json_object(response)
+
+    async def stream_task(self, body: dict, *, as_user: str) -> AsyncIterator[bytes]:
+        """Pass a streamed task completion's SSE bytes through unchanged."""
+        if not as_user or self._subject_minter is None:
+            raise ValueError('A task completion requires an acting user and subject minter')
+        headers = {
+            'Authorization': f'Bearer {self._api_key}',
+            'X-Soev-Subject': self._subject_minter(as_user),
+            'Accept': 'text/event-stream',
+        }
+        try:
+            async with _shared_client().stream(
+                'POST',
+                f'{self._base_url}/v1/completions/task',
+                headers=headers,
+                json=body,
+                timeout=httpx.Timeout(self._timeout, read=660.0),
+            ) as response:
+                if not response.is_success:
+                    await response.aread()
+                    raise _response_error(response)
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+        except httpx.TransportError as error:
+            status = 504 if isinstance(error, httpx.TimeoutException) else 502
+            raise SoevApiError(status, 'upstream_error', 'Task completion stream failed') from None
 
     async def chat_delete(self, path: str, *, as_user: str) -> None:
         """Delete a thread once; the chat contract has no mutation replay key."""
@@ -345,6 +406,7 @@ class SoevClient:
         path: str,
         *,
         body: dict | None = None,
+        content: bytes | None = None,
         as_user: str | None = None,
         params: dict | None = None,
         idempotency_key: str | None = None,
@@ -360,31 +422,54 @@ class SoevClient:
             headers['Idempotency-Key'] = idempotency_key
         started = time.perf_counter()
         status = None
+        route = path.split('?', 1)[0]
         try:
             response = await _shared_client().request(
-                method, f'{self._base_url}{path}', headers=headers, params=params, json=body, timeout=self._timeout
+                method,
+                f'{self._base_url}{path}',
+                headers=headers,
+                params=params,
+                json=body,
+                content=content,
+                timeout=self._timeout,
             )
             status = response.status_code
         except httpx.TransportError as error:
             status = 504 if isinstance(error, httpx.TimeoutException) else 502
-            log.warning('soev-api transport failure', extra={'status': status, 'request_id': None})
-            raise SoevApiError(status, 'upstream_error', 'soev-api request failed') from None
+            log.warning(
+                'soev-api transport failure %s %s %s',
+                method,
+                route,
+                status,
+                extra={'status': status, 'request_id': None},
+            )
+            failure = SoevApiError(status, 'upstream_error', 'soev-api request failed')
+            failure.method, failure.path = method, route
+            raise failure from None
         finally:
             # [Gradient] The deployed formatter renders the message only, so the timing rides in it.
             log.debug(
                 'soev-api request %s %s %s %.1fms',
                 method,
-                path.split('?', 1)[0],
+                route,
                 status,
                 (time.perf_counter() - started) * 1000,
             )
+        request_id = response.headers.get('X-Request-ID')
+        # [Gradient] Status and request id ride in the message; the deployed formatter drops extra.
         log.log(
             logging.INFO if response.is_success else logging.WARNING,
-            'soev-api response',
-            extra={'status': response.status_code, 'request_id': response.headers.get('X-Request-ID')},
+            'soev-api response %s %s %s request_id=%s',
+            method,
+            route,
+            response.status_code,
+            request_id,
+            extra={'status': response.status_code, 'request_id': request_id},
         )
         if not response.is_success:
-            raise _response_error(response)
+            error = _response_error(response)
+            error.method, error.path = method, route
+            raise error
         return response
 
     @staticmethod

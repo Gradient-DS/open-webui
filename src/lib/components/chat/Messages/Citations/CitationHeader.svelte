@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SourceIcon from './SourceIcon.svelte';
 	import { getContext } from 'svelte';
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
@@ -27,6 +28,7 @@
 	{#if citation?.source?.name}
 		{@const document = mergedDocuments?.[0]}
 		{@const docFileId = document?.metadata?.file_id}
+		<SourceIcon source={citation.source} />
 		{#if docFileId || externalUrl}
 			{@const isFileMissing = !!docFileId && !previewAvailable}
 			{@const linksToFile = !!docFileId && !isFileMissing}

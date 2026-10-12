@@ -99,6 +99,21 @@ describe('cloud-sync thin router', () => {
 		);
 	});
 
+	it('runs every schedule of a knowledge base in one call', async () => {
+		const result = {
+			data: [
+				{ schedule_id: 'a', job_id: 'job', code: null },
+				{ schedule_id: 'b', job_id: null, code: 'run_too_soon' }
+			]
+		};
+		const fetch = respond(result);
+		expect(await cloudSync.syncKnowledge(token, 'kb/one')).toEqual(result);
+		expect(fetch).toHaveBeenCalledWith(
+			'/api/v1/cloud-sync/knowledge/kb%2Fone/sync',
+			expect.objectContaining({ method: 'POST' })
+		);
+	});
+
 	it('handles run jobs and bodyless schedule and revoke responses', async () => {
 		respond({ job_id: 'job' }, 201);
 		expect(await cloudSync.runSchedule(token, 'kb', 's')).toEqual({ job_id: 'job' });

@@ -195,6 +195,58 @@ def test_verification_distinguishes_boolean_from_integer():
     assert records[0]['observed'] is True
 
 
+def _exports(server):
+    return sum(path == configuration.EXPORT for _, path, _ in server.calls)
+
+
+def _guard(server, records):
+    return configuration.preserve_configuration(server, report=records.append, route=ROUTE, unverified=pytest.fail)
+
+
+def test_a_verified_snapshot_is_reused_while_nothing_was_sent():
+    server = ConfigServer()
+    records = []
+    with _guard(server, records):
+        pass
+    assert _exports(server) == 2
+    with _guard(server, records):
+        server.config[KEY] = PAYLOAD
+    # One export after the write, then the import and its verification.
+    assert _exports(server) == 4
+    with _guard(server, records):
+        pass
+    assert _exports(server) == 5
+    assert [f['key'] for f in records] == [KEY]
+
+
+def test_any_request_sent_between_guards_forces_a_fresh_snapshot(monkeypatch):
+    server = ConfigServer()
+    with _guard(server, []):
+        pass
+    monkeypatch.setattr(configuration, '_send', lambda *a, **kw: None)
+    requests.Session().send(requests.Request('GET', 'http://offline-config/read').prepare())
+    # A read route that changed configuration outside any guard.
+    server.config[ENGINE] = 'changed-by-a-read'
+    records = []
+    with _guard(server, records):
+        pass
+    assert _exports(server) == 4
+    assert not records
+    assert server.config[ENGINE] == 'changed-by-a-read'
+
+
+def test_a_snapshot_verified_for_another_client_is_not_reused():
+    first, second = ConfigServer(), ConfigServer()
+    with _guard(first, []):
+        pass
+    second.config[KEY] = 7
+    records = []
+    with _guard(second, records):
+        pass
+    assert _exports(second) == 2
+    assert not records
+
+
 @pytest.mark.parametrize('baseline', [None, {}, {ENGINE: PAYLOAD}])
 def test_old_poison_without_a_clean_baseline_fails_before_seeding(monkeypatch, tmp_path, baseline):
     server = ConfigServer()
@@ -209,9 +261,9 @@ def test_old_poison_without_a_clean_baseline_fails_before_seeding(monkeypatch, t
 
 
 def test_recovery_does_not_remove_routes_or_fields():
-    assert len(plane.operations()) == 662
+    assert len(plane.operations()) == 612
     fields = plane.writable_string_fields(seeds.SPEC)
-    assert (len(fields), sum(map(len, fields.values()))) == (252, 2757)
+    assert (len(fields), sum(map(len, fields.values()))) == (231, 2664)
     assert seeds.SURFACE['preserve_configuration'] is True
     assert 'FILE_MAX_SIZE' in fields[ROUTE]
     assert 'POST /api/v1/retrieval/embedding/update' in fields

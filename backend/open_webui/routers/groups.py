@@ -21,6 +21,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.tools import Tools
 from open_webui.models.users import UserInfoResponse, Users
+from open_webui.soev.availability import configured
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -362,7 +363,7 @@ async def preview_group_access(
         db=db,
     )
 
-    all_knowledge = await Knowledges.get_knowledge_bases(db=db)
+    all_knowledge = await Knowledges.get_knowledge_bases(db=db) if configured() else []
     accessible_knowledge_ids = await AccessGrants.get_accessible_resource_ids(
         user_id='',
         resource_type='knowledge',

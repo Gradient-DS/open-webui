@@ -1,34 +1,8 @@
-"""Document export service — single-body Markdown → PDF / DOCX."""
+"""Document export service — single-body Markdown → DOCX."""
 
-import logging
 from io import BytesIO
-from pathlib import Path
 
-from open_webui.utils.chat_export import _md_to_html, safe_pdf_url_fetcher
-
-log = logging.getLogger(__name__)
-
-TEMPLATE_DIR = Path(__file__).parent.parent / 'templates'
-
-
-def _render_document_html(title: str, markdown: str) -> str:
-    from jinja2 import Environment, FileSystemLoader, select_autoescape
-
-    env = Environment(
-        loader=FileSystemLoader(str(TEMPLATE_DIR)),
-        autoescape=select_autoescape(default_for_string=True, default=True),
-    )
-    template = env.get_template('document_export.html')
-    body_html = _md_to_html(markdown)
-    return template.render(title=title, body=body_html)
-
-
-def generate_document_pdf(title: str, markdown: str) -> bytes:
-    """Render a single markdown document as PDF via WeasyPrint."""
-    from weasyprint import HTML
-
-    html_string = _render_document_html(title, markdown)
-    return HTML(string=html_string, url_fetcher=safe_pdf_url_fetcher).write_pdf()
+from open_webui.utils.chat_export import _md_to_html
 
 
 def generate_document_docx(title: str, markdown: str) -> bytes:

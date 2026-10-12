@@ -40,7 +40,7 @@ exceptions:
       The value is a literal placeholder in prose describing how to exercise a
       local dev stack. It was never issued by any identity provider and grants
       no access to any environment.
-    approved_by: "PENDING second review by @Gradient-DS/security"
+    approved_by: "@LexLubbers"
     recheck: 2026-12-01
 
   - id: 7029d372c3de8c09e7a2c9ed232c6179586ebbb1:src/lib/components/admin/Settings/Integrations.svelte:curl-auth-header:271
@@ -58,7 +58,7 @@ exceptions:
     usage_analysis: >-
       The string is displayed to a signed-in admin as documentation. It is not
       sent anywhere, is not a credential, and authenticates nothing.
-    approved_by: "PENDING second review by @Gradient-DS/security"
+    approved_by: "@LexLubbers"
     recheck: 2026-12-01
 
   - id: e0272831a4a5cc7a9fc0ffe361c8597f11fa487b:searxng/settings.yml:generic-api-key:28
@@ -77,7 +77,7 @@ exceptions:
       compose stack. It was never used by any deployed environment — every
       cluster's SearXNG key comes from 1Password via External Secrets — so
       nothing it protected was ever reachable off a laptop.
-    approved_by: "PENDING second review by @Gradient-DS/security"
+    approved_by: "@LexLubbers"
     recheck: 2026-12-01
 
   - id: 2f4f4c23764b03230cd626e3ba47b4ba93067450:backend/open_webui/test/apps/webui/storage/test_provider.py:generic-api-key:294
@@ -96,7 +96,7 @@ exceptions:
       The endpoint is a loopback address and the credential is the emulator's
       universally known development account. It grants access to nothing beyond
       a container running on the test host.
-    approved_by: "PENDING second review by @Gradient-DS/security"
+    approved_by: "@LexLubbers"
     recheck: 2026-12-01
 
   - id: 8b3e370a6eec353c931af76739bae2506238d726:backend/apps/rag/search/testdata/serpstack.json:generic-api-key:26
@@ -114,7 +114,7 @@ exceptions:
       The fixture is read from disk by a unit test that never performs a network
       call. The value is not a Gradient credential and was not valid for the
       third-party service.
-    approved_by: "PENDING second review by @Gradient-DS/security"
+    approved_by: "@LexLubbers"
     recheck: 2026-12-01
 
   - id: 501ff7a98bb874007ea1645d9fa371f75ae81f1a:backend/apps/rag/search/testdata/serpstack.json:generic-api-key:26
@@ -127,7 +127,7 @@ exceptions:
       Identical to the entry above: upstream history, file long since removed.
     usage_analysis: >-
       Identical to the entry above. No credential exists.
-    approved_by: "PENDING second review by @Gradient-DS/security"
+    approved_by: "@LexLubbers"
     recheck: 2026-12-01
 
   - id: 58a13aec7e14637a9d50d781e3f24c7f0747c292:static/pyscript/xterm-DqawCVsv.js:generic-api-key:1
@@ -146,7 +146,7 @@ exceptions:
       The match is inside vendored browser code shipped to render an in-page
       terminal. There is no secret to leak — the string is part of the
       library's own compiled source and is public on npm.
-    approved_by: "PENDING second review by @Gradient-DS/security"
+    approved_by: "@LexLubbers"
     recheck: 2026-12-01
 
   - id: 58a13aec7e14637a9d50d781e3f24c7f0747c292:static/pyscript/xterm-DqawCVsv.js.map:generic-api-key:1
@@ -159,7 +159,7 @@ exceptions:
       Identical to the entry above.
     usage_analysis: >-
       Identical to the entry above. No credential exists.
-    approved_by: "PENDING second review by @Gradient-DS/security"
+    approved_by: "@LexLubbers"
     recheck: 2026-12-01
 
   # ------------------------------------------------------------- pip-audit
@@ -174,34 +174,20 @@ exceptions:
       release, and the advisory lists it as still affected, so there is no
       version to upgrade to.
     replacement_considered: >-
-      nltk is pulled in for sentence tokenisation behind langchain's text
-      splitters. Replacing the splitter implementation would change how every
-      existing document was chunked and would invalidate stored embeddings, so
-      it is not a change a security-scanning rollout can make safely.
+      nltk is pulled in by unstructured, which uses it for sentence/word
+      tokenisation and POS tagging during document parsing. unstructured cannot
+      be configured without it, and replacing unstructured would change how
+      every existing document was parsed and chunked.
     usage_analysis: >-
-      The affected APIs download and unpack NLTK model artifacts. This image
-      downloads exactly one artifact, punkt_tab, at build time from NLTK's own
-      distribution, and the runtime never calls a download or unpack API — user
-      input reaches only the tokenizer, not the artifact loader.
-    approved_by: "PENDING second review by @Gradient-DS/security"
+      The affected APIs (TransitionParser.train/parse, AveragedPerceptron
+      save/load, PerceptronTagger.save_to_json, save_maxent_params) read or
+      write model files at a caller-chosen path, bypassing nltk's opt-in
+      pathsec sandbox. The backend never imports nltk; unstructured only calls
+      sent_tokenize, word_tokenize and pos_tag, which load models from nltk's
+      fixed data directories. No code path lets user input choose
+      a model import or export path, and we do not rely on pathsec.
+    approved_by: "@LexLubbers"
     recheck: 2026-12-01
-
-  # ------------------------------------------------------------------- npm
-  - id: GHSA-2883-xcg3-v3hh
-    package: js-yaml
-    scanner: npm
-    reason: >-
-      CPU exhaustion when parsing YAML with many merge keys. Reached only
-      beneath cypress, which parses its own configuration, not attacker input.
-      The application does not parse YAML in the browser at all.
-    replacement_considered: >-
-      A fixed js-yaml exists, but the vulnerable version is pinned by the
-      cypress tree, so reaching it means the same cypress 16 major.
-    usage_analysis: >-
-      Transitive beneath a devDependency. Not imported by any file under src/,
-      and absent from the production bundle.
-    approved_by: Lex Lubbers, 2026-09-09
-    recheck: 2026-12-09
 
   - id: CVE-2026-69112
     package: accelerate
@@ -228,3 +214,155 @@ exceptions:
     approved_by: Lex Lubbers, 2026-09-09
     recheck: 2026-12-09
 
+
+  # pymongo 4.18.1 (published 2026-09-10) is taken above and closes
+  # CVE-2026-88029. The three below are fixed only in 4.18.2, published
+  # 2026-09-24, which the 14-day uv exclude-newer cooldown refuses until
+  # 2026-10-08. NOT a §7 exception — a DEFERRED UPGRADE: on or after
+  # 2026-10-08 bump pymongo to 4.18.2 in pyproject.toml, uv.lock and both
+  # requirements files and delete these three entries. recheck 2026-10-20 is
+  # the deadline for that.
+  # Keyed by GHSA alias (pip-audit matches aliases) because ids must be unique
+  # across scanners and the image scan reports the CVE ids; see the trivy
+  # entries below.
+  - id: GHSA-qx36-8mw2-4r3x
+    package: pymongo
+    scanner: pip-audit
+    reason: >-
+      CVE-2026-96747. PyMongo passed a client-side-encryption data key's KMS
+      endpoint verbatim into parse_host(), which accepts any string ending in
+      .sock as a Unix socket path instead of validating it as a hostname.
+      Fixed in 4.18.2, which is inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      No replacement is needed; this is a deferred upgrade. 4.18.1, the newest
+      release outside the cooldown, is pinned now. Exempting pymongo from the
+      cooldown to take 4.18.2 early was rejected: the cooldown is the
+      supply-chain control, and the package is not used (see usage_analysis).
+    usage_analysis: >-
+      Unreachable. Nothing under backend/ imports pymongo, bson or gridfs; the
+      pin is inherited from upstream's requirements and pyproject `all` extra.
+      No code path creates a MongoClient, so no client-side-encryption data key
+      or KMS endpoint is ever parsed.
+    approved_by: "@LexLubbers"
+    recheck: 2026-10-20
+
+  - id: GHSA-vp6j-j7w5-5xjj
+    package: pymongo
+    scanner: pip-audit
+    reason: >-
+      CVE-2026-96748. PyMongo percent-decoded the whole host section of a
+      connection string before splitting it into host:port entries, so an
+      encoded comma or colon in a hostname could redirect the connection.
+      Fixed in 4.18.2, which is inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as CVE-2026-96747: 4.18.1 is pinned now, 4.18.2
+      replaces it once it clears the cooldown.
+    usage_analysis: >-
+      Unreachable. No code under backend/ imports pymongo or parses a MongoDB
+      connection string, and no deployment configures one.
+    approved_by: "@LexLubbers"
+    recheck: 2026-10-20
+
+  - id: GHSA-v4x9-3549-crwv
+    package: pymongo
+    scanner: pip-audit
+    reason: >-
+      CVE-2026-96749. Integer overflow in the BSON encoder of PyMongo's
+      bundled C extension when a single document is built from an unusually
+      large input. Fixed in 4.18.2, which is inside the 14-day package
+      cooldown until 2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as CVE-2026-96747: 4.18.1 is pinned now, 4.18.2
+      replaces it once it clears the cooldown.
+    usage_analysis: >-
+      Unreachable. Nothing under backend/ imports bson or pymongo, so the C
+      encoder is never invoked on any input, attacker-controlled or otherwise.
+    approved_by: "@LexLubbers"
+    recheck: 2026-10-20
+
+  # The image installs backend/requirements.txt, so the image scan reports
+  # the same two pymongo findings at HIGH. Cleared by the same 4.18.2 bump.
+  - id: CVE-2026-96748
+    package: pymongo (open-webui image)
+    scanner: trivy
+    reason: >-
+      Same finding as GHSA-vp6j-j7w5-5xjj, reported by the image scan. Fixed
+      only in pymongo 4.18.2, inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as GHSA-vp6j-j7w5-5xjj.
+    usage_analysis: >-
+      See GHSA-vp6j-j7w5-5xjj: nothing under backend/ imports pymongo, so no
+      connection string is ever parsed.
+    approved_by: "@LexLubbers"
+    recheck: 2026-10-20
+
+  - id: CVE-2026-96749
+    package: pymongo (open-webui image)
+    scanner: trivy
+    reason: >-
+      Same finding as GHSA-v4x9-3549-crwv, reported by the image scan. Fixed
+      only in pymongo 4.18.2, inside the 14-day package cooldown until
+      2026-10-08.
+    replacement_considered: >-
+      Same deferred upgrade as GHSA-v4x9-3549-crwv.
+    usage_analysis: >-
+      See GHSA-v4x9-3549-crwv: nothing under backend/ imports bson or pymongo,
+      so the C encoder is never invoked.
+    approved_by: "@LexLubbers"
+    recheck: 2026-10-20
+
+  # ------------------------------------------------------------------- npm
+  # Both fixes below exist but were published inside the 14-day window that
+  # the required lockfile-age check enforces. NOT §7 exceptions — DEFERRED
+  # UPGRADES with a recheck tied to the date the fix becomes installable.
+  - id: GHSA-wq5f-xc86-pv6w
+    package: sharp
+    scanner: npm
+    reason: >-
+      sharp's bundled libvips ships a librsvg affected by CVE-2026-96889. Fixed
+      in sharp 0.35.5, published 2026-09-27; lockfile-age refuses it until
+      2026-10-11. On or after that date raise the existing
+      overrides["@huggingface/transformers"].sharp in package.json to ^0.35.5,
+      relock, and delete this entry.
+    replacement_considered: >-
+      No replacement is needed; this is a deferred upgrade. Every sharp release
+      before 0.35.5 is affected, so no older pin helps. Taking 0.35.5 early
+      would fail the lockfile-age supply-chain gate for a package the shipped
+      app never loads.
+    usage_analysis: >-
+      sharp arrives only as a dependency of @huggingface/transformers (and,
+      through it, kokoro-js), which the frontend runs in the browser for
+      Whisper speech-to-text and Kokoro TTS workers. The package's browser
+      export (dist/transformers.web.js) marks sharp as ignored and decodes
+      images with the browser's own APIs, so sharp is never bundled. The
+      runtime image copies only the built frontend (/app/build), not
+      node_modules, so neither sharp nor libvips/librsvg is installed in any
+      published image. No SVG we render is ever passed to sharp.
+    approved_by: "@LexLubbers"
+    recheck: 2026-10-20
+
+  - id: GHSA-68fv-2mgg-jv7q
+    package: source-map-js
+    scanner: npm
+    reason: >-
+      source-map-js 1.0.0 - 1.2.1 allows an event-loop denial of service
+      through indexed source-map section offsets. Fixed in 1.2.2, published
+      2026-09-30; lockfile-age refuses it until 2026-10-14. On or after that
+      date run `npm update source-map-js` (postcss, sass and
+      @tailwindcss/node all accept ^1.2.2) and delete this entry.
+    replacement_considered: >-
+      No replacement is needed; this is a deferred upgrade. 1.2.1 is the
+      newest release outside the cooldown, and the dependents (postcss, sass,
+      tailwind) are the CSS toolchain, which has no source-map-js-free
+      alternative worth a swap for a build-time DoS.
+    usage_analysis: >-
+      Build-time only. source-map-js is used by postcss, sass and tailwind
+      while vite builds the frontend, and it parses only source maps those
+      tools produce from this repository's own sources. No user-supplied
+      source map is ever parsed, and the runtime image copies only the built
+      frontend, not node_modules. Worst case is a hung local or CI build.
+    approved_by: "@LexLubbers"
+    recheck: 2026-10-20

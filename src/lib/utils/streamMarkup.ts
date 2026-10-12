@@ -1,11 +1,7 @@
 // [Gradient] Markup the stream pipeline consumes instead of displaying.
 //
-// The backend lifts these tags out of the assistant text into output items
-// (DEFAULT_REASONING_TAGS / DEFAULT_CODE_INTERPRETER_TAGS /
-// DEFAULT_DOCUMENT_WRITER_TAGS in backend/open_webui/utils/middleware.py), and
-// the agent emits <details type="tool_calls"> anchors that StatusHistory renders
-// in MarkdownTokens' place. Every one of them is invisible once complete — which
-// is exactly why the half-typed form is the only form a user ever sees.
+// Tool/reasoning markers are hidden; documents become cards as soon as their
+// opening tag arrives. Their raw bodies belong only in the document panel.
 const STREAM_MARKUP_TAGS = [
 	'details',
 	'summary',
@@ -58,8 +54,17 @@ export const markupSafeEnd = (text: string, end: number): number => {
 	const code = text.charCodeAt(end - 1);
 	if (code >= 0xd800 && code <= 0xdbff) end += 1;
 
+	const document = text.lastIndexOf('<document', end - 1);
+	if (document !== -1) {
+		const opening = text.slice(document).match(/^<document\b(?:[^>"']|"[^"]*"|'[^']*')*>/);
+		if (!opening) return document;
+		const close = text.indexOf('</document>', document + opening[0].length);
+		if (close === -1) return text.length;
+		if (end <= close + '</document>'.length) return close + '</document>'.length;
+	}
+
 	const details = text.lastIndexOf('<details', end - 1);
-	if (details !== -1) {
+	if (details !== -1 && (document === -1 || details > text.indexOf('</document>', document))) {
 		const close = text.indexOf('</details>', details);
 		if (close === -1) return details;
 		end = Math.max(end, close + '</details>'.length);

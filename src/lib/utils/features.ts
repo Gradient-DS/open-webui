@@ -16,7 +16,10 @@ export type Feature =
 	| 'chat_overview'
 	| 'notes_ai_controls'
 	| 'voice'
+	| 'voice_call'
+	| 'read_aloud'
 	| 'changelog'
+	| 'meetings'
 	| 'system_prompt'
 	| 'models'
 	| 'knowledge'
@@ -31,7 +34,6 @@ export type Feature =
 	| 'input_menu'
 	| 'temporary_chat'
 	| 'builtin_tools'
-	| 'agent_picker'
 	| 'simple_assistant_builder';
 
 /**
@@ -99,26 +101,15 @@ export function hasFeatureAccess(
 }
 
 /**
- * Whether a chat is handled by the agent service. Mirrors the backend
- * routing matrix in `utils/agent_routing.py::resolve_agent_route`:
- *
- * - chat bound to an agent (`boundAgentId` set)          → agent route
- * - no agent, picker off, agent API enabled              → agent route (legacy bypass)
- * - otherwise                                            → standard route
+ * Whether chats are handled by the agent service: true whenever the agent
+ * API is enabled, as on the backend (`main.py`, `route_to_agent`).
  *
  * On the agent route the agent service owns retrieval, so per-file
  * retrieval controls (e.g. the "Using Focused Retrieval" toggle) have
  * no effect and should be hidden.
- *
- * @param boundAgentId - The chat's bound agent id (`chat.meta.agent_id`
- *   for an existing chat, the pending agent pick for a new chat).
  */
-export function isAgentRouted(boundAgentId?: string | null): boolean {
-	if (boundAgentId) {
-		return true;
-	}
-	const $config = get(config);
-	return Boolean($config?.features?.feature_agent_api_enabled) && !isFeatureEnabled('agent_picker');
+export function isAgentRouted(): boolean {
+	return Boolean(get(config)?.features?.feature_agent_api_enabled);
 }
 
 /**
@@ -141,8 +132,7 @@ export const ADMIN_SETTINGS_TABS = [
 	'security',
 	'db',
 	'acceptance',
-	'external-agents',
-	'agents'
+	'external-agents'
 ] as const;
 
 // [Gradient] Analytics is a known modal tab, outside the tenant settings allowlist.
@@ -192,25 +182,8 @@ export function isAdminSettingsTabEnabled(tab: string): boolean {
 	}
 
 	// External Agents tab requires AGENT_API_ENABLED on the backend.
-	// [Gradient] When the new per-chat agent picker is enabled, hide the
-	// legacy single-select tab to avoid confusion — admins should manage
-	// agents through the new Agents tab instead.
 	if (tab === 'external-agents') {
-		return (
-			tabAllowed &&
-			Boolean($config?.features?.feature_agent_api_enabled) &&
-			!isFeatureEnabled('agent_picker')
-		);
-	}
-
-	// [Gradient] New per-chat agent picker tab. Gated on the master flag.
-	// AGENT_API_ENABLED is also required so the agent service is reachable.
-	if (tab === 'agents') {
-		return (
-			tabAllowed &&
-			isFeatureEnabled('agent_picker') &&
-			Boolean($config?.features?.feature_agent_api_enabled)
-		);
+		return tabAllowed && Boolean($config?.features?.feature_agent_api_enabled);
 	}
 
 	return tabAllowed;

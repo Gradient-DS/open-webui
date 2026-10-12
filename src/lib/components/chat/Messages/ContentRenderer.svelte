@@ -4,7 +4,9 @@
 
 	import Markdown from './Markdown.svelte';
 	import StructuredOutputRenderer from './StructuredOutputRenderer.svelte';
-	import { hasDocumentOutput } from './structuredOutput';
+	import { maskInFlightTag } from '$lib/utils/streamMarkup';
+	import { DOCUMENT_OPEN } from '$lib/utils/agentDocument';
+	import { getOutputText, hasDocumentOutput } from './structuredOutput';
 	import {
 		artifactCode,
 		chatId as currentChatId,
@@ -18,6 +20,7 @@
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
 	import { createMessagesList, replaceOutsideCode } from '$lib/utils';
+	import { sourceLabels } from './Markdown/sourceLabels'; // [Gradient]
 
 	/**
 	 * Extracts all top-level <details>...</details> blocks from content,
@@ -83,6 +86,7 @@
 
 	export let done = true;
 	export let model = null;
+	/** @type {import('./Citations/reduceSources').RawSource[] | null} */
 	export let sources = null;
 
 	export let save = false;
@@ -112,8 +116,10 @@
 		// side panel never auto-opens for a reloaded chat.
 		const hasDocument =
 			hasDocumentOutput(output) ||
+			DOCUMENT_OPEN.test(getOutputText(output)) ||
 			(typeof content === 'string' &&
-				(/<details\b[^>]*\btype="document"/.test(content) ||
+				(DOCUMENT_OPEN.test(content) ||
+					/<details\b[^>]*\btype="document"/.test(content) ||
 					/<details\b[^>]*\btype="tool_calls"[^>]*\bname="write_document"/.test(content)));
 
 		if (
@@ -136,26 +142,10 @@
 		}
 	}
 
+	// [Gradient] One label per document, as the agent numbers them: a name shared by two documents no longer
+	// shifts the later chips onto the wrong (or no) source.
 	const getSourceIds = (sources) => {
-		const result = [];
-		for (const source of sources ?? []) {
-			for (let index = 0; index < (source.document ?? []).length; index++) {
-				if (model?.info?.meta?.capabilities?.citations == false) {
-					result.push('N/A');
-					continue;
-				}
-				const metadata = source.metadata?.[index];
-				const id = metadata?.source ?? 'N/A';
-				if (metadata?.name) {
-					result.push(metadata.name);
-				} else if (id.startsWith('http://') || id.startsWith('https://')) {
-					result.push(id);
-				} else {
-					result.push(source?.source?.name ?? id);
-				}
-			}
-		}
-		sourceIds = [...new Set(result)];
+		sourceIds = sourceLabels(sources, model?.info?.meta?.capabilities?.citations == false);
 	};
 
 	/** @param {string} messageContent */
@@ -184,7 +174,7 @@
 
 			if (
 				isFeatureEnabled('artifacts') &&
-				($settings?.detectArtifacts ?? true) &&
+				($settings?.detectArtifacts ?? false) &&
 				!compactPreview &&
 				isArtifact &&
 				hasClosingCodeFence(raw) &&
@@ -340,7 +330,7 @@
 			onUpdate={markdownUpdateHandler}
 			onPreview={previewHandler}
 		/>
-	{:else if $settings?.renderMarkdownInAssistantMessages ?? true}
+	{:else if ($settings?.renderMarkdownInAssistantMessages ?? true) || DOCUMENT_OPEN.test(content)}
 		<div class="markdown-prose">
 			<Markdown
 				{id}
@@ -383,7 +373,9 @@
 			</div>
 		{/if}
 		{#if extracted.plainContent}
-			<div class="whitespace-pre-wrap text-[0.9375rem]">{extracted.plainContent}</div>
+			<div class="whitespace-pre-wrap text-[0.9375rem]">
+				{maskInFlightTag(extracted.plainContent)}
+			</div>
 		{/if}
 	{/if}
 </div>

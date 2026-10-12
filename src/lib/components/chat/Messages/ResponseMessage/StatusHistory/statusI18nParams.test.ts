@@ -39,3 +39,31 @@ describe('statusI18nParams', () => {
 		expect(statusI18nParams(undefined)).toEqual({});
 	});
 });
+
+it('localizes mail order and address labels without changing addresses', () => {
+	const labels: Record<string, string> = {
+		'newest first': 'nieuwste eerst',
+		From: 'Van',
+		To: 'Aan',
+		Cc: 'Cc'
+	};
+	const params = statusI18nParams(
+		{
+			action: 'search_mail',
+			keywords: 'KNB',
+			matches: '143',
+			options: 'English fallback',
+			mail_options: [
+				{ label: 'newest first', value: '' },
+				{ label: 'From', value: '@knb.nl' },
+				{ label: 'To', value: 'lex@example.test' },
+				{ label: 'Cc', value: 'copy@example.test' }
+			]
+		},
+		(key) => labels[key]
+	);
+	expect(params.options).toBe(
+		'nieuwste eerst; Van: @knb.nl; Aan: lex@example.test; Cc: copy@example.test'
+	);
+	expect(params.mail_options).toBeUndefined();
+});

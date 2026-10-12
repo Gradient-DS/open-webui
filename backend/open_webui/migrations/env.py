@@ -7,6 +7,7 @@ import logging
 import alembic.context
 from open_webui.env import DATABASE_PASSWORD, DATABASE_URL, LOG_FORMAT
 from open_webui.internal.db import enable_iam_token_auth, extract_ssl_params_from_url, reattach_ssl_params_to_url
+from open_webui.internal.migration_lock import migration_lock
 from open_webui.models.auths import Auth
 from open_webui.models.calendar import Calendar, CalendarEvent, CalendarEventAttendee  # noqa: F401
 from open_webui.models.chat_messages import ChatMessage  # noqa: F401
@@ -71,7 +72,7 @@ def run_migrations_online() -> None:
     """Execute migrations against a live database connection."""
     live_connectable = _get_engine_connectable()
     enable_iam_token_auth(live_connectable)
-    with live_connectable.connect() as live_connection:
+    with migration_lock(live_connectable), live_connectable.connect() as live_connection:
         alembic.context.configure(
             connection=live_connection,
             target_metadata=migration_metadata,

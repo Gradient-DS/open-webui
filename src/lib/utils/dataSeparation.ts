@@ -47,7 +47,12 @@ export function classifyFileItem(item: FileItem | null | undefined): DataSide | 
 	return null;
 }
 
-/** The side selected in the message currently being composed (or null). */
+/**
+ * The side selected in the message currently being composed (or null).
+ *
+ * `webSearchEnabled` is true for web search Auto as well as Altijd: on Auto the model
+ * may search the open internet, so the open-internet side is already in use.
+ */
 export function getLiveSide(
 	files: FileItem[] | null | undefined,
 	webSearchEnabled: boolean

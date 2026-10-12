@@ -77,6 +77,28 @@ describe('mergeStatusAndReasoning — ChatAgent multi-tool', () => {
 	});
 });
 
+describe('mergeStatusAndReasoning — mid-turn summary', () => {
+	it('keeps the next tool on its own marker when a summary arrived between calls', () => {
+		// Prose between two calls settles the header with a summary, which has
+		// no marker: the call after it must still take the second marker, so
+		// the thought after that call stays below it.
+		const s = [
+			status('tool_a', { done: true }),
+			status('summary', { done: true }),
+			status('tool_b', { done: true })
+		];
+		const r = [reasoning(50, 'first thought'), reasoning(250, 'final thought')];
+		const out = mergeStatusAndReasoning(s, r, [100, 200]);
+		expect(out).toEqual([
+			r[0],
+			{ ...s[0], kind: 'status' },
+			{ ...s[1], kind: 'status' },
+			{ ...s[2], kind: 'status' },
+			r[1]
+		]);
+	});
+});
+
 describe('mergeStatusAndReasoning — ChatAgent pre-marker window', () => {
 	it('places reasoning before tool-start status when hidden=true && done=false', () => {
 		// The inline_tool_marker hasn't been emitted yet (toolOffsets === []),
@@ -345,6 +367,22 @@ describe('buildResponseBlocks', () => {
 			'summary'
 		]);
 		expect(contentText(blocks.at(-1))).toBe('Klaar.');
+	});
+
+	it('keeps a thought below the call after a mid-turn summary', () => {
+		const content = `${toolMarker('a')}Even kijken.${toolMarker('b')}${reasoningMarker()}Klaar.`;
+		const offsets = parseToolOffsets(content);
+		const r = [reasoning(content.indexOf('<details type="reasoning"'))];
+		const s = [
+			status('a', { done: true }),
+			status('summary', { done: true }),
+			status('b', { done: true })
+		];
+		const merged = mergeStatusAndReasoning(s, r, offsets);
+		const items = buildResponseBlocks(merged, content, offsets)
+			.filter((b) => b.kind !== 'content')
+			.flatMap((b) => (b as { items: { kind: string; action?: string }[] }).items);
+		expect(items.map((i) => i.action ?? i.kind)).toEqual(['a', 'summary', 'b', 'reasoning']);
 	});
 
 	it('returns a single content block for a turn that called no tools', () => {

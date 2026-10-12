@@ -63,41 +63,25 @@ describe('latestMessageWithSources', () => {
 	});
 });
 
-// [Gradient] Groups retain per-answer provenance even when the same file is reused.
+// [Gradient] Each answer's group lists exactly the sources its own `[N]` markers cite.
 describe('sourceGroups', () => {
-	it('groups a two-turn cumulative chat in branch order and scores only used sources', () => {
-		const shared = {
-			source: { id: 'shared' },
-			document: ['Shared'],
-			distances: [0.8],
-			cited_this_turn: true
-		};
+	it('groups a two-turn cumulative chat in branch order and scores only cited sources', () => {
+		const shared = { source: { id: 'shared' }, document: ['Shared'], distances: [0.8] };
 		const history: CitationHistory = {
 			currentId: 'a2',
 			messages: {
 				q1: { id: 'q1', role: 'user', content: '  First\n question?  ' },
-				a1: { id: 'a1', role: 'assistant', parentId: 'q1', sources: [shared] },
+				a1: { id: 'a1', role: 'assistant', parentId: 'q1', content: 'One [1].', sources: [shared] },
 				q2: { id: 'q2', role: 'user', parentId: 'a1', content: 'Second question?' },
 				a2: {
 					id: 'a2',
 					role: 'assistant',
 					parentId: 'q2',
+					content: 'Again [1] and new [3].',
 					sources: [
-						{ ...shared, current_turn: false },
-						{
-							source: { id: 'retrieved' },
-							document: ['Unused'],
-							distances: [12],
-							current_turn: true,
-							cited_this_turn: false
-						},
-						{
-							source: { id: 'new' },
-							document: ['New'],
-							distances: [0.7],
-							current_turn: true,
-							cited_this_turn: true
-						}
+						shared,
+						{ source: { id: 'retrieved' }, document: ['Unused'], distances: [12] },
+						{ source: { id: 'new' }, document: ['New'], distances: [0.7] }
 					]
 				}
 			}
@@ -116,57 +100,57 @@ describe('sourceGroups', () => {
 		expect(groups[1].showRelevance).toBe(true);
 	});
 
-	it('keeps all legacy sources and an empty question when the parent is absent', () => {
+	it('scopes an old message with the whole accumulated list to what its text cites', () => {
+		const accumulated = Array.from({ length: 15 }, (_, index) => ({
+			source: { id: `doc-${index + 1}` },
+			document: [`Passage ${index + 1}`]
+		}));
 		const [group] = sourceGroups({
 			currentId: 'a',
-			messages: { a: { id: 'a', role: 'assistant', sources } }
+			messages: {
+				a: { id: 'a', role: 'assistant', content: 'See [2] and [9].', sources: accumulated }
+			}
 		});
-		expect(group.used).toBe(group.citations);
-		expect(group.used).toHaveLength(1);
+		expect(group.citations).toHaveLength(15);
+		expect(group.used.map((citation) => citation.id)).toEqual(['doc-2', 'doc-9']);
 		expect(group.question).toBe('');
+	});
+
+	it('reads the cites from output items', () => {
+		const [group] = sourceGroups({
+			currentId: 'a',
+			messages: {
+				a: {
+					id: 'a',
+					role: 'assistant',
+					content: '',
+					output: [{ type: 'message', content: [{ type: 'output_text', text: 'Cited [1]' }] }],
+					sources
+				}
+			}
+		});
+		expect(group.used).toHaveLength(1);
 	});
 
 	it('ignores sourced sibling answers and unsourced messages', () => {
 		const groups = sourceGroups({
 			currentId: 'a',
 			messages: {
-				q: { id: 'q', role: 'user', sources },
-				a: { id: 'a', role: 'assistant', parentId: 'q', sources },
-				sibling: { id: 'sibling', role: 'assistant', parentId: 'q', sources }
+				q: { id: 'q', role: 'user', content: '[1]', sources },
+				a: { id: 'a', role: 'assistant', parentId: 'q', content: '[1]', sources },
+				sibling: { id: 'sibling', role: 'assistant', parentId: 'q', content: '[1]', sources }
 			}
 		});
 		expect(groups.map((group) => group.messageId)).toEqual(['a']);
 	});
 
-	it('retains a group with no used sources even if sources were retrieved', () => {
-		const [group] = sourceGroups({
-			currentId: 'a',
-			messages: {
-				a: {
-					id: 'a',
-					role: 'assistant',
-					sources: [{ ...sources[0], current_turn: true, cited_this_turn: false }]
-				}
-			}
-		});
-		expect(group.citations).toHaveLength(1);
-		expect(group.used).toEqual([]);
-		expect(group.showPercentage).toBe(false);
-		expect(group.showRelevance).toBe(false);
-	});
-
-	it('uses current-turn flags when cited flags are absent', () => {
-		const [group] = sourceGroups({
-			currentId: 'a',
-			messages: {
-				a: {
-					id: 'a',
-					role: 'assistant',
-					sources: [{ ...sources[0], current_turn: false }]
-				}
-			}
-		});
-		expect(group.used).toEqual([]);
+	it('gives an answer that cites nothing no group', () => {
+		expect(
+			sourceGroups({
+				currentId: 'a',
+				messages: { a: { id: 'a', role: 'assistant', content: 'No cites.', sources } }
+			})
+		).toEqual([]);
 	});
 
 	it.each([undefined, null, {}, { currentId: 'missing', messages: {} }])(
@@ -185,6 +169,7 @@ describe('sourceGroups', () => {
 						id: 'a',
 						role: 'assistant',
 						parentId: 'a',
+						content: '[1]',
 						sources
 					}
 				}

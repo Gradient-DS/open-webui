@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Readable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
 	import { createEventDispatcher, getContext } from 'svelte';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -11,7 +13,9 @@
 	import Tooltip from './Tooltip.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Readable<I18n>>('i18n');
+	$: originalUrl =
+		typeof item?.web_url === 'string' && item.web_url.startsWith('https://') ? item.web_url : null;
 	const dispatch = createEventDispatcher();
 
 	export let className = 'w-60';
@@ -32,11 +36,12 @@
 	export let size: number;
 
 	import DocumentPage from '../icons/DocumentPage.svelte';
-	import OneDrive from '../icons/OneDrive.svelte';
-	import GoogleDrive from '../icons/GoogleDrive.svelte';
-	import Confluence from '../icons/Confluence.svelte';
+	// [Gradient] Cloud collections show the folder icon with a provider badge.
+	import SourceItemIcon from './SourceItemIcon.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
 	import ChatBubble from '../icons/ChatBubble.svelte';
+	// [Gradient] Vergadering attached as chat context.
+	import Mic from '../icons/Mic.svelte';
 	import Folder from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
@@ -124,25 +129,23 @@
 							? $i18n.t('Collection')
 							: type === 'note'
 								? $i18n.t('Note')
-								: type === 'chat'
-									? $i18n.t('Chat')
-									: type === 'file' || type === 'filesystem'
-										? $i18n.t('File')
-										: type === 'url'
-											? $i18n.t('Web page')
-											: $i18n.t('Document')}
+								: type === 'meeting'
+									? $i18n.t('Meeting')
+									: type === 'chat'
+										? $i18n.t('Chat')
+										: type === 'file' || type === 'filesystem'
+											? $i18n.t('File')
+											: type === 'url'
+												? $i18n.t('Web page')
+												: $i18n.t('Document')}
 						placement="top"
 					>
-						{#if type === 'collection' && item?.knowledge_type === 'onedrive'}
-							<OneDrive className="size-3.5" />
-						{:else if type === 'collection' && item?.knowledge_type === 'google_drive'}
-							<GoogleDrive className="size-3.5" />
-						{:else if type === 'collection' && item?.knowledge_type === 'confluence'}
-							<Confluence className="size-3.5" />
-						{:else if type === 'collection'}
-							<FolderOpen className="size-3.5" />
+						{#if type === 'collection'}
+							<SourceItemIcon kind="folder" icon={FolderOpen} provider={item?.knowledge_type} />
 						{:else if type === 'note'}
 							<PageEdit className="size-3.5" />
+						{:else if type === 'meeting'}
+							<Mic className="size-3.5" />
 						{:else if type === 'chat'}
 							<ChatBubble className="size-3.5" />
 						{:else if type === 'folder'}
@@ -175,6 +178,8 @@
 						{$i18n.t('File')}
 					{:else if type === 'note'}
 						{$i18n.t('Note')}
+					{:else if type === 'meeting'}
+						{$i18n.t('Meeting')}
 					{:else if type === 'doc'}
 						{$i18n.t('Document')}
 					{:else if type === 'collection'}
@@ -228,5 +233,15 @@
 				<XMark className={'size-4'} />
 			</button>
 		</div>
+	{/if}
+	{#if item?.attached_by === 'agent' && originalUrl}
+		<a
+			href={originalUrl}
+			target="_blank"
+			rel="noopener noreferrer"
+			class="block px-2 py-1 text-xs text-blue-600 dark:text-blue-400"
+		>
+			{$i18n.t('Opened by the assistant from OneDrive')}
+		</a>
 	{/if}
 </div>

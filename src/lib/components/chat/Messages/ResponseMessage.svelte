@@ -43,6 +43,7 @@
 		removeAllDetails
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
+	import { answeredByLabel } from '$lib/utils/models/catalog';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
 
@@ -60,10 +61,13 @@
 
 	import Error from './Error.svelte';
 	import Citations from './SoevCitations.svelte'; // [Gradient]
+	import { answerText } from './Citations/citedSources'; // [Gradient]
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import PresentUIDispatcher from './Markdown/PresentUIDispatcher.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
+	import { consentLabels } from '$lib/utils/live-connections';
+	import ConnectOneDrive from './ConnectOneDrive.svelte';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import DocumentCard from './Markdown/DocumentCard.svelte';
 	import { isDeliveredFile } from '$lib/utils/deliveredFile';
@@ -84,23 +88,34 @@
 		parseToolOffsets
 	} from './ResponseMessage/mergeHistory';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
+	import TurnNotices from './ResponseMessage/TurnNotices.svelte';
 	import OutputEditView from './OutputEditView.svelte';
 	import {
 		getOutputProseRuns,
 		getOutputStreamAnchors,
-		getOutputText,
 		replaceOutputMessageText,
 		type OutputItem
 	} from './structuredOutput';
 
 	interface MessageType {
+		action_required?: { kind: string; provider: string };
 		id: string;
 		model: string;
 		assistant_id?: string; // [Gradient]
+		meta?: { answered_model?: string }; // [Gradient] Set when a fallback answered a v2 turn.
+		notices?: string[]; // [Claude] Chat items a v2 turn ran without, shown above its answer.
 		content: string;
 		output?: OutputItem[];
-		// [Gradient] Office attachments resolve their content through the owning chat.
-		files?: { type: string; url?: string; name?: string; content_type?: string; size?: number }[];
+		files?: {
+			type: string;
+			// [Gradient] Office attachments resolve their content through the owning chat.
+			url?: string;
+			id?: string;
+			attached_by?: string;
+			name?: string;
+			content_type?: string;
+			size?: number;
+		}[];
 		timestamp: number;
 		role: string;
 		statusHistory?: {
@@ -202,7 +217,10 @@
 	export let readOnly = false;
 	export let allowDelete = true;
 	export let compactPreview = false;
-	export let editCodeBlock = true;
+	// [Gradient] Answers are read-only: an agent's thread keeps what it answered, so an edit here would diverge
+	// from what the model knows. No edit button, and code blocks show without their editor.
+	const ANSWERS_EDITABLE = false;
+	export let editCodeBlock = ANSWERS_EDITABLE;
 	export let topPadding = false;
 	export let onInsertToNote: ((content: string) => void) | null = null;
 
@@ -220,6 +238,8 @@
 		assistant
 	);
 	$: headerModel = assistant ?? model;
+	// [Gradient] soev-api reports the model that answered when a fallback replaced the requested one.
+	$: answeredBy = answeredByLabel(message?.meta?.answered_model, message.model, $models);
 
 	$: statusEntries = (() => {
 		const raw = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
@@ -519,8 +539,8 @@
 	$: scheduleResponsePartsRebuild(reasoningItems, message?.subagents ?? _EMPTY_SUBAGENT_EVENTS);
 	$: responseParts = _memoResponseParts;
 
-	$: visibleResponseContent =
-		getOutputText(message.output) || removeAllDetails(message.content ?? '');
+	// [Gradient] Shared with the Sources panel, which lists the sources this text cites.
+	$: visibleResponseContent = answerText(message);
 	$: hasResponseContent = Boolean((message.content ?? '').trim() || message.output?.length);
 	$: hasAnswerText = Boolean(removeAllDetails(renderedContent ?? '').trim());
 
@@ -1073,12 +1093,18 @@
 							{headerModel?.name ?? message.model}
 						</span>
 					</Tooltip>
+					{#if answeredBy}
+						<span class="text-xs font-normal text-gray-400 dark:text-gray-500 line-clamp-1">
+							{$i18n.t('Answered by {{model}}', { model: answeredBy })}
+						</span>
+					{/if}
 				</Name>
 			{/if}
 
 			<div>
 				<div class="chat-{message.role} w-full min-w-full">
 					<div>
+						<TurnNotices notices={message?.notices ?? []} />
 						{#if protocol === 'reasoning_only' && (model?.info?.meta?.capabilities?.status_updates ?? true)}
 							<!-- No-tool / bezwaar turn: render parent reasoning blocks and
 							     subagent groups interleaved by their `started_at` timestamp.
@@ -1167,6 +1193,9 @@
 							{/each}
 						{/if}
 
+						{#if message?.action_required?.kind === 'connect' && consentLabels[message.action_required.provider]}
+							<ConnectOneDrive provider={message.action_required.provider} />
+						{/if}
 						{#if message?.files && message.files?.filter( (f) => ['image', 'file', 'office'].includes(f.type) ).length > 0}
 							<div
 								class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap"
@@ -1404,7 +1433,7 @@
 									id={message?.id}
 									{chatId}
 									sources={message?.sources ?? message?.citations}
-									messageDone={message?.done ?? false}
+									text={visibleResponseContent}
 									{readOnly}
 								/>
 							{/if}
@@ -1535,7 +1564,7 @@
 							{/if}
 
 							{#if message.done}
-								{#if !readOnly}
+								{#if !readOnly && ANSWERS_EDITABLE}
 									{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
 										<Tooltip content={$i18n.t('Edit')} placement="bottom">
 											<button
@@ -1691,7 +1720,7 @@
 									</Tooltip>
 								{/if}
 
-								{#if isFeatureEnabled('voice') && !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
+								{#if isFeatureEnabled('read_aloud') && !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
 											aria-label={$i18n.t('Read Aloud')}

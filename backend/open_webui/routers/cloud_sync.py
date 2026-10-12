@@ -8,13 +8,14 @@ from fastapi.responses import HTMLResponse
 from open_webui import config
 from open_webui.config import CORS_ALLOW_ORIGIN
 from open_webui.soev import identity
+from open_webui.soev.availability import SoevRoute, require_soev
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import CloudSync
 from open_webui.soev.request_cache import request_cache
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-router = APIRouter()
+router = APIRouter(route_class=SoevRoute)
 
 
 async def cloud_sync(user=Depends(get_verified_user)):
@@ -57,7 +58,7 @@ async def get_policy(user: object = Depends(get_verified_user)) -> SyncPolicy:
 
 class ConnectionForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    provider: Literal['onedrive', 'google_drive', 'confluence']
+    provider: Literal['onedrive', 'outlook_mail', 'google_drive', 'confluence']
 
 
 class ScheduleForm(BaseModel):
@@ -123,45 +124,70 @@ async def connect_done(
     )
 
 
-@router.post('/knowledge/{knowledge_id}/schedules')
+@router.post('/knowledge/{knowledge_id}/schedules', dependencies=[Depends(require_soev)])
 async def create_schedule(knowledge_id: str, body: ScheduleForm, sync=Depends(cloud_sync)):
     return await sync.create_schedule(knowledge_id, body.model_dump(exclude_none=True))
 
 
-@router.delete('/knowledge/{knowledge_id}/schedules/{schedule_id}', status_code=204)
+@router.delete(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}', status_code=204, dependencies=[Depends(require_soev)]
+)
 async def delete_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     await sync.schedule_action(knowledge_id, schedule_id, 'delete')
     return Response(status_code=204)
 
 
-@router.get('/knowledge/{knowledge_id}/sync')
+@router.get('/knowledge/{knowledge_id}/sync', dependencies=[Depends(require_soev)])
 async def sync_status(knowledge_id: str, sync=Depends(cloud_sync)):
     return await sync.sync_status(knowledge_id)
 
 
-@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/run', status_code=201)
+@router.post('/knowledge/{knowledge_id}/sync', dependencies=[Depends(require_soev)])
+async def sync_all(knowledge_id: str, sync=Depends(cloud_sync)):
+    return await sync.sync_all(knowledge_id)
+
+
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/run', status_code=201, dependencies=[Depends(require_soev)]
+)
 async def run_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     return await sync.schedule_action(knowledge_id, schedule_id, 'run')
 
 
-@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/cancel', status_code=204)
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/cancel', status_code=204, dependencies=[Depends(require_soev)]
+)
 async def cancel_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     await sync.schedule_action(knowledge_id, schedule_id, 'cancel')
     return Response(status_code=204)
 
 
-@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/suspend', status_code=204)
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/suspend', status_code=204, dependencies=[Depends(require_soev)]
+)
 async def suspend_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     await sync.schedule_action(knowledge_id, schedule_id, 'suspend')
     return Response(status_code=204)
 
 
-@router.post('/knowledge/{knowledge_id}/schedules/{schedule_id}/resume', status_code=204)
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/resume', status_code=204, dependencies=[Depends(require_soev)]
+)
 async def resume_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     await sync.schedule_action(knowledge_id, schedule_id, 'resume')
     return Response(status_code=204)
 
 
-@router.get('/knowledge/{knowledge_id}/schedules/{schedule_id}/skipped')
+@router.get('/knowledge/{knowledge_id}/schedules/{schedule_id}/skipped', dependencies=[Depends(require_soev)])
 async def skipped_items(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
     return await sync.skipped_items(knowledge_id, schedule_id)
+
+
+@router.get('/connections/{connection_id}/live/{family}')
+async def live_grants(connection_id: str, family: Literal['live_documents', 'mail'], sync=Depends(cloud_sync)):
+    return await sync.live_grants(connection_id, family)
+
+
+@router.post('/connections/{connection_id}/live/{family}')
+async def enable_live_family(connection_id: str, family: Literal['live_documents', 'mail'], sync=Depends(cloud_sync)):
+    return await sync.enable_live_family(connection_id, family)

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { prefetchKnowledge } from './Knowledge/utils/prefetch';
 	import { knowledgeListCache, type KnowledgeListItem } from './Knowledge/utils/listCache';
-	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import { enabledProviders } from '$lib/sources/policy';
-	import { providerFor, providerIcon } from '$lib/sources/registry';
+	import { providerFor } from '$lib/sources/registry';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	dayjs.extend(relativeTime);
@@ -149,6 +149,7 @@
 		if (cached) {
 			items = cached.items;
 			total = cached.total;
+			allItemsLoaded = cached.items.length >= cached.total;
 		}
 		await getItemsPage(true);
 	};
@@ -176,16 +177,9 @@
 
 		if (res) {
 			total = res.total;
-			setWorkspaceCount('knowledge', total);
 			const pageItems: KnowledgeListItem[] = res.items ?? [];
 			if (requestedPage === 1 && typeof res.total === 'number') {
 				knowledgeListCache.set(cacheKey, { items: pageItems, total: res.total }, cacheRevision);
-			}
-
-			if ((pageItems ?? []).length === 0) {
-				allItemsLoaded = true;
-			} else {
-				allItemsLoaded = false;
 			}
 
 			if (replace || items === null) {
@@ -193,6 +187,9 @@
 			} else {
 				items = [...items, ...pageItems];
 			}
+			// [Gradient] Stop at the total: the loader sentinel fetched an empty extra page otherwise.
+			allItemsLoaded =
+				pageItems.length === 0 || (typeof res.total === 'number' && items.length >= res.total);
 		}
 
 		itemsLoading = false;
@@ -493,7 +490,8 @@
 								}}
 							>
 								<div class="flex w-5 shrink-0 items-center justify-center">
-									<svelte:component this={providerIcon(item?.type)} className="size-4" />
+									<!-- [Gradient] Folder icon with the provider badge for cloud KBs. -->
+									<SourceItemIcon kind="folder" provider={item?.type} className="size-4" />
 								</div>
 								<div class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
 									<div class="flex min-w-0 flex-1 flex-col overflow-hidden">

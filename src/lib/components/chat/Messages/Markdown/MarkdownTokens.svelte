@@ -459,7 +459,7 @@
 						<DocumentCard
 							id={`${id}-${tokenIdx}-${detailIdx}-doc`}
 							title={decode(detailToken?.attributes?.title ?? detailToken.summary ?? '')}
-							markdown={decode(detailToken?.text ?? '')}
+							content={detailToken?.text ?? ''}
 							done={detailToken?.attributes?.done !== 'false'}
 							messageDone={done}
 						/>
@@ -468,7 +468,7 @@
 						<DocumentCard
 							id={`${id}-${tokenIdx}-${detailIdx}-wdoc`}
 							title={wdocArgs.title}
-							markdown={wdocArgs.markdown}
+							content={wdocArgs.markdown}
 							done={detailToken?.attributes?.done === 'true'}
 							messageDone={done}
 						/>
@@ -530,6 +530,14 @@
 				{/each}
 			</div>
 		</ConsecutiveDetailsGroup>
+	{:else if token.type === 'document'}
+		<DocumentCard
+			id={`${id}-${tokenIdx}-doc`}
+			title={token.document.title}
+			content={token.document.content}
+			format={token.document.format}
+			done={token.document.done}
+		/>
 	{:else if token.type === 'details'}
 		{@const textContent = getDetailTextContent(token)}
 
@@ -540,7 +548,7 @@
 			<DocumentCard
 				id={`${id}-${tokenIdx}-doc`}
 				title={decode(token?.attributes?.title ?? token.summary ?? '')}
-				markdown={decode(token?.text ?? '')}
+				content={token?.text ?? ''}
 				done={token?.attributes?.done !== 'false'}
 				messageDone={done}
 			/>
@@ -549,7 +557,7 @@
 			<DocumentCard
 				id={`${id}-${tokenIdx}-wdoc`}
 				title={wdocArgs.title}
-				markdown={wdocArgs.markdown}
+				content={wdocArgs.markdown}
 				done={token?.attributes?.done === 'true'}
 				messageDone={done}
 			/>

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { mergeCitationDocuments, probeFileAvailable } from './citationDocuments';
+import {
+	createPreviewProbe,
+	mergeCitationDocuments,
+	probeFileAvailable
+} from './citationDocuments';
 import {
 	minimumPage,
 	rectsFromSnippet,
@@ -72,5 +76,47 @@ describe('shared citation documents', () => {
 		);
 		expect(await probeFileAvailable('file')).toBe(false);
 		expect(await probeFileAvailable('file')).toBe(false);
+	});
+});
+describe('preview availability probe', () => {
+	const deferred = () => {
+		let resolve!: (ok: boolean) => void;
+		const promise = new Promise<boolean>((done) => (resolve = done));
+		return { promise, resolve };
+	};
+	it('ignores a late failure for the citation that was replaced', async () => {
+		const slowA = deferred();
+		const probe = vi.fn((id: string) => (id === 'a' ? slowA.promise : Promise.resolve(true)));
+		const results: boolean[] = [];
+		const availability = createPreviewProbe((ok) => results.push(ok), probe);
+		const first = availability.check('a');
+		await availability.check('b');
+		slowA.resolve(false);
+		await first;
+		expect(results.at(-1)).toBe(true);
+	});
+	it('probes the same file again instead of keeping a failure', async () => {
+		const probe = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+		const results: boolean[] = [];
+		const availability = createPreviewProbe((ok) => results.push(ok), probe);
+		await availability.check('a');
+		expect(results.at(-1)).toBe(false);
+		await availability.check('a');
+		expect(probe).toHaveBeenCalledTimes(2);
+		expect(results.at(-1)).toBe(true);
+	});
+	it('drops results after cancel and reports no file as available', async () => {
+		const slow = deferred();
+		const results: boolean[] = [];
+		const availability = createPreviewProbe(
+			(ok) => results.push(ok),
+			() => slow.promise
+		);
+		const pending = availability.check('a');
+		availability.cancel();
+		slow.resolve(false);
+		await pending;
+		await availability.check(undefined);
+		expect(results).toEqual([true, true]);
 	});
 });

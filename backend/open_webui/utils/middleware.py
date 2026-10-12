@@ -51,6 +51,7 @@ from open_webui.models.models import Models
 from open_webui.models.notes import Notes
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.availability import SoevNotConfigured
 from open_webui.retrieval.utils import get_sources_from_items
 from open_webui.routers.images import (
     CreateImageForm,
@@ -80,6 +81,7 @@ from open_webui.socket.main import (
 )
 from open_webui.tasks import clear_response_stream, save_response_stream
 from open_webui.utils.access_control import has_connection_access, has_permission
+from open_webui.utils.features import is_feature_enabled
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.ask_user import stage_ask_user_tool_calls
@@ -147,13 +149,13 @@ from open_webui.utils.agent_routing import agent_owns_tool_execution
 from open_webui.utils.skill_bundles import resolve_skill_bundle_files
 from open_webui.utils.data_separation import request_mixes_data_sources
 from open_webui.config import (
-    DEFAULT_DOCUMENT_WRITER_PROMPT,
     FEATURE_BUILTIN_TOOLS,
     FEATURE_STRICT_DATA_SEPARATION,
     FEATURE_SKILL_FILES,
 )
 from open_webui.env import AGENT_API_ENABLED  # Agent API bypass flag
 from starlette.responses import JSONResponse, Response, StreamingResponse
+from open_webui.utils.access_control import can_bypass_access_control
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -256,7 +258,6 @@ DEFAULT_REASONING_TAGS = [
 
 DEFAULT_SOLUTION_TAGS = [('<|begin_of_solution|>', '<|end_of_solution|>')]
 DEFAULT_CODE_INTERPRETER_TAGS = [('<code_interpreter>', '</code_interpreter>')]
-DEFAULT_DOCUMENT_WRITER_TAGS = [('<document>', '</document>')]
 
 
 def _start_tag_pattern(start_tag: str) -> str:
@@ -780,14 +781,7 @@ def serialize_output(output: list) -> str:
                 )
 
         elif item_type == 'open_webui:document':
-            # [Gradient] Document Writer feature — renders a <details type="document">
-            # block alongside reasoning/code_interpreter/tool_call blocks.
-            #
-            # Pre-v0.9.5 this branch wrote to a `content` string accumulator that only
-            # existed inside the code_interpreter branch (latent NameError if no
-            # code_interpreter item preceded a document item). Refactored to use the
-            # parts list architecture that all other branches use, fixing that bug and
-            # aligning with upstream's serialize_output structure.
+            # Stored messages from the legacy writer still contain these output items.
             markdown = item.get('markdown', '').strip()
             title = item.get('title', '') or item.get('attributes', {}).get('title', '')
             status = item.get('status', 'in_progress')
@@ -1658,6 +1652,8 @@ async def chat_completion_tools_handler(
                         tool_function = tool['callable']
                         tool_result = await tool_function(**tool_function_params)
 
+                except SoevNotConfigured:
+                    raise
                 except Exception as e:
                     tool_result = {'error': str(e)}
 
@@ -1732,9 +1728,13 @@ async def chat_completion_tools_handler(
             else:
                 await tool_call_handler(result)
 
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.debug('Error: %s', e)
             content = None
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         log.debug('Error: %s', e)
         content = None
@@ -2323,6 +2323,8 @@ async def chat_completion_files_handler(
                 full_context=all_full_context or rag_config.get('rag.full_context'),
                 user=user,
             )
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.exception(e)
 
@@ -2844,7 +2846,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     if folder_id and user:
         folder = await Folders.get_folder_by_id(folder_id)
-        if folder and user.role != 'admin' and not await has_folder_access(user.id, folder, 'read', db=None):
+        if (
+            folder
+            and not can_bypass_access_control(user)
+            and not await has_folder_access(user.id, folder, 'read', db=None)
+        ):
             folder = None
 
         if folder and folder.data:
@@ -2967,7 +2973,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # KBs are configured on the model (id, name, type, collection_names).
     raw_knowledge = model.get('info', {}).get('meta', {}).get('knowledge', None)
     if features:
-        if 'voice' in features and features['voice']:
+        # [Gradient] features is client-supplied; call mode is tenant-gated.
+        if 'voice' in features and features['voice'] and is_feature_enabled('voice_call'):
             if await Config.get('task.voice.prompt.enable'):
                 template = await Config.get('task.voice.prompt_template')
                 if not template:
@@ -3057,21 +3064,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                         append=True,
                     )
 
-        if 'document_writer' in features and features['document_writer']:
-            # Skip XML-tag prompt injection when native FC is enabled —
-            # write_document will be injected as a builtin tool instead.
-            # [Gradient] Also skip when this request is routed to the agent service.
-            if metadata.get('params', {}).get('function_calling') != 'native' and not route_to_agent:
-                prompt = (
-                    await Config.get('document_writer.prompt_template')
-                    if await Config.get('document_writer.prompt_template') != ''
-                    else DEFAULT_DOCUMENT_WRITER_PROMPT
-                )
-                form_data['messages'] = add_or_update_user_message(
-                    prompt,
-                    form_data['messages'],
-                )
-
     tool_ids = form_data.pop('tool_ids', None)
     terminal_id = form_data.pop('terminal_id', None)
     files = form_data.pop('files', None)
@@ -3100,7 +3092,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         note_id = (chat.meta or {}).get('note_id')
         note = await Notes.get_note_by_id(note_id) if note_id else None
         if note and (
-            user.role == 'admin'
+            can_bypass_access_control(user)
             or note.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -3613,6 +3605,8 @@ async def execute_tool_call_for_output(request, form_data, user, metadata, event
                 },
             )
             result = await function(**params)
+    except SoevNotConfigured:
+        raise
     except Exception as e:
         result = {'error': str(e)}
 
@@ -4756,15 +4750,10 @@ async def streaming_chat_response_handler(response, ctx):
                     'reasoning': 'reasoning',
                     'solution': 'message',  # solution tags just produce text
                     'code_interpreter': 'open_webui:code_interpreter',
-                    'document': 'open_webui:document',
                 }
                 output_item_type = output_type_map.get(content_type, content_type)
 
                 last_type = output[-1].get('type', '') if output else ''
-                # [Gradient] A document replacing an empty message keeps its stream slot/id.
-                document_slot = len(output) - 1
-                document_slot_id = output[-1].get('id') if output else None
-
                 if last_type == 'message':
                     # Use the output item's own text for tag detection
                     item = output[-1]
@@ -4832,20 +4821,6 @@ async def streaming_chat_response_handler(response, ctx):
                                         'started_at': time.time(),
                                     }
                                 )
-                            elif output_item_type == 'open_webui:document':
-                                output.append(
-                                    {
-                                        'type': 'open_webui:document',
-                                        'id': output_id('doc'),
-                                        'status': 'in_progress',
-                                        'start_tag': start_tag,
-                                        'end_tag': end_tag,
-                                        'attributes': attributes,
-                                        'title': attributes.get('title', ''),
-                                        'markdown': '',
-                                        'started_at': time.time(),
-                                    }
-                                )
                             else:
                                 # solution or other text-producing tag
                                 output.append(
@@ -4869,8 +4844,6 @@ async def streaming_chat_response_handler(response, ctx):
                                     output[-1]['content'] = [{'type': 'output_text', 'text': after_tag}]
                                 elif output_item_type == 'open_webui:code_interpreter':
                                     output[-1]['code'] = after_tag
-                                elif output_item_type == 'open_webui:document':
-                                    output[-1]['markdown'] = after_tag
                                 else:
                                     set_last_text(output, after_tag)
 
@@ -4885,7 +4858,6 @@ async def streaming_chat_response_handler(response, ctx):
                 elif (
                     (last_type == 'reasoning' and content_type == 'reasoning')
                     or (last_type == 'open_webui:code_interpreter' and content_type == 'code_interpreter')
-                    or (last_type == 'open_webui:document' and content_type == 'document')
                     or (last_type == 'message' and output[-1].get('_tag_type') == content_type)
                 ):
                     item = output[-1]
@@ -4900,8 +4872,6 @@ async def streaming_chat_response_handler(response, ctx):
                             block_content = parts[-1].get('text', '')
                     elif last_type == 'open_webui:code_interpreter':
                         block_content = item.get('code', '')
-                    elif last_type == 'open_webui:document':
-                        block_content = item.get('markdown', '')
                     else:
                         block_content = get_last_text(output)
 
@@ -4934,11 +4904,6 @@ async def streaming_chat_response_handler(response, ctx):
                                 item['code'] = block_content
                                 item['ended_at'] = time.time()
                                 item['duration'] = int(item['ended_at'] - item['started_at'])
-                            elif last_type == 'open_webui:document':
-                                item['markdown'] = block_content
-                                item['ended_at'] = time.time()
-                                item['duration'] = int(item['ended_at'] - item['started_at'])
-                                item['status'] = 'completed'
                             else:
                                 set_last_text(output, block_content)
                                 item['ended_at'] = time.time()
@@ -4977,15 +4942,6 @@ async def streaming_chat_response_handler(response, ctx):
                             )
                     else:
                         save_scanned_length(item, block_content)
-
-                if content_type == 'document':
-                    # [Gradient] Keep the persisted markdown and Responses API text part aligned.
-                    # Reuse the removed item's id so output_item.added replaces its client slot.
-                    if document_slot_id and not any(item.get('id') == document_slot_id for item in output):
-                        output[document_slot]['id'] = document_slot_id
-                    for item in output[max(document_slot, 0) :]:
-                        if item.get('type') == 'open_webui:document':
-                            item['content'] = [{'type': 'output_text', 'text': item.get('markdown', '')}]
 
                 return output, end_flag
 
@@ -5073,7 +5029,6 @@ async def streaming_chat_response_handler(response, ctx):
 
             reasoning_tags_param = metadata.get('params', {}).get('reasoning_tags')
             DETECT_REASONING_TAGS = reasoning_tags_param is not False
-            DETECT_DOCUMENT_WRITER = metadata.get('features', {}).get('document_writer', False)
 
             # Legacy tool-calling only: native FC gets execute_code as a builtin tool.
             # Same five authz gates as utils/tools.py get_builtin_tools.
@@ -5793,7 +5748,6 @@ async def streaming_chat_response_handler(response, ctx):
                                             and (
                                                 last_item_type == 'reasoning'
                                                 or last_item_type == 'open_webui:code_interpreter'
-                                                or last_item_type == 'open_webui:document'
                                                 or (
                                                     last_item_type == 'message'
                                                     and last_item.get('_tag_type') is not None
@@ -5805,8 +5759,6 @@ async def streaming_chat_response_handler(response, ctx):
                                             # Append to the existing tag-based item
                                             if last_item_type == 'open_webui:code_interpreter':
                                                 last_item['code'] = last_item.get('code', '') + value
-                                            elif last_item_type == 'open_webui:document':
-                                                last_item['markdown'] = last_item.get('markdown', '') + value
                                             elif last_item_type == 'reasoning':
                                                 parts = last_item.get('content', [])
                                                 if parts and parts[-1].get('type') == 'output_text':
@@ -5881,47 +5833,6 @@ async def streaming_chat_response_handler(response, ctx):
 
                                             if end:
                                                 break
-
-                                        # [Gradient] Lift document tags before emitting Responses API deltas.
-                                        # [Gradient] Agent-routed turns also flow through this handler (main.py pipes the agent response through process_chat_response), but the agent never emits <document> tags:
-                                        # the Document-Writer prompt injection is skipped for agent routes, and agent documents arrive as write_document tool-call markers rendered by the frontend as a DocumentCard.
-                                        if DETECT_DOCUMENT_WRITER:
-                                            document_slot = len(output) - 1
-                                            document_target = (output[-1].get('id'), output[-1].get('type'))
-                                            document_text = (
-                                                output[-1].get('markdown', '')
-                                                if document_target[1] == 'open_webui:document'
-                                                else (output[-1].get('content') or [{}])[-1].get('text', '')
-                                            )
-                                            output, _ = tag_output_handler(
-                                                'document',
-                                                DEFAULT_DOCUMENT_WRITER_TAGS,
-                                                output,
-                                            )
-                                            if document_target != (output[-1].get('id'), output[-1].get('type')) or (
-                                                document_text != (output[-1].get('content') or [{}])[-1].get('text', '')
-                                            ):
-                                                # [Gradient] Tag boundaries rewrite already-streamed text.
-                                                # Publish corrected items, then stream only the new tail's text.
-                                                # Ordinary document chunks use the upstream delta path unchanged.
-                                                value = output[-1]['content'][-1]['text']
-                                                for index in range(document_slot, len(output)):
-                                                    stream_item = dict(output[index])
-                                                    if index == len(output) - 1:
-                                                        stream_item['content'] = []
-                                                        if stream_item.get('type') == 'open_webui:document':
-                                                            stream_item['markdown'] = ''
-                                                    await emit_response_completion_event(
-                                                        {
-                                                            'type': (
-                                                                'response.output_item.done'
-                                                                if stream_item.get('status') == 'completed'
-                                                                else 'response.output_item.added'
-                                                            ),
-                                                            'output_index': index,
-                                                            'item': stream_item,
-                                                        }
-                                                    )
 
                                         target_index = len(output) - 1
                                         target_item = output[target_index] if target_index >= 0 else {}
@@ -6216,6 +6127,8 @@ async def streaming_chat_response_handler(response, ctx):
                                     },
                                 )
                                 result = await function(**params)
+                        except SoevNotConfigured:
+                            raise
                         except Exception as e:
                             result = {'error': str(e)}
                         return params, result, tool, tool_type, direct_tool

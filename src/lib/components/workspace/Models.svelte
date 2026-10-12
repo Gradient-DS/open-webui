@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { setWorkspaceCount } from '$lib/stores/workspace-counts';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -35,7 +34,6 @@
 	} from '$lib/apis/models';
 
 	import { getModels } from '$lib/apis';
-	import { getGroups } from '$lib/apis/groups';
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import { capitalizeFirstLetter, copyToClipboard } from '$lib/utils';
@@ -76,8 +74,6 @@
 	let showModelDeleteConfirm = false;
 
 	let selectedModel = null;
-
-	let groupIds = [];
 
 	let tags = [];
 	let selectedTag = '';
@@ -151,29 +147,30 @@
 		if (!loaded) return;
 
 		try {
-			const res = await getWorkspaceModels(
-				localStorage.token,
-				query,
-				viewOption,
-				selectedTag,
-				sortKey,
-				sortDirection,
-				page
-			).catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
+			// [Gradient] Tags load alongside the page instead of after it.
+			const [res, nextTags] = await Promise.all([
+				getWorkspaceModels(
+					localStorage.token,
+					query,
+					viewOption,
+					selectedTag,
+					sortKey,
+					sortDirection,
+					page
+				).catch((error) => {
+					toast.error(`${error}`);
+					return null;
+				}),
+				getModelTags(localStorage.token).catch((error) => {
+					toast.error(`${error}`);
+					return [];
+				})
+			]);
 
 			if (res) {
 				models = res.items;
 				total = res.total;
-				setWorkspaceCount('models', total);
-
-				// get tags
-				tags = await getModelTags(localStorage.token).catch((error) => {
-					toast.error(`${error}`);
-					return [];
-				});
+				tags = nextTags;
 			}
 		} catch (err) {
 			console.error(err);
@@ -400,9 +397,6 @@
 	onMount(async () => {
 		viewOption = localStorage.workspaceViewOption ?? '';
 		page = 1;
-
-		let groups = await getGroups(localStorage.token);
-		groupIds = groups.map((group) => group.id);
 
 		await tick();
 		loaded = true;

@@ -6,6 +6,8 @@
 	import { settings } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 
+	import { DOCUMENT_OPEN } from '$lib/utils/agentDocument';
+	import { maskInFlightTag } from '$lib/utils/streamMarkup';
 	import Markdown from './Markdown.svelte';
 	import ConsecutiveDetailsGroup from './Markdown/ConsecutiveDetailsGroup.svelte';
 	import {
@@ -88,7 +90,7 @@
 
 {#each displayItems as displayItem (displayItem.id)}
 	{#if displayItem.type === 'message'}
-		{#if renderMarkdown}
+		{#if renderMarkdown || DOCUMENT_OPEN.test(displayItem.text)}
 			<div class="markdown-prose">
 				<Markdown
 					id={`${id}-${displayItem.id}`}
@@ -112,13 +114,13 @@
 				/>
 			</div>
 		{:else}
-			<div class="whitespace-pre-wrap text-[0.9375rem]">{displayItem.text}</div>
+			<div class="whitespace-pre-wrap text-[0.9375rem]">{maskInFlightTag(displayItem.text)}</div>
 		{/if}
 	{:else if displayItem.type === 'document'}
 		<!-- [Gradient] Document Writer: the serialized <details type="document">
 		     block routes through Markdown → MarkdownTokens → DocumentCard, the
 		     same rendering the pre-v0.10.2 content path produced. -->
-		{#if renderMarkdown}
+		{#if renderMarkdown || DOCUMENT_OPEN.test(displayItem.text)}
 			<Markdown
 				id={`${id}-${displayItem.id}`}
 				content={formatMessageContent(displayItem.text)}
@@ -136,7 +138,7 @@
 				{onPreview}
 			/>
 		{:else}
-			<div class="whitespace-pre-wrap">{displayItem.text}</div>
+			<div class="whitespace-pre-wrap">{maskInFlightTag(displayItem.text)}</div>
 		{/if}
 	{:else if displayItem.type === 'detail_group'}
 		<ConsecutiveDetailsGroup

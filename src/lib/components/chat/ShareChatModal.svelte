@@ -11,6 +11,7 @@
 		updateChatAccessGrants
 	} from '$lib/apis/chats';
 	import { copyToClipboard } from '$lib/utils';
+	import { chatSharing } from '$lib/utils/chatSharing';
 
 	import Modal from '../common/Modal.svelte';
 	import Link from '../icons/Link.svelte';
@@ -160,8 +161,8 @@
 						<AccessControl
 							bind:accessGrants
 							accessRoles={['read']}
-							sharePublic={$user?.permissions?.sharing?.public_chats || $user?.role === 'admin'}
-							shareOpen={$user?.permissions?.sharing?.open_chats || $user?.role === 'admin'}
+							sharePublic={chatSharing($user).public}
+							shareOpen={chatSharing($user).open}
 							shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
 								$user?.role === 'admin'}
 							onChange={saveAccessGrants}

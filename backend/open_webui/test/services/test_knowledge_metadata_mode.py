@@ -692,3 +692,53 @@ def test_knowledge_file_list_response_union_serialization():
     # Status and error must survive the round-trip.
     assert item_dict.get('status') == 'completed'
     assert item_dict.get('error') is None
+
+
+async def _insert_directory(Session, *, kb_id: str, name: str, created_at: int, updated_at: int) -> None:
+    async with Session() as s:
+        s.add(
+            KnowledgeDirectory(
+                id=f'dir-{name}',
+                knowledge_id=kb_id,
+                parent_id=None,
+                name=name,
+                user_id='user-1',
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+        )
+        await s.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('filter', 'folders', 'files'),
+    [
+        ({}, ['Bankzaken', 'BTW betalingen', 'E-boekhouden'], ['alpha.pdf', 'Beta.pdf', 'gamma.pdf']),
+        (
+            {'order_by': 'name', 'direction': 'asc'},
+            ['Bankzaken', 'BTW betalingen', 'E-boekhouden'],
+            ['alpha.pdf', 'Beta.pdf', 'gamma.pdf'],
+        ),
+        ({'order_by': 'name'}, ['E-boekhouden', 'BTW betalingen', 'Bankzaken'], ['gamma.pdf', 'Beta.pdf', 'alpha.pdf']),
+        ({'order_by': 'created_at', 'direction': 'asc'}, ['E-boekhouden', 'Bankzaken', 'BTW betalingen'], None),
+        ({'order_by': 'updated_at'}, ['BTW betalingen', 'E-boekhouden', 'Bankzaken'], None),
+    ],
+)
+async def test_root_listing_orders_folders_and_files_by_the_chosen_key(db_session, filter, folders, files):
+    """Folders follow the files' sort key and direction; names ignore case."""
+    await _insert_user(db_session)
+    kb_id = await _insert_kb(db_session)
+    for name, created_at, updated_at in [('BTW betalingen', 30, 90), ('Bankzaken', 20, 10), ('E-boekhouden', 10, 50)]:
+        await _insert_directory(db_session, kb_id=kb_id, name=name, created_at=created_at, updated_at=updated_at)
+    for filename in ['gamma.pdf', 'Beta.pdf', 'alpha.pdf']:
+        file_id = await _insert_file(db_session, filename=filename)
+        await _link_file_to_kb(db_session, kb_id=kb_id, file_id=file_id)
+
+    result = await Knowledges.search_files_by_id(
+        kb_id, 'user-1', filter={**filter, 'directory_id': None}, metadata_only=True
+    )
+
+    assert [row.name for row in result.directories] == folders
+    if files is not None:
+        assert [row.filename for row in result.items] == files

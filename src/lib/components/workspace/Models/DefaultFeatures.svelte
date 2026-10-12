@@ -5,6 +5,7 @@
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { marked } from 'marked';
+	import { FEATURE_TOGGLES } from '$lib/utils/assistantCapabilities';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -22,7 +23,7 @@
 			description: $i18n.t('Model can execute code and perform calculations')
 		},
 		document_writer: {
-			label: $i18n.t('Document Writer'),
+			label: $i18n.t('Document writer'),
 			description: $i18n.t('Model can write and create downloadable documents')
 		},
 		office: {
@@ -32,19 +33,20 @@
 		office_edit: {
 			label: $i18n.t('Edit Office files'),
 			description: $i18n.t('Model can edit Office files made in this conversation')
+		},
+		live_documents: {
+			label: $i18n.t('OneDrive search'),
+			description: $i18n.t("Model can search the user's OneDrive files")
+		},
+		live_mail: {
+			label: $i18n.t('Mail search'),
+			description: $i18n.t("Model can search the user's mail")
 		}
 	};
 
 	type Feature = keyof typeof featureLabels;
 
-	export let availableFeatures: string[] = [
-		'web_search',
-		'image_generation',
-		'code_interpreter',
-		'document_writer',
-		'office',
-		'office_edit'
-	];
+	export let availableFeatures: string[] = [...FEATURE_TOGGLES];
 	export let featureIds: string[] = [];
 
 	const getFeatureLabel = (feature: string) => featureLabels[feature as Feature];

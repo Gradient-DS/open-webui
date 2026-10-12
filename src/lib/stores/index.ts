@@ -1,3 +1,4 @@
+import type { AgentDocument } from '$lib/utils/agentDocument';
 import { APP_NAME } from '$lib/constants';
 import { type Writable, derived, writable } from 'svelte/store';
 import type { ComponentType, SvelteComponent } from 'svelte';
@@ -75,8 +76,6 @@ export const tools = writable(null);
 export const skills = writable(null);
 export const functions = writable(null);
 
-export { workspaceCounts } from './workspace-counts';
-export type { WorkspaceSection } from './workspace-counts';
 export type WorkspaceAction = {
 	id: string;
 	label: string;
@@ -178,13 +177,15 @@ export type ChoiceRegistration = {
 };
 export const choiceBlockRegistry: Writable<Record<string, Record<string, ChoiceRegistration>>> =
 	writable({});
-export const documentContents: Writable<Array<{
-	title: string;
-	markdown: string;
-	sources?: any[];
-	// [Gradient] An Office file an agent delivered: the panel shows its rendered pages, not markdown.
-	file?: DeliveredFile;
-}> | null> = writable(null);
+export const selectedDocumentIndex = writable(0);
+export const documentContents: Writable<Array<
+	AgentDocument & {
+		sources?: any[];
+		messageId?: string;
+		// [Gradient] An Office file an agent delivered: the panel shows its rendered pages, not markdown.
+		file?: DeliveredFile;
+	}
+> | null> = writable(null);
 
 export const embed = writable(null);
 
@@ -198,40 +199,6 @@ export type DesktopEvent = {
 	data?: any;
 };
 export const desktopEvent: Writable<DesktopEvent | null> = writable(null);
-
-// [Gradient] Sticky agent pick for new chats. Set by AgentSelector.svelte when
-// the user clicks an agent card; read by Chat.svelte when the first message
-// is sent so the new chat is created with chat.meta.agent_id pre-set. The
-// pick is sticky — it survives chat creation and page reloads (persisted to
-// localStorage) so subsequent "New Chat" clicks default to the same agent
-// until the user explicitly clears it (clicks the same card again or the
-// "Clear" button) or picks a different one.
-const PENDING_AGENT_ID_STORAGE_KEY = 'pendingAgentId';
-
-const readPendingAgentId = (): string | null => {
-	if (typeof window === 'undefined') return null;
-	try {
-		return window.localStorage.getItem(PENDING_AGENT_ID_STORAGE_KEY) || null;
-	} catch {
-		return null;
-	}
-};
-
-export const pendingAgentId: Writable<string | null> = writable(readPendingAgentId());
-
-if (typeof window !== 'undefined') {
-	pendingAgentId.subscribe((value) => {
-		try {
-			if (value) {
-				window.localStorage.setItem(PENDING_AGENT_ID_STORAGE_KEY, value);
-			} else {
-				window.localStorage.removeItem(PENDING_AGENT_ID_STORAGE_KEY);
-			}
-		} catch {
-			// localStorage may be unavailable (quota, privacy mode) — ignore
-		}
-	});
-}
 
 export const isLastActiveTab = writable(true);
 export const playingNotificationSound = writable(false);
@@ -287,6 +254,7 @@ type OllamaModelDetails = {
 };
 
 type Settings = {
+	composerTools?: import('$lib/utils/composerPreferences').ComposerPreferences;
 	pinnedModels?: string[];
 	pinnedInputItems?: string[];
 	toolServers?: never[];
@@ -444,6 +412,8 @@ type Config = {
 		enable_google_drive_integration: boolean;
 		enable_google_drive_sync?: boolean;
 		enable_onedrive_integration: boolean;
+		enable_onedrive_personal?: boolean;
+		enable_onedrive_business?: boolean;
 		enable_confluence_integration?: boolean;
 		enable_confluence_sync?: boolean;
 		confluence_kb_mode?: string;
@@ -488,6 +458,8 @@ type Config = {
 		feature_admin_settings?: boolean;
 		feature_admin_settings_tabs?: string[];
 		feature_agent_api_enabled?: boolean;
+		enable_live_documents?: boolean;
+		enable_live_mail?: boolean;
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
 		feature_skill_files?: boolean;
@@ -499,6 +471,8 @@ type Config = {
 		enable_channels?: boolean;
 		enable_notes?: boolean;
 		enable_code_interpreter?: boolean;
+		enable_document_writer?: boolean;
+		enable_docx_export?: boolean;
 		enable_code_execution?: boolean;
 		enable_data_warnings?: boolean;
 		enable_feedback_report?: boolean;

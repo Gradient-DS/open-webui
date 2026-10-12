@@ -20,6 +20,25 @@ data:
   # httpx.UnsupportedProtocol on POST /api/v1/integrations/ingest.
   OPENWEBUI_BASE_URL: "http://{{ include "open-webui-tenant.openWebui.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.openWebui.service.port | default 8080 }}"
 
+  {{- with .Values.soevApi.url }}
+  SOEV_API_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.soevApi.audience }}
+  SOEV_API_AUDIENCE: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.soevApi.servicePrincipal }}
+  SOEV_API_SERVICE_PRINCIPAL: {{ . | quote }}
+  {{- end }}
+  {{- if and (ne .Values.liveDocuments.enabled nil) (ne (toString .Values.liveDocuments.enabled) "") }}
+  ENABLE_LIVE_DOCUMENTS: {{ .Values.liveDocuments.enabled | quote }}
+  {{- end }}
+  {{- if and (ne .Values.liveMail.enabled nil) (ne (toString .Values.liveMail.enabled) "") }}
+  ENABLE_LIVE_MAIL: {{ .Values.liveMail.enabled | quote }}
+  {{- end }}
+  {{- with .Values.webuiUrl }}
+  WEBUI_URL: {{ . | quote }}
+  {{- end }}
+
   # Locale
   DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
 
@@ -60,6 +79,10 @@ data:
 
   # Vector Database (Weaviate) - local to tenant namespace
   VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}
+  {{- if eq .Values.openWebui.config.vectorDb "pgvector" }}
+  PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH: {{ .Values.pgvector.maxVectorLength | quote }}
+  PGVECTOR_CREATE_EXTENSION: {{ .Values.pgvector.createExtension | quote }}
+  {{- end }}
   {{- /*
   Hosts default to this release's own Weaviate, rendering exactly the string the
   hard-coded template produced before, so every existing tenant's ConfigMap —
@@ -142,7 +165,10 @@ data:
   FEATURE_CHAT_OVERVIEW: {{ .Values.openWebui.config.featureChatOverview | quote }}
   FEATURE_NOTES_AI_CONTROLS: {{ .Values.openWebui.config.featureNotesAiControls | quote }}
   FEATURE_VOICE: {{ .Values.openWebui.config.featureVoice | quote }}
+  FEATURE_VOICE_CALL: {{ .Values.openWebui.config.featureVoiceCall | quote }}
+  FEATURE_READ_ALOUD: {{ .Values.openWebui.config.featureReadAloud | quote }}
   FEATURE_CHANGELOG: {{ .Values.openWebui.config.featureChangelog | quote }}
+  FEATURE_MEETINGS: {{ .Values.openWebui.config.featureMeetings | quote }}
   FEATURE_SYSTEM_PROMPT: {{ .Values.openWebui.config.featureSystemPrompt | quote }}
   FEATURE_MODELS: {{ .Values.openWebui.config.featureModels | quote }}
   FEATURE_MODEL_METERS: {{ .Values.openWebui.config.featureModelMeters | quote }}
@@ -531,11 +557,8 @@ data:
   REDIS_URL: "redis://{{ include "open-webui-tenant.redis.fullname" . }}:6379/0"
   {{- end }}
 
-  # Alembic migrations — set to false when the pre-upgrade Job handles them
-  # (see templates/open-webui/migration-job.yaml). Default is true so the
-  # first pod of a single-replica tenant migrates on startup (import-time
-  # trigger in backend/open_webui/config.py:75-76).
-  ENABLE_DB_MIGRATIONS: {{ ternary "false" "true" .Values.openWebui.migrationJob.enabled | quote }}
+  # Migrations run in each pod's init container, serialized on PostgreSQL.
+  ENABLE_DB_MIGRATIONS: "false"
 
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}
@@ -568,40 +591,10 @@ data:
   {{- end }}
 
   # Agent API (internal: routes chat UI to agent service)
-  # AGENT_API_KEY is set via secrets (see .Values.secrets.agentApiKey)
   {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
   AGENT_API_ENABLED: "true"
-  AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
   AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
-  {{- with .Values.openWebui.config.agentApiAgentsConfig }}
-  AGENT_API_AGENTS_CONFIG: {{ . | quote }}
   {{- end }}
-  AGENT_API_AGENTS_CONFIG_OVERWRITE: {{ .Values.openWebui.config.agentApiAgentsConfigOverwrite | default "false" | quote }}
-  {{- with .Values.openWebui.config.agentApiPickerDefaultSlug }}
-  AGENT_API_PICKER_DEFAULT_SLUG: {{ . | quote }}
-  {{- end }}
-  {{- end }}
-
-  # [Gradient] Per-chat agent picker UI (Settings → Agents admin tab +
-  # new-chat empty-state cards). Layered on top of AGENT_API_ENABLED.
-  FEATURE_AGENT_PICKER: {{ .Values.openWebui.config.featureAgentPicker | default "false" | quote }}
-
-  # Agent Proxy (external: exposes agent API to external callers)
-  ENABLE_AGENT_PROXY: {{ .Values.openWebui.config.enableAgentProxy | default "false" | quote }}
-
-  # Search API (RAG discovery proxy at /api/v1/discovery/*). Points at the
-  # agents-api, which hosts GET /v1/discovery/documents.
-  # SEARCH_API_KEY is set via secrets (see .Values.secrets.searchApiKey).
-  # Empty baseUrl disables the discovery proxy at request time.
-  {{- if .Values.openWebui.config.searchApi.baseUrl }}
-  SEARCH_API_BASE_URL: {{ .Values.openWebui.config.searchApi.baseUrl | quote }}
-  {{- end }}
-
-  # Agent Search (machine-auth retrieval endpoint at /api/v1/internal/retrieval/query
-  # and /api/v1/internal/retrieval/accessible-kbs). Inbound bearer is validated
-  # against the same AGENT_API_KEY used for the open-webui → agent outbound
-  # call (single shared secret across the per-tenant trust boundary).
-  AGENT_SEARCH_ENABLED: {{ .Values.agentSearch.enabled | default false | quote }}
 
   # Two-Factor Authentication (TOTP)
   ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}

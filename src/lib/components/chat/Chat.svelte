@@ -1,4 +1,16 @@
 <script lang="ts">
+	import {
+		composerPreferences,
+		composerFeatures,
+		composerFromFeatures,
+		type ComposerPreferences
+	} from '$lib/utils/composerPreferences';
+	import { type ToolState, seedsLiveDefault } from '$lib/utils/toolState';
+	import { getHistorySide } from '$lib/utils/dataSeparation';
+	import { turnNotices, withoutRemoved } from '$lib/utils/turnNotices';
+	import type { ChatAttachment } from '$lib/types/chatAttachment';
+	import { applyFileStatus, applyUploadResult, isAwaitingUpload } from '$lib/utils/messageQueue';
+	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -51,7 +63,6 @@
 		showFileNavPath,
 		showFileNavDir,
 		chatRequestQueues,
-		pendingAgentId,
 		submitPromptSignal,
 		desktopEvent
 	} from '$lib/stores';
@@ -147,11 +158,8 @@
 	import Image from '../common/Image.svelte';
 	import { getBanners } from '$lib/apis/configs';
 	import { logDataWarningAcceptance } from '$lib/apis/data-warnings';
-	import { showRagFilter } from '$lib/stores/rag-filter';
-	import { getRagFilterForRequest } from '$lib/utils/rag-filter';
 	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
 	import ContextUsageBanner from '$lib/components/chat/ContextUsageBanner.svelte';
-	import RagFilterPanel from './RagFilterPanel.svelte';
 	import FeedbackButton from './FeedbackButton.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import EmbeddedChatHistoryDropdown from './EmbeddedChatHistoryDropdown.svelte';
@@ -178,7 +186,6 @@
 	$: messageInputDropzoneId = embedded ? 'note-chat-input-dropzone' : 'chat-pane';
 
 	const eventTarget = new EventTarget();
-
 	let messageInput: MessageInput | undefined;
 	let messagesRef: Messages | undefined;
 
@@ -361,9 +368,55 @@
 	let pendingOAuthTools = [];
 
 	let imageGenerationEnabled = false;
+	let liveDocumentsState: ToolState = 'off';
+	let liveMailState: ToolState = 'off';
 	let webSearchEnabled = false;
+	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
+	let webSearchRequired = false;
 	let codeInterpreterEnabled = false;
-	let documentWriterEnabled = false;
+	let documentWriterEnabled = true;
+	let documentWriterRequired = false;
+	let composerInitialized = false;
+	let composerSettingsSave = Promise.resolve();
+	const rememberComposerPreferences = (preferences: ComposerPreferences) => {
+		if (equal($settings.composerTools, preferences)) return;
+		settings.update((value) => ({ ...value, composerTools: preferences }));
+		composerSettingsSave = composerSettingsSave.then(async () => {
+			await updateUserSettings(localStorage.token, { ui: $settings }).catch(() => {
+				toast.error($i18n.t('Failed to save settings'));
+			});
+		});
+	};
+	const currentComposerPreferences = (): ComposerPreferences => ({
+		webSearchEnabled,
+		webSearchRequired,
+		liveDocumentsState,
+		liveMailState,
+		imageGenerationEnabled,
+		codeInterpreterEnabled,
+		documentWriterEnabled,
+		documentWriterRequired,
+		selectedToolIds,
+		selectedSkillIds,
+		selectedFilterIds
+	});
+	const restoreComposerPreferences = (value: ComposerPreferences) => {
+		({
+			webSearchEnabled,
+			webSearchRequired,
+			liveDocumentsState,
+			liveMailState,
+			imageGenerationEnabled,
+			codeInterpreterEnabled,
+			documentWriterEnabled,
+			documentWriterRequired,
+			selectedToolIds,
+			selectedSkillIds,
+			selectedFilterIds
+		} = value);
+		composerInitialized = true;
+	};
+	// [Gradient] Office creation/editing; not a remembered composer preference.
 	let officeEnabled = false;
 	let officeEditEnabled = false;
 	$: if (!officeEnabled) officeEditEnabled = false;
@@ -379,11 +432,17 @@
 				(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
 			).length === currentModels.length;
 
+		// [Gradient] Auto and Altijd both make web search possible. The 'always' user setting
+		// and a model's default features now set the starting state (setDefaults) instead.
 		webSearchActive = Boolean(
 			$config?.features?.enable_web_search &&
 			($user?.role === 'admin' || $user?.permissions?.features?.web_search) &&
-			(webSearchEnabled ||
-				(allModelsSupportWebSearch && ($settings?.webSearch ?? false) === 'always'))
+			allModelsSupportWebSearch &&
+			!(
+				$config?.features?.feature_strict_data_separation &&
+				getHistorySide(createMessagesList(history, history.currentId)) === 'internal'
+			) &&
+			webSearchEnabled
 		);
 	}
 
@@ -459,7 +518,7 @@
 
 	// Chat Input
 	let prompt = '';
-	let chatFiles = [];
+	let chatFiles: ChatAttachment[] = [];
 	let files: any[] = [];
 	let params = {};
 	let chatVariables = {};
@@ -474,23 +533,27 @@
 
 	const handleToolApprovalModeChange = async (mode: string) => {
 		const tool_approval_mode = mode === 'ask' ? 'ask' : 'full';
+		// [Gradient] Restoring a draft re-applies its mode on every new chat; write only what changes.
+		const chatChanged = params?.tool_approval_mode !== tool_approval_mode;
 		params = {
 			...params,
 			tool_approval_mode
 		};
 
-		settings.set({
-			...$settings,
-			params: {
-				...($settings?.params ?? {}),
-				tool_approval_mode
-			}
-		});
-		await updateUserSettings(localStorage.token, { ui: $settings }).catch((err) => {
-			console.error('[tool permissions settings]', err);
-		});
+		if ($settings?.params?.tool_approval_mode !== tool_approval_mode) {
+			settings.set({
+				...$settings,
+				params: {
+					...($settings?.params ?? {}),
+					tool_approval_mode
+				}
+			});
+			await updateUserSettings(localStorage.token, { ui: $settings }).catch((err) => {
+				console.error('[tool permissions settings]', err);
+			});
+		}
 
-		if ($chatId && !$temporaryChatEnabled && !isTemporaryChatId($chatId)) {
+		if (chatChanged && $chatId && !$temporaryChatEnabled && !isTemporaryChatId($chatId)) {
 			const res = await updateChatById(localStorage.token, $chatId, { params }).catch((err) => {
 				console.error('[tool permissions chat]', err);
 				return null;
@@ -789,14 +852,9 @@
 		});
 	};
 
-	// [Gradient] Picker visibility is independent of the agent runtime bypass.
-	$: agentSelectorActive =
-		!embedded &&
-		isFeatureEnabled('agent_picker') &&
-		Boolean($config?.features?.feature_agent_api_enabled) &&
-		(!chat?.id || Boolean(chat?.meta?.agent_id));
-	$: agentBinding = !embedded && $pendingAgentId ? { agent_id: $pendingAgentId } : null;
-
+	// [Gradient] A draft restores text and files only. Tool states come from the chat's saved
+	// features or the user's last choice: a remounted composer writes its defaults into the
+	// draft, so restoring states from it turned the user's choices back off.
 	const restoreChatInput = async (storageChatInput: string | null) => {
 		if (!storageChatInput || $temporaryChatEnabled) {
 			return false;
@@ -807,16 +865,6 @@
 			prompt = input.prompt ?? '';
 			messageInput?.setText(prompt);
 			files = input.files ?? [];
-			selectedToolIds = input.selectedToolIds ?? [];
-			selectedSkillIds = input.selectedSkillIds ?? [];
-			selectedFilterIds = input.selectedFilterIds ?? [];
-			webSearchEnabled = input.webSearchEnabled ?? false;
-			imageGenerationEnabled = input.imageGenerationEnabled ?? false;
-			codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
-			// [Gradient] Preserve Document Writer across draft and OAuth restoration.
-			documentWriterEnabled = input.documentWriterEnabled ?? false;
-			officeEnabled = input.officeEnabled ?? false;
-			officeEditEnabled = input.officeEditEnabled ?? false;
 			if (input.toolApprovalMode) {
 				await handleToolApprovalModeChange(input.toolApprovalMode);
 			}
@@ -871,19 +919,16 @@
 
 		clearTimeout(saveControlsTimer);
 		await saveControls();
+		await chatSaveQueue;
 		loading = true;
 
 		prompt = '';
 		messageInput?.setText('');
 
 		files = [];
-		selectedToolIds = [];
-		selectedSkillIds = [];
-		selectedFilterIds = [];
+		composerInitialized = false;
 		officeEnabled = false;
 		officeEditEnabled = false;
-		webSearchEnabled = false;
-		imageGenerationEnabled = false;
 		acceptedDataWarnings = new Set();
 		contextUsage = null;
 
@@ -959,14 +1004,10 @@
 		chatVariables = {};
 		chatFiles = [];
 		files = [];
-		selectedToolIds = [];
-		selectedSkillIds = [];
-		selectedFilterIds = [];
+		composerInitialized = false;
+		restoreComposerPreferences(composerPreferences($settings.composerTools));
 		officeEnabled = false;
 		officeEditEnabled = false;
-		webSearchEnabled = false;
-		imageGenerationEnabled = false;
-		codeInterpreterEnabled = false;
 		prompt = '';
 		messageInput?.setText('');
 		await chatId.set('');
@@ -997,18 +1038,27 @@
 	}
 
 	let lastSavedFeatures = '';
-	$: if ($chatId && !loading && !$temporaryChatEnabled && history?.currentId) {
-		const current = JSON.stringify({
-			webSearchEnabled,
-			imageGenerationEnabled,
-			codeInterpreterEnabled,
-			documentWriterEnabled,
-			officeEnabled,
-			officeEditEnabled
-		});
+	$: composerSnapshot = composerPreferences({
+		webSearchEnabled,
+		webSearchRequired,
+		liveDocumentsState,
+		liveMailState,
+		imageGenerationEnabled,
+		codeInterpreterEnabled,
+		documentWriterEnabled,
+		documentWriterRequired,
+		selectedToolIds,
+		selectedSkillIds,
+		selectedFilterIds
+	});
+	$: if (composerInitialized && !loading && !settingDefaults) {
+		const current = JSON.stringify(composerSnapshot);
 		if (current !== lastSavedFeatures) {
 			lastSavedFeatures = current;
-			saveChatHandler($chatId, history);
+			rememberComposerPreferences(composerSnapshot);
+			if ($chatId && !$temporaryChatEnabled && history?.currentId) {
+				saveChatHandler($chatId, history);
+			}
 		}
 	}
 
@@ -1050,11 +1100,6 @@
 		if (!history?.currentId) resetInput();
 	}
 	const resetInput = async () => {
-		selectedToolIds = [];
-		selectedSkillIds = [];
-		selectedFilterIds = [];
-		pendingOAuthTools = [];
-
 		if (selectedModelIds.filter((id) => id).length > 0) {
 			await setDefaults();
 		}
@@ -1077,8 +1122,12 @@
 	}
 
 	let settingDefaults = false;
-	const setDefaults = async () => {
-		if (settingDefaults) return;
+	const setDefaults = async (newChat = false) => {
+		if (settingDefaults || composerInitialized || (chatIdProp && !newChat)) return;
+		if ($settings.composerTools) {
+			restoreComposerPreferences(composerPreferences($settings.composerTools));
+			return;
+		}
 		settingDefaults = true;
 
 		try {
@@ -1091,6 +1140,25 @@
 			if (!$skills) {
 				skills.set(await getSkills(localStorage.token));
 			}
+			// [Gradient] A new chat starts web search on Auto, or Altijd when the user asks for
+			// it always. Strict data separation starts on Uit: Auto may reach the open internet,
+			// which would lock a fresh chat away from internal documents before anything is sent.
+			if (!history?.currentId) {
+				const webSearchAllowed =
+					$config?.features?.enable_web_search &&
+					($user?.role === 'admin' || $user?.permissions?.features?.web_search);
+				const always = ($settings?.webSearch ?? null) === 'always';
+				const strict = $config?.features?.feature_strict_data_separation ?? false;
+				webSearchEnabled = Boolean(webSearchAllowed && (always || !strict));
+				webSearchRequired = Boolean(webSearchAllowed && always);
+			}
+
+			// [Gradient] Document writer reads no external data, including under strict separation.
+			if (!history?.currentId) {
+				documentWriterEnabled = true;
+				documentWriterRequired = false;
+			}
+
 			if (selectedModels.length !== 1 && !atSelectedModel) {
 				return;
 			}
@@ -1166,7 +1234,12 @@
 						$config?.features?.enable_web_search &&
 						($user?.role === 'admin' || $user?.permissions?.features?.web_search)
 					) {
-						webSearchEnabled = model.info.meta.defaultFeatureIds.includes('web_search');
+						// [Gradient] A default-on web search starts on Altijd; otherwise the chat
+						// keeps the starting state set above.
+						if (model.info.meta.defaultFeatureIds.includes('web_search')) {
+							webSearchEnabled = true;
+							webSearchRequired = true;
+						}
 					}
 
 					if (
@@ -1182,7 +1255,24 @@
 						$config?.features?.enable_document_writer &&
 						($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 					) {
-						documentWriterEnabled = model.info.meta.defaultFeatureIds.includes('document_writer');
+						if (model.info.meta.defaultFeatureIds.includes('document_writer')) {
+							documentWriterEnabled = true;
+							documentWriterRequired = true;
+						}
+					}
+
+					// [Gradient] Live tools start on Auto; consent waits for the user's own click.
+					if (
+						seedsLiveDefault(
+							model.info.meta,
+							'live_documents',
+							$config?.features?.enable_live_documents
+						)
+					) {
+						liveDocumentsState = 'auto';
+					}
+					if (seedsLiveDefault(model.info.meta, 'live_mail', $config?.features?.enable_live_mail)) {
+						liveMailState = 'auto';
 					}
 					if (
 						model.info?.meta?.capabilities?.['office'] &&
@@ -1212,6 +1302,11 @@
 				}
 			}
 		} finally {
+			if (!composerInitialized) {
+				restoreComposerPreferences(
+					composerPreferences($settings.composerTools, currentComposerPreferences())
+				);
+			}
 			settingDefaults = false;
 		}
 	};
@@ -1317,6 +1412,22 @@
 		error?: string;
 		collection_name?: string;
 	}) => {
+		const update = (file: ChatAttachment) =>
+			file.id === data.file_id
+				? {
+						...file,
+						status: data.status === 'completed' ? 'uploaded' : data.status,
+						...(data.collection_name ? { collection_name: data.collection_name } : {}),
+						error: data.error
+					}
+				: file;
+		chatFiles = chatFiles.map(update);
+		for (const message of Object.values(history.messages) as { files?: ChatAttachment[] }[]) {
+			if (message.files) message.files = message.files.map(update);
+		}
+		history = history;
+		chatRequestQueues.update((q) => applyFileStatus(q, data));
+		processNextInQueue($chatId);
 		const idx = files.findIndex((f) => f.id === data.file_id);
 		if (idx < 0) return;
 
@@ -1403,6 +1514,7 @@
 				} else if (type === 'chat:message' || type === 'replace') {
 					message.content = data.content;
 				} else if (type === 'chat:message:files' || type === 'files') {
+					const previous = new Set((message.files ?? []).map((file: ChatAttachment) => file.id));
 					message.files = data.files;
 					// [Gradient] A delivered Office file opens the document panel, like a generated document.
 					if (
@@ -1416,6 +1528,21 @@
 						showControls.set(true);
 						openDocumentTabSignal.update((n) => n + 1);
 					}
+					chatFiles = mergeFiles(
+						chatFiles,
+						message.files.filter(
+							(file: ChatAttachment) =>
+								file.source &&
+								(!previous.has(file.id) || chatFiles.some((item) => item.id === file.id))
+						)
+					);
+				} else if (type === 'chat:message:notices') {
+					// [Claude] Chat items the v2 turn ran without; deleted ones also leave the chat's selection.
+					const { notices, removed } = turnNotices(data);
+					message.notices = notices;
+					chatFiles = withoutRemoved(chatFiles, removed);
+				} else if (type === 'action_required') {
+					message.action_required = data;
 				} else if (type === 'chat:message:tasks') {
 					chatTasks = data.tasks;
 				} else if (type === 'chat:message:embeds' || type === 'embeds') {
@@ -1820,15 +1947,6 @@
 				messageInput?.setText('');
 
 				files = [];
-				selectedToolIds = [];
-				selectedSkillIds = [];
-				selectedFilterIds = [];
-				webSearchEnabled = false;
-				imageGenerationEnabled = false;
-				codeInterpreterEnabled = false;
-				documentWriterEnabled = false;
-				officeEnabled = false;
-				officeEditEnabled = false;
 				acceptedDataWarnings = new Set();
 
 				await restoreChatInput(storageChatInput);
@@ -1986,7 +2104,7 @@
 		// ingested into a Weaviate collection the agent cannot see (GRA-222).
 		// YouTube links and document URLs keep the ingest path — see
 		// `routeWebAttachment` for why.
-		const agentRouted = isAgentRouted(chat?.id ? chat?.meta?.agent_id : $pendingAgentId);
+		const agentRouted = isAgentRouted();
 
 		// Create file items first
 		const fileItems = urls.map((url) => {
@@ -2077,14 +2195,7 @@
 		if (file?.itemId) {
 			chatRequestQueues.update((q) => ({
 				...q,
-				[$chatId]: (q[$chatId] ?? []).map((message) =>
-					(message.files ?? []).some((item) => item.itemId === file.itemId)
-						? {
-								...message,
-								files: message.files.map((item) => (item.itemId === file.itemId ? file : item))
-							}
-						: message
-				)
+				[$chatId]: applyUploadResult(q[$chatId] ?? [], file)
 			}));
 		}
 
@@ -2212,59 +2323,6 @@
 		artifactContents.set(contents);
 	};
 
-	const decodeHtmlEntities = (str) => {
-		if (!str) return '';
-		return str
-			.replace(/&quot;/g, '"')
-			.replace(/&#x27;/g, "'")
-			.replace(/&#39;/g, "'")
-			.replace(/&lt;/g, '<')
-			.replace(/&gt;/g, '>')
-			.replace(/&amp;/g, '&');
-	};
-
-	const extractDocumentsFromMessage = (content) => {
-		const docs = [];
-		if (!content || typeof content !== 'string') return docs;
-
-		// 1. XML-fallback path: <details type="document" ... title="..." ...>...markdown...</details>
-		const detailsRegex = /<details\b([^>]*\btype="document"[^>]*)>([\s\S]*?)<\/details>/g;
-		let match;
-		while ((match = detailsRegex.exec(content)) !== null) {
-			const attrs = match[1] ?? '';
-			const inner = match[2] ?? '';
-			const titleMatch = /\btitle="([^"]*)"/.exec(attrs);
-			const title = titleMatch ? decodeHtmlEntities(titleMatch[1]) : '';
-			const markdown = inner.replace(/^\s*<summary>[\s\S]*?<\/summary>\s*/i, '').trim();
-			if (markdown.length > 0) {
-				docs.push({ title, markdown });
-			}
-		}
-
-		// 2. Native tool-call path: <details type="tool_calls" ... name="write_document" arguments="...">
-		const toolCallRegex = /<details\b([^>]*\btype="tool_calls"[^>]*)>[\s\S]*?<\/details>/g;
-		while ((match = toolCallRegex.exec(content)) !== null) {
-			const attrs = match[1] ?? '';
-			const nameMatch = /\bname="([^"]*)"/.exec(attrs);
-			if (!nameMatch || nameMatch[1] !== 'write_document') continue;
-			const argsMatch = /\barguments="([^"]*)"/.exec(attrs);
-			if (!argsMatch) continue;
-			try {
-				const argsJson = decodeHtmlEntities(argsMatch[1]);
-				const args = JSON.parse(argsJson);
-				const title = args?.title ?? '';
-				const markdown = args?.markdown ?? '';
-				if (markdown.length > 0) {
-					docs.push({ title, markdown });
-				}
-			} catch (e) {
-				console.warn('Failed to parse write_document arguments', e);
-			}
-		}
-
-		return docs;
-	};
-
 	const getDocuments = () => {
 		const messages = history ? createMessagesList(history, history.currentId) : [];
 		let docs = [];
@@ -2280,11 +2338,28 @@
 					: extractDocumentsFromMessage(getOutputText(message?.output));
 				if (documents.length > 0) {
 					const sources = message?.sources ?? [];
-					docs = [...docs, ...documents.map((doc) => ({ ...doc, sources }))];
+					docs = [
+						...docs,
+						...documents.map((doc) => ({
+							...doc,
+							sources,
+							messageId: message.id
+						}))
+					];
 				}
 				// [Gradient] Office files an agent delivered open in the same panel.
 				const delivered = (message?.files ?? []).filter(isDeliveredFile);
-				docs = [...docs, ...delivered.map((file) => ({ title: file.name, markdown: '', file }))];
+				docs = [
+					...docs,
+					...delivered.map((file) => ({
+						title: file.name,
+						content: '',
+						format: 'markdown' as const,
+						done: true,
+						file,
+						messageId: message.id
+					}))
+				];
 			}
 		});
 		documentContents.set(docs);
@@ -2295,6 +2370,8 @@
 	//////////////////////////
 
 	const openCallOverlay = () => {
+		// [Gradient] Tenant gate; covers the ?call=true URL and the desktop call shortcut.
+		if (!isFeatureEnabled('voice_call')) return;
 		setTimeout(() => {
 			showCallOverlay.set(true);
 			showControls.set(true);
@@ -2440,9 +2517,9 @@
 
 		autoScroll = true;
 
-		// resetInput() must stay last: the selected model's defaults override the draft's selection.
+		composerInitialized = false;
+		await setDefaults(true);
 		await restoreChatInput(sessionStorage.getItem('chat-input'));
-		await resetInput();
 		await chatId.set('');
 		await chatTitle.set('');
 
@@ -2467,6 +2544,7 @@
 
 		if ($page.url.searchParams.get('web-search') === 'true') {
 			webSearchEnabled = true;
+			webSearchRequired = true;
 		}
 
 		if ($page.url.searchParams.get('image-generation') === 'true') {
@@ -2477,8 +2555,10 @@
 			codeInterpreterEnabled = true;
 		}
 
-		if ($page.url.searchParams.get('document-writer') === 'true') {
-			documentWriterEnabled = true;
+		const writerParam = $page.url.searchParams.get('document-writer');
+		if (writerParam !== null) {
+			documentWriterEnabled = ['true', 'auto', 'required'].includes(writerParam);
+			documentWriterRequired = ['true', 'required'].includes(writerParam);
 		}
 
 		if ($page.url.searchParams.get('office') === 'true') officeEnabled = true;
@@ -2594,8 +2674,6 @@
 
 			const chatContent = chat.chat;
 			chatVariables = chat?.variables ?? {};
-			// [Gradient] The composer picker reads the shared pending-agent binding.
-			if (!embedded && chat?.meta?.agent_id) pendingAgentId.set(chat.meta.agent_id);
 
 			if (chatContent) {
 				noteChatDebug('chat payload found', {
@@ -2662,25 +2740,10 @@
 				delete params.note_id;
 				chatFiles = structuredClone(chatContent?.files ?? []);
 
-				const chatFeatures = chatContent?.features ?? {};
-				webSearchEnabled = chatFeatures.web_search ?? false;
-				imageGenerationEnabled = chatFeatures.image_generation ?? false;
-				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
-				documentWriterEnabled = chatFeatures.document_writer ?? false;
-				officeEnabled = chatFeatures.office ?? false;
-				officeEditEnabled = chatFeatures.office_edit ?? false;
-
-				// [Gradient] Keep the feature-autosave baseline in sync with the chat we just
-				// loaded, so the reactive at the feature-persist block does not emit a
-				// redundant full-history save right after load. Key order must match that block.
-				lastSavedFeatures = JSON.stringify({
-					webSearchEnabled,
-					imageGenerationEnabled,
-					codeInterpreterEnabled,
-					documentWriterEnabled,
-					officeEnabled,
-					officeEditEnabled
-				});
+				restoreComposerPreferences(composerFromFeatures(chatContent?.features));
+				lastSavedFeatures = JSON.stringify(currentComposerPreferences());
+				officeEnabled = chatContent?.features?.office ?? false;
+				officeEditEnabled = chatContent?.features?.office_edit ?? false;
 
 				// Load tasks from chat-level DB field
 				chatTasks = chat?.tasks ?? [];
@@ -2867,9 +2930,7 @@
 		const lastMessage = history.currentId ? history.messages[history.currentId] : null;
 		if (
 			(lastMessage && lastMessage.role === 'assistant' && !lastMessage.done) ||
-			queue.some((m) =>
-				(m.files ?? []).some((file) => ['uploading', 'error'].includes(file.status))
-			)
+			queue.some((m) => isAwaitingUpload(m.files))
 		) {
 			return;
 		}
@@ -3160,6 +3221,8 @@
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
 		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
+		// [Gradient] The model soev-api reports as having answered (a fallback), kept with the message meta.
+		const answeredModel = data.answered_model;
 
 		// Store raw OR-aligned output items from backend
 		if (output) {
@@ -3214,6 +3277,10 @@
 
 		if (usage) {
 			message.usage = usage;
+		}
+
+		if (answeredModel) {
+			message.meta = { ...(message.meta ?? {}), answered_model: answeredModel };
 		}
 
 		history.messages[message.id] = message;
@@ -3332,7 +3399,7 @@
 					knowledge_external: $i18n.t('External Knowledge Base'),
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
-					document_writer: $i18n.t('Document Writer'),
+					document_writer: $i18n.t('Document writer'),
 					office: $i18n.t('Create Office files'),
 					office_edit: $i18n.t('Edit Office files'),
 					image_generation: $i18n.t('Image Generation')
@@ -3547,14 +3614,6 @@
 			toast.error($i18n.t('Model not selected'));
 			return;
 		}
-		// [Gradient] A new chat under the picker must name an agent: the
-		// binding is written once, at creation, and a chat created without
-		// one would run on the raw model. The server refuses such a request
-		// too; this keeps the user from ever seeing that error.
-		if (agentSelectorActive && !chat?.id && !$pendingAgentId) {
-			toast.error($i18n.t('Choose an agent before sending a message.'));
-			return;
-		}
 		const form = getChatVariablesForm(selectedModelIds, chatVariables, $models);
 		if (form.conflicts.length > 0) {
 			showChatVariablesModal = true;
@@ -3589,10 +3648,8 @@
 		}
 
 		if (
-			($chatRequestQueues[$chatId] ?? []).some((m) =>
-				(m.files ?? []).some((file) => ['uploading', 'error'].includes(file.status))
-			) ||
-			(files.length > 0 && files.some((file) => ['uploading', 'error'].includes(file.status)))
+			($chatRequestQueues[$chatId] ?? []).some((m) => isAwaitingUpload(m.files)) ||
+			isAwaitingUpload(files)
 		) {
 			chatRequestQueues.update((q) => ({
 				...q,
@@ -3662,6 +3719,7 @@
 
 		const warningAccepted = await checkDataWarnings(selectedModels, activeCapabilities);
 		if (!warningAccepted) return;
+		rememberComposerPreferences(currentComposerPreferences());
 
 		messageInput?.setText('');
 		prompt = '';
@@ -3676,7 +3734,9 @@
 		chatFiles.push(
 			..._files.filter(
 				(item) =>
-					['doc', 'text', 'url', 'note', 'chat', 'folder', 'collection'].includes(item.type) ||
+					['doc', 'text', 'url', 'note', 'meeting', 'chat', 'folder', 'collection'].includes(
+						item.type
+					) ||
 					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
 			)
 		);
@@ -3717,11 +3777,10 @@
 		saveSessionSelectedModels();
 
 		// [Gradient] Pre-create the chat record before dispatching the first
-		// message so any pendingAgentId binding lands on the server before the
+		// message so the chat row (with its assistant binding) exists before the
 		// LLM completion request kicks off. Upstream v0.9.5 moved chat
-		// creation to the /chat/completions code path, but that path has no
-		// hook for `agent_binding`. initChatHandler calls createNewChat with
-		// the binding and sets $chatId; sendMessage then forwards that
+		// creation to the /chat/completions code path. initChatHandler calls
+		// createNewChat and sets $chatId; sendMessage then forwards that
 		// chat_id so the backend appends to the existing row instead of
 		// creating a duplicate.
 		if (!$chatId && !embedded) {
@@ -3903,6 +3962,17 @@
 		}
 	};
 
+	const supportsComposerFeature = (feature: string) =>
+		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).every(
+			(id) =>
+				(
+					($models.find((model) => model.id === id)?.info?.meta?.capabilities ?? {}) as Record<
+						string,
+						boolean
+					>
+				)[feature] ?? true
+		);
+
 	const getFeatures = () => {
 		let features = {};
 
@@ -3910,16 +3980,20 @@
 			features = {
 				voice: $showCallOverlay,
 				image_generation:
+					supportsComposerFeature('image_generation') &&
 					$config?.features?.enable_image_generation &&
 					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
 						? imageGenerationEnabled
 						: false,
 				code_interpreter:
+					supportsComposerFeature('code_interpreter') &&
+					!$selectedTerminalId &&
 					$config?.features?.enable_code_interpreter &&
 					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
 						? codeInterpreterEnabled
 						: false,
 				document_writer:
+					supportsComposerFeature('document_writer') &&
 					$config?.features?.enable_document_writer &&
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
@@ -3937,7 +4011,18 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.office_edit)
 						? officeEnabled && officeEditEnabled
 						: false,
-				web_search: webSearchActive
+				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
+				live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
+
+				document_writer_required: Boolean(
+					$config?.features?.enable_document_writer &&
+					($user?.role === 'admin' || $user?.permissions?.features?.document_writer) &&
+					documentWriterEnabled &&
+					documentWriterRequired
+				),
+				web_search: webSearchActive,
+				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
+				web_search_required: webSearchActive && webSearchRequired
 			};
 
 		if ($settings?.memory ?? $config?.features?.enable_memories ?? false) {
@@ -4000,7 +4085,9 @@
 		files.push(
 			...(userMessage?.files ?? []).filter(
 				(item) =>
-					['doc', 'text', 'url', 'note', 'chat', 'collection', 'folder'].includes(item.type) ||
+					['doc', 'text', 'url', 'note', 'meeting', 'chat', 'collection', 'folder'].includes(
+						item.type
+					) ||
 					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
 			)
 		);
@@ -4131,9 +4218,9 @@
 				filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
 				tool_ids: toolIds.length > 0 ? toolIds : undefined,
 				skill_ids: skillIds.length > 0 ? skillIds : undefined,
-				rag_filter: getRagFilterForRequest(),
 				terminal_id:
 					terminalEnabled &&
+					supportsComposerFeature('terminal') &&
 					($terminalServers ?? []).some((t) => t.id && t.id === $selectedTerminalId)
 						? $selectedTerminalId
 						: undefined,
@@ -4502,17 +4589,12 @@
 		const selectedFolderId = $selectedFolder?.id;
 
 		if (!$temporaryChatEnabled) {
-			// [Gradient] If the user picked an agent on the empty state,
-			// bind this chat to that agent for its lifetime via meta.agent_id.
-			// The pendingAgentId store is sticky — we do NOT clear it after
-			// use, so the next "New Chat" defaults to the same agent until
-			// the user changes or clears the pick.
-
 			chat = await createNewChat(
 				localStorage.token,
 				{
 					id: _chatId,
 					title: $i18n.t('New Chat'),
+					features: composerFeatures(currentComposerPreferences()),
 					models: selectedModels,
 					system: $settings.system ?? undefined,
 					params: params,
@@ -4524,7 +4606,7 @@
 				$selectedFolder?.id,
 				chatVariables ?? null,
 				// [Gradient]
-				{ ...agentBinding, ...($activeAssistantId ? { assistant_id: $activeAssistantId } : {}) }
+				$activeAssistantId ? { assistant_id: $activeAssistantId } : null
 			);
 
 			_chatId = chat.id;
@@ -4554,26 +4636,30 @@
 		return _chatId;
 	};
 
-	const saveChatHandler = async (_chatId, history) => {
-		if ($chatId == _chatId) {
-			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, _chatId, {
-					models: selectedModels,
-					history: history,
-					messages: createMessagesList(history, history.currentId),
-					params: params,
-					files: chatFiles,
-					features: {
-						web_search: webSearchEnabled,
-						image_generation: imageGenerationEnabled,
-						code_interpreter: codeInterpreterEnabled,
-						document_writer: documentWriterEnabled,
-						office: officeEnabled,
-						office_edit: officeEditEnabled
-					}
-				});
+	let chatSaveQueue = Promise.resolve();
+	const saveChatHandler = (_chatId, history) => {
+		const payload = {
+			models: selectedModels,
+			history: structuredClone(history),
+			messages: createMessagesList(history, history.currentId),
+			params: structuredClone(params),
+			files: structuredClone(chatFiles),
+			features: {
+				...composerFeatures(currentComposerPreferences()),
+				office: officeEnabled,
+				office_edit: officeEditEnabled
 			}
-		}
+		};
+		if ($chatId !== _chatId || $temporaryChatEnabled) return chatSaveQueue;
+		chatSaveQueue = chatSaveQueue
+			.then(async () => {
+				const saved = await updateChatById(localStorage.token, _chatId, payload);
+				if ($chatId === _chatId) chat = saved;
+			})
+			.catch(() => {
+				toast.error($i18n.t('Failed to save settings'));
+			});
+		return chatSaveQueue;
 	};
 
 	const saveControls = async () => {
@@ -4605,15 +4691,7 @@
 				user: undefined,
 				access_grants: undefined
 			})),
-		selectedToolIds,
-		selectedSkillIds,
-		selectedFilterIds,
-		imageGenerationEnabled,
-		webSearchEnabled,
-		codeInterpreterEnabled,
-		documentWriterEnabled,
-		officeEnabled,
-		officeEditEnabled,
+		...currentComposerPreferences(),
 		toolApprovalMode
 	});
 
@@ -4875,9 +4953,7 @@
 		: 'h-screen max-h-[100dvh]'} transition-width duration-200 ease-in-out {$showSidebar &&
 	!embedded
 		? '  md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ' '} {($config?.features?.enable_rag_filter_ui ?? true) && $showRagFilter
-		? 'pr-80'
-		: ''} w-full max-w-full min-w-0 flex flex-col"
+		: ' '} w-full max-w-full min-w-0 flex flex-col"
 	id={chatContainerId}
 >
 	{#if !loading}
@@ -4947,13 +5023,7 @@
 									history: history,
 									timestamp: Date.now()
 								},
-								meta: $chatId
-									? (chat?.meta ?? {})
-									: embedded
-										? {}
-										: $pendingAgentId
-											? { agent_id: $pendingAgentId }
-											: {}
+								meta: $chatId ? (chat?.meta ?? {}) : {}
 							}}
 							{history}
 							title={$chatTitle}
@@ -4987,10 +5057,7 @@
 										null,
 										chatVariables ?? null,
 										// [Gradient] Persist the independent assistant binding.
-										{
-											...agentBinding,
-											...($activeAssistantId ? { assistant_id: $activeAssistantId } : {})
-										}
+										$activeAssistantId ? { assistant_id: $activeAssistantId } : null
 									);
 
 									if (savedChat) {
@@ -5090,8 +5157,7 @@
 								>
 									<MessageInput
 										bind:this={messageInput}
-										agentRouted={isAgentRouted($pendingAgentId)}
-										agentPickerActive={agentSelectorActive}
+										agentRouted={isAgentRouted()}
 										{history}
 										{taskIds}
 										bind:selectedModels
@@ -5104,11 +5170,15 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
+										bind:documentWriterRequired
 										bind:officeEnabled
 										bind:officeEditEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
+										bind:liveDocumentsState
+										bind:liveMailState
 										bind:webSearchEnabled
+										bind:webSearchRequired
 										bind:atSelectedModel
 										bind:showCommands
 										bind:dragged
@@ -5201,8 +5271,13 @@
 										bind:officeEnabled
 										bind:officeEditEnabled
 										{pendingOAuthTools}
+										bind:documentWriterEnabled
+										bind:documentWriterRequired
 										{oauthRedirectHandler}
+										bind:liveDocumentsState
+										bind:liveMailState
 										bind:webSearchEnabled
+										bind:webSearchRequired
 										bind:atSelectedModel
 										bind:showCommands
 										bind:dragged
@@ -5261,9 +5336,13 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled
+									bind:liveDocumentsState
+									bind:liveMailState
+									bind:documentWriterRequired
 									bind:officeEnabled
 									bind:officeEditEnabled
 									bind:webSearchEnabled
+									bind:webSearchRequired
 									bind:atSelectedModel
 									bind:showCommands
 									bind:dragged
@@ -5340,7 +5419,6 @@
 </div>
 
 <!-- RAG Filter Panel -->
-<RagFilterPanel />
 
 <style>
 	::-webkit-scrollbar {

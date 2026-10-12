@@ -12,6 +12,8 @@ export interface ChatAttachment {
 	error?: string;
 	content?: string;
 	knowledge_type?: string;
+	/** [Gradient] The knowledge base a picked file was chosen from; the agent reads it there. */
+	knowledge_id?: string;
 	file?: string | { data?: { content?: string }; [key: string]: unknown };
 	[key: string]: unknown;
 }
@@ -23,11 +25,16 @@ export interface ChatDraft {
 	selectedSkillIds: string[];
 	selectedFilterIds: string[];
 	imageGenerationEnabled: boolean;
+	liveDocumentsState: import('$lib/utils/toolState').ToolState;
+	liveMailState: import('$lib/utils/toolState').ToolState;
 	webSearchEnabled: boolean;
+	/** [Gradient] Web search Altijd; webSearchEnabled alone is Auto. */
+	webSearchRequired: boolean;
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
 	officeEnabled: boolean;
 	officeEditEnabled: boolean;
+	documentWriterRequired: boolean;
 	toolApprovalMode: string;
 }
 

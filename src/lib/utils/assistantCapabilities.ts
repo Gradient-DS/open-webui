@@ -14,20 +14,55 @@ export interface AssistantToggles {
 	document_writer: boolean;
 	office: boolean;
 	office_edit: boolean;
+	live_documents: boolean;
+	live_mail: boolean;
 	vision: boolean;
 	file_upload: boolean;
 	citations: boolean;
 }
 
 /** Toggles that are also Open WebUI "default features" (meta.defaultFeatureIds). */
-const FEATURE_TOGGLES = [
+export const FEATURE_TOGGLES = [
 	'web_search',
 	'image_generation',
 	'code_interpreter',
 	'document_writer',
 	'office',
-	'office_edit'
+	'office_edit',
+	'live_documents',
+	'live_mail'
 ] as const;
+
+/** Tenant flags (`$config.features`) a capability needs before an editor offers it. */
+const CAPABILITY_GATES: Record<string, string[]> = {
+	memory: ['enable_memories'],
+	web_search: ['enable_web_search'],
+	image_generation: ['enable_image_generation'],
+	code_interpreter: ['enable_code_interpreter'],
+	document_writer: ['enable_document_writer', 'feature_document_writer'],
+	office: ['enable_office'],
+	office_edit: ['enable_office', 'enable_office_edit'],
+	live_documents: ['enable_live_documents'],
+	live_mail: ['enable_live_mail'],
+	builtin_tools: ['feature_builtin_tools']
+};
+
+/** Whether the tenant enables every flag the capability needs. */
+export function capabilityOffered(capability: string, features: object | undefined): boolean {
+	const flags = features as Record<string, unknown> | undefined;
+	return (CAPABILITY_GATES[capability] ?? []).every((flag) => !!flags?.[flag]);
+}
+
+/** Capabilities the v2 agent never receives; the advanced editor still offers them. */
+const AGENT_UNSERVED = ['image_generation', 'code_interpreter'];
+
+/** Whether the simple builder offers the capability on this tenant. */
+export function simpleCapabilityOffered(capability: string, features: object | undefined): boolean {
+	const agentRouted = !!(features as Record<string, unknown> | undefined)
+		?.feature_agent_api_enabled;
+	if (agentRouted && AGENT_UNSERVED.includes(capability)) return false;
+	return capabilityOffered(capability, features);
+}
 
 /** Toggles that are also built-in function-calling tools (meta.builtinTools). */
 const BUILTIN_TOGGLES = ['web_search', 'image_generation', 'code_interpreter'] as const;
@@ -42,6 +77,8 @@ export function togglesFromMeta(meta: any): AssistantToggles {
 		document_writer: !!c.document_writer,
 		office: !!c.office,
 		office_edit: !!c.office && !!c.office_edit,
+		live_documents: !!c.live_documents,
+		live_mail: !!c.live_mail,
 		vision: !!c.vision,
 		file_upload: !!c.file_upload,
 		citations: !!c.citations
@@ -60,6 +97,8 @@ export function applyToggles(meta: any, toggles: AssistantToggles): any {
 	capabilities.document_writer = toggles.document_writer;
 	capabilities.office = toggles.office;
 	capabilities.office_edit = toggles.office && toggles.office_edit;
+	capabilities.live_documents = toggles.live_documents;
+	capabilities.live_mail = toggles.live_mail;
 	capabilities.vision = toggles.vision;
 	capabilities.file_upload = toggles.file_upload;
 	capabilities.file_context = toggles.file_upload;

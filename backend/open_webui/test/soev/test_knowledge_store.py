@@ -60,6 +60,7 @@ SOEV = {
     'move_file_to_directory',
     'set_path_fields_by_file_id',
     'update_knowledge_data_by_id',
+    'update_knowledge_meta_by_id',
 }
 REMOVED = {
     'get_pending_deletions',
@@ -69,7 +70,6 @@ REMOVED = {
     'get_suspension_info',
 }
 REFUSED = {
-    'update_knowledge_meta_by_id',
     'update_knowledge_user_id_by_id',
 }
 
@@ -146,6 +146,50 @@ async def seed(env, key='kb', owner='alice', name='Research'):
         as_user=ref,
         idempotency_key=f'collection:{key}',
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('identifier', ['garbage', 'd_@@', 'd__w', 'd_', 'd_b3RoZXIKZGly'])
+async def test_invalid_or_foreign_directory_parent_is_a_client_error_without_a_write(env, identifier):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        await env.store.create_directory('kb', 'child', 'alice', parent_id=identifier)
+    assert error.value.status_code == 400
+    assert not env.api.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('name', ['', '/', 'a/b'])
+async def test_unrepresentable_directory_name_is_a_client_error_without_a_write(env, name):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        await env.store.create_directory('kb', name, 'alice')
+    assert error.value.status_code == 400
+    assert not env.api.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('identifier', ['garbage', 'd_@@', 'd__w', 'd_'])
+async def test_directory_lookup_rejects_malformed_ids_without_a_platform_request(env, identifier):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        await env.store.get_directory_by_id(identifier)
+    assert error.value.status_code == 400
+    assert not env.api.requests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('identifier', ['garbage', 'd_@@', 'd__w', 'd_', 'd_b3RoZXIKZGly'])
+async def test_directory_filter_rejects_malformed_or_foreign_ids_before_catalog_reads(env, identifier):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        await env.store.search_files_by_id('kb', 'alice', {'directory_id': identifier})
+    assert error.value.status_code == 400
+    assert not env.api.requests
 
 
 async def file(env, source='f1', path=None, key='kb', **meta):
@@ -348,7 +392,7 @@ async def test_a_listing_reads_schedules_once(env, monkeypatch, method, args, ex
     await env.identity.ensure_link('owui:user:bob', env.client)
     schedule(env, 'foreign', 'kb', 'onedrive', owner='bob')
     monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:bob' if explicit_user else 'owui:user:alice')
-    env.api.capabilities['test-runtime-key'] = {'connect'}
+    env.api.capabilities['soev_test_cred-runtime_test-secret'] = {'connect'}
     env.api.page_size = page_size
     env.api.requests.clear()
     result = await getattr(env.store, method)(*args)
@@ -708,6 +752,9 @@ async def test_search_knowledge_files_spans_every_readable_collection(env, monke
     filters = {'user_id': 'alice', 'group_ids': ['irrelevant']}
     result = await env.store.search_knowledge_files(filters)
     assert [row.id for row in result.items] == ['first', 'shared']
+    assert [row.collection for row in result.items] == [
+        {'id': key, 'name': env.api.collections[key]['name']} for key in ('kb', 'second')
+    ]
     assert result.total == 2 and result.directories == [] and result.breadcrumbs == []
     assert result.items[0].added_at == int(
         dt.datetime.fromisoformat(env.api.documents['kb', 'first']['ingested_at']).timestamp()
@@ -770,6 +817,30 @@ async def test_search_knowledge_files_filters_by_query_and_pages(env, order_by, 
     shared = await env.store.search_knowledge_files({**filters, 'view_option': 'shared'})
     assert [row.id for row in shared.items] == ['z'] and shared.total == 1
     assert (await env.store.search_knowledge_files({**filters, 'view_option': 'created'})).total == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('filters', 'folders', 'files'),
+    [
+        ({}, ['Bankzaken', 'BTW betalingen', 'E-boekhouden'], ['Alpha', 'beta', 'Gamma']),
+        (
+            {'order_by': 'name', 'direction': 'asc'},
+            ['Bankzaken', 'BTW betalingen', 'E-boekhouden'],
+            ['Alpha', 'beta', 'Gamma'],
+        ),
+        ({'order_by': 'name'}, ['E-boekhouden', 'BTW betalingen', 'Bankzaken'], ['Gamma', 'beta', 'Alpha']),
+    ],
+)
+async def test_listing_sorts_names_case_insensitively_with_folders_following(env, filters, folders, files):
+    """A level's folders and files both follow the chosen name order, ignoring case."""
+    for name in ['E-boekhouden', 'BTW betalingen', 'Bankzaken']:
+        await env.store.create_directory('kb', name, 'alice')
+    for source in ['beta', 'Gamma', 'Alpha']:
+        await file(env, source)
+    result = await env.store.search_files_by_id('kb', 'alice', {**filters, 'directory_id': None})
+    assert [row.name for row in result.directories] == folders
+    assert [row.id for row in result.items] == files
 
 
 @pytest.mark.asyncio
@@ -886,18 +957,11 @@ async def test_reset_preserves_the_original_failure_result_until_folders_are_emp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ('method', 'args', 'reason'),
-    [
-        ('update_knowledge_meta_by_id', ('kb', {}), 'cloud sync'),
-        ('update_knowledge_user_id_by_id', ('kb', 'bob'), 'owner transfer'),
-    ],
-)
-async def test_a_refused_method_names_the_plan_it_moves_with(env, method, args, reason):
-    """Unsupported writes identify their method and the missing plan or owner-transfer route."""
+async def test_a_refused_method_names_the_plan_it_moves_with(env):
+    """Unsupported writes identify their method and the missing owner-transfer route."""
     with pytest.raises(env.module.NotOnSoev) as caught:
-        await getattr(env.store, method)(*args)
-    assert method in str(caught.value) and reason in str(caught.value)
+        await env.store.update_knowledge_user_id_by_id('kb', 'bob')
+    assert 'update_knowledge_user_id_by_id' in str(caught.value) and 'owner transfer' in str(caught.value)
     assert env.api.requests == []
 
 
@@ -1398,3 +1462,21 @@ async def test_search_overlaps_owners_and_needed_schedules(env, monkeypatch, own
     assert owners_started.is_set() and schedules_started.is_set()
     assert sum(request.url.path == '/v1/schedules' for request in env.api.requests) == 1
     assert len(env.api.requests) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_synced_document_is_left_to_its_source(env):
+    """Removing a schedule-reached document is refused and a reset leaves it; owned ones go."""
+    from fastapi import HTTPException
+
+    await file(env)
+    env.api.add_document('kb', 'catalog')
+    env.api.add_document('kb', 'synced', schedule_ids=['schedule'])
+    with pytest.raises(HTTPException) as error:
+        await env.store.remove_file_from_knowledge_by_id('kb', 'synced')
+    assert error.value.status_code == 403
+    assert error.value.detail == {'code': 'synced_document_read_only'}
+    assert not [r for r in env.api.requests if r.method == 'DELETE']
+    await env.store.reset_knowledge_by_id('kb', include_directories=False)
+    deleted = [r.url.path for r in env.api.requests if r.method == 'DELETE']
+    assert sorted(deleted) == ['/v1/collections/kb/documents/catalog', '/v1/collections/kb/documents/f1']

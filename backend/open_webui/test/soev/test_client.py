@@ -320,7 +320,7 @@ async def test_every_page_carries_a_fresh_assertion(recorded_http, caplog):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('method', ['get', 'pages', 'send'])
+@pytest.mark.parametrize('method', ['get', 'pages', 'send', 'post_bytes'])
 async def test_as_user_without_a_minter_is_refused(recorded_http, method):
     """Acting as a user requires a configured minter before any HTTP request."""
     requests, _ = recorded_http
@@ -330,6 +330,8 @@ async def test_as_user_without_a_minter_is_refused(recorded_http, method):
             _ = [item async for item in client.pages('/v1/collections', as_user='owui:user:alice')]
         elif method == 'send':
             await client.send('POST', '/v1/collections', {}, as_user='owui:user:alice', idempotency_key='operation-1')
+        elif method == 'post_bytes':
+            await client.post_bytes('/v1/chat/images', b'image', as_user='owui:user:alice')
         else:
             await client.get('/v1/collections', as_user='owui:user:alice')
     assert requests == []
@@ -363,7 +365,7 @@ async def test_an_invalid_problem_uses_a_safe_fallback(recorded_http, body, stat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('error_type, status', [(httpx.ConnectError, 502), (httpx.ReadTimeout, 504)])
-@pytest.mark.parametrize('method', ['get', 'get_text', 'put_bytes'])
+@pytest.mark.parametrize('method', ['get', 'get_text', 'put_bytes', 'post_bytes'])
 async def test_transport_failures_are_safe_and_are_not_retried(recorded_http, caplog, error_type, status, method):
     """Transport exceptions cannot expose credentials or replay a subject assertion."""
     requests, responses = recorded_http
@@ -372,6 +374,8 @@ async def test_transport_failures_are_safe_and_are_not_retried(recorded_http, ca
         client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda _: 'test-assertion')
         if method == 'put_bytes':
             await client.put_bytes('https://s3.invalid/file?signature=private-signature', headers={}, body=b'upload')
+        elif method == 'post_bytes':
+            await client.post_bytes('/v1/chat/images', b'image', as_user='owui:user:alice')
         else:
             await getattr(client, method)('/v1/collections', as_user='owui:user:alice')
     assert caught.value.status == status
@@ -412,12 +416,10 @@ def test_settings_are_environment_only_and_secrets_are_not_registered_or_logged(
         'SOEV_API_URL': 'https://soev.invalid',
         'SOEV_API_KEY': 'test-api-key-never-persist',
         'SOEV_API_SIGNING_KEY': '-----BEGIN PRIVATE KEY-----\ntest-signing-key\n-----END PRIVATE KEY-----\n',
-        'SOEV_API_SIGNING_KID': 'key-1',
         'SOEV_API_AUDIENCE': 'tenant-1',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
     }
     environment = {key: value for key, value in os.environ.items() if key not in settings}
-    environment.pop('AGENT_API_RUNTIME', None)
     environment.update(
         DATA_DIR=str(tmp_path),
         DATABASE_URL=f'sqlite:///{tmp_path / "config.db"}',
@@ -427,7 +429,6 @@ def test_settings_are_environment_only_and_secrets_are_not_registered_or_logged(
     )
     if configured:
         environment.update(settings)
-        environment['AGENT_API_RUNTIME'] = 'v2'
     code = """
 import json
 import logging
@@ -436,10 +437,9 @@ from io import StringIO
 
 output = StringIO()
 logging.basicConfig(stream=output, level=logging.DEBUG, force=True)
-from open_webui import config, env
+from open_webui import config
 
 expected = json.loads(sys.argv[1])
-assert env.AGENT_API_RUNTIME == sys.argv[2]
 for name, value in expected.items():
     assert getattr(config, name) == value, name
 assert not any(key.startswith('soev_api.') for key in config.DEFAULT_CONFIG)
@@ -451,7 +451,7 @@ for name in ('SOEV_API_KEY', 'SOEV_API_SIGNING_KEY'):
 """
     expected = settings if configured else dict.fromkeys(settings, '')
     result = subprocess.run(
-        [sys.executable, '-c', code, json.dumps(expected), 'v2' if configured else 'v1'],
+        [sys.executable, '-c', code, json.dumps(expected)],
         env=environment,
         capture_output=True,
         text=True,
@@ -612,3 +612,66 @@ def test_each_event_loop_gets_its_own_transport():
     second = asyncio.run(transport())
     assert first is not second
     asyncio.run(close_client())
+
+
+@pytest.mark.asyncio
+async def test_live_refusal_preserves_provider_and_retry_after(recorded_http):
+    """Structured refusal context survives without exposing upstream server details."""
+    _, responses = recorded_http
+    responses.append(
+        httpx.Response(
+            503,
+            json={'code': 'provider_throttled', 'detail': 'private upstream detail', 'provider': 'onedrive'},
+            headers={'Content-Type': 'application/problem+json', 'Retry-After': '7'},
+        )
+    )
+    with pytest.raises(SoevApiError) as caught:
+        await SoevClient('https://soev.invalid', 'test-key').get('/v1/live/attach/job')
+    assert caught.value.status == 503
+    assert caught.value.code == 'provider_throttled'
+    assert caught.value.provider == 'onedrive'
+    assert caught.value.retry_after == '7'
+    assert 'private upstream' not in caught.value.detail
+
+
+@pytest.mark.asyncio
+async def test_post_bytes_uploads_as_user_without_content_type(recorded_http):
+    requests, responses = recorded_http
+    reference = {'id': 'a' * 32, 'sha256': 'b' * 64, 'size': 5, 'media_type': 'image/png', 'name': 'photo +#.png'}
+    responses.append(httpx.Response(201, json=reference))
+    minter = Mock(return_value='test-assertion')
+    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=minter)
+    assert (
+        await client.post_bytes(
+            '/v1/chat/images', b'image', as_user='owui:user:alice', params={'name': reference['name']}
+        )
+        == reference
+    )
+    (request,) = requests
+    assert request.method == 'POST' and request.url.path == '/v1/chat/images'
+    assert request.url.params['name'] == reference['name']
+    assert request.content == b'image'
+    assert request.headers['Authorization'] == 'Bearer test-api-key'
+    assert request.headers['X-Soev-Subject'] == 'test-assertion'
+    assert 'Content-Type' not in request.headers
+    assert 'Idempotency-Key' not in request.headers
+    minter.assert_called_once_with('owui:user:alice')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', [413, 415, 503])
+async def test_post_bytes_uses_shared_problem_handling(recorded_http, status):
+    requests, responses = recorded_http
+    responses.append(
+        httpx.Response(
+            status,
+            json={'code': 'image_error', 'detail': 'reason'},
+            headers={'Content-Type': 'application/problem+json'},
+        )
+    )
+    client = SoevClient('https://soev.invalid', 'test-api-key', subject_minter=lambda ref: 'assertion')
+    with pytest.raises(SoevApiError) as caught:
+        await client.post_bytes('/v1/chat/images', b'image', as_user='owui:user:alice')
+    assert caught.value.status == status
+    assert caught.value.code == 'image_error'
+    assert len(requests) == 1

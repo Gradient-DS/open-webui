@@ -10,9 +10,10 @@ open shapes, six genuinely free-form bodies, and ten already typed bodies with
 only boolean/integer leaves. No invented string fields were added to make the
 last group visible to a string-only corpus.
 
-## Decisions for all 27 operations
+## Decisions for the 26 remaining operations
 
-All paths below are POST operations under `/api/v1/`.
+All paths below are POST operations under `/api/v1/`. The v2-only release
+removed the legacy agent configuration operation from the original 27.
 
 | Operations | Count | Decision and evidence |
 | --- | ---: | --- |
@@ -24,14 +25,14 @@ All paths below are POST operations under `/api/v1/`.
 | `functions/id/{id}/valves/update`, `functions/id/{id}/valves/user/update`, `tools/id/{id}/valves/update`, `tools/id/{id}/valves/user/update` | 4 | Leave free-form; rewrite waivers. The handler loads the installed author's `Valves` or `UserValves` model at runtime. Future coverage must use that selected author schema, not a fabricated global schema. |
 | `pipelines/{pipeline_id}/valves/update` | 1 | Leave free-form; rewrite waiver. The handler forwards the supplied key/value body to the selected pipeline service. Keys belong to the pipeline author; coverage needs its runtime schema. |
 | `configs/import` | 1 | Leave free-form; rewrite waiver. `ImportConfigForm.config` is an arbitrary exported blob passed directly to `Config.upsert`. Revisit with a versioned import contract or arbitrary-map corpus support. |
-| `configs/2fa`, `configs/agent_proxy`, `configs/connections`, `configs/data-retention` | 4 | Keep existing models; rewrite waivers. Respectively: booleans plus grace-period days, one boolean, two booleans, and retention-day integers plus a warning-email boolean. No named string leaves. |
+| `configs/2fa`, `configs/connections`, `configs/data-retention` | 3 | Keep existing models; rewrite waivers. Respectively: booleans plus grace-period days, two booleans, and retention-day integers plus a warning-email boolean. No named string leaves. |
 | `users/default/permissions` | 1 | Keep existing `UserPermissions`; rewrite waiver. All nested permission flags are booleans. |
 | `channels/{id}/members/active`, `channels/{id}/messages/{message_id}/pin` | 2 | Keep existing forms; rewrite waivers. They contain only `is_active` and `is_pinned` booleans respectively. |
 | `folders/{id}/update/expanded` | 1 | Keep existing `FolderIsExpandedForm`; rewrite waiver. Only `is_expanded` (boolean). |
 | `archives/admin/config` | 1 | Keep existing `ArchiveConfigForm`; rewrite waiver. Archival booleans and retention-day integers. |
 | `auths/admin/config/ldap` | 1 | Keep existing `LdapConfigForm`; rewrite waiver. Only `enable_ldap` (boolean). |
 
-The ten boolean/integer-only waivers should be revisited if string fields are
+The nine remaining boolean/integer-only waivers should be revisited if string fields are
 added or the corpus learns to drive non-string values. They are not free-form
 and further typing would not help.
 

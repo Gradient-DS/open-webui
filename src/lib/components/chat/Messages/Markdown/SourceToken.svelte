@@ -4,6 +4,7 @@
 	import { activeCitationIndex, citationPanel } from '$lib/stores/citations'; // [Gradient]
 	import { activeCitationIndexFor } from './activeCitation'; // [Gradient]
 	import Source from './Source.svelte';
+	import { chipLabel } from './sourceLabels'; // [Gradient]
 
 	export let id;
 	export let token;
@@ -11,6 +12,7 @@
 	export let onClick: Function = () => {};
 
 	$: activeIndex = activeCitationIndexFor(id, $citationPanel, $activeCitationIndex); // [Gradient]
+	$: chip = chipLabel(token?.ids ?? [], sourceIds); // [Gradient]
 	$: active = activeIndex !== null && (token?.ids ?? []).includes(activeIndex); // [Gradient]
 	let containerElement;
 	let openPreview = false;
@@ -47,12 +49,12 @@
 	{#if (token?.ids ?? []).length == 1}
 		{@const id = token.ids[0]}
 		{@const identifier = token.citationIdentifiers ? token.citationIdentifiers[0] : id - 1}
-		<Source active={id === activeIndex} id={identifier} title={sourceIds[id - 1]} {onClick} />
-	{:else}
+		<Source active={id === activeIndex} id={identifier} title={sourceIds[id - 1] ?? 'N/A'} {onClick} />
+	{:else if chip}
 		<LinkPreview.Root openDelay={0} bind:open={openPreview}>
 			<LinkPreview.Trigger>
 				<button
-					aria-label={`${getDisplayTitle(formattedTitle(decodeString(sourceIds[token.ids[0] - 1])))} +${(token?.ids ?? []).length - 1} more sources`}
+					aria-label={`${getDisplayTitle(formattedTitle(decodeString(chip.title)))} +${chip.more} more sources`}
 					class="text-[0.625rem] w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
 					class:ring-2={active}
 					class:ring-gray-400={active}
@@ -63,8 +65,10 @@
 					}}
 				>
 					<span class="line-clamp-1">
-						{getDisplayTitle(formattedTitle(decodeString(sourceIds[token.ids[0] - 1])))}
-						<span class="dark:text-white/50 text-black/50">+{(token?.ids ?? []).length - 1}</span>
+						{getDisplayTitle(formattedTitle(decodeString(chip.title)))}
+						{#if chip.more > 0}
+							<span class="dark:text-white/50 text-black/50">+{chip.more}</span>
+						{/if}
 					</span>
 				</button>
 			</LinkPreview.Trigger>
@@ -76,7 +80,7 @@
 								typeof identifier === 'string' ? parseInt(identifier.split('#')[0]) : identifier}
 							<div class="">
 								<!-- prettier-ignore -->
-								<Source active={id === activeIndex} id={identifier} title={sourceIds[id - 1]} {onClick} />
+								<Source active={id === activeIndex} id={identifier} title={sourceIds[id - 1] ?? 'N/A'} {onClick} />
 							</div>
 						{/each}
 					</div>

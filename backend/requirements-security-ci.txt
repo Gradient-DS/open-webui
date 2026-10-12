@@ -1,7 +1,7 @@
-# Test tooling for the runtime security gate. CI only.
+# Test tooling for offline backend checks and the runtime security gate. CI only.
 #
 # These are installed into the open-webui-ci image that docker-compose.ci.yaml
-# builds (INSTALL_SECURITY_CI_DEPS=true) and into no production image, which is
+# builds (INSTALL_SECURITY_CI_DEPS=true) and the backend test venv, never into a production image, which is
 # why they are not in requirements.txt. They used to be, so every shipped image
 # carried the hostile corpus.
 #
@@ -10,7 +10,8 @@
 # route off its internal network.
 #
 # They live in the private Gradient-DS/security-ci, so the install needs a
-# credential. CI mounts a BuildKit secret holding an App token; a workstation
+# credential. Runtime CI mounts a BuildKit secret holding an App token; backend
+# tests use the same App through an ephemeral git credential helper. A workstation
 # uses its own gh login (`gh auth setup-git`, then GH_TOKEN=$(gh auth token)).
 #
 # Pin a commit with the tag in this comment, and never move a tag that a

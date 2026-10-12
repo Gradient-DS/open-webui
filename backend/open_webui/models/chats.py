@@ -15,7 +15,6 @@ from typing import Any, Literal
 from typing import Optional
 
 # local imports
-from open_webui.env import ENABLE_ADMIN_CHAT_ACCESS
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.ordering import request_order
 from open_webui.models.access_grants import AccessGrants
@@ -261,9 +260,7 @@ class ChatFileModel(BaseModel):
 class ChatForm(BaseModel):
     chat: dict
     folder_id: Optional[str] = None
-    # [Gradient] Optional meta dict set on creation. Used by the per-chat
-    # agent picker to bind a new chat to an external agent via
-    # ``meta.agent_id``. When omitted, meta defaults to {}.
+    # [Gradient] Optional meta dict set on creation. When omitted, meta defaults to {}.
     meta: Optional[dict] = None
     variables: Optional[dict] = None
 
@@ -888,24 +885,6 @@ class ChatTable:
                 return ChatModel.model_validate(chat_item)
         except Exception:
             return None
-
-    async def bind_chat_agent_by_id(self, id: str, agent_id: str) -> bool:
-        """[Gradient] Record which agent a chat runs on, in ``meta.agent_id``.
-
-        Written when a chat without a binding falls back to the picker
-        default, so the row says what actually served it and later turns
-        and the navbar agree. Only the meta column is touched.
-
-        :return: Whether a row was updated.
-        """
-        async with get_async_db_context() as session:
-            row = (await session.execute(select(Chat.meta).filter_by(id=id))).one_or_none()
-            if row is None:
-                return False
-            meta = row[0] or {}
-            await session.execute(update(Chat).filter_by(id=id).values(meta={**meta, 'agent_id': agent_id}))
-            await session.commit()
-            return True
 
     # [Gradient] Assistant bindings live only in chat metadata.
     async def bind_chat_assistant_by_id(self, id: str, assistant_id: str) -> bool:
@@ -1835,7 +1814,9 @@ class ChatTable:
         if not chat:
             return None
 
-        if user.role == 'admin' and (ENABLE_ADMIN_CHAT_ACCESS or is_internal_chat(chat.meta)):
+        from open_webui.utils.access_control import can_access_admin_chats
+
+        if can_access_admin_chats(user):
             return chat
 
         if await AccessGrants.has_access(
@@ -2700,6 +2681,7 @@ class ChatTable:
         from open_webui.models.files import Files
         from open_webui.models.users import Users
         from open_webui.utils.access_control.files import has_access_to_file
+        from open_webui.utils.access_control import can_bypass_access_control
 
         user = await Users.get_user_by_id(user_id, db=db)
         accessible_file_ids = []
@@ -2709,7 +2691,7 @@ class ChatTable:
                 continue
             if (
                 file.user_id == user_id
-                or (user and user.role == 'admin')
+                or (user and can_bypass_access_control(user))
                 or (user and await has_access_to_file(file_id, 'read', user, db=db))
             ):
                 accessible_file_ids.append(file_id)

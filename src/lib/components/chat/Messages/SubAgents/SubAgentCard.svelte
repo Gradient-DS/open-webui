@@ -250,8 +250,8 @@
 						id={card.agent_id}
 						chatId=""
 						sources={card.sources}
+						text={card.text_buffer}
 						readOnly={true}
-						messageDone={state === 'done' || state === 'error'}
 					/>
 				</div>
 			{/if}

@@ -11,13 +11,12 @@
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import CitationHeader from '../Messages/Citations/CitationHeader.svelte';
 	import {
+		createPreviewProbe,
 		mergeCitationDocuments,
-		probeFileAvailable,
 		type CitationDocument
 	} from '../Messages/Citations/citationDocuments';
 	import { citationFileInfo, resolveExternalUrl } from '../Messages/Citations/useCitationDocument';
 	import type { DisplayCitation } from '../Messages/Citations/reduceSources';
-	import { usedCitations } from '../Messages/Citations/panelScope';
 	import {
 		calculateShowRelevance,
 		shouldShowPercentage
@@ -35,7 +34,7 @@
 	let selectedTab: 'preview' | 'content' = 'preview';
 	let previewAvailable = true;
 	let panelElement: HTMLElement;
-	let probeVersion = 0;
+	const availability = createPreviewProbe((available) => (previewAvailable = available));
 
 	// [Gradient] The list comes from the live branch; payloads identify only the target answer.
 	$: groups = sourceGroups(history);
@@ -101,7 +100,7 @@
 	// [Gradient] Match by stable source id: history reduction creates new citation objects.
 	$: citation = panel?.citation ?? null;
 	$: cumulativeCitations = activeGroup?.citations ?? panel?.citations ?? [];
-	$: groupUsed = activeGroup?.used ?? usedCitations(cumulativeCitations);
+	$: groupUsed = activeGroup?.used ?? [];
 	$: visibleCitations =
 		citation && !groupUsed.some((item) => item.id === citation.id)
 			? cumulativeCitations
@@ -136,17 +135,13 @@
 	}
 	$: ({ fileId, isPreviewable } = citationFileInfo(citation, mergedDocuments));
 	$: externalUrl = resolveExternalUrl(citation, mergedDocuments);
-	$: checkAvailability(fileId);
-	async function checkAvailability(id: string | undefined) {
-		const version = ++probeVersion;
-		previewAvailable = true;
-		if (id) {
-			const available = await probeFileAvailable(id);
-			if (version === probeVersion) previewAvailable = available;
-		}
+	// [Gradient] Every opened payload re-probes, even for the same file: a transient failure never sticks.
+	$: checkAvailability(panel, fileId);
+	function checkAvailability(_opened: typeof panel, id: string | undefined) {
+		void availability.check(id);
 	}
 	onDestroy(() => {
-		probeVersion++;
+		availability.cancel();
 		scrollVersion++;
 	});
 </script>

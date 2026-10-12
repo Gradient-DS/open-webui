@@ -45,7 +45,9 @@ def api(fake_api):
         yield fake, client
 
 
-def send(client, method, path, body=None, *, user=None, operation=None, credential='test-runtime-key'):
+def send(
+    client, method, path, body=None, *, user=None, operation=None, credential='soev_test_cred-runtime_test-secret'
+):
     headers = {'Authorization': f'Bearer {credential}'}
     if user:
         headers['X-Soev-Subject'] = assertion(user)
@@ -212,7 +214,7 @@ def test_identity_groups_and_credential_scoped_jobs(api):
     )
     assert send(client, 'GET', '/v1/jobs', credential='other-key').json()['data'] == []
     token = assertion('owui:user:alice')
-    headers = {'Authorization': 'Bearer test-runtime-key', 'X-Soev-Subject': token}
+    headers = {'Authorization': 'Bearer soev_test_cred-runtime_test-secret', 'X-Soev-Subject': token}
     assert client.get('/v1/collections/kb', headers=headers).status_code == 200
     assert client.get('/v1/collections/kb', headers=headers).status_code == 401
     send(client, 'PUT', '/v1/directory/groups/owui%3Agroup%3Astaff/members', {'members': []})
@@ -250,7 +252,7 @@ def test_identity_link_and_group_routes_replay_freely(api):
         ('PUT', group_path, {'members': []}),
     ):
         for invalid in (None, 'short', 'x' * 256):
-            headers = {'Authorization': 'Bearer test-runtime-key'}
+            headers = {'Authorization': 'Bearer soev_test_cred-runtime_test-secret'}
             if invalid is not None:
                 headers['Idempotency-Key'] = invalid
             response = client.request(method, path, json=body, headers=headers)
@@ -270,12 +272,14 @@ def test_pages_and_document_acl_follow_the_wire_contract(api):
     fake.add_document('kb', 'private', principals=['owui:user:bob'])
     assert send(client, 'GET', '/v1/collections/kb/documents', user='owui:user:alice').json()['data'] == []
     assert send(client, 'DELETE', '/v1/collections/kb/documents/private', user='owui:user:alice').status_code == 404
-    missing_key = client.post('/v1/collections', json={}, headers={'Authorization': 'Bearer test-runtime-key'})
+    missing_key = client.post(
+        '/v1/collections', json={}, headers={'Authorization': 'Bearer soev_test_cred-runtime_test-secret'}
+    )
     assert missing_key.status_code == 400
 
 
-def test_an_assertion_signed_with_the_configured_kid_is_accepted_by_the_fake(api):
-    """The registered public key verifies assertions minted with the configured kid."""
+def test_an_assertion_signed_with_the_derived_kid_is_accepted_by_the_fake(api):
+    """The registered public key verifies assertions minted with the derived kid."""
     fake, client = api
     response = send(
         client,
@@ -287,11 +291,10 @@ def test_an_assertion_signed_with_the_configured_kid_is_accepted_by_the_fake(api
     assert fake.links == {'owui:user:alice': 'person'}
 
 
-def test_an_assertion_with_an_unregistered_kid_is_refused_by_the_fake(api, identity_config, monkeypatch):
+def test_an_assertion_with_an_unregistered_kid_is_refused_by_the_fake(api):
     """A valid signature cannot authenticate an unregistered kid."""
     fake, client = api
-    identity, _ = identity_config
-    monkeypatch.setattr(identity.config, 'SOEV_API_SIGNING_KID', 'unregistered-key')
+    fake.signing_keys.clear()
     response = send(
         client,
         'POST',
@@ -319,12 +322,15 @@ def test_an_assertion_with_a_forged_signature_is_refused_by_the_fake(api):
     assert not fake.links
 
 
-@pytest.mark.parametrize('setting', ['SOEV_API_CREDENTIAL_ID', 'SOEV_API_AUDIENCE'])
-def test_an_assertion_with_wrong_claims_is_refused_by_the_fake(api, identity_config, monkeypatch, setting):
+@pytest.mark.parametrize(
+    ('setting', 'value'),
+    [('SOEV_API_KEY', 'soev_test_cred-wrong_test-secret'), ('SOEV_API_AUDIENCE', 'wrong-value')],
+)
+def test_an_assertion_with_wrong_claims_is_refused_by_the_fake(api, identity_config, monkeypatch, setting, value):
     """A valid signature still requires the credential issuer and configured audience."""
     _, client = api
     identity, _ = identity_config
-    monkeypatch.setattr(identity.config, setting, 'wrong-value')
+    monkeypatch.setattr(identity.config, setting, value)
     response = send(
         client,
         'POST',
@@ -387,7 +393,7 @@ def test_ingest_requires_the_credential_capability(api):
     seed(client)
     operation = str(uuid4())
     job = ingest(client, inline_document(), operation=operation).json()
-    fake.capabilities['test-runtime-key'] = {'read'}
+    fake.capabilities['soev_test_cred-runtime_test-secret'] = {'read'}
     for response in (
         ingest(client, inline_document()),
         ingest(client, inline_document(), operation=operation),
@@ -449,7 +455,9 @@ def test_the_presigned_put_refuses_a_bearer(api):
     seed(client)
     upload = ingest(client, file_document()).json()['uploads'][0]
     response = client.put(
-        upload['url'], content=FILE_BYTES, headers={**upload['headers'], 'Authorization': 'Bearer test-runtime-key'}
+        upload['url'],
+        content=FILE_BYTES,
+        headers={**upload['headers'], 'Authorization': 'Bearer soev_test_cred-runtime_test-secret'},
     )
     assert response.status_code == 400
     assert response.json()['code'] == 'bearer_on_presigned_put'
@@ -550,7 +558,7 @@ def test_job_routes_conceal_unknown_and_other_credentials_jobs(api, suffix, meth
     job = ingest(client, inline_document()).json()
     fake.credentials['other-key'] = SERVICE
     fake.capabilities['other-key'] = {'*'}
-    for job_id, credential in [('missing', 'test-runtime-key'), (job['job_id'], 'other-key')]:
+    for job_id, credential in [('missing', 'soev_test_cred-runtime_test-secret'), (job['job_id'], 'other-key')]:
         response = send(client, method, f'/v1/jobs/{job_id}{suffix}', credential=credential, user='owui:user:alice')
         assert response.status_code == 404
         assert response.json()['code'] == 'job_not_found'

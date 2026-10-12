@@ -75,7 +75,8 @@ class LeaderboardFeedbackData(BaseModel):
 
 
 class RatingData(BaseModel):
-    rating: Optional[str | int] = None
+    # [Gradient] Not Optional[...]: typing caches Union[int, str] by set, so import order flipped anyOf in the spec.
+    rating: str | int | None = None
     model_id: Optional[str] = None
     sibling_model_ids: Optional[list[str]] = None
     reason: Optional[str] = None

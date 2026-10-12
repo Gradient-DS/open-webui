@@ -1677,7 +1677,8 @@ try:
 except Exception as e:
     log.exception(f'Error loading DEFAULT_PROMPT_SUGGESTIONS: {e}')
     default_prompt_suggestions = []
-if default_prompt_suggestions == []:
+# [Gradient] Stock suggestions only when the variable is unset; an explicit "[]" means none.
+if 'DEFAULT_PROMPT_SUGGESTIONS' not in os.environ:
     default_prompt_suggestions = [
         {
             'title': ['Help me study', 'vocabulary for a college entrance exam'],
@@ -1902,7 +1903,7 @@ USER_PERMISSIONS_CHAT_RATE_RESPONSE = os.getenv('USER_PERMISSIONS_CHAT_RATE_RESP
 
 USER_PERMISSIONS_CHAT_EDIT = os.getenv('USER_PERMISSIONS_CHAT_EDIT', 'True').lower() == 'true'
 
-USER_PERMISSIONS_CHAT_SHARE = os.getenv('USER_PERMISSIONS_CHAT_SHARE', 'True').lower() == 'true'
+USER_PERMISSIONS_CHAT_SHARE = os.getenv('USER_PERMISSIONS_CHAT_SHARE', 'False').lower() == 'true'
 
 USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING = (
     os.getenv('USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
@@ -1961,6 +1962,10 @@ USER_PERMISSIONS_FEATURES_CALENDAR = os.getenv('USER_PERMISSIONS_FEATURES_CALEND
 
 USER_PERMISSIONS_FEATURES_USER_WEBHOOKS = (
     os.getenv('USER_PERMISSIONS_FEATURES_USER_WEBHOOKS', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER = (
+    os.getenv('USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER', 'True').lower() == 'true'
 )
 
 
@@ -2050,6 +2055,7 @@ DEFAULT_USER_PERMISSIONS = {
         'automations': USER_PERMISSIONS_FEATURES_AUTOMATIONS,
         'calendar': USER_PERMISSIONS_FEATURES_CALENDAR,
         'webhooks': USER_PERMISSIONS_FEATURES_USER_WEBHOOKS,
+        'document_writer': USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER,
     },
     'settings': {
         'interface': USER_PERMISSIONS_SETTINGS_INTERFACE,
@@ -2888,10 +2894,6 @@ GREETING_TEMPLATE = os.environ.get('GREETING_TEMPLATE', '')
 
 ENABLE_WELCOME_MESSAGE = os.environ.get('ENABLE_WELCOME_MESSAGE', 'False').lower() == 'true'
 
-USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER = (
-    os.environ.get('USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER', 'True').lower() == 'true'
-)
-
 KNOWLEDGE_MAX_FILE_COUNT = int(os.environ.get('KNOWLEDGE_MAX_FILE_COUNT', '250'))
 
 ENABLE_FEEDBACK_LAYER2 = os.environ.get('ENABLE_FEEDBACK_LAYER2', 'True').lower() == 'true'
@@ -2979,7 +2981,15 @@ FEATURE_NOTES_AI_CONTROLS = os.environ.get('FEATURE_NOTES_AI_CONTROLS', 'True').
 
 FEATURE_VOICE = os.environ.get('FEATURE_VOICE', 'True').lower() == 'true'
 
+# [Gradient] Sub-gates under FEATURE_VOICE: FEATURE_VOICE alone leaves dictation only.
+FEATURE_VOICE_CALL = os.environ.get('FEATURE_VOICE_CALL', 'True').lower() == 'true'
+
+FEATURE_READ_ALOUD = os.environ.get('FEATURE_READ_ALOUD', 'True').lower() == 'true'
+
 FEATURE_CHANGELOG = os.environ.get('FEATURE_CHANGELOG', 'True').lower() == 'true'
+
+# [Gradient] Vergadering (meeting assistant) page; also needs the meeting agent in the soev-api catalog.
+FEATURE_MEETINGS = os.environ.get('FEATURE_MEETINGS', 'True').lower() == 'true'
 
 FEATURE_SYSTEM_PROMPT = os.environ.get('FEATURE_SYSTEM_PROMPT', 'True').lower() == 'true'
 
@@ -3049,24 +3059,9 @@ ENABLE_CITATION_TEXT_HIGHLIGHT = os.environ.get('ENABLE_CITATION_TEXT_HIGHLIGHT'
 
 SOEV_LOGIN_FOOTER = os.environ.get('SOEV_LOGIN_FOOTER', 'Powered by [soev.ai](https://soev.ai)')
 
-ENABLE_DOCUMENT_WRITER = os.environ.get('ENABLE_DOCUMENT_WRITER', 'False').lower() == 'true'
+ENABLE_DOCUMENT_WRITER = os.environ.get('ENABLE_DOCUMENT_WRITER', 'True').lower() == 'true'
 ENABLE_OFFICE = os.environ.get('ENABLE_OFFICE', 'True').lower() == 'true'
 ENABLE_OFFICE_EDIT = os.environ.get('ENABLE_OFFICE_EDIT', 'True').lower() == 'true'
-
-DOCUMENT_WRITER_PROMPT_TEMPLATE = os.environ.get('DOCUMENT_WRITER_PROMPT_TEMPLATE', '')
-
-DEFAULT_DOCUMENT_WRITER_PROMPT = """
-#### Document Writer
-
-You can produce a structured markdown document that renders in a side panel and can be downloaded by the user as Markdown, Plain Text, PDF, or Word.
-
-- Wrap the document in `<document title="…">…</document>` XML tags. The `title` attribute is required.
-- Inside the tags, write the full document body as well-structured **Markdown**: headings (`#`, `##`, `###`), paragraphs, lists, tables, code blocks, quotes, emphasis.
-- Write in a document style — proper paragraphs, complete sentences, clear section headings. Not chat-style.
-- Do **not** wrap the document in triple backticks — the tags contain raw markdown, not a code block.
-- You may write explanatory text before and after the `<document>` block in your reply; the document itself only contains the document body.
-- Respond in the chat's primary language. Default to English if multilingual.
-"""
 
 WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get('WEAVIATE_WEB_SEARCH_TTL_MINUTES', '1440'))
 
@@ -3107,25 +3102,17 @@ TENANT_NAME = os.environ.get('TENANT_NAME', '')
 # The signing key is the PEM value, including its original newlines.
 SOEV_API_URL = os.environ.get('SOEV_API_URL', '')
 SOEV_API_KEY = os.environ.get('SOEV_API_KEY', '')
-SOEV_API_CREDENTIAL_ID = os.environ.get('SOEV_API_CREDENTIAL_ID', '')
 SOEV_API_SIGNING_KEY = os.environ.get('SOEV_API_SIGNING_KEY', '')
-# The API-assigned kid printed by the bootstrap.
-SOEV_API_SIGNING_KID = os.environ.get('SOEV_API_SIGNING_KID', '')
 SOEV_API_AUDIENCE = os.environ.get('SOEV_API_AUDIENCE', '')
 SOEV_API_SERVICE_PRINCIPAL = os.environ.get('SOEV_API_SERVICE_PRINCIPAL', '')
 SOEV_API_JOB_POLL_SECONDS = int(os.environ.get('SOEV_API_JOB_POLL_SECONDS', '5'))
 SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS = int(os.environ.get('SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS', '21600'))
 SOEV_API_INLINE_DOCUMENT_BYTES = int(os.environ.get('SOEV_API_INLINE_DOCUMENT_BYTES', '262144'))
 
-ENABLE_AGENT_PROXY = os.environ.get('ENABLE_AGENT_PROXY', 'False').lower() == 'true'
-
-AGENT_SEARCH_ENABLED = os.environ.get('AGENT_SEARCH_ENABLED', 'False').lower() == 'true'
 
 _default_selected_agent = AGENT_API_AGENTS[0] if AGENT_API_AGENTS else ''
 
 AGENT_API_SELECTED_AGENT = _default_selected_agent
-
-AGENT_API_PICKER_DEFAULT_SLUG = os.environ.get('AGENT_API_PICKER_DEFAULT_SLUG', '').strip()
 
 
 DEFAULT_CONFIG = {
@@ -3165,6 +3152,8 @@ DEFAULT_CONFIG = {
     'google_drive.enable': ENABLE_GOOGLE_DRIVE_INTEGRATION,
     'google_drive.client_id': GOOGLE_DRIVE_CLIENT_ID,
     'google_drive.api_key': GOOGLE_DRIVE_API_KEY,
+    'live_mail.enable': os.getenv('ENABLE_LIVE_MAIL', 'False').lower() == 'true',
+    'live_documents.enable': os.getenv('ENABLE_LIVE_DOCUMENTS', 'False').lower() == 'true',
     'onedrive.enable': ENABLE_ONEDRIVE_INTEGRATION,
     'onedrive.sharepoint_url': ONEDRIVE_SHAREPOINT_URL,
     'onedrive.sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID,
@@ -3540,17 +3529,13 @@ DEFAULT_CONFIG = {
     'admin.enable_user_archival': ENABLE_USER_ARCHIVAL,
     'admin.knowledge_retention_ttl_days': KNOWLEDGE_RETENTION_TTL_DAYS,
     'admin.user_inactivity_ttl_days': USER_INACTIVITY_TTL_DAYS,
-    'agent_api.picker_default_slug': AGENT_API_PICKER_DEFAULT_SLUG,
     'agent_api.selected_agent': AGENT_API_SELECTED_AGENT,
-    'agent_proxy.enable': ENABLE_AGENT_PROXY,
-    'agent_search.enabled': AGENT_SEARCH_ENABLED,
     'auth.2fa_grace_period_days': TWO_FA_GRACE_PERIOD_DAYS,
     'auth.enable_2fa': ENABLE_2FA,
     'auth.require_2fa': REQUIRE_2FA,
     'document_writer.enable': ENABLE_DOCUMENT_WRITER,
     'office.enable': ENABLE_OFFICE,
     'office_edit.enable': ENABLE_OFFICE_EDIT,
-    'document_writer.prompt_template': DOCUMENT_WRITER_PROMPT_TEMPLATE,
     'email.enable_forgot_password': ENABLE_FORGOT_PASSWORD,
     'email.enable_invites': ENABLE_EMAIL_INVITES,
     'email.from_address': EMAIL_FROM_ADDRESS,

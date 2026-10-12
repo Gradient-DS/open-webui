@@ -13,6 +13,16 @@ from open_webui.models.groups import Groups
 from open_webui.models.users import UserModel
 from open_webui.utils.json_codec import JSONCodec
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui import config
+
+
+def can_bypass_access_control(user: UserModel | dict) -> bool:
+    role = user.get('role') if isinstance(user, dict) else user.role
+    return role == 'admin' and bool(config.BYPASS_ADMIN_ACCESS_CONTROL)
+
+
+def can_access_admin_chats(user: UserModel) -> bool:
+    return user.role == 'admin' and bool(config.ENABLE_ADMIN_CHAT_ACCESS)
 
 
 def fill_missing_permissions(permissions: dict[str, Any], default_permissions: dict[str, Any]) -> dict[str, Any]:
@@ -163,9 +173,7 @@ async def has_connection_access(
     - Missing, None, or empty access_grants → private, admin-only
     - access_grants has entries → delegates to ``has_access``
     """
-    from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
-
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if can_bypass_access_control(user):
         return True
 
     access_grants = (connection.get('config') or {}).get('access_grants', [])
@@ -230,18 +238,22 @@ async def filter_allowed_access_grants(
     public_permission_key: str,
     anyone_permission_key: str | None = None,
     db: AsyncSession | None = None,
+    admin_needs_wide_permission: bool = False,
 ) -> list:
     """
     Checks if the user has the required permissions to grant access to a resource.
     Returns the filtered list of access grants if permissions are missing.
+    With admin_needs_wide_permission, admins also need the anyone/public keys.
     """
     if not access_grants:
         return access_grants
 
+    admin_exempt = user_role == 'admin' and not admin_needs_wide_permission
+
     if has_anyone_read_access_grant(access_grants) and (
         not anyone_permission_key
         or (
-            user_role != 'admin'
+            not admin_exempt
             and not await has_permission(
                 user_id,
                 anyone_permission_key,
@@ -252,7 +264,7 @@ async def filter_allowed_access_grants(
     ):
         access_grants = strip_anyone_access_grants(access_grants)
 
-    if user_role == 'admin':
+    if admin_exempt:
         return access_grants
 
     # Check if user can share publicly
@@ -274,6 +286,9 @@ async def filter_allowed_access_grants(
                 == '*'
             )
         ]
+
+    if user_role == 'admin':
+        return access_grants
 
     # Strip individual user sharing if user lacks permission
     if has_user_access_grant(access_grants) and not await has_permission(
@@ -323,11 +338,15 @@ async def has_base_model_access(
     """
     from open_webui.models.access_grants import AccessGrants
     from open_webui.models.models import Models
+    from open_webui.soev import model_catalog
 
     base_model_id = getattr(model_info, 'base_model_id', None)
     seen = {model_info.id}
     while base_model_id and base_model_id not in seen:
         seen.add(base_model_id)
+        # [Gradient] In v2 mode a catalog base is open to every user and admin, row or not.
+        if await model_catalog.is_offered(base_model_id, user_role):
+            return True
         base_model_info = await Models.get_model_by_id(base_model_id, db=db)
         if base_model_info is None:
             return user_role == 'admin'
@@ -371,8 +390,8 @@ async def check_model_access(
         return
 
     if model_info:
-        # Enforce for every non-admin role (including pending); never fail open.
-        if user.role != 'admin':
+        # Enforce grants unless the administrator explicitly opts into bypass.
+        if not can_bypass_access_control(user):
             from open_webui.models.access_grants import AccessGrants
 
             user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}

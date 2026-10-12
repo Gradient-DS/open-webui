@@ -62,11 +62,9 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'retrieval/web/yacy.py': 'yacy search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/yandex.py': 'yandex search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/ydc.py': 'ydc search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
-    'routers/agent_proxy.py': 'Agent passthrough uses AGENT_API_BASE_URL at stub.',
     'routers/audio.py': 'OpenAI audio URLs explicitly point to stub; other speech engines remain unselected.',
     'routers/auths.py': 'OAuth avatar fetch requires a completed provider login; no OAuth provider is configured.',
     'routers/configs.py': 'Admin connection verification consumes supplied URLs; off-network destinations are findings.',
-    'routers/discovery.py': 'Discovery uses SEARCH_API_BASE_URL at stub.',
     'routers/functions.py': 'Admin URL imports consume supplied URLs; off-network destinations are findings.',
     'routers/images.py': 'OpenAI image URL explicitly points to stub; other image engines remain unselected.',
     'routers/ollama.py': 'Ollama passthrough uses OLLAMA_BASE_URL and OLLAMA_BASE_URLS at stub.',
@@ -78,7 +76,6 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'services/email/graph_mail_client.py': 'Mail token acquisition raises before Graph sendMail when EMAIL_GRAPH credentials are empty.',
     'soev/client.py': 'Targets SOEV_API_URL, empty in CI; tests use httpx.MockTransport.',
     'storage/provider.py': 'S3 uploads/downloads use S3_ENDPOINT_URL at the in-network S3 gateway with disposable credentials; STORAGE_PROVIDER=s3 leaves Azure Blob and GCS unselected.',
-    'utils/agent.py': 'Agent completions use AGENT_API_BASE_URL at stub, including streaming requests.',
     'utils/anthropic.py': 'Provider passthrough uses configured OpenAI connections at stub; no Anthropic connection is seeded.',
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
     'utils/automations.py': 'No automation webhook is seeded; request-supplied public webhooks are findings.',
@@ -387,9 +384,6 @@ STUB_URLS = {
     'OPENAI_API_BASE_URLS': 'http://stub:8000/v1',
     'OLLAMA_BASE_URL': 'http://stub:8000',
     'OLLAMA_BASE_URLS': 'http://stub:8000',
-    'AGENT_API_BASE_URL': 'http://stub:8000',
-    'SEARCH_API_BASE_URL': 'http://stub:8000',
-    'SYNC_DAEMON_URL': 'http://stub:8000',
     'RAG_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
     'RAG_EXTERNAL_RERANKER_URL': 'http://stub:8000/v1/rerank',
     'SEARXNG_QUERY_URL': 'http://stub:8000/search',
@@ -562,3 +556,20 @@ class TestCiStubsEveryDeclaredSink:
         # against a synthetic scope, to prove a blank key blocks the public datalab.to
         # fallback. No untrusted input reaches this expression.
         assert not eval(compile(ast.Expression(conditions[0]), '<marker guard>', 'eval'), scope)  # nosec B307
+
+
+def test_no_private_upstream_is_configured_or_run(compose):
+    env = compose['services']['open-webui']['environment']
+    absent = {
+        'SOEV_API_URL',
+        'AGENT_API_ENABLED',
+        'SYNC_DAEMON_URL',
+        'SYNC_DAEMON_API_KEY',
+        'SYNC_API_KEY',
+        'SYNC_DAEMON_ENABLED',
+        'LOADER_INGEST_API_KEY',
+        'PIPELINE_API_BASE_URL',
+        'PIPELINE_API_KEY',
+    }
+    assert not absent & env.keys()
+    assert set(compose['services']) == {'postgres', 'weaviate', 'redis', 'stub', 's3', 'open-webui', 'entry'}

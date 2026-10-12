@@ -5,12 +5,17 @@ import {
 	connectionOutcome,
 	shouldRefetchSyncItems,
 	pairSchedules,
+	queueRuns,
+	settleQueuedRuns,
+	QUEUED_RUN_MAX_MS,
 	connectResult,
 	trustedConnectOrigins,
 	reconnectConnections,
 	runCounts,
 	runIsLive,
-	runStatus
+	runStatus,
+	syncableSources,
+	syncAllNotice
 } from './cloudSync';
 
 describe('connect popup messages', () => {
@@ -186,11 +191,42 @@ it('pairs schedules by connection and deep-equal scope regardless of key or sche
 	).toHaveLength(1);
 });
 
+it('marks a pair queued while its requested run has no run row yet', () => {
+	const content = scheduleFixture('content', 'content');
+	expect(pairSchedules([content], new Map([['content', 1]]))).toEqual([
+		{ content, acl: undefined, queued: true }
+	]);
+});
+
+describe('queued runs', () => {
+	const finished = { id: 'r1', started_at: 't', finished_at: 't', outcome: 'succeeded' as const };
+	const idle = { ...scheduleFixture('s', 'content'), last_run: finished };
+	it('queues idle schedules, including ones not in the last status yet', () => {
+		const queued = queueRuns(new Map(), [idle], ['s', 'new'], 5);
+		expect([...queued]).toEqual([
+			['s', { runId: 'r1', since: 5 }],
+			['new', { runId: null, since: 5 }]
+		]);
+		const live = { ...idle, last_run: { ...finished, id: 'r2', outcome: null } };
+		expect(queueRuns(new Map(), [live], ['s']).size).toBe(0);
+	});
+	it('settles once the run changes, the schedule is gone, or the request is stale', () => {
+		const queued = queueRuns(new Map(), [idle], ['s'], 0);
+		expect(settleQueuedRuns(queued, [idle], 1).has('s')).toBe(true);
+		const claimed = { ...idle, last_run: { ...finished, id: 'r2', outcome: null } };
+		expect(settleQueuedRuns(queued, [claimed], 1).size).toBe(0);
+		expect(settleQueuedRuns(queued, [], 1).size).toBe(0);
+		expect(settleQueuedRuns(queued, [idle], QUEUED_RUN_MAX_MS).size).toBe(0);
+	});
+});
+
 it.each([
 	['enabled', null, 0, { status: 'done' }],
 	['enabled', 'invalid_grant', 0, { status: 'failed', reason: 'invalid_grant' }],
 	['pending', 'consent_denied', 0, { status: 'failed', reason: 'consent_denied' }],
-	['suspended:reauth', null, 0, { status: 'failed', reason: 'suspended:reauth' }],
+	['suspended:reauth', null, 0, { status: 'waiting' }],
+	['suspended:reauth', null, 120000, { status: 'gave_up' }],
+	['suspended:reauth', 'invalid_grant', 0, { status: 'failed', reason: 'invalid_grant' }],
 	['revoked', null, 6000, { status: 'failed', reason: 'revoked' }],
 	['pending', null, 0, { status: 'waiting' }],
 	['pending', null, 119999, { status: 'waiting' }],
@@ -290,5 +326,33 @@ describe('finished runs', () => {
 		const after = [{ ...scheduleFixture('folder', 'content'), last_run: { ...done, id: 'r2' } }];
 		expect(finishedRuns(before, after)).toEqual([]);
 		expect(finishedRuns([], after)).toEqual([]);
+	});
+});
+
+describe('sync all now', () => {
+	const live = { id: 'r', started_at: '2026-10-12T11:00:00Z', outcome: null };
+	it('covers every live content source, including one already syncing', () => {
+		const syncing = { ...scheduleFixture('a', 'content'), last_run: live };
+		const revoked = { ...scheduleFixture('b', 'content'), lifecycle: 'revoked' };
+		const acl = scheduleFixture('c', 'acl_refresh');
+		expect(syncableSources([syncing, revoked, acl])).toEqual([syncing]);
+		expect(syncableSources([acl])).toEqual([]);
+	});
+	it('starts the idle sources and skips those refused as running', () => {
+		expect(
+			syncAllNotice([
+				{ schedule_id: 'a', job_id: null, code: 'run_active' },
+				{ schedule_id: 'b', job_id: 'j', code: null }
+			])
+		).toEqual({ kind: 'started', ids: ['b'] });
+	});
+	it('names why nothing started', () => {
+		const refused = (...codes: string[]) =>
+			syncAllNotice(codes.map((code, i) => ({ schedule_id: `${i}`, job_id: null, code }))).kind;
+		expect(refused()).toBe('not_owner');
+		expect(refused('run_active', 'connection_pending')).toBe('reconnect');
+		expect(refused('run_active', 'run_too_soon')).toBe('too_soon');
+		expect(refused('run_active', 'schedule_suspended')).toBe('running');
+		expect(refused('schedule_suspended')).toBe('paused');
 	});
 });

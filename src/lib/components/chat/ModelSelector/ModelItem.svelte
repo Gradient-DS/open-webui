@@ -5,7 +5,7 @@
 	import { getContext, tick } from 'svelte';
 	import dayjs from '$lib/dayjs';
 
-	import { config, mobile, settings, user } from '$lib/stores';
+	import { config, mobile, models, settings, user } from '$lib/stores';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { copyToClipboard, sanitizeResponseContent } from '$lib/utils';
@@ -28,6 +28,7 @@
 		hostingFromDeployment,
 		infoTooltipHtml
 	} from '$lib/utils/models/profile';
+	import { catalogLine, catalogMeta, replacementLabel } from '$lib/utils/models/catalog';
 
 	const i18n = getContext('i18n');
 
@@ -70,6 +71,16 @@
 	$: descriptionHtml = description
 		? marked.parse(sanitizeResponseContent(description).replaceAll('\n', '<br>'))
 		: '';
+
+	// [Gradient] soev-api catalog facts (v2 mode): one line of origin and hosting, and a replacement note.
+	$: soev = catalogMeta(item?.model);
+	$: soevLine = catalogLine(soev, {
+		openWeights: $i18n.t('open weights'),
+		hostedByIn: (host, region) => $i18n.t('hosted by {{host}} in {{region}}', { host, region }),
+		hostedBy: (host) => $i18n.t('hosted by {{host}}', { host }),
+		hostedIn: (region) => $i18n.t('hosted in {{region}}', { region })
+	});
+	$: replacedBy = replacementLabel(soev, $models);
 
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
@@ -146,7 +157,7 @@
 			</div>
 
 			<div class=" shrink-0 flex items-center gap-2">
-				{#if profile.info || description || hosting}
+				{#if profile.info || description || hosting || soevLine}
 					{#key item.model.id}
 						<Tooltip elementId="model-info-{item.model.id}">
 							<InfoCircle className="size-3.5 text-gray-400 dark:text-gray-500" />
@@ -162,9 +173,18 @@
 										{@html descriptionHtml}
 									</div>
 								{/if}
+								{#if soevLine}
+									<div
+										class={profile.info || description
+											? 'mt-1.5 pt-1.5 border-t border-white/15'
+											: ''}
+									>
+										{soevLine}
+									</div>
+								{/if}
 								{#if hosting}
 									<div
-										class="flex items-center gap-1.5 {profile.info || description
+										class="flex items-center gap-1.5 {profile.info || description || soevLine
 											? 'mt-1.5 pt-1.5 border-t border-white/15'
 											: ''}"
 									>
@@ -296,6 +316,11 @@
 		{#if profile.bestFor && displayName && displayName !== profile.bestFor}
 			<div class="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
 				{displayName}
+			</div>
+		{/if}
+		{#if replacedBy}
+			<div class="text-[11px] text-gray-400 dark:text-gray-500 line-clamp-1">
+				{$i18n.t('Replaced by {{model}}', { model: replacedBy })}
 			</div>
 		{/if}
 	</div>

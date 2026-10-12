@@ -1,9 +1,11 @@
 <script lang="ts">
+	import SourceIcon from './Citations/SourceIcon.svelte';
 	import { getContext } from 'svelte';
 	import { config, embed, showControls, showEmbeds } from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
-	import { reduceSources, type DisplayCitation } from './Citations/reduceSources';
+	import { reduceSources } from './Citations/reduceSources';
+	import { citedCitations } from './Citations/citedSources';
 	import { calculateShowRelevance, shouldShowPercentage } from './Citations/relevanceDisplay';
 
 	const i18n = getContext('i18n');
@@ -13,22 +15,10 @@
 
 	export let sources = [];
 	export let readOnly = false;
-	/**
-	 * [Gradient] Whether the parent message has finished streaming. Used to
-	 * suppress the bottom pill until the agent's final source dispatch is
-	 * in. Intermediate dispatches (one after every tool iteration) carry the
-	 * full "retrieved so far" set with `current_turn` true, so a web-search
-	 * turn briefly shows the entire result corpus (e.g. 19 hits) before the
-	 * post-answer dispatch settles the `cited_this_turn` flags. The final
-	 * dispatch arrives right after the answer text finishes streaming —
-	 * effectively the same moment as `done` flipping true — so gating on
-	 * done avoids the flash without delaying anything that was stable
-	 * mid-stream.
-	 *
-	 * Defaults to `true` so non-streaming callers (e.g. `Document.svelte`)
-	 * keep their previous behavior without opting in.
-	 */
-	export let messageDone: boolean = true;
+	// [Gradient] False keeps only pill clicks (SoevCitations' read-only path).
+	export let listed = true;
+	// [Gradient] The answer text whose `[N]` markers pick the sources the pill lists.
+	export let text = '';
 
 	let citations = [];
 	let visibleCitations = [];
@@ -98,21 +88,9 @@
 		showPercentage = shouldShowPercentage(citations);
 	}
 
-	// [Gradient] Per-message panel scope from the agent's provenance flags:
-	// `current_turn` (a tool retrieved the source this turn) ∪ `cited_this_turn`
-	// (the model wrote its `[N]` in this turn's answer, incl. cross-turn cites).
-	// Prior-turn sources neither retrieved nor cited this turn stay out of the
-	// panel. Falls back to show-all when no citation carries provenance flags
-	// (legacy chats / upstream providers). The filter does NOT touch the
-	// underlying `citations` array — inline `[N]` clicks still resolve via
-	// `showSourceModal(N)` against the cumulative list.
-	$: {
-		const all = citations as DisplayCitation[];
-		const hasProvenance = all.some(
-			(c) => c.current_turn !== undefined || c.cited_this_turn !== undefined
-		);
-		visibleCitations = hasProvenance ? all.filter((c) => c.current_turn || c.cited_this_turn) : all;
-	}
+	// [Gradient] The pill lists the sources the text's `[N]` markers cite; inline
+	// `[N]` clicks still resolve via `showSourceModal(N)` against the full list.
+	$: visibleCitations = citedCitations(citations, text);
 
 	const decodeString = (str: string) => {
 		try {
@@ -130,10 +108,7 @@
 	showRelevance={citationRelevanceEnabled && showRelevance}
 />
 
-{#if visibleCitations.length > 0 && messageDone}
-	{@const urlCitations = visibleCitations.filter((c) =>
-		c?.source?.name?.startsWith('http')
-	)}
+{#if listed && visibleCitations.length > 0}
 	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
 		<button
 			class="text-xs font-normal text-gray-600 dark:text-gray-300 px-3.5 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-1 border border-gray-50 dark:border-gray-850/30"
@@ -145,27 +120,20 @@
 				showCitations = !showCitations;
 			}}
 		>
-			{#if urlCitations.length > 0}
+			{#if visibleCitations.length > 0}
 				<div class="flex -space-x-1 items-center">
-					{#each urlCitations.slice(0, 3) as citation, idx}
-						<img
-							src="https://www.google.com/s2/favicons?sz=32&domain={citation.source.name}"
-							alt="favicon"
-							class="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-white dark:bg-gray-900"
-							on:error={(e) => {
-								// LICENSE covers this Open WebUI fallback logo.
-								// Do not alter, remove, obscure, or replace it except as LICENSE permits:
-								// https://docs.openwebui.com/license.
-								e.target.src = '/favicon.png';
-							}}
+					{#each visibleCitations.slice(0, 3) as citation, idx}
+						<SourceIcon
+							source={citation.source}
+							className="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-white dark:bg-gray-900"
 						/>
 					{/each}
-					{#if citations.length > 3}
+					{#if visibleCitations.length > 3}
 						<div
 							class="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[0.5rem] font-normal text-gray-500 dark:text-gray-400 whitespace-nowrap tracking-tighter"
 							aria-hidden="true"
 						>
-							+{citations.length - Math.min(urlCitations.length, 3)}
+							+{visibleCitations.length - 3}
 						</div>
 					{/if}
 				</div>
@@ -190,7 +158,7 @@
 				<button
 					id={`source-${id}-${idx + 1}`}
 					aria-label={$i18n.t('View source: {{name}}', {
-						name: decodeString(citation.source.name)
+						name: decodeString(citation.source.name ?? '')
 					})}
 					class="no-toggle outline-hidden flex dark:text-gray-300 bg-transparent text-gray-600 rounded-xl gap-1.5 items-center"
 					on:click={() => {
@@ -198,13 +166,14 @@
 						selectedCitation = citation;
 					}}
 				>
+					<SourceIcon source={citation.source} />
 					<div class=" font-normal bg-gray-50 dark:bg-gray-850 rounded-md px-1">
 						{idx + 1}
 					</div>
 					<div
 						class="flex-1 truncate hover:text-black dark:text-white/60 dark:hover:text-white transition text-left"
 					>
-						{decodeString(citation.source.name)}
+						{decodeString(citation.source.name ?? '')}
 					</div>
 				</button>
 			{/each}

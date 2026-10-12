@@ -49,15 +49,17 @@ auth boundary; retrieval and agentic control flow belong in soev-agents, not in
 a fork of a chat frontend.
 
 Gated by `AGENT_API_ENABLED` (`backend/open_webui/env.py:1007`, default `False`;
-Helm `openWebui.config.agentApiEnabled`, default `"false"`). The routing decision
-itself is a pure function isolated from upstream code in
-`backend/open_webui/utils/agent_routing.py` (`resolve_agent_route`,
-`agent_owns_tool_execution`) so the delta stays one-liners at the call sites in
-`main.py`. The client — payload build, SSE streaming, error redaction — is
-`backend/open_webui/utils/agent.py` (`build_agent_payload`, `call_agent_api`,
-`stream_agent_response`). Routing matrix: bound `chat.meta.agent_id` → agent
-route; no agent id + picker off + `AGENT_API_ENABLED` → agent route (legacy
-bypass); otherwise the stock route.
+Helm `openWebui.config.agentApiEnabled`, default `"false"`). With the flag on,
+every chat turn takes the agent route; otherwise the stock route.
+`backend/open_webui/utils/agent_routing.py:agent_owns_tool_execution` keeps the
+tool-loop decision isolated from upstream code.
+`backend/open_webui/utils/agent.py:call_agent_api` sends the admin-selected agent
+(`agent_api.selected_agent`) and the picked model, and always calls
+`utils/agent_v2.py`, which owns server threads and streamed events. The v1 agent
+picker is removed, and migration `ee54ed095346` drops the `agent_config` table
+with its `access_grant` rows. Stale `chat.meta.agent_id` values stay and are
+ignored. A rollback to v1 redeploys the previous image set and restores the
+database backup.
 
 D-Runtime keeps upstream's sub-agents, tool approval, ask-user, timers, and
 automations out of agent-routed turns. The agent still owns tool execution and
@@ -65,30 +67,12 @@ the post-tool continuation loop. The model editor hides the subagents builtin
 unconditionally because `/api/config` exposes no subagents feature flag; memory
 capabilities and tools use upstream's `enable_memories` flag.
 
-## Agent proxy (inbound API surface, separate from the above)
+## Composer model selector
 
-`backend/open_webui/routers/agent_proxy.py`, mounted at `/api/v1/agent`
-(`main.py:1066`), reverse-proxies the agent service's OpenAI-compatible API
-(`GET /models`, `POST /chat/completions`, `GET /openapi.json`) to callers holding
-an **OWUI API key**. Why: the agent service has no auth of its own — OWUI owns
-auth, the agent service owns inference. It also resolves knowledge-base
-collection refs before forwarding (`_resolve_collection_refs`).
-
-Gated separately from the chat integration by the persisted config key
-`agent_proxy.enable` (Helm `enableAgentProxy`, default `"false"`). Do not
-conflate the two flags: `agentApiEnabled` is outbound (OWUI → agent),
-`enableAgentProxy` is inbound (client → OWUI → agent).
-
-## Agent picker (replaces the model selector)
-
-The v0.11.3 merge moves the picker from the navbar into the composer's right
-slot (Q7). `agentPickerActive` is computed in `Chat.svelte` / `Placeholder.svelte`
-and passed to `MessageInput.svelte`: `FEATURE_AGENT_PICKER` and
-`feature_agent_api_enabled` must be on, and the chat must be new or agent-bound
-(`!chat?.id || chat?.meta?.agent_id`). The slot renders `AgentSelector` when
-active, otherwise `ModelSelector` whenever there is anything to pick. Why: picker
-tenants choose an assistant; non-picker tenants using the legacy agent bypass
-still need their model selector. `agentRouted` does not control this slot.
+The v0.11.3 merge moves the model selector from the navbar into the composer's
+right slot (Q7); it renders whenever there is anything to pick. The v1 agent
+picker that could take this slot (`AgentSelector`, `FEATURE_AGENT_PICKER`) is
+removed.
 
 The selector's list excludes assistants (models carrying `info.base_model_id`)
 unless one is currently selected, so the trigger can still name an assistant-bound
@@ -97,10 +81,8 @@ AI-assistants workspace instead; the workspace is therefore the only pin surface
 for them. The list is not gated on a minimum model count: on a single-model tenant
 the selector still carries model info, set-as-default and the pin toggle.
 
-The navbar keeps upstream's title block; the new-chat greeting remains suppressed
-under the picker. Both flags default off (`FEATURE_AGENT_PICKER` / Helm
-`featureAgentPicker`, `AGENT_API_ENABLED` / Helm `agentApiEnabled`). The same pair
-swaps the admin tabs `external-agents` and `agents` through
+The navbar keeps upstream's title block. The admin tab `external-agents` is shown
+when `AGENT_API_ENABLED` (Helm `agentApiEnabled`) is on, through
 `src/lib/utils/features.ts:isAdminSettingsTabEnabled`.
 
 ## Two-menu composer and retired input pins
@@ -122,11 +104,8 @@ back to user settings and admin defaults; it was never a session-long default.
 ## Chat attachments and loading
 
 `MessageInput.svelte` hides per-file retrieval controls with `edit={!agentRouted}`.
-Its callers now pass `isAgentRouted($pendingAgentId)`; the bound-id argument is
-narrowed to the pending selection, rather than also resolving saved-chat metadata
-there. The helper still covers the legacy bypass when the agent API is enabled
-and the picker is off. This UI hint does not replace backend routing from
-`chat.meta.agent_id`. Why: retrieval on an agent turn is owned by the agent.
+Its callers pass `isAgentRouted()`, true whenever the agent API is enabled, as
+on the backend. Why: retrieval on an agent turn is owned by the agent.
 
 GRA-184 keeps `skipUpload` conditional on both temporary-chat mode and the agent
 API flag: temporary agent chats still upload real attachments. GRA-222 keeps
@@ -290,8 +269,8 @@ Files: `backend/open_webui/routers/feedback_report.py`,
 A "Keep in Sidebar" / "Hide from Sidebar" toggle inside the simple assistant
 editor, writing per-user `settings.pinnedModels` with the same handler shape as
 the workspace list's `pinModelHandler`. Why: upstream's only pin surface is the
-model selector, which the agent picker hides — without this there is no way to
-pin an assistant in picker tenants.
+model selector, which lists no assistants — without this there is no way to
+pin an assistant from the simple editor.
 
 Files: `src/lib/components/workspace/Models/SimpleModelEditor.svelte` (~65–81,
 ~320–330). Commit `1f61ab3b0`. Visible only where the simple builder is used,
@@ -333,8 +312,9 @@ archive retention.
 ## Admin settings in the settings modal
 
 Q13 adopts `chat/SettingsModal.svelte` as the host and retires
-`admin/Settings.svelte`. The six fork tabs are `cloud-sync`, `email`, `security`,
-`acceptance`, `external-agents`, and `agents`, with their existing save behavior.
+`admin/Settings.svelte`. The five fork tabs are `cloud-sync`, `email`, `security`,
+`acceptance` and `external-agents`, with their existing save behavior (the v1
+`agents` tab is removed).
 `isAdminSettingsEnabled` / `isAdminSettingsTabEnabled` filter discovery, search,
 and deep links; old settings routes redirect through those gates. Why: keep
 tenant feature restrictions while following upstream's unified settings host.
@@ -367,3 +347,122 @@ dev tenants track `^dev-<sha>-<run>$` numerically ascending, test tenants track
 `^v<major>.<minor>.<patch>$`, range `>=1.0.0`** — i.e. prod advances only on an
 explicit release tag. `:main` and `:latest` are published by CI but no prod
 ImagePolicy follows them.
+
+## onnxruntime wasm copy without vite-plugin-static-copy
+
+Upstream copies `node_modules/onnxruntime-web/dist/*.jsep.*` to `/wasm/` with
+`vite-plugin-static-copy`. Every release of that plugin depends on chokidar 3,
+which pulls in braces. braces has a high advisory (GHSA-vfj7-8cjw-p6xm) and no
+fixed release, so the fork dropped the plugin. The inline `ortWasm()` plugin in
+`vite.config.ts` does the same job: in dev it serves the files at `/wasm/`, and
+in the client build it emits them to `wasm/`. `src/lib/workers/kokoro.worker.ts`
+reads them from there, and the build output is byte-identical. On an upstream
+merge, keep `ortWasm()` and do not re-add the plugin to `package.json`. Revisit
+once braces ships a fix or the plugin moves off chokidar 3.
+---
+
+## Docker build context excludes `.git`
+
+`.dockerignore` excludes `.git` (plus the CI-only `.security-tooling` and `.falco`
+checkouts), and `docker-build-soev.yaml` checks out with `persist-credentials: false`.
+The frontend build stage does `COPY . .`, and the public `cache-slim-*` registry
+cache is written with `mode=max`, so without this the checkout's `.git/config`
+(including the job token) ended up in a public cache layer. The SvelteKit
+`version.name` in `svelte.config.js` therefore reads `APP_BUILD_HASH` (the commit,
+set from `BUILD_HASH` in the Dockerfile) before falling back to `git rev-parse`.
+
+## Fresh OS security fixes on every image build
+
+The Dockerfile's final stage ends its installs with an `apt-get upgrade` layer
+behind `ARG APT_UPGRADE_EPOCH`. `docker-build-soev.yaml` (both arch legs) and
+the PR scan build in `security.yml` pass `${{ github.run_id }}-${{ github.run_attempt }}`,
+so that layer never comes from cache. Why: the `cache-slim-*` registry cache is
+written with `mode=max`, so the `apt-get install` layer that holds the Debian
+packages was served from cache until the `python:3.11-slim-bookworm` tag moved,
+and shipped images missed fixes published in between (CVE-2026-103111,
+libpcre2-8-0, failed dev's digest scan). The layer sits after the uv install, so
+the dependency layers stay cached. Upstream has no registry cache, so this is
+fork-only. `runtime-security.yml` builds the same Dockerfile through compose
+without a cache, so its build always runs the layer and needs no epoch.
+
+## Voice gates and dictation hygiene
+
+`FEATURE_VOICE` gates dictation (STT); `FEATURE_VOICE_CALL` and
+`FEATURE_READ_ALOUD` are sub-gates for call mode and read-aloud, so a tenant can
+offer dictation only. Upstream's per-user `chat.stt` / `chat.tts` / `chat.call`
+permissions are bypassed for admins; tenant gates bind admins too. Enforced
+server-side in `backend/open_webui/routers/audio.py`: `POST /audio/speech` needs
+read-aloud or call mode, `POST /audio/transcriptions` needs `voice` (403
+otherwise).
+
+Upstream writes every dictation upload to `CACHE_DIR/audio/transcriptions/`
+(plus converted, compressed and chunk copies and a `.json` transcript per engine
+call) and never deletes them. The fork's `transcription` route removes every
+file named after the upload's uuid (`discard_transcription_files`) as soon as the
+text is returned, and on failure too: dictation has no retry, and audio has no
+use once it is text. `transcribe()` itself is unchanged, so file-upload
+transcription in `routers/files.py` keeps its source file. Tests:
+`backend/open_webui/test/apps/test_voice_feature_gates.py`.
+
+## Vergadering (meeting assistant)
+
+A separate "Vergadering" page records a meeting, shows a rough live transcript,
+and after stop shows the cleaned, diarized transcript with Samenvatting / Notulen /
+Actiepunten. Open WebUI holds UI only: the soev-api meeting agent owns every
+meeting (one thread per meeting) and all state. Why fork-only: the agent and its
+platform audio live in soev-solutions; upstream has no counterpart (its Notes
+recording is unrelated and unchanged).
+
+Gated by `FEATURE_MEETINGS` (`config.py`, default `True`; Helm
+`featureMeetings`, default `"False"`; `/api/config` `feature_meetings`) **and**
+`meeting` in soev-api `GET /v1/agents` for the caller. Any failure of that check
+(soev-api unset or down, agent not allowlisted) hides the entry; the route gate
+redirects to `/`. No sharing UI: transcripts stay private, users share by
+downloading Markdown, .docx (built in the browser with jszip) or PDF (browser
+print via `utils/documentPrint.ts`).
+
+`backend/open_webui/routers/meetings.py` (mounted at `/api/v1/meetings` in
+`main.py`, since no fork router has a matching prefix) only forwards as the
+caller via `identity.build_client()`: audio bytes (64 MiB cap, held in memory,
+never written to disk) to `POST /v1/audio`, inputs to the thread routes, and
+`GET /{id}` returns `{status, state}` where `state` is the latest `meeting_state`
+event payload. Inputs return once soev-api accepts them; the turn runs on and the
+page polls. Every route refuses with 403 when the flag is off (admins too) and 503
+without `SOEV_API_URL`.
+
+Frontend, all fork-owned: `src/routes/(app)/meetings/`,
+`src/lib/components/meetings/` (consent and source choice, recorder, view, list,
+sidebar entry, export), `src/lib/apis/meetings/`. The list and the meeting
+header reuse the Notes list and Notes editor markup; the recorder reuses the
+chat dictation pill's look without touching `VoiceRecording.svelte`. Sources:
+microphone, a shared Chrome tab, or both mixed through an AudioContext (the
+default for online meetings, since tab audio lacks the user's own voice); a
+share without an audio track is refused. Live segments are self-contained
+recordings cut at the first pause (RMS under an adaptive noise-floor threshold
+for 400 ms) after 20 s, at most 45 s, and are sent one at a time, retrying 409s.
+Every download starts with the meeting's title, date, start–end time, duration
+and speakers. Upstream files touched:
+`Sidebar.svelte` (two gated `MeetingsSidebarEntry` mounts and one availability
+check), i18n en-US/nl-NL, and the flag plumbing. Tests:
+`backend/open_webui/test/apps/test_meetings_router.py`,
+`src/lib/components/meetings/meeting.test.ts`.
+
+### Meetings as chat context
+
+"Vergaderingen bijvoegen" in the composer's + menu (and "Chat over deze
+vergadering" on a ready meeting) attaches `{type: 'meeting', id, name}` like a
+note. Only the reference is stored with the chat. At send time the server reads
+the meeting from soev-api as the user (`soev/meetings.py`; soev-api only returns
+the caller's own threads) and renders title, date, start–end, duration,
+speakers, the clean transcript as timestamped speaker turns, and any summary,
+minutes and action items. Nothing is written to OWUI files, storage or the
+vector store. Hooks: `retrieval/utils.py` `get_sources_from_items` (direct
+model path, `[Gradient]` branch next to `note`) and `utils/agent_v2.py`
+`_texts` (v2 agent). The agent's attached texts accept only `note` and `chat`,
+so a meeting goes as a `note` text with id `note:meeting-<thread>`; its citation
+links to `/meetings/<thread>`. A meeting that is gone or not the user's is
+reported to the model as unavailable (direct path) or refuses the turn like a
+missing note (agent path). Upstream files touched: `InputMenu.svelte` (menu
+item and tab), `FileItem.svelte` (chip icon and label), `Chat.svelte` (the two
+attachment type lists). "Chat over deze vergadering" uses the existing new-chat
+draft hand-off (`sessionStorage['chat-input']`, restored by `Chat.svelte`).

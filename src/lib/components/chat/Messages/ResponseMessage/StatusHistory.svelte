@@ -48,18 +48,24 @@
 
 	let history = [];
 
-	// [Gradient] The promoted header is ALWAYS the newest entry, and the list is the
-	// whole block in order, the newest included, so it ends where the header is.
-	// The previous rule promoted the last NON-reasoning entry, which lifted a tool
-	// status out of the MIDDLE of the timeline. A block of one entry is its header.
+	// [Gradient] The promoted header is ALWAYS the newest entry and the list is
+	// the whole chronological run, so the step the header shows is also the
+	// bottom row. The previous rule promoted the last NON-reasoning entry,
+	// which lifted a tool status out of the MIDDLE of the timeline and left the
+	// reasoning bullets it separated adjacent to each other. That is what read as
+	// "reasoning is not interleaved with the tool calls".
+	// The turn's summary line ("N tools called in M seconds") only ever heads the
+	// list: mid-turn it would sit between steps, and at the end it is the header.
+	const isSummary = (item) => item?.action === 'summary';
 	$: status = history.at(-1) ?? null;
 	// [Gradient] A finished block says what it did; the turn's closing tool count, when
 	// this block has it, stays its header.
 	$: blockSummary =
-		messageDone && !history.some((item) => item?.action === 'summary')
+		messageDone && !history.some((item) => isSummary(item))
 			? describeBlock(history, (key, options) => $i18n.t(key, options))
 			: null;
-	$: historyItems = history.length > 1 ? history : [];
+	$: historyItems = history.filter((item) => !isSummary(item));
+	$: expandable = historyItems.length > (isSummary(status) ? 0 : 1);
 	// [Gradient] A step that is still running keeps the block shimmering, also while a
 	// subagent thinks between its own steps under a running Office call.
 	$: blockRunning = !messageDone && history.some((item) => item?.done === false);
@@ -128,7 +134,7 @@
 					{/if}
 				</div>
 
-				{#if historyItems.length > 0}
+				{#if expandable}
 					<div class="flex shrink-0 self-center translate-y-[1px] text-gray-400 dark:text-gray-500">
 						{#if showHistory}
 							<ChevronUp strokeWidth="3.5" className="size-3" />
@@ -140,7 +146,7 @@
 			</div>
 		</button>
 
-		{#if showHistory}
+		{#if showHistory && expandable}
 			<div class="flex flex-row">
 				{#if historyItems.length > 0}
 					<div class="w-full">

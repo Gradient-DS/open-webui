@@ -18,6 +18,8 @@ def install(app: FastAPI) -> None:
     from open_webui.soev import identity
     from open_webui.utils.auth import get_current_user
 
+    identity.validate_config()
+
     @wraps(get_current_user)
     async def upstream_user(*args, **kwargs):
         return await get_current_user(*args, **kwargs)
