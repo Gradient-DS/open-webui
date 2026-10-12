@@ -24,6 +24,8 @@
 	export let preview = true;
 	export let showDocumentNote = false;
 	let expanded = true;
+	// A whole-document citation has no passage to show: the read text only repeats the document below.
+	$: wholeDocument = mergedDocuments.length > 0 && mergedDocuments.every(isDocumentSnippet);
 	let viewer: CitationViewer;
 	function selectSnippet(idx: number) {
 		if (idx < 0 || idx >= mergedDocuments.length) return;
@@ -33,70 +35,76 @@
 </script>
 
 {#if preview}
-	<div
-		class="flex flex-col max-h-[34%] shrink-0 min-h-0 border-b border-gray-100 dark:border-gray-800"
-	>
-		<div
-			class="flex items-center justify-between gap-2 px-3 py-2 shrink-0 text-xs text-gray-500 dark:text-gray-400"
+	{#if wholeDocument}
+		<p
+			class="shrink-0 px-3 py-2 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800"
 		>
-			<span>
-				{#if mergedDocuments.length > 0 && mergedDocuments.every(isDocumentSnippet)}
-					{$i18n.t('Whole-document citation')}
-				{:else}
+			{showDocumentNote
+				? $i18n.t('Whole-document citation — no specific passage to highlight')
+				: $i18n.t('Whole-document citation')}
+		</p>
+	{:else}
+		<div
+			class="flex flex-col max-h-[34%] shrink-0 min-h-0 border-b border-gray-100 dark:border-gray-800"
+		>
+			<div
+				class="flex items-center justify-between gap-2 px-3 py-2 shrink-0 text-xs text-gray-500 dark:text-gray-400"
+			>
+				<span>
 					{expanded || !mergedDocuments.length
 						? $i18n.t('{{count}} passages', { count: mergedDocuments.length })
 						: $i18n.t('Passage {{n}} of {{count}}', {
 								n: activeSnippetIdx + 1,
 								count: mergedDocuments.length
 							})}
-				{/if}
-			</span>
-			<div class="flex items-center gap-1">
-				{#if !expanded}
+				</span>
+				<div class="flex items-center gap-1">
+					{#if !expanded}
+						<button
+							class="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
+							disabled={activeSnippetIdx === 0}
+							aria-label={$i18n.t('Previous passage')}
+							title={$i18n.t('Previous passage')}
+							on:click={() => selectSnippet(activeSnippetIdx - 1)}
+							><ChevronLeft className="size-4" /></button
+						>
+						<button
+							class="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
+							disabled={activeSnippetIdx >= mergedDocuments.length - 1}
+							aria-label={$i18n.t('Next passage')}
+							title={$i18n.t('Next passage')}
+							on:click={() => selectSnippet(activeSnippetIdx + 1)}
+							><ChevronRight className="size-4" /></button
+						>
+					{/if}
 					<button
-						class="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
-						disabled={activeSnippetIdx === 0}
-						aria-label={$i18n.t('Previous passage')}
-						title={$i18n.t('Previous passage')}
-						on:click={() => selectSnippet(activeSnippetIdx - 1)}
-						><ChevronLeft className="size-4" /></button
+						class="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
+						aria-expanded={expanded}
+						aria-label={expanded ? $i18n.t('Collapse passages') : $i18n.t('Expand passages')}
+						title={expanded ? $i18n.t('Collapse passages') : $i18n.t('Expand passages')}
+						on:click={() => (expanded = !expanded)}
 					>
-					<button
-						class="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
-						disabled={activeSnippetIdx >= mergedDocuments.length - 1}
-						aria-label={$i18n.t('Next passage')}
-						title={$i18n.t('Next passage')}
-						on:click={() => selectSnippet(activeSnippetIdx + 1)}
-						><ChevronRight className="size-4" /></button
-					>
-				{/if}
-				<button
-					class="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-800"
-					aria-expanded={expanded}
-					aria-label={expanded ? $i18n.t('Collapse passages') : $i18n.t('Expand passages')}
-					title={expanded ? $i18n.t('Collapse passages') : $i18n.t('Expand passages')}
-					on:click={() => (expanded = !expanded)}
-				>
-					{#if expanded}<ChevronUp className="size-4" />{:else}<ChevronDown
-							className="size-4"
-						/>{/if}
-				</button>
+						{#if expanded}<ChevronUp className="size-4" />{:else}<ChevronDown
+								className="size-4"
+							/>{/if}
+					</button>
+				</div>
 			</div>
+			{#if expanded}
+				<div class="overflow-y-auto min-h-0 scrollbar-thin px-3 pb-2">
+					<CitationSnippetList
+						{mergedDocuments}
+						{activeSnippetIdx}
+						{showPercentage}
+						{showRelevance}
+						layout="compact"
+						onSelect={selectSnippet}
+					/>
+				</div>
+			{/if}
 		</div>
-		{#if expanded}
-			<div class="overflow-y-auto min-h-0 scrollbar-thin px-3 pb-2">
-				<CitationSnippetList
-					{mergedDocuments}
-					{activeSnippetIdx}
-					{showPercentage}
-					{showRelevance}
-					layout="compact"
-					onSelect={selectSnippet}
-				/>
-			</div>
-		{/if}
-	</div>
-	{#if showDocumentNote && mergedDocuments[activeSnippetIdx]?.metadata?.granularity === 'document'}
+	{/if}
+	{#if !wholeDocument && showDocumentNote && mergedDocuments[activeSnippetIdx]?.metadata?.granularity === 'document'}
 		<p class="shrink-0 px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
 			{$i18n.t('Whole-document citation — no specific passage to highlight')}
 		</p>

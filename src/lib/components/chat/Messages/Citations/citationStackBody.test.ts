@@ -35,6 +35,9 @@ describe('citation stack heading', () => {
 			context: new Map([['i18n', i18n]])
 		}).body;
 		expect(html).toContain(label);
-		if (label === 'Whole-document citation') expect(html).not.toContain('1 passages');
+		if (label === 'Whole-document citation') {
+			expect(html).not.toContain('1 passages');
+			expect(html).not.toContain('Full document');
+		}
 	});
 });
