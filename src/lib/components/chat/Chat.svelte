@@ -9,6 +9,7 @@
 	import { getHistorySide } from '$lib/utils/dataSeparation';
 	import { turnNotices, withoutRemoved } from '$lib/utils/turnNotices';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
+	import { applyFileStatus, applyUploadResult, isAwaitingUpload } from '$lib/utils/messageQueue';
 	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
@@ -1388,6 +1389,8 @@
 			if (message.files) message.files = message.files.map(update);
 		}
 		history = history;
+		chatRequestQueues.update((q) => applyFileStatus(q, data));
+		processNextInQueue($chatId);
 		const idx = files.findIndex((f) => f.id === data.file_id);
 		if (idx < 0) return;
 
@@ -2143,14 +2146,7 @@
 		if (file?.itemId) {
 			chatRequestQueues.update((q) => ({
 				...q,
-				[$chatId]: (q[$chatId] ?? []).map((message) =>
-					(message.files ?? []).some((item) => item.itemId === file.itemId)
-						? {
-								...message,
-								files: message.files.map((item) => (item.itemId === file.itemId ? file : item))
-							}
-						: message
-				)
+				[$chatId]: applyUploadResult(q[$chatId] ?? [], file)
 			}));
 		}
 
@@ -2866,9 +2862,7 @@
 		const lastMessage = history.currentId ? history.messages[history.currentId] : null;
 		if (
 			(lastMessage && lastMessage.role === 'assistant' && !lastMessage.done) ||
-			queue.some((m) =>
-				(m.files ?? []).some((file) => ['uploading', 'error'].includes(file.status))
-			)
+			queue.some((m) => isAwaitingUpload(m.files))
 		) {
 			return;
 		}
@@ -3592,10 +3586,8 @@
 		}
 
 		if (
-			($chatRequestQueues[$chatId] ?? []).some((m) =>
-				(m.files ?? []).some((file) => ['uploading', 'error'].includes(file.status))
-			) ||
-			(files.length > 0 && files.some((file) => ['uploading', 'error'].includes(file.status)))
+			($chatRequestQueues[$chatId] ?? []).some((m) => isAwaitingUpload(m.files)) ||
+			isAwaitingUpload(files)
 		) {
 			chatRequestQueues.update((q) => ({
 				...q,
