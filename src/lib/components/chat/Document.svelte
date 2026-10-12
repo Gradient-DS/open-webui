@@ -18,7 +18,6 @@
 		selectedDocumentIndex
 	} from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
-	import { exportDocumentAsDocx } from '$lib/apis/utils';
 	import { printDocument } from '$lib/utils/documentPrint';
 
 	import ContentRenderer from './Messages/ContentRenderer.svelte';
@@ -92,12 +91,14 @@
 	const downloadDocx = async () => {
 		if (!current) return;
 		try {
-			const blob = await exportDocumentAsDocx(
-				localStorage.token,
+			const { buildDocumentDocx } = await import('$lib/utils/documentDocx');
+			const blob = await buildDocumentDocx(
 				current.title,
-				getExportMarkdown()
+				current.content,
+				current.sources ?? [],
+				$i18n.t('Sources')
 			);
-			if (blob) saveAs(blob, `${sanitizeFilename(current.title)}.docx`);
+			saveAs(blob, `${sanitizeFilename(current.title)}.docx`);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export Word document'));
