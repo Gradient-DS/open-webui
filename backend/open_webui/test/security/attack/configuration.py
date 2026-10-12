@@ -26,6 +26,25 @@ CONFIG_TIMEOUT_SECONDS = float(os.getenv('ATTACK_CONFIG_TIMEOUT_SECONDS', '300')
 # connection the server dropped once the client's retry budget was spent.
 NO_RESPONSE = (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
 
+# Every HTTP request this process sends, whichever client sent it. A verified
+# snapshot stays the current configuration only while this has not moved, so the
+# next guard can reuse it instead of exporting again: the export pair around
+# each write was over half of the runtime suite's requests.
+_sent = 0
+_send = requests.Session.send
+
+
+def _counted_send(self, request, **kwargs):
+    global _sent
+    _sent += 1
+    return _send(self, request, **kwargs)
+
+
+requests.Session.send = _counted_send
+# (admin client, _sent when verified, snapshot). Keyed on the client object, so
+# a new pass or identity set always exports afresh.
+_verified = None
+
 
 def _request(admin, method, path, **kwargs):
     kwargs.setdefault('timeout', CONFIG_TIMEOUT_SECONDS)
@@ -43,6 +62,17 @@ def snapshot(admin):
     return _request(admin, 'GET', EXPORT)
 
 
+def _current(admin):
+    if _verified is not None and _verified[0] is admin and _verified[1] == _sent:
+        return _verified[2]
+    return snapshot(admin)
+
+
+def _verify(admin, state):
+    global _verified
+    _verified = (admin, _sent, state)
+
+
 def _different(left, right):
     # JSON booleans and numbers must not compare equal during verification.
     return json.dumps(left, sort_keys=True) != json.dumps(right, sort_keys=True)
@@ -56,6 +86,7 @@ def restore(admin, before, *, report, route):
         if key not in before or key not in after or _different(before[key], after[key])
     )
     if not changed:
+        _verify(admin, after)
         return
     payloads = _corpus_values()
     for key in changed:
@@ -79,6 +110,7 @@ def restore(admin, before, *, report, route):
             'Configuration recovery did not persist the exact snapshot; '
             'export/import cannot remove newly introduced keys. Retaining the recovery journal.'
         )
+    _verify(admin, before)
 
 
 def _journal(admin):
@@ -153,7 +185,7 @@ def preserve_configuration(admin, *, report, route, unverified, durable=False):
     unverified. `unverified` is what stops the pass claiming otherwise.
     """
     try:
-        before = snapshot(admin)
+        before = _current(admin)
     except NO_RESPONSE as error:
         _unverified(
             unverified,
