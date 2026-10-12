@@ -7,8 +7,8 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
-	import { getMeetings } from '$lib/apis/meetings';
-	import { matchesQuery, type MeetingSummary } from '$lib/components/meetings/meeting';
+	import { matchesQuery } from '$lib/components/meetings/meeting';
+	import { meetingList, refreshMeetings } from '$lib/components/meetings/list';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Mic from '$lib/components/icons/Mic.svelte';
@@ -20,7 +20,8 @@
 
 	let { onSelect }: { onSelect: (item: Record<string, unknown>) => void } = $props();
 
-	let meetings = $state<MeetingSummary[] | null>(null);
+	let failed = $state(false);
+	const meetings = $derived($meetingList ?? (failed ? [] : null));
 	let query = $state('');
 	let selectedIdx = $state(0);
 
@@ -37,8 +38,8 @@
 			}))
 	);
 
-	onMount(async () => {
-		meetings = (await getMeetings(localStorage.token).catch(() => null))?.data ?? [];
+	onMount(() => {
+		refreshMeetings(localStorage.token).catch(() => (failed = true));
 	});
 </script>
 
