@@ -763,6 +763,35 @@ async def test_attached_chat_strips_details_and_replaces_documents(chat: Chat, s
     assert text == 'user: Question\n\nassistant: Here is the report.\n[document: A & B > C]\n[document: Second]'
 
 
+@pytest.mark.parametrize(
+    'text,expected',
+    [
+        ('Claim [1]. Grouped [2, 3]; adjacent [4][5].', 'Claim. Grouped; adjacent.'),
+        ('Hash [6#p3], mail card [#7], fullwidth 【8】 and 【9†L1-L4】.', 'Hash, mail card, fullwidth and.'),
+        ('Code `arr[1]` and\n```\nx = b[2]\n```\nkept [3].', 'Code `arr[1]` and\n```\nx = b[2]\n```\nkept.'),
+        (
+            'Footnote [^1], link [docs], year [2024a] and [ ] stay.',
+            'Footnote [^1], link [docs], year [2024a] and [ ] stay.',
+        ),
+    ],
+)
+def test_history_text_loses_its_citation_markers_outside_code(text: str, expected: str) -> None:
+    assert agent_v2._uncited(text) == expected
+
+
+@pytest.mark.asyncio
+async def test_attached_chat_and_earlier_conversation_are_sent_without_citation_markers(
+    chat: Chat, stored_texts: dict
+) -> None:
+    stored_texts['c1'].chat['history']['messages']['a']['content'] = 'Answer [1] with `a[2]`.'
+    stored_texts['chat'] = stored_chat(2)
+    stored_texts['chat'].chat['history']['messages']['m2']['content'] = 'Earlier answer [3] [4].'
+    await chat.turn('and now [5]?', 'a3', 'm2', files=[{'type': 'chat', 'id': 'c1'}])
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['texts'][0]['text'] == 'user: Question\n\nassistant: Answer with `a[2]`.'
+    assert sent['text'].endswith('assistant: Earlier answer.\n\n---\n\nand now [5]?')
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('kind,item_id', [('note', 'n1'), ('chat', 'c1')])
 @pytest.mark.parametrize('size', [49_999, 50_000, 50_001])
