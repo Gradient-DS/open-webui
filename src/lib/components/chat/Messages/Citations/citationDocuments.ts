@@ -35,3 +35,24 @@ export async function probeFileAvailable(fileId: string): Promise<boolean> {
 		return false;
 	}
 }
+
+// [Gradient] Every check re-probes (no cached failure) and only the latest check reports, so a late
+// result for a replaced citation never decides the preview of the one now shown.
+export function createPreviewProbe(
+	onResult: (available: boolean) => void,
+	probe: (fileId: string) => Promise<boolean> = probeFileAvailable
+) {
+	let version = 0;
+	return {
+		async check(fileId: string | undefined): Promise<void> {
+			const current = ++version;
+			onResult(true);
+			if (!fileId) return;
+			const available = await probe(fileId);
+			if (current === version) onResult(available);
+		},
+		cancel() {
+			version++;
+		}
+	};
+}
