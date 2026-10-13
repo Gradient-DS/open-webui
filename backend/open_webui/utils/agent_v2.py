@@ -540,6 +540,8 @@ async def _image_bytes(entry: dict, user: str) -> tuple[bytes, FileModel | None,
 
 
 async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
+    from open_webui.soev import capabilities
+
     entries = [
         entry
         for entry in (metadata.get('user_message') or {}).get('files') or []
@@ -547,6 +549,8 @@ async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
     ]
     if len(entries) > 4:
         raise ImagesUnavailable('limit')
+    if entries and not await capabilities.has(capabilities.IMAGES):
+        raise ImagesUnavailable('gone', entries[0].get('name') or 'image')
     images = []
     client = identity.build_client() if entries else None
     for entry in entries:
@@ -647,14 +651,24 @@ def _tools(
 
 async def _live_mail_allowed() -> bool:
     from open_webui.env import AGENT_API_ENABLED
+    from open_webui.soev import capabilities
 
-    return AGENT_API_ENABLED and bool(await Config.get('live_mail.enable'))
+    return (
+        AGENT_API_ENABLED
+        and bool(await Config.get('live_mail.enable'))
+        and await capabilities.has(capabilities.LIVE_MAIL)
+    )
 
 
 async def _live_documents_allowed() -> bool:
     from open_webui.env import AGENT_API_ENABLED
+    from open_webui.soev import capabilities
 
-    return AGENT_API_ENABLED and bool(await Config.get('live_documents.enable'))
+    return (
+        AGENT_API_ENABLED
+        and bool(await Config.get('live_documents.enable'))
+        and await capabilities.has(capabilities.LIVE_DOCUMENTS)
+    )
 
 
 async def _web_search_allowed(user_id: str) -> bool:

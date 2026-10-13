@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from starlette.responses import StreamingResponse
 
 from open_webui import config, env
-from open_webui.soev import identity
+from open_webui.soev import capabilities, identity
 from open_webui.soev.client import SoevApiError
 
 log = logging.getLogger(__name__)
@@ -84,7 +84,11 @@ def owui_model(entry: dict) -> dict:
 
 
 async def base_models() -> list[dict]:
-    return [owui_model(entry) for entry in await catalog()]
+    models = [owui_model(entry) for entry in await catalog()]
+    if models and not await capabilities.has(capabilities.IMAGES):
+        for model in models:
+            model['info']['meta']['capabilities']['vision'] = False
+    return models
 
 
 def apply_catalog(models: list[dict], base: list[dict]) -> None:

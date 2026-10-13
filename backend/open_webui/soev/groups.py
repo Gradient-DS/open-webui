@@ -13,7 +13,6 @@ from open_webui.models.users import Users
 from open_webui.soev.client import SoevApiError
 
 log = logging.getLogger(__name__)
-_warned_unconfigured = False
 
 
 class SoevGroupTable(GroupTable):
@@ -23,14 +22,9 @@ class SoevGroupTable(GroupTable):
         # models/groups.py binds us during import; config's alembic run imports models that import Groups.
         import httpx
 
-        from open_webui import config
-        from open_webui.soev import identity
+        from open_webui.soev import capabilities, identity
 
-        global _warned_unconfigured
-        if not config.SOEV_API_URL:
-            if not _warned_unconfigured:
-                log.warning('SOEV_API_URL is empty; group membership pushes are disabled')
-                _warned_unconfigured = True
+        if not await capabilities.has(capabilities.GROUPS_PUSH):
             return
         client = identity.build_client()
         for group_id in sorted(set(group_ids)):

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.config import Config
 from open_webui.models.files import Files
-from open_webui.soev import identity, ingest
+from open_webui.soev import capabilities, identity, ingest
 from open_webui.soev.availability import SoevRoute, require_soev
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.live_documents import AttachmentMismatch, chat_file, register_attachment
@@ -45,6 +45,7 @@ async def attach_onedrive(
     idempotency_key: Annotated[UUID, Header(alias='Idempotency-Key')],
     user=Depends(get_verified_user),
 ):
+    await capabilities.require(capabilities.LIVE_DOCUMENTS)
     if user.role != 'admin':
         cap = await Config.get('rag.file.max_count_per_user')
         if cap and int(cap) > 0 and await Files.count_files_by_user_id(user.id) >= int(cap):

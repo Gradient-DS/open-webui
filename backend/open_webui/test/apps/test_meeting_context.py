@@ -40,12 +40,13 @@ class FakeClient:
 
 
 @pytest.fixture(autouse=True)
-def acting(monkeypatch):
+def acting(monkeypatch, platform_capabilities):
     async def acting_ref(user, client):
         return f'owui:user:{user.id}'
 
     monkeypatch.setattr(meetings.identity, 'acting_ref', acting_ref)
     monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: True)
+    monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
 
 
 def test_render_has_metadata_clean_turns_and_outputs():
@@ -109,6 +110,15 @@ async def test_meeting_without_snapshot_or_user_is_unavailable():
         await meetings.meeting_document(USER, 'thr-1', FakeClient(thread={'events': []}))
     with pytest.raises(meetings.MeetingUnavailable):
         await meetings.meeting_document(None, 'thr-1', FakeClient(thread={'events': []}))
+
+
+@pytest.mark.asyncio
+async def test_meeting_attachment_needs_capability(platform_capabilities):
+    platform_capabilities.discard('meetings')
+    client = FakeClient(thread={'events': []})
+    with pytest.raises(meetings.MeetingUnavailable):
+        await meetings.meeting_document(USER, 'thr-1', client)
+    assert client.calls == []
 
 
 @pytest.mark.asyncio
