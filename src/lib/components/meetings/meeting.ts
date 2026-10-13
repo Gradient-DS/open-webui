@@ -67,6 +67,8 @@ export type MeetingState = {
 	audio_retained?: boolean;
 	usage?: { audio_seconds?: number; stt_output_tokens?: number };
 	pending_action?: OutputKind | null;
+	/** While a finish runs: transcribing the recording, then cleaning it up and naming speakers. */
+	finishing?: 'transcribing' | 'cleaning' | null;
 	started_at?: string | null;
 	ended_at?: string | null;
 	duration_s?: number | null;

@@ -35,7 +35,7 @@ import {
 	type CutState,
 	type RecorderLike
 } from './recorder';
-import { displayMediaOptions } from './audio';
+import { displayMediaOptions, micConstraints } from './audio';
 
 const labels: ExportLabels = {
 	transcript: 'Transcript',
@@ -344,6 +344,16 @@ describe('display capture hints', () => {
 	});
 });
 
+describe('microphone choice', () => {
+	it('asks for the chosen device exactly, and the system default without one', () => {
+		expect(micConstraints('mic-2')).toMatchObject({
+			deviceId: { exact: 'mic-2' },
+			echoCancellation: true
+		});
+		expect(micConstraints(null)).not.toHaveProperty('deviceId');
+	});
+});
+
 describe('chunk delivery', () => {
 	it('retries while the thread is busy and rethrows other errors', async () => {
 		let calls = 0;
@@ -381,6 +391,33 @@ describe('chunk delivery', () => {
 		await queue.drain();
 		expect(order).toEqual(['a', 'c']);
 		expect(errors).toHaveLength(1);
+		expect(queue.pending).toBe(0);
+	});
+
+	it('on cancel skips waiting jobs and stops a running one at its next busy answer', async () => {
+		const sent: string[] = [];
+		const errors: unknown[] = [];
+		const queue = new SerialQueue(undefined, (error) => errors.push(error));
+		let busy = 0;
+		let reopen: () => void = () => {};
+		const gate = new Promise<void>((resolve) => (reopen = resolve));
+		queue.push(() =>
+			sendWhenIdle(
+				async () => {
+					busy++;
+					throw { status: 409 };
+				},
+				{ wait: () => gate, cancelled: () => queue.cancelled }
+			).then(() => void sent.push('a'))
+		);
+		queue.push(async () => void sent.push('b'));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		const cancelled = queue.cancel();
+		reopen();
+		await cancelled;
+		expect(sent).toEqual([]);
+		expect(busy).toBe(2);
+		expect(errors).toEqual([]);
 		expect(queue.pending).toBe(0);
 	});
 });

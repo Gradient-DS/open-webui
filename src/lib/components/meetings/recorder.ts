@@ -146,20 +146,35 @@ export const isConflict = (error: unknown): boolean =>
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Retries `send` while the thread is busy (409); any other error is thrown. */
+/** A send given up on because its queue was cancelled. */
+export class CancelledError extends Error {
+	constructor() {
+		super('cancelled');
+		this.name = 'CancelledError';
+	}
+}
+
+/** Retries `send` while the thread is busy (409), until `cancelled`; any other error is thrown. */
 export const sendWhenIdle = async <T>(
 	send: () => Promise<T>,
 	{
 		delayMs = CONFLICT_RETRY_MS,
 		maxAttempts = 600,
-		wait = sleep
-	}: { delayMs?: number; maxAttempts?: number; wait?: (ms: number) => Promise<void> } = {}
+		wait = sleep,
+		cancelled = () => false
+	}: {
+		delayMs?: number;
+		maxAttempts?: number;
+		wait?: (ms: number) => Promise<void>;
+		cancelled?: () => boolean;
+	} = {}
 ): Promise<T> => {
 	for (let attempt = 1; ; attempt++) {
 		try {
 			return await send();
 		} catch (error) {
 			if (!isConflict(error) || attempt >= maxAttempts) throw error;
+			if (cancelled()) throw new CancelledError();
 			await wait(delayMs);
 		}
 	}
@@ -169,6 +184,8 @@ export const sendWhenIdle = async <T>(
 export class SerialQueue {
 	private tail: Promise<void> = Promise.resolve();
 	pending = 0;
+	/** Set by `cancel`: jobs not yet started are skipped, a running one may check it. */
+	cancelled = false;
 
 	constructor(
 		private readonly onChange: (pending: number) => void = () => {},
@@ -179,8 +196,10 @@ export class SerialQueue {
 		this.pending++;
 		this.onChange(this.pending);
 		this.tail = this.tail
-			.then(job)
-			.catch((error) => this.onError(error))
+			.then(() => (this.cancelled ? undefined : job()))
+			.catch((error) => {
+				if (!(error instanceof CancelledError)) this.onError(error);
+			})
 			.finally(() => {
 				this.pending--;
 				this.onChange(this.pending);
@@ -188,6 +207,12 @@ export class SerialQueue {
 	}
 
 	drain(): Promise<void> {
+		return this.tail;
+	}
+
+	/** Skips the jobs not yet started; resolves when the running one has settled. */
+	cancel(): Promise<void> {
+		this.cancelled = true;
 		return this.tail;
 	}
 }

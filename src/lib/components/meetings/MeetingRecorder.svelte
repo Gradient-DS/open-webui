@@ -90,8 +90,9 @@
 	const sendChunk = (blob: Blob, seq: number) =>
 		queue.push(async () => {
 			const audio_ref = await upload(blob, `chunk-${seq}.${extension(blob.type)}`);
-			await sendWhenIdle(() =>
-				sendMeetingInput(localStorage.token, meetingId, { type: 'chunk', seq, audio_ref })
+			await sendWhenIdle(
+				() => sendMeetingInput(localStorage.token, meetingId, { type: 'chunk', seq, audio_ref }),
+				{ cancelled: () => queue.cancelled }
 			);
 		});
 
@@ -164,7 +165,9 @@
 	const finish = async () => {
 		phase = 'uploading';
 		try {
-			await queue.drain();
+			// The live text is only a preview: the finish transcribes the whole recording again,
+			// so live parts still waiting are dropped rather than holding the finish back.
+			await queue.cancel();
 			const earlier = (await store.parts(meetingId))
 				.filter((stored) => stored.part < part)
 				.map((stored) => stored.blob);
