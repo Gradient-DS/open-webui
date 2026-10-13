@@ -2,7 +2,9 @@
 	// [Gradient] Explicit scroll intent keeps initial positioning instant.
 	type ScrollBehavior = 'auto' | 'smooth';
 	import { onMount, onDestroy, tick } from 'svelte';
-	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+	// [Gradient] The legacy build polyfills the newest JS APIs the modern build calls
+	// directly (Map.getOrInsertComputed, Math.sumPrecise, ...), which iOS WebKit lacks.
+	import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 	import panzoom, { type PanZoom } from 'panzoom';
 	import { clampDocumentTargetPage } from '$lib/utils/documentPreview';
 	import Spinner from './Spinner.svelte';
@@ -520,7 +522,7 @@
 		width: number,
 		scrollRatio: number
 	) => {
-		const pdfjs = await import('pdfjs-dist');
+		const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 		if (token !== renderToken || !pdfDoc) return;
 		const dpr = window.devicePixelRatio || 1;
 
@@ -660,7 +662,7 @@
 		bboxLayerDivs = [];
 		pageBaseDims = [];
 
-		const pdfjs = await import('pdfjs-dist');
+		const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 		if (token !== renderToken || !pdfDoc) return;
 		const dpr = window.devicePixelRatio || 1;
 		const wrappers: HTMLElement[] = [];
@@ -829,7 +831,7 @@
 		pdfDoc = null;
 
 		try {
-			const pdfjs = await import('pdfjs-dist');
+			const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 			pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 			let pdfData: ArrayBuffer | Uint8Array;
