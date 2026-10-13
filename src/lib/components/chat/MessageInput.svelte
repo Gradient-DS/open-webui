@@ -1,5 +1,6 @@
 <script lang="ts">
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
+	import { overflowFade } from '$lib/utils/overflowFade'; // [Gradient]
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
 	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
@@ -2596,7 +2597,10 @@
 										{/if}
 
 										<!-- [Gradient] Scrolls sideways on narrow screens instead of overflowing. -->
-										<div class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none">
+										<div
+											class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none"
+											use:overflowFade
+										>
 											<!-- [Gradient] Pinned or active "+" menu items, same gates as the menu. -->
 											{#each inputBarItems as itemId (itemId)}
 												{#if itemId === 'upload_files' && inputMenuFileUploadEnabled}

@@ -175,7 +175,8 @@
 	}
 </script>
 
-<div class="flex shrink-0 items-center gap-1.5">
+<!-- On a narrow screen the row wraps and these controls take their own line. -->
+<div class="ml-auto flex shrink-0 items-center gap-1.5">
 	{#if showAccessHelp}<span class="text-xs text-gray-500" role="status">
 			{$i18n.t('Ask the knowledge base owner to restore your edit access, then resume syncing.')}
 		</span>{/if}

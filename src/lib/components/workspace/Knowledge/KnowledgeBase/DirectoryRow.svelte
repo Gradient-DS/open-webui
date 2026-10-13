@@ -100,7 +100,7 @@
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
-	class="group flex cursor-pointer w-full px-1.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition
+	class="group flex flex-wrap cursor-pointer w-full px-1.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition
 		{dragOver
 		? 'bg-gray-100 dark:bg-gray-800 ring-1 ring-gray-300 dark:ring-gray-600'
 		: selected
@@ -172,14 +172,14 @@
 	</div>
 
 	<button
-		class="relative flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
+		class="relative flex min-w-0 flex-[1_1_12rem] items-center gap-1 rounded-xl p-2 text-left justify-between"
 		type="button"
 		on:click={(e) => {
 			if (editing || selectClick(e)) return;
 			onNavigate(directory.id);
 		}}
 	>
-		<div>
+		<div class="min-w-0">
 			<div class="flex gap-2 items-center line-clamp-1">
 				{#if editing}
 					<!-- svelte-ignore a11y-autofocus -->
@@ -201,7 +201,7 @@
 						autofocus
 					/>
 				{:else}
-					<div class="line-clamp-1 text-xs">
+					<div class="max-w-[60%] shrink-0 truncate text-xs">
 						{directory.name}
 					</div>
 				{/if}
@@ -229,7 +229,7 @@
 				{#if progress}
 					<!-- counters above carry the state -->
 				{:else if updatedAt}
-					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="shrink-0">
+					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="min-w-0 truncate">
 						<span class="text-xs text-gray-400">
 							&middot; {$i18n.t('Updated {{time}}', { time: dayjs(updatedAt).fromNow() })}
 						</span>

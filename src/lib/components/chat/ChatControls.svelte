@@ -249,7 +249,10 @@
 		>
 			<div class="{activeTab === 'sources' ? 'h-full' : 'h-[100dvh]'} flex flex-col min-h-0">
 				<!-- [Gradient] -->
-				{#if activeTab === 'sources'}<SourcesSheet bind:expanded={sheetExpanded} />{/if}
+				{#if activeTab === 'sources'}<SourcesSheet
+						bind:expanded={sheetExpanded}
+						onClose={() => showControls.set(false)}
+					/>{/if}
 				{#if $showCallOverlay}
 					<div
 						class="h-full max-h-[100dvh] bg-white text-gray-700 dark:bg-black dark:text-gray-300 flex justify-center"

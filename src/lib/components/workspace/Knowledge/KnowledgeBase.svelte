@@ -2286,28 +2286,32 @@
 				</div>
 			{:else}
 				<div class="px-3 flex shrink-0 items-center w-full space-x-1.5">
-					<div class="flex flex-1 items-center">
-						<div class=" self-center ml-1 mr-2">
-							<Search className="size-3.5" />
+					<!-- [Gradient] On a narrow screen the buttons wrap below the search field. -->
+					<div class="flex flex-1 flex-wrap items-center gap-y-1">
+						<div class="flex min-w-[10rem] flex-1 items-center">
+							<div class=" self-center ml-1 mr-2">
+								<Search className="size-3.5" />
+							</div>
+							<input
+								class=" w-full text-xs pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
+								bind:value={query}
+								aria-label={$i18n.t('Search Collection')}
+								placeholder={$i18n.t('Search Collection')}
+								on:input={() => {
+									queryDebounceActive = true;
+								}}
+								on:focus={() => {
+									selectedFileId = null;
+								}}
+							/>
 						</div>
-						<input
-							class=" w-full text-xs pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
-							bind:value={query}
-							aria-label={$i18n.t('Search Collection')}
-							placeholder={$i18n.t('Search Collection')}
-							on:input={() => {
-								queryDebounceActive = true;
-							}}
-							on:focus={() => {
-								selectedFileId = null;
-							}}
-						/>
 
 						{#if knowledge?.write_access && hasSyncableSources}
 							<!-- [Gradient] Keep the standard gap before "Add source". -->
 							<Tooltip
 								content={$i18n.t('Check every source of this knowledge base for changes now')}
 								className="flex mr-1.5"
+								touch={false}
 							>
 								<button
 									type="button"
@@ -2321,6 +2325,7 @@
 								{#if activeProviderEnabled}
 									<Tooltip
 										content={$i18n.t('Sync from {{label}}', { label: activeProvider!.label })}
+										touch={false}
 									>
 										<button
 											class="py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
@@ -2447,7 +2452,7 @@
 
 				{#if fileItems !== null && fileItemsTotal !== null}
 					<div class="flex flex-row flex-1 min-h-0 gap-2 px-2">
-						<div class="flex-1 flex">
+						<div class="flex-1 flex min-w-0">
 							<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 								<div class="w-full h-full flex flex-col min-h-0">
 									<!-- Mirrors the row-list condition below so a level holding only
