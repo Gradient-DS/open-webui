@@ -714,22 +714,26 @@ async def _insert_directory(Session, *, kb_id: str, name: str, created_at: int, 
 @pytest.mark.parametrize(
     ('filter', 'folders', 'files'),
     [
-        ({}, ['Bankzaken', 'BTW betalingen', 'E-boekhouden'], ['alpha.pdf', 'Beta.pdf', 'gamma.pdf']),
+        ({}, ['Belastingdienst', 'BTW aangifte', 'E-facturen'], ['alpha.pdf', 'Beta.pdf', 'gamma.pdf']),
         (
             {'order_by': 'name', 'direction': 'asc'},
-            ['Bankzaken', 'BTW betalingen', 'E-boekhouden'],
+            ['Belastingdienst', 'BTW aangifte', 'E-facturen'],
             ['alpha.pdf', 'Beta.pdf', 'gamma.pdf'],
         ),
-        ({'order_by': 'name'}, ['E-boekhouden', 'BTW betalingen', 'Bankzaken'], ['gamma.pdf', 'Beta.pdf', 'alpha.pdf']),
-        ({'order_by': 'created_at', 'direction': 'asc'}, ['E-boekhouden', 'Bankzaken', 'BTW betalingen'], None),
-        ({'order_by': 'updated_at'}, ['BTW betalingen', 'E-boekhouden', 'Bankzaken'], None),
+        (
+            {'order_by': 'name'},
+            ['E-facturen', 'BTW aangifte', 'Belastingdienst'],
+            ['gamma.pdf', 'Beta.pdf', 'alpha.pdf'],
+        ),
+        ({'order_by': 'created_at', 'direction': 'asc'}, ['E-facturen', 'Belastingdienst', 'BTW aangifte'], None),
+        ({'order_by': 'updated_at'}, ['BTW aangifte', 'E-facturen', 'Belastingdienst'], None),
     ],
 )
 async def test_root_listing_orders_folders_and_files_by_the_chosen_key(db_session, filter, folders, files):
     """Folders follow the files' sort key and direction; names ignore case."""
     await _insert_user(db_session)
     kb_id = await _insert_kb(db_session)
-    for name, created_at, updated_at in [('BTW betalingen', 30, 90), ('Bankzaken', 20, 10), ('E-boekhouden', 10, 50)]:
+    for name, created_at, updated_at in [('BTW aangifte', 30, 90), ('Belastingdienst', 20, 10), ('E-facturen', 10, 50)]:
         await _insert_directory(db_session, kb_id=kb_id, name=name, created_at=created_at, updated_at=updated_at)
     for filename in ['gamma.pdf', 'Beta.pdf', 'alpha.pdf']:
         file_id = await _insert_file(db_session, filename=filename)

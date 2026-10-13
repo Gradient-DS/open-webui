@@ -325,14 +325,14 @@ async def test_unavailable_knowledge_is_left_out_with_a_notice_naming_only_the_d
 ) -> None:
     seed_collection(chat.api, 'kb-a', 'Contracten')
     for key in ('kb-secret', 'kb-private'):
-        seed_hidden_collection(chat.api, key, 'Integriteitsonderzoek')
+        seed_hidden_collection(chat.api, key, 'Vertrouwelijk dossier')
     chunks = await chat.turn(
         'next',
         'a1',
         files=[
             {'type': 'collection', 'id': 'kb-a'},
-            {'type': 'collection', 'id': 'kb-secret', 'name': 'Integriteitsonderzoek'},
-            {'type': 'collection', 'id': 'kb-private', 'name': 'Integriteitsonderzoek'},
+            {'type': 'collection', 'id': 'kb-secret', 'name': 'Vertrouwelijk dossier'},
+            {'type': 'collection', 'id': 'kb-private', 'name': 'Vertrouwelijk dossier'},
             {'type': 'collection', 'id': 'kb-gone', 'name': 'Oud'},
         ],
         user_language=language,
@@ -343,7 +343,7 @@ async def test_unavailable_knowledge_is_left_out_with_a_notice_naming_only_the_d
     assert sent['text'] == 'next\n\nAttachment status:\n3 selected knowledge bases not available, left out'
     assert notices(chat) == [{'notices': expected, 'removed': ['kb-gone']}]
     assert chat.messages['chat', 'a1']['notices'] == expected
-    assert not any('Integriteitsonderzoek' in line or 'kb-' in line for line in expected)
+    assert not any('Vertrouwelijk dossier' in line or 'kb-' in line for line in expected)
 
 
 @pytest.mark.asyncio
@@ -498,7 +498,7 @@ async def test_a_file_picked_from_a_knowledge_base_is_sent_as_that_kb_document(
 ) -> None:
     seed_collection(chat.api, 'kb-cloud', 'OneDrive')
     seed_collection(chat.api, 'kb-local', 'Contracten')
-    chat.api.add_document('kb-cloud', 'onedrive-item-1', filename='202508.pdf', schedule_ids=['sch-1'])
+    chat.api.add_document('kb-cloud', 'onedrive-item-1', filename='factuur-0042.pdf', schedule_ids=['sch-1'])
     chat.api.add_document('kb-local', 'f-local', filename='contract.pdf')
     # The synced document has no OWUI File row; the local one keeps its upload's row, without a collection.
     stored_files(monkeypatch, **{'f-local': 'completed'})
@@ -506,13 +506,13 @@ async def test_a_file_picked_from_a_knowledge_base_is_sent_as_that_kb_document(
         'question',
         'a1',
         files=[
-            {'type': 'file', 'id': 'onedrive-item-1', 'name': '202508.pdf', 'knowledge_id': 'kb-cloud'},
+            {'type': 'file', 'id': 'onedrive-item-1', 'name': 'factuur-0042.pdf', 'knowledge_id': 'kb-cloud'},
             {'type': 'file', 'id': 'f-local', 'name': 'contract.pdf', 'knowledge_id': 'kb-local'},
         ],
     )
     assert not any('error' in chunk for chunk in chunks)
     assert chat.mutations()[-1][1]['input']['attachments'] == [
-        {'collection_key': 'kb-cloud', 'file_id': 'onedrive-item-1', 'name': '202508.pdf'},
+        {'collection_key': 'kb-cloud', 'file_id': 'onedrive-item-1', 'name': 'factuur-0042.pdf'},
         {'collection_key': 'kb-local', 'file_id': 'f-local', 'name': 'contract.pdf'},
     ]
 
@@ -2153,7 +2153,7 @@ async def test_web_calls_carry_the_addresses_they_found_and_read() -> None:
     turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
     turn.emitter = AsyncMock()
     link = {'type': 'link', 'id': 'https://soev.ai/', 'url': 'https://soev.ai/', 'title': 'soev.ai'}
-    other = {'type': 'link', 'id': 'https://gradient-ds.com/', 'url': 'https://gradient-ds.com/'}
+    other = {'type': 'link', 'id': 'https://example.org/', 'url': 'https://example.org/'}
     calls = [('s1', 'web_search', {'query': 'soev'}, [link, other, link]), ('f1', 'fetch', {'link': link['id']}, [])]
     async with asyncio.timeout(2):
         for call_id, name, arguments, elements in calls:
@@ -2171,7 +2171,7 @@ async def test_web_calls_carry_the_addresses_they_found_and_read() -> None:
     shown = [call.args[0]['data'].get('items') for call in turn.emitter.call_args_list]
     found = [
         {'link': 'https://soev.ai/', 'title': 'soev.ai'},
-        {'link': 'https://gradient-ds.com/', 'title': 'https://gradient-ds.com/'},
+        {'link': 'https://example.org/', 'title': 'https://example.org/'},
     ]
     assert shown == [None, found, found[:1], None]
 
@@ -2907,17 +2907,17 @@ async def test_mail_sources_link_to_outlook_without_creating_files(chat: Chat):
 
 @pytest.mark.asyncio
 async def test_a_cited_search_result_is_a_snippet_source(chat: Chat):
-    url = 'https://quantware.com/product/processors/d-line'
+    url = 'https://example.com/products/widgets/alpha'
     result = {
         'id': url,
         'ref': url,
         'type': 'search-result',
         'url': url,
-        'title': 'D-line QPUs | Build bigger, scale faster',
-        'text': 'Contralto-D21 expands to 21 qubits ... Tenor-D64 introduces a 64-qubit architecture',
+        'title': 'Alpha widgets | Build better widgets',
+        'text': 'Widget-A12 has 12 clamps ... Widget-B48 introduces a 48-clamp design',
     }
-    chat.api.chat.turns = [[found(result), answered('64 qubits', cited(9, url, url))]]
-    assert content(await chat.turn('How many qubits?', 'a1')) == '64 qubits [1]'
+    chat.api.chat.turns = [[found(result), answered('48 clamps', cited(9, url, url))]]
+    assert content(await chat.turn('How many clamps?', 'a1')) == '48 clamps [1]'
     source = next(event['data'] for event in chat.socket if event['type'] == 'source')
     assert source['source'] == {'id': url, 'name': result['title'], 'url': url}
     assert source['document'] == [result['text']]
@@ -2988,16 +2988,16 @@ def test_search_mail_status_keeps_order_and_filters(matches):
     status = turn.tool_status(
         'search_mail',
         {
-            'keywords': ['KNB'],
+            'keywords': ['Acme'],
             'order': 'newest',
-            'from_addresses': ['@knb.nl'],
+            'from_addresses': ['@acme.example'],
             'to_addresses': ['a@example.test'],
             'cc_addresses': ['b@example.test'],
         },
         {'elements': [{'type': 'mail-reference', 'matches': matches}] if matches else []},
     )
     assert '({{options}})' in status['description']
-    assert status['options'] == 'newest first; From: @knb.nl; To: a@example.test; Cc: b@example.test'
+    assert status['options'] == 'newest first; From: @acme.example; To: a@example.test; Cc: b@example.test'
     assert len(status['mail_options']) == 4
     assert ('no emails' in status['description']) == (matches is None)
 
@@ -3005,8 +3005,8 @@ def test_search_mail_status_keeps_order_and_filters(matches):
 def test_plain_mail_status_is_unchanged():
     from open_webui.utils.mail_status import mail_search_status
 
-    status = {'description': 'Searched your mail for "{{keywords}}": no emails', 'keywords': 'KNB'}
-    assert mail_search_status(status, {'keywords': ['KNB']}) == status
+    status = {'description': 'Searched your mail for "{{keywords}}": no emails', 'keywords': 'Acme'}
+    assert mail_search_status(status, {'keywords': ['Acme']}) == status
 
 
 IMAGE_BYTES = base64.b64decode(

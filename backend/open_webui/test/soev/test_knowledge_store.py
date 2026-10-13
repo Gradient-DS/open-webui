@@ -823,18 +823,18 @@ async def test_search_knowledge_files_filters_by_query_and_pages(env, order_by, 
 @pytest.mark.parametrize(
     ('filters', 'folders', 'files'),
     [
-        ({}, ['Bankzaken', 'BTW betalingen', 'E-boekhouden'], ['Alpha', 'beta', 'Gamma']),
+        ({}, ['Belastingdienst', 'BTW aangifte', 'E-facturen'], ['Alpha', 'beta', 'Gamma']),
         (
             {'order_by': 'name', 'direction': 'asc'},
-            ['Bankzaken', 'BTW betalingen', 'E-boekhouden'],
+            ['Belastingdienst', 'BTW aangifte', 'E-facturen'],
             ['Alpha', 'beta', 'Gamma'],
         ),
-        ({'order_by': 'name'}, ['E-boekhouden', 'BTW betalingen', 'Bankzaken'], ['Gamma', 'beta', 'Alpha']),
+        ({'order_by': 'name'}, ['E-facturen', 'BTW aangifte', 'Belastingdienst'], ['Gamma', 'beta', 'Alpha']),
     ],
 )
 async def test_listing_sorts_names_case_insensitively_with_folders_following(env, filters, folders, files):
     """A level's folders and files both follow the chosen name order, ignoring case."""
-    for name in ['E-boekhouden', 'BTW betalingen', 'Bankzaken']:
+    for name in ['E-facturen', 'BTW aangifte', 'Belastingdienst']:
         await env.store.create_directory('kb', name, 'alice')
     for source in ['beta', 'Gamma', 'Alpha']:
         await file(env, source)
