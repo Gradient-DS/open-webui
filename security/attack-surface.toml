@@ -34,7 +34,7 @@ preserve_configuration = true
 # from its environment. Applied after configuration recovery and before any
 # pass snapshots, so every restore keeps it. Chart values only seed
 # PersistentConfig, so each key here is production surface; route-coverage.toml
-# states the rule. CI-005 in plane-findings.md.
+# states the rule.
 [stack_configuration]
 # Five tenants run self-signup. The first signup turns signup off in-process
 # (routers/auths.py:signup), and identity bootstrap is that signup, so an

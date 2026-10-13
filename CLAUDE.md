@@ -39,7 +39,7 @@ Set `down_revision` to the current head. `alembic heads` needs a live DB connect
 
 ## Running against a soev stack
 
-To develop this fork against the soev platform, run it from your checkout (commands above) and point it at a running local stack's soev-api, `http://api.<slug>.soev.localhost`: set `AGENT_API_ENABLED=true` plus the `SOEV_API_*` variables in [docs/agent-api-deployment.md](docs/agent-api-deployment.md). Starting a stack, its naming and where its credentials come from: `soev-docs/architecture/local-development.md`. `docker-compose.soev-dev.yaml` and `docker-compose.soev-stack.yaml` belong to the retired stack tooling; do not use them.
+To develop this fork against the soev platform, run it from your checkout (commands above) and point it at a running local stack's soev-api, `http://api.<slug>.soev.localhost`: set `AGENT_API_ENABLED=true` plus the `SOEV_API_*` variables in [docs/agent-api-deployment.md](docs/agent-api-deployment.md). Starting a stack, its naming and where its credentials come from: `soev-docs/architecture/local-development.md`.
 
 ## Architecture
 
