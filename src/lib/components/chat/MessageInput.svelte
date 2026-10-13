@@ -2505,8 +2505,12 @@
 								</div>
 							</div>
 
-							<div class=" flex justify-between mt-0.5 mb-2 mx-0.5 max-w-full" dir="ltr">
-								<div class="ml-1 self-end flex items-center flex-1 min-w-0">
+							<!-- [Gradient] On phones the tools take a full-width row of their own above model and send. -->
+							<div
+								class=" flex justify-between mt-0.5 mb-2 mx-0.5 max-w-full max-md:flex-wrap max-md:gap-y-1"
+								dir="ltr"
+							>
+								<div class="ml-1 self-end flex items-center flex-1 min-w-0 max-md:basis-full">
 									<!-- [Gradient] One "+" menu holds context, knowledge and tools. -->
 									{#if isFeatureEnabled('input_menu')}
 										<InputMenu
@@ -2576,7 +2580,9 @@
 										</InputMenu>
 									{/if}
 
-									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
+									<div
+										class="flex flex-1 items-center min-w-0 max-md:flex-wrap md:overflow-x-auto scrollbar-none"
+									>
 										{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
 											<div class="ml-1 flex gap-1.5 shrink-0">
 												<Tooltip content={$i18n.t('Valves')} placement="top">
@@ -2596,9 +2602,9 @@
 											</div>
 										{/if}
 
-										<!-- [Gradient] Scrolls sideways on narrow screens instead of overflowing. -->
+										<!-- [Gradient] Wraps on phones; scrolls sideways (with an edge fade) on wider screens. -->
 										<div
-											class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none"
+											class="ml-1 flex flex-wrap gap-1.5 min-w-0 md:flex-nowrap md:overflow-x-auto scrollbar-none"
 											use:overflowFade
 										>
 											<!-- [Gradient] Pinned or active "+" menu items, same gates as the menu. -->
@@ -2981,7 +2987,7 @@
 									</div>
 								</div>
 
-								<div class="self-end flex space-x-1 mr-1 min-w-0 gap-[0.03125rem]">
+								<div class="self-end flex space-x-1 mr-1 min-w-0 gap-[0.03125rem] max-md:ml-auto">
 									<!-- [Gradient] Assistant identity sits beside the independent LLM picker. -->
 									<AssistantChip editable={!history?.currentId} />
 									<div class="flex min-w-0 max-w-[10rem] items-center sm:max-w-[13rem]">
