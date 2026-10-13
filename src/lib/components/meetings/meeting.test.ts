@@ -8,6 +8,7 @@ import {
 	hasMeetingAgent,
 	groupByRange,
 	liveParts,
+	meetingLanguage,
 	matchesQuery,
 	meetingTimes,
 	metadataMarkdown,
@@ -351,6 +352,21 @@ describe('microphone choice', () => {
 			echoCancellation: true
 		});
 		expect(micConstraints(null)).not.toHaveProperty('deviceId');
+	});
+
+	it('keeps the room unfiltered except for the level, and filters next to a call', () => {
+		expect(micConstraints(null, true)).toEqual({
+			echoCancellation: false,
+			noiseSuppression: false,
+			autoGainControl: true
+		});
+		expect(micConstraints(null)).toMatchObject({ echoCancellation: true, noiseSuppression: true });
+	});
+
+	it('records in the UI language, else lets the transcriber detect it', () => {
+		expect(meetingLanguage('nl-NL')).toBe('nl');
+		expect(meetingLanguage('en')).toBe('en');
+		expect(meetingLanguage(undefined)).toBe('auto');
 	});
 });
 

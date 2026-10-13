@@ -32,11 +32,20 @@ export const displayMediaOptions = () => ({
 	surfaceSwitching: 'include'
 });
 
-const MIC_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+// With the call's audio from the speakers, echo cancellation keeps it out of the microphone.
+const CALL_MIC = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+// In the room, call filters treat everyone but the nearest voice as noise and cut it away:
+// only the level is evened out.
+const ROOM_MIC = { echoCancellation: false, noiseSuppression: false, autoGainControl: true };
 
-/** The microphone constraints; `micId` picks a device, null keeps the system default. */
-export const micConstraints = (micId: string | null): MediaTrackConstraints =>
-	micId ? { ...MIC_CONSTRAINTS, deviceId: { exact: micId } } : MIC_CONSTRAINTS;
+/**
+ * The microphone constraints: room filters for a meeting in the room, call filters next to a
+ * shared tab; `micId` picks a device, null keeps the system default.
+ */
+export const micConstraints = (micId: string | null, room = false): MediaTrackConstraints => {
+	const filters = room ? ROOM_MIC : CALL_MIC;
+	return micId ? { ...filters, deviceId: { exact: micId } } : filters;
+};
 
 export type Microphone = { id: string; label: string };
 
@@ -92,7 +101,9 @@ export const captureAudio = async (
 	micId: string | null = null
 ): Promise<Capture> => {
 	if (source === 'microphone') {
-		const stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints(micId) });
+		const stream = await navigator.mediaDevices.getUserMedia({
+			audio: micConstraints(micId, true)
+		});
 		const tracks = stream.getTracks();
 		return { stream, tracks, release: once(() => stopAll(tracks)) };
 	}

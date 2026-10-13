@@ -287,6 +287,12 @@ export const matchesQuery = (title: string | null | undefined, query: string): b
 	return !needle || fold(title ?? '').includes(needle);
 };
 
+/** The meeting language for the transcriber: the UI language's code (nl-NL → nl), else auto-detect. */
+export const meetingLanguage = (uiLanguage: string | undefined): string => {
+	const code = (uiLanguage ?? '').slice(0, 2).toLowerCase();
+	return /^[a-z]{2}$/.test(code) ? code : 'auto';
+};
+
 /** Groups items (already newest first) under the label `rangeOf` gives each, keeping order. */
 export const groupByRange = <T>(items: T[], rangeOf: (item: T) => string): [string, T[]][] => {
 	const groups = new Map<string, T[]>();

@@ -22,6 +22,7 @@
 		initialCutState,
 		rmsOf,
 		sendWhenIdle,
+		AUDIO_BITS_PER_SECOND,
 		type RecorderLike
 	} from './recorder';
 
@@ -82,7 +83,10 @@
 	let resizeObserver: ResizeObserver | null = null;
 
 	const newRecorder = (): MediaRecorder =>
-		new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+		new MediaRecorder(stream, {
+			...(mimeType ? { mimeType } : {}),
+			audioBitsPerSecond: AUDIO_BITS_PER_SECOND
+		});
 
 	const upload = async (blob: Blob, name: string): Promise<AudioRef> =>
 		(await uploadMeetingAudio(localStorage.token, blob, name)) as AudioRef;

@@ -52,6 +52,7 @@
 		OUTPUT_KINDS,
 		fileStem,
 		formatTimestamp,
+		meetingLanguage,
 		groupTurns,
 		liveParts,
 		meetingTimes,
@@ -364,6 +365,7 @@
 			const res = await startMeeting(localStorage.token, {
 				type: 'start',
 				...(chosen ? { title: chosen } : {}),
+				language: meetingLanguage($i18n.language),
 				consent: { text_version: CONSENT_TEXT_VERSION, at: new Date().toISOString() }
 			});
 			titleSent = chosen;

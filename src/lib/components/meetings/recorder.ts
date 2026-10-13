@@ -19,6 +19,8 @@ export interface RecorderLike {
 }
 
 /** Live segments are cut at the first pause after this long, or at the hard cap. */
+/** Opus at this rate keeps speech clear for transcription; browsers otherwise pick their own. */
+export const AUDIO_BITS_PER_SECOND = 96_000;
 export const SEGMENT_MIN_MS = 20_000;
 export const SEGMENT_MAX_MS = 45_000;
 export const SILENCE_HOLD_MS = 400;
