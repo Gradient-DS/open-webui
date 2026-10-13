@@ -123,7 +123,9 @@ AGENT_API_ENABLED to offer the control. The server gates every requested documen
 with that setting; enable the matching platform live_documents setting as well.
 
 Reference attachments that are failed or gone are skipped on later turns; processing
-ones add a short status note. Ordinary upload admission is unchanged. Collection setup
+ones add a short status note. The composer holds a message (queues it) while any of its
+files is uploading or processing, picker references included, until `file:status` settles
+it (`utils/messageQueue.ts`). Ordinary upload admission is unchanged. Collection setup
 runs only for enabled document tools or reference-bearing turns, caches successful keys
 per user, and disables the document tools for that turn if setup fails. Reference File
 rows retain supplied content_type for inline original previews and never delete empty

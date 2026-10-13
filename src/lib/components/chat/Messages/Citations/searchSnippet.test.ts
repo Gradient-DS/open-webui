@@ -5,25 +5,25 @@ import SearchSnippetNote from './SearchSnippetNote.svelte';
 import { searchResultPage } from './searchSnippet';
 import type { CitationDocument } from './citationDocuments';
 
-const URL = 'https://www.quantware.com/product/processors/d-line';
+const URL = 'https://www.example.com/products/widgets/alpha';
 const snippet = (metadata: Record<string, unknown>): CitationDocument => ({
 	source: { id: URL, name: URL, url: URL },
-	document: 'Contralto-D21 expands to 21 qubits ... Tenor-D64',
-	metadata: { source: URL, name: 'D-line QPUs', granularity: 'snippet', ...metadata }
+	document: 'Widget-A12 has 12 clamps ... Widget-B48',
+	metadata: { source: URL, name: 'Alpha widgets', granularity: 'snippet', ...metadata }
 });
 
 describe('search result snippets', () => {
 	it('names the page, its address and where to open it', () => {
 		expect(searchResultPage(snippet({}))).toEqual({
-			title: 'D-line QPUs',
+			title: 'Alpha widgets',
 			url: URL,
-			address: 'quantware.com/product/processors/d-line'
+			address: 'example.com/products/widgets/alpha'
 		});
 	});
 
 	it('falls back to the address when the result has no title', () => {
 		expect(searchResultPage(snippet({ name: '' }))?.title).toBe(
-			'quantware.com/product/processors/d-line'
+			'example.com/products/widgets/alpha'
 		);
 	});
 
@@ -40,8 +40,8 @@ describe('search result snippets', () => {
 	it('says the page was not opened and links to it', () => {
 		const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
 		const html = render(SearchSnippetNote, { props: { document: snippet({}) }, context }).body;
-		expect(html).toContain('D-line QPUs');
-		expect(html).toContain('quantware.com/product/processors/d-line');
+		expect(html).toContain('Alpha widgets');
+		expect(html).toContain('example.com/products/widgets/alpha');
 		expect(html).toContain('Search result — snippet only, the page was not opened');
 		expect(html).toContain(`href="${URL}"`);
 	});

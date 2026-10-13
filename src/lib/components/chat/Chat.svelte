@@ -9,7 +9,12 @@
 	import { getHistorySide } from '$lib/utils/dataSeparation';
 	import { turnNotices, withoutRemoved } from '$lib/utils/turnNotices';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
-	import { applyFileStatus, applyUploadResult, isAwaitingUpload } from '$lib/utils/messageQueue';
+	import {
+		applyFileStatus,
+		applyUploadResult,
+		isAwaitingUpload,
+		isPending
+	} from '$lib/utils/messageQueue';
 	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
@@ -2901,7 +2906,7 @@
 	const sendQueuedMessageNow = async (id) => {
 		const queue = $chatRequestQueues[$chatId] ?? [];
 		const item = queue.find((m) => m.id === id);
-		if (!item || (item.files ?? []).some((file) => ['uploading', 'error'].includes(file.status))) {
+		if (!item || (item.files ?? []).some((file) => isPending(file) || file.status === 'error')) {
 			return;
 		}
 

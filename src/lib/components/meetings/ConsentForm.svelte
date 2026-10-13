@@ -1,12 +1,18 @@
 <script lang="ts">
 	// [Gradient] Vergadering: consent and source choice before anything is recorded (D2, D20).
-	import { getContext, untrack } from 'svelte';
+	import { getContext, onMount, untrack } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import { audioCapabilities, type AudioSource } from './audio';
+	import {
+		audioCapabilities,
+		listMicrophones,
+		unlockMicrophones,
+		type AudioSource,
+		type Microphone
+	} from './audio';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -15,7 +21,7 @@
 		onCancel,
 		resume = false
 	}: {
-		onStart: (source: AudioSource) => Promise<void>;
+		onStart: (source: AudioSource, micId: string | null) => Promise<void>;
 		onCancel: () => void;
 		/** Continuing an interrupted meeting: its consent stands, only the source is asked. */
 		resume?: boolean;
@@ -27,6 +33,50 @@
 	// Tab audio needs Chromium on a desktop; elsewhere only the microphone is offered.
 	const can = audioCapabilities(typeof navigator !== 'undefined' ? navigator : undefined);
 	let source = $state<AudioSource>(can.tabAudio ? 'mixed' : 'microphone');
+
+	// The microphone to record: the one chosen last time on this device while it is still there,
+	// else the system default. Shown whenever there is more than one, so a display's or headset's
+	// microphone is never used unnoticed.
+	const MIC_KEY = 'meetings.microphone';
+	let microphones = $state<Microphone[]>([]);
+	let micId = $state<string | null>(null);
+	const named = $derived(microphones.some((mic) => mic.label));
+	const refreshMicrophones = async (list?: Microphone[]) => {
+		try {
+			microphones = list ?? (await listMicrophones());
+		} catch {
+			microphones = [];
+		}
+		let saved: string | null = null;
+		try {
+			saved = localStorage.getItem(MIC_KEY);
+		} catch {
+			// Storage blocked: the default it is.
+		}
+		const ids = microphones.map((mic) => mic.id);
+		micId = micId && ids.includes(micId) ? micId : saved && ids.includes(saved) ? saved : null;
+	};
+	const unlock = async () => {
+		try {
+			await refreshMicrophones(await unlockMicrophones());
+		} catch (error) {
+			console.error(error);
+		}
+	};
+	const chooseMicrophone = (id: string) => {
+		micId = id;
+		try {
+			localStorage.setItem(MIC_KEY, id);
+		} catch {
+			// Remembering is a convenience only.
+		}
+	};
+	onMount(() => {
+		refreshMicrophones();
+		navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
+		return () => navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
+	});
+	const onDeviceChange = () => refreshMicrophones();
 
 	const options = $derived(
 		[
@@ -57,7 +107,7 @@
 		if (!consented || starting) return;
 		starting = true;
 		try {
-			await onStart(source);
+			await onStart(source, source === 'display' ? null : micId);
 		} finally {
 			starting = false;
 		}
@@ -92,6 +142,32 @@
 			</button>
 		{/each}
 	</div>
+
+	{#if source !== 'display' && (named ? microphones.length > 1 : microphones.length > 0)}
+		<div class="mt-3 px-2">
+			<div class="mb-1 text-xs text-gray-500">{$i18n.t('Microphone')}</div>
+			{#if named}
+				<select
+					class="w-full rounded-lg border border-gray-100 bg-transparent px-2 py-1.5 text-[0.8125rem] text-gray-800 outline-hidden dark:border-gray-850 dark:text-gray-200"
+					aria-label={$i18n.t('Microphone')}
+					value={micId ?? microphones[0].id}
+					onchange={(event) => chooseMicrophone((event.target as HTMLSelectElement).value)}
+				>
+					{#each microphones as mic (mic.id)}
+						<option value={mic.id}>{mic.label}</option>
+					{/each}
+				</select>
+			{:else}
+				<button
+					type="button"
+					class="text-xs text-gray-700 underline underline-offset-2 dark:text-gray-300"
+					onclick={unlock}
+				>
+					{$i18n.t('Choose microphone')}
+				</button>
+			{/if}
+		</div>
+	{/if}
 
 	{#if !can.tabAudio}
 		<div class="mt-2 px-2 text-xs leading-5 text-gray-500">

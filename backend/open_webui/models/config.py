@@ -64,7 +64,10 @@ API_CONFIG_FIELDS = (
 # of being pinned to the value seed_defaults wrote at first boot.
 # Security-critical upload guards are deployment-authoritative: gitops env
 # always wins; admin-UI writes do not persist for these keys.
-_ENV_AUTHORITATIVE_KEY_PREFIXES = ('sync_daemon.', 'rag.file.')
+# [Gradient] Speech-to-text has no admin tab in this fork: the chart env (parakeet via
+# litellm) is its only source, and a tenant booted before dictation was configured would
+# otherwise stay pinned to the empty engine (local Whisper, not in the image).
+_ENV_AUTHORITATIVE_KEY_PREFIXES = ('sync_daemon.', 'rag.file.', 'audio.stt.')
 
 
 def _split_api_config_fragment(fragment: str) -> tuple[str, list[str]] | None:

@@ -7,6 +7,7 @@
 	import EditPencil from '$lib/components/icons/EditPencil.svelte';
 	import ArrowForward from '$lib/components/icons/ArrowForward.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { isPending } from '$lib/utils/messageQueue';
 
 	const i18n = getContext('i18n');
 
@@ -38,7 +39,7 @@
 							class="relative size-6 shrink-0 overflow-hidden rounded-lg border border-gray-100/60 bg-white/60 dark:border-white/[0.06] dark:bg-white/[0.025]"
 						>
 							<Image src={fileUrl} alt="" imageClassName="size-full object-cover" />
-							{#if file.status === 'uploading'}
+							{#if isPending(file)}
 								<div
 									class="absolute inset-0 flex items-center justify-center bg-white/75 text-gray-500 backdrop-blur-[1px] dark:bg-gray-950/70 dark:text-gray-300"
 								>
@@ -50,7 +51,7 @@
 						<div
 							class="flex h-6 max-w-[9rem] items-center gap-1 rounded-lg border border-gray-100/60 bg-white/60 px-1.5 text-[0.6875rem] leading-none text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.025] dark:text-gray-400"
 						>
-							{#if file.status === 'uploading'}
+							{#if isPending(file)}
 								<span class="shrink-0 text-gray-400 dark:text-gray-500">
 									<Spinner className="size-3" />
 								</span>
