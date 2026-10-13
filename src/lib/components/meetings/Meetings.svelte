@@ -15,6 +15,9 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
+	import DropdownOptions from '$lib/components/common/DropdownOptions.svelte';
+	import KbSelectionHeader from '$lib/components/workspace/Knowledge/KnowledgeBase/KbSelectionHeader.svelte';
+	import SelectCheckbox from '$lib/components/workspace/Knowledge/KnowledgeBase/SelectCheckbox.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -25,8 +28,10 @@
 	import {
 		dayjsLocale,
 		groupByRange,
-		matchesQuery,
+		listMeetings,
 		statusLabelKey,
+		type MeetingSort,
+		type MeetingStatus,
 		type MeetingSummary
 	} from './meeting';
 
@@ -38,19 +43,34 @@
 	// A revisit shows the kept list at once; the refresh on mount updates it.
 	const meetings = $derived($meetingList ?? (failed ? [] : null));
 	let query = $state('');
-	let deleting = $state<MeetingSummary | null>(null);
+	let status = $state<MeetingStatus | ''>('');
+	let sort = $state<MeetingSort>('created_at');
+	let direction = $state<'asc' | 'desc'>('desc');
+	let deleting = $state<MeetingSummary[]>([]);
 	let showDelete = $state(false);
 	let openMenuId = $state<string | null>(null);
+	let selected = $state<string[]>([]);
 
 	const locale = $derived(dayjsLocale($i18n.languages, dayjs.Ls));
 	const created = (meeting: MeetingSummary) => dayjs(meeting.created_at).locale(locale);
-	const sorted = $derived(
-		[...(meetings ?? [])].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+	const visible = $derived(
+		listMeetings(meetings ?? [], {
+			query,
+			status: status || null,
+			sort,
+			ascending: direction === 'asc'
+		})
 	);
-	const visible = $derived(sorted.filter((meeting) => matchesQuery(meeting.title, query)));
+	// Date ranges only follow the order of a date sort; any other sort is one plain list.
 	const grouped = $derived(
-		groupByRange(visible, (meeting) => getTimeRange(created(meeting).unix()))
+		sort === 'created_at'
+			? groupByRange(visible, (meeting) => getTimeRange(created(meeting).unix()))
+			: [['', visible] as [string, MeetingSummary[]]]
 	);
+	// A selection covers only what is listed: searching or filtering drops what it hides.
+	const picked = $derived(visible.filter((meeting) => selected.includes(meeting.thread_id)));
+	const toggle = (id: string) =>
+		(selected = selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id]);
 
 	const load = async () => {
 		try {
@@ -63,29 +83,43 @@
 	};
 
 	const remove = async () => {
-		const target = deleting;
-		if (!target) return;
-		try {
-			await deleteMeeting(localStorage.token, target.thread_id);
-			await partStore().remove(target.thread_id);
-			forgetMeeting(target.thread_id);
-			toast.success($i18n.t('Meeting deleted'));
-		} catch (error) {
-			toast.error(`${(error as Error)?.message ?? error}`);
-		} finally {
-			deleting = null;
+		const targets = deleting;
+		let removed = 0;
+		for (const target of targets) {
+			try {
+				await deleteMeeting(localStorage.token, target.thread_id);
+				await partStore().remove(target.thread_id);
+				forgetMeeting(target.thread_id);
+				removed += 1;
+			} catch (error) {
+				toast.error(`${(error as Error)?.message ?? error}`);
+			}
 		}
+		if (removed === 1 && targets.length === 1) toast.success($i18n.t('Meeting deleted'));
+		else if (removed > 0) toast.success($i18n.t('{{count}} meetings deleted', { count: removed }));
+		selected = selected.filter((id) => !targets.some((target) => target.thread_id === id));
+		deleting = [];
 	};
 
 	onMount(load);
 </script>
 
+<svelte:window
+	onkeydown={(e) => {
+		if (e.key === 'Escape' && picked.length > 0) selected = [];
+	}}
+/>
+
 <ConfirmDialog
 	bind:show={showDelete}
-	title={$i18n.t('Delete meeting?')}
-	message={$i18n.t(
-		'The transcript and all outputs of this meeting are deleted. This cannot be undone.'
-	)}
+	title={deleting.length > 1
+		? $i18n.t('Delete {{count}} meetings?', { count: deleting.length })
+		: $i18n.t('Delete meeting?')}
+	message={deleting.length > 1
+		? $i18n.t(
+				'The transcripts and all outputs of these meetings are deleted. This cannot be undone.'
+			)
+		: $i18n.t('The transcript and all outputs of this meeting are deleted. This cannot be undone.')}
 	confirmLabel={$i18n.t('Delete')}
 	onConfirm={remove}
 />
@@ -147,6 +181,36 @@
 					</div>
 				{/if}
 			</div>
+
+			<div class="flex shrink-0 items-center gap-2 whitespace-nowrap">
+				<DropdownOptions
+					align="end"
+					bind:value={status}
+					items={[
+						{ value: '', label: $i18n.t('All') },
+						{ value: 'ready', label: $i18n.t('Done') },
+						{ value: 'recording', label: $i18n.t('Not finished') },
+						{ value: 'transcribing', label: $i18n.t('In progress') },
+						{ value: 'failed', label: $i18n.t('Failed') }
+					]}
+				/>
+				<DropdownOptions
+					align="end"
+					bind:value={sort}
+					items={[
+						{ value: 'created_at', label: $i18n.t('Created') },
+						{ value: 'title', label: $i18n.t('Name') }
+					]}
+				/>
+				<DropdownOptions
+					align="end"
+					bind:value={direction}
+					items={[
+						{ value: 'asc', label: $i18n.t('Asc') },
+						{ value: 'desc', label: $i18n.t('Desc') }
+					]}
+				/>
+			</div>
 		</div>
 
 		{#if meetings === null}
@@ -154,11 +218,25 @@
 				<Spinner className="size-4" />
 			</div>
 		{:else if visible.length > 0}
+			<KbSelectionHeader
+				count={picked.length}
+				allSelected={picked.length === visible.length}
+				indeterminate={picked.length > 0 && picked.length < visible.length}
+				onToggleSelectAll={() =>
+					(selected = picked.length > 0 ? [] : visible.map((meeting) => meeting.thread_id))}
+				onDelete={() => {
+					deleting = picked;
+					showDelete = true;
+				}}
+			/>
+
 			<div class="@container h-full my-1">
 				{#each grouped as [timeRange, list], groupIndex (timeRange)}
-					<div class="w-full px-2 pb-1 text-xs text-gray-500 dark:text-gray-500">
-						{$i18n.t(timeRange)}
-					</div>
+					{#if timeRange}
+						<div class="w-full px-2 pb-1 text-xs text-gray-500 dark:text-gray-500">
+							{$i18n.t(timeRange)}
+						</div>
+					{/if}
 
 					<div class="{grouped.length - 1 !== groupIndex ? 'mb-3' : ''} gap-y-0.5 flex flex-col">
 						{#each list as meeting (meeting.thread_id)}
@@ -170,6 +248,12 @@
 								class="group flex min-h-8 w-full cursor-pointer items-center gap-2 rounded-xl px-2 py-[0.375rem] text-left transition hover:bg-gray-50 focus-within:bg-gray-50 dark:hover:bg-gray-900 dark:focus-within:bg-gray-900"
 								onclick={() => goto(`/meetings/${encodeURIComponent(meeting.thread_id)}`)}
 							>
+								<SelectCheckbox
+									selected={selected.includes(meeting.thread_id)}
+									visible={picked.length > 0}
+									onToggle={() => toggle(meeting.thread_id)}
+								/>
+
 								<div class="flex min-w-0 flex-1 items-center gap-2">
 									<div
 										dir="auto"
@@ -205,7 +289,7 @@
 									<MeetingMenu
 										show={openMenuId === meeting.thread_id}
 										onDelete={() => {
-											deleting = meeting;
+											deleting = [meeting];
 											showDelete = true;
 										}}
 										onChange={(open) => (openMenuId = open ? meeting.thread_id : null)}
@@ -215,9 +299,9 @@
 											type="button"
 											aria-label={$i18n.t('Meeting menu')}
 											onclick={(e) => {
-												e.preventDefault();
+												// The Dropdown opens itself on this click; toggling here too closed it at once.
+												// Only keep the row from opening the meeting.
 												e.stopPropagation();
-												openMenuId = openMenuId === meeting.thread_id ? null : meeting.thread_id;
 											}}
 										>
 											<EllipsisHorizontal className="size-3.5" />
@@ -235,12 +319,12 @@
 					<div class="mb-1.5 text-sm">
 						{failed
 							? $i18n.t('Meetings could not be loaded.')
-							: query
+							: query || status
 								? $i18n.t('No meetings found')
 								: $i18n.t('No meetings yet')}
 					</div>
 					<div class="text-xs leading-5 text-gray-500">
-						{query
+						{query || status
 							? $i18n.t('Try adjusting your search or filter to find what you are looking for.')
 							: $i18n.t('Create a meeting to record and transcribe it.')}
 					</div>

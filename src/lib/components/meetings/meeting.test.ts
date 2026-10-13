@@ -7,6 +7,7 @@ import {
 	groupTurns,
 	hasMeetingAgent,
 	groupByRange,
+	listMeetings,
 	liveParts,
 	meetingLanguage,
 	matchesQuery,
@@ -18,6 +19,7 @@ import {
 	revealTotalMs,
 	wordCount,
 	type MeetingMeta,
+	type MeetingSummary,
 	outputMarkdown,
 	transcriptMarkdown,
 	type ExportLabels,
@@ -189,6 +191,35 @@ describe('meeting helpers', () => {
 	it('keeps accented letters in file names and drops path characters', () => {
 		expect(fileStem('Overleg café / 7-10')).toBe('Overleg-café-7-10');
 		expect(fileStem('///')).toBe('vergadering');
+	});
+});
+
+describe('meeting list', () => {
+	const meeting = (thread_id: string, title: string | null, created_at: string, status = 'ready') =>
+		({ thread_id, agent: 'meeting', title, created_at, status }) as MeetingSummary;
+	const all = [
+		meeting('a', 'Budget', '2026-10-01T10:00:00Z'),
+		meeting('b', 'agenda', '2026-10-03T10:00:00Z', 'failed'),
+		meeting('c', null, '2026-10-02T10:00:00Z', 'recording')
+	];
+	const ids = (list: MeetingSummary[]) => list.map((item) => item.thread_id);
+
+	it('sorts newest first by default and oldest first ascending', () => {
+		const options = { query: '', status: null, sort: 'created_at', ascending: false } as const;
+		expect(ids(listMeetings(all, options))).toEqual(['b', 'c', 'a']);
+		expect(ids(listMeetings(all, { ...options, ascending: true }))).toEqual(['a', 'c', 'b']);
+	});
+
+	it('sorts by title regardless of case', () => {
+		expect(
+			ids(listMeetings(all, { query: '', status: null, sort: 'title', ascending: true }))
+		).toEqual(['c', 'b', 'a']);
+	});
+
+	it('filters by status and query together', () => {
+		const options = { query: '', status: 'failed', sort: 'created_at', ascending: false } as const;
+		expect(ids(listMeetings(all, options))).toEqual(['b']);
+		expect(ids(listMeetings(all, { ...options, query: 'budget' }))).toEqual([]);
 	});
 });
 
