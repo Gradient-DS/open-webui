@@ -59,14 +59,14 @@ const meta: MeetingMeta = {
 	date: '7 oktober 2026',
 	time: '10:00–10:47',
 	duration: '47:12',
-	speakers: ['Xander', 'Spreker 2']
+	speakers: ['Pieter', 'Spreker 2']
 };
 
 const state: MeetingState = {
 	status: 'ready',
 	transcript: {
 		speakers: [
-			{ label: 'Spreker 1', name: 'Xander', inferred: true },
+			{ label: 'Spreker 1', name: 'Pieter', inferred: true },
 			{ label: 'Spreker 2', name: null }
 		],
 		segments: [
@@ -78,7 +78,7 @@ const state: MeetingState = {
 				clean: 'Goedemorgen allemaal.'
 			},
 			{ start: 2.4, end: 5, speaker: 'Spreker 1', raw: 'eh we beginnen', clean: 'We beginnen.' },
-			{ start: 65, end: 70, speaker: 'Spreker 2', raw: 'dank je xander', clean: 'Dank je, Xander.' }
+			{ start: 65, end: 70, speaker: 'Spreker 2', raw: 'dank je pieter', clean: 'Dank je, Pieter.' }
 		]
 	},
 	outputs: {
@@ -86,7 +86,7 @@ const state: MeetingState = {
 		minutes: null,
 		actions: {
 			items: [
-				{ task: 'Offerte sturen', owner: 'Xander', due: 'vrijdag' },
+				{ task: 'Offerte sturen', owner: 'Pieter', due: 'vrijdag' },
 				{ task: 'Agenda', owner: null, due: null }
 			]
 		}
@@ -152,7 +152,7 @@ describe('meeting helpers', () => {
 		expect(block).toContain('**Datum:** 7 oktober 2026');
 		expect(block).toContain('**Tijd:** 10:00–10:47');
 		expect(block).toContain('**Duur:** 47:12');
-		expect(block).toContain('**Sprekers:** Xander, Spreker 2');
+		expect(block).toContain('**Sprekers:** Pieter, Spreker 2');
 		expect(metadataMarkdown({ ...meta, duration: null, speakers: [] }, labels)).not.toContain(
 			'Duur'
 		);
@@ -171,7 +171,7 @@ describe('meeting helpers', () => {
 	it('exports the transcript with names, labels and timestamps', () => {
 		const md = transcriptMarkdown(meta, state, labels);
 		expect(md).toContain('# Weekoverleg');
-		expect(md).toContain('**Xander** (00:00)\n\nGoedemorgen allemaal. We beginnen.');
+		expect(md).toContain('**Pieter** (00:00)\n\nGoedemorgen allemaal. We beginnen.');
 		expect(md).toContain('**Spreker 2** (01:05)');
 		expect(transcriptMarkdown(meta, state, labels, true)).toContain(
 			'Heedemorgen allemaal eh we beginnen'
@@ -183,7 +183,7 @@ describe('meeting helpers', () => {
 			'Kort **overleg** over één punt.'
 		);
 		expect(outputMarkdown(meta, state, 'actions', labels)).toContain(
-			'- Offerte sturen (Eigenaar: Xander, Deadline: vrijdag)\n- Agenda'
+			'- Offerte sturen (Eigenaar: Pieter, Deadline: vrijdag)\n- Agenda'
 		);
 		expect(outputMarkdown(meta, state, 'minutes', labels)).toBeNull();
 	});

@@ -13,7 +13,7 @@ STATE = {
     'ended_at': '2026-10-07T08:47:12Z',
     'duration_s': 2832,
     'transcript': {
-        'speakers': [{'label': 'Spreker 1', 'name': 'Xander'}, {'label': 'Spreker 2', 'name': None}],
+        'speakers': [{'label': 'Spreker 1', 'name': 'Pieter'}, {'label': 'Spreker 2', 'name': None}],
         'segments': [
             {'start': 0, 'end': 2, 'speaker': 'Spreker 1', 'raw': 'heedemorgen', 'clean': 'Goedemorgen.'},
             {'start': 2, 'end': 4, 'speaker': 'Spreker 1', 'raw': 'we beginnen', 'clean': 'We beginnen.'},
@@ -23,7 +23,7 @@ STATE = {
     'outputs': {
         'summary': {'markdown': 'Kort overleg.'},
         'minutes': None,
-        'actions': {'items': [{'task': 'Offerte sturen', 'owner': 'Xander', 'due': 'vrijdag'}]},
+        'actions': {'items': [{'task': 'Offerte sturen', 'owner': 'Pieter', 'due': 'vrijdag'}]},
     },
 }
 
@@ -55,12 +55,12 @@ def test_render_has_metadata_clean_turns_and_outputs():
     assert 'Datum: 07-10-2026' in text
     assert 'Tijd: 10:00–10:47' in text
     assert 'Duur: 47:12' in text
-    assert 'Sprekers: Xander, Spreker 2' in text
-    assert '[00:00] Xander: Goedemorgen. We beginnen.' in text
+    assert 'Sprekers: Pieter, Spreker 2' in text
+    assert '[00:00] Pieter: Goedemorgen. We beginnen.' in text
     assert '[01:05] Spreker 2: Dank je.' in text
     assert 'heedemorgen' not in text
     assert '## Samenvatting\n\nKort overleg.' in text
-    assert '- Offerte sturen (eigenaar: Xander, deadline: vrijdag)' in text
+    assert '- Offerte sturen (eigenaar: Pieter, deadline: vrijdag)' in text
     assert '## Notulen' not in text
 
 
@@ -88,7 +88,7 @@ async def test_source_reads_the_meeting_as_the_user():
     source = await meetings.meeting_source({'type': 'meeting', 'id': 'thr-1', 'name': 'x'}, USER, client)
     assert client.calls == [('/v1/chat/threads/thr-1', 'owui:user:u1')]
     assert source['metadatas'] == [[{'file_id': 'thr-1', 'name': 'Weekoverleg'}]]
-    assert 'Xander: Goedemorgen.' in source['documents'][0][0]
+    assert 'Pieter: Goedemorgen.' in source['documents'][0][0]
 
 
 @pytest.mark.asyncio
