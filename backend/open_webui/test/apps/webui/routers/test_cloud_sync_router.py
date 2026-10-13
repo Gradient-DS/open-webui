@@ -615,14 +615,12 @@ def test_missing_capability_refuses_before_platform_calls(api, platform_capabili
     api.link.assert_not_awaited()
 
 
-def test_no_connection_capabilities_refuses_connection_and_popup_routes(api, platform_capabilities):
+def test_no_connection_capabilities_refuses_connection_routes(api, platform_capabilities):
     platform_capabilities.clear()
-    for path in ['connections', 'connect/done?connection=c&result=pending']:
-        result = api.browser.get(f'/api/v1/cloud-sync/{path}')
-        assert result.status_code == 503
-        assert result.json()['detail']['code'] == 'feature_unavailable'
+    result = api.browser.get('/api/v1/cloud-sync/connections')
+    assert result.status_code == 503
+    assert result.json()['detail']['code'] == 'feature_unavailable'
     assert not api.requests
-    assert api.requests == []
 
 
 def test_policy_preserves_upstream_forbidden_code(api, monkeypatch) -> None:

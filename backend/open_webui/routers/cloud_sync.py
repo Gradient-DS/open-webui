@@ -123,15 +123,7 @@ async def connect_done(
     result: Literal['pending', 'error', 'invalid'],
     user=Depends(get_verified_user),
 ):
-    from open_webui.soev.availability import ensure_configured
-
-    ensure_configured()
-    if not await capabilities.refresh() & {
-        capabilities.CLOUD_SYNC,
-        capabilities.LIVE_DOCUMENTS,
-        capabilities.LIVE_MAIL,
-    }:
-        await capabilities.require(capabilities.CLOUD_SYNC)
+    # Not capability-gated: the page only relays the popup's result to its opener.
     data = json.dumps({'type': 'soev_connect', 'connection': connection, 'result': result}).replace('<', '\\u003c')
     # The opener may live on another configured origin than this page (a dev
     # stack serves the frontend and the API on different ports); a message to
