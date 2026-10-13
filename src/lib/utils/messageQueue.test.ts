@@ -32,6 +32,13 @@ describe('message queue', () => {
 		expect(isAwaitingUpload(queues.c1[0].files)).toBe(false);
 	});
 
+	it('waits while a OneDrive file attached by reference is processing', () => {
+		const picked = { ...uploading, status: 'processing', attached_by: 'user' };
+		expect(isAwaitingUpload([picked])).toBe(true);
+		const queues = applyFileStatus(queued([picked]), { file_id: 'f1', status: 'completed' });
+		expect(isAwaitingUpload(queues.c1[0].files)).toBe(false);
+	});
+
 	it('keeps waiting on a processing event', () => {
 		const queues = applyFileStatus(queued([uploading]), { file_id: 'f1', status: 'processing' });
 		expect(isAwaitingUpload(queues.c1[0].files)).toBe(true);
