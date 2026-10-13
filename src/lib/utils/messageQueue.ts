@@ -8,9 +8,13 @@ export type FileStatusEvent = {
 	collection_name?: string | null;
 };
 
+/** A file is not readable yet: uploading, or processing (an upload, or a OneDrive file attached by reference). */
+export const isPending = (file: ChatAttachment): boolean =>
+	file.status === 'uploading' || file.status === 'processing';
+
 /** A message waits only while one of its files is still uploading or processing. */
 export const isAwaitingUpload = (files: ChatAttachment[] | undefined): boolean =>
-	(files ?? []).some((file) => file.status === 'uploading');
+	(files ?? []).some(isPending);
 
 /** Applies a `file:status` event to every queued message holding that file; returns `queues` itself when none does.
  * A failed file stays attached so the turn reports it as skipped. */

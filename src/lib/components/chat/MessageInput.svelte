@@ -41,6 +41,7 @@
 		prefetchLiveConnections,
 		relinkPrompt
 	} from '$lib/utils/live-connections';
+	import { isPending } from '$lib/utils/messageQueue';
 	import { enableLiveFamily } from '$lib/apis/cloudSync';
 	import {
 		beginBusinessDocumentPicker,
@@ -2298,7 +2299,7 @@
 												name={file.name ?? ''}
 												type={file.type}
 												size={file?.size ?? 0}
-												loading={file.status === 'uploading'}
+												loading={isPending(file)}
 												dismissible={true}
 												edit={!agentRouted}
 												small={true}
