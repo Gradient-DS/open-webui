@@ -35,7 +35,7 @@
 </script>
 
 <div
-	class="group flex w-full items-center rounded-xl px-1.5 transition {selectable
+	class="group flex w-full flex-wrap items-center rounded-xl px-1.5 transition {selectable
 		? 'select-none'
 		: ''} {selected
 		? 'bg-blue-50 dark:bg-blue-900/20'
@@ -50,17 +50,17 @@
 	</div>
 	<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
 	<div
-		class="flex min-w-0 flex-1 items-center gap-2 p-2 text-left"
+		class="flex min-w-0 flex-[1_1_12rem] items-center gap-2 p-2 text-left"
 		on:click={(e) => {
 			if (selectable) onRowClick(e);
 		}}
 	>
-		<div class="line-clamp-1 text-xs">{schedule.label || $i18n.t(view.label)}</div>
+		<div class="max-w-[60%] shrink-0 truncate text-xs">{schedule.label || $i18n.t(view.label)}</div>
 		<span class="shrink-0 text-xs text-gray-400"
 			>&middot; {$i18n.t(view.kind === 'file' ? 'File' : 'Folder')}</span
 		>
 		{#if view.lastSyncedAt}
-			<Tooltip content={dayjs(view.lastSyncedAt).format('LLLL')} className="shrink-0">
+			<Tooltip content={dayjs(view.lastSyncedAt).format('LLLL')} className="min-w-0 truncate">
 				<span class="text-xs text-gray-400">
 					&middot; {$i18n.t('Updated {{time}}', { time: dayjs(view.lastSyncedAt).fromNow() })}
 				</span>

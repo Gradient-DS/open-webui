@@ -16,14 +16,15 @@
 	};
 </script>
 
-<!-- Hidden while the RAG filter panel is open so it never sits behind it. -->
+<!-- Hidden while the RAG filter panel is open so it never sits behind it.
+     On a phone it covers the answer; there it lives in the user menu only. -->
 {#if $config?.features?.enable_feedback_report ?? false}
 	<button
 		type="button"
 		aria-label={$i18n.t('Send feedback')}
 		title={$i18n.t('Send feedback')}
 		on:click={openFeedback}
-		class="absolute bottom-3 right-3 z-20 flex items-center justify-center size-10 rounded-full bg-black hover:bg-gray-950 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 shadow-lg transition"
+		class="absolute bottom-3 right-3 z-20 hidden md:flex items-center justify-center size-10 rounded-full bg-black hover:bg-gray-950 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 shadow-lg transition"
 	>
 		<ChatBubbleOval className="size-5" strokeWidth="1.5" />
 	</button>
