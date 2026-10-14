@@ -37,6 +37,8 @@
 		newestFileVersionIndex,
 		loadPages
 	} from '$lib/utils/deliveredFile';
+	import ChevronDown from '../icons/ChevronDown.svelte';
+	import { groupDocuments } from '$lib/utils/documentGroups';
 
 	export let overlay = false;
 
@@ -95,14 +97,27 @@
 			toast.error($i18n.t('Failed to download file'));
 		}
 	};
+	let documentMenuOpen = false;
+
+	// Different documents are picked from the title menu; the arrows page through one document's versions.
+	$: groups = groupDocuments(contents);
+	$: currentGroup = groups.find((group) => group.indices.includes($selectedDocumentIndex));
+	$: versions = currentGroup?.indices ?? [];
+	$: versionPosition = versions.indexOf($selectedDocumentIndex);
 	// [Gradient] A version switch closes the download menu; its options depend on the format.
-	$: ($selectedDocumentIndex, (downloadOpen = false));
+	$: ($selectedDocumentIndex, (downloadOpen = false), (documentMenuOpen = false));
 
 	function navigateContent(direction: 'prev' | 'next') {
-		$selectedDocumentIndex =
+		const position =
 			direction === 'prev'
-				? Math.max($selectedDocumentIndex - 1, 0)
-				: Math.min($selectedDocumentIndex + 1, contents.length - 1);
+				? Math.max(versionPosition - 1, 0)
+				: Math.min(versionPosition + 1, versions.length - 1);
+		$selectedDocumentIndex = versions[position] ?? $selectedDocumentIndex;
+	}
+
+	function selectDocument(indices: number[]) {
+		$selectedDocumentIndex = indices[indices.length - 1];
+		documentMenuOpen = false;
 	}
 
 	const sanitizeFilename = (name: string) => {
@@ -202,60 +217,95 @@
 			>
 				<div class="flex-1 flex items-center justify-between pr-1 min-w-0">
 					<div class="flex items-center space-x-2 min-w-0">
-						<div class="flex items-center gap-0.5 self-center min-w-fit" dir="ltr">
-							<button
-								class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition disabled:cursor-not-allowed"
-								on:click={() => navigateContent('prev')}
-								disabled={contents.length <= 1}
-								aria-label={$i18n.t('Previous')}
-							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-									stroke-width="2.5"
-									class="size-3.5"
+						{#if versions.length > 1}
+							<div class="flex items-center gap-0.5 self-center min-w-fit" dir="ltr">
+								<button
+									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition disabled:cursor-not-allowed"
+									on:click={() => navigateContent('prev')}
+									disabled={versionPosition <= 0}
+									aria-label={$i18n.t('Previous')}
 								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										d="M15.75 19.5 8.25 12l7.5-7.5"
-									/>
-								</svg>
-							</button>
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+										stroke-width="2.5"
+										class="size-3.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M15.75 19.5 8.25 12l7.5-7.5"
+										/>
+									</svg>
+								</button>
 
-							<div class="text-xs self-center dark:text-gray-100 min-w-fit">
-								{$i18n.t('Version {{selectedVersion}} of {{totalVersions}}', {
-									selectedVersion: $selectedDocumentIndex + 1,
-									totalVersions: contents.length
-								})}
+								<div class="text-xs self-center dark:text-gray-100 min-w-fit">
+									{$i18n.t('Version {{selectedVersion}} of {{totalVersions}}', {
+										selectedVersion: versionPosition + 1,
+										totalVersions: versions.length
+									})}
+								</div>
+
+								<button
+									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition disabled:cursor-not-allowed"
+									on:click={() => navigateContent('next')}
+									disabled={versionPosition >= versions.length - 1}
+									aria-label={$i18n.t('Next')}
+								>
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+										stroke-width="2.5"
+										class="size-3.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="m8.25 4.5 7.5 7.5-7.5 7.5"
+										/>
+									</svg>
+								</button>
 							</div>
+						{/if}
 
-							<button
-								class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition disabled:cursor-not-allowed"
-								on:click={() => navigateContent('next')}
-								disabled={contents.length <= 1}
-								aria-label={$i18n.t('Next')}
+						{#if groups.length > 1}
+							<Dropdown
+								bind:show={documentMenuOpen}
+								contentClass="select-none min-w-[240px] max-w-[min(28rem,90vw)] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-									stroke-width="2.5"
-									class="size-3.5"
+								<button
+									class="flex items-center gap-1 min-w-0 px-1.5 py-0.5 -mx-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition"
+									aria-label={$i18n.t('Switch document')}
+									title={current.title}
 								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										d="m8.25 4.5 7.5 7.5-7.5 7.5"
-									/>
-								</svg>
-							</button>
-						</div>
+									<span class="text-sm font-medium truncate text-gray-900 dark:text-white">
+										{current.title || $i18n.t('Document')}
+									</span>
+									<ChevronDown className="size-3 shrink-0" strokeWidth="2.5" />
+								</button>
 
-						{#if current.title}
+								<div slot="content">
+									{#each groups as group}
+										<button
+											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full text-left"
+											class:font-medium={group === currentGroup}
+											on:click={() => selectDocument(group.indices)}
+										>
+											<span class="flex-1 truncate">{group.title || $i18n.t('Document')}</span>
+											{#if group.indices.length > 1}
+												<span class="shrink-0 text-xs text-gray-500">
+													{$i18n.t('{{count}} versions', { count: group.indices.length })}
+												</span>
+											{/if}
+										</button>
+									{/each}
+								</div>
+							</Dropdown>
+						{:else if current.title}
 							<div
 								class="text-sm font-medium truncate text-gray-900 dark:text-white"
 								title={current.title}
