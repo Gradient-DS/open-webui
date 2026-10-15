@@ -73,8 +73,8 @@ async def env(identity_config, fake_api, monkeypatch):
         lambda **kwargs: original(transport=httpx.MockTransport(api.handle), **kwargs),
     )
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-        for user_id in ('alice', 'bob', 'oauth'):
-            user = await users.Users.insert_new_user(user_id, user_id, f'{user_id}@example.test', db=db)
+        for user_id, role in (('alice', 'admin'), ('bob', 'user'), ('oauth', 'user'), ('awaiting', 'pending')):
+            user = await users.Users.insert_new_user(user_id, user_id, f'{user_id}@example.test', role=role, db=db)
             assert user is not None
         oauth = await db.get(users.User, 'oauth')
         oauth.oauth = {'entra': {'sub': 'provider-sub'}}
@@ -94,12 +94,30 @@ async def env(identity_config, fake_api, monkeypatch):
                         {'principal_type': 'group', 'principal_id': group.id, 'permission': 'read'},
                         {'principal_type': 'group', 'principal_id': group.id, 'permission': 'write'},
                         {'principal_type': 'user', 'principal_id': 'bob', 'permission': 'read'},
+                        {'principal_type': 'user', 'principal_id': 'bob', 'permission': 'write'},
                     ],
                 ),
-                ('Public', 'bob', 'custom', [{'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}]),
+                (
+                    'Everyone',
+                    'bob',
+                    'local',
+                    [
+                        {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'},
+                        {'principal_type': 'user', 'principal_id': '*', 'permission': 'write'},
+                    ],
+                ),
                 ('Orphan', 'gone', 'local', []),
                 ('External', 'alice', 'local', []),
                 ('Deleted', 'alice', 'local', []),
+                (
+                    'Cloud',
+                    'alice',
+                    'onedrive',
+                    [
+                        {'principal_type': 'user', 'principal_id': '*', 'permission': 'write'},
+                        {'principal_type': 'group', 'principal_id': group.id, 'permission': 'read'},
+                    ],
+                ),
             ):
                 kb = await raw.insert_new_knowledge(
                     owner,
@@ -137,7 +155,7 @@ async def env(identity_config, fake_api, monkeypatch):
             assert statement.lstrip().upper().startswith('SELECT'), 'Migration attempted a SQL write'
 
         event.listen(engine.sync_engine, 'before_cursor_execute', read_only)
-        yield SimpleNamespace(db=db, api=api, kbs=kbs, group=group, empty=empty, identity=identity)
+        yield SimpleNamespace(db=db, api=api, kbs=kbs, cloud=kbs[5], group=group, empty=empty, identity=identity)
         event.remove(engine.sync_engine, 'before_cursor_execute', read_only)
     await engine.dispose()
 
@@ -151,8 +169,8 @@ async def run(env, *, dry_run=False):
 async def test_every_knowledge_base_becomes_a_collection_keyed_by_its_id(env):
     """All eligible KB types retain ids, names, descriptions, ACLs and owner attribution."""
     assert await run(env) == 0
-    assert set(env.api.collections) == {kb.id for kb in env.kbs[:3]}
-    for kb in env.kbs[:3]:
+    assert set(env.api.collections) == {kb.id for kb in [*env.kbs[:3], env.cloud]}
+    for kb in [*env.kbs[:3], env.cloud]:
         row = env.api.collections[kb.id]
         assert (row['name'], row['description']) == (kb.name, kb.description)
     row = env.api.collections[env.kbs[0].id]
@@ -160,10 +178,18 @@ async def test_every_knowledge_base_becomes_a_collection_keyed_by_its_id(env):
     assert row['principals'] == sorted(
         ['owui:service:webui', 'owui:user:alice', 'owui:user:bob', f'owui:group:{env.group.id}']
     )
-    assert row['writers'] == sorted(['owui:user:alice', f'owui:group:{env.group.id}'])
-    assert env.api.collections[env.kbs[1].id]['visibility'] == 'public'
+    assert row['writers'] == sorted(['owui:user:alice', 'owui:user:bob', f'owui:group:{env.group.id}'])
+    assert env.api.collections[env.kbs[1].id]['visibility'] == 'restricted'
+    assert 'platform:pseudo:owui' in env.api.collections[env.kbs[1].id]['principals']
+    assert 'platform:pseudo:owui' in env.api.collections[env.kbs[1].id]['writers']
+    assert env.api.collections[env.cloud.id]['source_kind'] == 'onedrive'
+    assert (
+        env.api.collections[env.cloud.id]['principals']
+        == env.api.collections[env.cloud.id]['writers']
+        == ['owui:user:alice']
+    )
     creates = [r for r in env.api.requests if r.url.path == '/v1/collections' and r.method == 'POST']
-    assert {r.headers['Idempotency-Key'] for r in creates} == {f'kb:{kb.id}' for kb in env.kbs[:3]}
+    assert {r.headers['Idempotency-Key'] for r in creates} == {f'kb:{kb.id}' for kb in [*env.kbs[:3], env.cloud]}
 
 
 @pytest.mark.asyncio
@@ -183,8 +209,8 @@ async def test_a_rerun_creates_nothing(env):
 
 
 @pytest.mark.asyncio
-async def test_every_user_gets_a_link_of_the_right_assurance(env):
-    """Local and OAuth users both use self-vouched OWUI refs without an IdP token."""
+async def test_only_eligible_users_get_a_link_of_the_right_assurance(env):
+    """Eligible local and OAuth users link; pending users never get a link."""
     assert await run(env) == 0
     assert env.api.links == {
         f'owui:user:{uid}': env.identity.platform_user_id(f'owui:user:{uid}') for uid in ('alice', 'bob', 'oauth')
@@ -280,7 +306,7 @@ async def test_external_and_deleted_knowledge_bases_are_skipped(env):
     """External metadata and soft deletion each exclude a KB from creation and reconciliation."""
     assert await run(env) == 0
     bodies = [json.loads(r.content) for r in env.api.requests if r.content and r.url.path == '/v1/collections']
-    assert all(body['key'] not in {kb.id for kb in env.kbs[3:]} for body in bodies)
+    assert all(body['key'] not in {kb.id for kb in env.kbs[3:5]} for body in bodies)
 
 
 @pytest.mark.asyncio
@@ -347,8 +373,36 @@ async def test_module_dry_run_preserves_sql_tables(env, tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert 'KB count: 3' in result.stdout
+    assert 'KB count: 4' in result.stdout
     assert '/folders' in result.stdout and 'reports/2026' not in result.stdout
     assert all(kb.id in result.stdout for kb in env.kbs[:3])
     with sqlite3.connect(database_path) as snapshot:
         assert list(snapshot.iterdump()) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('dry_run', [False, True])
+async def test_mapping_report_counts_original_grants_and_lists_dropped_cloud_grants(env, capsys, dry_run):
+    assert await run(env, dry_run=dry_run) == 0
+    output = capsys.readouterr().out
+    for mapping in ('everyone read', 'everyone write', 'user read', 'user write', 'group read', 'group write'):
+        assert f'4 directory: {mapping} 1' in output
+    assert '4 directory: dropped cloud grants 2' in output
+    assert '4 directory: skipped pending users 1' in output
+    assert f'{env.cloud.id}: dropped cloud grant user:*:write' in output
+    assert f'{env.cloud.id}: dropped cloud grant group:{env.group.id}:read' in output
+    planned = [json.loads(line) for line in output.splitlines() if line.startswith('{')]
+    assert not any(row.get('external_ref') == 'owui:user:awaiting' for row in planned)
+    assert 'owui:user:awaiting' not in env.api.links
+    if dry_run:
+        cloud = next(
+            row['body'] for row in planned if row['path'] == '/v1/collections' and row['body']['key'] == env.cloud.id
+        )
+        assert cloud['source_kind'] == 'onedrive'
+        assert cloud['principals'] == cloud['writers'] == []
+    else:
+        creates = [
+            json.loads(r.content) for r in env.api.requests if r.method == 'POST' and r.url.path == '/v1/collections'
+        ]
+        cloud = next(row for row in creates if row['key'] == env.cloud.id)
+        assert cloud['principals'] == cloud['writers'] == []

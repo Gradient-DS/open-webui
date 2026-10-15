@@ -224,3 +224,7 @@ Access changes commission one `PUT /access` job carrying readers and writers, re
 KB types come only from the collection's immutable `source_kind`, sent at create. Cloud collections omit the
 service reader. Without a content schedule, the view shows "Not connected", retry (where a browser provider
 adapter exists) and delete; Confluence has no browser picker adapter yet.
+
+Migration directory reports count the six original grant mappings, dropped cloud grants (listed by KB and
+principal), and skipped pending users. Only user/admin roles get links. Cloud KBs migrate with source_kind
+and no grants; reconciliation reads them as their owners because the service is not a cloud reader.

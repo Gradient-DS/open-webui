@@ -15,6 +15,12 @@ import sys
 import time
 from dataclasses import dataclass, field
 from urllib.parse import quote
+from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Sequence
+
+if TYPE_CHECKING:
+    from open_webui.models.access_grants import AccessGrantModel
+    from open_webui.models.knowledge import KnowledgeModel
+    from open_webui.soev.client import SoevClient
 
 # 1 is retried (soev-api unreachable, collection mismatch); 2 is bad input a retry cannot fix;
 # 75 (EX_TEMPFAIL) means ingest jobs are still running. The chart's Job fails fast only on 2.
@@ -79,7 +85,10 @@ async def _push_directory(users, groups, client, *, dry_run, db):
     from open_webui.models.users import Users
     from open_webui.soev import identity
 
+    print(f'4 directory: skipped pending users {sum(user.role == "pending" for user in users)}')
     for user in sorted(users, key=lambda user: user.id):
+        if user.role not in ('user', 'admin'):
+            continue
         ref = identity.external_ref(user)
         if dry_run:
             print(
@@ -110,46 +119,71 @@ async def _push_directory(users, groups, client, *, dry_run, db):
         )
 
 
+def _collection_grants(
+    kb: 'KnowledgeModel', grants: Sequence['AccessGrantModel'], counts: Dict[str, int]
+) -> List[dict]:
+    if kb.type in ('onedrive', 'google_drive', 'confluence'):
+        counts['dropped cloud grants'] += len(grants)
+        for grant in grants:
+            print(f'{kb.id}: dropped cloud grant {grant.principal_type}:{grant.principal_id}:{grant.permission}')
+        return []
+    for grant in grants:
+        kind = grant.principal_type
+        if kind not in ('user', 'group') or grant.permission not in ('read', 'write'):
+            continue
+        if grant.principal_id == '*':
+            if kind != 'user':
+                continue
+            kind = 'everyone'
+        counts[f'{kind} {grant.permission}'] += 1
+    return [grant.model_dump() for grant in grants]
+
+
 async def _create_collections(rows, users, grants, client, *, dry_run, db):
     from open_webui import config
+    from open_webui.models.knowledge import KnowledgeForm
     from open_webui.soev import projection
-    from open_webui.soev.client import SoevApiError
 
+    counts = {f'{kind} {permission}': 0 for kind in ('everyone', 'user', 'group') for permission in ('read', 'write')}
+    counts['dropped cloud grants'] = 0
     user_ids = {user.id for user in users}
     conflicts = set()
     for kb in rows:
-        acl = await grants.get_grants_by_resource('knowledge', kb.id, db=db)
-        visibility, readers, writers = projection.access_of(
-            [grant.model_dump() for grant in acl],
-            service_principal=config.SOEV_API_SERVICE_PRINCIPAL,
-        )
+        acl = _collection_grants(kb, await grants.get_grants_by_resource('knowledge', kb.id, db=db), counts)
+        form = KnowledgeForm(name=kb.name, description=kb.description, type=kb.type, access_grants=acl)
+        body = projection.collection_create_body(form, service_principal=config.SOEV_API_SERVICE_PRINCIPAL)
         owner = f'owui:user:{kb.user_id}' if kb.user_id in user_ids else None
         if owner is None:
             print(f'{kb.id}: owner missing, created without created_by')
-        try:
-            await _send(
-                client,
-                'POST',
-                '/v1/collections',
-                {
-                    'key': kb.id,
-                    'name': kb.name,
-                    'description': kb.description,
-                    'visibility': visibility,
-                    'principals': readers,
-                    'writers': writers,
-                },
-                key=f'kb:{kb.id}',
-                dry_run=dry_run,
-                as_user=owner,
-            )
-        except SoevApiError as error:
-            if error.status != 409:
-                raise
+        if not await _create_collection(kb.id, body, owner, client, dry_run=dry_run):
             conflicts.add(kb.id)
-            reason = 'collection_exists' if error.code == 'collection_exists' else 'collection create conflict'
-            print(f'{kb.id}: {reason} (409); not overwritten')
+    for mapping, count in counts.items():
+        print(f'4 directory: {mapping} {count}')
     return conflicts
+
+
+async def _create_collection(
+    key: str, body: dict, owner: Optional[str], client: 'SoevClient', *, dry_run: bool
+) -> bool:
+    from open_webui.soev.client import SoevApiError
+
+    try:
+        await _send(
+            client,
+            'POST',
+            '/v1/collections',
+            {'key': key, **body},
+            key=f'kb:{key}',
+            dry_run=dry_run,
+            as_user=owner,
+        )
+    except SoevApiError as error:
+        if error.status != 409:
+            raise
+        reason = 'collection_exists' if error.code == 'collection_exists' else 'collection create conflict'
+        print(f'{key}: {reason} (409); not overwritten')
+        return False
+    return True
 
 
 def _cloud_scope(provider, source):
@@ -261,6 +295,15 @@ async def _cloud_coverage(cloud_owners, client, *, dry_run):
     return {key: f'{"not read" if dry_run else int(key in scheduled)} / 1' for key in cloud_owners}
 
 
+async def _reconcile_collections(client: 'SoevClient', cloud_owners: Mapping[str, Optional[str]]) -> Dict[str, dict]:
+    collections = {row['key']: row async for row in client.pages('/v1/collections')}
+    for owner in sorted({owner for owner in cloud_owners.values() if owner is not None}):
+        async for row in client.pages('/v1/collections', as_user=owner):
+            if cloud_owners.get(row['key']) == owner:
+                collections[row['key']] = row
+    return collections
+
+
 async def reconcile(file_counts, client, *, conflicts, dry_run=False, cloud_owners=None):
     coverage = await _cloud_coverage(cloud_owners or {}, client, dry_run=dry_run)
     header = 'Collection | OWUI files | document_count | gap | KBs with a schedule / KBs of a cloud type'
@@ -270,7 +313,7 @@ async def reconcile(file_counts, client, *, conflicts, dry_run=False, cloud_owne
         for key, count in sorted(file_counts.items()):
             print(f'{key} | {count} | not read | not read | {coverage.get(key, "0 / 0")}')
         return 0
-    collections = {row['key']: row async for row in client.pages('/v1/collections')}
+    collections = await _reconcile_collections(client, cloud_owners or {})
     print(f'KB count: {len(file_counts)} | collection count: {len(collections)}')
     print(header)
     missing = set(file_counts) - collections.keys()
