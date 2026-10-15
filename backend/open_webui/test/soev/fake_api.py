@@ -402,7 +402,6 @@ class FakeSoevApi:
             'source_kind': body.get('source_kind', 'local'),
             'name': body['name'],
             'description': body.get('description'),
-            'source_kind': body.get('source_kind', 'local'),
             'schema_key': 'core',
             'embedder': 'recorded',
             'chunking': {},

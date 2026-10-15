@@ -47170,7 +47170,7 @@
     },
     "/api/v1/users/{user_id}": {
       "delete": {
-        "description": "Delete a user and optionally archive their data first.\n\n- archive_before_delete: If true, creates archive before deletion\n- archive_reason: Required if archive_before_delete is true\n- archive_retention_days: Custom retention period (uses default if not specified)",
+        "description": "Delete, transfer or archive resources before removing the account.",
         "operationId": "delete_user_by_id_api_v1_users__user_id__delete",
         "parameters": [
           {
@@ -47180,6 +47180,60 @@
             "schema": {
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "delete",
+              "enum": [
+                "delete",
+                "transfer",
+                "archive"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "transfer_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Transfer To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm_shared_deletion",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Confirm Shared Deletion",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "never_delete",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Never Delete",
+              "type": "boolean"
             }
           },
           {
@@ -47215,6 +47269,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "exclusiveMinimum": 0,
                   "type": "integer"
                 },
                 {
@@ -47668,6 +47723,52 @@
           }
         ],
         "summary": "Get User Profile Image By Id",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/shared-data": {
+      "get": {
+        "description": "Return the item ids required to confirm deletion of shared resources.",
+        "operationId": "get_user_shared_data_api_v1_users__user_id__shared_data_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get User Shared Data",
         "tags": [
           "users"
         ]

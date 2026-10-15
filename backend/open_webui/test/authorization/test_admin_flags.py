@@ -194,7 +194,8 @@ def test_admin_reader_has_no_write_access(seeded, bypass, kind):
     method, path, _ = request_for(kind, 'read')
     response = seeded.client.request(method, path, headers=seeded.headers('admin'))
     assert response.status_code == 200, response.text
-    assert response.json()['write_access'] is bypass
+    # Knowledge write access is soev-api's caller decision, never the admin bypass.
+    assert response.json()['write_access'] is (bypass and kind != 'knowledge')
 
 
 @pytest.mark.parametrize('internal', [False, True])

@@ -48,7 +48,7 @@ MATRIX = [
     ('knowledge', 'read', 'DAAADDA', 'AAAADDA'),
     ('knowledge', 'update', 'DADADDD', 'AADADDD'),
     ('knowledge', 'delete', 'DADADDD', 'AADADDD'),
-    ('knowledge', 'share', 'DADADDD', 'AADADDD'),
+    ('knowledge', 'share', 'DADDDDD', 'DADDDDD'),  # Access changes are owner-only; writers edit content.
     ('skill', 'read', 'DAAADDA', 'AAAADDA'),
     ('skill', 'update', 'DADADDD', 'AADADDD'),
     ('skill', 'delete', 'DADADDD', 'AADADDD'),
