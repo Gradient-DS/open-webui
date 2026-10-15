@@ -199,3 +199,6 @@ including the initial message. Search statuses retain structured order/from/to/c
 options for English/Dutch rendering, including zero-result searches.
 
 PDF writer auto/required/off choices persist with composerPreferences in user settings and chat.features. Draft restoration restores text and files only; model defaults seed unsaved preferences.
+
+Platform API refusals reach HTTP clients through the `SoevApiError` handler in `main.py`.
+`soev/errors.py` selects fixed nl/en messages from `Accept-Language`; problem details are never echoed.

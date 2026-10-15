@@ -122,6 +122,8 @@ from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
 from open_webui.soev import capabilities, model_catalog
 from open_webui.soev.availability import SoevNotConfigured
+from open_webui.soev.client import SoevApiError
+from open_webui.soev.errors import problem_message
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -708,6 +710,20 @@ app.state.startup_complete = False
 @app.exception_handler(SoevNotConfigured)
 async def soev_not_configured_handler(request, exc: SoevNotConfigured):
     return JSONResponse(status_code=503, content={'detail': {'code': exc.code, 'detail': exc.detail}})
+
+
+@app.exception_handler(SoevApiError)
+async def soev_api_error_handler(request: Request, exc: SoevApiError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status,
+        content=build_http_error_body(
+            {
+                'code': exc.code,
+                'constraint': exc.constraint,
+                'detail': problem_message(exc, request.headers.get('accept-language', 'en')),
+            }
+        ),
+    )
 
 
 # [Gradient] Surface the OTel trace id on HTTP error responses so a feedback
