@@ -228,9 +228,9 @@ adapter exists) and delete; Confluence has no browser picker adapter yet.
 Migration directory reports count the six original grant mappings, dropped cloud grants (listed by KB and
 principal), and skipped pending users. Only user/admin roles get links. Cloud KBs migrate with source_kind
 and no grants; reconciliation reads them as their owners because the service is not a cloud reader.
-Role writes in `models/users.py` serialize with group reconciliation. Pending demotions unlink
-before committing; approvals queue failed links for backoff retry. `ensure_link` checks the current
-local role even for cached refs. Reconcile repairs eligible and pending users and known deleted refs;
+Role writes in `models/users.py` serialize with group reconciliation. Pending demotions first revoke
+cloud schedules/connections as the still-linked person, then unlink before committing. Approvals queue
+failed links for backoff retry. `ensure_link` checks the current local role even for cached refs. Reconcile repairs eligible and pending users and known deleted refs;
 the supplied platform contract has no link listing to discover otherwise unknown deleted users.
 
 `owui:group:admins-archive` is synthetic: `group_sync` derives its members from admin roles,
@@ -238,14 +238,17 @@ narrows before demotion/deletion, and retries promotions. Reconcile always repub
 
 Admin `DELETE /api/v1/users/{id}` accepts `mode=delete|transfer|archive`, `transfer_to`, and exact
 `confirm_shared_deletion` ids (listed by `GET /users/{id}/shared-data`). The existing checkbox sends
-`mode=archive`. `services/deletion/offboarding.py` revokes cloud custody as the departing person,
+`mode=archive`. `services/deletion/offboarding.py` revokes cloud custody as the linked departing person,
 narrows groups, disposes resources, unlinks, then commits local erasure/reassignment together.
 Cloud resources and memories are always deleted; chats never transfer. Archive snapshots retain a
 resource manifest and the configured retention; retries reuse it. Local archive grants are admin-read-only,
 and archive deletion/expiry removes the resources before dropping the snapshot. Retention edits publish
 the KB expiry before the local update. A failed remote step preserves local content/account rows.
 
-Spec gaps held for clarification: this checkout has no archive restore endpoint; no supplied API lists
-all identity links; a previously approved user demoted to pending cannot revoke cloud custody as a
-subject after unlinking, while pending users may not be linked. Pending offboarding therefore refuses
-before deletion. The plan's unlink-first order is superseded by spec §10's revoke-before-unlink order.
+Pending users have already lost cloud custody on demotion. Their offboarding skips subject revocation,
+uses service authority for collection inventory/disposition, and keeps group narrowing, unlinking and
+local erasure fail-closed. Demotion and offboarding share `soev/cloud_sync.revoke_cloud`.
+There is no archive restore endpoint; archived KBs return to a person through the collection ownership
+transfer path (`POST /v1/collections/{key}/owner`).
+The supplied platform contract has no link listing to discover otherwise unknown deleted users.
+The plan's unlink-first order is superseded by spec §10's revoke-before-unlink order.

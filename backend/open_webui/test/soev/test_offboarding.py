@@ -517,21 +517,181 @@ async def test_scim_deletion_does_not_erase_threads_before_shared_confirmation(m
 
 
 @pytest.mark.asyncio
-async def test_pending_offboarding_refuses_without_recreating_a_product_link(offboard_store, monkeypatch):
+@pytest.mark.parametrize('mode', ['delete', 'transfer', 'archive'])
+async def test_pending_offboarding_uses_service_without_recreating_a_link(offboard_store, monkeypatch, mode):
     from open_webui.models.users import Users
 
     store = offboard_store
     await Users.update_user_role_by_id('fern', 'pending', db=store.db)
-
-    async def local_user(ref, *, db=None):
-        return await Users.get_user_by_id(ref.removeprefix('owui:user:'), db=store.db)
-
-    monkeypatch.setattr(store.identity, 'user_of', local_user)
+    monkeypatch.setattr(
+        store.identity, 'ensure_link', AsyncMock(side_effect=AssertionError('Pending users stay unlinked'))
+    )
+    responses = [
+        httpx.Response(200, json={'data': list(store.api.collections.values()), 'next_cursor': None}),
+        httpx.Response(204),
+        httpx.Response(204 if mode == 'delete' else 200, json={}),
+        httpx.Response(204),
+    ]
     store.api.requests.clear()
-    with pytest.raises(store.identity.SoevApiError) as error:
+
+    def handle(request):
+        store.api.requests.append(request)
+        return responses.pop(0)
+
+    monkeypatch.setattr(store.api, 'handle', handle)
+    await store.module.offboard_user(
+        'fern',
+        actor_id='operator',
+        options=store.module.OffboardingOptions(mode=mode, transfer_to='lark' if mode == 'transfer' else None),
+        db=store.db,
+    )
+    assert not responses
+    assert all('X-Soev-Subject' not in request.headers for request in store.api.requests)
+    assert store.api.requests[0].url.path == '/v1/collections'
+    assert not any(request.url.path.startswith(('/v1/schedules', '/v1/connections')) for request in store.api.requests)
+    assert store.api.requests[-1].url.path.startswith('/v1/identity/links/')
+    assert await store.db.get(store.classes[0], 'fern') is None
+    model = await store.db.get(store.classes[1], 'assistant')
+    if mode == 'delete':
+        assert model is None
+    else:
+        assert model.user_id == ('lark' if mode == 'transfer' else 'platform:svc:archive-owui')
+
+
+async def seed_cloud_custody(store):
+    client = store.identity.build_client()
+    connection = await client.send(
+        'POST',
+        '/v1/connections',
+        {'source_kind': 'onedrive', 'credential_kind': 'user_oauth'},
+        as_user='owui:user:fern',
+        idempotency_key='connection:fern',
+    )
+    schedule = await client.send(
+        'POST',
+        '/v1/schedules',
+        {'connection_id': connection['id'], 'collection_key': 'cloud', 'kind': 'content'},
+        as_user='owui:user:fern',
+        idempotency_key='schedule:fern',
+    )
+    return connection['id'], schedule['id']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('role', ['user', 'admin'])
+@pytest.mark.parametrize('method', ['role', 'update'])
+async def test_demotion_revokes_cloud_before_unlink_and_role_commit(offboard_store, monkeypatch, role, method):
+    from open_webui.models.users import Users
+    from open_webui.test.soev.test_identity import claims
+
+    store = offboard_store
+    await Users.update_user_role_by_id('fern', role, db=store.db)
+    connection_id, schedule_id = await seed_cloud_custody(store)
+    store.api.requests.clear()
+    original = store.api.handle
+    observed_roles = []
+
+    async def handle(request):
+        observed_roles.append((await Users.get_user_by_id('fern', db=store.db)).role)
+        return original(request)
+
+    monkeypatch.setattr(store.api, 'handle', handle)
+    if method == 'role':
+        await Users.update_user_role_by_id('fern', 'pending', db=store.db)
+    else:
+        await Users.update_user_by_id('fern', {'role': 'pending', 'name': 'New name'}, db=store.db)
+    assert observed_roles and set(observed_roles) == {role}
+    assert store.api.requests[0].url.path == '/v1/schedules'
+    deletes = [request for request in store.api.requests if request.method == 'DELETE']
+    assert [request.url.path for request in deletes] == [
+        f'/v1/schedules/{schedule_id}',
+        f'/v1/connections/{connection_id}',
+        '/v1/identity/links/' + store.identity.platform_user_id('owui:user:fern'),
+    ]
+    assert all(claims(request.headers['X-Soev-Subject'])['sub'] == 'owui:user:fern' for request in deletes[:2])
+    assert 'X-Soev-Subject' not in deletes[-1].headers
+    assert connection_id not in store.api.connections
+    assert store.api.schedules[schedule_id]['subscribers'] == []
+    assert 'owui:user:fern' not in store.api.links
+    assert (await Users.get_user_by_id('fern', db=store.db)).role == 'pending'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['schedule', 'connection', 'unlink'])
+@pytest.mark.parametrize('role', ['user', 'admin'])
+async def test_demotion_revocation_failures_preserve_local_role_and_link(offboard_store, monkeypatch, failure, role):
+    from open_webui.models.users import Users
+
+    store = offboard_store
+    await Users.update_user_role_by_id('fern', role, db=store.db)
+    connection_id, schedule_id = await seed_cloud_custody(store)
+    original = store.api.handle
+    path = {
+        'schedule': f'/v1/schedules/{schedule_id}',
+        'connection': f'/v1/connections/{connection_id}',
+        'unlink': '/v1/identity/links/' + store.identity.platform_user_id('owui:user:fern'),
+    }[failure]
+    failed = []
+
+    def handle(request):
+        if request.method == 'DELETE' and request.url.path == path:
+            failed.append(request)
+            return httpx.Response(503, json={'code': 'service_unavailable'})
+        return original(request)
+
+    monkeypatch.setattr(store.api, 'handle', handle)
+    with pytest.raises(store.identity.SoevApiError):
+        await Users.update_user_by_id('fern', {'role': 'pending', 'name': 'New name'}, db=store.db)
+    assert failed
+    user = await Users.get_user_by_id('fern', db=store.db)
+    assert user.role == role and user.name == 'Fern'
+    assert 'owui:user:fern' in store.api.links
+    assert not any(request.url.path.startswith('/v1/identity/links/') for request in store.api.requests)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('step', ['inventory', 'groups', 'resources', 'unlink', 'local'])
+async def test_pending_offboarding_keeps_fail_closed_boundaries(offboard_store, monkeypatch, step):
+    from open_webui.models.groups import Groups
+    from open_webui.models.users import Users
+
+    store = offboard_store
+    await Users.update_user_role_by_id('fern', 'pending', db=store.db)
+    monkeypatch.setattr(
+        store.identity, 'ensure_link', AsyncMock(side_effect=AssertionError('Pending users stay unlinked'))
+    )
+    store.api.requests.clear()
+    failure = store.identity.SoevApiError(503, 'service_unavailable', 'Unavailable')
+    if step == 'groups':
+        monkeypatch.setattr(Groups, 'remove_user_from_all_groups', AsyncMock(side_effect=failure))
+    if step == 'local':
+        finalize = store.module.finalize_local
+
+        async def fail_after_staging(*args, **kwargs):
+            await finalize(*args, **kwargs)
+            raise failure
+
+        monkeypatch.setattr(store.module, 'finalize_local', fail_after_staging)
+
+    def handle(request):
+        store.api.requests.append(request)
+        path = request.url.path
+        if (
+            step == 'inventory'
+            or (step == 'resources' and request.method == 'DELETE' and path.startswith('/v1/collections/'))
+            or (step == 'unlink' and path.startswith('/v1/identity/links/'))
+        ):
+            return httpx.Response(503, json={'code': 'service_unavailable'})
+        if request.method == 'GET':
+            return httpx.Response(200, json={'data': list(store.api.collections.values()), 'next_cursor': None})
+        return httpx.Response(204)
+
+    monkeypatch.setattr(store.api, 'handle', handle)
+    with pytest.raises(store.identity.SoevApiError):
         await store.module.offboard_user(
             'fern', actor_id='operator', options=store.module.OffboardingOptions(), db=store.db
         )
-    assert error.value.constraint == 'identity:eligible_role'
-    assert store.api.requests == []
-    assert await store.db.get(store.classes[0], 'fern') is not None
+    assert all('X-Soev-Subject' not in request.headers for request in store.api.requests)
+    assert not any(request.url.path.startswith(('/v1/schedules', '/v1/connections')) for request in store.api.requests)
+    for cls, rid in zip(store.classes[:8], ['fern', 'assistant', 'prompt', 'tool', 'note', 'chat', 'memory', 'native']):
+        assert await store.db.get(cls, rid) is not None

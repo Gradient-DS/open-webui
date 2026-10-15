@@ -7,12 +7,17 @@ import httpx
 import pytest
 
 
+async def empty_cloud_pages(path, *, as_user):
+    for row in ():
+        yield row
+
+
 @pytest.mark.asyncio
 async def test_pending_user_cannot_link_even_if_cached(identity_config, monkeypatch):
     identity, _ = identity_config
     monkeypatch.setattr(identity, 'user_of', AsyncMock(return_value=SimpleNamespace(role='pending')))
     identity._linked_refs.add('owui:user:fern')
-    client = SimpleNamespace(send=AsyncMock())
+    client = SimpleNamespace(send=AsyncMock(), pages=empty_cloud_pages)
     with pytest.raises(identity.SoevApiError) as error:
         await identity.ensure_link('owui:user:fern', client)
     assert error.value.status == 403
@@ -42,7 +47,7 @@ async def test_demotion_failure_refuses_local_role_write(role_store, monkeypatch
     store = role_store
     await store.db.execute(__import__('sqlalchemy').text("UPDATE user SET role='user'"))
     await store.db.commit()
-    client = SimpleNamespace(send=AsyncMock(side_effect=httpx.ConnectError('offline')))
+    client = SimpleNamespace(send=AsyncMock(side_effect=httpx.ConnectError('offline')), pages=empty_cloud_pages)
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
     with pytest.raises(httpx.ConnectError):
         if method == 'role':
@@ -73,7 +78,7 @@ async def test_unlink_contract_and_cache_invalidation(identity_config, identity_
 @pytest.mark.parametrize('role', ['user', 'admin'])
 async def test_approval_links_and_demotion_unlinks(role_store, monkeypatch, role):
     store = role_store
-    client = SimpleNamespace(send=AsyncMock())
+    client = SimpleNamespace(send=AsyncMock(), pages=empty_cloud_pages)
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
     await store.users.update_user_role_by_id('fern', role, db=store.db)
     assert client.send.await_args_list[0].args[:2] == ('POST', '/v1/identity/links')

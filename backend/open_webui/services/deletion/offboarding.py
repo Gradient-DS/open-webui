@@ -18,7 +18,7 @@ from open_webui.services.deletion import offboarding_store as store
 from open_webui.soev import group_sync, identity, ingest
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
-from open_webui.soev.cloud_sync import CloudSync
+from open_webui.soev.cloud_sync import revoke_cloud
 from open_webui.soev.group_sync import ARCHIVE_OWNER
 
 
@@ -55,12 +55,16 @@ class Inventory:
 
 async def inventory(user_id: str, *, db: AsyncSession) -> Inventory:
     """List owned resources with the platform's principals and writers."""
-    ref = f'owui:user:{user_id}'
+    user = await Users.get_user_by_id(user_id, db=db)
+    if user is None:
+        raise SoevApiError(404, 'not_found', 'User not found')
+    ref = identity.external_ref(user)
+    as_user = ref if user.role in {'user', 'admin'} else None
     collections = []
     if configured():
         collections = [
             row
-            async for row in identity.build_client().pages('/v1/collections', as_user=ref)
+            async for row in identity.build_client().pages('/v1/collections', as_user=as_user)
             if row['created_by'] == ref
         ]
     shared = [
@@ -94,17 +98,18 @@ async def _offboard(
     if user is None:
         raise SoevApiError(404, 'not_found', 'User not found')
     await _validate_target(user_id, options, db=db)
-    if configured():
+    as_user = identity.external_ref(user) if user.role in {'user', 'admin'} else None
+    if configured() and as_user is not None:
         await identity.ensure_link(identity.external_ref(user), identity.build_client(), db=db)
     owned = await inventory(user_id, db=db)
     _confirm_deletion(owned, options, language)
     archive = await store.prepare_archive(user, actor_id=actor_id, options=options, owned=owned, db=db)
-    if configured():
-        await revoke_cloud(user_id)
+    if configured() and as_user is not None:
+        await revoke_cloud(user_id, client=identity.build_client())
     if not await Groups.remove_user_from_all_groups(user_id, db=db):
         raise SoevApiError(503, 'group_sync_unavailable', 'Group membership update failed')
     await store.narrow_owned_groups(user_id, db=db)
-    await apply_collections(owned, options=options, archive=archive)
+    await apply_collections(owned, options=options, archive=archive, as_user=as_user)
     await delete_external_user_data(user_id, options=options, db=db)
     if configured():
         await identity.unlink(identity.external_ref(user), identity.build_client())
@@ -142,19 +147,9 @@ def _confirm_deletion(owned: Inventory, options: OffboardingOptions, language: s
     )
 
 
-async def revoke_cloud(user_id: str) -> None:
-    """Unsubscribe each owned schedule and revoke connections using the person's assertion."""
-    client = identity.build_client()
-    cloud = CloudSync(client, f'owui:user:{user_id}')
-    schedules = [row async for row in client.pages('/v1/schedules', as_user=cloud.user_ref)]
-    for schedule in schedules:
-        for key in schedule['subscribers']:
-            await cloud.schedule_action(key, schedule['id'], 'delete')
-    for connection in await cloud.connections():
-        await cloud.revoke_connection(connection['id'])
-
-
-async def apply_collections(owned: Inventory, *, options: OffboardingOptions, archive: UserArchive | None) -> None:
+async def apply_collections(
+    owned: Inventory, *, options: OffboardingOptions, archive: UserArchive | None, as_user: str | None
+) -> None:
     """Delete cloud collections in every mode; move only local collection ownership."""
     if not configured():
         return
@@ -163,9 +158,7 @@ async def apply_collections(owned: Inventory, *, options: OffboardingOptions, ar
     for row in rows:
         path = f'/v1/collections/{quote(row["key"], safe="")}'
         if options.mode == 'delete' or row['source_kind'] != 'local':
-            await client.send(
-                'DELETE', path, None, as_user=row['created_by'], idempotency_key=f'offboard-delete:{row["key"]}'
-            )
+            await client.send('DELETE', path, None, as_user=as_user, idempotency_key=f'offboard-delete:{row["key"]}')
             continue
         body = {'owner': f'owui:user:{options.transfer_to}'}
         if options.mode == 'archive':
