@@ -6,12 +6,13 @@ import logging
 import time
 from collections import Counter
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from open_webui.models.recovery_codes import RecoveryCodes
-from open_webui.services.deletion import DeletionService
+from open_webui.services.deletion.offboarding import OffboardingOptions, inventory, offboard_user
+from open_webui.soev.client import SoevApiError
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
@@ -1046,23 +1047,35 @@ async def update_user_by_id(
 ############################
 
 
+@router.get('/{user_id}/shared-data')
+async def get_user_shared_data(
+    user_id: str,
+    user=Depends(get_admin_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Return the item ids required to confirm deletion of shared resources."""
+    if await Users.get_user_by_id(user_id, db=db) is None:
+        raise HTTPException(404, detail=ERROR_MESSAGES.USER_NOT_FOUND)
+    return {'items': (await inventory(user_id, db=db)).shared}
+
+
 @router.delete('/{user_id}', response_model=bool)
 async def delete_user_by_id(
     request: Request,
     user_id: str,
+    mode: Literal['delete', 'transfer', 'archive'] = Query('delete'),
+    transfer_to: str | None = Query(None),
+    confirm_shared_deletion: list[str] = Query([]),
+    never_delete: bool = Query(False),
     archive_before_delete: bool = Query(False),
     archive_reason: Optional[str] = Query(None),
-    archive_retention_days: Optional[int] = Query(None),
+    archive_retention_days: Optional[int] = Query(None, gt=0),
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """
-    Delete a user and optionally archive their data first.
-
-    - archive_before_delete: If true, creates archive before deletion
-    - archive_reason: Required if archive_before_delete is true
-    - archive_retention_days: Custom retention period (uses default if not specified)
-    """
+    """Delete, transfer or archive resources before removing the account."""
+    if mode == 'transfer' and transfer_to is None:
+        raise SoevApiError(422, 'invalid_field', 'Missing transfer target', constraint='offboarding:target')
     # Prevent deletion of the primary admin user
     try:
         first_user = await Users.get_first_user(db=db)
@@ -1081,30 +1094,22 @@ async def delete_user_by_id(
         )
 
     if user.id != user_id:
-        # [Gradient] Archive if requested before cascading user deletion.
-        if archive_before_delete:
-            from open_webui.services.archival import ArchiveService
-
-            if not archive_reason:
-                archive_reason = 'Admin deletion'
-
-            if await Config.get('admin.enable_user_archival'):
-                retention = archive_retention_days or await Config.get('admin.default_archive_retention_days')
-                archive_result = await ArchiveService.create_archive(
-                    user_id=user_id,
-                    archived_by=user.id,
-                    reason=archive_reason,
-                    retention_days=retention,
-                )
-                if not archive_result.success:
-                    log.warning(f'Failed to archive user before deletion: {archive_result.errors}')
-
-        # [Gradient] Delete through the GDPR cascade and disconnect live sessions.
-        report = await DeletionService.delete_user(user_id)
-        if report.has_errors:
-            log.warning(f'User deletion had errors: {report.errors}')
-
-        if report.total_db_records > 0:
+        count = await offboard_user(
+            user_id,
+            actor_id=user.id,
+            options=OffboardingOptions(
+                mode=mode,
+                transfer_to=transfer_to,
+                confirm_shared_deletion=confirm_shared_deletion,
+                archive_before_delete=archive_before_delete,
+                archive_reason=archive_reason or 'Admin deletion',
+                archive_retention_days=archive_retention_days,
+                never_delete=never_delete,
+            ),
+            db=db,
+            language=request.headers.get('accept-language', 'en'),
+        )
+        if count > 0:
             await disconnect_user_sessions(user_id)
             await publish_event(
                 request,

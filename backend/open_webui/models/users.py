@@ -763,20 +763,9 @@ class UsersTable:
             return UserModel.model_validate(user)
 
     async def delete_user_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
-        from open_webui.models.chats import Chats
-        from open_webui.models.groups import Groups
+        from open_webui.services.deletion.offboarding import OffboardingOptions, offboard_user
 
-        # Remove User from Groups
-        await Groups.remove_user_from_all_groups(id)
-
-        # Delete User Chats
-        async with get_async_db_context(db) as session:
-            deleted_chats = await Chats.delete_chats_by_user_id(id, db=session)
-            if not deleted_chats:
-                return False  # chats deletion failed
-            await session.execute(delete(User).where(User.id == id))
-            await session.commit()
-            return True
+        return bool(await offboard_user(id, actor_id='system:deletion', options=OffboardingOptions(), db=db))
 
     async def get_user_api_key_by_id(self, id: str, db: AsyncSession | None = None) -> str | None:
         async with get_async_db_context(db) as session:

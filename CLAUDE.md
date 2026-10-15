@@ -235,3 +235,17 @@ the supplied platform contract has no link listing to discover otherwise unknown
 
 `owui:group:admins-archive` is synthetic: `group_sync` derives its members from admin roles,
 narrows before demotion/deletion, and retries promotions. Reconcile always republishes it.
+
+Admin `DELETE /api/v1/users/{id}` accepts `mode=delete|transfer|archive`, `transfer_to`, and exact
+`confirm_shared_deletion` ids (listed by `GET /users/{id}/shared-data`). The existing checkbox sends
+`mode=archive`. `services/deletion/offboarding.py` revokes cloud custody as the departing person,
+narrows groups, disposes resources, unlinks, then commits local erasure/reassignment together.
+Cloud resources and memories are always deleted; chats never transfer. Archive snapshots retain a
+resource manifest and the configured retention; retries reuse it. Local archive grants are admin-read-only,
+and archive deletion/expiry removes the resources before dropping the snapshot. Retention edits publish
+the KB expiry before the local update. A failed remote step preserves local content/account rows.
+
+Spec gaps held for clarification: this checkout has no archive restore endpoint; no supplied API lists
+all identity links; a previously approved user demoted to pending cannot revoke cloud custody as a
+subject after unlinking, while pending users may not be linked. Pending offboarding therefore refuses
+before deletion. The plan's unlink-first order is superseded by spec §10's revoke-before-unlink order.

@@ -6,21 +6,20 @@ import datetime as dt
 import hashlib
 import json
 import logging
-from contextlib import asynccontextmanager
-from time import monotonic
 from collections.abc import AsyncIterator
-
-import httpx
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from functools import lru_cache
+from time import monotonic
 from uuid import UUID, uuid4, uuid5
 from weakref import WeakValueDictionary
 
+import httpx
 import jwt
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui import config
 from open_webui.models.users import UserModel, Users
@@ -33,6 +32,7 @@ log = logging.getLogger(__name__)
 OWUI_PLATFORM_NAMESPACE = UUID('ec855a67-541f-4b17-a7e2-0f8fbd09c47e')
 _linked_refs: set[str] = set()
 _pending_links: dict[str, tuple[float, int]] = {}
+_link_owner: ContextVar[tuple[asyncio.Task, str] | None] = ContextVar('soev_link_owner', default=None)
 _link_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
@@ -112,9 +112,24 @@ def mint_assertion(user_ref: str, *, now: dt.datetime) -> str:
     return f'{message}.{_base64url(key.sign(message.encode()))}'
 
 
+@asynccontextmanager
+async def link_lock(user_ref: str) -> AsyncIterator[None]:
+    """Keep role changes and offboarding ordered with ordinary first-link requests."""
+    owner = (asyncio.current_task(), user_ref)
+    if _link_owner.get() == owner:
+        yield
+        return
+    async with _link_locks.setdefault(user_ref, asyncio.Lock()):
+        token = _link_owner.set(owner)
+        try:
+            yield
+        finally:
+            _link_owner.reset(token)
+
+
 async def ensure_link(user_ref: str, client: SoevClient, *, db: AsyncSession | None = None) -> None:
     """Link an existing eligible user; cached links never bypass the role check."""
-    async with _link_locks.setdefault(user_ref, asyncio.Lock()):
+    async with link_lock(user_ref):
         user = await user_of(user_ref, db=db)
         if user is None or user.role not in {'user', 'admin'}:
             raise SoevApiError(
@@ -133,7 +148,7 @@ async def _ensure_link(user_ref: str, client: SoevClient) -> None:
             'platform_user_id': platform_user_id(user_ref),
             'assertion': mint_assertion(user_ref, now=dt.datetime.now(dt.UTC)),
         },
-        idempotency_key=f'link:{user_ref}',
+        idempotency_key=f'link:{uuid4()}',
     )
     _linked_refs.add(user_ref)
     _pending_links.pop(user_ref, None)
@@ -141,7 +156,7 @@ async def _ensure_link(user_ref: str, client: SoevClient) -> None:
 
 async def unlink(user_ref: str, client: SoevClient) -> None:
     """Remove only the OWUI product link and invalidate successful-link caches."""
-    async with _link_locks.setdefault(user_ref, asyncio.Lock()):
+    async with link_lock(user_ref):
         await _unlink(user_ref, client)
 
 
@@ -192,7 +207,7 @@ async def role_change(user: UserModel, role: str, *, db: AsyncSession | None = N
     from open_webui.soev import group_sync
 
     ref = external_ref(user)
-    async with _link_locks.setdefault(ref, asyncio.Lock()):
+    async with link_lock(ref):
         if user.role == 'admin' and role != 'admin':
             await group_sync.narrow_admin(user.id, db=db)
         if role not in {'user', 'admin'}:

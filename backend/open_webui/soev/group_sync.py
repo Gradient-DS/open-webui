@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from functools import wraps
 from inspect import signature
 from time import monotonic
@@ -21,14 +22,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.soev.client import SoevApiError
 
 if TYPE_CHECKING:
-    from open_webui.models.groups import GroupTable
+    from open_webui.models.groups import GroupModel, GroupTable
 
 P = ParamSpec('P')
 T = TypeVar('T')
 log = logging.getLogger(__name__)
 ADMIN_ARCHIVE_GROUP = 'admins-archive'
+ARCHIVE_OWNER = 'platform:svc:archive-owui'
 _LOCK_ID = 0x4F57554947525053
 _lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
+_membership_owner: ContextVar[asyncio.Task | None] = ContextVar('soev_membership_owner', default=None)
 _pending: dict[str, tuple[float, int]] = {}
 
 
@@ -38,18 +41,25 @@ async def membership_lock(db: AsyncSession | None = None) -> AsyncIterator[None]
     global _lock
     from open_webui.internal.db import async_engine
 
+    task = asyncio.current_task()
+    if _membership_owner.get() is task:
+        yield
+        return
     loop = asyncio.get_running_loop()
     if _lock is None or _lock[0] is not loop:
         _lock = (loop, asyncio.Lock())
     async with _lock[1]:
-        engine = db.bind if db is not None else async_engine
-        if engine.dialect.name != 'postgresql':
-            yield
-            return
-        # The separate transaction retains its lock across GroupTable's commits.
-        async with engine.begin() as connection:
-            await connection.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': _LOCK_ID})
-            yield
+        token = _membership_owner.set(task)
+        try:
+            engine = db.bind if db is not None else async_engine
+            if engine.dialect.name != 'postgresql':
+                yield
+                return
+            async with engine.begin() as connection:
+                await connection.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': _LOCK_ID})
+                yield
+        finally:
+            _membership_owner.reset(token)
 
 
 def serialized(method: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
@@ -159,6 +169,11 @@ async def reconcile(table: GroupTable, *, db: AsyncSession | None = None) -> Non
         params = {'limit': 200}
         while True:
             page = await identity.build_client().get('/v1/directory/groups', params=params)
+            remote_members = {
+                member for row in page['groups'] for member in row['members'] if member.startswith('owui:user:')
+            }
+            for ref in remote_members - refs:
+                await identity.unlink(ref, identity.build_client())
             orphans = {
                 row['group'].removeprefix('owui:group:')
                 for row in page['groups']
@@ -189,6 +204,28 @@ async def narrow_admin(user_id: str, *, db: AsyncSession | None = None) -> None:
     ids = await admin_ids(db=db)
     if user_id in ids:
         await narrow(ADMIN_ARCHIVE_GROUP, [value for value in ids if value != user_id])
+
+
+async def archive_groups_for_users(user_ids: list[str], *, db: AsyncSession) -> dict[str, list[GroupModel]]:
+    """Expose the same synthetic admin membership to local resource read checks."""
+    from sqlalchemy import select
+
+    from open_webui import config
+    from open_webui.models.groups import GroupModel
+    from open_webui.models.users import User
+
+    if not config.SOEV_API_URL:
+        return {}
+    ids = (await db.execute(select(User.id).where(User.id.in_(user_ids), User.role == 'admin'))).scalars()
+    group = GroupModel(
+        id=ADMIN_ARCHIVE_GROUP,
+        user_id=ARCHIVE_OWNER,
+        name=ADMIN_ARCHIVE_GROUP,
+        description='',
+        created_at=0,
+        updated_at=0,
+    )
+    return {user_id: [group] for user_id in ids}
 
 
 async def _run() -> None:

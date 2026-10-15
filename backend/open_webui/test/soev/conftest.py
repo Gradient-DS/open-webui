@@ -111,3 +111,26 @@ def eligible_identity(identity_config, monkeypatch):
         )
 
     monkeypatch.setattr(identity, 'user_of', user_of)
+
+
+@pytest_asyncio.fixture
+async def role_store(identity_config, monkeypatch, platform_capabilities):
+    from types import SimpleNamespace
+
+    from open_webui.internal.db import Base
+    from open_webui.models.users import User, Users
+    from open_webui.soev import group_sync, identity
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    monkeypatch.setattr(group_sync, '_pending', {})
+
+    from open_webui.internal import db as database
+
+    monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
+    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    async with engine.begin() as conn:
+        await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[User.__table__]))
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        await Users.insert_new_user('fern', 'Fern', 'fern@example.invalid', db=db)
+        yield SimpleNamespace(db=db, users=Users, identity=identity)
+    await engine.dispose()

@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from open_webui.test.soev.test_link_lifecycle import role_store
 
 
 @pytest.mark.asyncio

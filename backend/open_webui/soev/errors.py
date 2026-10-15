@@ -3,6 +3,22 @@
 from open_webui.soev.client import SoevApiError
 
 _MESSAGES = {
+    ('policy_forbids', 'offboarding:in_progress'): (
+        'Resume the existing offboarding operation before changing its mode or target.',
+        'Hervat de bestaande uitdiensttreding voordat je de modus of het overdrachtsdoel wijzigt.',
+    ),
+    ('invalid_field', 'offboarding:target'): (
+        'Choose another approved user as the transfer target.',
+        'Kies een andere goedgekeurde gebruiker als overdrachtsdoel.',
+    ),
+    ('policy_forbids', 'offboarding:archive_disabled'): (
+        'User archival is not enabled.',
+        'Het archiveren van gebruikers is niet ingeschakeld.',
+    ),
+    ('scope_insufficient', 'identity:eligible_role'): (
+        'Only approved users can connect to the platform.',
+        'Alleen goedgekeurde gebruikers kunnen verbinding maken met het platform.',
+    ),
     ('scope_insufficient', 'collection:access_owner'): (
         'Only the owner can change access to this knowledge base.',
         'Alleen de eigenaar kan de toegang tot deze kennisbank wijzigen.',
@@ -25,4 +41,13 @@ _GENERIC = (
 def problem_message(error: SoevApiError, language: str) -> str:
     """Select a fixed English or Dutch message without reading the problem detail."""
     messages = _MESSAGES.get((error.code, error.constraint), _GENERIC)
+    return messages[1 if language.lower().startswith('nl') else 0]
+
+
+def shared_deletion_message(language: str) -> str:
+    """Describe the confirmation requirement without exposing private item names."""
+    messages = (
+        'Confirm deletion of every shared item before deleting this user.',
+        'Bevestig de verwijdering van elk gedeeld item voordat je deze gebruiker verwijdert.',
+    )
     return messages[1 if language.lower().startswith('nl') else 0]

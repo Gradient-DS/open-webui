@@ -204,6 +204,19 @@ class FakeSoevApi:
     def _route(self, request: httpx.Request, body: dict | None, credential: str, subject: str | None) -> httpx.Response:
         if request.url.path.startswith('/v1/chat/threads'):
             return self.chat.handle(request, body, (credential, subject))
+        if request.url.path == '/v1/connections' and request.method == 'GET':
+            return self._page([row for row in self.connections.values() if row['owner'] == subject], request)
+        parts = request.url.path.strip('/').split('/')
+        if len(parts) == 3 and parts[:2] == ['v1', 'connections'] and request.method == 'DELETE':
+            self.connections.pop(parts[2], None)
+            return httpx.Response(204)
+        if len(parts) == 3 and parts[:2] == ['v1', 'schedules']:
+            schedule = self.schedules[parts[2]]
+            if request.method == 'GET':
+                return httpx.Response(200, json=schedule)
+            if request.method == 'DELETE':
+                schedule['subscribers'].remove(request.url.params['collection_key'])
+                return httpx.Response(204)
         if request.url.path == '/v1/sync-policy' and request.method == 'GET':
             return httpx.Response(200, json={'min_cadence_minutes': self.min_cadence_minutes})
         if request.url.path in ('/v1/connections', '/v1/schedules') and request.method == 'POST':
@@ -237,6 +250,20 @@ class FakeSoevApi:
             return self._lookup_documents(request, credential, subject)
         if parts == ['v1', 'collections']:
             return self._collections(request, body, credential, subject)
+        return self._collection_catalog(request, parts, body, credential, subject)
+
+    def _collection_catalog(self, request, parts, body, credential, subject):
+        if len(parts) == 4 and parts[:2] == ['v1', 'collections'] and parts[3] == 'owner' and request.method == 'POST':
+            row = self.collections[parts[2]]
+            previous = row['created_by']
+            row['created_by'] = body['owner']
+            for field in ('principals', 'writers'):
+                row[field] = sorted((set(row[field]) - {previous}) | {body['owner']})
+            if 'readers' in body:
+                row['principals'] = body['readers']
+                row['writers'] = []
+            row['expires_at'] = body.get('expires_at')
+            return httpx.Response(200, json=copy.deepcopy(row))
         if parts[:2] != ['v1', 'collections'] or len(parts) < 3:
             raise Problem(404, 'route_not_found')
         key = parts[2]
@@ -372,6 +399,7 @@ class FakeSoevApi:
         self.creation_bodies[key] = copy.deepcopy((body, subject))
         row = {
             'key': key,
+            'source_kind': body.get('source_kind', 'local'),
             'name': body['name'],
             'description': body.get('description'),
             'source_kind': body.get('source_kind', 'local'),

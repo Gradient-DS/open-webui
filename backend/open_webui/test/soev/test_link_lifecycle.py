@@ -3,30 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pytest
-import pytest_asyncio
 import httpx
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-
-@pytest_asyncio.fixture
-async def role_store(identity_config, monkeypatch, platform_capabilities):
-    from open_webui.internal.db import Base
-    from open_webui.models.users import User, Users
-    from open_webui.soev import identity, group_sync
-
-    monkeypatch.setattr(group_sync, '_pending', {})
-
-    from open_webui.internal import db as database
-
-    monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
-    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
-    async with engine.begin() as conn:
-        await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[User.__table__]))
-    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-        await Users.insert_new_user('fern', 'Fern', 'fern@example.invalid', db=db)
-        yield SimpleNamespace(db=db, users=Users, identity=identity)
-    await engine.dispose()
+import pytest
 
 
 @pytest.mark.asyncio
@@ -125,3 +103,14 @@ async def test_reconcile_links_eligible_and_unlinks_pending_and_known_deleted(
     )
     for ref in ['owui:user:fern', 'owui:user:gone']:
         assert any(c.args[0] == 'DELETE' and store.identity.platform_user_id(ref) in c.args[1] for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_relink_after_unlink_uses_a_new_operation(identity_config, identity_http):
+    identity, _ = identity_config
+    requests, responses = identity_http
+    responses.extend([httpx.Response(204)] * 3)
+    await identity.ensure_link('owui:user:fern', identity.build_client())
+    await identity.unlink('owui:user:fern', identity.build_client())
+    await identity.ensure_link('owui:user:fern', identity.build_client())
+    assert requests[0].headers['Idempotency-Key'] != requests[2].headers['Idempotency-Key']
