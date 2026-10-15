@@ -189,13 +189,21 @@ async def role_change(user: UserModel, role: str, *, db: AsyncSession | None = N
     if not config.SOEV_API_URL or user.role == role:
         yield
         return
+    from open_webui.soev import group_sync
+
     ref = external_ref(user)
     async with _link_locks.setdefault(ref, asyncio.Lock()):
+        if user.role == 'admin' and role != 'admin':
+            await group_sync.narrow_admin(user.id, db=db)
         if role not in {'user', 'admin'}:
             await _unlink(ref, build_client())
         yield
     if role in {'user', 'admin'}:
         await publish_link(ref, build_client(), db=db)
+    if role == 'admin':
+        from open_webui.models.groups import Groups
+
+        await group_sync.publish(Groups, [group_sync.ADMIN_ARCHIVE_GROUP], db=db)
 
 
 async def acting_ref(user: UserModel, client: SoevClient) -> str:

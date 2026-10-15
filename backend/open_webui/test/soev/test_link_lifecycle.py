@@ -10,10 +10,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest_asyncio.fixture
-async def role_store(identity_config, monkeypatch):
+async def role_store(identity_config, monkeypatch, platform_capabilities):
     from open_webui.internal.db import Base
     from open_webui.models.users import User, Users
-    from open_webui.soev import identity
+    from open_webui.soev import identity, group_sync
+
+    monkeypatch.setattr(group_sync, '_pending', {})
 
     from open_webui.internal import db as database
 
@@ -98,7 +100,7 @@ async def test_approval_links_and_demotion_unlinks(role_store, monkeypatch, role
     await store.users.update_user_role_by_id('fern', role, db=store.db)
     assert client.send.await_args_list[0].args[:2] == ('POST', '/v1/identity/links')
     await store.users.update_user_role_by_id('fern', 'pending', db=store.db)
-    assert client.send.await_args_list[1].args[0] == 'DELETE'
+    assert any(c.args[0] == 'DELETE' for c in client.send.await_args_list)
     assert (await store.users.get_user_by_id('fern', db=store.db)).role == 'pending'
     assert 'owui:user:fern' not in store.identity._linked_refs
 

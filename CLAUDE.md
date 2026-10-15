@@ -232,3 +232,6 @@ Role writes in `models/users.py` serialize with group reconciliation. Pending de
 before committing; approvals queue failed links for backoff retry. `ensure_link` checks the current
 local role even for cached refs. Reconcile repairs eligible and pending users and known deleted refs;
 the supplied platform contract has no link listing to discover otherwise unknown deleted users.
+
+`owui:group:admins-archive` is synthetic: `group_sync` derives its members from admin roles,
+narrows before demotion/deletion, and retries promotions. Reconcile always republishes it.

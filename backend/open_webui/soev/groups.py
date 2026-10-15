@@ -51,6 +51,7 @@ class SoevGroupTable(GroupTable):
 
     @group_sync.serialized
     async def remove_user_from_all_groups(self, user_id: str, db: AsyncSession | None = None) -> bool:
+        await group_sync.narrow_admin(user_id, db=db)
         groups = await self.get_groups_by_member_id(user_id, db=db)
         await self._narrow_members(groups, {user_id}, db=db)
         return await super().remove_user_from_all_groups(user_id, db=db)

@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 P = ParamSpec('P')
 T = TypeVar('T')
 log = logging.getLogger(__name__)
+ADMIN_ARCHIVE_GROUP = 'admins-archive'
 _LOCK_ID = 0x4F57554947525053
 _lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
 _pending: dict[str, tuple[float, int]] = {}
@@ -149,7 +150,7 @@ async def reconcile(table: GroupTable, *, db: AsyncSession | None = None) -> Non
             else:
                 await identity.unlink(ref, identity.build_client())
         groups = await table.get_all_groups(db=db)
-        local_ids = {group.id for group in groups}
+        local_ids = {group.id for group in groups} | {ADMIN_ARCHIVE_GROUP}
         await publish(table, local_ids, db=db)
         if not await capabilities.has(capabilities.GROUPS_PUSH):
             if not capabilities.known():
@@ -170,8 +171,24 @@ async def reconcile(table: GroupTable, *, db: AsyncSession | None = None) -> Non
 
 
 async def _members(table: GroupTable, group_id: str, *, db: AsyncSession | None = None) -> list[str]:
+    if group_id == ADMIN_ARCHIVE_GROUP:
+        return await admin_ids(db=db)
     group = await table.get_group_by_id(group_id, db=db)
     return await table.get_group_user_ids_by_id(group_id, db=db) if group is not None else []
+
+
+async def admin_ids(*, db: AsyncSession | None = None) -> list[str]:
+    """Derive archive readers directly from the current local admin roles."""
+    from open_webui.models.users import Users
+
+    return sorted(user.id for user in (await Users.get_users(db=db))['users'] if user.role == 'admin')
+
+
+async def narrow_admin(user_id: str, *, db: AsyncSession | None = None) -> None:
+    """Remove archive readership before demoting or deleting an admin."""
+    ids = await admin_ids(db=db)
+    if user_id in ids:
+        await narrow(ADMIN_ARCHIVE_GROUP, [value for value in ids if value != user_id])
 
 
 async def _run() -> None:
