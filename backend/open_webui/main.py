@@ -579,6 +579,9 @@ async def lifespan(app: FastAPI):
 
     await capabilities.refresh()
     start_job_poller(app)
+    from open_webui.soev.group_sync import start_reconciler
+
+    start_reconciler(app)
 
     # [Gradient] Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
@@ -675,6 +678,8 @@ async def lifespan(app: FastAPI):
 
     app.state.periodic_usage_pool_cleanup.cancel()
     app.state.periodic_session_pool_cleanup.cancel()
+    app.state.soev_group_reconciler.cancel()
+    await app.state.soev_group_reconciler
     app.state.soev_job_poller.cancel()
     await app.state.soev_job_poller
 

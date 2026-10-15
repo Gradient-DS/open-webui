@@ -217,6 +217,16 @@ class FakeSoevApi:
             return httpx.Response(200, json={'data': copy.deepcopy(self.models)})
         if parts == ['v1', 'completions', 'task'] and request.method == 'POST':
             return self._task(request, body, credential, subject)
+        if parts == ['v1', 'directory', 'groups'] and request.method == 'GET':
+            rows = [{'group': ref, 'members': members} for ref, members in sorted(self.groups.items())]
+            limit = int(request.url.params.get('limit', 200))
+            assert 1 <= limit <= 500
+            limit = min(limit, self.page_size)
+            start = int(request.url.params.get('cursor', 0))
+            end = start + limit
+            return httpx.Response(
+                200, json={'groups': rows[start:end], 'next_cursor': str(end) if end < len(rows) else None}
+            )
         if parts[:2] == ['v1', 'identity'] or parts[:2] == ['v1', 'directory']:
             return self._identity(request.method, parts, body)
         if parts[:2] == ['v1', 'jobs']:

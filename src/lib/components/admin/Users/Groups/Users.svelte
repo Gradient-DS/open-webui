@@ -125,7 +125,7 @@
 		try {
 			const res = await getUsers(localStorage.token, query, orderBy, direction, page).catch(
 				(error) => {
-					toast.error(`${error}`);
+					toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
 					return null;
 				}
 			);
@@ -144,12 +144,12 @@
 
 		if (state === 'checked') {
 			res = await addUserToGroup(localStorage.token, groupId, [userId]).catch((error) => {
-				toast.error(`${error}`);
+				toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
 				return null;
 			});
 		} else {
 			res = await removeUserFromGroup(localStorage.token, groupId, [userId]).catch((error) => {
-				toast.error(`${error}`);
+				toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
 				return null;
 			});
 		}
@@ -198,7 +198,7 @@
 
 	const addUserIdToCurrentGroup = async (userId: string) =>
 		addUserToGroup(localStorage.token, groupId, [userId]).catch((error) => {
-			toast.error(`${error}`);
+			toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
 			return null;
 		});
 
@@ -238,7 +238,7 @@
 
 			await getUserList();
 		} catch (error) {
-			toast.error(`${error}`);
+			toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
 		} finally {
 			clearFileInput();
 			importing = false;

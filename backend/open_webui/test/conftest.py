@@ -52,6 +52,7 @@ def platform_capabilities(monkeypatch):
         return frozenset(enabled) if config.SOEV_API_URL else frozenset()
 
     monkeypatch.setattr(capabilities, 'refresh', refresh)
+    monkeypatch.setattr(capabilities, 'known', lambda: True)
     return enabled
 
 

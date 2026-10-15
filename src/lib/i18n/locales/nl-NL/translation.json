@@ -1659,6 +1659,7 @@
   "Group assigned to new users by default.": "",
   "Group created successfully": "Groep succesvol aangemaakt",
   "Group deleted successfully": "Groep succesvol verwijderd",
+  "Group membership could not be synchronized. Try again.": "Het groepslidmaatschap kon niet worden gesynchroniseerd. Probeer het opnieuw.",
   "Group multi-model responses into tabs.": "",
   "Group updated successfully": "Groep succesvol bijgewerkt",
   "Groups": "Groepen",
