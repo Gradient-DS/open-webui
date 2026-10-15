@@ -71,6 +71,7 @@ def collection_create_body(form: KnowledgeForm, *, service_principal: str) -> di
     return {
         'name': form.name,
         'description': form.description,
+        'source_kind': form.type,
         'visibility': visibility,
         'principals': readers,
         'writers': writers,
@@ -78,24 +79,21 @@ def collection_create_body(form: KnowledgeForm, *, service_principal: str) -> di
 
 
 def access_of(grants: list[dict], *, service_principal: str) -> tuple[str, list[str], list[str]]:
-    visibility = 'restricted'
     readers, writers = {service_principal}, set()
     for grant in grants:
         principal_type = grant.get('principal_type')
         principal_id = grant.get('principal_id')
         permission = grant.get('permission')
-        if principal_id == '*':
-            if permission == 'read':
-                visibility = 'public'
-            continue
         if principal_type not in ('user', 'group') or not principal_id:
             continue
-        ref = f'owui:{principal_type}:{principal_id}'
-        if permission == 'read':
+        if principal_id == '*' and principal_type != 'user':
+            continue
+        ref = 'platform:pseudo:owui' if principal_id == '*' else f'owui:{principal_type}:{principal_id}'
+        if permission in ('read', 'write'):
             readers.add(ref)
-        elif permission == 'write':
+        if permission == 'write':
             writers.add(ref)
-    return visibility, sorted(readers), sorted(writers)
+    return 'restricted', sorted(readers), sorted(writers)
 
 
 def grants_of(collection: dict, *, service_principal: str) -> list[AccessGrantModel]:
@@ -104,6 +102,9 @@ def grants_of(collection: dict, *, service_principal: str) -> list[AccessGrantMo
     for field, permission in (('principals', 'read'), ('writers', 'write')):
         for ref in collection[field]:
             if ref in excluded:
+                continue
+            if ref == 'platform:pseudo:owui':
+                identities.add(('user', '*', permission))
                 continue
             source, _, rest = ref.partition(':')
             principal_type, _, principal_id = rest.partition(':')

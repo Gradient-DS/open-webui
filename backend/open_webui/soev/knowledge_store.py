@@ -325,11 +325,15 @@ class SoevKnowledgeTable:
         )
         owner = current.get('created_by')
         owners = {owner} if owner else set()
-        body = {**(fields or {}), 'writers': sorted(set(writers) | owners)}
-        access = {'visibility': visibility, 'principals': sorted(set(readers) | owners)}
-        result = await self._send('PATCH', self._path(id), body)
+        access = {
+            'visibility': visibility,
+            'principals': sorted(set(readers) | owners),
+            'writers': sorted(set(writers) | owners),
+        }
         await self._send('PUT', self._path(id) + '/access', access)
-        return result
+        if fields:
+            return await self._send('PATCH', self._path(id), fields)
+        return await self._collection(id)
 
     async def update_knowledge_by_id(self, id, form_data, overwrite=False, db=None):
         body = {'name': form_data.name, 'description': form_data.description}

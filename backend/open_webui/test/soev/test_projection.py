@@ -125,13 +125,14 @@ def test_readers_always_include_the_service_principal(projection, grants):
     """Creation preserves form text and emits sorted unique ACLs with the service reader."""
     from open_webui.models.knowledge import KnowledgeForm
 
-    form = KnowledgeForm(name='Research', description='Notes', type='remote', access_grants=grants)
+    form = KnowledgeForm(name='Research', description='Notes', type='local', access_grants=grants)
     before = form.model_dump()
     readers = [SERVICE, 'owui:user:a', 'owui:user:z'] if grants else [SERVICE]
     assert projection.access_of(grants or [], service_principal=SERVICE) == ('restricted', readers, [])
     assert projection.collection_create_body(form, service_principal=SERVICE) == {
         'name': 'Research',
         'description': 'Notes',
+        'source_kind': 'local',
         'visibility': 'restricted',
         'principals': readers,
         'writers': [],
@@ -139,16 +140,44 @@ def test_readers_always_include_the_service_principal(projection, grants):
     assert form.model_dump() == before
 
 
-def test_a_wildcard_read_grant_becomes_public(projection, collection):
-    """Public read uses OWUI's user wildcard and never becomes an enumerated principal."""
-    grants = [{'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}] * 2
-    assert projection.access_of(grants, service_principal=SERVICE) == ('public', [SERVICE], [])
-    collection.update(visibility='public', principals=[SERVICE])
+@pytest.mark.parametrize(
+    'kind,identifier,permission,ref',
+    [
+        ('user', 'reader', 'read', 'owui:user:reader'),
+        ('user', 'writer', 'write', 'owui:user:writer'),
+        ('group', 'readers', 'read', 'owui:group:readers'),
+        ('group', 'writers', 'write', 'owui:group:writers'),
+        ('user', '*', 'read', 'platform:pseudo:owui'),
+        ('user', '*', 'write', 'platform:pseudo:owui'),
+    ],
+)
+def test_every_grant_shape_round_trips(projection, collection, kind, identifier, permission, ref):
+    grant = {'principal_type': kind, 'principal_id': identifier, 'permission': permission}
+    access = projection.access_of([grant, grant], service_principal=SERVICE)
+    assert access == ('restricted', sorted([SERVICE, ref]), [ref] if permission == 'write' else [])
+    visibility, readers, writers = access
+    collection.update(visibility=visibility, principals=readers, writers=writers)
     projected = projection.grants_of(collection, service_principal=SERVICE)
-    assert [(g.principal_type, g.principal_id, g.permission) for g in projected] == [('user', '*', 'read')]
-    assert projection.access_of([g.model_dump() for g in projected], service_principal=SERVICE) == (
-        'public',
-        [SERVICE],
+    permissions = {g.permission for g in projected if (g.principal_type, g.principal_id) == (kind, identifier)}
+    assert permissions == ({'read', 'write'} if permission == 'write' else {'read'})
+    assert projection.access_of([g.model_dump() for g in projected], service_principal=SERVICE) == access
+
+
+@pytest.mark.parametrize('permission', ['read', 'write'])
+def test_anyone_grants_stay_stripped(projection, permission):
+    assert projection.access_of(
+        [{'principal_type': 'anyone', 'principal_id': '*', 'permission': permission}],
+        service_principal=SERVICE,
+    ) == ('restricted', [SERVICE], [])
+
+
+def test_public_reads_as_everyone_but_is_never_emitted(projection, collection):
+    collection.update(visibility='public', principals=[SERVICE])
+    grants = projection.grants_of(collection, service_principal=SERVICE)
+    assert [(g.principal_type, g.principal_id, g.permission) for g in grants] == [('user', '*', 'read')]
+    assert projection.access_of([g.model_dump() for g in grants], service_principal=SERVICE) == (
+        'restricted',
+        sorted([SERVICE, 'platform:pseudo:owui']),
         [],
     )
 
@@ -184,8 +213,8 @@ def test_write_grants_become_writers_and_back(projection, collection):
     )
     assert projection.access_of(incoming, service_principal=service) == (
         'restricted',
-        ['owui:user:reader', service],
-        ['owui:user:writer'],
+        sorted(['owui:user:reader', 'owui:user:writer', service, 'platform:pseudo:owui']),
+        sorted(['owui:user:writer', 'platform:pseudo:owui']),
     )
     assert collection == before
 

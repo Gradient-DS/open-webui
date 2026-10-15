@@ -369,6 +369,7 @@ class FakeSoevApi:
             'key': key,
             'name': body['name'],
             'description': body.get('description'),
+            'source_kind': body.get('source_kind', 'local'),
             'schema_key': 'core',
             'embedder': 'recorded',
             'chunking': {},
@@ -390,13 +391,15 @@ class FakeSoevApi:
         if method == 'GET':
             return httpx.Response(200, json=self._view(row, subject))
         if method == 'PATCH':
-            if set(body) - {'name', 'description', 'tags', 'retention_days', 'writers'}:
+            if set(body) - {'name', 'description', 'tags', 'retention_days'}:
                 raise Problem(400, 'unknown_field')
             row.update(copy.deepcopy(body), updated_at=self.now)
             return httpx.Response(200, json=self._view(row, subject))
         if method == 'DELETE':
             return self._job('delete_collection', row['key'], credential)
         if method == 'PUT' and parts[-1] == 'access':
+            if set(body) != {'visibility', 'principals', 'writers'}:
+                raise Problem(422, 'invalid_field', 'request:schema')
             return self._job('update_collection_access', row['key'], credential, copy.deepcopy(body))
         raise Problem(404, 'route_not_found')
 

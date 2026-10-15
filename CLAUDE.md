@@ -218,3 +218,6 @@ The v2 migration uploads step includes explicit `file` entries from every model'
 using the model owner's attachments collection. Shared assistants still lack access to another owner's files.
 Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
 OWUI's init container owns schema upgrades. A timeout exits with a clear retry message.
+
+Knowledge grants project everyone to `platform:pseudo:owui`; writes explicitly include read access.
+Access changes commission one `PUT /access` job carrying readers and writers, retaining the owner in both.

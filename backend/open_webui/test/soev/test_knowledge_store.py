@@ -443,7 +443,7 @@ async def test_insert_sends_readers_writers_and_the_subject(env):
     result = await env.store.insert_new_knowledge('carol', form)
     assert result.user_id == 'carol'
     row = env.api.collections[result.id]
-    assert row['principals'] == [SERVICE, 'owui:user:carol']
+    assert row['principals'] == ['owui:group:staff', SERVICE, 'owui:user:carol']
     assert row['writers'] == ['owui:group:staff', 'owui:user:carol']
     relevant = [request for request in env.api.requests if request.method == 'POST']
     assert relevant[-2].url.path == '/v1/identity/links'
@@ -502,9 +502,9 @@ async def test_access_and_patch_replay_by_sorted_body(env):
     assert writes[0].headers['Idempotency-Key'] == writes[2].headers['Idempotency-Key']
     assert writes[1].headers['Idempotency-Key'] == writes[3].headers['Idempotency-Key']
     assert len(env.api.jobs) == 1
-    reversed_body = dict(reversed(list(json.loads(writes[0].content).items())))
+    reversed_body = dict(reversed(list(json.loads(writes[1].content).items())))
     await env.store._send('PATCH', '/v1/collections/kb', reversed_body)
-    assert env.api.requests[-1].headers['Idempotency-Key'] == writes[0].headers['Idempotency-Key']
+    assert env.api.requests[-1].headers['Idempotency-Key'] == writes[1].headers['Idempotency-Key']
     await env.store.update_knowledge_by_id('kb', form.model_copy(update={'name': 'Different'}))
     patches = [r for r in env.api.requests if r.method == 'PATCH']
     assert patches[-1].headers['Idempotency-Key'] != patches[0].headers['Idempotency-Key']
@@ -554,13 +554,15 @@ async def test_update_patches_and_regrants_through_the_access_job(env):
     finally:
         acting._acting_ref.reset(token)
     assert result.name == 'Renamed'
-    assert env.api.collections['kb']['writers'] == ['owui:user:alice', 'owui:user:bob']
+    assert env.api.collections['kb']['writers'] == ['owui:user:alice']
     assert env.api.collections['kb']['visibility'] == 'restricted'
     job = next(iter(env.api.jobs.values()))
     assert job['kind'] == 'update_collection_access' and job['status'] == 'QUEUED'
     assert all('X-Soev-Subject' in r.headers for r in env.api.requests if r.method in ('PATCH', 'PUT'))
     env.api.advance(job['job_id'], 'SUCCEEDED')
-    assert env.api.collections['kb']['visibility'] == 'public'
+    assert env.api.collections['kb']['visibility'] == 'restricted'
+    assert 'platform:pseudo:owui' in env.api.collections['kb']['principals']
+    assert env.api.collections['kb']['writers'] == ['owui:user:alice', 'owui:user:bob']
 
 
 @pytest.mark.asyncio
