@@ -267,6 +267,8 @@ async def ingest_uploads(*, concurrency: int, dry_run: bool = False, db=None, pr
     pending = []
     for owner, owned in sorted(_by_owner(files, linked, users, state, chat_ids, assistant_refs).items()):
         pending += await _check(owner, owned, client, state, dry_run=dry_run)
+    # One File row holds one job pointer: a file shared by several owners goes to the next owner on the next run.
+    pending = list({file.id: file for file in reversed(pending)}.values())[::-1]
     if pending:
         gate = asyncio.Semaphore(concurrency)
         progress = _Progress(len(pending), prefix)
