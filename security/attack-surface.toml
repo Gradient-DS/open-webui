@@ -723,9 +723,9 @@ backed_by = "soev-solutions"
 key = "cloud_knowledge"
 name = "knowledge_id"
 prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}"
-description = "Use a separate KB: subscribing makes it cloud-synced and must not change the ordinary KB's reset or file controls."
+description = "Use a separate KB, created as OneDrive: a KB's source kind is fixed at creation and only a matching, unshared KB may subscribe."
 via = "POST /api/v1/knowledge/create"
-body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture" }
+body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture", type = "onedrive" }
 extract = "id"
 actor = "admin"
 
