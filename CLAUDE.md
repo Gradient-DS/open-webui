@@ -221,3 +221,6 @@ OWUI's init container owns schema upgrades. A timeout exits with a clear retry m
 
 Knowledge grants project everyone to `platform:pseudo:owui`; writes explicitly include read access.
 Access changes commission one `PUT /access` job carrying readers and writers, retaining the owner in both.
+KB types come only from the collection's immutable `source_kind`, sent at create. Cloud collections omit the
+service reader. Without a content schedule, the view shows "Not connected", retry (where a browser provider
+adapter exists) and delete; Confluence has no browser picker adapter yet.

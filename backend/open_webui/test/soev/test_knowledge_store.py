@@ -314,22 +314,14 @@ def schedule(env, id, key, provider, *, kind='content', lifecycle='enabled', own
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
-@pytest.mark.parametrize('lifecycle', ['enabled', 'suspended', 'suspended:reauth', 'expired'])
-@pytest.mark.parametrize('subscriptions', [False, True])
-async def test_type_projects_the_schedules_provider(env, monkeypatch, provider, lifecycle, subscriptions):
-    """Subscriptions order providers; older API rows retain schedule-id ordering across pages."""
-    if not subscriptions:
-        view = env.api._view
-        monkeypatch.setattr(
-            env.api, '_view', lambda *args: {key: value for key, value in view(*args).items() if key != 'subscriptions'}
-        )
+@pytest.mark.parametrize('has_schedule', [False, True])
+async def test_cloud_type_survives_without_a_subscription(env, monkeypatch, provider, has_schedule):
     monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:alice')
+    env.api.collections['kb']['source_kind'] = provider
     await seed(env, 'local')
-    schedule(env, 'z-conflict', 'kb', 'google_drive')
-    schedule(env, 'a-content', 'kb', provider, lifecycle=lifecycle)
-    schedule(env, '0-acl', 'kb', 'acl-provider', kind='acl_refresh')
-    schedule(env, '0-revoked', 'kb', 'revoked-provider', lifecycle='revoked')
-    provider = min(provider, 'google_drive') if subscriptions else provider
+    if has_schedule:
+        schedule(env, 'source', 'kb', provider)
+    env.api.requests.clear()
     assert (await env.store.get_knowledge_by_id('kb')).type == provider
     assert (await env.store.get_knowledge_by_id_unfiltered('kb')).type == provider
     assert (await env.store.get_knowledge_by_id_and_user_id('kb', 'alice')).type == provider
@@ -338,97 +330,53 @@ async def test_type_projects_the_schedules_provider(env, monkeypatch, provider, 
     assert result.total == 1
     assert [row.id for row in await env.store.get_knowledge_bases_by_type(provider)] == ['kb']
     assert [row.id for row in await env.store.get_knowledge_bases_by_type('local')] == ['local']
-    assert [row.id for row in (await env.store.search_knowledge_bases('alice', {'type': 'local'})).items] == ['local']
     form = env.models.KnowledgeForm(name='Renamed', description='Notes')
     assert (await env.store.update_knowledge_by_id('kb', form)).type == provider
     env.api.add_document('kb', 'cloud-document')
     assert (await env.store.get_knowledge_by_file_id('cloud-document')).type == provider
-    assert await env.files.Files.get_file_by_id('cloud-document') is None
+    assert not any(request.url.path == '/v1/schedules' for request in env.api.requests)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('ineligible', ['absent', 'acl_refresh', 'revoked', 'other_collection'])
-async def test_type_is_local_without_a_schedule(env, ineligible):
-    """Only a non-revoked content schedule subscribed to this collection changes its local type."""
-    if ineligible != 'absent':
-        schedule(
-            env,
-            'ignored',
-            'other' if ineligible == 'other_collection' else 'kb',
-            'onedrive',
-            kind='acl_refresh' if ineligible == 'acl_refresh' else 'content',
-            lifecycle='revoked' if ineligible == 'revoked' else 'enabled',
-        )
-    result = await env.store.search_knowledge_bases('alice', {})
-    assert [(row.id, row.type) for row in result.items] == [('kb', 'local')]
+@pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
+async def test_cloud_creation_has_only_the_owner_and_retains_its_type(env, monkeypatch, provider):
+    form = env.models.KnowledgeForm(name='Atlas notes', description='Field research', type=provider, access_grants=[])
+    result = await env.store.insert_new_knowledge('carol', form)
+    row = env.api.collections[result.id]
+    assert row['source_kind'] == provider
+    assert row['principals'] == row['writers'] == ['owui:user:carol']
+    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:carol')
+    assert (await env.store.get_knowledge_by_id(result.id)).type == provider
+    creates = [r for r in env.api.requests if r.method == 'POST' and r.url.path == '/v1/collections']
+    assert json.loads(creates[0].content)['source_kind'] == provider
+    assert not any(request.url.path == '/v1/schedules' for request in env.api.requests)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('page_size', [1, 200])
-@pytest.mark.parametrize('subscriptions', [False, True])
 @pytest.mark.parametrize(
-    ('method', 'args', 'explicit_user'),
+    ('method', 'args'),
     [
-        ('get_knowledge_bases', (), False),
-        ('search_knowledge_bases', ('alice', {}), True),
-        ('get_knowledge_bases_by_type', ('onedrive',), False),
-        ('get_knowledge_bases_by_user_id', ('alice', 'read'), True),
-        ('get_knowledge_items_by_user_id', ('alice',), True),
-        ('get_knowledges_by_file_id', ('shared-document',), False),
+        ('get_knowledge_bases', ()),
+        ('search_knowledge_bases', ('alice', {})),
+        ('get_knowledge_bases_by_type', ('onedrive',)),
+        ('get_knowledge_bases_by_user_id', ('alice', 'read')),
+        ('get_knowledge_items_by_user_id', ('alice',)),
+        ('get_knowledges_by_file_id', ('shared-document',)),
     ],
 )
-async def test_a_listing_reads_schedules_once(env, monkeypatch, method, args, explicit_user, page_size, subscriptions):
-    """Listings skip schedules for subscribed rows, retaining one viewer-scoped traversal for older API rows."""
-    if not subscriptions:
-        view = env.api._view
-        monkeypatch.setattr(
-            env.api, '_view', lambda *args: {key: value for key, value in view(*args).items() if key != 'subscriptions'}
-        )
+async def test_listing_uses_source_kind_without_reading_schedules(env, monkeypatch, method, args, page_size):
     for key in ('second', 'third'):
         await seed(env, key)
     for key in ('kb', 'second', 'third'):
-        schedule(env, key, key, 'onedrive')
+        env.api.collections[key]['source_kind'] = 'onedrive'
         env.api.add_document(key, 'shared-document')
-    await env.identity.ensure_link('owui:user:bob', env.client)
-    schedule(env, 'foreign', 'kb', 'onedrive', owner='bob')
-    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:bob' if explicit_user else 'owui:user:alice')
-    env.api.capabilities['soev_test_cred-runtime_test-secret'] = {'connect'}
+    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:alice')
     env.api.page_size = page_size
     env.api.requests.clear()
     result = await getattr(env.store, method)(*args)
     rows = result.items if method == 'search_knowledge_bases' else result
     assert {(row.id, row.type) for row in rows} == {(key, 'onedrive') for key in ('kb', 'second', 'third')}
-    requests = [request for request in env.api.requests if request.url.path == '/v1/schedules']
-    assert len(requests) == (0 if subscriptions else 1 if page_size == 200 else 3)
-    if requests:
-        assert dict(requests[0].url.params) == {}
-    if requests and page_size == 1:
-        assert [dict(request.url.params) for request in requests[1:]] == [{'cursor': '1'}, {'cursor': '2'}]
-    for request in requests:
-        assert request.method == 'GET'
-        encoded = request.headers['X-Soev-Subject'].split('.')[1]
-        assert json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub'] == 'owui:user:alice'
-    assert not any(request.url.path.startswith('/v1/connections') for request in env.api.requests)
-
-
-@pytest.mark.asyncio
-async def test_co_writer_sees_subscriptions_without_owning_schedules(env, monkeypatch):
-    """A co-writer sees the same subscribed type and filters even though their schedule listing is empty."""
-    monkeypatch.setattr(env.module, 'acting_ref', lambda: 'owui:user:bob')
-    env.api.collections['kb']['principals'].append('owui:user:bob')
-    env.api.collections['kb']['writers'].append('owui:user:bob')
-    schedule(env, 'source', 'kb', 'onedrive')
-    assert await env.store._types(user_id='bob') == {}
-    env.api.requests.clear()
-    assert (await env.store.get_knowledge_by_id('kb')).type == 'onedrive'
-    assert (await env.store.get_knowledge_by_id_unfiltered('kb')).type == 'onedrive'
-    assert (await env.store.get_knowledge_by_id_and_user_id('kb', 'bob')).type == 'onedrive'
-    assert [(row.id, row.type) for row in await env.store.get_knowledge_bases()] == [('kb', 'onedrive')]
-    assert [row.id for row in await env.store.get_knowledge_bases_by_type('onedrive')] == ['kb']
-    assert await env.store.get_knowledge_bases_by_type('local') == []
-    assert (await env.store.search_knowledge_bases('bob', {'type': 'onedrive'})).total == 1
-    assert (await env.store.search_knowledge_bases('bob', {'type': 'local'})).total == 0
-    assert [(row.id, row.type) for row in await env.store.get_knowledge_bases_by_user_id('bob')] == [('kb', 'onedrive')]
     assert not any(request.url.path == '/v1/schedules' for request in env.api.requests)
 
 
@@ -1420,50 +1368,6 @@ async def test_reference_collections_overlap_and_preserve_order_and_errors(env, 
     assert sum(request.url.path == '/v1/collections/kb' for request in env.api.requests) == 1
     assert sum(request.url.path == '/v1/collections/other' for request in env.api.requests) == 1
     assert len(env.api.requests) == (3 if failure in (403, 503) else 4)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('owners_fail', [False, True])
-async def test_search_overlaps_owners_and_needed_schedules(env, monkeypatch, owners_fail):
-    import asyncio
-
-    from open_webui.soev.client import close_client
-
-    owners_started, schedules_started = asyncio.Event(), asyncio.Event()
-    handle = env.api.handle
-    owners = env.store._owners
-    owner_error = RuntimeError('owner lookup failed')
-
-    async def delayed(request):
-        response = handle(request)
-        if request.url.path == '/v1/schedules':
-            schedules_started.set()
-            await asyncio.wait_for(owners_started.wait(), timeout=2)
-            if owners_fail:
-                return httpx.Response(503)
-        return response
-
-    async def delayed_owners(rows):
-        owners_started.set()
-        await asyncio.wait_for(schedules_started.wait(), timeout=2)
-        if owners_fail:
-            raise owner_error
-        return await owners(rows)
-
-    await close_client()
-    monkeypatch.setattr(env.api, 'handle', delayed)
-    monkeypatch.setattr(env.store, '_owners', delayed_owners)
-    env.api.requests.clear()
-    if owners_fail:
-        with pytest.raises(RuntimeError) as error:
-            await env.store.search_knowledge_bases('alice', {})
-        assert error.value is owner_error
-    else:
-        result = await env.store.search_knowledge_bases('alice', {})
-        assert [(row.id, row.type) for row in result.items] == [('kb', 'local')]
-    assert owners_started.is_set() and schedules_started.is_set()
-    assert sum(request.url.path == '/v1/schedules' for request in env.api.requests) == 1
-    assert len(env.api.requests) == 4
 
 
 @pytest.mark.asyncio

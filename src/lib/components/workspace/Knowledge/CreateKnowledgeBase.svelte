@@ -18,14 +18,14 @@
 	export let modal = false;
 	/** @type {() => void | Promise<void>} */
 	export let onBack = () => goto('/workspace/knowledge');
-	/** @type {(knowledge: { id: string }) => void | Promise<void>} */
+	/** @type {(knowledge: { id: string; type: string }) => void | Promise<void>} */
 	export let onCreated = (res) => {
 		// [Gradient] Preserve provider auto-sync and assistant-builder return routes.
 		// Preserve returnTo (the builder's "New Knowledge" flow) for
 		// every type, alongside any provider auto-sync trigger, so the
 		// KB detail page can offer a "Back to assistant" return.
 		const params = new URLSearchParams();
-		const provider = providerFor(type);
+		const provider = providerFor(res.type);
 		if (provider) params.set(provider.startParam, 'true');
 		if (returnTo) {
 			params.set('returnTo', returnTo);

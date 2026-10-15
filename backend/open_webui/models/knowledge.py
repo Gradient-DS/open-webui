@@ -71,7 +71,7 @@ class KnowledgeModel(BaseModel):
 
     id: str
     user_id: str
-    # Cloud provider names are projections of soev-api content schedules.
+    # Cloud provider names come from the immutable collection source_kind.
     type: str = 'local'
 
     name: str
@@ -86,9 +86,9 @@ class KnowledgeModel(BaseModel):
     deleted_at: Optional[int] = None
 
 
-# [Gradient] Cloud types are projected from subscribed content schedules.
+# [Gradient] Cloud types stay synced even before the first subscription.
 def is_synced_kb(knowledge: KnowledgeModel) -> bool:
-    return knowledge.type in ('onedrive', 'google_drive')
+    return knowledge.type in ('onedrive', 'google_drive', 'confluence')
 
 
 class KnowledgeDirectory(Base):
