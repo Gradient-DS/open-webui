@@ -10,6 +10,12 @@
 # What remains is a route the sealed stack cannot reach without an external
 # system it deliberately lacks, or one a working guard keeps unseedable. Each
 # reason names what would close it.
+#
+# GET /api/v1/users/{user_id}/shared-data has no waiver: it is an admin-only
+# read of another user's shared KB/assistant ids and kinds, never content.
+# The disposable user seed also works without soev-api; local assistants remain
+# available, while the remote KB portion requires soev-api. Keep this route in
+# ordinary reads and crossuser admin-refusal checks, with no sharing allowance.
 
 # --- OAuth: the sealed stack has no identity provider ------------------------
 # Production runs OAuth login (multi-tenant Entra SSO, #291), so these are real

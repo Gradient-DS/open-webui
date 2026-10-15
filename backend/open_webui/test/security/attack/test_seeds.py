@@ -934,6 +934,7 @@ def test_model_registration_rejects_missing_read_access_or_wrong_model(body):
 LIVE_READS = [
     '/api/v1/meetings/{meeting_id}',
     '/api/v1/users/{user_id}',
+    '/api/v1/users/{user_id}/shared-data',
     '/api/v1/folders/{id}',
     '/api/v1/chats/{id}',
     '/api/v1/chats/share/{share_id}',
