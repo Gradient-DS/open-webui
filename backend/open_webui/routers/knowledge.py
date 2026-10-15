@@ -1227,6 +1227,13 @@ async def update_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
+    # [Gradient] Reject changed synced grants before filtering can silently discard them.
+    _assert_synced_grants_unchanged(knowledge, form_data.access_grants)
+    if knowledge.user_id != user.id:
+        if form_data.access_grants is not None and _grants_changed(knowledge, form_data.access_grants):
+            raise HTTPException(status_code=403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+        form_data.access_grants = None
+
     # Is the user the original creator, in a group with write access, or an admin
     if (
         knowledge.user_id != user.id
@@ -1246,9 +1253,7 @@ async def update_knowledge_by_id(
     # Prevent changing type after creation
     form_data.type = None  # Strip type from update form
 
-    # [Gradient] Reject changed synced grants before filtering can silently discard them.
-    _assert_synced_grants_unchanged(knowledge, form_data.access_grants)
-    if not is_synced_kb(knowledge):
+    if form_data.access_grants is not None and not is_synced_kb(knowledge):
         # Prevent access_grants changes on non-local KBs
         if knowledge.type != 'local':
             form_data.access_grants = knowledge.access_grants if hasattr(knowledge, 'access_grants') else []
@@ -1308,24 +1313,10 @@ async def update_knowledge_access_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if (
-        knowledge.user_id != user.id
-        and not await AccessGrants.has_access(
-            user_id=user.id,
-            resource_type='knowledge',
-            resource_id=knowledge.id,
-            permission='write',
-            db=db,
-        )
-        and not can_bypass_access_control(user)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
     # [Gradient] Equal synced grants pass through without permission filtering.
     _assert_synced_grants_unchanged(knowledge, form_data.access_grants)
+    if knowledge.user_id != user.id:
+        raise HTTPException(status_code=403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     if not is_synced_kb(knowledge):
         # Non-local knowledge bases (e.g. Confluence) are always private
         if knowledge.type != 'local':
@@ -1920,12 +1911,16 @@ async def remove_file_from_knowledge_by_id(
 
 
 # [Gradient] Compare grant meaning, ignoring row metadata and ordering.
+def _grants_changed(knowledge, requested: list[dict]) -> bool:
+    fields = ('principal_type', 'principal_id', 'permission')
+    stored = {tuple(getattr(grant, field) for field in fields) for grant in knowledge.access_grants}
+    return {tuple(grant.get(field) for field in fields) for grant in requested} != stored
+
+
 def _assert_synced_grants_unchanged(knowledge, requested: list[dict] | None) -> None:
     if not is_synced_kb(knowledge) or requested is None:
         return
-    fields = ('principal_type', 'principal_id', 'permission')
-    stored = {tuple(getattr(grant, field) for field in fields) for grant in knowledge.access_grants}
-    if {tuple(grant.get(field) for field in fields) for grant in requested} != stored:
+    if _grants_changed(knowledge, requested):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={'code': 'synced_kb_not_shareable'},

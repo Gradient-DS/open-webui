@@ -2023,6 +2023,7 @@
 			<AccessControlModal
 				bind:show={showAccessControlModal}
 				bind:accessGrants={knowledge.access_grants}
+				readOnly={knowledge.user_id !== $user?.id}
 				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
 				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
 				shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
@@ -2036,7 +2037,7 @@
 						);
 						toast.success($i18n.t('Saved'));
 					} catch (error) {
-						toast.error(`${error}`);
+						toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
 					}
 				}}
 				accessRoles={['read', 'write']}
@@ -2121,7 +2122,7 @@
 							</div>
 						</div>
 
-						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type || $config?.integration_providers?.[knowledge?.type])}
+						{#if knowledge?.type === 'local' || !knowledge?.type}
 							<div class="self-center shrink-0">
 								<AccessButton
 									on:click={() => {

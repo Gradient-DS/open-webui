@@ -51,3 +51,60 @@ def test_admin_bypass_defaults_off_even_with_legacy_content_setting():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize('route', ['update', 'access/update'])
+@pytest.mark.parametrize('role', ['user', 'admin'])
+def test_non_owner_cannot_change_grants(api, monkeypatch, route, role):
+    api.kb.type = 'local'
+    api.user.id, api.user.role = 'writer', role
+    monkeypatch.setattr(knowledge.AccessGrants, 'has_access', AsyncMock(return_value=True))
+    monkeypatch.setattr(knowledge, 'can_bypass_access_control', lambda user: True)
+    body = {'access_grants': [{'principal_type': 'user', 'principal_id': 'reader', 'permission': 'read'}]}
+    if route == 'update':
+        body.update(name='Revised', description='Notes')
+    result = api.browser.post('/knowledge/kb/' + route, json=body)
+    assert result.status_code == 403, result.text
+    api.writes.update.assert_not_awaited()
+    api.writes.grants.assert_not_awaited()
+
+
+@pytest.mark.parametrize('grants', ['omitted', None, []])
+def test_non_owner_writer_can_edit_content_without_an_access_write(api, monkeypatch, grants):
+    api.kb.type = 'local'
+    api.user.id = 'writer'
+    monkeypatch.setattr(knowledge.AccessGrants, 'has_access', AsyncMock(return_value=True))
+    body = {'name': 'Revised', 'description': 'Notes'}
+    if grants != 'omitted':
+        body['access_grants'] = grants
+    result = api.browser.post('/knowledge/kb/update', json=body)
+    assert result.status_code == 200, result.text
+    assert api.writes.update.await_args.kwargs['form_data'].access_grants is None
+    api.writes.filter.assert_not_awaited()
+
+
+@pytest.mark.parametrize('route', ['update', 'access/update'])
+def test_owner_can_change_access(api, route):
+    api.kb.type = 'local'
+    body = {'access_grants': [{'principal_type': 'user', 'principal_id': 'reader', 'permission': 'read'}]}
+    if route == 'update':
+        body.update(name='Revised', description='Notes')
+    result = api.browser.post('/knowledge/kb/' + route, json=body)
+    assert result.status_code == 200, result.text
+    api.writes.filter.assert_awaited_once()
+
+
+def test_non_owner_reader_gets_403_for_access_change(api, monkeypatch):
+    api.kb.type = 'local'
+    api.user.id = 'reader'
+    monkeypatch.setattr(knowledge.AccessGrants, 'has_access', AsyncMock(return_value=False))
+    result = api.browser.post(
+        '/knowledge/kb/update',
+        json={
+            'name': 'Revised',
+            'description': 'Notes',
+            'access_grants': [{'principal_type': 'user', 'principal_id': 'reader', 'permission': 'write'}],
+        },
+    )
+    assert result.status_code == 403
+    api.writes.update.assert_not_awaited()

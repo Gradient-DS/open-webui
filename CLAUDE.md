@@ -205,3 +205,6 @@ Platform API refusals reach HTTP clients through the `SoevApiError` handler in `
 
 `BYPASS_ADMIN_ACCESS_CONTROL` defaults to false independently of the legacy content-access setting.
 KB list/detail `write_access` uses the platform's caller write decision through `AccessGrants`.
+
+Knowledge sharing changes are owner-only. Writers can save content with omitted or unchanged grants;
+unchanged grants are stripped before persistence. The local KB access dialog is read-only for other users.
