@@ -551,6 +551,6 @@ async def test_reconciler_runs_at_startup_and_configured_interval(monkeypatch):
             raise asyncio.CancelledError
 
     monkeypatch.setattr(group_sync.asyncio, 'sleep', pause)
-    await group_sync._run()
+    await group_sync._run(asyncio.Event())
     assert reconciles.await_count == 2
     assert retries.await_count == 3
