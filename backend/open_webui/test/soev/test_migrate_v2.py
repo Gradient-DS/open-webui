@@ -123,6 +123,12 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
         await connection.run_sync(
             lambda sync: database.Base.metadata.create_all(sync, tables=[table.__table__ for table in tables])
         )
+    from open_webui.soev.migrate_state import schema_heads
+
+    async with engine.begin() as connection:
+        await connection.execute(sa.text('CREATE TABLE alembic_version (version_num TEXT PRIMARY KEY)'))
+        for head in schema_heads():
+            await connection.execute(sa.text('INSERT INTO alembic_version VALUES (:head)'), {'head': head})
     monkeypatch.setattr(database, 'AsyncSessionLocal', async_sessionmaker(engine, expire_on_commit=False))
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
     original = httpx.AsyncClient
@@ -285,15 +291,13 @@ async def test_restore_is_byte_for_byte_on_postgres_and_state_stays_outside_alem
 
 @pytest.mark.asyncio
 async def test_apply_leaves_the_alembic_version_and_adds_only_prefixed_tables(env):
-    async with env.engine.begin() as connection:
-        await connection.execute(sa.text('CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)'))
-        await connection.execute(sa.text(f"INSERT INTO alembic_version VALUES ('{ALEMBIC_VERSION}')"))
+    before_versions = await rows(env, 'SELECT version_num FROM alembic_version ORDER BY version_num')
     names = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
     before = {name for (name,) in await rows(env, names)}
     await env.module.apply(options(env))
     added = {name for (name,) in await rows(env, names)} - before
     assert added == {f'owui_v2_migration_{t}' for t in ('config_backup', 'migration_marker', 'model_id_backup')}
-    assert await rows(env, 'SELECT version_num FROM alembic_version') == [(ALEMBIC_VERSION,)]
+    assert await rows(env, 'SELECT version_num FROM alembic_version ORDER BY version_num') == before_versions
 
 
 async def config_value(env, key):
@@ -1115,11 +1119,11 @@ async def test_uploads_mode_ingests_each_attached_upload_as_its_owner_and_skips_
     assert (await file_meta(env, 'gone'))['collection_name'] == 'file-gone'
     assert (await file_meta(env, 'in-kb'))['collection_name'] == 'file-in-kb'
     output = capsys.readouterr().out
-    assert '5 chat uploads: 6 files attached in chats, 5 with a file row' in output
-    assert '5 chat uploads: knowledge base file 1, no file row 1, original missing 1, submitted 3' in output
-    assert '5 chat uploads: original missing, skipped alice/gone\n' in output
+    assert '5 uploads: 6 files attached in chats or assistants, 5 with a file row' in output
+    assert '5 uploads: knowledge base file 1, no file row 1, original missing 1, submitted 3' in output
+    assert '5 uploads: original missing, skipped alice/gone\n' in output
     assert '.pdf' not in output
-    assert 'chat uploads running 3 | chat uploads failed 0 | chat upload originals missing 1' in output
+    assert 'uploads running 3 | uploads failed 0 | upload originals missing 1' in output
 
 
 @pytest.mark.asyncio
@@ -1135,7 +1139,7 @@ async def test_an_uploads_rerun_submits_nothing_twice_and_ends_once_jobs_finish(
     assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 0
     assert job_posts(env) == []
     output = capsys.readouterr().out
-    assert 'ingested 3' in output and 'chat uploads running 0' in output
+    assert 'ingested 3' in output and 'uploads running 0' in output
 
 
 @pytest.mark.asyncio
@@ -1168,8 +1172,8 @@ async def test_an_upload_soev_api_refuses_is_reported_and_the_run_goes_on(env, m
     assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
     assert submitted_uploads(env) == [(ALICE, 'chat-level'), (BOB, 'bobs')]
     output = capsys.readouterr().out
-    assert '5 chat uploads: failed alice/loose: unsupported_media_type\n' in output
-    assert '5 chat uploads: failed 1 (unsupported_media_type 1)' in output
+    assert '5 uploads: failed alice/loose: unsupported_media_type\n' in output
+    assert '5 uploads: failed 1 (unsupported_media_type 1)' in output
     assert '.pdf' not in output
 
 
@@ -1181,8 +1185,8 @@ async def test_the_uploads_dry_run_reads_only_the_database(env, monkeypatch, cap
     assert await rows(env, 'SELECT * FROM file ORDER BY id') == before
     assert env.api.requests == []
     output = capsys.readouterr().out
-    assert '5 chat uploads: knowledge base file 1, no file row 1, to check 4' in output
-    assert '5 chat uploads: to check 1.0 MB' in output
+    assert '5 uploads: knowledge base file 1, no file row 1, to check 4' in output
+    assert '5 uploads: to check 1.0 MB' in output
 
 
 @pytest.mark.asyncio
@@ -1192,7 +1196,7 @@ async def test_the_full_apply_ingests_chat_uploads_too(env, monkeypatch, capsys)
     assert {(ALICE, 'loose'), (BOB, 'bobs')} <= set(submitted_uploads(env))
     await finish_jobs(env, monkeypatch)
     assert await env.module.apply(options(env)) == 0
-    assert 'chat uploads failed 0 | chat upload originals missing 1' in capsys.readouterr().out
+    assert 'uploads failed 0 | upload originals missing 1' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -1255,3 +1259,91 @@ def test_a_stored_ingest_error_is_reported_by_its_code_alone(error, code):
     from open_webui.soev.migrate_ingest import stored_code
 
     assert stored_code(SimpleNamespace(meta={'error': error}, data=None)) == code
+
+
+@pytest.mark.asyncio
+async def test_assistant_files_are_migrated_for_the_model_owner_and_rerunnable(env, monkeypatch):
+    await seed_uploads(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, name, params, meta, is_active, created_at, updated_at) '
+                'VALUES (:id, :owner, :name, :params, :meta, 1, 1, 1)'
+            ),
+            {
+                'id': 'field-guide',
+                'owner': 'alice',
+                'name': 'Field guide',
+                'params': '{}',
+                'meta': json.dumps(
+                    {
+                        'knowledge': [
+                            upload('quiet'),
+                            upload('quiet'),
+                            {'type': 'collection', 'id': 'not-a-file'},
+                            {'type': 'note', 'id': 'not-a-file'},
+                        ]
+                    }
+                ),
+            },
+        )
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
+    assert (ALICE, 'quiet') in submitted_uploads(env)
+    submitted = len(job_posts(env))
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
+    assert len(job_posts(env)) == submitted
+    await finish_jobs(env, monkeypatch)
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 0
+    assert len(job_posts(env)) == submitted
+
+
+@pytest.mark.asyncio
+async def test_assistant_file_targets_model_owner_instead_of_uploader(env, monkeypatch):
+    await seed_uploads(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, name, params, meta, is_active, created_at, updated_at) '
+                'VALUES (:id, :owner, :name, :params, :meta, 1, 1, 1)'
+            ),
+            {
+                'id': 'field-guide',
+                'owner': 'bob',
+                'name': 'Field guide',
+                'params': '{}',
+                'meta': json.dumps({'knowledge': [upload('quiet')]}),
+            },
+        )
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    assert (BOB, 'quiet') in submitted_uploads(env)
+    assert (ALICE, 'quiet') not in submitted_uploads(env)
+
+
+@pytest.mark.asyncio
+async def test_same_file_in_two_model_owners_collections_is_migrated_without_losing_jobs(env, monkeypatch):
+    await seed_uploads(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        for owner in ('alice', 'bob'):
+            await connection.execute(
+                sa.text(
+                    'INSERT INTO model (id, user_id, name, params, meta, is_active, created_at, updated_at) '
+                    'VALUES (:id, :owner, :name, :params, :meta, 1, 1, 1)'
+                ),
+                {
+                    'id': 'guide-' + owner,
+                    'owner': owner,
+                    'name': 'Field guide',
+                    'params': '{}',
+                    'meta': json.dumps({'knowledge': [upload('quiet')]}),
+                },
+            )
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    assert len([item for item in submitted_uploads(env) if item[1] == 'quiet']) == 1
+    await finish_jobs(env, monkeypatch)
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    await finish_jobs(env, monkeypatch)
+    assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 0
+    assert [(key, file_id) for key, file_id in submitted_uploads(env) if file_id == 'quiet'] == [
+        (ALICE, 'quiet'),
+        (BOB, 'quiet'),
+    ]

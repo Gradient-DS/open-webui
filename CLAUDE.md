@@ -213,3 +213,8 @@ unchanged grants are stripped before persistence. The local KB access dialog is 
 `soev/group_sync.py` serializes these operations, retries widening with backoff, and reconciles at startup
 and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15), clearing remote OWUI groups absent locally.
 Unknown capabilities refuse narrowing and queue widening. User-deletion callers must propagate group failures.
+
+The v2 migration uploads step includes explicit `file` entries from every model's `meta.knowledge`,
+using the model owner's attachments collection. Shared assistants still lack access to another owner's files.
+Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
+OWUI's init container owns schema upgrades. A timeout exits with a clear retry message.

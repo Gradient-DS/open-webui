@@ -17,7 +17,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from open_webui.soev.client import SoevApiError
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -59,6 +59,12 @@ async def env(identity_config, fake_api, monkeypatch):
                 ],
             )
         )
+    from open_webui.soev.migrate_state import schema_heads
+
+    async with engine.begin() as connection:
+        await connection.execute(text('CREATE TABLE alembic_version (version_num TEXT PRIMARY KEY)'))
+        for head in schema_heads():
+            await connection.execute(text('INSERT INTO alembic_version VALUES (:head)'), {'head': head})
     api = fake_api
     api.page_size = 1
     original = httpx.AsyncClient

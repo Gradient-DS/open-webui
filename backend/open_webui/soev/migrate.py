@@ -3,7 +3,7 @@
 python -m open_webui.soev.migrate --apply | --restore | --dry-run. The directory copy
 (identities, groups, collections, folders, cloud schedules) only reads OWUI tables.
 --models with --apply or --dry-run rewrites stored model ids alone, under its own id.
---uploads with --apply or --dry-run ingests only the chat uploads stored chats attach (step 5).
+--uploads with --apply or --dry-run ingests chat uploads and assistant files (step 5).
 """
 
 import argparse
@@ -448,8 +448,8 @@ def verdict(collections: int, ingest_state, memory_state, uploads_state) -> int:
     print(
         f'7 reconcile: collections {"ok" if not collections else "MISMATCH"} | ingest running {running}'
         f' | ingest failed {len(ingest_state.failures)} | memory vectors missing {memory_state.missing}'
-        f' | chat uploads failed {len(uploads_state.failures)}'
-        f' | chat upload originals missing {len(uploads_state.missing)}'
+        f' | uploads failed {len(uploads_state.failures)}'
+        f' | upload originals missing {len(uploads_state.missing)}'
     )
     if collections or memory_state.missing:
         return EXIT_FAILED
@@ -484,6 +484,7 @@ async def apply(options: Options, *, db=None) -> int:
     )
 
     async with get_async_db_context(db) as session:
+        await migrate_state.wait_for_schema(session)
         await migrate_state.ensure_tables(session)
         taken = await migrate_state.snapshot(session, options.migration_id, migrate_config.SNAPSHOT_KEYS)
         print(f'1 snapshot: {"taken" if taken else "kept"} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
@@ -506,7 +507,7 @@ async def apply(options: Options, *, db=None) -> int:
     ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
     _print_ingest(ingest_state, prefix='5 re-ingest')
     uploads_state = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, db=db)
-    _print_uploads(uploads_state, prefix='5 chat uploads')
+    _print_uploads(uploads_state, prefix='5 uploads')
     memory_state = await migrate_memories.reembed(db=db)
     _print_memories(memory_state, prefix='6 memories')
     deadline = time.monotonic() + options.wait_seconds
@@ -525,22 +526,22 @@ async def apply(options: Options, *, db=None) -> int:
         ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
         _print_ingest(ingest_state, prefix='5 re-ingest')
         uploads_state = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, db=db)
-        _print_uploads(uploads_state, prefix='5 chat uploads')
+        _print_uploads(uploads_state, prefix='5 uploads')
 
 
 async def apply_uploads(options: Options, *, db=None) -> int:
-    """Only the chat uploads of step 5, for a tenant migrated before the step existed: no config switch, model
+    """Only the uploads of step 5, for a tenant migrated before the step existed: no config switch, model
     ids, directory, KB re-ingest, memories or sign-out. 0 once every upload is ingested or terminally failed."""
     from open_webui.soev import migrate_uploads
 
     deadline = time.monotonic() + options.wait_seconds
     while True:
         state = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, db=db)
-        _print_uploads(state, prefix='5 chat uploads')
+        _print_uploads(state, prefix='5 uploads')
         running = _uploads_running(state)
         print(
-            f'7 reconcile: chat uploads running {running} | chat uploads failed {len(state.failures)}'
-            f' | chat upload originals missing {len(state.missing)}'
+            f'7 reconcile: uploads running {running} | uploads failed {len(state.failures)}'
+            f' | upload originals missing {len(state.missing)}'
         )
         if not running:
             return EXIT_OK
@@ -555,7 +556,7 @@ async def plan_uploads(options: Options, *, db=None) -> int:
     from open_webui.soev import migrate_uploads
 
     state = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, dry_run=True, db=db)
-    _print_uploads(state, prefix='5 chat uploads')
+    _print_uploads(state, prefix='5 uploads')
     return EXIT_OK
 
 
@@ -568,6 +569,7 @@ async def apply_models(options: Options, *, db=None) -> int:
     from open_webui.soev import migrate_config, migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
+        await migrate_state.wait_for_schema(session)
         await migrate_state.ensure_tables(session)
         keys = migrate_config.MODEL_ID_KEYS
         taken = await migrate_state.snapshot(session, options.migration_id, keys)
@@ -600,6 +602,7 @@ async def restore(migration_id: str, *, db=None) -> int:
     from open_webui.soev import migrate_models, migrate_state
 
     async with get_async_db_context(db) as session:
+        await migrate_state.wait_for_schema(session)
         restored = await migrate_state.restore_config(session, migration_id)
         report = await migrate_models.restore(session, migration_id)
         # The snapshot stays: it is the v1 state, and a later --apply switches again from it.
@@ -624,6 +627,7 @@ async def plan(options: Options, *, db=None) -> int:
     )
 
     async with get_async_db_context(db) as session:
+        await migrate_state.wait_for_schema(session)
         # A preview creates nothing, not even the state tables the first --apply creates.
         snapshotted = None
         if await migrate_state.tables_exist(session):
@@ -647,7 +651,7 @@ async def plan(options: Options, *, db=None) -> int:
     state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, dry_run=True, db=db)
     _print_ingest(state, prefix='5 re-ingest')
     uploads = await migrate_uploads.ingest_uploads(concurrency=options.ingest_concurrency, dry_run=True, db=db)
-    _print_uploads(uploads, prefix='5 chat uploads')
+    _print_uploads(uploads, prefix='5 uploads')
     _print_memories(await migrate_memories.reembed(dry_run=True, db=db), prefix='6 memories')
     print(f'8 sign-out: {"already done" if signed_out else "every user, after a successful apply"}')
     return await reconcile(
@@ -679,7 +683,7 @@ def main():
     only = parser.add_mutually_exclusive_group()
     only.add_argument('--models', action='store_true', help='With --apply or --dry-run: only rewrite model ids')
     only.add_argument(
-        '--uploads', action='store_true', help='With --apply or --dry-run: only ingest the uploads chats attach'
+        '--uploads', action='store_true', help='With --apply or --dry-run: only ingest chat uploads and assistant files'
     )
     parser.add_argument('--migration-id', help='Defaults to SOEV_V2_MIGRATION_ID')
     args = parser.parse_args()
@@ -687,9 +691,8 @@ def main():
         parser.error('--restore takes no --models: the migration id says what to undo')
     if args.uploads and args.restore:
         parser.error('--restore takes no --uploads: ingested uploads stay, and v1 never reads them')
-    if args.dry_run:
-        # Config otherwise runs schema migrations on import, which would write OWUI tables.
-        os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
+    # OWUI owns schema upgrades; this job waits for its Alembic head before step 1.
+    os.environ['ENABLE_DB_MIGRATIONS'] = 'false'
 
     import httpx
 
