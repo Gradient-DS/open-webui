@@ -660,9 +660,20 @@ def stored_texts(monkeypatch: pytest.MonkeyPatch) -> dict[str, SimpleNamespace]:
     'kind,item_id,text', [('note', 'n1', 'Note body'), ('chat', 'c1', 'user: Question\n\nassistant: Answer')]
 )
 @pytest.mark.parametrize('access', ['owner', 'admin', 'grant'])
+@pytest.mark.parametrize('bypass', [False, True])
 async def test_attached_texts_use_upstream_access_and_stored_titles(
-    chat: Chat, stored_texts: dict, monkeypatch: pytest.MonkeyPatch, kind: str, item_id: str, text: str, access: str
+    chat: Chat,
+    stored_texts: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    item_id: str,
+    text: str,
+    access: str,
+    bypass: bool,
 ) -> None:
+    from open_webui import config
+
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass)
     item = stored_texts[item_id]
     if access != 'owner':
         item.user_id = 'bob'
@@ -672,6 +683,16 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
         )
     agent_v2.AccessGrants.has_access.return_value = access == 'grant'
     chunks = await chat.turn('read', 'a1', files=[{'type': kind, 'id': item_id, 'name': 'Stale title'}])
+    if access == 'admin' and kind == 'note' and not bypass:
+        assert 'texts' not in chat.mutations()[-1][1]['input']
+        assert notices(chat)[0]['notices'] == ["Note 'Stale title' is not accessible and was skipped."]
+        agent_v2.AccessGrants.has_access.assert_awaited_once_with(
+            user_id='alice',
+            resource_type='note',
+            resource_id=item_id,
+            permission='read',
+        )
+        return
     assert not any('error' in chunk for chunk in chunks)
     assert chat.mutations()[-1][1]['input']['texts'] == [
         {'id': f'{kind}:{item_id}', 'kind': kind, 'title': item.title, 'text': text, 'length': len(text)}

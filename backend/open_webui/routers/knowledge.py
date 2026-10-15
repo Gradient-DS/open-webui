@@ -236,11 +236,7 @@ async def get_knowledge_bases(
             KnowledgeAccessResponse(
                 **knowledge_base.model_dump(exclude={'file_count'}),
                 file_count=file_counts.get(knowledge_base.id, 0),  # [Gradient] Caller-scoped count.
-                write_access=(
-                    user.id == knowledge_base.user_id
-                    or can_bypass_access_control(user)
-                    or knowledge_base.id in writable_knowledge_base_ids
-                ),
+                write_access=knowledge_base.id in writable_knowledge_base_ids,
             )
             for knowledge_base in result.items
         ],
@@ -307,11 +303,7 @@ async def search_knowledge_bases(
             KnowledgeAccessResponse(
                 **knowledge_base.model_dump(exclude={'file_count'}),
                 file_count=file_counts.get(knowledge_base.id, 0),  # [Gradient] Caller-scoped count.
-                write_access=(
-                    user.id == knowledge_base.user_id
-                    or can_bypass_access_control(user)
-                    or knowledge_base.id in writable_knowledge_base_ids
-                ),
+                write_access=knowledge_base.id in writable_knowledge_base_ids,
             )
             for knowledge_base in result.items
         ],
@@ -1191,9 +1183,7 @@ async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Asyn
             return KnowledgeFilesResponse(
                 **knowledge.model_dump(),
                 write_access=(
-                    user.id == knowledge.user_id
-                    or can_bypass_access_control(user)
-                    or await AccessGrants.has_access(
+                    await AccessGrants.has_access(
                         user_id=user.id,
                         resource_type='knowledge',
                         resource_id=knowledge.id,

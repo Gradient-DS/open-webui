@@ -202,3 +202,6 @@ PDF writer auto/required/off choices persist with composerPreferences in user se
 
 Platform API refusals reach HTTP clients through the `SoevApiError` handler in `main.py`.
 `soev/errors.py` selects fixed nl/en messages from `Accept-Language`; problem details are never echoed.
+
+`BYPASS_ADMIN_ACCESS_CONTROL` defaults to false independently of the legacy content-access setting.
+KB list/detail `write_access` uses the platform's caller write decision through `AccessGrants`.

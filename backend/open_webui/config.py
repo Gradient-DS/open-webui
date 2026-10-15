@@ -2122,13 +2122,7 @@ ENABLE_ADMIN_EXPORT = os.getenv('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
 
 ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS = os.getenv('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True').lower() == 'true'
 
-BYPASS_ADMIN_ACCESS_CONTROL = (
-    os.getenv(
-        'BYPASS_ADMIN_ACCESS_CONTROL',
-        os.getenv('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True'),
-    ).lower()
-    == 'true'
-)
+BYPASS_ADMIN_ACCESS_CONTROL = os.getenv('BYPASS_ADMIN_ACCESS_CONTROL', 'False').lower() == 'true'
 
 ENABLE_ADMIN_ANALYTICS = os.getenv('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
 
