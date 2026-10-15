@@ -54,11 +54,12 @@ def identity_config(monkeypatch, tmp_path):
     }.items():
         monkeypatch.setattr(identity.config, f'SOEV_API_{name}', value)
     monkeypatch.setattr(identity, '_linked_refs', set())
+    monkeypatch.setattr(identity, '_pending_links', {})
     return identity, key
 
 
 @pytest.fixture
-def fake_api(identity_config):
+def fake_api(identity_config, eligible_identity):
     """Register the declared credential and its public key under the JWK thumbprint."""
     from open_webui.test.soev.fake_api import FakeSoevApi
 
@@ -76,7 +77,7 @@ def fake_api(identity_config):
 
 
 @pytest.fixture
-def identity_http(monkeypatch):
+def identity_http(monkeypatch, eligible_identity):
     """Record requests and allow asynchronous responses without network access."""
     requests, responses = [], []
     original_client = httpx.AsyncClient
@@ -91,3 +92,22 @@ def identity_http(monkeypatch):
         lambda **kwargs: original_client(transport=httpx.MockTransport(handle), **kwargs),
     )
     return requests, responses
+
+
+@pytest.fixture
+def eligible_identity(identity_config, monkeypatch):
+    """HTTP contract tests act as existing, approved fictional local accounts."""
+    identity, _ = identity_config
+
+    async def user_of(ref, *, db=None):
+        return identity.UserModel(
+            id=ref.removeprefix('owui:user:'),
+            role='user',
+            email='person@example.invalid',
+            name='Person',
+            last_active_at=0,
+            updated_at=0,
+            created_at=0,
+        )
+
+    monkeypatch.setattr(identity, 'user_of', user_of)

@@ -121,7 +121,10 @@ async def publish(table: GroupTable, group_ids: Iterable[str], *, db: AsyncSessi
 async def retry_pending(table: GroupTable, *, now: float, db: AsyncSession | None = None) -> None:
     """Retry due groups using their current local membership, never a captured payload."""
     async with membership_lock(db):
+        from open_webui.soev import identity
+
         await publish(table, [group_id for group_id, (due, _) in _pending.items() if due <= now], db=db)
+        await identity.retry_links(now=now, db=db)
 
 
 async def reconcile(table: GroupTable, *, db: AsyncSession | None = None) -> None:
@@ -132,6 +135,19 @@ async def reconcile(table: GroupTable, *, db: AsyncSession | None = None) -> Non
     if not config.SOEV_API_URL:
         return
     async with membership_lock(db):
+        from open_webui.models.users import Users
+
+        users = (await Users.get_users(db=db))['users']
+        refs = {identity.external_ref(user) for user in users}
+        for ref in identity._linked_refs - refs:
+            await identity.unlink(ref, identity.build_client())
+        for user in users:
+            ref = identity.external_ref(user)
+            if user.role in {'user', 'admin'}:
+                identity._linked_refs.discard(ref)
+                await identity.publish_link(ref, identity.build_client(), db=db)
+            else:
+                await identity.unlink(ref, identity.build_client())
         groups = await table.get_all_groups(db=db)
         local_ids = {group.id for group in groups}
         await publish(table, local_ids, db=db)

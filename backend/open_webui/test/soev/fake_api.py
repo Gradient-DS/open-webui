@@ -343,6 +343,11 @@ class FakeSoevApi:
         return httpx.Response(200, json={'data': rows, 'next_cursor': None})
 
     def _identity(self, method, parts, body):
+        if len(parts) == 4 and parts[:3] == ['v1', 'identity', 'links'] and method == 'DELETE':
+            self.links = {
+                ref: uid for ref, uid in self.links.items() if uid != parts[3] or not ref.startswith('owui:user:')
+            }
+            return httpx.Response(204)
         if parts == ['v1', 'identity', 'links'] and method == 'POST':
             ref = self._assertion(body['assertion'])
             if not ref.startswith('owui:user:'):

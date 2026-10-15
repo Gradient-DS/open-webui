@@ -228,3 +228,7 @@ adapter exists) and delete; Confluence has no browser picker adapter yet.
 Migration directory reports count the six original grant mappings, dropped cloud grants (listed by KB and
 principal), and skipped pending users. Only user/admin roles get links. Cloud KBs migrate with source_kind
 and no grants; reconciliation reads them as their owners because the service is not a cloud reader.
+Role writes in `models/users.py` serialize with group reconciliation. Pending demotions unlink
+before committing; approvals queue failed links for backoff retry. `ensure_link` checks the current
+local role even for cached refs. Reconcile repairs eligible and pending users and known deleted refs;
+the supplied platform contract has no link listing to discover otherwise unknown deleted users.
