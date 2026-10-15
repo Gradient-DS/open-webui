@@ -157,7 +157,9 @@ async def apply_collections(
     rows = owned.collections if archive is None else archive.data['offboarding']['collections']
     for row in rows:
         path = f'/v1/collections/{quote(row["key"], safe="")}'
-        if options.mode == 'delete' or row['source_kind'] != 'local':
+        # Chat attachments are personal like chats: never handed to another person.
+        personal = ingest.is_attachments_collection(row['key'])
+        if options.mode == 'delete' or row['source_kind'] != 'local' or (options.mode == 'transfer' and personal):
             await client.send('DELETE', path, None, as_user=as_user, idempotency_key=f'offboard-delete:{row["key"]}')
             continue
         body = {'owner': f'owui:user:{options.transfer_to}'}

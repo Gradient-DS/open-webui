@@ -131,6 +131,35 @@ async def test_modes_move_or_delete_resources_then_unlink(offboard_store, mode):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(('mode', 'method'), [('transfer', 'DELETE'), ('archive', 'POST')])
+async def test_chat_attachments_are_never_transferred_to_another_person(offboard_store, mode, method):
+    """Transfer deletes the personal attachments collection; archive keeps it beside the chat snapshot."""
+    from open_webui.soev import ingest
+
+    store = offboard_store
+    key = ingest.attachments_collection_key('fern')
+    await store.identity.build_client().send(
+        'POST',
+        '/v1/collections',
+        {
+            'key': key,
+            'name': key,
+            'source_kind': 'local',
+            'visibility': 'restricted',
+            'principals': ['owui:user:fern'],
+            'writers': ['owui:user:fern'],
+        },
+        as_user='owui:user:fern',
+        idempotency_key='seed:' + key,
+    )
+    store.api.requests.clear()
+    options = store.module.OffboardingOptions(mode=mode, transfer_to='lark' if mode == 'transfer' else None)
+    await store.module.offboard_user('fern', actor_id='operator', options=options, db=store.db)
+    calls = [r for r in store.api.requests if key in r.url.path and r.method != 'GET']
+    assert [r.method for r in calls] == [method]
+
+
+@pytest.mark.asyncio
 async def test_shared_deletion_requires_exact_inventory(offboard_store):
     from fastapi import HTTPException
 
