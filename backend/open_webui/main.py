@@ -678,8 +678,9 @@ async def lifespan(app: FastAPI):
 
     app.state.periodic_usage_pool_cleanup.cancel()
     app.state.periodic_session_pool_cleanup.cancel()
-    app.state.soev_group_reconciler.cancel()
-    await app.state.soev_group_reconciler
+    from open_webui.soev.group_sync import stop_reconciler
+
+    await stop_reconciler(app)
     app.state.soev_job_poller.cancel()
     await app.state.soev_job_poller
 

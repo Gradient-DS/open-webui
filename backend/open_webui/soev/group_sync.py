@@ -228,13 +228,15 @@ async def archive_groups_for_users(user_ids: list[str], *, db: AsyncSession) -> 
     return {user_id: [group] for user_id in ids}
 
 
-async def _run() -> None:
+async def _run(stop: asyncio.Event) -> None:
     from open_webui import config
     from open_webui.models.groups import Groups
 
     next_reconcile = 0.0
     try:
-        while True:
+        # The flag, not only cancellation, ends the loop: a cancel swallowed inside a database or
+        # HTTP context must not keep the reconciler (and the app's shutdown) alive.
+        while not stop.is_set():
             try:
                 if monotonic() >= next_reconcile:
                     await reconcile(Groups)
@@ -250,4 +252,15 @@ async def _run() -> None:
 
 def start_reconciler(app: FastAPI) -> None:
     """Reconcile at startup, then periodically, with retries between full scans."""
-    app.state.soev_group_reconciler = asyncio.create_task(_run())
+    app.state.soev_group_reconciler_stop = asyncio.Event()
+    app.state.soev_group_reconciler = asyncio.create_task(_run(app.state.soev_group_reconciler_stop))
+
+
+async def stop_reconciler(app: FastAPI, *, timeout: float = 10.0) -> None:
+    """Stop the loop and wait a bounded time; shutdown never hangs on it."""
+    app.state.soev_group_reconciler_stop.set()
+    task = app.state.soev_group_reconciler
+    task.cancel()
+    done, _ = await asyncio.wait({task}, timeout=timeout)
+    if not done:
+        log.warning('soev group reconciler did not stop within %ss', timeout)
