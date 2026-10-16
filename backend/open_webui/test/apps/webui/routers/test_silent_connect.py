@@ -9,6 +9,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from open_webui.models.users import UserSettings
 from open_webui.routers import cloud_sync
 from open_webui.soev import silent_connect
 from open_webui.soev.client import SoevClient, close_client
@@ -47,7 +48,8 @@ def api(monkeypatch, platform_capabilities):
     settings: dict = {}
 
     async def get_user_by_id(user_id):
-        return SimpleNamespace(id=user_id, settings=dict(settings))
+        # The real column type: settings come back as a UserSettings model, not a dict.
+        return SimpleNamespace(id=user_id, settings=UserSettings(**settings) if settings else None)
 
     async def update_user_settings_by_id(user_id, updated):
         settings.update(updated)
