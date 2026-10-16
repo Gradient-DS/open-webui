@@ -171,6 +171,30 @@ async def test_inventory_links_an_approved_user_before_listing_as_them(offboard_
 
 
 @pytest.mark.asyncio
+async def test_a_shared_assistants_files_collection_is_listed_as_its_assistant_only(offboard_store):
+    from open_webui.soev import ingest
+
+    store = offboard_store
+    key = ingest.assistant_collection_key('assistant')
+    await store.identity.build_client().send(
+        'POST',
+        '/v1/collections',
+        {
+            'key': key,
+            'name': 'Assistant files',
+            'visibility': 'restricted',
+            'principals': ['owui:user:fern', 'owui:user:lark'],
+            'writers': ['owui:user:fern'],
+        },
+        as_user='owui:user:fern',
+        idempotency_key='seed:' + key,
+    )
+    owned = await store.module.inventory('fern', db=store.db)
+    assert key in {row['key'] for row in owned.collections}
+    assert key not in {item['id'] for item in owned.shared}
+
+
+@pytest.mark.asyncio
 async def test_shared_deletion_requires_exact_inventory(offboard_store):
     from fastapi import HTTPException
 

@@ -139,7 +139,13 @@ class SoevKnowledgeTable:
             self._pages('/v1/jobs', user_id=user_id, params={'status': 'RUNNING'}, as_service=as_service),
         )
         hidden = {job['collection_key'] for job in queued + running if job['kind'] == 'delete_collection'}
-        return [row for row in rows if row['key'] not in hidden and not ingest.is_attachments_collection(row['key'])]
+        return [
+            row
+            for row in rows
+            if row['key'] not in hidden
+            and not ingest.is_attachments_collection(row['key'])
+            and not ingest.is_assistant_collection(row['key'])
+        ]
 
     def _knowledge(self, row):
         return self._projection.knowledge_of(row, service_principal=self._service_principal) if row else None

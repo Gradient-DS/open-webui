@@ -899,6 +899,121 @@ async def test_attached_files_the_agent_cannot_read_are_left_out_with_a_notice(
     assert notices(chat)[-1] == {'notices': expected[language], 'removed': ['deleted']}
 
 
+def seed_assistant_collection(api: FakeSoevApi, model_id: str, *readers: str) -> str:
+    """The assistant's files collection, owned by bob and read by `readers` besides him and the service."""
+    key = ingest.assistant_collection_key(model_id)
+    seed_collection(api, key, 'Assistant files')
+    api.collections[key].update(
+        visibility='restricted',
+        principals=sorted({'owui:service:webui', 'owui:user:bob', *readers}),
+        writers=['owui:user:bob'],
+        created_by='owui:user:bob',
+    )
+    return key
+
+
+@pytest.mark.asyncio
+async def test_an_assistants_file_and_knowledge_base_both_reach_the_agent(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    key = seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
+    chat.api.add_document(key, 'af1', filename='handboek.txt')
+    stored_files(monkeypatch, af1='completed')
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        model_id='helper',
+        knowledge=[{'id': 'kb-a', 'type': 'collection'}, {'id': 'af1', 'type': 'file', 'name': 'handboek.txt'}],
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['knowledge'] == [{'key': 'kb-a', 'name': 'Contracten'}]
+    assert sent['attachments'] == [{'collection_key': key, 'file_id': 'af1', 'name': 'handboek.txt'}]
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
+async def test_a_shared_assistants_file_is_read_by_a_group_member_and_skipped_for_others(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bob owns the assistant and shares it with a group; alice reads its file through that group only."""
+    key = seed_assistant_collection(chat.api, 'helper', 'owui:group:juristen')
+    chat.api.add_document(key, 'af1', filename='handboek.txt')
+    stored_files(monkeypatch, af1='completed')
+    knowledge = [{'id': 'af1', 'type': 'file', 'name': 'handboek.txt'}]
+    chat.api.groups['owui:group:juristen'] = {'owui:user:alice'}
+    await chat.turn('question', 'a1', model_id='helper', knowledge=knowledge)
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': key, 'file_id': 'af1', 'name': 'handboek.txt'}
+    ]
+    chat.api.groups['owui:group:juristen'] = set()
+    await chat.turn('question', 'a2', model_id='helper', knowledge=knowledge)
+    assert 'attachments' not in chat.mutations()[-1][1]['input']
+    assert notices(chat)[-1] == {'notices': ["File 'handboek.txt' is not accessible and was skipped."], 'removed': []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'language,expected',
+    [
+        ('en-US', "File 'weg.txt' of this assistant no longer exists and was skipped."),
+        ('nl-NL', "Bestand 'weg.txt' van deze assistent bestaat niet meer en is overgeslagen."),
+    ],
+)
+async def test_a_deleted_assistant_file_gives_a_notice_and_stays_on_the_assistant(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, language: str, expected: str
+) -> None:
+    seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
+    stored_files(monkeypatch)
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        model_id='helper',
+        knowledge=[{'id': 'gone', 'type': 'file', 'name': 'weg.txt'}],
+        user_language=language,
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert 'attachments' not in sent
+    assert sent['text'] == 'question\n\nAttachment status:\nnot available, left out: weg.txt'
+    assert notices(chat) == [{'notices': [expected], 'removed': []}]
+
+
+@pytest.mark.asyncio
+async def test_an_assistant_file_not_yet_in_its_collection_is_skipped_as_processing_and_synced(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Saved before the sync landed it, or never migrated: the turn asks for a sync instead of failing."""
+    scheduled = []
+    monkeypatch.setattr(agent_v2.assistant_files, 'schedule', scheduled.append)
+    seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
+    stored_files(monkeypatch, new='completed')
+    await chat.turn('question', 'a1', model_id='helper', knowledge=[{'id': 'new', 'type': 'file', 'name': 'nieuw.txt'}])
+    sent = chat.mutations()[-1][1]['input']
+    assert 'attachments' not in sent
+    assert sent['text'] == 'question\n\nAttachment status:\nstill processing: nieuw.txt'
+    assert notices(chat)[-1]['notices'] == ["File 'nieuw.txt' is still being processed and was skipped this time."]
+    assert scheduled == ['helper']
+
+
+@pytest.mark.asyncio
+async def test_an_assistant_file_also_attached_in_the_chat_is_sent_once(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
+    chat.api.add_document(key, 'af1', filename='handboek.txt')
+    stored_files(monkeypatch, af1='completed')
+    await chat.turn(
+        'question',
+        'a1',
+        model_id='helper',
+        files=[{'type': 'file', 'id': 'af1', 'name': 'handboek.txt'}],
+        knowledge=[{'id': 'af1', 'type': 'file', 'name': 'handboek.txt'}],
+    )
+    assert [item['file_id'] for item in chat.mutations()[-1][1]['input']['attachments']] == ['af1']
+
+
 @pytest.mark.asyncio
 async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_instructions(chat: Chat) -> None:
     await chat.turn('question', 'a1', system_prompt='Je helpt behandelaars.', chat_system_prompt='Ik ben jurist.')

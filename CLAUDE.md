@@ -214,8 +214,13 @@ unchanged grants are stripped before persistence. The local KB access dialog is 
 and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15), clearing remote OWUI groups absent locally.
 Unknown capabilities refuse narrowing and queue widening. User-deletion callers must propagate group failures.
 
-The v2 migration uploads step includes explicit `file` entries from every model's `meta.knowledge`,
-using the model owner's attachments collection. Shared assistants still lack access to another owner's files.
+An assistant's files (explicit `file` entries of a model's `meta.knowledge`) live in its own collection,
+`owui-assistant-<model id>` (`soev/assistant_files.py`): owned by the model owner, read and written per the
+assistant's access grants, hidden from KB lists. An event sink syncs it on model create/update/access/delete
+(access republished, missing files submitted as the owner, removed ones deleted, the collection deleted with the
+assistant or its last file; a file still ingesting elsewhere is retried for ten minutes). A turn sends them as
+`attachments`, read as the user; one not there yet is skipped as processing and asks for a sync, a deleted one is
+noticed as the assistant's. The v2 migration uploads step ingests them into that same collection.
 Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
 OWUI's init container owns schema upgrades. A timeout exits with a clear retry message.
 

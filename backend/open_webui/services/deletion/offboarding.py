@@ -73,7 +73,10 @@ async def inventory(user_id: str, *, db: AsyncSession) -> Inventory:
     shared = [
         {'id': row['key'], 'kind': 'knowledge'}
         for row in collections
-        if not ingest.is_attachments_collection(row['key']) and (set(row['principals']) | set(row['writers'])) - {ref}
+        if not ingest.is_attachments_collection(row['key'])
+        # [Claude] An assistant's files collection is listed as its assistant.
+        and not ingest.is_assistant_collection(row['key'])
+        and (set(row['principals']) | set(row['writers'])) - {ref}
     ]
     shared.extend(await store.shared_assistants(user_id, db=db))
     return Inventory(collections=collections, shared=sorted(shared, key=lambda item: (item['kind'], item['id'])))
