@@ -9,6 +9,8 @@ leaves the manual reconnect in place.
 
 import logging
 import time
+import traceback
+from pathlib import Path
 
 from fastapi import Request
 
@@ -37,7 +39,7 @@ async def after_login(user: UserModel, provider: str, redirect_url: str) -> str:
     try:
         return await next_hop(user) or redirect_url
     except Exception as error:  # the login itself must never fail on this
-        log.warning('Silent reconnect skipped', extra={'user_id': user.id, 'code': _code(error)})
+        log.warning('Silent reconnect skipped: %s', _code(error), extra={'user_id': user.id, 'code': _code(error)})
         return redirect_url
 
 
@@ -93,7 +95,7 @@ async def continue_chain(request: Request, user: UserModel, connection_id: str, 
     try:
         url = await next_hop(user)
     except Exception as error:
-        log.warning('Silent reconnect stopped', extra={'user_id': user.id, 'code': _code(error)})
+        log.warning('Silent reconnect stopped: %s', _code(error), extra={'user_id': user.id, 'code': _code(error)})
         url = None
     if url:
         return url
@@ -118,4 +120,9 @@ async def _save(user_id: str, **changes) -> None:
 
 
 def _code(error: Exception) -> str:
-    return error.code if isinstance(error, SoevApiError) else type(error).__name__
+    """The API error code, or the exception type and the line that raised it; never its message."""
+    if isinstance(error, SoevApiError):
+        return error.code
+    frame = traceback.extract_tb(error.__traceback__)[-1] if error.__traceback__ else None
+    where = f' at {Path(frame.filename).name}:{frame.lineno}' if frame else ''
+    return type(error).__name__ + where
