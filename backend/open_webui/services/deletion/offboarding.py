@@ -62,6 +62,9 @@ async def inventory(user_id: str, *, db: AsyncSession) -> Inventory:
     as_user = ref if user.role in {'user', 'admin'} else None
     collections = []
     if configured():
+        if as_user is not None:
+            # An approved user whose link push is still queued lists as themselves too.
+            await identity.ensure_link(as_user, identity.build_client(), db=db)
         collections = [
             row
             async for row in identity.build_client().pages('/v1/collections', as_user=as_user)
@@ -99,8 +102,6 @@ async def _offboard(
         raise SoevApiError(404, 'not_found', 'User not found')
     await _validate_target(user_id, options, db=db)
     as_user = identity.external_ref(user) if user.role in {'user', 'admin'} else None
-    if configured() and as_user is not None:
-        await identity.ensure_link(identity.external_ref(user), identity.build_client(), db=db)
     owned = await inventory(user_id, db=db)
     _confirm_deletion(owned, options, language)
     archive = await store.prepare_archive(user, actor_id=actor_id, options=options, owned=owned, db=db)

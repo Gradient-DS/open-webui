@@ -160,6 +160,17 @@ async def test_chat_attachments_are_never_transferred_to_another_person(offboard
 
 
 @pytest.mark.asyncio
+async def test_inventory_links_an_approved_user_before_listing_as_them(offboard_store):
+    """The shared-data listing works for a user whose link is not cached (e.g. a queued retry)."""
+    store = offboard_store
+    store.identity._linked_refs.clear()
+    owned = await store.module.inventory('fern', db=store.db)
+    assert {row['key'] for row in owned.collections} == {'native', 'cloud'}
+    paths = [(r.method, r.url.path) for r in store.api.requests]
+    assert paths.index(('POST', '/v1/identity/links')) < paths.index(('GET', '/v1/collections'))
+
+
+@pytest.mark.asyncio
 async def test_shared_deletion_requires_exact_inventory(offboard_store):
     from fastapi import HTTPException
 
