@@ -90,6 +90,10 @@ def _json_sink(message: 'Message') -> None:
             sys.stderr.flush()
 
 
+# [Gradient] The attributes every LogRecord has; anything else came in through `extra=`.
+_RECORD_ATTRIBUTES = frozenset(logging.makeLogRecord({}).__dict__) | {'message', 'asctime', 'taskName'}
+
+
 class InterceptHandler(logging.Handler):
     """
     Intercepts log records from Python's standard logging module
@@ -113,7 +117,9 @@ class InterceptHandler(logging.Handler):
             depth += 1
 
         message = record.getMessage()
-        logger.opt(depth=depth, exception=record.exc_info).bind(**self._get_extras()).log(level, message)
+        # [Gradient] Keep the `extra=` fields (ids and codes) that stdlib callers pass.
+        fields = {key: value for key, value in record.__dict__.items() if key not in _RECORD_ATTRIBUTES}
+        logger.opt(depth=depth, exception=record.exc_info).bind(**{**fields, **self._get_extras()}).log(level, message)
         if ENABLE_OTEL and ENABLE_OTEL_LOGS:
             from open_webui.utils.telemetry.logs import otel_handler
 

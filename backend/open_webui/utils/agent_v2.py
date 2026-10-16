@@ -280,7 +280,8 @@ async def _assistant_attachments(
     unavailable: list[Skipped],
 ) -> None:
     """[Claude] The assistant's own files not also attached in the chat, read in its collection as the user."""
-    model_id = metadata.get('model_id')
+    # An assistant/LLM split turn runs the picked LLM as `model_id`; the assistant is `assistant_id`.
+    model_id = metadata.get('assistant_id') or metadata.get('model_id')
     if not model_id:
         return
     key = ingest.assistant_collection_key(model_id)

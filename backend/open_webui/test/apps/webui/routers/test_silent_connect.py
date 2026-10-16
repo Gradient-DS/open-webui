@@ -152,6 +152,15 @@ def test_a_platform_outage_never_breaks_the_login(api, caplog):
     assert 'invalid-test-assertion' not in caplog.text
 
 
+def test_a_local_failure_logs_its_type_and_line_never_its_message(api, caplog, monkeypatch):
+    monkeypatch.setattr(silent_connect.CloudSync, 'connections', AsyncMock(side_effect=KeyError('private-detail')))
+    with caplog.at_level(logging.INFO):
+        assert login(api) == 'https://owui.invalid/auth'
+    [record] = [record for record in caplog.records if record.getMessage().startswith('Silent reconnect skipped')]
+    assert record.getMessage().startswith('Silent reconnect skipped: KeyError at ')
+    assert 'private-detail' not in caplog.text
+
+
 def test_other_login_providers_are_untouched(api):
     """Only an Entra login can finish Microsoft consent silently."""
     assert login(api, 'google') == 'https://owui.invalid/auth'
