@@ -30626,7 +30626,8 @@
               "enum": [
                 "pending",
                 "error",
-                "invalid"
+                "invalid",
+                "interaction_required"
               ],
               "title": "Result",
               "type": "string"

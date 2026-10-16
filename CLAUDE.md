@@ -162,6 +162,13 @@ and tooltip. The picker retains the plain cloud; pinned tooltip labels are
 
 Consent polling treats suspended:reauth with a cleared last_error as pending until exchange enables the reused connection. A stored failure still terminates polling, and the normal timeout applies.
 
+After an Entra login, `soev/silent_connect.py` (one hook in `utils/oauth.py`) redirects the browser
+through a silent soev-api attempt (`silent: true`, `prompt=none`) for the first OneDrive/Outlook
+connection that is `pending` or `suspended:reauth`. soev-api returns to `/cloud-sync/connect/done`,
+which continues with the next connection or lands on `/auth`. User settings key `soev_silent_connect`
+records every tried connection (never tried again) and the one in flight (consumed on return, 300 s), so
+popups keep their postMessage page. A failure leaves the manual reconnect; the login never fails on it.
+
 ### Live mail
 
 `ENABLE_LIVE_MAIL=true` enables the server gate (`live_mail.enable`, default false),

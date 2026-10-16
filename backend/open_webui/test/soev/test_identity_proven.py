@@ -74,11 +74,14 @@ def login(identity_config, monkeypatch):
     monkeypatch.setattr(oauth.OAuthSessions, 'create_session', AsyncMock(return_value=SimpleNamespace(id='session')))
     mint = Mock(wraps=oauth.create_token)
     monkeypatch.setattr(oauth, 'create_token', mint)
+    # The silent reconnect hop has its own tests; here it keeps the login's own destination.
+    silent = AsyncMock(side_effect=lambda user, provider, url: url)
+    monkeypatch.setattr(oauth.silent_connect, 'after_login', silent)
 
     async def callback(provider='microsoft'):
         return await manager.handle_callback(SimpleNamespace(base_url='https://owui.invalid/'), provider, Response())
 
-    return SimpleNamespace(user=user, token=token, oauth=oauth, callback=callback, mint=mint)
+    return SimpleNamespace(user=user, token=token, oauth=oauth, callback=callback, mint=mint, silent=silent)
 
 
 def assert_logged_in(response, login):
@@ -231,3 +234,16 @@ async def test_the_id_token_never_reaches_a_log_record(identity_config, login, i
         identity.config.SOEV_API_SIGNING_KEY,
     ):
         assert secret not in exposed
+
+
+@pytest.mark.asyncio
+async def test_a_login_can_go_through_a_silent_reconnect_first(login, identity_http):
+    """The callback hands its destination to the silent reconnect and still sets the session cookie."""
+    _, responses = identity_http
+    responses.append(httpx.Response(204))
+    start = 'https://soev.invalid/oauth/start/invalid-attempt-capability'
+    login.silent.side_effect = lambda user, provider, url: start
+    response = await login.callback()
+    assert response.headers['location'] == start
+    assert any(cookie.startswith('token=') for cookie in response.headers.getlist('set-cookie'))
+    login.silent.assert_awaited_once_with(login.user, 'microsoft', 'https://owui.invalid/auth')
