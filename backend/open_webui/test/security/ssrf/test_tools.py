@@ -47,7 +47,7 @@ async def test_mcp_rebinding_after_redirect_is_guarded(monkeypatch, offline):
     def respond(request):
         connected.append(offline(request.url.host, request.url.port or 80)[0][4][0])
         if str(request.url) == PUBLIC:
-            return httpx.Response(302, headers={'Location': PUBLIC + 'next', 'Connection': 'close'})
+            return httpx.Response(307, headers={'Location': PUBLIC + 'next', 'Connection': 'close'})
         return httpx.Response(403)
 
     monkeypatch.setattr(httpx.AsyncClient, '_init_transport', lambda *args, **kwargs: httpx.MockTransport(respond))
