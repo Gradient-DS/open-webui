@@ -52,7 +52,7 @@ dependencies = [
     "asgiref==3.11.1",
 
     "tiktoken==0.13.0",
-    "mcp==1.28.1", # security: CVE-2026-59950 (WebSocket server transport missing Host/Origin validation, transport unused by us) fixed in 1.28.1
+    "mcp==1.30.0", # security: CVE-2026-59951 (Streamable HTTP server never reclaimed session state) fixed in 1.30.0
     "regex==2026.5.9",
 
     "openai==2.29.0",
