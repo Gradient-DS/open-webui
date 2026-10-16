@@ -29,7 +29,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
-from open_webui.soev import acting, agent_threads, identity, ingest, live_documents
+from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
 from open_webui.storage.provider import Storage
@@ -207,7 +207,7 @@ def _input_text(metadata: dict[str, Any], form_data: dict[str, Any]) -> str:
 class Skipped:
     """[Claude] An item of the chat or assistant this turn runs without: `kind` is knowledge, file, note, chat or meeting;
     `reason` gone (deleted), denied (exists, not for this user), failed, processing or unmigrated (a v1 upload never
-    ingested for v2). `in_chat` is False for an assistant's own knowledge base, which the chat cannot drop."""
+    ingested for v2). `in_chat` is False for an assistant's own knowledge base or file, which the chat cannot drop."""
 
     kind: str
     reason: str
@@ -256,8 +256,56 @@ async def _knowledge_document_reason(knowledge_id: str, file_id: str, user_id: s
     return 'gone'
 
 
+async def _assistant_file_reason(key: str, file: FileModel | None, model_id: str, user_id: str | None) -> str:
+    """[Claude] Why an assistant's file is not in its collection for the user: deleted, failed there, denied while
+    the collection exists but not for the user, else still on its way; a file no sync has submitted asks for one."""
+    if file is None:
+        return 'gone'
+    meta = file.meta or {}
+    if meta.get('status') == 'failed' and meta.get('soev_collection_key') == key:
+        return 'failed'
+    if user_id is not None and await Knowledges.existing_knowledge([key]):
+        if not await Knowledges.describe_knowledge([key], user_id=user_id):
+            return 'denied'
+    if meta.get('soev_job') is None:
+        assistant_files.schedule(model_id)
+    return 'processing'
+
+
+async def _assistant_attachments(
+    metadata: dict[str, Any],
+    in_chat: set[str],
+    user_id: str | None,
+    attached: list[dict[str, str]],
+    unavailable: list[Skipped],
+) -> None:
+    """[Claude] The assistant's own files not also attached in the chat, read in its collection as the user."""
+    model_id = metadata.get('model_id')
+    if not model_id:
+        return
+    key = ingest.assistant_collection_key(model_id)
+    names = {
+        entry['id']: entry.get('name')
+        for entry in metadata.get('knowledge') or []
+        if isinstance(entry, dict) and entry.get('type') == 'file' and entry.get('id')
+    }
+    for file_id in assistant_files.file_ids({'knowledge': metadata.get('knowledge')}):
+        if file_id in in_chat:
+            continue
+        document = await Knowledges.knowledge_document(key, file_id, user_id=user_id)
+        if document is not None:
+            name = names[file_id] or document.get('filename') or file_id
+            attached.append({'collection_key': key, 'file_id': file_id, 'name': name})
+            continue
+        file = await Files.get_file_by_id(file_id)
+        name = names[file_id] or (file.filename if file is not None else None)
+        reason = await _assistant_file_reason(key, file, model_id, user_id)
+        unavailable.append(Skipped('file', reason, file_id, name, in_chat=False))
+
+
 async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
-    """[Claude] The files attached in the chat, as the turn's `attachments` field; none while nothing is attached.
+    """[Claude] The files attached in the chat and the assistant's own files, as the turn's `attachments` field;
+    none while nothing is attached.
 
     The collection is the one the file's own record names (a live document, or an upload the v2 migration ingested),
     else where chat uploads go; the agent checks access. A chat entry's `collection_name` is never read: a v1 entry
@@ -266,6 +314,8 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
     A file picked from a knowledge base (`knowledge_id`) is that KB's document, read there as the user: synced
     documents have no File row, and an uploaded one's row does not name the KB. A file the agent cannot read is
     left out under `skipped`; a processing one is also noted for the agent.
+    An assistant's file (a `file` entry of its knowledge) is read in the assistant's collection as the user, so a
+    shared assistant's files reach everyone it is shared with (`soev/assistant_files.py`).
     """
     attached: list[dict[str, str]] = []
     unavailable: list[Skipped] = []
@@ -303,6 +353,7 @@ async def _attachments(metadata: dict[str, Any]) -> dict[str, Any]:
         if (file.meta or {}).get('source'):
             item['document_ref'] = file.meta['source']['ref']
         attached.append(item)
+    await _assistant_attachments(metadata, set(entries), user_id, attached, unavailable)
     notes.extend(f'still processing: {item.name}' for item in unavailable if item.reason == 'processing')
     return {
         **({'attachments': attached} if attached else {}),
@@ -715,6 +766,7 @@ _SUBJECTS = {
 _WHY = {
     'en': {
         'gone': '{subject} no longer exists and was removed from this chat.',
+        'gone_assistant': '{subject} of this assistant no longer exists and was skipped.',
         'denied': '{subject} is not accessible and was skipped.',
         'failed': '{subject} could not be processed and was skipped.',
         'processing': '{subject} is still being processed and was skipped this time.',
@@ -722,6 +774,7 @@ _WHY = {
     },
     'nl': {
         'gone': '{subject} bestaat niet meer en is uit deze chat gehaald.',
+        'gone_assistant': '{subject} van deze assistent bestaat niet meer en is overgeslagen.',
         'denied': '{subject} is niet toegankelijk en is overgeslagen.',
         'failed': '{subject} kon niet worden verwerkt en is overgeslagen.',
         'processing': '{subject} wordt nog verwerkt en is deze keer overgeslagen.',
@@ -776,7 +829,8 @@ def _notices(skipped: list[Skipped], language: str | None) -> list[str]:
             continue
         named, unnamed = _SUBJECTS[lang][item.kind]
         subject = named.format(name=item.name) if item.name else unnamed
-        notices.append(_WHY[lang][item.reason].format(subject=subject))
+        reason = 'gone_assistant' if (item.reason, item.in_chat) == ('gone', False) else item.reason
+        notices.append(_WHY[lang][reason].format(subject=subject))
     return notices
 
 

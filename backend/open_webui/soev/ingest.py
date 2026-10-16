@@ -16,6 +16,7 @@ from open_webui.storage.provider import Storage
 from open_webui.utils.content_types import content_type_for
 
 ATTACHMENTS_PREFIX = 'owui-attachments-'
+ASSISTANT_PREFIX = 'owui-assistant-'
 ATTACHMENTS_TAG = 'chat-attachments'
 
 
@@ -29,6 +30,17 @@ def attachments_collection_key(user_id: str) -> str:
 
 def is_attachments_collection(key: str) -> bool:
     return key.startswith(ATTACHMENTS_PREFIX)
+
+
+def assistant_collection_key(model_id: str) -> str:
+    """[Claude] The collection holding an assistant's own files (`soev/assistant_files.py`). A model id may run to
+    256 characters, a collection key to 128: a longer one goes by its digest."""
+    key = ASSISTANT_PREFIX + model_id
+    return key if len(key) <= 128 else ASSISTANT_PREFIX + hashlib.sha256(model_id.encode()).hexdigest()
+
+
+def is_assistant_collection(key: str) -> bool:
+    return key.startswith(ASSISTANT_PREFIX)
 
 
 def is_chat_attachment(entry: dict) -> bool:

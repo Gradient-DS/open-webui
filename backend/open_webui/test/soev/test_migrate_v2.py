@@ -1262,7 +1262,7 @@ def test_a_stored_ingest_error_is_reported_by_its_code_alone(error, code):
 
 
 @pytest.mark.asyncio
-async def test_assistant_files_are_migrated_for_the_model_owner_and_rerunnable(env, monkeypatch):
+async def test_assistant_files_are_migrated_into_the_assistants_collection_and_rerunnable(env, monkeypatch):
     await seed_uploads(env, monkeypatch)
     async with env.engine.begin() as connection:
         await connection.execute(
@@ -1288,7 +1288,10 @@ async def test_assistant_files_are_migrated_for_the_model_owner_and_rerunnable(e
             },
         )
     assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
-    assert (ALICE, 'quiet') in submitted_uploads(env)
+    assert ('owui-assistant-field-guide', 'quiet') in submitted_uploads(env)
+    assert (ALICE, 'quiet') not in submitted_uploads(env)
+    # The chat attachments pointer stays where chat uploads look.
+    assert (await file_meta(env, 'quiet'))['collection_name'] == 'file-quiet'
     submitted = len(job_posts(env))
     assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 75
     assert len(job_posts(env)) == submitted
@@ -1298,7 +1301,7 @@ async def test_assistant_files_are_migrated_for_the_model_owner_and_rerunnable(e
 
 
 @pytest.mark.asyncio
-async def test_assistant_file_targets_model_owner_instead_of_uploader(env, monkeypatch):
+async def test_assistant_file_is_submitted_as_the_model_owner_and_shared_with_the_assistants_users(env, monkeypatch):
     await seed_uploads(env, monkeypatch)
     async with env.engine.begin() as connection:
         await connection.execute(
@@ -1314,13 +1317,23 @@ async def test_assistant_file_targets_model_owner_instead_of_uploader(env, monke
                 'meta': json.dumps({'knowledge': [upload('quiet')]}),
             },
         )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission, '
+                "created_at) VALUES ('g1', 'model', 'field-guide', 'group', 'readers', 'read', 1)"
+            )
+        )
     await env.module.apply_uploads(uploads_options(env, monkeypatch))
-    assert (BOB, 'quiet') in submitted_uploads(env)
-    assert (ALICE, 'quiet') not in submitted_uploads(env)
+    assert submitted_uploads(env).count(('owui-assistant-field-guide', 'quiet')) == 1
+    assert {key for key, file_id in submitted_uploads(env) if file_id == 'quiet'} == {'owui-assistant-field-guide'}
+    collection = env.api.collections['owui-assistant-field-guide']
+    assert collection['created_by'] == 'owui:user:bob'
+    assert 'owui:group:readers' in collection['principals']
+    assert collection['writers'] == ['owui:user:bob']
 
 
 @pytest.mark.asyncio
-async def test_same_file_in_two_model_owners_collections_is_migrated_without_losing_jobs(env, monkeypatch):
+async def test_same_file_in_two_assistants_is_migrated_into_both_without_losing_jobs(env, monkeypatch):
     await seed_uploads(env, monkeypatch)
     async with env.engine.begin() as connection:
         for owner in ('alice', 'bob'):
@@ -1344,6 +1357,6 @@ async def test_same_file_in_two_model_owners_collections_is_migrated_without_los
     await finish_jobs(env, monkeypatch)
     assert await env.module.apply_uploads(uploads_options(env, monkeypatch)) == 0
     assert [(key, file_id) for key, file_id in submitted_uploads(env) if file_id == 'quiet'] == [
-        (ALICE, 'quiet'),
-        (BOB, 'quiet'),
+        ('owui-assistant-guide-alice', 'quiet'),
+        ('owui-assistant-guide-bob', 'quiet'),
     ]
