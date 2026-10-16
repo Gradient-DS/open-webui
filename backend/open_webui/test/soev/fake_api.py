@@ -204,6 +204,19 @@ class FakeSoevApi:
     def _route(self, request: httpx.Request, body: dict | None, credential: str, subject: str | None) -> httpx.Response:
         if request.url.path.startswith('/v1/chat/threads'):
             return self.chat.handle(request, body, (credential, subject))
+        if request.url.path == '/v1/connections' and request.method == 'GET':
+            return self._page([row for row in self.connections.values() if row['owner'] == subject], request)
+        parts = request.url.path.strip('/').split('/')
+        if len(parts) == 3 and parts[:2] == ['v1', 'connections'] and request.method == 'DELETE':
+            self.connections.pop(parts[2], None)
+            return httpx.Response(204)
+        if len(parts) == 3 and parts[:2] == ['v1', 'schedules']:
+            schedule = self.schedules[parts[2]]
+            if request.method == 'GET':
+                return httpx.Response(200, json=schedule)
+            if request.method == 'DELETE':
+                schedule['subscribers'].remove(request.url.params['collection_key'])
+                return httpx.Response(204)
         if request.url.path == '/v1/sync-policy' and request.method == 'GET':
             return httpx.Response(200, json={'min_cadence_minutes': self.min_cadence_minutes})
         if request.url.path in ('/v1/connections', '/v1/schedules') and request.method == 'POST':
@@ -217,6 +230,16 @@ class FakeSoevApi:
             return httpx.Response(200, json={'data': copy.deepcopy(self.models)})
         if parts == ['v1', 'completions', 'task'] and request.method == 'POST':
             return self._task(request, body, credential, subject)
+        if parts == ['v1', 'directory', 'groups'] and request.method == 'GET':
+            rows = [{'group': ref, 'members': members} for ref, members in sorted(self.groups.items())]
+            limit = int(request.url.params.get('limit', 200))
+            assert 1 <= limit <= 500
+            limit = min(limit, self.page_size)
+            start = int(request.url.params.get('cursor', 0))
+            end = start + limit
+            return httpx.Response(
+                200, json={'groups': rows[start:end], 'next_cursor': str(end) if end < len(rows) else None}
+            )
         if parts[:2] == ['v1', 'identity'] or parts[:2] == ['v1', 'directory']:
             return self._identity(request.method, parts, body)
         if parts[:2] == ['v1', 'jobs']:
@@ -227,6 +250,20 @@ class FakeSoevApi:
             return self._lookup_documents(request, credential, subject)
         if parts == ['v1', 'collections']:
             return self._collections(request, body, credential, subject)
+        return self._collection_catalog(request, parts, body, credential, subject)
+
+    def _collection_catalog(self, request, parts, body, credential, subject):
+        if len(parts) == 4 and parts[:2] == ['v1', 'collections'] and parts[3] == 'owner' and request.method == 'POST':
+            row = self.collections[parts[2]]
+            previous = row['created_by']
+            row['created_by'] = body['owner']
+            for field in ('principals', 'writers'):
+                row[field] = sorted((set(row[field]) - {previous}) | {body['owner']})
+            if 'readers' in body:
+                row['principals'] = body['readers']
+                row['writers'] = []
+            row['expires_at'] = body.get('expires_at')
+            return httpx.Response(200, json=copy.deepcopy(row))
         if parts[:2] != ['v1', 'collections'] or len(parts) < 3:
             raise Problem(404, 'route_not_found')
         key = parts[2]
@@ -333,6 +370,11 @@ class FakeSoevApi:
         return httpx.Response(200, json={'data': rows, 'next_cursor': None})
 
     def _identity(self, method, parts, body):
+        if len(parts) == 4 and parts[:3] == ['v1', 'identity', 'links'] and method == 'DELETE':
+            self.links = {
+                ref: uid for ref, uid in self.links.items() if uid != parts[3] or not ref.startswith('owui:user:')
+            }
+            return httpx.Response(204)
         if parts == ['v1', 'identity', 'links'] and method == 'POST':
             ref = self._assertion(body['assertion'])
             if not ref.startswith('owui:user:'):
@@ -357,6 +399,7 @@ class FakeSoevApi:
         self.creation_bodies[key] = copy.deepcopy((body, subject))
         row = {
             'key': key,
+            'source_kind': body.get('source_kind', 'local'),
             'name': body['name'],
             'description': body.get('description'),
             'schema_key': 'core',
@@ -380,13 +423,15 @@ class FakeSoevApi:
         if method == 'GET':
             return httpx.Response(200, json=self._view(row, subject))
         if method == 'PATCH':
-            if set(body) - {'name', 'description', 'tags', 'retention_days', 'writers'}:
+            if set(body) - {'name', 'description', 'tags', 'retention_days'}:
                 raise Problem(400, 'unknown_field')
             row.update(copy.deepcopy(body), updated_at=self.now)
             return httpx.Response(200, json=self._view(row, subject))
         if method == 'DELETE':
             return self._job('delete_collection', row['key'], credential)
         if method == 'PUT' and parts[-1] == 'access':
+            if set(body) != {'visibility', 'principals', 'writers'}:
+                raise Problem(422, 'invalid_field', 'request:schema')
             return self._job('update_collection_access', row['key'], credential, copy.deepcopy(body))
         raise Problem(404, 'route_not_found')
 

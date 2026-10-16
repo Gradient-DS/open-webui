@@ -2,6 +2,7 @@
 	import { takeKnowledgeDetail, takeKnowledgeItems } from './utils/prefetch';
 	import { enabledProviders, loadSourcePolicy } from '$lib/sources/policy';
 	import { providers, providerFor, type SourceProvider } from '$lib/sources/registry';
+	import { providerBadge } from '$lib/sources/badges';
 	/* global FileSystemDirectoryReader, FileSystemEntry, FileSystemFileEntry, FileSystemDirectoryEntry */
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
@@ -21,6 +22,7 @@
 	import {
 		addFileToKnowledgeById,
 		getKnowledgeById,
+		deleteKnowledgeById,
 		removeFileFromKnowledgeById,
 		resetKnowledgeById,
 		updateKnowledgeById,
@@ -106,8 +108,16 @@
 	let destroyed = false;
 	let closeAuthorization: (() => void) | undefined;
 	let syncStatusError = false;
+	let syncStatusLoaded = false;
+	let showDeleteDisconnected = false;
 	let syncStatusRequest = 0;
-	$: activeProvider = requestedProvider ?? (knowledge?.type ? providers[knowledge.type] : null);
+	$: activeProvider = providerFor(knowledge?.type);
+	$: cloudBadge = providerBadge(knowledge?.type);
+	$: cloudNotConnected =
+		syncStatusLoaded &&
+		!syncStatusError &&
+		!!cloudBadge &&
+		!schedules.some((schedule) => schedule.kind === 'content' && schedule.lifecycle !== 'revoked');
 	$: activeProviderEnabled =
 		!!activeProvider && $enabledProviders.some((item) => item.kind === activeProvider.kind);
 	$: isSyncBusy =
@@ -965,6 +975,7 @@
 		if (destroyed || request !== syncStatusRequest) return false;
 		const previous = schedules;
 		schedules = status.schedules;
+		syncStatusLoaded = true;
 		queuedRuns = settleQueuedRuns(queuedRuns, schedules);
 		syncStatusError = false;
 		for (const schedule of finishedRuns(previous, schedules)) announceFinishedRun(schedule);
@@ -1927,6 +1938,21 @@
 	});
 </script>
 
+<ConfirmDialog
+	bind:show={showDeleteDisconnected}
+	title={$i18n.t('Delete')}
+	on:confirm={async () => {
+		if (!knowledge || knowledge.user_id !== $user?.id) return;
+		try {
+			await deleteKnowledgeById(localStorage.token, knowledge.id);
+			toast.success($i18n.t('Knowledge deleted successfully.'));
+			await goto('/workspace/knowledge');
+		} catch (error) {
+			toast.error(`${error}`);
+		}
+	}}
+/>
+
 <svelte:window
 	on:keydown={(e) => {
 		if (e.key === 'Escape' && $bulkCount > 0) {
@@ -2023,6 +2049,7 @@
 			<AccessControlModal
 				bind:show={showAccessControlModal}
 				bind:accessGrants={knowledge.access_grants}
+				readOnly={knowledge.user_id !== $user?.id}
 				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
 				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
 				shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
@@ -2036,7 +2063,7 @@
 						);
 						toast.success($i18n.t('Saved'));
 					} catch (error) {
-						toast.error(`${error}`);
+						toast.error($i18n.t((error as { detail?: string })?.detail ?? `${error}`));
 					}
 				}}
 				accessRoles={['read', 'write']}
@@ -2083,8 +2110,8 @@
 										{$i18n.t('Back to assistant')}
 									</button>
 								{/if}
-								{#if activeProvider}
-									<Badge type="info" content={$i18n.t(activeProvider.label)} />
+								{#if cloudBadge}
+									<Badge type="info" content={$i18n.t(cloudBadge.label)} />
 								{:else if $config?.integration_providers?.[knowledge?.type]}
 									<Badge
 										type={$config.integration_providers[knowledge.type].badge_type}
@@ -2095,7 +2122,7 @@
 								{/if}
 								{#if fileItemsTotal || kbFileTotal}
 									<!-- [Gradient] Synced cloud sources have no per-KB file cap: show the count only. -->
-									{#if knowledge?.type !== 'local' && knowledge?.type && !activeProvider}
+									{#if knowledge?.type !== 'local' && knowledge?.type && !cloudBadge}
 										{@const maxFiles =
 											$config?.integration_providers?.[knowledge?.type]?.max_files_per_kb ||
 											$config?.features?.knowledge_max_file_count ||
@@ -2121,7 +2148,7 @@
 							</div>
 						</div>
 
-						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type || $config?.integration_providers?.[knowledge?.type])}
+						{#if knowledge?.type === 'local' || !knowledge?.type}
 							<div class="self-center shrink-0">
 								<AccessButton
 									on:click={() => {
@@ -2176,6 +2203,32 @@
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
 			<!-- [Gradient] Cloud-sync notices; the sources themselves sit in the listing. -->
+			{#if cloudNotConnected}
+				<div
+					class="mx-4 mb-2 flex items-center justify-between gap-3 text-xs text-gray-500"
+					role="status"
+				>
+					<span>{$i18n.t('Not connected')}</span>
+					{#if knowledge.user_id === $user?.id}
+						<div class="flex gap-3">
+							{#if activeProviderEnabled}
+								<button
+									class="font-medium underline"
+									disabled={isSyncBusy}
+									on:click={() => cloudSyncHandler(activeProvider!)}
+								>{$i18n.t('Retry connection')}</button>
+							{/if}
+							<button
+								class="font-medium underline"
+								disabled={isSyncBusy}
+								on:click={() => {
+									showDeleteDisconnected = true;
+								}}
+							>{$i18n.t('Delete')}</button>
+						</div>
+					{/if}
+				</div>
+			{/if}
 			{#if finishingConnectionId}
 				<p role="status" class="mx-4 mb-1 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t('Finishing the connection…')}
@@ -2349,7 +2402,7 @@
 											<span>{$i18n.t('Add source')}</span>
 										</button>
 									</Tooltip>
-								{:else if activeProvider || $config?.integration_providers?.[knowledge?.type]}
+								{:else if cloudBadge || $config?.integration_providers?.[knowledge?.type]}
 									<!-- Disabled sync providers and API-managed providers have no add button. -->
 								{:else}
 									<AddContentMenu
@@ -2536,7 +2589,7 @@
 												{$i18n.t('Starting sync...')}
 											</div>
 										</div>
-									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null}
+									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null && (!cloudBadge || activeProviderEnabled) && !cloudNotConnected}
 										<EmptyStateCards
 											knowledgeType={activeProvider?.kind ?? knowledge?.type ?? 'local'}
 											integrationProviders={$config?.integration_providers}

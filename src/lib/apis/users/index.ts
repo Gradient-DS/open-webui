@@ -554,7 +554,7 @@ export const deleteUserById = async (
 
 	const params = new URLSearchParams();
 	if (options.archiveBeforeDelete) {
-		params.set('archive_before_delete', 'true');
+		params.set('mode', 'archive');
 	}
 	if (options.archiveReason) {
 		params.set('archive_reason', options.archiveReason);

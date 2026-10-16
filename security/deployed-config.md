@@ -89,6 +89,18 @@ Caller contracts verified in this checkout:
 - External reranking posts to `/v1/rerank` and reads indexed relevance scores.
 - `AGENT_API_AGENTS` matches the deployed list; agent routing is disabled and
   no private-service URL is configured.
+- `GET /api/v1/users/{user_id}/shared-data` is an admin-only, read-only
+  offboarding inventory of another user's shared KB and assistant IDs and kinds;
+  it returns no content and grants no ordinary-user sharing access. It uses the
+  disposable user seed and has no route-coverage waiver. With soev-api absent,
+  only local shared assistants can appear; the remote KB inventory is not
+  exercised by the sealed stack.
+- `DELETE /api/v1/users/{user_id}` remains admin-only and destructive. Its
+  `mode=delete|transfer|archive` query selects resource disposition, `transfer_to`
+  selects a transfer target, and in delete mode repeated `confirm_shared_deletion`
+  values must exactly match the shared-resource IDs. The scalar query pass
+  derives `mode` and `transfer_to` alongside `archive_reason`; confirmation is
+  an array of strings and is outside that derivation.
 - Legacy sync-daemon, loader-worker, document-job and `PIPELINE_API_*` settings
   have no callers in this checkout and are removed. Pipelines management uses
   the configured OpenAI connections (`routers/pipelines.py`).

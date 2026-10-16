@@ -138,3 +138,14 @@ class CloudSync:
         return {
             'schedules': [{**schedule, 'connection': connections[schedule['connection_id']]} for schedule in schedules]
         }
+
+
+async def revoke_cloud(user_id: str, *, client: SoevClient) -> None:
+    """Unsubscribe each owned schedule and revoke connections using the person's assertion."""
+    cloud = CloudSync(client, f'owui:user:{user_id}')
+    schedules = [row async for row in client.pages('/v1/schedules', as_user=cloud.user_ref)]
+    for schedule in schedules:
+        for key in schedule['subscribers']:
+            await cloud.schedule_action(key, schedule['id'], 'delete')
+    for connection in await cloud.connections():
+        await cloud.revoke_connection(connection['id'])

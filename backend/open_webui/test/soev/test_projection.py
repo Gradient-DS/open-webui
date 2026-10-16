@@ -41,6 +41,7 @@ def collection():
         'meta': {},
         'document_count': 3,
         'subscriptions': [],
+        'source_kind': 'local',
         'created_at': '2026-01-01T00:00:00Z',
         'updated_at': '2026-01-02T01:00:00.999+01:00',
     }
@@ -71,24 +72,23 @@ def test_a_collection_becomes_a_knowledge_model(projection, collection, descript
 
 
 @pytest.mark.parametrize('project', ['knowledge_of', 'knowledge_user_of'])
-@pytest.mark.parametrize('types', [None, {}, {'kb-1': 'google_drive'}])
-@pytest.mark.parametrize('subscriptions', [['onedrive'], ['google_drive', 'onedrive'], ['confluence', 'onedrive']])
-def test_type_follows_subscriptions_regardless_of_viewer(projection, collection, project, types, subscriptions):
-    """The first authoritative provider wins even when the viewer owns no schedule or sees another provider."""
-    collection['subscriptions'] = subscriptions
-    result = getattr(projection, project)(collection, service_principal=SERVICE, types=types)
-    assert result.type == subscriptions[0]
+@pytest.mark.parametrize('source_kind', ['local', 'onedrive', 'google_drive', 'confluence'])
+@pytest.mark.parametrize('subscriptions', [[], ['onedrive'], ['google_drive', 'onedrive']])
+def test_type_comes_only_from_source_kind(projection, collection, project, source_kind, subscriptions):
+    collection.update(source_kind=source_kind, subscriptions=subscriptions)
+    assert getattr(projection, project)(collection, service_principal=SERVICE).type == source_kind
 
 
-@pytest.mark.parametrize('project', ['knowledge_of', 'knowledge_user_of'])
-@pytest.mark.parametrize('missing', [False, True])
-@pytest.mark.parametrize('types', [None, {}, {'kb-1': 'google_drive'}])
-def test_type_falls_back_to_viewer_schedules_without_subscriptions(projection, collection, project, missing, types):
-    """Empty and older collection responses preserve viewer schedule projection and the local default."""
-    if missing:
-        collection.pop('subscriptions')
-    result = getattr(projection, project)(collection, service_principal=SERVICE, types=types)
-    assert result.type == ('google_drive' if types else 'local')
+@pytest.mark.parametrize('source_kind', ['local', 'onedrive', 'google_drive', 'confluence'])
+def test_creation_sends_source_kind_before_any_subscription(projection, source_kind):
+    from open_webui.models.knowledge import KnowledgeForm
+
+    form = KnowledgeForm(name='Atlas notes', description='Field research', type=source_kind, access_grants=[])
+    body = projection.collection_create_body(form, service_principal=SERVICE)
+    assert body['source_kind'] == source_kind
+    assert body['visibility'] == 'restricted'
+    assert body['principals'] == ([SERVICE] if source_kind == 'local' else [])
+    assert body['writers'] == []
 
 
 @pytest.mark.parametrize(
@@ -125,13 +125,14 @@ def test_readers_always_include_the_service_principal(projection, grants):
     """Creation preserves form text and emits sorted unique ACLs with the service reader."""
     from open_webui.models.knowledge import KnowledgeForm
 
-    form = KnowledgeForm(name='Research', description='Notes', type='remote', access_grants=grants)
+    form = KnowledgeForm(name='Research', description='Notes', type='local', access_grants=grants)
     before = form.model_dump()
     readers = [SERVICE, 'owui:user:a', 'owui:user:z'] if grants else [SERVICE]
     assert projection.access_of(grants or [], service_principal=SERVICE) == ('restricted', readers, [])
     assert projection.collection_create_body(form, service_principal=SERVICE) == {
         'name': 'Research',
         'description': 'Notes',
+        'source_kind': 'local',
         'visibility': 'restricted',
         'principals': readers,
         'writers': [],
@@ -139,16 +140,44 @@ def test_readers_always_include_the_service_principal(projection, grants):
     assert form.model_dump() == before
 
 
-def test_a_wildcard_read_grant_becomes_public(projection, collection):
-    """Public read uses OWUI's user wildcard and never becomes an enumerated principal."""
-    grants = [{'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}] * 2
-    assert projection.access_of(grants, service_principal=SERVICE) == ('public', [SERVICE], [])
-    collection.update(visibility='public', principals=[SERVICE])
+@pytest.mark.parametrize(
+    'kind,identifier,permission,ref',
+    [
+        ('user', 'reader', 'read', 'owui:user:reader'),
+        ('user', 'writer', 'write', 'owui:user:writer'),
+        ('group', 'readers', 'read', 'owui:group:readers'),
+        ('group', 'writers', 'write', 'owui:group:writers'),
+        ('user', '*', 'read', 'platform:pseudo:owui'),
+        ('user', '*', 'write', 'platform:pseudo:owui'),
+    ],
+)
+def test_every_grant_shape_round_trips(projection, collection, kind, identifier, permission, ref):
+    grant = {'principal_type': kind, 'principal_id': identifier, 'permission': permission}
+    access = projection.access_of([grant, grant], service_principal=SERVICE)
+    assert access == ('restricted', sorted([SERVICE, ref]), [ref] if permission == 'write' else [])
+    visibility, readers, writers = access
+    collection.update(visibility=visibility, principals=readers, writers=writers)
     projected = projection.grants_of(collection, service_principal=SERVICE)
-    assert [(g.principal_type, g.principal_id, g.permission) for g in projected] == [('user', '*', 'read')]
-    assert projection.access_of([g.model_dump() for g in projected], service_principal=SERVICE) == (
-        'public',
-        [SERVICE],
+    permissions = {g.permission for g in projected if (g.principal_type, g.principal_id) == (kind, identifier)}
+    assert permissions == ({'read', 'write'} if permission == 'write' else {'read'})
+    assert projection.access_of([g.model_dump() for g in projected], service_principal=SERVICE) == access
+
+
+@pytest.mark.parametrize('permission', ['read', 'write'])
+def test_anyone_grants_stay_stripped(projection, permission):
+    assert projection.access_of(
+        [{'principal_type': 'anyone', 'principal_id': '*', 'permission': permission}],
+        service_principal=SERVICE,
+    ) == ('restricted', [SERVICE], [])
+
+
+def test_public_reads_as_everyone_but_is_never_emitted(projection, collection):
+    collection.update(visibility='public', principals=[SERVICE])
+    grants = projection.grants_of(collection, service_principal=SERVICE)
+    assert [(g.principal_type, g.principal_id, g.permission) for g in grants] == [('user', '*', 'read')]
+    assert projection.access_of([g.model_dump() for g in grants], service_principal=SERVICE) == (
+        'restricted',
+        sorted([SERVICE, 'platform:pseudo:owui']),
         [],
     )
 
@@ -184,8 +213,8 @@ def test_write_grants_become_writers_and_back(projection, collection):
     )
     assert projection.access_of(incoming, service_principal=service) == (
         'restricted',
-        ['owui:user:reader', service],
-        ['owui:user:writer'],
+        sorted(['owui:user:reader', 'owui:user:writer', service, 'platform:pseudo:owui']),
+        sorted(['owui:user:writer', 'platform:pseudo:owui']),
     )
     assert collection == before
 
@@ -262,3 +291,21 @@ def test_only_a_synced_folder_root_carries_its_schedule_id(projection):
     assert [model.schedule_id, plain.schedule_id] == ['sched-1', None]
     listed = projection.knowledge_file_list_of([], total=0, directories=[model, plain]).directories
     assert [row.schedule_id for row in listed] == ['sched-1', None]
+
+
+@pytest.mark.parametrize('source_kind', ['onedrive', 'google_drive', 'confluence'])
+def test_cloud_type_keeps_the_sync_guard_without_subscriptions(projection, collection, source_kind):
+    from open_webui.models.knowledge import is_synced_kb
+
+    collection.update(source_kind=source_kind, subscriptions=[])
+    assert is_synced_kb(projection.knowledge_of(collection, service_principal=SERVICE))
+
+
+def test_an_omitted_create_type_uses_the_contract_local_default(projection):
+    from open_webui.models.knowledge import KnowledgeForm
+
+    body = projection.collection_create_body(
+        KnowledgeForm(name='Atlas', description='Notes'), service_principal=SERVICE
+    )
+    assert body['source_kind'] == 'local'
+    assert body['principals'] == [SERVICE]

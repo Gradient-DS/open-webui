@@ -27,13 +27,14 @@ _expires_at = 0.0
 _backend: tuple[str, str] | None = None
 _lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
 _warned = False
+_known: bool = False
 
 
 async def refresh() -> frozenset[str]:
-    global _features, _expires_at, _backend, _lock, _warned
+    global _features, _expires_at, _backend, _lock, _warned, _known
     backend = (config.SOEV_API_URL, config.SOEV_API_KEY)
     if backend != _backend:
-        _backend, _features, _expires_at, _warned = backend, frozenset(), 0.0, False
+        _backend, _features, _expires_at, _warned, _known = backend, frozenset(), 0.0, False, False
     if not backend[0]:
         return frozenset()
     loop = asyncio.get_running_loop()
@@ -56,6 +57,7 @@ async def refresh() -> frozenset[str]:
             if not all(isinstance(feature, str) for feature in features):
                 raise ValueError('Invalid capability names')
             _features = frozenset(features)
+            _known = True
             _warned = False
         except (httpx.HTTPError, SoevApiError, ValueError):
             ttl = RETRY_SECONDS
@@ -64,6 +66,11 @@ async def refresh() -> frozenset[str]:
                 _warned = True
         _expires_at = monotonic() + ttl
         return _features
+
+
+def known() -> bool:
+    """Whether a capability read succeeded for the configured backend."""
+    return _known
 
 
 async def has(feature: str) -> bool:

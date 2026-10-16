@@ -6,14 +6,20 @@ import datetime as dt
 import hashlib
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from functools import lru_cache
+from time import monotonic
 from uuid import UUID, uuid4, uuid5
 from weakref import WeakValueDictionary
 
+import httpx
 import jwt
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui import config
 from open_webui.models.users import UserModel, Users
@@ -25,6 +31,8 @@ log = logging.getLogger(__name__)
 # This namespace is permanent: changing it would give existing people different platform ids.
 OWUI_PLATFORM_NAMESPACE = UUID('ec855a67-541f-4b17-a7e2-0f8fbd09c47e')
 _linked_refs: set[str] = set()
+_pending_links: dict[str, tuple[float, int]] = {}
+_link_owner: ContextVar[tuple[asyncio.Task, str] | None] = ContextVar('soev_link_owner', default=None)
 _link_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
@@ -36,13 +44,13 @@ def platform_user_id(user_ref: str) -> str:
     return str(uuid5(OWUI_PLATFORM_NAMESPACE, user_ref))
 
 
-async def user_of(ref: str) -> UserModel | None:
+async def user_of(ref: str, *, db: AsyncSession | None = None) -> UserModel | None:
     if not ref.startswith('owui:user:'):
         return None
     user_id = ref.removeprefix('owui:user:')
     if not user_id or ':' in user_id:
         return None
-    return await Users.get_user_by_id(user_id)
+    return await Users.get_user_by_id(user_id, db=db) if db is not None else await Users.get_user_by_id(user_id)
 
 
 @lru_cache(maxsize=1)
@@ -104,23 +112,116 @@ def mint_assertion(user_ref: str, *, now: dt.datetime) -> str:
     return f'{message}.{_base64url(key.sign(message.encode()))}'
 
 
-async def ensure_link(user_ref: str, client: SoevClient) -> None:
+@asynccontextmanager
+async def link_lock(user_ref: str) -> AsyncIterator[None]:
+    """Keep role changes and offboarding ordered with ordinary first-link requests."""
+    owner = (asyncio.current_task(), user_ref)
+    if _link_owner.get() == owner:
+        yield
+        return
+    async with _link_locks.setdefault(user_ref, asyncio.Lock()):
+        token = _link_owner.set(owner)
+        try:
+            yield
+        finally:
+            _link_owner.reset(token)
+
+
+async def ensure_link(user_ref: str, client: SoevClient, *, db: AsyncSession | None = None) -> None:
+    """Link an existing eligible user; cached links never bypass the role check."""
+    async with link_lock(user_ref):
+        user = await user_of(user_ref, db=db)
+        if user is None or user.role not in {'user', 'admin'}:
+            raise SoevApiError(
+                403, 'scope_insufficient', 'Only approved users can be linked', constraint='identity:eligible_role'
+            )
+        await _ensure_link(user_ref, client)
+
+
+async def _ensure_link(user_ref: str, client: SoevClient) -> None:
     if user_ref in _linked_refs:
         return
-    lock = _link_locks.setdefault(user_ref, asyncio.Lock())
-    async with lock:
-        if user_ref in _linked_refs:
-            return
-        await client.send(
-            'POST',
-            '/v1/identity/links',
-            {
-                'platform_user_id': platform_user_id(user_ref),
-                'assertion': mint_assertion(user_ref, now=dt.datetime.now(dt.UTC)),
-            },
-            idempotency_key=f'link:{user_ref}',
-        )
-        _linked_refs.add(user_ref)
+    await client.send(
+        'POST',
+        '/v1/identity/links',
+        {
+            'platform_user_id': platform_user_id(user_ref),
+            'assertion': mint_assertion(user_ref, now=dt.datetime.now(dt.UTC)),
+        },
+        idempotency_key=f'link:{uuid4()}',
+    )
+    _linked_refs.add(user_ref)
+    _pending_links.pop(user_ref, None)
+
+
+async def unlink(user_ref: str, client: SoevClient) -> None:
+    """Remove only the OWUI product link and invalidate successful-link caches."""
+    async with link_lock(user_ref):
+        await _unlink(user_ref, client)
+
+
+async def _unlink(user_ref: str, client: SoevClient) -> None:
+    await client.send(
+        'DELETE',
+        f'/v1/identity/links/{platform_user_id(user_ref)}?source=owui',
+        None,
+        idempotency_key=f'unlink:{uuid4()}',
+    )
+    _linked_refs.discard(user_ref)
+    _pending_links.pop(user_ref, None)
+
+
+def pending_links() -> set[str]:
+    """Return approvals waiting for a successful platform link."""
+    return set(_pending_links)
+
+
+async def publish_link(user_ref: str, client: SoevClient, *, db: AsyncSession | None = None) -> None:
+    """Retry widening failures with bounded exponential backoff."""
+    try:
+        await ensure_link(user_ref, client, db=db)
+    except (SoevApiError, httpx.TransportError):
+        attempts = _pending_links.get(user_ref, (0, 0))[1] + 1
+        _pending_links[user_ref] = (monotonic() + min(10 * 2 ** min(attempts - 1, 5), 300), attempts)
+        log.warning('soev-api link push failed', extra={'user_ref': user_ref})
+
+
+async def retry_links(*, now: float, db: AsyncSession | None = None) -> None:
+    """Retry against the current role, dropping stale approvals."""
+    for ref, (due, _) in list(_pending_links.items()):
+        if due > now:
+            continue
+        user = await user_of(ref, db=db)
+        if user is None or user.role not in {'user', 'admin'}:
+            await unlink(ref, build_client())
+        else:
+            await publish_link(ref, build_client(), db=db)
+
+
+@asynccontextmanager
+async def role_change(user: UserModel, role: str, *, db: AsyncSession | None = None) -> AsyncIterator[None]:
+    """Revoke cloud custody before unlinking a demotion; retry committed approvals."""
+    if not config.SOEV_API_URL or user.role == role:
+        yield
+        return
+    from open_webui.soev import group_sync
+    from open_webui.soev.cloud_sync import revoke_cloud
+
+    ref = external_ref(user)
+    async with link_lock(ref):
+        if role == 'pending' and user.role in {'user', 'admin'}:
+            await revoke_cloud(user.id, client=build_client())
+        if user.role == 'admin' and role != 'admin':
+            await group_sync.narrow_admin(user.id, db=db)
+        if role not in {'user', 'admin'}:
+            await _unlink(ref, build_client())
+        yield
+    if role in {'user', 'admin'}:
+        await publish_link(ref, build_client(), db=db)
+    if role == 'admin':
+        from open_webui.models.groups import Groups
+
+        await group_sync.publish(Groups, [group_sync.ADMIN_ARCHIVE_GROUP], db=db)
 
 
 async def acting_ref(user: UserModel, client: SoevClient) -> str:

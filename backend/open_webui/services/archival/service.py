@@ -8,6 +8,8 @@ export format, so they can be directly imported by another user.
 import logging
 import time
 from dataclasses import dataclass, field
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from typing import Optional, Dict, Any, List
 
 log = logging.getLogger(__name__)
@@ -59,45 +61,22 @@ class ArchiveService:
     """Service for creating user archives"""
 
     @staticmethod
-    async def collect_user_data(user_id: str) -> ArchiveData:
-        """
-        Collect all user data for archival.
-        Chats are stored in the native Open WebUI export format.
-        """
+    async def collect_user_data(user_id: str, *, db: AsyncSession | None = None) -> ArchiveData:
+        """Collect the profile and all exportable chats; collection failures abort archival."""
         from open_webui.models.users import Users
         from open_webui.models.chats import Chats, ChatResponse
 
+        user = await Users.get_user_by_id(user_id, db=db)
+        if user is None:
+            raise ValueError('Cannot archive a missing user')
         data = ArchiveData()
         data.archived_at = int(time.time())
-
-        # 1. User profile (for reference/metadata)
-        try:
-            user = await Users.get_user_by_id(user_id)
-            if user:
-                data.user_profile = {
-                    'id': user.id,
-                    'name': user.name,
-                    'email': user.email,
-                    'role': user.role,
-                    'profile_image_url': user.profile_image_url,
-                    'created_at': user.created_at,
-                    'updated_at': user.updated_at,
-                }
-        except Exception as e:
-            log.error(f'Error collecting user profile: {e}')
-
-        # 2. Chats in native export format (compatible with Import Chats)
-        # Uses the same ChatResponse model as GET /api/v1/chats/all to ensure
-        # format compatibility with Open WebUI's native export/import
-        try:
-            chats_response = await Chats.get_chats_by_user_id(user_id)
-            for chat in chats_response.items:
-                # Convert via ChatResponse model - same as native /chats/all endpoint
-                chat_response = ChatResponse(**chat.model_dump())
-                data.chats.append(chat_response.model_dump())
-        except Exception as e:
-            log.error(f'Error collecting chats: {e}')
-
+        data.user_profile = {
+            key: getattr(user, key)
+            for key in ('id', 'name', 'email', 'role', 'profile_image_url', 'created_at', 'updated_at')
+        }
+        chats = await Chats.get_chats_by_user_id(user_id, db=db)
+        data.chats = [ChatResponse(**chat.model_dump()).model_dump() for chat in chats.items]
         return data
 
     @staticmethod
@@ -189,12 +168,14 @@ class ArchiveService:
 
         stats = {'checked': 0, 'deleted': 0, 'errors': 0}
 
+        from open_webui.services.archival.resources import delete_archive
+
         expired = await UserArchives.get_expired_archives()
         stats['checked'] = len(expired)
 
         for archive in expired:
             try:
-                if await UserArchives.delete_archive(archive.id):
+                if await delete_archive(archive.id):
                     stats['deleted'] += 1
                     log.info(f'Deleted expired archive {archive.id} for user {archive.user_id}')
                 else:

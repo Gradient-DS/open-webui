@@ -24,6 +24,7 @@ def _collection(meta):
         'description': None,
         'created_by': 'owui:user:alice',
         'subscriptions': ['onedrive'],
+        'source_kind': 'onedrive',
         'visibility': 'restricted',
         'principals': [SERVICE, 'owui:user:alice'],
         'writers': ['owui:user:alice'],

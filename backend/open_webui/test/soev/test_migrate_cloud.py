@@ -109,7 +109,7 @@ async def env(identity_config, fake_api, monkeypatch):
         )
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         for user_id in ('alice', 'bob'):
-            await users.Users.insert_new_user(user_id, user_id, f'{user_id}@example.test', db=db)
+            await users.Users.insert_new_user(user_id, user_id, f'{user_id}@example.test', role='user', db=db)
 
         async def seed(provider='onedrive', *, source_type='folder', owner='alice', sources=None, kb_id=None):
             source = {'type': source_type, 'item_id': 'item-1', 'name': 'Source', 'item_path': '/Source'}
@@ -356,3 +356,27 @@ async def test_an_owners_cloud_kbs_share_one_connection_and_no_legacy_folders(en
     labels = {row['subscribers'][0]: row['label'] for row in env.api.schedules.values()}
     assert labels == {first.id: 'Source', second.id: 'Q3'}
     assert not any(r.url.path.endswith('/folders') for r in env.api.requests)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
+async def test_cloud_collections_keep_their_kind_and_drop_legacy_grants(env, provider, capsys):
+    access = importlib.import_module('open_webui.models.access_grants')
+    kb = await env.seed(provider)
+    await access.AccessGrantsTable().set_access_grants(
+        'knowledge',
+        kb.id,
+        [{'principal_type': 'user', 'principal_id': 'bob', 'permission': 'write'}],
+        db=env.db,
+    )
+    assert await env.run() == 0
+    row = env.api.collections[kb.id]
+    assert row['source_kind'] == provider
+    assert row['principals'] == row['writers'] == ['owui:user:alice']
+    request = next(r for r in env.api.requests if r.method == 'POST' and r.url.path == '/v1/collections')
+    body = json.loads(request.content)
+    assert body['source_kind'] == provider
+    assert body['principals'] == body['writers'] == []
+    output = capsys.readouterr().out
+    assert f'{kb.id}: dropped cloud grant user:bob:write' in output
+    assert '4 directory: dropped cloud grants 1' in output

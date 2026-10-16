@@ -80,7 +80,7 @@ def test_importing_config_first_binds_the_soev_table(tmp_path):
 @pytest.fixture
 def directory_http(monkeypatch):
     """Record replacements and replay 204 without applying a committed operation twice."""
-    state = SimpleNamespace(requests=[], members={}, operations={}, failures=[])
+    state = SimpleNamespace(requests=[], members={}, operations={}, failures=[], original_client=httpx.AsyncClient)
     original_client = httpx.AsyncClient
 
     def handle(request):
@@ -117,16 +117,20 @@ def directory_http(monkeypatch):
         state.members[group_ref] = members
         return httpx.Response(204)
 
-    monkeypatch.setattr(
-        'open_webui.soev.client.httpx.AsyncClient',
-        lambda **kwargs: original_client(transport=httpx.MockTransport(handle), **kwargs),
-    )
+    class DirectoryClient(original_client):
+        def __init__(self, **kwargs):
+            super().__init__(transport=httpx.MockTransport(handle), **kwargs)
+
+    monkeypatch.setattr('open_webui.soev.client.httpx.AsyncClient', DirectoryClient)
     return state
 
 
 @pytest_asyncio.fixture
 async def group_store(identity_config, directory_http, monkeypatch, platform_capabilities):
     """Exercise the real upstream group methods against isolated SQLite tables."""
+    from open_webui.soev import group_sync
+
+    monkeypatch.setattr(group_sync, '_pending', {})
     models = importlib.import_module('open_webui.models.groups')
     users = importlib.import_module('open_webui.models.users')
     database = importlib.import_module('open_webui.internal.db')
@@ -277,44 +281,74 @@ async def test_delete_groups_by_user_id_pushes_their_members(group_store):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    'failure', [403, 503, httpx.ConnectError('reflected-secret'), httpx.ReadTimeout('reflected-secret')]
-)
-async def test_a_failed_push_is_logged_and_never_fails_the_owui_write(group_store, failure, caplog):
-    """HTTP and transport failures keep the OWUI write and disclose only group id and status."""
+@pytest.mark.parametrize('failure', [403, 503, httpx.ConnectError('secret'), httpx.ReadTimeout('secret')])
+@pytest.mark.parametrize('action', ['replace', 'remove', 'remove_all', 'delete', 'delete_all', 'delete_owned', 'oauth'])
+async def test_narrowing_refuses_before_any_local_write(group_store, failure, action):
+    from fastapi import HTTPException
+
     store = group_store
-    first, second = await seed(store), await seed(store, 'other')
+    group = await seed(store)
     store.http.failures.append(failure)
-    with caplog.at_level(logging.WARNING):
-        assert await store.table.remove_user_from_all_groups('alice', db=store.db) is True
-    assert len(store.http.requests) == 2
-    for group in (first, second):
-        assert await store.raw.get_group_user_ids_by_id(group.id, db=store.db) == ['bob']
-    records = [record for record in caplog.records if record.name == 'open_webui.soev.groups']
-    assert len(records) == 1
-    assert records[0].group_id in {first.id, second.id}
-    expected_status = failure if isinstance(failure, int) else (504 if isinstance(failure, httpx.ReadTimeout) else 502)
-    assert records[0].status == expected_status
-    assert records[0].exc_info is None
-    exposed = caplog.text + repr([vars(record) for record in records])
-    assert 'reflected-secret' not in exposed
-    assert 'soev_test_cred-runtime_test-secret' not in exposed
-    assert 'owui:user:' not in exposed
+    calls = {
+        'replace': lambda: store.table.set_group_user_ids_by_id(group.id, ['carol'], db=store.db),
+        'remove': lambda: store.table.remove_users_from_group(group.id, ['alice'], db=store.db),
+        'remove_all': lambda: store.table.remove_user_from_all_groups('alice', db=store.db),
+        'delete': lambda: store.table.delete_group_by_id(group.id, db=store.db),
+        'delete_all': lambda: store.table.delete_all_groups(db=store.db),
+        'delete_owned': lambda: store.table.delete_groups_by_user_id('alice', db=store.db),
+        'oauth': lambda: store.table.sync_groups_by_group_names('alice', [], db=store.db),
+    }
+    with pytest.raises(HTTPException) as raised:
+        await calls[action]()
+    assert raised.value.status_code == 503
+    assert await store.raw.get_group_by_id(group.id, db=store.db) is not None
+    assert sorted(await store.raw.get_group_user_ids_by_id(group.id, db=store.db)) == ['alice', 'bob']
 
 
 @pytest.mark.asyncio
-async def test_repeated_pushes_use_the_same_operation_key(group_store):
+async def test_widening_queues_retry_reads_current_members_and_logs_only_group_id(group_store, caplog):
+    from open_webui.soev import group_sync
+
+    store = group_store
+    group = await seed(store)
+    store.http.failures.append(503)
+    with caplog.at_level(logging.WARNING):
+        await store.table.add_users_to_group(group.id, ['carol'], db=store.db)
+    assert sorted(await store.raw.get_group_user_ids_by_id(group.id, db=store.db)) == ['alice', 'bob', 'carol']
+    records = [record for record in caplog.records if record.name == 'open_webui.soev.group_sync']
+    assert len(records) == 1 and records[0].group_id == group.id
+    assert 'status' not in vars(records[0])
+    assert records[0].exc_info is None
+    assert group.id in group_sync.pending_groups()
+    await store.raw.remove_users_from_group(group.id, ['alice'], db=store.db)
+    await group_sync.retry_pending(store.table, now=float('inf'), db=store.db)
+    assert store.http.members[f'owui:group:{group.id}'] == ['owui:user:bob', 'owui:user:carol']
+    assert group.id not in group_sync.pending_groups()
+
+
+@pytest.mark.asyncio
+async def test_mixed_replacement_never_publishes_new_members_before_commit(group_store, monkeypatch):
+    store = group_store
+    group = await seed(store)
+    original = store.models.GroupTable.set_group_user_ids_by_id
+
+    async def commit(table, group_id, user_ids, db=None):
+        assert store.http.members[f'owui:group:{group_id}'] == ['owui:user:alice']
+        return await original(table, group_id, user_ids, db=db)
+
+    monkeypatch.setattr(store.models.GroupTable, 'set_group_user_ids_by_id', commit)
+    await store.table.set_group_user_ids_by_id(group.id, ['alice', 'carol'], db=store.db)
+    await assert_pushed(store, {group.id: ['alice', 'carol']})
+
+
+@pytest.mark.asyncio
+async def test_repeated_pushes_replace_members_again_after_an_intervening_change(group_store):
     """The same member set replays 204 under a stable key regardless of input ordering."""
     store = group_store
     group = await seed(store)
-    for members in (['bob', 'alice'], ['alice', 'bob'], ['carol']):
+    for members in (['bob', 'alice'], ['carol'], ['alice', 'bob']):
         await store.table.set_group_user_ids_by_id(group.id, members, db=store.db)
-    keys = [request.headers['Idempotency-Key'] for request in store.http.requests]
-    assert len(keys) == 3
-    assert keys[0] == keys[1]
-    assert keys[2] != keys[0]
-    assert all(key.startswith(f'group:{group.id}:') and len(key.rsplit(':', 1)[1]) == 64 for key in keys)
-    await assert_pushed(store, {group.id: ['carol']})
+    await assert_pushed(store, {group.id: ['alice', 'bob']})
 
 
 @pytest.mark.asyncio
@@ -365,9 +399,158 @@ def test_every_mutating_group_method_is_overridden(group_store):
 
 @pytest.mark.asyncio
 async def test_a_failed_local_deletion_republishes_the_actual_members(group_store, monkeypatch):
-    """A failed local deletion keeps its return value and never empties a surviving group remotely."""
+    """A failed local deletion leaves the platform narrower until reconciliation."""
     store = group_store
     group = await seed(store)
     monkeypatch.setattr(store.models.GroupTable, 'delete_group_by_id', AsyncMock(return_value=False))
     assert await store.table.delete_group_by_id(group.id, db=store.db) is False
-    await assert_pushed(store, {group.id: ['alice', 'bob']})
+    assert store.http.members[f'owui:group:{group.id}'] == []
+    assert await store.raw.get_group_by_id(group.id, db=store.db) is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('narrowing', [False, True])
+async def test_unknown_capabilities_refuse_narrowing_and_queue_widening(group_store, monkeypatch, narrowing):
+    from fastapi import HTTPException
+    from open_webui.soev import capabilities, group_sync
+
+    group = await seed(group_store)
+    monkeypatch.setattr(capabilities, 'has', AsyncMock(return_value=False))
+    monkeypatch.setattr(capabilities, 'known', lambda: False)
+    if narrowing:
+        with pytest.raises(HTTPException):
+            await group_store.table.remove_users_from_group(group.id, ['alice'], db=group_store.db)
+        assert sorted(await group_store.raw.get_group_user_ids_by_id(group.id, db=group_store.db)) == ['alice', 'bob']
+    else:
+        await group_store.table.add_users_to_group(group.id, ['carol'], db=group_store.db)
+        assert group.id in group_sync.pending_groups()
+        assert sorted(await group_store.raw.get_group_user_ids_by_id(group.id, db=group_store.db)) == [
+            'alice',
+            'bob',
+            'carol',
+        ]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_paginates_and_empties_remote_orphans(group_store, fake_api, monkeypatch):
+    from open_webui.soev import group_sync
+
+    group = await seed(group_store)
+    chat_http = fake_api
+    monkeypatch.setattr(
+        'open_webui.soev.client.httpx.AsyncClient',
+        lambda **kwargs: group_store.http.original_client(transport=httpx.MockTransport(chat_http.handle), **kwargs),
+    )
+    chat_http.page_size = 1
+    chat_http.groups = {
+        'owui:group:missing': ['owui:user:carol'],
+        'owui:group:other': [],
+        'foreign:group:kept': ['foreign:user:x'],
+    }
+    await group_sync.reconcile(group_store.table, db=group_store.db)
+    assert chat_http.groups[f'owui:group:{group.id}'] == ['owui:user:alice', 'owui:user:bob']
+    assert chat_http.groups['owui:group:missing'] == []
+    assert chat_http.groups['foreign:group:kept'] == ['foreign:user:x']
+    gets = [r for r in chat_http.requests if r.method == 'GET']
+    assert len(gets) >= 3
+    assert all(r.url.path == '/v1/directory/groups' and int(r.url.params['limit']) <= 500 for r in gets)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('trigger', ['admin', 'scim', 'oauth'])
+async def test_narrowing_trigger_propagates_refusal_without_local_removal(group_store, monkeypatch, trigger):
+    from fastapi import HTTPException, Request
+    from open_webui.routers import groups, scim
+    from open_webui.utils import oauth
+
+    store = group_store
+    group = await seed(store)
+    store.http.failures.append(503)
+    request = Request({'type': 'http', 'path': '/', 'headers': []})
+    user = SimpleNamespace(id='alice', role='admin')
+    for module in (groups, scim, oauth):
+        monkeypatch.setattr(module, 'Groups', store.table)
+        monkeypatch.setattr(module, 'publish_event', AsyncMock())
+    monkeypatch.setattr(
+        oauth,
+        'get_oauth_runtime_config',
+        AsyncMock(
+            return_value=SimpleNamespace(
+                OAUTH_GROUPS_CLAIM='groups', OAUTH_BLOCKED_GROUPS='[]', ENABLE_OAUTH_GROUP_CREATION=False
+            )
+        ),
+    )
+    with pytest.raises(HTTPException) as raised:
+        if trigger == 'admin':
+            await groups.remove_users_from_group(
+                request=request,
+                id=group.id,
+                form_data=store.models.UserIdsForm(user_ids=['alice']),
+                user=user,
+                db=store.db,
+            )
+        elif trigger == 'scim':
+            await scim.update_group(
+                group_id=group.id,
+                request=request,
+                group_data=scim.SCIMGroupUpdateRequest(members=[scim.SCIMGroupMember(value='bob')]),
+                db=store.db,
+            )
+        else:
+            await oauth.OAuthManager.update_user_groups(None, request, user, {'groups': ['other']}, {}, db=store.db)
+    assert raised.value.status_code == 503
+    assert sorted(await store.raw.get_group_user_ids_by_id(group.id, db=store.db)) == ['alice', 'bob']
+
+
+@pytest.mark.asyncio
+async def test_signup_default_group_keeps_local_addition_and_queues_failure(group_store):
+    from open_webui.soev import group_sync
+    from open_webui.utils.groups import apply_default_group_assignment
+
+    group = await seed(group_store)
+    group_store.http.failures.append(503)
+    await apply_default_group_assignment(group.id, 'carol', db=group_store.db)
+    assert group.id in group_sync.pending_groups()
+    assert 'carol' in await group_store.raw.get_group_user_ids_by_id(group.id, db=group_store.db)
+
+
+@pytest.mark.asyncio
+async def test_retries_wait_for_backoff(group_store):
+    from open_webui.soev import group_sync
+
+    group = await seed(group_store)
+    group_store.http.failures.extend([503, 503])
+    await group_store.table.add_users_to_group(group.id, ['carol'], db=group_store.db)
+    due, attempts = group_sync._pending[group.id]
+    assert attempts == 1
+    requests = len(group_store.http.requests)
+    await group_sync.retry_pending(group_store.table, now=due - 1, db=group_store.db)
+    assert len(group_store.http.requests) == requests
+    await group_sync.retry_pending(group_store.table, now=due, db=group_store.db)
+    assert group_sync._pending[group.id][1] == 2
+    assert group_sync._pending[group.id][0] > due
+
+
+@pytest.mark.asyncio
+async def test_reconciler_runs_at_startup_and_configured_interval(monkeypatch):
+    import asyncio
+
+    from open_webui import config
+    from open_webui.soev import group_sync
+
+    now = [0.0]
+    reconciles, retries = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(group_sync, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(group_sync, 'reconcile', reconciles)
+    monkeypatch.setattr(group_sync, 'retry_pending', retries)
+    monkeypatch.setattr(config, 'SOEV_GROUP_RECONCILE_MINUTES', 1)
+
+    async def pause(seconds):
+        now[0] += 30
+        if now[0] > 60:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(group_sync.asyncio, 'sleep', pause)
+    await group_sync._run(asyncio.Event())
+    assert reconciles.await_count == 2
+    assert retries.await_count == 3

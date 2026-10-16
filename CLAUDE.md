@@ -199,3 +199,56 @@ including the initial message. Search statuses retain structured order/from/to/c
 options for English/Dutch rendering, including zero-result searches.
 
 PDF writer auto/required/off choices persist with composerPreferences in user settings and chat.features. Draft restoration restores text and files only; model defaults seed unsaved preferences.
+
+Platform API refusals reach HTTP clients through the `SoevApiError` handler in `main.py`.
+`soev/errors.py` selects fixed nl/en messages from `Accept-Language`; problem details are never echoed.
+
+`BYPASS_ADMIN_ACCESS_CONTROL` defaults to false independently of the legacy content-access setting.
+KB list/detail `write_access` uses the platform's caller write decision through `AccessGrants`.
+
+Knowledge sharing changes are owner-only. Writers can save content with omitted or unchanged grants;
+unchanged grants are stripped before persistence. The local KB access dialog is read-only for other users.
+
+`soev/groups.py` narrows platform membership before local writes and publishes widening afterward.
+`soev/group_sync.py` serializes these operations, retries widening with backoff, and reconciles at startup
+and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15), clearing remote OWUI groups absent locally.
+Unknown capabilities refuse narrowing and queue widening. User-deletion callers must propagate group failures.
+
+The v2 migration uploads step includes explicit `file` entries from every model's `meta.knowledge`,
+using the model owner's attachments collection. Shared assistants still lack access to another owner's files.
+Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
+OWUI's init container owns schema upgrades. A timeout exits with a clear retry message.
+
+Knowledge grants project everyone to `platform:pseudo:owui`; writes explicitly include read access.
+Access changes commission one `PUT /access` job carrying readers and writers, retaining the owner in both.
+KB types come only from the collection's immutable `source_kind`, sent at create. Cloud collections omit the
+service reader. Without a content schedule, the view shows "Not connected", retry (where a browser provider
+adapter exists) and delete; Confluence has no browser picker adapter yet.
+
+Migration directory reports count the six original grant mappings, dropped cloud grants (listed by KB and
+principal), and skipped pending users. Only user/admin roles get links. Cloud KBs migrate with source_kind
+and no grants; reconciliation reads them as their owners because the service is not a cloud reader.
+Role writes in `models/users.py` serialize with group reconciliation. Pending demotions first revoke
+cloud schedules/connections as the still-linked person, then unlink before committing. Approvals queue
+failed links for backoff retry. `ensure_link` checks the current local role even for cached refs. Reconcile repairs eligible and pending users and known deleted refs;
+the supplied platform contract has no link listing to discover otherwise unknown deleted users.
+
+`owui:group:admins-archive` is synthetic: `group_sync` derives its members from admin roles,
+narrows before demotion/deletion, and retries promotions. Reconcile always republishes it.
+
+Admin `DELETE /api/v1/users/{id}` accepts `mode=delete|transfer|archive`, `transfer_to`, and exact
+`confirm_shared_deletion` ids (listed by `GET /users/{id}/shared-data`). The existing checkbox sends
+`mode=archive`. `services/deletion/offboarding.py` revokes cloud custody as the linked departing person,
+narrows groups, disposes resources, unlinks, then commits local erasure/reassignment together.
+Cloud resources and memories are always deleted; chats never transfer. Archive snapshots retain a
+resource manifest and the configured retention; retries reuse it. Local archive grants are admin-read-only,
+and archive deletion/expiry removes the resources before dropping the snapshot. Retention edits publish
+the KB expiry before the local update. A failed remote step preserves local content/account rows.
+
+Pending users have already lost cloud custody on demotion. Their offboarding skips subject revocation,
+uses service authority for collection inventory/disposition, and keeps group narrowing, unlinking and
+local erasure fail-closed. Demotion and offboarding share `soev/cloud_sync.revoke_cloud`.
+There is no archive restore endpoint; archived KBs return to a person through the collection ownership
+transfer path (`POST /v1/collections/{key}/owner`).
+The supplied platform contract has no link listing to discover otherwise unknown deleted users.
+The plan's unlink-first order is superseded by spec §10's revoke-before-unlink order.

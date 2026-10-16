@@ -18,6 +18,7 @@
 	export let accessControl: any = undefined;
 	export let accessRoles = ['read'];
 
+	export let readOnly = false;
 	export let share = true;
 	export let sharePublic = true;
 	export let shareOpen = false;
@@ -48,6 +49,7 @@
 				bind:accessControl
 				{onChange}
 				{accessRoles}
+				{readOnly}
 				{share}
 				{sharePublic}
 				{shareOpen}

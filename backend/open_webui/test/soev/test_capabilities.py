@@ -24,6 +24,7 @@ def cache(monkeypatch, identity_config):
     monkeypatch.setattr(capabilities, '_features', frozenset())
     monkeypatch.setattr(capabilities, '_expires_at', 0.0)
     monkeypatch.setattr(capabilities, '_warned', False)
+    monkeypatch.setattr(capabilities, '_known', False)
     now = [100.0]
     monkeypatch.setattr(capabilities, 'monotonic', lambda: now[0])
     return now
@@ -186,3 +187,15 @@ async def test_no_backend_does_not_construct_client(cache, monkeypatch):
     monkeypatch.setattr(identity, 'build_client', client)
     assert not await capabilities.refresh()
     client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_failed_capability_read_is_unknown_until_success(cache, identity_http):
+    _, responses = identity_http
+    responses.append(httpx.Response(503))
+    assert not await capabilities.has('groups_push')
+    assert not capabilities.known()
+    cache[0] += 10
+    responses.append(httpx.Response(200, json={'contract': '0.3.0', 'features': []}))
+    assert not await capabilities.has('groups_push')
+    assert capabilities.known()

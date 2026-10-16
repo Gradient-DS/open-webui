@@ -57,7 +57,7 @@ config = { "folders.enable" = true, "memories.enable" = true, "channels.enable" 
 key = "user"
 name = "user_id"
 prefix = "/api/v1/users/{user_id}"
-description = "routers/auths.py:add_user. Fresh disposable target user; never alias the driving admin to a user-deletion target."
+description = "routers/auths.py:add_user. Fresh disposable target user; never alias the driving admin to a user-deletion target. GET /api/v1/users/{user_id}/shared-data is an admin-only, read-only offboarding inventory of that user's shared KB and assistant ids and kinds, never content. It reuses this user target and has no sharing allowance. Without soev-api only local shared assistants are inventoried."
 via = "POST /api/v1/auths/add"
 body = { "email" = "attack-fixture-{token}@example.com", "name" = "Attack fixture {token}", "password" = "Attack-Fixture-Passw0rd!", "role" = "user" }
 extract = "id"
@@ -723,9 +723,9 @@ backed_by = "soev-solutions"
 key = "cloud_knowledge"
 name = "knowledge_id"
 prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}"
-description = "Use a separate KB: subscribing makes it cloud-synced and must not change the ordinary KB's reset or file controls."
+description = "Use a separate KB, created as OneDrive: a KB's source kind is fixed at creation and only a matching, unshared KB may subscribe."
 via = "POST /api/v1/knowledge/create"
-body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture" }
+body = { name = "attack-cloud-{token}", description = "Cloud schedule isolation fixture", type = "onedrive" }
 extract = "id"
 actor = "admin"
 
@@ -782,7 +782,7 @@ reason = "Changes the caller password, and since v0.11.3 revokes every token tha
 
 [[destructive]]
 id = "DELETE /api/v1/users/{user_id}"
-reason = "Can delete the driving user and its owned resources. Schedule with a disposable identity after ordinary targets."
+reason = "Admin-only offboarding removes the target account after deleting, transferring or archiving its resources (mode=delete|transfer|archive). transfer_to selects the new owner; delete requires confirm_shared_deletion to exactly match the shared KB and assistant ids returned by GET /api/v1/users/{user_id}/shared-data. Primary-admin and self deletion are refused. Schedule with a disposable identity after ordinary targets."
 
 [[destructive]]
 id = "POST /api/v1/knowledge/{id}/reset"

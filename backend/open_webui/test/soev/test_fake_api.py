@@ -108,7 +108,7 @@ def test_access_and_delete_jobs_advance_only_when_requested(api):
             client,
             'PUT',
             '/v1/collections/kb/access',
-            {'visibility': 'public', 'principals': [SERVICE]},
+            {'visibility': 'public', 'principals': [SERVICE, 'owui:user:alice'], 'writers': ['owui:user:alice']},
             operation=operation,
         )
         for _ in range(2)

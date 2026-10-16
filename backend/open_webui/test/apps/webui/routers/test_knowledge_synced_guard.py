@@ -79,7 +79,7 @@ def update(api, route, grants):
     return api.browser.post('/knowledge/kb/' + route, json=body)
 
 
-@pytest.mark.parametrize('provider', ['onedrive', 'google_drive'])
+@pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
 @pytest.mark.parametrize('route', ['update', 'access/update', 'external'])
 @pytest.mark.parametrize('change', ['add', 'remove', 'permission'])
 def test_access_grants_change_on_a_synced_kb_is_403(api, provider, route, change):
@@ -97,7 +97,7 @@ def test_access_grants_change_on_a_synced_kb_is_403(api, provider, route, change
     api.writes.filter.assert_not_awaited()
 
 
-@pytest.mark.parametrize('provider', ['onedrive', 'google_drive'])
+@pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
 @pytest.mark.parametrize('route', ['update', 'access/update', 'external'])
 @pytest.mark.parametrize('grants', [[], GRANTS])
 def test_same_grants_is_allowed(api, provider, route, grants):
@@ -116,7 +116,7 @@ def test_same_grants_is_allowed(api, provider, route, grants):
         assert api.writes.update.await_args.kwargs['form_data'].access_grants == requested
 
 
-@pytest.mark.parametrize('provider', ['onedrive', 'google_drive'])
+@pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
 @pytest.mark.parametrize('role', ['user', 'admin'])
 def test_delete_is_allowed_and_reset_keeps_its_guard(api, provider, role):
     """Owners and admins can delete a subscribed KB but cannot reset it."""
@@ -131,7 +131,7 @@ def test_delete_is_allowed_and_reset_keeps_its_guard(api, provider, role):
     api.writes.reset.assert_not_awaited()
 
 
-@pytest.mark.parametrize('provider', ['onedrive', 'google_drive'])
+@pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
 @pytest.mark.parametrize('include_null', [False, True])
 def test_metadata_update_without_grants_is_allowed(api, provider, include_null):
     """An omitted or null grant field leaves existing synced grants untouched."""
@@ -155,17 +155,16 @@ def test_local_grants_still_use_permission_filtering(api, route):
     api.writes.filter.assert_awaited_once()
 
 
-@pytest.mark.parametrize('provider', ['local', 'confluence'])
-def test_legacy_confluence_metadata_does_not_mark_a_kb_as_synced(api, provider):
+def test_cloud_metadata_does_not_mark_a_local_kb_as_synced(api):
     """The predicate follows cloud type projection rather than legacy Confluence metadata."""
-    api.kb.type = provider
+    api.kb.type = 'local'
     api.kb.meta = {'confluence_sync': {'shared': True}}
     assert not is_synced_kb(api.kb)
 
 
 @pytest.mark.parametrize('action', ['update', 'access/update', 'external', 'reset'])
 def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, monkeypatch, action):
-    """Collection subscriptions enforce every guard for a co-writer with no viewer-owned schedules."""
+    """Stored source kind enforces every guard without subscriptions or viewer-owned schedules."""
     api.user.id = 'co-writer'
     if action == 'external':
         api.user.role = 'admin'
@@ -177,7 +176,8 @@ def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, m
         'visibility': 'restricted',
         'principals': ['owui:user:owner', 'owui:user:co-writer'],
         'writers': ['owui:user:owner', 'owui:user:co-writer'],
-        'subscriptions': ['onedrive'],
+        'subscriptions': [],
+        'source_kind': 'onedrive',
         'meta': {},
         'created_at': '2026-01-01T00:00:00Z',
         'updated_at': '2026-01-01T00:00:00Z',
