@@ -4,9 +4,9 @@ import json
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from open_webui.config import CORS_ALLOW_ORIGIN
-from open_webui.soev import capabilities, identity
+from open_webui.soev import capabilities, identity, silent_connect
 from open_webui.soev.availability import SoevRoute, require_soev
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import CloudSync
@@ -119,10 +119,18 @@ async def authorize_connection(connection_id: str, sync=Depends(cloud_sync), use
 
 @router.get('/connect/done', response_class=HTMLResponse)
 async def connect_done(
+    request: Request,
     connection: str,
-    result: Literal['pending', 'error', 'invalid'],
+    result: Literal['pending', 'error', 'invalid', 'interaction_required'],
     user=Depends(get_verified_user),
 ):
+    # A silent reconnect arrives here as a top-level page, not a popup: continue its chain.
+    if await silent_connect.returned(user, connection):
+        return RedirectResponse(
+            await silent_connect.continue_chain(request, user, connection, result),
+            status_code=302,
+            headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'},
+        )
     # Not capability-gated: the page only relays the popup's result to its opener.
     data = json.dumps({'type': 'soev_connect', 'connection': connection, 'result': result}).replace('<', '\\u003c')
     # The opener may live on another configured origin than this page (a dev

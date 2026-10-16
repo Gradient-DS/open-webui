@@ -54,8 +54,10 @@ class CloudSync:
             knowledge_ids.update(schedule['subscribers'])
         return {'knowledge_ids': sorted(knowledge_ids)}
 
-    async def authorize(self, connection_id: str, owner_email: str | None = None) -> dict:
+    async def authorize(self, connection_id: str, owner_email: str | None = None, *, silent: bool = False) -> dict:
         body = {'owner_email': owner_email} if owner_email is not None else None
+        if silent:
+            body = {**(body or {}), 'silent': True}
         return await self._send('POST', f'/v1/connections/{quote(connection_id, safe="")}/authorize', body)
 
     async def create_connection(self, provider: str, owner_email: str | None = None) -> dict:
