@@ -42,7 +42,7 @@ RestrictedPython==8.4
 loguru==0.7.3
 asgiref==3.11.1
 
-mcp==1.28.1
+mcp==1.30.0
 openai
 
 langchain==1.3.9 # security: GHSA-gr75-jv2w-4656 (path traversal in file-search middleware, unused by us) fixed in 1.3.9
