@@ -1556,6 +1556,7 @@ async def chat_completion(
             'tool_ids': form_data.get('tool_ids', None),
             'tool_servers': tool_servers,
             'rag_filter': form_data.pop('rag_filter', None),  # [Gradient] RAG filter passthrough
+            'assistant_id': split_assistant_id,  # [Gradient] the assistant of an assistant/LLM split turn
             'files': form_data.get('files', None),
             'features': form_data.get('features', {}),
             'variables': form_data.get('variables', {}),

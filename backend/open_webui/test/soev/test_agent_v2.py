@@ -934,6 +934,26 @@ async def test_an_assistants_file_and_knowledge_base_both_reach_the_agent(
 
 
 @pytest.mark.asyncio
+async def test_an_assistant_split_turn_reads_the_assistants_files_not_the_llms(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
+    chat.api.add_document(key, 'af1', filename='handboek.txt')
+    stored_files(monkeypatch, af1='completed')
+    await chat.turn(
+        'question',
+        'a1',
+        model_id='vendor/some-llm',
+        assistant_id='helper',
+        knowledge=[{'id': 'af1', 'type': 'file', 'name': 'handboek.txt'}],
+    )
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': key, 'file_id': 'af1', 'name': 'handboek.txt'}
+    ]
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
 async def test_a_shared_assistants_file_is_read_by_a_group_member_and_skipped_for_others(
     chat: Chat, monkeypatch: pytest.MonkeyPatch
 ) -> None:
