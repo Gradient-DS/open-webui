@@ -243,6 +243,16 @@ jobs:
           grep -q 'matchName: "login.microsoftonline.com"' /tmp/strict-egress.yaml
           helm template test-release helm/open-webui-tenant | grep -q '169.254.0.0/16'
 
+      - name: v2-migrate Job name follows its pod template, not the app image
+        # The pod template is immutable: a template change must rename the Job, an app
+        # image bump must not (it would rerun the finished migration).
+        run: |
+          name() { helm template t helm/open-webui-tenant -f helm/open-webui-tenant/ci/v2-uploads-migrate-values.yaml "$@" -s templates/open-webui/v2-migrate-job.yaml | grep -m1 'name: t-open-webui-tenant-v2-migrate-'; }
+          base="$(name)"
+          test -n "$base"
+          test "$base" = "$(name --set openWebui.image.tag=other)"
+          test "$base" != "$(name --set externalSecrets.onepassword.fields.feedbackReportSlackWebhookUrl=true)"
+
   # Record only same-repository PRs whose tests really ran and whose other
   # quality checks passed. A path-only no-op cannot certify an untested tree.
   record:
