@@ -15,6 +15,7 @@
 		isAwaitingUpload,
 		isPending
 	} from '$lib/utils/messageQueue';
+	import { expectSettled, markSettled } from '$lib/utils/turnSettled';
 	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
@@ -1475,6 +1476,7 @@
 				} else if (type === 'chat:completion') {
 					chatCompletionEventHandler(data, message, event.chat_id);
 				} else if (type === 'chat:tasks:cancel') {
+					markSettled(event.message_id);
 					dismissContextCompactionToast();
 					if (event.message_id === history.currentId) {
 						taskIds = null;
@@ -2864,10 +2866,13 @@
 		followRAF = requestAnimationFrame(step);
 	};
 
+	const INTERRUPT_SETTLE_MS = 10_000;
 	let processingQueueChats = new Set<string>();
+	// [Gradient] Set while a new input interrupts the answer: the stop must not also send the rest of the queue.
+	let interrupting = false;
 
 	const processNextInQueue = async (targetChatId: string) => {
-		if (processingQueueChats.has(targetChatId)) return;
+		if (interrupting || processingQueueChats.has(targetChatId)) return;
 
 		const queue = $chatRequestQueues[targetChatId];
 		if (!queue || queue.length === 0) return;
@@ -2914,9 +2919,32 @@
 			...q,
 			[$chatId]: queue.filter((m) => m.id !== id)
 		}));
-		await stopResponse(false);
-		await tick();
+		await interruptResponse();
 		await submitPrompt(item.prompt, item.files);
+	};
+
+	// [Gradient] Stop the answer for a new input. On the agent route the next turn forks from the stopped
+	// message's thread bookmark, which is stored with the cancel, so wait for that before sending.
+	const interruptResponse = async () => {
+		const answer = (history.currentId ? history.messages[history.currentId] : null) as {
+			id: string;
+			role: string;
+			done?: boolean;
+		} | null;
+		const settled =
+			isAgentRouted() && answer?.role === 'assistant' && answer.done !== true
+				? expectSettled(answer.id, INTERRUPT_SETTLE_MS)
+				: null;
+		interrupting = true;
+		try {
+			await stopResponse(false);
+			if (settled && !(await settled)) {
+				console.warn('Stopped answer did not settle before the next input', answer?.id);
+			}
+			await tick();
+		} finally {
+			interrupting = false;
+		}
 	};
 
 	const editQueuedMessage = (id) => {
@@ -3623,8 +3651,7 @@
 				return;
 			} else {
 				// Interrupt: stop current generation and proceed
-				await stopResponse();
-				await tick();
+				await interruptResponse();
 			}
 		}
 

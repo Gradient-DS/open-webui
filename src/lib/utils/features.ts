@@ -221,3 +221,15 @@ export function isChatControlSectionEnabled(section: ChatControlSection): boolea
 	// If no sections specified, all sections are allowed
 	return allowedSections.length === 0 || allowedSections.includes(section);
 }
+
+/**
+ * Whether Continue Response is offered. The agent route sends one new input per
+ * turn and cannot extend an earlier answer, so it never is there.
+ */
+export function canContinueResponse(
+	$config: { features?: { feature_agent_api_enabled?: boolean } } | undefined,
+	$user: { role?: string; permissions?: { chat?: { continue_response?: boolean } } } | undefined
+): boolean {
+	if ($config?.features?.feature_agent_api_enabled) return false;
+	return $user?.role === 'admin' || ($user?.permissions?.chat?.continue_response ?? true);
+}
