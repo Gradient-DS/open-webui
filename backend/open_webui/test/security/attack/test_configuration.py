@@ -261,7 +261,7 @@ def test_old_poison_without_a_clean_baseline_fails_before_seeding(monkeypatch, t
 
 
 def test_recovery_does_not_remove_routes_or_fields():
-    assert len(plane.operations()) == 612
+    assert len(plane.operations()) == 613
     fields = plane.writable_string_fields(seeds.SPEC)
     assert (len(fields), sum(map(len, fields.values()))) == (230, 2662)
     assert seeds.SURFACE['preserve_configuration'] is True
