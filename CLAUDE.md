@@ -228,6 +228,14 @@ assistant's access grants, hidden from KB lists. An event sink syncs it on model
 assistant or its last file; a file still ingesting elsewhere is retried for ten minutes). A turn sends them as
 `attachments`, read as the user; one not there yet is skipped as processing and asks for a sync, a deleted one is
 noticed as the assistant's. The v2 migration uploads step ingests them into that same collection.
+
+Sharing a folder shares its knowledge (`soev/folder_sharing.py`): everyone a folder (or a same-owner ancestor) is
+shared with gets a read grant on the local knowledge bases and notes in it that the folder owner owns, through
+`AccessGrants.set_access_grants` asserted as that owner; a folder write grant gives read. Cloud KBs and other
+owners' items are never shared. `folder_share_grant` records only the grants this added, so unsharing, removing an
+item or moving a folder out revokes those and keeps grants the item already had. The folder routes remove grants
+before committing (a failure refuses the change) and add them after. On v2 only the owner changes a folder's grants
+or adds items to it; write members may remove items.
 Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
 OWUI's init container owns schema upgrades. A timeout exits with a clear retry message.
 
