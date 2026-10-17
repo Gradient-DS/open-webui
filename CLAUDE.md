@@ -236,6 +236,7 @@ owners' items are never shared. `folder_share_grant` records only the grants thi
 item or moving a folder out revokes those and keeps grants the item already had. The folder routes remove grants
 before committing (a failure refuses the change) and add them after. On v2 only the owner changes a folder's grants
 or adds items to it; write members may remove items.
+
 Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
 OWUI's init container owns schema upgrades. A timeout exits with a clear retry message.
 
