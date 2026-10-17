@@ -158,6 +158,10 @@ directory copy, re-ingest, memories or sign-out, and needs no `config`. It
 snapshots just the two model-id config rows, so `mode: restore` with the same
 `id` undoes it.
 
+In both `apply` and `models`, a stored model id that `modelMap` leaves out and
+that is no catalog id becomes the catalog's default model, read from soev-api
+before anything is written; with no default in the catalog the Job exits 2.
+
 `mode: uploads` runs `--apply --uploads`: it ingests only the uploads stored
 chats attach (not KB files or images) into their owners' attachments
 collections in soev-api, for a tenant whose `apply` ran before that step was

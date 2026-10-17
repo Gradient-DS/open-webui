@@ -9,6 +9,8 @@ import os
 import sqlite3
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -327,8 +329,31 @@ async def test_dry_run_sends_nothing(env, capsys):
     )
 
 
+class CatalogHandler(BaseHTTPRequestHandler):
+    """soev-api's model catalog, the one read a dry run makes."""
+
+    def do_GET(self):
+        body = json.dumps({'data': [{'id': 'glm-5-3', 'default': True}]}).encode()
+        self.send_response(200 if self.path == '/v1/models' else 404)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def catalog_url():
+    server = ThreadingHTTPServer(('127.0.0.1', 0), CatalogHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f'http://127.0.0.1:{server.server_port}'
+    server.shutdown()
+
+
 @pytest.mark.asyncio
-async def test_module_dry_run_preserves_sql_tables(env, tmp_path):
+async def test_module_dry_run_preserves_sql_tables(env, tmp_path, catalog_url):
     """A fresh CLI process previews seeded SQL without running schema migrations or changing any rows."""
     database_path = tmp_path / 'migration.db'
     connection = await env.db.connection()
@@ -346,7 +371,8 @@ async def test_module_dry_run_preserves_sql_tables(env, tmp_path):
         'DATABASE_URL': f'sqlite:///{database_path}',
         'DATABASE_ENABLE_SQLITE_WAL': 'false',
         'VECTOR_DB': 'weaviate',
-        'SOEV_API_URL': 'https://soev.invalid',
+        'SOEV_API_URL': catalog_url,
+        'SOEV_API_KEY': 'soev_test_cred-dry-run_secret',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
         'SOEV_V2_MIGRATION_ID': 'v2-test',
         'SOEV_V2_MODEL_MAP': json.dumps({'zai-org/GLM-5.3': 'glm-5-3'}),
