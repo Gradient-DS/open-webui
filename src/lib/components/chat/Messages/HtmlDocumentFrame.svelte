@@ -5,32 +5,40 @@
 	import type { i18n as i18nType } from 'i18next';
 	import { DOCUMENT_SANDBOX, sanitizeDocumentHtml } from '$lib/utils/htmlDocument';
 	import { documentPreviewThrottle } from '$lib/utils/documentPreview';
-	import { fitZoom, PAGE_HEIGHT, PAGE_WIDTH, ZOOM_STEPS } from '$lib/utils/documentZoom';
+	import { fitPages, mmToPx, pagesOf, pageSize, pageStyle } from '$lib/utils/documentPages';
+	import { fitZoom, ZOOM_STEPS } from '$lib/utils/documentZoom';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	let {
 		content,
 		title,
+		page,
 		done = true
 	}: {
 		content: string;
 		title: string;
+		page?: string;
 		done?: boolean;
 	} = $props();
+	const size = $derived(pageSize(page));
 	let width = $state(0);
 	let panelHeight = $state(0);
-	// A page may be wider than A4 (fixed widths, margins); the fit and the frame use what it measures.
-	let contentWidth = $state(PAGE_WIDTH);
-	let height = $state(PAGE_HEIGHT);
-	// null fits the page to the panel inside its padding (px-6, pt-6 and the zoom bar's pb-16), never above
-	// 100%; a step is the user's own zoom.
+	// The frame's measured content: its sheets with the gaps between them, or one flowing page, which may be
+	// wider than its paper (fixed widths, margins).
+	let contentWidth = $state(mmToPx(210));
+	let height = $state(mmToPx(297));
+	// How many page sections the document has; 0 for a document written as one flowing page.
+	let sheets = $state(0);
+	// null fits the pages to the panel inside its padding (px-6, pt-6 and the zoom bar's pb-16), never above
+	// 100%: one page shows whole, more pages fit the width; a step is the user's own zoom.
 	let zoom = $state<number | null>(null);
 	const scale = $derived(
 		zoom ??
 			fitZoom(
 				{ width: width - 48, height: panelHeight - 88 },
-				{ width: contentWidth, height: height }
+				{ width: contentWidth, height },
+				sheets === 1 || (sheets === 0 && height <= mmToPx(size.height) * 1.05)
 			)
 	);
 	let srcdoc = $state('');
@@ -38,7 +46,10 @@
 	let scrollTop = 0;
 	const preview = documentPreviewThrottle((snapshot: { content: string; title: string }) => {
 		scrollTop = container?.scrollTop ?? 0;
-		srcdoc = sanitizeDocumentHtml(snapshot.content, snapshot.title, { stripCitations: true });
+		srcdoc = sanitizeDocumentHtml(snapshot.content, snapshot.title, {
+			stripCitations: true,
+			trustedStyle: pageStyle(snapshot.content, size, 'screen')
+		});
 	});
 	$effect(() => {
 		if (browser) preview.update({ content, title }, done);
@@ -48,10 +59,12 @@
 	});
 
 	async function loadFrame(event: Event) {
-		const frame = event.currentTarget as HTMLIFrameElement;
-		const page = frame.contentDocument?.documentElement;
-		contentWidth = Math.max(PAGE_WIDTH, page?.scrollWidth ?? 0);
-		height = Math.max(PAGE_HEIGHT, page?.scrollHeight ?? 0);
+		const doc = (event.currentTarget as HTMLIFrameElement).contentDocument;
+		if (!doc) return;
+		fitPages(doc, size);
+		sheets = pagesOf(doc).length;
+		contentWidth = Math.max(mmToPx(size.width), doc.documentElement.scrollWidth);
+		height = Math.max(sheets ? 0 : mmToPx(size.height), doc.documentElement.scrollHeight);
 		await tick();
 		container.scrollTop = scrollTop;
 	}
@@ -69,9 +82,12 @@
 		bind:clientWidth={width}
 		bind:clientHeight={panelHeight}
 	>
+		<!-- Sheets draw their own shadow inside the frame; a flowing page gets it here. -->
 		<div
 			style:height="{height * scale}px"
-			class="mx-auto overflow-hidden shadow-[0_6px_28px_rgba(0,0,0,0.18)] ring-1 ring-black/5 dark:shadow-[0_6px_28px_rgba(0,0,0,0.65)] dark:ring-white/10"
+			class="mx-auto overflow-hidden {sheets
+				? ''
+				: 'shadow-[0_6px_28px_rgba(0,0,0,0.18)] ring-1 ring-black/5 dark:shadow-[0_6px_28px_rgba(0,0,0,0.65)] dark:ring-white/10'}"
 			style:width="{contentWidth * scale}px"
 		>
 			<!-- Same-origin permits measuring the page; scripts stay forbidden. -->
@@ -80,7 +96,7 @@
 				sandbox={DOCUMENT_SANDBOX}
 				{srcdoc}
 				onload={loadFrame}
-				class="block border-0 bg-white origin-top-left"
+				class="block border-0 origin-top-left {sheets ? 'bg-transparent' : 'bg-white'}"
 				style:width="{contentWidth}px"
 				style:height="{height}px"
 				style:transform="scale({scale})"
