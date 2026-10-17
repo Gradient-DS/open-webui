@@ -42,7 +42,7 @@
 		removeDetails,
 		removeAllDetails
 	} from '$lib/utils';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import { canContinueResponse, isFeatureEnabled } from '$lib/utils/features';
 	import { answeredByLabel } from '$lib/utils/models/catalog';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
@@ -1877,7 +1877,7 @@
 										</Tooltip>
 									{/if}
 
-									{#if isLastMessage && ($user?.role === 'admin' || ($user?.permissions?.chat?.continue_response ?? true))}
+									{#if isLastMessage && canContinueResponse($config, $user)}
 										<Tooltip content={$i18n.t('Continue Response')} placement="bottom">
 											<button
 												aria-label={$i18n.t('Continue Response')}
