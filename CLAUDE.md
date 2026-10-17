@@ -245,6 +245,20 @@ assistant's access grants, hidden from KB lists. An event sink syncs it on model
 assistant or its last file; a file still ingesting elsewhere is retried for ten minutes). A turn sends them as
 `attachments`, read as the user; one not there yet is skipped as processing and asks for a sync, a deleted one is
 noticed as the assistant's. The v2 migration uploads step ingests them into that same collection.
+
+Sharing a folder shares its knowledge (`soev/folder_sharing.py`): everyone a folder (or a same-owner ancestor) is
+shared with gets a read grant on the local knowledge bases and notes in it that the folder owner owns, through
+`AccessGrants.set_access_grants` asserted as that owner; a folder write grant gives read. Cloud KBs and other
+owners' items are never shared. `folder_share_grant` records only the grants this added, so unsharing, removing an
+item or moving a folder out revokes those and keeps grants the item already had. The folder routes remove grants
+before committing (a failure refuses the change) and add them after. On v2 only the owner changes a folder's grants
+or adds items to it; write members may remove items.
+A shared folder's files go to its own collection, `owui-folder-<folder id>` (`soev/folder_files.py`): owned by the
+folder owner, read by the folder's audience, holding the `file` entries the owner uploaded, deleted when the folder
+is unshared, emptied or deleted. Its readers and files are narrowed before a folder change commits and synced in the
+background after (missing files submitted as the owner, retried while still ingesting elsewhere). Folder items carry
+`folder_id`, and a turn reads a folder file there first, as the user. Hidden from KB lists.
+
 Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
 OWUI's init container owns schema upgrades. A timeout exits with a clear retry message.
 
