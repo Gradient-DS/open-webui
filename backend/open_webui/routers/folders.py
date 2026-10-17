@@ -3,6 +3,7 @@ import mimetypes
 import os
 import shutil
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +28,8 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.automations import Automations
 from open_webui.models.groups import Groups
 from open_webui.models.users import Users
+from open_webui.soev import folder_sharing
+from open_webui.soev.availability import configured
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control import (
     filter_allowed_access_grants,
@@ -174,6 +177,12 @@ async def create_folder(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
                 )
+            if configured() and form_data.data and form_data.data.get('files'):
+                # [Gradient] A folder share shares its knowledge: only the owner adds to it.
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+                )
             if form_data.data and 'files' in form_data.data:
                 owner = await Users.get_user_by_id(parent.user_id, db=db)
                 if not owner:
@@ -215,7 +224,9 @@ async def create_folder(
         )
 
     try:
-        folder = await Folders.insert_new_folder(user.id, form_data, form_data.parent_id, db=db)
+        sharing = folder_sharing.changing(user.id) if (form_data.data or {}).get('files') else nullcontext()
+        async with sharing:
+            folder = await Folders.insert_new_folder(user.id, form_data, form_data.parent_id, db=db)
         await publish_event(
             request,
             EVENTS.FOLDER_CREATED,
@@ -361,9 +372,25 @@ async def update_folder_name_by_id(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
                 )
+            # [Gradient] A folder share shares its knowledge: only the owner adds to it, others may remove.
+            if (
+                configured()
+                and folder.user_id != user.id
+                and folder_sharing.adds_entries((folder.data or {}).get('files'), form_data.data['files'])
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+                )
 
+        def edit(folders: folder_sharing.View) -> None:
+            folders.files[id] = list(form_data.data['files'] or [])
+
+        files_change = bool(form_data.data and 'files' in form_data.data)
+        sharing = folder_sharing.changing(folder.user_id, edit) if files_change else nullcontext()
         try:
-            folder = await Folders.update_folder_by_id_and_user_id(id, folder.user_id, form_data, db=db)
+            async with sharing:
+                folder = await Folders.update_folder_by_id_and_user_id(id, folder.user_id, form_data, db=db)
             await publish_event(
                 request,
                 EVENTS.FOLDER_UPDATED,
@@ -420,8 +447,14 @@ async def update_folder_parent_id_by_id(
                 detail=ERROR_MESSAGES.DEFAULT('Cannot move a folder into itself or one of its subfolders'),
             )
 
+        def edit(folders: folder_sharing.View) -> None:
+            folders.parents[id] = form_data.parent_id
+
         try:
-            folder = await Folders.update_folder_parent_id_by_id_and_user_id(id, user.id, form_data.parent_id, db=db)
+            async with folder_sharing.changing(user.id, edit):
+                folder = await Folders.update_folder_parent_id_by_id_and_user_id(
+                    id, user.id, form_data.parent_id, db=db
+                )
             await publish_event(
                 request,
                 EVENTS.FOLDER_PARENT_UPDATED,
@@ -513,6 +546,13 @@ async def update_folder_access_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
+    # [Gradient] A folder share shares its owner's knowledge, so on v2 only the owner changes it.
+    if configured() and user.id != folder.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
     # Only owner, admin, or write-granted user can update access
     if not can_bypass_access_control(user) and user.id != folder.user_id:
         if not await _has_folder_access(user.id, folder, 'write', db):
@@ -530,7 +570,11 @@ async def update_folder_access_by_id(
         db=db,
     )
 
-    await AccessGrants.set_access_grants('folder', id, form_data.access_grants, db=db)
+    def edit(folders: folder_sharing.View) -> None:
+        folders.grants[id] = list(form_data.access_grants or [])
+
+    async with folder_sharing.changing(folder.user_id, edit):
+        await AccessGrants.set_access_grants('folder', id, form_data.access_grants, db=db)
 
     grants = await AccessGrants.get_grants_by_resource('folder', id, db=db)
     await publish_event(
@@ -706,7 +750,9 @@ async def delete_folder_by_id(
         folder = folders.pop()
         if folder:
             try:
-                folder_ids = await Folders.delete_folder_by_id_and_user_id(folder.id, folder_owner_id, db=db)
+                subtree = await Folders.get_folder_ids_by_id_and_user_id_in_subtree(folder.id, folder_owner_id, db=db)
+                async with folder_sharing.changing(folder_owner_id, lambda folders: folders.drop(subtree)):
+                    folder_ids = await Folders.delete_folder_by_id_and_user_id(folder.id, folder_owner_id, db=db)
 
                 for folder_id in folder_ids:
                     if delete_contents:
