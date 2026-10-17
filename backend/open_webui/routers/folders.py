@@ -590,6 +590,28 @@ async def update_folder_access_by_id(
     }
 
 
+@router.get('/{id}/sharing')
+async def get_folder_sharing_by_id(
+    request: Request,
+    id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """[Gradient] The folder's items a share leaves out (cloud knowledge bases, other people's items), for the
+    owner's share dialog."""
+    await check_folders_permission(request, user, db=db)
+    folder = await Folders.get_folder_by_id_and_user_id(id, user.id, db=db)
+    if not folder:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+    if not configured():
+        return {'shares_knowledge': False, 'left_out': []}
+    left_out = await folder_sharing.left_out(folder.user_id, (folder.data or {}).get('files'))
+    return {'shares_knowledge': True, 'left_out': left_out}
+
+
 ############################
 # Get Shared Folder Chats
 ############################
