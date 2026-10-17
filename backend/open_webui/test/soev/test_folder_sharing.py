@@ -108,6 +108,13 @@ def world(monkeypatch):
     monkeypatch.setattr(folder_sharing.Config, 'get', permissions)
     monkeypatch.setattr(folder_sharing, 'filter_allowed_access_grants', allowed)
     monkeypatch.setattr(folder_sharing, '_locks', {})
+    state.narrowed, state.scheduled = [], []
+
+    async def narrow(owner_id, folder_id, principals, files):
+        state.narrowed.append((folder_id, principals, files, dict(state.folder_grants)))
+
+    monkeypatch.setattr(folder_sharing.folder_files, 'narrow', narrow)
+    monkeypatch.setattr(folder_sharing.folder_files, 'schedule', state.scheduled.append)
 
     state.knowledge = {
         'kb-local': {'user_id': 'dana', 'type': 'local'},
@@ -250,6 +257,17 @@ async def test_everyone_follows_the_owners_permission_to_share_with_everyone(wor
     world.public_allowed = True
     await share(world, 'project', [grant('user', '*'), grant('user', 'frank')])
     assert readers(world, 'knowledge', 'kb-local') == {('user', 'frank', 'read'), ('user', '*', 'read')}
+
+
+@pytest.mark.asyncio
+async def test_the_folders_file_collection_is_narrowed_before_the_change_and_synced_after(world):
+    await share(world, 'project', [grant('user', 'frank')])
+    assert world.scheduled == ['project']
+    await share(world, 'project', [])
+    folder_id, principals, files, committed = world.narrowed[-1]
+    assert (folder_id, principals, files) == ('project', set(), ['file-1'])
+    assert committed == {'project': [grant('user', 'frank')]}
+    assert world.scheduled == ['project', 'project']
 
 
 @pytest.mark.asyncio

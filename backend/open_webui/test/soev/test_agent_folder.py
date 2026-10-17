@@ -53,7 +53,7 @@ async def settled(route_to_agent: bool, function_calling: str) -> tuple[dict, di
 async def test_a_routed_turn_carries_the_folders_prompt_and_items(function_calling: str) -> None:
     _, metadata = await settled(True, function_calling)
     assert metadata['chat_system_prompt'] == 'Antwoord in het kort.'
-    assert metadata['folder_knowledge'] == FOLDER_FILES
+    assert metadata['folder_knowledge'] == [{**item, 'folder_id': 'folder-1'} for item in FOLDER_FILES]
 
 
 @pytest.mark.asyncio

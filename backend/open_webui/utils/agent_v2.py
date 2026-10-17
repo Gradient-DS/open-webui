@@ -244,7 +244,7 @@ async def _folder_items(metadata: dict[str, Any]) -> tuple[list[dict[str, Any]],
             name = entry.get('name') or (folder.name if folder else None)
             skipped.append(Skipped('folder', 'denied' if folder else 'gone', entry['id'], name))
             continue
-        items.extend(await get_owner_accessible_folder_files(folder))
+        items.extend({**item, 'folder_id': folder.id} for item in await get_owner_accessible_folder_files(folder))
     unique: dict[tuple[str, str], dict[str, Any]] = {}
     for item in items:
         if isinstance(item, dict) and item.get('type') in _FOLDER_ITEMS and isinstance(item.get('id'), str):
@@ -438,6 +438,11 @@ async def _folder_attachment(
     key = entry.get('knowledge_id') or (collection.get('id') if isinstance(collection, dict) else None)
     file = await Files.get_file_by_id(file_id)
     name = entry.get('name') or (file.filename if file is not None else None) or file_id
+    if not key and file is not None and entry.get('folder_id'):
+        # [Gradient] A shared folder's file is read in the folder's own collection (`soev/folder_files.py`).
+        shared = ingest.folder_collection_key(entry['folder_id'])
+        if await Knowledges.knowledge_document(shared, file_id, user_id=user_id) is not None:
+            key = shared
     if not key and file is not None:
         key = (file.meta or {}).get('collection_name') or ingest.attachments_collection_key(file.user_id)
         if key == f'file-{file.id}':
