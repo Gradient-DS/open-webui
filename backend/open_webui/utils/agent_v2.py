@@ -1089,6 +1089,16 @@ def _chunk(delta: dict[str, Any]) -> dict[str, Any]:
     return {'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': delta, 'finish_reason': None}]}
 
 
+_USAGE_KEYS = ('prompt_tokens', 'completion_tokens', 'total_tokens')
+
+
+def _summed_usage(total: dict[str, int] | None, usage: Any) -> dict[str, int] | None:
+    """[Claude] Add one model call's token counts to the turn's; a call without usage adds nothing."""
+    if not isinstance(usage, dict):
+        return total
+    return {key: (total or {}).get(key, 0) + int(usage.get(key) or 0) for key in _USAGE_KEYS}
+
+
 def _error(
     code: str,
     *,
@@ -1390,6 +1400,8 @@ class AgentTurn:
         # [Claude] Whether soev-api accepted the turn, and the HTTP status of its failure, if it failed.
         self.accepted = False
         self.status: int | None = None
+        # [Claude] Token counts summed over every model call of the turn, sent once as the stream's usage chunk.
+        self.usage: dict[str, int] | None = None
 
     def fail(self, status: int, code: str, *, upstream: int | None = None, constraint: str | None = None) -> None:
         """[Claude] Keep the failure's HTTP status and log it once: ids and codes only, never content (GRA-219)."""
@@ -1835,6 +1847,8 @@ class AgentTurn:
         if event.event == 'citation':
             marker = await self.cite(event.data)
             return [_chunk({'content': marker})] if marker else []
+        if event.event == 'model_output':
+            self.usage = _summed_usage(self.usage, payload.get('usage'))
         if event.event == 'model_output' and event.data.get('stream') == 'root':
             return await self.model_output(payload)
         if event.event == 'tool_output' and event.data.get('stream') == 'root':
@@ -1937,6 +1951,10 @@ class AgentTurn:
         elif state not in {*_ENDED, 'waiting'}:
             self.fail(_http_status(state or 'service_unavailable'), state or 'service_unavailable')
             chunks.append(_error(state or 'service_unavailable', language=language))
+        if self.usage:
+            # [Claude] The OpenAI terminal usage chunk, which the middleware stores on the message as v1 does.
+            chunks.append({'object': 'chat.completion.chunk', 'choices': [], 'usage': self.usage})
+            self.usage = None
         return chunks
 
     async def summarize(self) -> None:
@@ -2002,14 +2020,21 @@ async def call_agent_v2(
         return JSONResponse(early, status_code=turn.status or 502)
     if not form_data.get('stream', True):
         message = {'role': 'assistant', 'content': '', 'reasoning_content': ''}
+        usage: dict[str, int] | None = None
         async with aclosing(chunks):
             rest = [chunk async for chunk in chunks]
         for chunk in early + rest:
             if 'error' in chunk:
                 return JSONResponse(chunk, status_code=turn.status or 502)
-            for key, value in chunk['choices'][0]['delta'].items():
-                message[key] += value
-        return {'object': 'chat.completion', 'choices': [{'index': 0, 'message': message, 'finish_reason': 'stop'}]}
+            usage = chunk.get('usage') or usage
+            for choice in chunk['choices'][:1]:
+                for key, value in choice['delta'].items():
+                    message[key] += value
+        return {
+            'object': 'chat.completion',
+            'choices': [{'index': 0, 'message': message, 'finish_reason': 'stop'}],
+            **({'usage': usage} if usage else {}),
+        }
 
     async def stream_body() -> AsyncIterator[str]:
         async with aclosing(chunks):
