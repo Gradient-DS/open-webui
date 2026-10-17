@@ -2857,7 +2857,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             if 'system_prompt' in folder.data:
                 form_data = await apply_system_prompt_to_body(folder.data['system_prompt'], form_data, metadata, user)
             if 'files' in folder.data:
-                if metadata.get('params', {}).get('function_calling') == 'legacy':
+                # [Gradient] A routed turn sends the folder's items to the agent itself (`utils/agent_v2.py`).
+                if metadata.get('params', {}).get('function_calling') == 'legacy' and not route_to_agent:
                     form_data['files'] = [
                         {'type': 'folder', 'id': folder.id},
                         *form_data.get('files', []),
