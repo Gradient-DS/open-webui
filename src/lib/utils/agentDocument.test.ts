@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { encode } from 'html-entities';
-import { extractDocumentsFromMessage } from './agentDocument';
+import { extractDocumentsFromMessage, labelDocuments } from './agentDocument';
 
 const marker = (format: string, content: string, title = 'Report') =>
 	`<document title="${encode(title)}" format="${format}">${content}</document>`;
@@ -53,5 +53,44 @@ describe('streamed documents', () => {
 		expect(
 			extractDocumentsFromMessage(marker('markdown', '```\n</document>\n```'))[0].content
 		).toBe('```\n');
+	});
+});
+
+describe('documents in reasoning', () => {
+	const label = (title: string) => title || 'Document';
+
+	it('names a finished or unfinished document in one line instead of showing it', () => {
+		expect(
+			labelDocuments(
+				'Plan.\n<document title="Appeltaart" format="markdown">\n# Taart\n</document>\nKlaar.',
+				label
+			)
+		).toBe('Plan.\n\n\n_Appeltaart_\n\n\nKlaar.');
+		expect(labelDocuments('Plan. <document format="html"><html>', label)).toBe(
+			'Plan. \n\n_Document_\n\n'
+		);
+	});
+
+	it('names a document whose tag lost its bracket to a tool-call token', () => {
+		expect(
+			labelDocuments(
+				'<tool_call>document title="Taart" format="markdown">\n# Taart\n</document>',
+				label
+			)
+		).toBe('\n\n_Taart_\n\n');
+	});
+
+	it('takes linear time however many tags stay unclosed', () => {
+		for (const text of ['<document '.repeat(50_000), '<document "'.repeat(50_000)]) {
+			const started = performance.now();
+			expect(labelDocuments(text, label)).toBe(text);
+			expect(performance.now() - started).toBeLessThan(200);
+		}
+	});
+
+	it('leaves reasoning without documents as it is', () => {
+		expect(labelDocuments('Ik denk na over <tool_call> en documenten.', label)).toBe(
+			'Ik denk na over <tool_call> en documenten.'
+		);
 	});
 });

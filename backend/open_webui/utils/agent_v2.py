@@ -384,13 +384,72 @@ TEXT_CHARACTERS = 50_000
 # [Gradient] Match quoted attributes too: document titles and tool arguments may contain `>`.
 _ATTRIBUTES = r"""((?:[^>"']|"[^"]*"|'[^']*')*)"""
 _DETAILS = re.compile(r'<details\b' + _ATTRIBUTES + r'>.*?</details>', re.DOTALL)
-_DOCUMENT = re.compile(r'<document\b' + _ATTRIBUTES + r'>.*?</document>', re.DOTALL)
 _ATTRIBUTE = re.compile(r"""([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+# [Claude] GLM's tool-call token leaked into a document tag: `<tool_call>document title=...>` (also with `<`).
+_TOOL_CALL = '<tool_call>'
+_LEAKED_DOCUMENT = re.compile(re.escape(_TOOL_CALL) + r'\s*<?(?=document\b)')
 
 
-def _document_label(match: re.Match[str]) -> str:
-    attributes = {key: double or single for key, double, single in _ATTRIBUTE.findall(match[1])}
-    return f'[document: {html.unescape(attributes.get("title", ""))}]'
+def _unleaked(text: str) -> str:
+    """[Claude] `text` with a leaked tool-call token in front of a document tag turned back into `<document`."""
+    return _LEAKED_DOCUMENT.sub('<', text)
+
+
+def _undecided(text: str) -> int:
+    """[Claude] Where the tail of streamed answer text starts that may still turn out to be a leaked document tag
+    (`<tool_c`, `<tool_call>`, `<tool_call>doc`); its length when there is none."""
+    start = text.rfind(_TOOL_CALL)
+    if start != -1 and 'document'.startswith(text[start + len(_TOOL_CALL) :].lstrip().removeprefix('<')):
+        return start
+    for size in range(min(len(_TOOL_CALL) - 1, len(text)), 0, -1):
+        if _TOOL_CALL.startswith(text[-size:]):
+            return len(text) - size
+    return len(text)
+
+
+@dataclass(frozen=True)
+class _Document:
+    start: int
+    end: int
+    attributes: str
+
+    def label(self) -> str:
+        attributes = {key: double or single for key, double, single in _ATTRIBUTE.findall(self.attributes)}
+        return f'[document: {html.unescape(attributes.get("title", ""))}]'
+
+
+def _documents(text: str) -> list[_Document]:
+    """[Claude] Each closed `<document ...>...</document>` in `text`, found in one pass: a regular expression takes
+    quadratic time on many unclosed tags, which a model (or text it quotes) can write. An unclosed tag ends the
+    search, since no later tag can close before it does."""
+    found, position = [], 0
+    while (start := text.find('<document', position)) != -1:
+        after = start + len('<document')
+        if after < len(text) and (text[after].isalnum() or text[after] in '_-'):
+            position = after
+            continue
+        end, quote = after, ''
+        while end < len(text) and (quote or text[end] != '>'):
+            if quote and text[end] == quote:
+                quote = ''
+            elif not quote and text[end] in '"\'':
+                quote = text[end]
+            end += 1
+        close = text.find('</document>', end)
+        if end == len(text) or close == -1:
+            break
+        position = close + len('</document>')
+        found.append(_Document(start, position, text[after:end]))
+    return found
+
+
+def _labelled(text: str) -> str:
+    """[Claude] `text` with each document replaced by a line naming it."""
+    parts, position = [], 0
+    for document in _documents(text):
+        parts += [text[position : document.start], document.label()]
+        position = document.end
+    return ''.join(parts) + text[position:]
 
 
 # [Gradient] A citation marker the agent would read as a number of this turn: `[3]`, `[3, 4]`, `[#3]`, `[3#p2]`,
@@ -416,7 +475,7 @@ def _conversation(chat: Any, message_id: str | None) -> list[str]:
     blocks = []
     for message in get_message_list(chat.chat.get('history', {}).get('messages', {}), message_id):
         text = _DETAILS.sub('', get_content_from_message(message) or '')
-        text = _uncited(_DOCUMENT.sub(_document_label, text)).strip()
+        text = _uncited(_labelled(text)).strip()
         if text:
             blocks.append(f'{message.get("role", "user")}: {text}')
     return blocks
@@ -1133,10 +1192,15 @@ class AgentTurn:
         # [Claude] The source ids this turn already sent to the message's `sources`.
         self.shown_sources: set[str] = set()
         self.partial = ''
+        # [Claude] Streamed answer text not shown yet, because it may still be a leaked document tag.
+        self.held = ''
         # [Claude] Markers already shown in the answer being streamed, as (position, number).
         self.streamed: list[tuple[int, int]] = []
         self.streamed_citations = 0
         self.partial_reasoning = ''
+        # [Claude] The turn's document writer state, and every text its tools returned.
+        self.documents = 'off'
+        self.tool_texts: list[str] = []
         self.tool_calls = 0
         # [Claude] How many calls the last summary counted.
         self.summarized = 0
@@ -1481,6 +1545,11 @@ class AgentTurn:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
         await self.attached(payload)
         await self.keep(payload)
+        self.tool_texts += [
+            text
+            for text in [payload.get('data'), *(element.get('text') for element in payload.get('elements') or [])]
+            if isinstance(text, str) and text
+        ]
         for element in payload.get('elements') or []:
             if element.get('type') == 'action-required' and element.get('kind') == 'connect':
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
@@ -1505,7 +1574,20 @@ class AgentTurn:
             return ''
         await self.show_source(citation['source'])
         self.streamed.append((at, number))
-        return _citation_marker(self.partial[:at], number)
+        return self.release() + _citation_marker(self.partial[:at], number)
+
+    def shown(self, text: str) -> str:
+        """[Claude] The part of streamed answer text to show now; a tail that may still be a leaked document tag
+        waits for the next text."""
+        text = _unleaked(self.held + text)
+        cut = _undecided(text)
+        self.held = text[cut:]
+        return text[:cut]
+
+    def release(self) -> str:
+        """[Claude] The answer text held back, shown as it is now that no more text joins it."""
+        held, self.held = self.held, ''
+        return held
 
     async def resume(self) -> None:
         events = self.client.chat_stream(
@@ -1586,7 +1668,8 @@ class AgentTurn:
             if event.data['text'] and not self.running:
                 await self.summarize()
             self.partial += event.data['text']
-            return [_chunk({'content': event.data['text']})] if event.data['text'] else []
+            text = self.shown(event.data['text'])
+            return [_chunk({'content': text})] if text else []
         if event.event == 'citation':
             marker = await self.cite(event.data)
             return [_chunk({'content': marker})] if marker else []
@@ -1614,9 +1697,10 @@ class AgentTurn:
         citations = (payload.get('citations') or [])[self.streamed_citations :]
         streamed = self.streamed
         self.partial, self.streamed, self.streamed_citations = '', [], 0
+        held = self.release()
         if not content.startswith(partial):
             log.warning('Durable model output disagrees with streamed text', extra={'thread_id': self.thread_id})
-            return []
+            return [_chunk({'content': held})] if held else []
         markers = [
             (citation['at'], number)
             for citation in citations
@@ -1628,13 +1712,28 @@ class AgentTurn:
         for citation in citations:
             if self.citations.number(citation) is not None:
                 await self.show_source(citation['source'])
-        text = _marked(content, markers, len(partial))
+        text = _unleaked(held + _marked(content, markers, len(partial)))
+        if (document := self.reasoning_document(content, payload.get('reasoning') or '')) is not None:
+            text += f'\n\n{document}'
         chunks = []
         if reasoning:
             chunks.append(_chunk({'reasoning_content': reasoning}))
         if text:
             chunks.append(_chunk({'content': text}))
         return chunks
+
+    def reasoning_document(self, content: str, reasoning: str) -> str | None:
+        """[Claude] The document a model wrote in its reasoning instead of its answer, for the answer to show: only
+        when the user turned the document writer on, the call ends the turn and its answer has none, and only the
+        last one, which a tool did not return as it is (text the model quoted from a mail or file is not its own)."""
+        if self.documents not in ('auto', 'required') or self.pending_calls or _documents(_unleaked(content)):
+            return None
+        reasoning = _unleaked(reasoning)
+        if not (found := _documents(reasoning)):
+            return None
+        last = found[-1]
+        body = reasoning[last.start + len('<document') + len(last.attributes) + 1 : last.end - len('</document>')]
+        return None if any(body.strip() in text for text in self.tool_texts) else reasoning[last.start : last.end]
 
     def remaining_reasoning(self, reasoning: str) -> str:
         partial, self.partial_reasoning = self.partial_reasoning, ''
@@ -1652,7 +1751,8 @@ class AgentTurn:
         if event.event == 'status':
             self.position = event.data['position']
         await self.persist()
-        chunks: list[dict[str, Any]] = []
+        held = self.release()
+        chunks: list[dict[str, Any]] = [_chunk({'content': held})] if held else []
         state = event.data.get('state')
         if state not in _ENDED:
             await self.emit('status', {'description': state or 'error', 'done': True})
@@ -1688,6 +1788,7 @@ class AgentTurn:
 
     async def run(self, body: dict, agent: str | None) -> AsyncIterator[dict[str, Any]]:
         self.model = body.get('model')
+        self.documents = body.get('input', {}).get('documents', 'off')
         try:
             self.emitter = await get_event_emitter(self.metadata)
             await self.notify()
