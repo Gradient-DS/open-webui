@@ -1167,6 +1167,29 @@ async def test_a_shared_folders_file_the_user_cannot_read_is_left_out_with_a_not
 
 
 @pytest.mark.asyncio
+async def test_a_shared_folders_file_is_read_in_the_folders_own_collection(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bob's upload in his shared folder reaches alice through the folder's collection, not his attachments."""
+    seed_hidden_collection(chat.api, ingest.attachments_collection_key('bob'), 'Attachments')
+    shared = ingest.folder_collection_key('folder-bob')
+    seed_collection(chat.api, shared, 'Folder files')
+    chat.api.add_document(shared, 'f-bob', filename='beleid.pdf')
+    record = SimpleNamespace(id='f-bob', user_id='bob', filename='beleid.pdf', meta={'status': 'completed'})
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', AsyncMock(return_value=record))
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        folder_knowledge=[{'type': 'file', 'id': 'f-bob', 'name': 'beleid.pdf', 'folder_id': 'folder-bob'}],
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': shared, 'file_id': 'f-bob', 'name': 'beleid.pdf'}
+    ]
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
 async def test_a_folders_note_is_sent_after_the_chats_texts(chat: Chat, stored_texts: dict) -> None:
     stored_texts['n2'] = SimpleNamespace(id='n2', user_id='alice', title='Afspraken', data={'content': {'md': 'Body'}})
     await chat.turn(

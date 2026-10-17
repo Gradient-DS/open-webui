@@ -17,6 +17,7 @@ from open_webui.utils.content_types import content_type_for
 
 ATTACHMENTS_PREFIX = 'owui-attachments-'
 ASSISTANT_PREFIX = 'owui-assistant-'
+FOLDER_PREFIX = 'owui-folder-'
 ATTACHMENTS_TAG = 'chat-attachments'
 
 
@@ -41,6 +42,15 @@ def assistant_collection_key(model_id: str) -> str:
 
 def is_assistant_collection(key: str) -> bool:
     return key.startswith(ASSISTANT_PREFIX)
+
+
+def folder_collection_key(folder_id: str) -> str:
+    """[Gradient] The collection holding a shared folder's own files (`soev/folder_files.py`)."""
+    return FOLDER_PREFIX + folder_id
+
+
+def is_folder_collection(key: str) -> bool:
+    return key.startswith(FOLDER_PREFIX)
 
 
 def is_chat_attachment(entry: dict) -> bool:
