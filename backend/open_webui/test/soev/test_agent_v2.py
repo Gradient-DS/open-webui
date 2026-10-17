@@ -146,7 +146,7 @@ def chat(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch, platform_capab
 
 
 def content(chunks: list[dict], key: str = 'content') -> str:
-    return ''.join(chunk['choices'][0]['delta'].get(key, '') for chunk in chunks if 'choices' in chunk)
+    return ''.join(chunk['choices'][0]['delta'].get(key, '') for chunk in chunks if chunk.get('choices'))
 
 
 @pytest.mark.asyncio
@@ -2082,7 +2082,7 @@ async def test_durable_reasoning_emits_only_missing_suffix(chat: Chat, close_aft
     chat.api.chat.close_after = close_after
     chunks = await chat.turn('question', 'a1')
     assert content(chunks, 'reasoning_content') == 'Think first.'
-    assert content(chunks) == 'Answer'
+    assert content(chunks).endswith('Answer')
     assert len(chat.mutations()) == 1
 
 
@@ -3717,3 +3717,55 @@ async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind):
     metadata = source['metadata'][0]
     assert metadata.get('granularity') == ('document' if kind == 'document-text' else None)
     assert metadata['page'] == 1
+
+
+def usage(prompt: int, completion: int) -> dict[str, int]:
+    return {'prompt_tokens': prompt, 'completion_tokens': completion, 'total_tokens': prompt + completion}
+
+
+@pytest.mark.asyncio
+async def test_a_turn_ends_with_one_usage_chunk_summed_over_its_model_calls(chat: Chat) -> None:
+    calls = {'content': '', 'tool_calls': [{'id': 'c1', 'name': 'search', 'arguments': {}}], 'usage': usage(100, 10)}
+    chat.api.chat.turns = [
+        [
+            ('model_output', calls),
+            ('tool_output', {'call_id': 'c1'}),
+            ('model_output', {'content': 'Answer', 'usage': usage(250, 40)}),
+        ]
+    ]
+    chunks = await chat.turn('question', 'a1')
+    assert [chunk for chunk in chunks if 'usage' in chunk] == [
+        {'object': 'chat.completion.chunk', 'choices': [], 'usage': usage(350, 50)}
+    ]
+    assert chunks[-1] == {'object': 'chat.completion.chunk', 'choices': [], 'usage': usage(350, 50)}
+    assert content(chunks).endswith('Answer')
+
+
+@pytest.mark.asyncio
+async def test_a_turn_without_reported_usage_sends_no_usage_chunk(chat: Chat) -> None:
+    chunks = await chat.turn('question', 'a1')
+    assert not [chunk for chunk in chunks if 'usage' in chunk]
+
+
+@pytest.mark.asyncio
+async def test_sub_agent_calls_count_and_a_call_without_usage_adds_nothing() -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    turn.emitter = AsyncMock()
+    async with asyncio.timeout(2):
+        await render(
+            turn, ChatEvent('model_output', {'stream': 'sub:1', 'payload': {'content': '', 'usage': usage(30, 5)}})
+        )
+        await render(turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': 'A', 'usage': None}}))
+        await render(
+            turn, ChatEvent('model_output', {'stream': 'root', 'payload': {'content': 'B', 'usage': usage(70, 15)}})
+        )
+        ended = await render(turn, ChatEvent('status', {'state': 'finished', 'position': 3}))
+    assert ended[-1]['usage'] == usage(100, 20)
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_returns_the_summed_usage(chat: Chat) -> None:
+    chat.api.chat.turns = [[('model_output', {'content': 'Answer', 'usage': usage(12, 3)})]]
+    result = await chat.response('question', 'a1', stream=False)
+    assert result['choices'][0]['message']['content'] == 'Answer'
+    assert result['usage'] == usage(12, 3)

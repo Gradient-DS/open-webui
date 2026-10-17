@@ -296,3 +296,41 @@ async def test_millisecond_timestamp_still_lands_inside_query_window():
     start, end = _window()
     model_counts = await ChatMessages.get_message_count_by_model(start_date=start, end_date=end)
     assert model_counts.get(model) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_v2_agent_turns_summed_usage_reaches_the_token_analytics():
+    """The usage chunk a v2 turn ends with, stored as the middleware does, counts every model call."""
+    from open_webui.utils.agent_v2 import _summed_usage
+    from open_webui.utils.response import merge_usage
+
+    chat_id, user_id, message_id = _ids()
+    model = f'v2-model-{uuid.uuid4()}'
+    turn = None
+    for prompt, completion in ((100, 10), (250, 40)):
+        turn = _summed_usage(
+            turn, {'prompt_tokens': prompt, 'completion_tokens': completion, 'total_tokens': prompt + completion}
+        )
+    await ChatMessages.upsert_message(
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=user_id,
+        data={
+            'role': 'assistant',
+            'content': 'Answer.',
+            'model': model,
+            'timestamp': int(time.time()),
+            'usage': merge_usage(None, turn),
+        },
+    )
+
+    start, end = _window()
+    assert (await ChatMessages.get_token_usage_by_model(start_date=start, end_date=end))[model] == {
+        'input_tokens': 350,
+        'output_tokens': 50,
+        'total_tokens': 400,
+        'message_count': 1,
+    }
+    by_user = await ChatMessages.get_token_usage_by_user(start_date=start, end_date=end)
+    assert by_user[user_id]['input_tokens'] == 350
+    assert by_user[user_id]['output_tokens'] == 50
