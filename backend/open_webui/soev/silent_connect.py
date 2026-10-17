@@ -105,7 +105,9 @@ async def continue_chain(request: Request, user: UserModel, connection_id: str, 
 
 async def _state(user_id: str) -> dict:
     user = await Users.get_user_by_id(user_id)
-    stored = ((user.settings if user else None) or {}).get(SETTINGS_KEY)
+    # Settings come back as a UserSettings model (extra keys allowed), or None.
+    settings = user.settings.model_dump() if user and user.settings else {}
+    stored = settings.get(SETTINGS_KEY)
     stored = stored if isinstance(stored, dict) else {}
     tried = stored.get('tried')
     inflight = stored.get('inflight')
