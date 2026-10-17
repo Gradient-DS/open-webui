@@ -36,6 +36,8 @@ V1_CONFIG = {
     'user.permissions': {'chat': {'edit': True}, 'features': {'web_search': False, 'memories': True}},
     'web.search.enable': False,
 }
+DEFAULT = 'mistral-small-4'
+CATALOG = [{'id': 'glm-5-3'}, {'id': 'gemma-4-31b'}, {'id': 'qwen-3-32b'}, {'id': DEFAULT, 'default': True}]
 
 
 class FakeVectors:
@@ -141,6 +143,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
     monkeypatch.setenv('SOEV_V2_MIGRATION_ID', MIGRATION)
     monkeypatch.setenv('SOEV_V2_CONFIG', json.dumps(V2_CONFIG))
     monkeypatch.setenv('SOEV_V2_MODEL_MAP', '{}')
+    fake_api.models = CATALOG
     async with engine.begin() as connection:
         for key, value in V1_CONFIG.items():
             # Hand-written text, so a byte-for-byte restore cannot pass by re-serializing.
@@ -189,6 +192,11 @@ async def config_rows(env):
 
 def options(env, **overrides):
     return env.module.options_from_env()
+
+
+def catalog_reads(env) -> bool:
+    """soev-api saw only the model catalog reads of step 3."""
+    return {(request.method, request.url.path) for request in env.api.requests} == {('GET', '/v1/models')}
 
 
 @pytest.mark.asyncio
@@ -495,7 +503,7 @@ async def dumps(env):
 
 
 @pytest.mark.asyncio
-async def test_model_ids_are_rewritten_everywhere_and_unmapped_ids_reported(env, monkeypatch, capsys):
+async def test_mapped_ids_are_rewritten_and_unmapped_ids_defaulted_everywhere(env, monkeypatch, capsys):
     await seed_models(env, monkeypatch)
     await env.module.apply(options(env))
     data = await dumps(env)
@@ -504,17 +512,20 @@ async def test_model_ids_are_rewritten_everywhere_and_unmapped_ids_reported(env,
     assert chat['history']['messages']['m.1']['models'] == ['glm-5-3']
     assert chat['history']['messages']['m.2']['model'] == 'glm-5-3'
     assert chat['history']['messages']['m.2']['content'] == 'model: zai-org/GLM-5.3'
-    assert chat['messages'] == [{'model': 'unknown/model'}]
-    assert data['chat_message'] == [('m.1', None), ('m.2', 'glm-5-3'), ('m.3', 'unknown/model')]
-    assert data['model'] == [('glm-5-3', None), ('helper', 'glm-5-3'), ('legacy', 'unknown/model')]
+    assert chat['messages'] == [{'model': DEFAULT}]
+    assert data['chat_message'] == [('m.1', None), ('m.2', 'glm-5-3'), ('m.3', DEFAULT)]
+    assert data['model'] == [('glm-5-3', None), ('helper', 'glm-5-3'), ('legacy', DEFAULT)]
     assert data['access_grant'] == [('g1', 'glm-5-3'), ('g2', 'zai-org/GLM-5.3')]
-    assert data['user'] == [('alice', {'ui': {'models': ['glm-5-3'], 'pinnedModels': ['helper', 'unknown/model']}})]
+    assert data['user'] == [('alice', {'ui': {'models': ['glm-5-3'], 'pinnedModels': ['helper', DEFAULT]}})]
     assert data['automation'][0][1]['model_id'] == 'glm-5-3'
     assert data['folder'] == [('f1', {'system_prompt': 'Kort.', 'model_ids': ['glm-5-3', 'helper']}), ('f2', None)]
-    assert await config_value(env, 'ui.default_pinned_models') == 'glm-5-3,unknown/model'
+    assert await config_value(env, 'ui.default_pinned_models') == f'glm-5-3,{DEFAULT}'
     output = capsys.readouterr().out
-    assert '3 model ids: unmapped unknown/model' in output
-    assert 'unmapped helper' not in output
+    assert f'3 model ids: default model {DEFAULT}' in output
+    for site in ('chat.chat', 'chat_message.model_id', 'model.base_model_id', 'ui.default_pinned_models'):
+        assert f'3 model ids: defaulted {site} 1\n' in output
+    assert f'3 model ids: defaulted unknown/model -> {DEFAULT} (5 references)' in output
+    assert 'defaulted helper' not in output
 
 
 @pytest.mark.asyncio
@@ -551,6 +562,67 @@ async def test_restore_gives_back_the_original_model_ids_and_keeps_later_message
     assert dict_chat['history']['messages'].pop('m.4') == {'role': 'assistant', 'model': 'glm-5-3'}
     assert json.loads(json.dumps(restored)) == expected
     assert await rows(env, 'SELECT * FROM owui_v2_migration_model_id_backup') == []
+
+
+@pytest.mark.asyncio
+async def test_an_unmapped_override_row_merges_into_the_default_and_catalog_ids_stay(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
+                " VALUES ('vendor/retired-1', 'alice', NULL, 'Retired', '{}', '{}', 1, 1, 1),"
+                " ('qwen-3-32b', 'alice', NULL, 'Qwen', '{}', '{}', 1, 1, 1)"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission,'
+                " created_at) VALUES ('g6', 'model', 'vendor/retired-1', 'group', 'eng', 'read', 1)"
+            )
+        )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO chat_message (id, chat_id, role, model_id, created_at, updated_at)'
+                " VALUES ('m.4', 'c1', 'assistant', 'qwen-3-32b', 1, 1)"
+            )
+        )
+    active_sql = 'SELECT id, is_active FROM model WHERE base_model_id IS NULL ORDER BY id'
+    original = (await dumps(env), await rows(env, active_sql))
+    await env.module.apply(options(env))
+    data = await dumps(env)
+    assert await rows(env, active_sql) == [('glm-5-3', 1), ('qwen-3-32b', 1), ('vendor/retired-1', 0)]
+    assert ('g6', DEFAULT) in data['access_grant']
+    assert ('m.4', 'qwen-3-32b') in data['chat_message']
+    output = capsys.readouterr().out
+    merged = f'merged model vendor/retired-1: unmapped, merged into the default {DEFAULT}; 1 grants moved to it'
+    assert f'3 model ids: {merged}, vendor/retired-1 deactivated' in output
+    assert '3 model ids: defaulted access_grant.resource_id 1\n' in output
+    assert '3 model ids: defaulted model.is_active 1\n' in output
+    assert 'qwen-3-32b' not in output
+    await env.module.restore(MIGRATION)
+    assert (await dumps(env), await rows(env, active_sql)) == original
+
+
+@pytest.mark.parametrize(
+    ('catalog', 'message'),
+    [
+        ([entry for entry in CATALOG if not entry.get('default')], 'marks no default model'),
+        ([{'id': 'zai-org/GLM-5.3', 'default': True}], 'rewrites the default model zai-org/GLM-5.3'),
+    ],
+)
+@pytest.mark.asyncio
+async def test_without_a_usable_default_model_the_run_fails_before_any_write(env, monkeypatch, catalog, message):
+    from open_webui.soev.migrate_state import MigrationError
+
+    await seed_models(env, monkeypatch)
+    env.api.models = catalog
+    before = (await config_rows(env), await dumps(env))
+    for run in (env.module.plan, env.module.apply):
+        with pytest.raises(MigrationError, match=message):
+            await run(options(env))
+    assert (await config_rows(env), await dumps(env)) == before
+    assert await rows(env, "SELECT name FROM sqlite_master WHERE name LIKE 'owui_v2_migration%'") == []
 
 
 @pytest.mark.parametrize(
@@ -855,7 +927,7 @@ async def test_dry_run_prints_every_step_and_writes_nothing(env, monkeypatch, ca
     assert await env.module.plan(options(env)) == 0
     after = (await config_rows(env), await dumps(env), await rows(env, 'SELECT * FROM file ORDER BY id'))
     assert after == before
-    assert env.api.requests == [] and env.redis.sets == [] and env.embedded == []
+    assert catalog_reads(env) and env.redis.sets == [] and env.embedded == []
     tables = await rows(env, "SELECT name FROM sqlite_master WHERE name LIKE 'owui_v2_migration%'")
     assert tables == []
     output = capsys.readouterr().out
@@ -863,7 +935,7 @@ async def test_dry_run_prints_every_step_and_writes_nothing(env, monkeypatch, ca
     assert '2 config switch: openai.enable = false' in output
     assert '3 model ids: map zai-org/GLM-5.3 -> glm-5-3' in output
     assert '3 model ids: chat.chat 3' in output
-    assert '3 model ids: unmapped unknown/model' in output
+    assert f'3 model ids: defaulted unknown/model -> {DEFAULT} (4 references)' in output
     assert f'5 re-ingest: {local.id}: failed 1, to check 6' in output
     assert '8 sign-out: every user' in output
 
@@ -932,12 +1004,12 @@ async def test_models_mode_rewrites_only_model_ids_and_restore_undoes_it(env, mo
     data = await dumps(env)
     chat = dict(data['chat'])['c1']
     assert chat['models'] == ['zai-org/glm-5.3', 'helper']
-    assert data['chat_message'] == [('m.1', None), ('m.2', 'zai-org/glm-5.3'), ('m.3', 'unknown/model')]
-    assert data['model'] == [('helper', 'zai-org/glm-5.3'), ('legacy', 'unknown/model'), ('zai-org/glm-5.3', None)]
-    assert await config_value(env, 'ui.default_pinned_models') == 'zai-org/glm-5.3,unknown/model'
+    assert data['chat_message'] == [('m.1', None), ('m.2', 'zai-org/glm-5.3'), ('m.3', DEFAULT)]
+    assert data['model'] == [('helper', 'zai-org/glm-5.3'), ('legacy', DEFAULT), ('zai-org/glm-5.3', None)]
+    assert await config_value(env, 'ui.default_pinned_models') == f'zai-org/glm-5.3,{DEFAULT}'
     unchanged = [row for row in await config_rows(env) if row[0] != 'ui.default_pinned_models']
     assert unchanged == [row for row in config if row[0] != 'ui.default_pinned_models']
-    assert env.api.requests == [] and env.redis.sets == [] and env.embedded == []
+    assert catalog_reads(env) and env.redis.sets == [] and env.embedded == []
     assert await rows(env, 'SELECT step FROM owui_v2_migration_migration_marker ORDER BY step') == [
         ('model_ids',),
         ('snapshot',),
@@ -1038,6 +1110,8 @@ async def test_models_dry_run_previews_and_writes_nothing(env, monkeypatch, caps
     output = capsys.readouterr().out
     assert '3 model ids: map zai-org/GLM-5.3 -> zai-org/glm-5.3' in output
     assert '3 model ids: chat_message.model_id 1' in output
+    assert '3 model ids: defaulted chat_message.model_id 1' in output
+    assert f'3 model ids: defaulted unknown/model -> {DEFAULT} (5 references)' in output
 
 
 ALICE, BOB = 'owui-attachments-alice', 'owui-attachments-bob'
