@@ -128,9 +128,12 @@ enable Redis and disable the default RWO data PVC, as in the v2 example.
 `soevApi.migrate.enabled` renders a plain `batch/v1` Job (not a Helm hook)
 named `<release>-v2-migrate-<hash>`. The hash covers the whole `soevApi.migrate`
 block (config, model map, migration id, mode, tuning and the pinned
-`soevApi.migrate.image.tag`) and `extraEnv`, which is everything the immutable
-pod template takes from values. An app image bump therefore leaves the
-finished Job alone; a migrate change starts a new run. Every step is
+`soevApi.migrate.image.tag`) and the rendered pod template, so any change to
+the immutable template starts a new Job instead of failing the upgrade with
+`field is immutable`. That includes the shared env: a new
+`externalSecrets.onepassword.fields` entry, `extraEnv` or resources. The
+template never takes the app image tag, so an app image bump leaves the
+finished Job alone. Every step is
 idempotent, and the once-only steps (config switch, model ids, sign-out) are
 skipped on later runs with the same `soevApi.migrate.id`.
 
