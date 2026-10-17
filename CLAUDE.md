@@ -90,6 +90,9 @@ folders attached to the chat (`type: 'folder'` entries, read access via `has_fol
 files and notes follow the chat's and the assistant's (deduplicated), read as the chatting user; a folder file is
 checked in its collection first so an unreadable one is skipped, not refused. Folder notes fill the room the chat's
 ten texts leave. Skipped folder items get "of this folder" notices and are never dropped from the chat.
+An assistant's knowledge entries of type note, chat and folder are read the same way, as the chatting user: notes and
+chats come after the folder's notes in the shared ten texts (truncated, never refused), folders are expanded like
+attached ones, and unreadable ones get the assistant's notices.
 
 ## Live document attachments
 
