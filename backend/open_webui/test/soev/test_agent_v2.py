@@ -2107,6 +2107,77 @@ async def test_reasoning_mismatch_warns_without_cancelling_and_resets_per_output
     assert warnings[0].thread_id == 'thr-1'
 
 
+RECIPE = '<document title="Appeltaart" format="markdown">\n# Appeltaart\n</document>'
+LEAKED = '<tool_call>document title="Appeltaart" format="markdown">\n# Appeltaart\n</document>'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('leaked', [LEAKED, LEAKED.replace('<tool_call>', '<tool_call><')])
+@pytest.mark.parametrize('split', [0, 3, 8, 11, 14, 18])
+async def test_a_tool_call_token_leaked_into_a_document_tag_is_repaired_however_it_streams(
+    chat: Chat, leaked: str, split: int
+) -> None:
+    answer = f'Hier is het recept.{leaked}'
+    cut = len('Hier is het recept.') + split
+    chat.api.chat.turns = [
+        [('delta', {'text': answer[:cut]}), ('delta', {'text': answer[cut:]}), ('model_output', {'content': answer})]
+    ]
+    chunks = await chat.turn('question', 'a1')
+    assert content(chunks) == f'Hier is het recept.{RECIPE}'
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_token_leaked_into_a_document_tag_is_repaired_in_durable_output(chat: Chat) -> None:
+    chat.api.chat.turns = [[('model_output', {'content': f'Hier is het recept.{LEAKED}'})]]
+    chunks = await chat.turn('question', 'a1')
+    assert content(chunks) == f'Hier is het recept.{RECIPE}'
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_token_before_other_text_is_shown_as_written(chat: Chat) -> None:
+    chat.api.chat.turns = [
+        [
+            ('delta', {'text': 'Zie <tool_c'}),
+            ('delta', {'text': 'all>x en <tool_call>'}),
+            ('model_output', {'content': 'Zie <tool_call>x en <tool_call>'}),
+        ]
+    ]
+    chunks = await chat.turn('question', 'a1')
+    assert content(chunks) == 'Zie <tool_call>x en <tool_call>'
+
+
+@pytest.mark.asyncio
+async def test_a_document_written_in_the_reasoning_is_shown_in_the_answer(chat: Chat) -> None:
+    reasoning = f'Ik schrijf het recept.\n{RECIPE}'
+    chat.api.chat.turns = [
+        [
+            ('reasoning_delta', {'text': reasoning}),
+            ('delta', {'text': 'Hieronder het recept.'}),
+            ('model_output', {'content': 'Hieronder het recept.', 'reasoning': reasoning}),
+        ]
+    ]
+    chunks = await chat.turn('question', 'a1')
+    assert content(chunks) == f'Hieronder het recept.\n\n{RECIPE}'
+    assert content(chunks, 'reasoning_content') == reasoning
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'output',
+    [
+        {'content': f'Hieronder.{RECIPE}', 'reasoning': f'Concept: {RECIPE}'},
+        {'content': '', 'reasoning': f'Concept: {RECIPE}', 'tool_calls': [{'id': 'c1', 'name': 'search'}]},
+        {'content': 'Hieronder.', 'reasoning': 'Concept: <document title="Half">\n# Half'},
+    ],
+)
+async def test_a_reasoning_document_stays_there_when_the_answer_has_one_calls_a_tool_or_it_is_unfinished(
+    chat: Chat, output: dict
+) -> None:
+    chat.api.chat.turns = [[('model_output', output)]]
+    chunks = await chat.turn('question', 'a1')
+    assert content(chunks).count('<document') == output['content'].count('<document')
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     'name,generic,done,failed',

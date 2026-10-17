@@ -40,6 +40,20 @@ export function readDocument(
 	};
 }
 
+// A model may write its document in its reasoning; the answer shows it, so the reasoning names it in one line.
+export function labelDocuments(text: string, label: (title: string) => string): string {
+	// GLM's tool-call token can stand in for the tag's `<`, as agent_v2 repairs in the answer.
+	let rest = text.replace(/<tool_call>\s*<?(?=document\b)/g, '<');
+	let labelled = '';
+	let open: RegExpExecArray | null;
+	while ((open = DOCUMENT_OPEN.exec(rest))) {
+		const { document, raw } = readDocument(rest.slice(open.index))!;
+		labelled += `${rest.slice(0, open.index)}\n\n_${label(document.title)}_\n\n`;
+		rest = rest.slice(open.index + raw.length);
+	}
+	return labelled + rest;
+}
+
 export function extractDocumentsFromMessage(content: string): AgentDocument[] {
 	const documents: AgentDocument[] = [];
 	const markers = /<document\b|<details\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/details>/g;
