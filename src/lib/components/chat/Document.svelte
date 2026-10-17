@@ -19,6 +19,7 @@
 	} from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { printDocument } from '$lib/utils/documentPrint';
+	import { documentPdf } from '$lib/utils/documentPdf';
 
 	import ContentRenderer from './Messages/ContentRenderer.svelte';
 	import HtmlDocumentFrame from './Messages/HtmlDocumentFrame.svelte';
@@ -93,10 +94,22 @@
 
 	const downloadPdf = async () => {
 		if (!current) return;
+		downloadOpen = false;
+		try {
+			const blob = await documentPdf(current, current.sources ?? [], $i18n.t('Sources'));
+			saveAs(blob, `${sanitizeFilename(current.title)}.pdf`);
+		} catch (e) {
+			console.error(e);
+			toast.error($i18n.t('Failed to export PDF'));
+		}
+	};
+
+	const print = async () => {
+		if (!current) return;
 		// Close first: the print dialog blocks the page, and the menu must not outlive it.
 		downloadOpen = false;
 		try {
-			await printDocument(current.title, getExportMarkdown(), current.format);
+			await printDocument(current.title, getExportMarkdown(), current.format, current.page);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
@@ -310,6 +323,14 @@
 											{$i18n.t('PDF document (.pdf)')}
 										</div>
 									</button>
+									<button
+										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+										on:click={print}
+									>
+										<div class="flex items-center line-clamp-1">
+											{$i18n.t('Print')}
+										</div>
+									</button>
 									{#if current.format === 'markdown' && ($config?.features?.enable_docx_export ?? true)}
 										<button
 											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
@@ -340,6 +361,7 @@
 							<HtmlDocumentFrame
 								content={current.content}
 								title={current.title}
+								page={current.page}
 								done={current.done}
 							/>
 						{/key}

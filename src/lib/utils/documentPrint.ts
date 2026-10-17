@@ -1,6 +1,7 @@
 import { Marked } from 'marked';
 import type { DocumentFormat } from './agentDocument';
 import { DOCUMENT_SANDBOX, sanitizeDocumentHtml } from './htmlDocument';
+import { pageSize, pageStyle } from './documentPages';
 
 // Line breaks as in the document panel, so a source list without list markers stays one line per source.
 const markdown = new Marked({ gfm: true, breaks: true });
@@ -58,7 +59,8 @@ export function buildPrintDocument(
 	title: string,
 	content: string,
 	format: DocumentFormat,
-	font = ''
+	font = '',
+	page?: string
 ): string {
 	const html =
 		format === 'html'
@@ -66,7 +68,7 @@ export function buildPrintDocument(
 			: `<html><head><style>${PRINT_STYLE}</style></head><body>${markdown.parse(withTitle(content, title), { async: false })}</body></html>`;
 	return sanitizeDocumentHtml(html, title, {
 		stripCitations: format === 'html',
-		trustedStyle: format === 'html' ? '' : font
+		trustedStyle: format === 'html' ? pageStyle(content, pageSize(page), 'paper') : font
 	});
 }
 
@@ -74,10 +76,11 @@ export function buildPrintDocument(
 export async function printDocument(
 	title: string,
 	content: string,
-	format: DocumentFormat
+	format: DocumentFormat,
+	page?: string
 ): Promise<void> {
 	const font = format === 'html' ? '' : await interFontFace();
-	const srcdoc = buildPrintDocument(title, content, format, font);
+	const srcdoc = buildPrintDocument(title, content, format, font, page);
 	return new Promise((resolve, reject) => {
 		const frame = document.createElement('iframe');
 		frame.title = title;

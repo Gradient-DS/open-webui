@@ -7,6 +7,8 @@ export interface AgentDocument {
 	content: string;
 	format: DocumentFormat;
 	done: boolean;
+	// An HTML document's page size (documentPages.PAGE_SIZES); A4 when absent or unknown.
+	page?: string;
 }
 
 export const DOCUMENT_OPEN = /<document\b((?:[^>"']|"[^"]*"|'[^']*')*)>/;
@@ -35,7 +37,8 @@ export function readDocument(
 			title: decode(attrs.title ?? ''),
 			format: attrs.format === 'html' ? 'html' : 'markdown',
 			content: content.slice(open[0].length, done ? close : undefined),
-			done
+			done,
+			...(attrs.page && { page: attrs.page })
 		}
 	};
 }
