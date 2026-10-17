@@ -1252,6 +1252,118 @@ async def test_an_attached_folder_the_user_cannot_read_is_left_out_with_a_notice
 
 
 @pytest.mark.asyncio
+async def test_an_assistants_notes_and_chats_are_sent_after_the_chats_and_folders(
+    chat: Chat, stored_texts: dict
+) -> None:
+    stored_texts['n2'] = SimpleNamespace(id='n2', user_id='alice', title='Map', data={'content': {'md': 'Body'}})
+    await chat.turn(
+        'read',
+        'a1',
+        files=[{'type': 'note', 'id': 'n1'}],
+        folder_knowledge=[{'type': 'note', 'id': 'n2'}],
+        knowledge=[{'type': 'chat', 'id': 'c1', 'name': 'My chat'}, {'type': 'note', 'id': 'n1'}],
+    )
+    assert [text['id'] for text in chat.mutations()[-1][1]['input']['texts']] == ['note:n1', 'note:n2', 'chat:c1']
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'language,expected',
+    [
+        (
+            'en-US',
+            [
+                "Note 'Geheim' is not accessible and was skipped.",
+                "Note 'Oud' of this assistant no longer exists and was skipped.",
+            ],
+        ),
+        (
+            'nl-NL',
+            [
+                "Notitie 'Geheim' is niet toegankelijk en is overgeslagen.",
+                "Notitie 'Oud' van deze assistent bestaat niet meer en is overgeslagen.",
+            ],
+        ),
+    ],
+)
+async def test_an_assistants_unreadable_notes_are_left_out_with_a_notice_and_stay(
+    chat: Chat, stored_texts: dict, monkeypatch: pytest.MonkeyPatch, language: str, expected: list[str]
+) -> None:
+    """Read as the chatting user: the assistant owner's private note is not shared with them."""
+    stored_texts['n1'].user_id = 'bob'
+    monkeypatch.setattr(Chats, 'update_chat_by_id', AsyncMock())
+    chunks = await chat.turn(
+        'read',
+        'a1',
+        knowledge=[{'type': 'note', 'id': 'n1', 'name': 'Geheim'}, {'type': 'note', 'id': 'gone', 'name': 'Oud'}],
+        user_language=language,
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    assert 'texts' not in chat.mutations()[-1][1]['input']
+    assert notices(chat) == [{'notices': expected, 'removed': []}]
+    Chats.update_chat_by_id.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_chat_folder_and_assistant_texts_share_ten_and_the_assistants_give_way(
+    chat: Chat, stored_texts: dict
+) -> None:
+    files = []
+    for index in range(8):
+        item = copy.deepcopy(stored_texts['n1'])
+        item.id = f'item-{index}'
+        stored_texts[item.id] = item
+        files.append({'type': 'note', 'id': item.id})
+    for note_id in ('f1', 'a1', 'a2'):
+        stored_texts[note_id] = SimpleNamespace(id=note_id, user_id='alice', title=note_id, data={'content': {}})
+    chunks = await chat.turn(
+        'read',
+        'a1',
+        files=files,
+        folder_knowledge=[{'type': 'note', 'id': 'f1'}],
+        knowledge=[{'type': 'note', 'id': 'a1'}, {'type': 'note', 'id': 'a2', 'name': 'Tweede'}],
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    assert [text['id'] for text in chat.mutations()[-1][1]['input']['texts']][-2:] == ['note:f1', 'note:a1']
+    assert notices(chat)[-1]['notices'] == ["Note 'Tweede' was skipped: a message reads at most 10 notes or chats."]
+
+
+@pytest.mark.asyncio
+async def test_an_assistants_folder_sends_its_items(chat: Chat, attached_folder: SimpleNamespace) -> None:
+    seed_collection(chat.api, 'kb-project', 'Project')
+    agent_v2.has_folder_access.return_value = True
+    await chat.turn('read', 'a1', knowledge=[{'type': 'folder', 'id': 'folder-1', 'name': 'Project'}])
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['knowledge'] == [{'key': 'kb-project', 'name': 'Project'}]
+    assert [text['id'] for text in sent['texts']] == ['note:n1']
+    agent_v2.has_folder_access.assert_awaited_once_with('alice', attached_folder, 'read', db=None)
+
+
+@pytest.mark.asyncio
+async def test_an_assistants_unavailable_folder_gives_a_notice_and_stays_on_the_assistant(
+    chat: Chat, attached_folder: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Chats, 'update_chat_by_id', AsyncMock())
+    knowledge = [
+        {'type': 'folder', 'id': 'folder-1', 'name': 'Project'},
+        {'type': 'folder', 'id': 'gone', 'name': 'Oud'},
+    ]
+    chunks = await chat.turn('read', 'a1', knowledge=knowledge)
+    assert not any('error' in chunk for chunk in chunks)
+    assert notices(chat) == [
+        {
+            'notices': [
+                "Folder 'Project' is not accessible and was skipped.",
+                "Folder 'Oud' of this assistant no longer exists and was skipped.",
+            ],
+            'removed': [],
+        }
+    ]
+    Chats.update_chat_by_id.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_the_browsers_time_zone_is_sent_as_the_zone(chat: Chat) -> None:
     await chat.turn('question', 'a1', variables={'{{CURRENT_TIMEZONE}}': 'Europe/Amsterdam'})
     assert chat.mutations()[-1][1]['input']['zone'] == 'Europe/Amsterdam'

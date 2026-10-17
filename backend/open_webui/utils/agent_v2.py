@@ -223,17 +223,17 @@ _FOLDER_ITEMS = ('collection', 'file', 'note')
 
 async def _folder_items(metadata: dict[str, Any]) -> tuple[list[dict[str, Any]], list[Skipped]]:
     """[Claude] The knowledge bases, files and notes of the chat's folder (`folder_knowledge`, set by the middleware)
-    and of folders attached to the chat, once each, as far as each folder's owner can still delegate them. An
-    attached folder the user cannot read is left out."""
+    and of folders attached to the chat or to the assistant, once each, as far as each folder's owner can still
+    delegate them. A folder the user cannot read is left out; only the chat's own entry is dropped when it is gone."""
     items = list(metadata.get('folder_knowledge') or [])
     skipped = []
-    attached = [
-        entry
-        for entry in metadata.get('files') or []
-        if isinstance(entry, dict) and entry.get('type') == 'folder' and entry.get('id')
-    ]
+    attached: dict[str, tuple[dict[str, Any], bool]] = {}
+    for source, in_chat in ((metadata.get('files'), True), (metadata.get('knowledge'), False)):
+        for entry in source if isinstance(source, list) else []:
+            if isinstance(entry, dict) and entry.get('type') == 'folder' and isinstance(entry.get('id'), str):
+                attached.setdefault(entry['id'], (entry, in_chat))
     user = await Users.get_user_by_id(metadata['user_id']) if attached else None
-    for entry in {entry['id']: entry for entry in attached}.values():
+    for entry, in_chat in attached.values():
         folder = await Folders.get_folder_by_id(entry['id'])
         allowed = bool(
             folder
@@ -242,7 +242,7 @@ async def _folder_items(metadata: dict[str, Any]) -> tuple[list[dict[str, Any]],
         )
         if not allowed:
             name = entry.get('name') or (folder.name if folder else None)
-            skipped.append(Skipped('folder', 'denied' if folder else 'gone', entry['id'], name))
+            skipped.append(Skipped('folder', 'denied' if folder else 'gone', entry['id'], name, in_chat))
             continue
         items.extend(await get_owner_accessible_folder_files(folder))
     unique: dict[tuple[str, str], dict[str, Any]] = {}
@@ -619,10 +619,10 @@ async def _drop_chat_files(chat_id: str, ids: list[str]) -> None:
 
 
 async def _texts(
-    entries: list[dict[str, Any]], user_id: str, *, of_folder: bool = False
+    entries: list[dict[str, Any]], user_id: str, *, origin: str = 'chat'
 ) -> tuple[list[dict[str, Any]], list[Skipped]]:
-    """[Gradient] Read attached notes and chats (or a folder's notes) with the same grants as upstream retrieval; the
-    ones deleted or not readable by the user are left out."""
+    """[Gradient] Read attached notes and chats (`origin` chat), a folder's notes or an assistant's notes and chats with
+    the same grants as upstream retrieval; the ones deleted or not readable by the user are left out."""
     if not entries:
         return [], []
     user = await Users.get_user_by_id(user_id)
@@ -670,7 +670,8 @@ async def _texts(
         if not allowed:
             name = entry.get('name') or (item.title if item else None) or item_id or kind
             reason = 'denied' if item else 'gone'
-            unavailable.append(Skipped(kind, reason, item_id or '', name, in_chat=not of_folder, folder=of_folder))
+            in_chat, folder_item = origin == 'chat', origin == 'folder'
+            unavailable.append(Skipped(kind, reason, item_id or '', name, in_chat=in_chat, folder=folder_item))
             continue
         text = item.data.get('content', {}).get('md', '') if kind == 'note' else _chat_text(item)
         title = item.title or entry.get('name') or ('Notitie' if kind == 'note' else 'Chat')
@@ -690,18 +691,33 @@ async def _texts(
 TEXTS = 10
 
 
-async def _folder_texts(
-    folder: list[dict[str, Any]], entries: list[dict[str, Any]], user_id: str
+async def _more_texts(
+    folder: list[dict[str, Any]], entries: list[dict[str, Any]], metadata: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], list[Skipped]]:
-    """[Claude] The folder's notes not attached in the chat too, in the room the chat's own texts leave; the rest
-    are skipped, never refusing the turn."""
-    attached = {('note', entry.get('id')) for entry in entries}
-    notes = [item for item in folder if item['type'] == 'note' and ('note', item['id']) not in attached]
+    """[Claude] The folder's notes, then the assistant's notes and chats, not attached in the chat too, in the room
+    the chat's own texts leave; the rest are skipped, never refusing the turn."""
+    taken = {(entry['type'], entry.get('id')) for entry in entries}
     room = max(TEXTS - len(entries), 0)
-    texts, skipped = await _texts(notes[:room], user_id, of_folder=True)
-    skipped += [
-        Skipped('note', 'limit', item['id'], item.get('name'), in_chat=False, folder=True) for item in notes[room:]
+    assistant = [
+        item
+        for item in metadata.get('knowledge') or []
+        if isinstance(item, dict) and item.get('type') in ('note', 'chat') and isinstance(item.get('id'), str)
     ]
+    texts, skipped = [], []
+    for items, origin in (([item for item in folder if item['type'] == 'note'], 'folder'), (assistant, 'assistant')):
+        fresh = []
+        for item in items:
+            if (item['type'], item['id']) not in taken:
+                taken.add((item['type'], item['id']))
+                fresh.append(item)
+        read, more = await _texts(fresh[:room], metadata['user_id'], origin=origin)
+        texts += read
+        skipped += more
+        skipped += [
+            Skipped(item['type'], 'limit', item['id'], item.get('name'), in_chat=False, folder=origin == 'folder')
+            for item in fresh[room:]
+        ]
+        room = max(room - len(fresh), 0)
     return texts, skipped
 
 
@@ -2037,13 +2053,13 @@ async def _sent(
         knowledge, skipped = await _knowledge(metadata, folder)
         attachments = await _attachments(metadata, folder)
         texts, skipped_texts = await _texts(entries, metadata['user_id'])
-        folder_texts, skipped_folder_texts = await _folder_texts(folder, entries, metadata['user_id'])
+        more_texts, skipped_more_texts = await _more_texts(folder, entries, metadata)
         images = await _images(metadata, turn.as_user)
     except ImagesUnavailable as unavailable:
         turn.fail({'size': 413, 'type': 415}.get(unavailable.reason, 422), 'images_unavailable')
         return _refused(_unimaged(unavailable, metadata.get('user_language')))
-    texts += folder_texts
-    skipped = skipped_folders + skipped + attachments.pop('skipped', []) + skipped_texts + skipped_folder_texts
+    texts += more_texts
+    skipped = skipped_folders + skipped + attachments.pop('skipped', []) + skipped_texts + skipped_more_texts
     if skipped:
         turn.left_out(skipped)
     tools = _tools(
