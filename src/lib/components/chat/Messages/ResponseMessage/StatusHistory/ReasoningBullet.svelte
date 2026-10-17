@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { decode } from 'html-entities';
+	import { labelDocuments } from '$lib/utils/agentDocument';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 	import { getContext } from 'svelte';
@@ -40,7 +41,8 @@
 	// wraps each line in `> ` then html.escape()s the whole block), so we must
 	// decode entities before handing the body to Markdown — otherwise users see
 	// literal "&gt;", "&quot;", "&#x27;" in the rendered output.
-	$: decodedBody = decode(body);
+	// [Gradient] A document written in the reasoning is shown in the answer (agent_v2), not as a card here.
+	$: decodedBody = labelDocuments(decode(body), (title) => title || $i18n.t('Document'));
 	$: isDone = attributes?.done === 'true';
 	// [Gradient] Only trust a duration the agent actually sent. The reasoning
 	// output item carries started_at but no duration, so the old `?? 0` made

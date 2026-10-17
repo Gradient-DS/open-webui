@@ -334,6 +334,26 @@ _ATTRIBUTES = r"""((?:[^>"']|"[^"]*"|'[^']*')*)"""
 _DETAILS = re.compile(r'<details\b' + _ATTRIBUTES + r'>.*?</details>', re.DOTALL)
 _DOCUMENT = re.compile(r'<document\b' + _ATTRIBUTES + r'>.*?</document>', re.DOTALL)
 _ATTRIBUTE = re.compile(r"""([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+# [Claude] GLM's tool-call token leaked into a document tag: `<tool_call>document title=...>` (also with `<`).
+_TOOL_CALL = '<tool_call>'
+_LEAKED_DOCUMENT = re.compile(re.escape(_TOOL_CALL) + r'\s*<?(?=document\b)')
+
+
+def _unleaked(text: str) -> str:
+    """[Claude] `text` with a leaked tool-call token in front of a document tag turned back into `<document`."""
+    return _LEAKED_DOCUMENT.sub('<', text)
+
+
+def _undecided(text: str) -> int:
+    """[Claude] Where the tail of streamed answer text starts that may still turn out to be a leaked document tag
+    (`<tool_c`, `<tool_call>`, `<tool_call>doc`); its length when there is none."""
+    start = text.rfind(_TOOL_CALL)
+    if start != -1 and 'document'.startswith(text[start + len(_TOOL_CALL) :].lstrip().removeprefix('<')):
+        return start
+    for size in range(min(len(_TOOL_CALL) - 1, len(text)), 0, -1):
+        if _TOOL_CALL.startswith(text[-size:]):
+            return len(text) - size
+    return len(text)
 
 
 def _document_label(match: re.Match[str]) -> str:
@@ -1075,6 +1095,8 @@ class AgentTurn:
         # [Claude] The source ids this turn already sent to the message's `sources`.
         self.shown_sources: set[str] = set()
         self.partial = ''
+        # [Claude] Streamed answer text not shown yet, because it may still be a leaked document tag.
+        self.held = ''
         # [Claude] Markers already shown in the answer being streamed, as (position, number).
         self.streamed: list[tuple[int, int]] = []
         self.streamed_citations = 0
@@ -1470,7 +1492,20 @@ class AgentTurn:
             return ''
         await self.show_source(citation['source'])
         self.streamed.append((at, number))
-        return _citation_marker(self.partial[:at], number)
+        return self.release() + _citation_marker(self.partial[:at], number)
+
+    def shown(self, text: str) -> str:
+        """[Claude] The part of streamed answer text to show now; a tail that may still be a leaked document tag
+        waits for the next text."""
+        text = _unleaked(self.held + text)
+        cut = _undecided(text)
+        self.held = text[cut:]
+        return text[:cut]
+
+    def release(self) -> str:
+        """[Claude] The answer text held back, shown as it is now that no more text joins it."""
+        held, self.held = self.held, ''
+        return held
 
     async def resume(self) -> None:
         events = self.client.chat_stream(
@@ -1549,7 +1584,8 @@ class AgentTurn:
             if event.data['text']:
                 await self.settle()
             self.partial += event.data['text']
-            return [_chunk({'content': event.data['text']})] if event.data['text'] else []
+            text = self.shown(event.data['text'])
+            return [_chunk({'content': text})] if text else []
         if event.event == 'citation':
             marker = await self.cite(event.data)
             return [_chunk({'content': marker})] if marker else []
@@ -1595,9 +1631,10 @@ class AgentTurn:
         citations = (payload.get('citations') or [])[self.streamed_citations :]
         streamed = self.streamed
         self.partial, self.streamed, self.streamed_citations = '', [], 0
+        held = self.release()
         if not content.startswith(partial):
             log.warning('Durable model output disagrees with streamed text', extra={'thread_id': self.thread_id})
-            return []
+            return [_chunk({'content': held})] if held else []
         markers = [
             (citation['at'], number)
             for citation in citations
@@ -1609,7 +1646,11 @@ class AgentTurn:
         for citation in citations:
             if self.citations.number(citation) is not None:
                 await self.show_source(citation['source'])
-        text = _marked(content, markers, len(partial))
+        text = _unleaked(held + _marked(content, markers, len(partial)))
+        if not self.pending_calls and not _DOCUMENT.search(_unleaked(content)):
+            # [Claude] A model that wrote its document in its reasoning: the answer, which promises it, shows it.
+            documents = [match[0] for match in _DOCUMENT.finditer(_unleaked(payload.get('reasoning') or ''))]
+            text += ''.join(f'\n\n{document}' for document in documents)
         chunks = []
         if reasoning:
             chunks.append(_chunk({'reasoning_content': reasoning}))
@@ -1633,7 +1674,8 @@ class AgentTurn:
         if event.event == 'status':
             self.position = event.data['position']
         await self.persist()
-        chunks: list[dict[str, Any]] = []
+        held = self.release()
+        chunks: list[dict[str, Any]] = [_chunk({'content': held})] if held else []
         state = event.data.get('state')
         if state not in _ENDED:
             await self.emit('status', {'description': state or 'error', 'done': True})
