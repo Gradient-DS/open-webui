@@ -565,7 +565,7 @@ async def test_restore_gives_back_the_original_model_ids_and_keeps_later_message
 
 
 @pytest.mark.asyncio
-async def test_an_unmapped_override_row_is_deactivated_without_moving_grants(env, monkeypatch, capsys):
+async def test_an_unmapped_override_row_merges_into_the_default_and_catalog_ids_stay(env, monkeypatch, capsys):
     await seed_models(env, monkeypatch)
     async with env.engine.begin() as connection:
         await connection.execute(
@@ -578,8 +578,7 @@ async def test_an_unmapped_override_row_is_deactivated_without_moving_grants(env
         await connection.execute(
             sa.text(
                 'INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission,'
-                " created_at) VALUES ('g6', 'model', 'vendor/retired-1', 'group', 'eng', 'read', 1),"
-                " ('g7', 'model', 'legacy', 'group', 'eng', 'read', 1)"
+                " created_at) VALUES ('g6', 'model', 'vendor/retired-1', 'group', 'eng', 'read', 1)"
             )
         )
         await connection.execute(
@@ -593,13 +592,12 @@ async def test_an_unmapped_override_row_is_deactivated_without_moving_grants(env
     await env.module.apply(options(env))
     data = await dumps(env)
     assert await rows(env, active_sql) == [('glm-5-3', 1), ('qwen-3-32b', 1), ('vendor/retired-1', 0)]
-    assert ('g6', 'vendor/retired-1') in data['access_grant']
-    assert not [grant for grant in data['access_grant'] if grant[1] == DEFAULT]
-    assert ('g7', 'legacy') in data['access_grant'] and ('legacy', DEFAULT) in data['model']
+    assert ('g6', DEFAULT) in data['access_grant']
     assert ('m.4', 'qwen-3-32b') in data['chat_message']
     output = capsys.readouterr().out
-    assert '3 model ids: merged model vendor/retired-1: unmapped, grants kept, vendor/retired-1 deactivated' in output
-    assert 'defaulted access_grant' not in output
+    merged = f'merged model vendor/retired-1: unmapped, merged into the default {DEFAULT}; 1 grants moved to it'
+    assert f'3 model ids: {merged}, vendor/retired-1 deactivated' in output
+    assert '3 model ids: defaulted access_grant.resource_id 1\n' in output
     assert '3 model ids: defaulted model.is_active 1\n' in output
     assert 'qwen-3-32b' not in output
     await env.module.restore(MIGRATION)

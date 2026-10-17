@@ -153,8 +153,8 @@ class _Rewrite:
         existing = set((await self.db.execute(sa.select(Model.id))).scalars().all())
         rows = (await self.db.execute(sa.select(Model.id, Model.updated_at).where(Model.base_model_id.is_(None)))).all()
         # [Gradient] When several ids map to one target, the most recently updated row becomes it
-        # and the others merge into it. An unmapped row is only deactivated: its name, params and
-        # grants never become the default model's.
+        # and the others merge into it. An unmapped row always merges into the default, so its
+        # name and params never become the default model's.
         for model_id, _ in sorted(rows, key=lambda row: (-(row[1] or 0), row[0])):
             new = self.target(model_id)
             if new is None:
@@ -189,10 +189,9 @@ class _Rewrite:
         return moved
 
     async def merge_model(self, model_id: str, new: str) -> None:
-        """[Gradient] The target row exists: give it the legacy grants and deactivate the legacy row. An unmapped
-        row is only deactivated; its grants stay on it, so the default gains no access."""
-        mapped = model_id in self.mapping
-        moved = await self.move_grants(model_id, new) if mapped else 0
+        """[Gradient] The target row exists or the id is unmapped: give the target the legacy grants, deactivate
+        the legacy row."""
+        moved = await self.move_grants(model_id, new)
         active = (await self.db.execute(sa.select(Model.is_active).where(Model.id == model_id))).scalar()
         if active is not False:
             self.count('model.is_active', model_id)
@@ -210,10 +209,8 @@ class _Rewrite:
                 )
                 await self.db.execute(sa.update(Model).where(Model.id == model_id).values(is_active=False))
         state = 'deactivated' if active is not False else 'already inactive'
-        if mapped:
-            self.report.merged.append(f'model {model_id}: {new} exists; {moved} grants moved to it, {model_id} {state}')
-        else:
-            self.report.merged.append(f'model {model_id}: unmapped, grants kept, {model_id} {state}')
+        reason = f'{new} exists' if model_id in self.mapping else f'unmapped, merged into the default {new}'
+        self.report.merged.append(f'model {model_id}: {reason}; {moved} grants moved to it, {model_id} {state}')
 
     async def json_rows(self, site: str, table, column: str, rewrite) -> None:
         attribute, last = getattr(table, column), None
