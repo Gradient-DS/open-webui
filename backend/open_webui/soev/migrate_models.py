@@ -1,7 +1,8 @@
 """Rewrite stored model ids to soev-api catalog ids, recording each change for --restore.
 
 The mapping is an explicit input, SOEV_V2_MODEL_MAP: a JSON object of old id to catalog id,
-either LiteLLM model names (the v2 apply) or renamed catalog ids (a --models run).
+either LiteLLM model names (the v2 apply) or renamed catalog ids (a --models run). Any other id
+that is neither a catalog id nor an assistant becomes the catalog's default model.
 """
 
 import copy
@@ -45,32 +46,60 @@ def parse_model_map(raw: str | None) -> dict[str, str]:
     return mapping
 
 
+def catalog_default(listed: dict, mapping: dict[str, str]) -> tuple[str, set[str]]:
+    """The catalog default the chat picker starts on, and every catalog id, from soev-api's GET /v1/models."""
+    data = listed.get('data')
+    entries = [entry for entry in data if isinstance(entry, dict) and entry.get('id')] if isinstance(data, list) else []
+    default = next((entry['id'] for entry in entries if entry.get('default')), None)
+    if not isinstance(default, str):
+        raise MigrationError('The soev-api model catalog marks no default model; unmapped model ids need one')
+    if default in mapping:
+        raise MigrationError(f'SOEV_V2_MODEL_MAP rewrites the default model {default}')
+    return default, {entry['id'] for entry in entries}
+
+
 @dataclass
 class Report:
     changed: Counter = field(default_factory=Counter)
-    unmapped: Counter = field(default_factory=Counter)
+    # Per site, and per old id, the references rewritten to the default model.
+    defaulted: Counter = field(default_factory=Counter)
+    defaulted_ids: Counter = field(default_factory=Counter)
     skipped: list[str] = field(default_factory=list)
     merged: list[str] = field(default_factory=list)
 
 
 class _Rewrite:
-    def __init__(self, db: AsyncSession, mapping: dict[str, str], migration_id: str, dry_run: bool, known: set[str]):
+    def __init__(
+        self, db: AsyncSession, mapping: dict[str, str], migration_id: str, dry_run: bool, known: set[str], default: str
+    ):
         self.db, self.mapping, self.migration_id, self.dry_run = db, mapping, migration_id, dry_run
         # Assistant ids and catalog ids are already v2 references, not unmapped names.
         self.known = known | set(mapping.values())
+        self.default = default
         self.report = Report()
         self.now = int(time.time())
         self.records: list[dict] = []
 
+    def target(self, value: str) -> str | None:
+        """The id a stored reference becomes; None when it already is a v2 reference."""
+        if value in self.mapping:
+            return self.mapping[value]
+        return None if value in self.known else self.default
+
+    def count(self, site: str, value: str) -> None:
+        if value in self.mapping:
+            self.report.changed[site] += 1
+        else:
+            self.report.defaulted[site] += 1
+            self.report.defaulted_ids[value] += 1
+
     def map(self, site: str, row_id: str, path: list, value, *, record: bool = True) -> object:
         if not isinstance(value, str) or not value:
             return value
-        if value not in self.mapping:
-            if value not in self.known:
-                self.report.unmapped[value] += 1
+        new = self.target(value)
+        if new is None:
             return value
-        new = self.mapping[value]
-        self.report.changed[site] += 1
+        self.count(site, value)
         if record and not self.dry_run:
             # Written in the transaction that rewrites the row, so a rerun never finds one without the other.
             self.records.append(
@@ -107,16 +136,15 @@ class _Rewrite:
         counts = await self.db.execute(
             sa.select(attribute, sa.func.count()).where(attribute.is_not(None)).group_by(attribute)
         )
-        for value, count in sorted(counts.all()):
-            if value not in self.mapping:
-                if value not in self.known:
-                    self.report.unmapped[value] += count
+        for value, _ in sorted(counts.all()):
+            new = self.target(value)
+            if new is None:
                 continue
             ids = (await self.db.execute(sa.select(table.id).where(attribute == value))).scalars().all()
             for row_id in sorted(ids):
                 self.map(site, row_id, [], value)
             if not self.dry_run:
-                await self.db.execute(sa.update(table).where(attribute == value).values({column: self.mapping[value]}))
+                await self.db.execute(sa.update(table).where(attribute == value).values({column: new}))
         await self._flush()
 
     async def rename_models(self) -> None:
@@ -125,13 +153,13 @@ class _Rewrite:
         existing = set((await self.db.execute(sa.select(Model.id))).scalars().all())
         rows = (await self.db.execute(sa.select(Model.id, Model.updated_at).where(Model.base_model_id.is_(None)))).all()
         # [Gradient] When several ids map to one target, the most recently updated row becomes it
-        # and the others merge into it.
+        # and the others merge into it. An unmapped row always merges into the default, so its
+        # name and params never become the default model's.
         for model_id, _ in sorted(rows, key=lambda row: (-(row[1] or 0), row[0])):
-            if model_id not in self.mapping:
-                self.map(site, model_id, [], model_id, record=False)
+            new = self.target(model_id)
+            if new is None:
                 continue
-            new = self.mapping[model_id]
-            if new in existing:
+            if new in existing or model_id not in self.mapping:
                 await self.merge_model(model_id, new)
                 continue
             self.map(site, new, [], model_id)
@@ -161,11 +189,12 @@ class _Rewrite:
         return moved
 
     async def merge_model(self, model_id: str, new: str) -> None:
-        """[Gradient] The catalog row exists: keep it, give it the legacy grants, deactivate the legacy row."""
+        """[Gradient] The target row exists or the id is unmapped: give the target the legacy grants, deactivate
+        the legacy row."""
         moved = await self.move_grants(model_id, new)
         active = (await self.db.execute(sa.select(Model.is_active).where(Model.id == model_id))).scalar()
         if active is not False:
-            self.report.changed['model.is_active'] += 1
+            self.count('model.is_active', model_id)
             if not self.dry_run:
                 self.records.append(
                     {
@@ -180,7 +209,8 @@ class _Rewrite:
                 )
                 await self.db.execute(sa.update(Model).where(Model.id == model_id).values(is_active=False))
         state = 'deactivated' if active is not False else 'already inactive'
-        self.report.merged.append(f'model {model_id}: {new} exists; {moved} grants moved to it, {model_id} {state}')
+        reason = f'{new} exists' if model_id in self.mapping else f'unmapped, merged into the default {new}'
+        self.report.merged.append(f'model {model_id}: {reason}; {moved} grants moved to it, {model_id} {state}')
 
     async def json_rows(self, site: str, table, column: str, rewrite) -> None:
         attribute, last = getattr(table, column), None
@@ -252,9 +282,17 @@ async def _assistant_ids(db: AsyncSession) -> set[str]:
     return set((await db.execute(sa.select(Model.id).where(Model.base_model_id.is_not(None)))).scalars().all())
 
 
-async def rewrite(db: AsyncSession, mapping: dict[str, str], migration_id: str, *, dry_run: bool = False) -> Report:
-    """Map every stored model reference; rows already holding catalog ids are left alone."""
-    run = _Rewrite(db, mapping, migration_id, dry_run, await _assistant_ids(db))
+async def rewrite(
+    db: AsyncSession,
+    mapping: dict[str, str],
+    migration_id: str,
+    *,
+    default: str,
+    catalog: set[str],
+    dry_run: bool = False,
+) -> Report:
+    """Map every stored model reference, unmapped ones to the default; catalog ids and assistants are left alone."""
+    run = _Rewrite(db, mapping, migration_id, dry_run, await _assistant_ids(db) | catalog, default)
     await run.column('chat_message.model_id', ChatMessage, 'model_id')
     await run.column('model.base_model_id', Model, 'base_model_id')
     await run.rename_models()

@@ -466,15 +466,36 @@ def _print_uploads(state, *, prefix: str) -> None:
         print(f'{prefix}: original missing, skipped {line}')
 
 
-def _print_model_report(report, *, prefix: str) -> None:
+async def _model_catalog(options: Options) -> tuple[str, set[str]]:
+    """Step 3's one soev-api read: the catalog's default model and ids. Read before any write, so it fails first."""
+    from open_webui.soev import identity
+    from open_webui.soev.migrate_models import catalog_default
+
+    return catalog_default(await identity.build_client().get('/v1/models'), options.model_map)
+
+
+async def _rewrite_models(session, options: Options, catalog: tuple[str, set[str]], *, dry_run: bool = False):
+    from open_webui.soev import migrate_models
+
+    default, ids = catalog
+    return await migrate_models.rewrite(
+        session, options.model_map, options.migration_id, default=default, catalog=ids, dry_run=dry_run
+    )
+
+
+def _print_model_report(report, *, prefix: str, default: str | None = None) -> None:
+    if default is not None:
+        print(f'{prefix}: default model {default}')
     for site, count in sorted(report.changed.items()):
         print(f'{prefix}: {site} {count}')
+    for site, count in sorted(report.defaulted.items()):
+        print(f'{prefix}: defaulted {site} {count}')
+    for model_id, count in sorted(report.defaulted_ids.items()):
+        print(f'{prefix}: defaulted {model_id} -> {default} ({count} references)')
     for line in report.merged:
         print(f'{prefix}: merged {line}')
     for line in report.skipped:
         print(f'{prefix}: skipped {line}')
-    for model_id, count in sorted(report.unmapped.items()):
-        print(f'{prefix}: unmapped {model_id} ({count} references left as they are)')
 
 
 def _uploads_running(state) -> int:
@@ -521,11 +542,11 @@ async def apply(options: Options, *, db=None) -> int:
         migrate_config,
         migrate_ingest,
         migrate_memories,
-        migrate_models,
         migrate_state,
         migrate_uploads,
     )
 
+    catalog = await _model_catalog(options)
     async with get_async_db_context(db) as session:
         await migrate_state.wait_for_schema(session)
         await migrate_state.ensure_tables(session)
@@ -541,10 +562,10 @@ async def apply(options: Options, *, db=None) -> int:
         if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
             print('3 model ids: already done')
         else:
-            report = await migrate_models.rewrite(session, options.model_map, options.migration_id)
+            report = await _rewrite_models(session, options, catalog)
             await migrate_state.add_marker(session, options.migration_id, 'model_ids')
             await session.commit()
-            _print_model_report(report, prefix='3 model ids')
+            _print_model_report(report, prefix='3 model ids', default=catalog[0])
     directory = await copy_directory(db=db)
     print(f'4 directory: {len(directory.rows)} KBs, {len(directory.conflicts)} conflicts')
     ingest_state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, db=db)
@@ -609,8 +630,9 @@ async def apply_models(options: Options, *, db=None) -> int:
     The snapshot covers just the config rows the rewrite touches, so --restore with this id undoes it.
     """
     from open_webui.internal.db import get_async_db_context
-    from open_webui.soev import migrate_config, migrate_models, migrate_state
+    from open_webui.soev import migrate_config, migrate_state
 
+    catalog = await _model_catalog(options)
     async with get_async_db_context(db) as session:
         await migrate_state.wait_for_schema(session)
         await migrate_state.ensure_tables(session)
@@ -620,23 +642,23 @@ async def apply_models(options: Options, *, db=None) -> int:
         if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
             print('3 model ids: already done')
             return EXIT_OK
-        report = await migrate_models.rewrite(session, options.model_map, options.migration_id)
+        report = await _rewrite_models(session, options, catalog)
         await migrate_state.add_marker(session, options.migration_id, 'model_ids')
         await session.commit()
-        _print_model_report(report, prefix='3 model ids')
+        _print_model_report(report, prefix='3 model ids', default=catalog[0])
     return EXIT_OK
 
 
 async def plan_models(options: Options, *, db=None) -> int:
     """Preview apply_models: the map and what it would rewrite; nothing is written."""
     from open_webui.internal.db import get_async_db_context
-    from open_webui.soev import migrate_models
 
+    catalog = await _model_catalog(options)
     async with get_async_db_context(db) as session:
         for source, target in sorted(options.model_map.items()):
             print(f'3 model ids: map {source} -> {target}')
-        report = await migrate_models.rewrite(session, options.model_map, options.migration_id, dry_run=True)
-        _print_model_report(report, prefix='3 model ids')
+        report = await _rewrite_models(session, options, catalog, dry_run=True)
+        _print_model_report(report, prefix='3 model ids', default=catalog[0])
     return EXIT_OK
 
 
@@ -664,11 +686,11 @@ async def plan(options: Options, *, db=None) -> int:
         migrate_config,
         migrate_ingest,
         migrate_memories,
-        migrate_models,
         migrate_state,
         migrate_uploads,
     )
 
+    catalog = await _model_catalog(options)
     async with get_async_db_context(db) as session:
         await migrate_state.wait_for_schema(session)
         # A preview creates nothing, not even the state tables the first --apply creates.
@@ -687,8 +709,7 @@ async def plan(options: Options, *, db=None) -> int:
         for source, target in sorted(options.model_map.items()):
             print(f'3 model ids: map {source} -> {target}')
         _print_model_report(
-            await migrate_models.rewrite(session, options.model_map, options.migration_id, dry_run=True),
-            prefix='3 model ids',
+            await _rewrite_models(session, options, catalog, dry_run=True), prefix='3 model ids', default=catalog[0]
         )
     directory = await copy_directory(dry_run=True, db=db)
     state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, dry_run=True, db=db)
@@ -722,7 +743,11 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--apply', action='store_true', help='Run every step; safe to rerun')
     mode.add_argument('--restore', action='store_true', help='Put back the config snapshot and model ids')
-    mode.add_argument('--dry-run', action='store_true', help='Print the plan; no writes and no HTTP requests')
+    mode.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Print the plan; no writes and no HTTP request but the model catalog read',
+    )
     only = parser.add_mutually_exclusive_group()
     only.add_argument('--models', action='store_true', help='With --apply or --dry-run: only rewrite model ids')
     only.add_argument(
