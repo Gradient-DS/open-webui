@@ -84,6 +84,13 @@ is named and dropped from the chat's `files` (backend and the frontend's `chatFi
 accessible stays, and knowledge bases are then only counted. Failed and still-processing files are skipped with a
 notice too; images keep refusing (`_unimaged`).
 
+A chat's folder reaches the agent too: its prompt joins `user_instructions`, and the middleware puts the items its
+owner can still delegate in `metadata['folder_knowledge']` on every routed turn. `agent_v2._folder_items` adds the
+folders attached to the chat (`type: 'folder'` entries, read access via `has_folder_access`). Their knowledge bases,
+files and notes follow the chat's and the assistant's (deduplicated), read as the chatting user; a folder file is
+checked in its collection first so an unreadable one is skipped, not refused. Folder notes fill the room the chat's
+ten texts leave. Skipped folder items get "of this folder" notices and are never dropped from the chat.
+
 ## Live document attachments
 
 `utils/agent_v2.py` registers every `attached-document` element of a root `tool_output`

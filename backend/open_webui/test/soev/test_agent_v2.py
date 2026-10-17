@@ -1044,6 +1044,214 @@ async def test_the_models_prompt_and_the_chats_prompt_are_sent_as_their_own_inst
 
 
 @pytest.mark.asyncio
+async def test_the_folders_prompt_is_sent_as_the_users_instructions(chat: Chat) -> None:
+    """The middleware merges the folder's prompt into the chat's prompt (`test_agent_folder.py`)."""
+    await chat.turn('question', 'a1', chat_system_prompt='Antwoord in het kort.')
+    assert chat.mutations()[-1][1]['input']['user_instructions'] == 'Antwoord in het kort.'
+
+
+@pytest.mark.asyncio
+async def test_the_folders_knowledge_bases_follow_the_chats_and_assistants_once(chat: Chat) -> None:
+    seed_collection(chat.api, 'kb-chat', 'Contracten')
+    seed_collection(chat.api, 'kb-model', 'Handboek')
+    seed_collection(chat.api, 'kb-folder', 'Dossier')
+    await chat.turn(
+        'question',
+        'a1',
+        files=[{'type': 'collection', 'id': 'kb-chat'}],
+        knowledge=[{'id': 'kb-model'}],
+        folder_knowledge=[
+            {'type': 'collection', 'id': 'kb-folder', 'name': 'Dossier'},
+            {'type': 'collection', 'id': 'kb-chat', 'name': 'Contracten'},
+            {'type': 'collection', 'id': 'kb-model', 'name': 'Handboek'},
+        ],
+    )
+    assert chat.mutations()[-1][1]['input']['knowledge'] == [
+        {'key': 'kb-chat', 'name': 'Contracten'},
+        {'key': 'kb-model', 'name': 'Handboek'},
+        {'key': 'kb-folder', 'name': 'Dossier'},
+    ]
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'language,expected',
+    [
+        (
+            'en-US',
+            [
+                '1 knowledge base of this folder is not accessible and was skipped.',
+                '1 knowledge base of this folder no longer exists and was skipped.',
+            ],
+        ),
+        (
+            'nl-NL',
+            [
+                '1 kennisbank van deze map is niet toegankelijk en is overgeslagen.',
+                '1 kennisbank van deze map bestaat niet meer en is overgeslagen.',
+            ],
+        ),
+    ],
+)
+async def test_a_folders_unavailable_knowledge_is_counted_and_stays_on_the_folder(
+    chat: Chat, language: str, expected: list[str]
+) -> None:
+    seed_hidden_collection(chat.api, 'kb-secret', 'Geheim')
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        folder_knowledge=[{'type': 'collection', 'id': 'kb-secret'}, {'type': 'collection', 'id': 'kb-gone'}],
+        user_language=language,
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    assert chat.mutations()[-1][1]['input']['knowledge'] == []
+    assert notices(chat) == [{'notices': expected, 'removed': []}]
+
+
+@pytest.mark.asyncio
+async def test_a_folders_file_is_sent_from_its_collection_once(chat: Chat, monkeypatch: pytest.MonkeyPatch) -> None:
+    key = ingest.attachments_collection_key('alice')
+    seed_collection(chat.api, key, 'Attachments')
+    seed_collection(chat.api, 'kb-a', 'Contracten')
+    chat.api.add_document(key, 'f-folder', filename='beleid.pdf')
+    chat.api.add_document('kb-a', 'f-kb', filename='contract.pdf')
+    stored_files(monkeypatch, **{'f-folder': 'completed', 'f-chat': 'completed', 'f-kb': 'completed'})
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        files=[{'type': 'file', 'id': 'f-chat', 'name': 'notulen.pdf'}],
+        folder_knowledge=[
+            {'type': 'file', 'id': 'f-folder', 'name': 'beleid.pdf'},
+            {'type': 'file', 'id': 'f-chat', 'name': 'notulen.pdf'},
+            {'type': 'file', 'id': 'f-kb', 'name': 'contract.pdf', 'collection': {'id': 'kb-a'}},
+        ],
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    assert chat.mutations()[-1][1]['input']['attachments'] == [
+        {'collection_key': key, 'file_id': 'f-chat', 'name': 'notulen.pdf'},
+        {'collection_key': key, 'file_id': 'f-folder', 'name': 'beleid.pdf'},
+        {'collection_key': 'kb-a', 'file_id': 'f-kb', 'name': 'contract.pdf'},
+    ]
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'language,expected',
+    [
+        ('en-US', "File 'beleid.pdf' of this folder is not accessible and was skipped."),
+        ('nl-NL', "Bestand 'beleid.pdf' van deze map is niet toegankelijk en is overgeslagen."),
+    ],
+)
+async def test_a_shared_folders_file_the_user_cannot_read_is_left_out_with_a_notice(
+    chat: Chat, monkeypatch: pytest.MonkeyPatch, language: str, expected: str
+) -> None:
+    """Bob's upload sits in his own attachments collection: alice is not refused, she is told it was skipped."""
+    key = ingest.attachments_collection_key('bob')
+    seed_hidden_collection(chat.api, key, 'Attachments')
+    chat.api.add_document(key, 'f-bob', filename='beleid.pdf')
+    record = SimpleNamespace(id='f-bob', user_id='bob', filename='beleid.pdf', meta={'status': 'completed'})
+    monkeypatch.setattr(agent_v2.Files, 'get_file_by_id', AsyncMock(return_value=record))
+    chunks = await chat.turn(
+        'question',
+        'a1',
+        folder_knowledge=[{'type': 'file', 'id': 'f-bob', 'name': 'beleid.pdf'}],
+        user_language=language,
+    )
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert 'attachments' not in sent
+    assert sent['text'] == 'question\n\nAttachment status:\nnot available, left out: beleid.pdf'
+    assert notices(chat) == [{'notices': [expected], 'removed': []}]
+
+
+@pytest.mark.asyncio
+async def test_a_folders_note_is_sent_after_the_chats_texts(chat: Chat, stored_texts: dict) -> None:
+    stored_texts['n2'] = SimpleNamespace(id='n2', user_id='alice', title='Afspraken', data={'content': {'md': 'Body'}})
+    await chat.turn(
+        'read',
+        'a1',
+        files=[{'type': 'note', 'id': 'n1'}],
+        folder_knowledge=[{'type': 'note', 'id': 'n2', 'name': 'Afspraken'}, {'type': 'note', 'id': 'n1'}],
+    )
+    assert [text['id'] for text in chat.mutations()[-1][1]['input']['texts']] == ['note:n1', 'note:n2']
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
+async def test_a_folders_notes_fill_the_room_the_chat_leaves_and_never_refuse(chat: Chat, stored_texts: dict) -> None:
+    files = []
+    for index in range(9):
+        item = copy.deepcopy(stored_texts['n1'])
+        item.id = f'item-{index}'
+        stored_texts[item.id] = item
+        files.append({'type': 'note', 'id': item.id})
+    for note_id in ('f1', 'f2'):
+        stored_texts[note_id] = SimpleNamespace(id=note_id, user_id='alice', title=note_id, data={'content': {}})
+    folder = [{'type': 'note', 'id': 'f1', 'name': 'Eerste'}, {'type': 'note', 'id': 'f2', 'name': 'Tweede'}]
+    chunks = await chat.turn('read', 'a1', files=files, folder_knowledge=folder, user_language='nl-NL')
+    assert not any('error' in chunk for chunk in chunks)
+    assert [text['id'] for text in chat.mutations()[-1][1]['input']['texts']][-1] == 'note:f1'
+    assert len(chat.mutations()[-1][1]['input']['texts']) == 10
+    assert notices(chat)[-1]['notices'] == [
+        "Notitie 'Tweede' van deze map is overgeslagen: een bericht leest maximaal 10 notities of chats."
+    ]
+
+
+@pytest.fixture
+def attached_folder(monkeypatch: pytest.MonkeyPatch, stored_texts: dict) -> SimpleNamespace:
+    """Bob's folder `Project`, attached to alice's chat through # or drag and drop."""
+    folder = SimpleNamespace(
+        id='folder-1',
+        name='Project',
+        user_id='bob',
+        parent_id=None,
+        data={'files': [{'type': 'collection', 'id': 'kb-project'}, {'type': 'note', 'id': 'n1'}]},
+    )
+    agent_v2.Folders.get_folder_by_id.side_effect = {'folder-1': folder}.get
+    monkeypatch.setattr(
+        agent_v2, 'get_owner_accessible_folder_files', AsyncMock(side_effect=lambda found: found.data['files'])
+    )
+    return folder
+
+
+@pytest.mark.asyncio
+async def test_an_attached_folder_sends_its_items(chat: Chat, attached_folder: SimpleNamespace) -> None:
+    seed_collection(chat.api, 'kb-project', 'Project')
+    agent_v2.has_folder_access.return_value = True
+    files = [{'type': 'folder', 'id': 'folder-1', 'name': 'Project'}, {'type': 'collection', 'id': 'kb-project'}]
+    await chat.turn('read', 'a1', files=files, folder_knowledge=[{'type': 'note', 'id': 'n1'}])
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['knowledge'] == [{'key': 'kb-project', 'name': 'Project'}]
+    assert [text['id'] for text in sent['texts']] == ['note:n1']
+    agent_v2.has_folder_access.assert_awaited_once_with('alice', attached_folder, 'read', db=None)
+    assert notices(chat) == []
+
+
+@pytest.mark.asyncio
+async def test_an_attached_folder_the_user_cannot_read_is_left_out_with_a_notice(
+    chat: Chat, attached_folder: SimpleNamespace
+) -> None:
+    seed_collection(chat.api, 'kb-project', 'Project')
+    files = [{'type': 'folder', 'id': 'folder-1', 'name': 'Project'}, {'type': 'folder', 'id': 'folder-gone'}]
+    chunks = await chat.turn('read', 'a1', files=files)
+    assert not any('error' in chunk for chunk in chunks)
+    sent = chat.mutations()[-1][1]['input']
+    assert sent['knowledge'] == []
+    assert 'texts' not in sent
+    assert notices(chat) == [
+        {
+            'notices': [
+                "Folder 'Project' is not accessible and was skipped.",
+                'A folder no longer exists and was removed from this chat.',
+            ],
+            'removed': ['folder-gone'],
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_the_browsers_time_zone_is_sent_as_the_zone(chat: Chat) -> None:
     await chat.turn('question', 'a1', variables={'{{CURRENT_TIMEZONE}}': 'Europe/Amsterdam'})
     assert chat.mutations()[-1][1]['input']['zone'] == 'Europe/Amsterdam'
