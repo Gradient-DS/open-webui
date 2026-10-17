@@ -55,7 +55,7 @@
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
-	import Excel from '$lib/components/icons/Excel.svelte';
+	import Grid from '$lib/components/icons/Grid.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import Cube from '$lib/components/icons/Cube.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
@@ -177,7 +177,7 @@
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 	export let showDocumentWriterButton = false;
-	// [Gradient] Office files (Excel on the demo stack): on/off, editing follows creation.
+	// [Gradient] Office files (xlsx, pptx and docx on the demo stack): on/off, editing follows creation.
 	export let showOfficeButton = false;
 	export let officeEnabled = false;
 	export let officeEditEnabled = false;
@@ -1010,7 +1010,7 @@
 
 					{#if showOffice}
 						<MenuItem
-							label={$i18n.t('Excel')}
+							label={$i18n.t('Office')}
 							pinId="office"
 							toolState={officeState}
 							tooltipPlacement="top-start"
@@ -1020,14 +1020,14 @@
 									? $i18n.t('Create Office files')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
-								$i18n.t('Excel'),
+								$i18n.t('Office'),
 								officeState,
 								officeEnabled ? $i18n.t('Create Office files') : $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
 							disabled={!showOfficeButton}
 							onClick={() => showOfficeButton && cycleTool('office')}
 						>
-							<Excel slot="icon" className="size-3.5" />
+							<Grid slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
 					{/if}
 

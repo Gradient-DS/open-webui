@@ -142,7 +142,7 @@
 	import Camera from '../icons/Camera.svelte';
 	import Link from '../icons/Link.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
-	import Excel from '../icons/Excel.svelte';
+	import Grid from '../icons/Grid.svelte';
 	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
 	import { meetingsAvailable } from '$lib/components/meetings/availability';
 	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
@@ -2914,7 +2914,7 @@
 												{:else if itemId === 'office' && showOfficeButton}
 													<Tooltip
 														content={pinnedStateTooltip(
-															$i18n.t('Excel'),
+															$i18n.t('Office'),
 															officeEnabled ? 'required' : 'off',
 															officeEnabled
 																? $i18n.t('Create Office files')
@@ -2924,12 +2924,12 @@
 													>
 														<button
 															type="button"
-															aria-label={$i18n.t('Excel')}
+															aria-label={$i18n.t('Office')}
 															aria-pressed={officeEnabled}
 															on:click|preventDefault={() => inputMenuRef?.cycleTool('office')}
 															class={pinnedToggleClass(officeEnabled)}
 														>
-															<Excel className="size-4" />
+															<Grid className="size-4" strokeWidth="1.75" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'tools' && showToolsButton}
