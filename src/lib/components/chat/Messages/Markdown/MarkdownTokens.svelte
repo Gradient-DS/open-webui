@@ -536,6 +536,7 @@
 			title={token.document.title}
 			content={token.document.content}
 			format={token.document.format}
+			page={token.document.page}
 			done={token.document.done}
 		/>
 	{:else if token.type === 'details'}

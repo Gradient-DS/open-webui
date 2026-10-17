@@ -18,7 +18,7 @@
 		requestedOfficeFile
 	} from '$lib/stores';
 	import { getExportMarkdown } from '$lib/utils/documentCitations';
-	import { printDocument } from '$lib/utils/documentPrint';
+	import { documentPdf } from '$lib/utils/documentPdf';
 
 	import type { DocumentFormat } from '$lib/utils/agentDocument';
 	import Document from '$lib/components/icons/Document.svelte';
@@ -31,6 +31,7 @@
 	export let title: string = '';
 	export let content: string = '';
 	export let format: DocumentFormat = 'markdown';
+	export let page: string | undefined = undefined;
 	export let done: boolean = true;
 	export let messageDone: boolean = true;
 	export let className: string = '';
@@ -108,10 +109,14 @@
 
 	const downloadPdf = async () => {
 		if (!content) return;
-		// Close first: the print dialog blocks the page, and the menu must not outlive it.
 		downloadOpen = false;
 		try {
-			await printDocument(displayTitle, exportContent, format);
+			const blob = await documentPdf(
+				{ title: displayTitle, content, format, page },
+				sources,
+				$i18n.t('Sources')
+			);
+			saveAs(blob, `${sanitizeFilename(displayTitle)}.pdf`);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
