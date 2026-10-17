@@ -18,6 +18,7 @@ from open_webui.models.automations import Automation
 from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.chats import Chat
 from open_webui.models.config import Config
+from open_webui.models.folders import Folder
 from open_webui.models.models import Model
 from open_webui.models.users import User
 from open_webui.soev.migrate_state import MigrationError, state
@@ -207,6 +208,13 @@ class _Rewrite:
                 parent[path[1]] = [self.map(site, row_id, [*path, i], v) for i, v in enumerate(parent[path[1]])]
         return result
 
+    def folder(self, site: str, row_id: str, value):
+        """A folder's default models for its new chats."""
+        if not isinstance(value, dict) or not isinstance(value.get('model_ids'), list):
+            return value
+        model_ids = [self.map(site, row_id, ['model_ids', i], v) for i, v in enumerate(value['model_ids'])]
+        return {**value, 'model_ids': model_ids}
+
     def automation(self, site: str, row_id: str, value):
         if not isinstance(value, dict):
             return value
@@ -253,6 +261,7 @@ async def rewrite(db: AsyncSession, mapping: dict[str, str], migration_id: str, 
     await run.json_rows('chat.chat', Chat, 'chat', lambda site, row_id, value: run.walk(site, row_id, value, []))
     await run.json_rows('user.settings', User, 'settings', run.settings)
     await run.json_rows('automation.data', Automation, 'data', run.automation)
+    await run.json_rows('folder.data', Folder, 'data', run.folder)
     await run.config()
     return run.report
 
@@ -273,6 +282,7 @@ _JSON_SITES = {
     'chat.chat': (Chat, 'chat'),
     'user.settings': (User, 'settings'),
     'automation.data': (Automation, 'data'),
+    'folder.data': (Folder, 'data'),
 }
 _COLUMN_SITES = {
     'chat_message.model_id': (ChatMessage, 'model_id'),
