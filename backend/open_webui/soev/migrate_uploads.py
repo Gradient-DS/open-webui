@@ -67,14 +67,22 @@ def attached_file_ids(chat: dict) -> set[str]:
     }
 
 
+def folder_file_ids(data: dict) -> set[str]:
+    """The uploads a folder's knowledge lists, read by the agent like a chat's; not files picked from a KB."""
+    return attached_file_ids({'files': _list((data or {}).get('files'))})
+
+
 async def _referenced(db) -> set[str]:
     import sqlalchemy as sa
 
     from open_webui.internal.db import get_async_db_context
     from open_webui.models.chats import Chat
+    from open_webui.models.folders import Folder
 
     ids, after = set(), ''
     async with get_async_db_context(db) as session:
+        for (data,) in (await session.execute(sa.select(Folder.data).where(Folder.data.is_not(None)))).all():
+            ids |= folder_file_ids(data if isinstance(data, dict) else {})
         while True:
             query = (
                 sa.select(Chat.id, Chat.chat)
@@ -268,8 +276,8 @@ async def _check(
 
 
 async def ingest_uploads(*, concurrency: int, dry_run: bool = False, db=None, prefix: str = '5 uploads'):
-    """Put every referenced chat upload into its owner's attachments collection and every assistant file into its
-    assistant's collection; a rerun submits nothing twice. A dry run makes no HTTP request and writes nothing."""
+    """Put every upload a chat or folder references into its owner's attachments collection and every assistant file
+    into its assistant's collection; a rerun submits nothing twice. A dry run makes no HTTP request and writes nothing."""
     from open_webui.soev import identity
 
     state = UploadState()
@@ -280,7 +288,8 @@ async def ingest_uploads(*, concurrency: int, dry_run: bool = False, db=None, pr
     files, linked, users = await _rows(referenced, db, assistant_owners=model_owners)
     state.counts[GONE] = len(referenced) - len(files)
     print(
-        f'{prefix}: {len(referenced)} files attached in chats or assistants, {len(files)} with a file row', flush=True
+        f'{prefix}: {len(referenced)} files attached in chats, folders or assistants, {len(files)} with a file row',
+        flush=True,
     )
     client = None if dry_run else identity.build_client()
     pending = []

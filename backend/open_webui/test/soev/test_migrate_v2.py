@@ -100,6 +100,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
             'models',
             'memories',
             'automations',
+            'folders',
         )
     }
     engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/owui.db')
@@ -118,6 +119,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
         modules['models'].Model,
         modules['memories'].Memory,
         modules['automations'].Automation,
+        modules['folders'].Folder,
     ]
     async with engine.begin() as connection:
         await connection.run_sync(
@@ -426,6 +428,7 @@ TABLE_DUMPS = {
     'access_grant': 'SELECT id, resource_id FROM access_grant ORDER BY id',
     'user': 'SELECT id, settings FROM user ORDER BY id',
     'automation': 'SELECT id, data FROM automation ORDER BY id',
+    'folder': 'SELECT id, data FROM folder ORDER BY id',
 }
 
 
@@ -470,6 +473,11 @@ async def seed_models(env, monkeypatch):
             " VALUES ('a1', 'alice', 'Daily', :data, 1, 1, 1)",
             {'data': json.dumps({'prompt': 'p', 'model_id': 'zai-org/GLM-5.3', 'rrule': 'FREQ=DAILY'})},
         ),
+        (
+            'INSERT INTO folder (id, user_id, name, data, is_expanded, created_at, updated_at)'
+            " VALUES ('f1', 'alice', 'Project', :data, 0, 1, 1), ('f2', 'alice', 'Empty', NULL, 0, 1, 1)",
+            {'data': json.dumps({'system_prompt': 'Kort.', 'model_ids': ['zai-org/GLM-5.3', 'helper']})},
+        ),
     ]
     async with env.engine.begin() as connection:
         for statement, params in statements:
@@ -502,6 +510,7 @@ async def test_model_ids_are_rewritten_everywhere_and_unmapped_ids_reported(env,
     assert data['access_grant'] == [('g1', 'glm-5-3'), ('g2', 'zai-org/GLM-5.3')]
     assert data['user'] == [('alice', {'ui': {'models': ['glm-5-3'], 'pinnedModels': ['helper', 'unknown/model']}})]
     assert data['automation'][0][1]['model_id'] == 'glm-5-3'
+    assert data['folder'] == [('f1', {'system_prompt': 'Kort.', 'model_ids': ['glm-5-3', 'helper']}), ('f2', None)]
     assert await config_value(env, 'ui.default_pinned_models') == 'glm-5-3,unknown/model'
     output = capsys.readouterr().out
     assert '3 model ids: unmapped unknown/model' in output
@@ -1119,11 +1128,44 @@ async def test_uploads_mode_ingests_each_attached_upload_as_its_owner_and_skips_
     assert (await file_meta(env, 'gone'))['collection_name'] == 'file-gone'
     assert (await file_meta(env, 'in-kb'))['collection_name'] == 'file-in-kb'
     output = capsys.readouterr().out
-    assert '5 uploads: 6 files attached in chats or assistants, 5 with a file row' in output
+    assert '5 uploads: 6 files attached in chats, folders or assistants, 5 with a file row' in output
     assert '5 uploads: knowledge base file 1, no file row 1, original missing 1, submitted 3' in output
     assert '5 uploads: original missing, skipped alice/gone\n' in output
     assert '.pdf' not in output
     assert 'uploads running 3 | uploads failed 0 | upload originals missing 1' in output
+
+
+@pytest.mark.asyncio
+async def test_an_upload_only_a_folder_lists_is_ingested_and_pointed_at_its_owners_collection(env, monkeypatch):
+    kb = await seed_uploads(env, monkeypatch)
+    files = importlib.import_module('open_webui.models.files')
+    path = env.tmp_path / 'folder-only.pdf'
+    path.write_bytes(b'original folder-only')
+    meta = {'name': 'folder-only.pdf', 'content_type': 'application/pdf', 'size': 1, 'status': 'completed'}
+    await files.Files.insert_new_file(
+        'alice', files.FileForm(id='folder-only', filename='folder-only.pdf', path=str(path), meta=meta)
+    )
+    data = {'files': [upload('folder-only'), upload('picked', knowledge_id=kb.id), {'type': 'collection', 'id': kb.id}]}
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO folder (id, user_id, name, data, is_expanded, created_at, updated_at)'
+                " VALUES ('f1', 'alice', 'Project', :data, 0, 1, 1)"
+            ),
+            {'data': json.dumps(data)},
+        )
+    await env.module.apply_uploads(uploads_options(env, monkeypatch))
+    assert submitted_uploads(env) == [(ALICE, 'chat-level'), (ALICE, 'folder-only'), (ALICE, 'loose'), (BOB, 'bobs')]
+    assert (await file_meta(env, 'folder-only'))['collection_name'] == ALICE
+
+
+def test_folder_uploads_skip_kb_picks_and_odd_shapes():
+    from open_webui.soev.migrate_uploads import folder_file_ids
+
+    data = {'files': [upload('up'), upload('kb-file', knowledge_id='kb'), {'type': 'note', 'id': 'n'}, 'odd']}
+    assert folder_file_ids(data) == {'up'}
+    assert folder_file_ids({'files': None}) == set()
+    assert folder_file_ids({}) == set()
 
 
 @pytest.mark.asyncio
