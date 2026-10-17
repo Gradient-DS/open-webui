@@ -23,10 +23,15 @@
 	// A page may be wider than A4 (fixed widths, margins); the fit and the frame use what it measures.
 	let contentWidth = $state(PAGE_WIDTH);
 	let height = $state(PAGE_HEIGHT);
-	// null fits the page to the panel (above the zoom bar), never above 100%; a step is the user's own zoom.
+	// null fits the page to the panel inside its padding (px-6, pt-6 and the zoom bar's pb-16), never above
+	// 100%; a step is the user's own zoom.
 	let zoom = $state<number | null>(null);
 	const scale = $derived(
-		zoom ?? fitZoom({ width, height: panelHeight - 56 }, { width: contentWidth, height: height })
+		zoom ??
+			fitZoom(
+				{ width: width - 48, height: panelHeight - 88 },
+				{ width: contentWidth, height: height }
+			)
 	);
 	let srcdoc = $state('');
 	let container: HTMLDivElement;
@@ -59,14 +64,14 @@
 
 <div class="relative w-full h-full min-h-0 shrink-0">
 	<div
-		class="w-full h-full overflow-auto bg-gray-100"
+		class="w-full h-full overflow-auto bg-white px-6 pt-6 pb-16 dark:bg-gray-850"
 		bind:this={container}
 		bind:clientWidth={width}
 		bind:clientHeight={panelHeight}
 	>
 		<div
 			style:height="{height * scale}px"
-			class="mx-auto overflow-hidden"
+			class="mx-auto overflow-hidden shadow-[0_6px_28px_rgba(0,0,0,0.18)] ring-1 ring-black/5 dark:shadow-[0_6px_28px_rgba(0,0,0,0.65)] dark:ring-white/10"
 			style:width="{contentWidth * scale}px"
 		>
 			<!-- Same-origin permits measuring the page; scripts stay forbidden. -->
