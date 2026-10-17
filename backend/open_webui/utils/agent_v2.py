@@ -384,7 +384,6 @@ TEXT_CHARACTERS = 50_000
 # [Gradient] Match quoted attributes too: document titles and tool arguments may contain `>`.
 _ATTRIBUTES = r"""((?:[^>"']|"[^"]*"|'[^']*')*)"""
 _DETAILS = re.compile(r'<details\b' + _ATTRIBUTES + r'>.*?</details>', re.DOTALL)
-_DOCUMENT = re.compile(r'<document\b' + _ATTRIBUTES + r'>.*?</document>', re.DOTALL)
 _ATTRIBUTE = re.compile(r"""([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 # [Claude] GLM's tool-call token leaked into a document tag: `<tool_call>document title=...>` (also with `<`).
 _TOOL_CALL = '<tool_call>'
@@ -408,9 +407,49 @@ def _undecided(text: str) -> int:
     return len(text)
 
 
-def _document_label(match: re.Match[str]) -> str:
-    attributes = {key: double or single for key, double, single in _ATTRIBUTE.findall(match[1])}
-    return f'[document: {html.unescape(attributes.get("title", ""))}]'
+@dataclass(frozen=True)
+class _Document:
+    start: int
+    end: int
+    attributes: str
+
+    def label(self) -> str:
+        attributes = {key: double or single for key, double, single in _ATTRIBUTE.findall(self.attributes)}
+        return f'[document: {html.unescape(attributes.get("title", ""))}]'
+
+
+def _documents(text: str) -> list[_Document]:
+    """[Claude] Each closed `<document ...>...</document>` in `text`, found in one pass: a regular expression takes
+    quadratic time on many unclosed tags, which a model (or text it quotes) can write. An unclosed tag ends the
+    search, since no later tag can close before it does."""
+    found, position = [], 0
+    while (start := text.find('<document', position)) != -1:
+        after = start + len('<document')
+        if after < len(text) and (text[after].isalnum() or text[after] in '_-'):
+            position = after
+            continue
+        end, quote = after, ''
+        while end < len(text) and (quote or text[end] != '>'):
+            if quote and text[end] == quote:
+                quote = ''
+            elif not quote and text[end] in '"\'':
+                quote = text[end]
+            end += 1
+        close = text.find('</document>', end)
+        if end == len(text) or close == -1:
+            break
+        position = close + len('</document>')
+        found.append(_Document(start, position, text[after:end]))
+    return found
+
+
+def _labelled(text: str) -> str:
+    """[Claude] `text` with each document replaced by a line naming it."""
+    parts, position = [], 0
+    for document in _documents(text):
+        parts += [text[position : document.start], document.label()]
+        position = document.end
+    return ''.join(parts) + text[position:]
 
 
 # [Gradient] A citation marker the agent would read as a number of this turn: `[3]`, `[3, 4]`, `[#3]`, `[3#p2]`,
@@ -436,7 +475,7 @@ def _conversation(chat: Any, message_id: str | None) -> list[str]:
     blocks = []
     for message in get_message_list(chat.chat.get('history', {}).get('messages', {}), message_id):
         text = _DETAILS.sub('', get_content_from_message(message) or '')
-        text = _uncited(_DOCUMENT.sub(_document_label, text)).strip()
+        text = _uncited(_labelled(text)).strip()
         if text:
             blocks.append(f'{message.get("role", "user")}: {text}')
     return blocks
@@ -1159,6 +1198,9 @@ class AgentTurn:
         self.streamed: list[tuple[int, int]] = []
         self.streamed_citations = 0
         self.partial_reasoning = ''
+        # [Claude] The turn's document writer state, and every text its tools returned.
+        self.documents = 'off'
+        self.tool_texts: list[str] = []
         self.tool_calls = 0
         # [Claude] How many calls the last summary counted.
         self.summarized = 0
@@ -1503,6 +1545,11 @@ class AgentTurn:
         """[Claude] Offer every text a root tool output read to the citation panel, and end its call's status."""
         await self.attached(payload)
         await self.keep(payload)
+        self.tool_texts += [
+            text
+            for text in [payload.get('data'), *(element.get('text') for element in payload.get('elements') or [])]
+            if isinstance(text, str) and text
+        ]
         for element in payload.get('elements') or []:
             if element.get('type') == 'action-required' and element.get('kind') == 'connect':
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
@@ -1666,16 +1713,27 @@ class AgentTurn:
             if self.citations.number(citation) is not None:
                 await self.show_source(citation['source'])
         text = _unleaked(held + _marked(content, markers, len(partial)))
-        if not self.pending_calls and not _DOCUMENT.search(_unleaked(content)):
-            # [Claude] A model that wrote its document in its reasoning: the answer, which promises it, shows it.
-            documents = [match[0] for match in _DOCUMENT.finditer(_unleaked(payload.get('reasoning') or ''))]
-            text += ''.join(f'\n\n{document}' for document in documents)
+        if (document := self.reasoning_document(content, payload.get('reasoning') or '')) is not None:
+            text += f'\n\n{document}'
         chunks = []
         if reasoning:
             chunks.append(_chunk({'reasoning_content': reasoning}))
         if text:
             chunks.append(_chunk({'content': text}))
         return chunks
+
+    def reasoning_document(self, content: str, reasoning: str) -> str | None:
+        """[Claude] The document a model wrote in its reasoning instead of its answer, for the answer to show: only
+        when the user turned the document writer on, the call ends the turn and its answer has none, and only the
+        last one, which a tool did not return as it is (text the model quoted from a mail or file is not its own)."""
+        if self.documents not in ('auto', 'required') or self.pending_calls or _documents(_unleaked(content)):
+            return None
+        reasoning = _unleaked(reasoning)
+        if not (found := _documents(reasoning)):
+            return None
+        last = found[-1]
+        body = reasoning[last.start + len('<document') + len(last.attributes) + 1 : last.end - len('</document>')]
+        return None if any(body.strip() in text for text in self.tool_texts) else reasoning[last.start : last.end]
 
     def remaining_reasoning(self, reasoning: str) -> str:
         partial, self.partial_reasoning = self.partial_reasoning, ''
@@ -1730,6 +1788,7 @@ class AgentTurn:
 
     async def run(self, body: dict, agent: str | None) -> AsyncIterator[dict[str, Any]]:
         self.model = body.get('model')
+        self.documents = body.get('input', {}).get('documents', 'off')
         try:
             self.emitter = await get_event_emitter(self.metadata)
             await self.notify()

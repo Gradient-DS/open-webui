@@ -40,18 +40,42 @@ export function readDocument(
 	};
 }
 
+// Where the opening tag that starts at `from` ends (its `>`), skipping quoted attribute values; -1 when it does
+// not end. One pass, unlike a regular expression, which takes quadratic time on many unclosed tags.
+function tagEnd(text: string, from: number): number {
+	let quote = '';
+	for (let index = from; index < text.length; index++) {
+		const char = text[index];
+		if (quote) {
+			if (char === quote) quote = '';
+		} else if (char === '"' || char === "'") quote = char;
+		else if (char === '>') return index;
+	}
+	return -1;
+}
+
 // A model may write its document in its reasoning; the answer shows it, so the reasoning names it in one line.
 export function labelDocuments(text: string, label: (title: string) => string): string {
 	// GLM's tool-call token can stand in for the tag's `<`, as agent_v2 repairs in the answer.
-	let rest = text.replace(/<tool_call>\s*<?(?=document\b)/g, '<');
+	const rest = text.replace(/<tool_call>\s*<?(?=document\b)/g, '<');
 	let labelled = '';
-	let open: RegExpExecArray | null;
-	while ((open = DOCUMENT_OPEN.exec(rest))) {
-		const { document, raw } = readDocument(rest.slice(open.index))!;
-		labelled += `${rest.slice(0, open.index)}\n\n_${label(document.title)}_\n\n`;
-		rest = rest.slice(open.index + raw.length);
+	let position = 0;
+	let start: number;
+	while ((start = rest.indexOf('<document', position)) !== -1) {
+		const after = start + '<document'.length;
+		if (/[\w-]/.test(rest[after] ?? '')) {
+			labelled += rest.slice(position, after);
+			position = after;
+			continue;
+		}
+		const end = tagEnd(rest, after);
+		if (end === -1) break;
+		const title = decode(attributes(rest.slice(after, end)).title ?? '');
+		const close = rest.indexOf('</document>', end);
+		labelled += `${rest.slice(position, start)}\n\n_${label(title)}_\n\n`;
+		position = close === -1 ? rest.length : close + '</document>'.length;
 	}
-	return labelled + rest;
+	return labelled + rest.slice(position);
 }
 
 export function extractDocumentsFromMessage(content: string): AgentDocument[] {
