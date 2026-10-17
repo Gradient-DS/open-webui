@@ -47,6 +47,14 @@ function openFrame(srcdoc: string, title: string, width: number): Promise<HTMLIF
 	});
 }
 
+// Whether an element's text is visible: text hidden on the page (visibility, opacity, a transparent colour) stays
+// out of the text layer, so a copied or searched PDF holds nothing the reader could not see.
+function shown(element: Element): boolean {
+	if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+	const color = element.ownerDocument.defaultView!.getComputedStyle(element).color;
+	return !/^(transparent|rgba\(.*,\s*0\))$/.test(color);
+}
+
 // Each word of `area` that falls on its page, written invisibly where it is drawn.
 function writeText(pdf: JsPdf, area: Area, size: PageSize): void {
 	const doc = area.element.ownerDocument;
@@ -58,7 +66,8 @@ function writeText(pdf: JsPdf, area: Area, size: PageSize): void {
 	pdf.setFont('helvetica', 'normal');
 	while (walker.nextNode()) {
 		const node = walker.currentNode as Text;
-		if (node.parentElement?.closest('style, title, script')) continue;
+		if (!node.parentElement || node.parentElement.closest('style, title, script')) continue;
+		if (!shown(node.parentElement)) continue;
 		for (const word of node.data.matchAll(/\S+/g)) {
 			const text = Array.from(word[0]).filter(winAnsi).join('');
 			if (!text) continue;
