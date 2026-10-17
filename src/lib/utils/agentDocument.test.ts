@@ -80,6 +80,14 @@ describe('documents in reasoning', () => {
 		).toBe('\n\n_Taart_\n\n');
 	});
 
+	it('takes linear time however many tags stay unclosed', () => {
+		for (const text of ['<document '.repeat(50_000), '<document "'.repeat(50_000)]) {
+			const started = performance.now();
+			expect(labelDocuments(text, label)).toBe(text);
+			expect(performance.now() - started).toBeLessThan(200);
+		}
+	});
+
 	it('leaves reasoning without documents as it is', () => {
 		expect(labelDocuments('Ik denk na over <tool_call> en documenten.', label)).toBe(
 			'Ik denk na over <tool_call> en documenten.'
