@@ -13,7 +13,7 @@
 	import { removeLastWordFromString, isValidHttpUrl, isYoutubeUrl, decodeString } from '$lib/utils';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Database from '$lib/components/icons/Database.svelte';
+	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	// [Gradient] Cloud collections keep the collection icon plus a provider badge.
 	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
@@ -164,7 +164,7 @@
 						placement="top"
 					>
 						{#if item?.type === 'collection'}
-							<SourceItemIcon kind="folder" icon={Database} provider={item.knowledge_type} />
+							<SourceItemIcon kind="folder" icon={FolderOpen} provider={item.knowledge_type} />
 						{:else if item?.type === 'folder'}
 							<Folder className="size-3.5" />
 						{:else}

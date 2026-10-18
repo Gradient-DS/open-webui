@@ -11,7 +11,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ExperimentalBadge from '$lib/components/common/ExperimentalBadge.svelte';
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
-	import DatabaseSettings from '$lib/components/icons/DatabaseSettings.svelte';
+	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import {
@@ -825,7 +825,7 @@
 								: ''}"
 						>
 							<Tooltip content={$i18n.t('Knowledge')}>
-								<DatabaseSettings className="size-4" strokeWidth="1.5" />
+								<FolderOpen className="size-4" strokeWidth="1.5" />
 							</Tooltip>
 
 							<div class="outline-hidden w-full bg-transparent text-xs min-w-0 line-clamp-1">
