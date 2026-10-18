@@ -10,17 +10,29 @@ from open_webui.retrieval.web import utils as web
 from .conftest import BLOCKED_URLS, INTERNAL, PUBLIC, assert_public_only
 
 
+def get_loader(urls, engine, verify_ssl=True, settings=None):
+    """The loader for `engine` with upstream's dotted retrieval config; unset keys use the defaults."""
+    config = {
+        'web.loader.engine': engine,
+        'web.loader.ssl_verification': verify_ssl,
+        'web.loader.concurrent_requests': 2,
+        'web.search.trust_env': False,
+        **(settings or {}),
+    }
+    return web.get_web_loader(urls, config)
+
+
 @pytest.mark.parametrize('url', BLOCKED_URLS)
 @pytest.mark.parametrize('engine', ['safe_web', 'playwright', 'firecrawl', 'external', 'tavily', 'microsoft_web_iq'])
 def test_loader_rejects_target(engine, url, http_boundary):
     with pytest.raises(ValueError, match='invalid'):
-        web.get_web_loader(url, loader_config={'web_loader_engine': engine})
+        get_loader(url, engine)
     assert http_boundary.sent == []
 
 
 def test_search_result_filter_retains_only_public_urls(http_boundary):
     assert web.safe_validate_urls([*BLOCKED_URLS, PUBLIC]) == [PUBLIC]
-    loader = web.get_web_loader([*BLOCKED_URLS, PUBLIC], loader_config={'web_loader_engine': 'safe_web'})
+    loader = get_loader([*BLOCKED_URLS, PUBLIC], 'safe_web')
     assert loader.load()[0].page_content == 'public content'
     assert http_boundary.sent == [PUBLIC]
 
@@ -32,7 +44,7 @@ async def test_native_loader_connect_guard(asynchronous, attack, http_boundary, 
     monkeypatch.setattr(web, 'AIOHTTP_CLIENT_ALLOW_REDIRECTS', True)
     http_boundary.redirect = INTERNAL if attack == 'redirect' else None
     offline.rebind = attack == 'rebind'
-    loader = web.get_web_loader(PUBLIC, loader_config={'web_loader_engine': 'safe_web'})
+    loader = get_loader(PUBLIC, 'safe_web')
     if asynchronous:
         await loader.aload()
     else:
@@ -52,7 +64,7 @@ async def test_playwright_interception_guards_every_hop(asynchronous, attack, ht
     monkeypatch.setattr(web, 'AIOHTTP_CLIENT_ALLOW_REDIRECTS', True)
     http_boundary.redirect = INTERNAL if attack == 'redirect' else None
     offline.rebind = attack == 'rebind'
-    loader = web.get_web_loader(PUBLIC, verify_ssl=False, loader_config={'web_loader_engine': 'playwright'})
+    loader = get_loader(PUBLIC, 'playwright', verify_ssl=False)
     route = MagicMock()
     route.request.url = PUBLIC
     route.request.method = 'GET'
@@ -74,7 +86,7 @@ async def test_playwright_interception_guards_every_hop(asynchronous, attack, ht
 
 def test_local_fetch_opt_in_retains_its_semantics(monkeypatch, http_boundary):
     monkeypatch.setattr(web, 'ENABLE_LOCAL_WEB_FETCH', True)
-    loader = web.get_web_loader(INTERNAL, loader_config={'web_loader_engine': 'safe_web'})
+    loader = get_loader(INTERNAL, 'safe_web')
     assert loader.load()
     assert http_boundary.sent == [INTERNAL]
 
@@ -94,7 +106,7 @@ async def test_ssl_probe_refuses_rebinding(engine, asynchronous, offline, monkey
 
     tls_socket.connect.side_effect = connect
     monkeypatch.setattr(ssl.SSLContext, 'wrap_socket', lambda *args, **kwargs: tls_socket)
-    loader = web.get_web_loader('https://public.example/', loader_config={'web_loader_engine': engine})
+    loader = get_loader('https://public.example/', engine)
     if engine == 'playwright':
         with pytest.raises(ValueError, match='SSL certificate verification failed'):
             if asynchronous:
@@ -120,14 +132,14 @@ async def test_ssl_probe_refuses_rebinding(engine, asynchronous, offline, monkey
 )
 def test_remote_loader_sends_only_validated_urls(engine, endpoint, body, http_boundary):
     http_boundary.responses[endpoint] = (200, {'Content-Type': 'application/json'}, body)
-    loader = web.get_web_loader(
+    loader = get_loader(
         [INTERNAL, PUBLIC],
+        engine,
         verify_ssl=False,
-        loader_config={
-            'web_loader_engine': engine,
-            'firecrawl_api_url': 'http://extract.example',
-            'external_web_loader_url': 'http://extract.example/',
-            'microsoft_web_iq_api_base_url': 'http://extract.example',
+        settings={
+            'web.loader.firecrawl_api_url': 'http://extract.example',
+            'web.loader.external_web_loader_url': 'http://extract.example/',
+            'web.search.microsoft_web_iq_api_base_url': 'http://extract.example',
         },
     )
     assert loader.load()[0].page_content == 'page'
