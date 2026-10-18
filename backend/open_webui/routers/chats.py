@@ -169,7 +169,10 @@ async def shared_chat_response(chat, user=None, db=None):
             if author.get('id') == author_id and author.get('name'):
                 authors[author_id] = {'id': author_id, 'name': author['name']}
         if user is None or (message.get('user_id') or chat.user_id) != user.id:
-            message.pop('meta', None)
+            meta = message.pop('meta', None)
+            # [Gradient] Which model answered stays visible; the rest of meta stays the author's.
+            if isinstance(meta, dict) and isinstance(meta.get('answered_model'), str):
+                message['meta'] = {'answered_model': meta['answered_model']}
     missing_ids = {message['user_id'] for message in messages if message.get('role') == 'user'} - authors.keys()
     if missing_ids:
         for author in await Users.get_users_by_user_ids(list(missing_ids), db=db):
