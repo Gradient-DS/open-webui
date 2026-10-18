@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { latestMessageWithSources, sourceGroups, type CitationHistory } from './citationTab';
+import {
+	findFileCitation,
+	latestMessageWithSources,
+	sourceGroups,
+	type CitationHistory,
+	type SourceGroup
+} from './citationTab';
+import type { DisplayCitation } from '../Messages/Citations/reduceSources';
 
 const sources = [{ source: { id: 'file', name: 'Report' }, document: ['A passage'] }];
 
@@ -175,5 +182,25 @@ describe('sourceGroups', () => {
 				}
 			})
 		).toHaveLength(1);
+	});
+});
+
+describe('findFileCitation', () => {
+	const cite = (id: string, fileId: string) =>
+		({ id, metadata: [{ file_id: fileId }] }) as unknown as DisplayCitation;
+	const group = (messageId: string, used: DisplayCitation[]) =>
+		({ messageId, used, citations: used }) as unknown as SourceGroup;
+
+	it('returns the latest answer citing the file', () => {
+		const older = group('a1', [cite('s1', 'f1')]);
+		const latest = group('a2', [cite('s2', 'f2'), cite('s3', 'f1')]);
+		expect(findFileCitation([older, latest], 'f1')).toEqual({
+			group: latest,
+			citation: latest.used[1]
+		});
+	});
+
+	it('returns null when no answer cites the file', () => {
+		expect(findFileCitation([group('a1', [cite('s1', 'f1')])], 'f9')).toBeNull();
 	});
 });

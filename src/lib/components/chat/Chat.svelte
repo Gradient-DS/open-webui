@@ -21,7 +21,7 @@
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
-	import { getContext, onDestroy, onMount, tick } from 'svelte';
+	import { getContext, onDestroy, onMount, setContext, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -146,6 +146,8 @@
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/chat/Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
+	import { CHAT_FILE_PANEL, type OpenFileInPanel } from './Messages/Citations/fileCitation'; // [Gradient]
+	import { openFileInPanel } from '$lib/stores/citations'; // [Gradient]
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DataWarningConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
@@ -183,6 +185,13 @@
 	export let onDeleteEmbeddedChat: ((chatId: string) => void | Promise<void>) | null = null;
 	export let onEmbeddedChatTitle: ((chatId: string, title: string) => void | Promise<void>) | null =
 		null;
+
+	// [Gradient] File chips in this chat open in the sources panel; embedded chats have none.
+	setContext(CHAT_FILE_PANEL, ((item) => {
+		if (embedded) return false;
+		openFileInPanel($chatId, item);
+		return true;
+	}) satisfies OpenFileInPanel);
 
 	let loading = true;
 	$: chatContainerId = embedded ? 'note-chat-container' : 'chat-container';
