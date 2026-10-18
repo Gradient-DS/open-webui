@@ -141,6 +141,8 @@ Under the agent route Continue Response is hidden (`canContinueResponse`): a v2 
 extend an answer. A follow-up sent while an answer streams is queued and sent after it; "send now" (or the queue
 turned off) stops the answer and waits for its `chat:tasks:cancel` (`utils/turnSettled.ts`), which comes after the
 soev-api cancel is bookmarked, so the next turn continues the thread after the partial answer.
+The stop button follows the answer, not the chat task: once every answer of the turn is done (`turnAnswered`),
+the task's post-turn work (follow-ups, title, tags, memory) runs on without holding it.
 
 Collection setup
 runs only for enabled document tools or reference-bearing turns, caches successful keys

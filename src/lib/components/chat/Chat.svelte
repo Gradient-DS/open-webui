@@ -15,7 +15,7 @@
 		isAwaitingUpload,
 		isPending
 	} from '$lib/utils/messageQueue';
-	import { expectSettled, markSettled } from '$lib/utils/turnSettled';
+	import { expectSettled, markSettled, turnAnswered } from '$lib/utils/turnSettled';
 	import { extractDocumentsFromMessage } from '$lib/utils/agentDocument';
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
@@ -3254,6 +3254,12 @@
 
 			history.messages[message.id] = message;
 
+			// [Gradient] The chat task outlives the answer while it runs post-turn work (follow-ups, title, tags,
+			// memory); that work must not hold the stop button, so the answer's own done releases it.
+			if (turnAnswered(history)) {
+				taskIds = null;
+			}
+
 			await tick();
 			if (shouldAutoScrollResponse()) {
 				scrollToBottom();
@@ -4228,7 +4234,10 @@
 				await handleOpenAIError(res.error, responseMessage);
 			} else {
 				// Backend returns task_ids (multi-model) or task_id (single model)
-				onToolCallResolved(res);
+				// [Gradient] Unless the answer's done already arrived: the task then only runs post-turn work.
+				if (!turnAnswered(history)) {
+					onToolCallResolved(res);
+				}
 
 				// Backend returns chat_id for new chats — set store + URL.
 				// Only update if the user hasn't navigated to a different chat
