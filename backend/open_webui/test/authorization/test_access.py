@@ -65,7 +65,9 @@ def test_permissions_merge_groups_without_mutating_defaults(seeded):
             )
             db.add(GroupMember(id='second', group_id='writers', user_id='reader'))
             await db.commit()
-            assert await get_permissions('reader', defaults, db=db) == {'features': {'notes': True, 'channels': True}}
+            # Upstream fills keys the defaults omit from DEFAULT_USER_PERMISSIONS; the merged ones are what matter here.
+            merged = await get_permissions('reader', defaults, db=db)
+            assert {key: merged['features'][key] for key in ('notes', 'channels')} == {'notes': True, 'channels': True}
             assert defaults == original
             assert await has_permission('reader', 'features.notes', deepcopy(defaults), db=db)
             assert await has_permission('outsider', 'features.channels', deepcopy(defaults), db=db)

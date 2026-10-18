@@ -66,7 +66,8 @@ def test_openai_header_builder_discards_inbound_identity(seeded, identity_header
     from open_webui.routers import openai
 
     module = identity_headers
-    monkeypatch.setattr(openai, 'ENABLE_FORWARD_USER_INFO_HEADERS', True)
+    # Upstream moved the header builder into utils.headers; it reads the flag there.
+    monkeypatch.setattr(module, 'ENABLE_FORWARD_USER_INFO_HEADERS', True)
     monkeypatch.setattr(module, 'FORWARD_USER_INFO_HEADER_JWT_SECRET', 'forwarding-test-secret' if signed else '')
     spoof = {
         'x-openwebui-user-id': 'spoofed',

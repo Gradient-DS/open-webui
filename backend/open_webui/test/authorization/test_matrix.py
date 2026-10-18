@@ -1,6 +1,7 @@
 """Owner, grant, and administrator policy against real rows and real JWTs."""
 
 import importlib
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -89,7 +90,15 @@ async def seed_resource(seeded, kind, public=False):
         'skill': (
             'skills',
             'Skill',
-            {'name': 'original', 'content': 'original', 'description': 'original', 'meta': {}},
+            {
+                'name': 'original',
+                'content': 'original',
+                'description': 'original',
+                'data': {'files': [{'path': 'SKILL.md', 'content': 'original'}]},
+                # The skill-snapshot migration gives every skill a current version.
+                'version_id': 'target-v1',
+                'meta': {},
+            },
         ),
         'channel': ('channels', 'Channel', {'name': 'original'}),
         'knowledge': ('knowledge', 'Knowledge', {'name': 'original', 'description': 'original'}),
@@ -98,13 +107,37 @@ async def seed_resource(seeded, kind, public=False):
     model = getattr(importlib.import_module(f'open_webui.models.{module}'), name)
     async with seeded.sessions() as db:
         db.add(model(id='target', user_id='owner', created_at=1, updated_at=1, **fields))
+        if kind == 'skill':
+            from open_webui.models.skill_history import SkillHistory
+            from open_webui.models.skills import skill_snapshot
+
+            db.add(
+                SkillHistory(
+                    id='target-v1',
+                    skill_id='target',
+                    snapshot=skill_snapshot(SimpleNamespace(**fields)),
+                    user_id='owner',
+                    created_at=1,
+                )
+            )
         if kind == 'file':
             db.add(Knowledge(id='file-kb', user_id='owner', name='file-kb', description='', created_at=1, updated_at=1))
         await db.commit()
         if kind == 'file':
-            from open_webui.models.files import Files
+            from open_webui.models.knowledge import KnowledgeFile
 
-            await Files.update_file_metadata_by_id('target', {'collection_name': 'file-kb'}, db=db)
+            # Knowledge access to a file comes only from the knowledge_file association (upstream #29937).
+            db.add(
+                KnowledgeFile(
+                    id='file-kb-target',
+                    knowledge_id='file-kb',
+                    file_id='target',
+                    user_id='owner',
+                    created_at=1,
+                    updated_at=1,
+                )
+            )
+            await db.commit()
         if kind != 'chat':
             await AccessGrants.set_access_grants(
                 'knowledge' if kind == 'file' else kind,

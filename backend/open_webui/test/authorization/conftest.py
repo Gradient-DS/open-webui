@@ -51,6 +51,14 @@ def no_network():
     assert not attempts, f'Network attempts, including swallowed exceptions: {attempts}'
 
 
+def stamp(principal):
+    return f'stamp-{principal}'
+
+
+def session_token(create_token, principal):
+    return create_token({'id': principal, 'typ': 'session', 'session_stamp': stamp(principal)})
+
+
 @pytest.fixture(scope='module')
 def application(tmp_path_factory, no_network):
     with pytest.MonkeyPatch.context() as patch:
@@ -80,6 +88,7 @@ def template(application, tmp_path_factory):
     from open_webui.internal.db import Base
     from open_webui.models.config import Config
     from open_webui.models.groups import Group, GroupMember
+    from open_webui.models.auths import Auth
     from open_webui.models.users import User
     from open_webui.config import DEFAULT_USER_PERMISSIONS
     from copy import deepcopy
@@ -90,6 +99,8 @@ def template(application, tmp_path_factory):
     permissions = deepcopy(DEFAULT_USER_PERMISSIONS)
     for category in ('workspace', 'sharing', 'features', 'chat', 'access_grants'):
         permissions[category] = {key: True for key in permissions[category]}
+    # A restriction, not a capability: upstream refuses persistent chat creation while it is on.
+    permissions['chat']['temporary_enforced'] = False
     with sessionmaker(engine)() as db:
         for principal in (*PRINCIPALS, 'pending'):
             db.add(
@@ -102,6 +113,16 @@ def template(application, tmp_path_factory):
                     updated_at=1,
                     last_active_at=1,
                     variables={},
+                )
+            )
+            # Upstream refuses a token whose user has no active Auth row or a stale session_stamp.
+            db.add(
+                Auth(
+                    id=principal,
+                    email=f'{principal}@acl.invalid',
+                    password='',
+                    active=True,
+                    session_stamp=stamp(principal),
                 )
             )
         for group, member in (('readers', 'reader'), ('writers', 'writer'), ('unrelated', 'other_group')):
@@ -180,7 +201,7 @@ def seeded(template, application, monkeypatch, tmp_path):
             run=client.portal.call,
             sessions=sessions,
             engine=engine,
-            headers=lambda principal: {'Authorization': f'Bearer {create_token({"id": principal})}'},
+            headers=lambda principal: {'Authorization': f'Bearer {session_token(create_token, principal)}'},
         )
         client.portal.call(drain_background_tasks)
     asyncio.run(async_engine.dispose())

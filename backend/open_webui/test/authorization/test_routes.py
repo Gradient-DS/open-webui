@@ -22,6 +22,12 @@ PUBLIC_ROUTES = {
     'POST /api/v1/channels/webhooks/{webhook_id}/{token}': 'Webhook capability token is validated inside the handler.',
     'GET /api/v1/chats/share/{share_id}': 'Anyone-read shares are anonymous; other shares check identity.',
     'WEBSOCKET /api/v1/terminals/{server_id}/api/terminals/{session_id}': 'Public upgrade; first message authenticates before connecting upstream.',
+    'WEBSOCKET /api/v1/audio/realtime': 'Public upgrade; the first message carries a session token verified before any provider call.',
+    'POST /api/v1/auths/mfa/challenge': 'Same-origin bootstrap of a pending-login MFA challenge from its cookie; no session exists yet.',
+    'POST /api/v1/auths/mfa/enroll/start': 'Consumes a pending-login MFA challenge token before a full session exists.',
+    'POST /api/v1/auths/mfa/enroll/confirm': 'Consumes a pending-login MFA challenge token and code before a full session exists.',
+    'POST /api/v1/auths/mfa/verify': 'Consumes a pending-login MFA challenge token and code before a full session exists.',
+    'POST /api/v1/auths/mfa/recover': 'Consumes a pending-login MFA challenge token and an admin-issued reset token.',
     'GET /api/v1/invites/{token}/validate': 'Validates an invitation capability before account creation.',
     'POST /api/v1/invites/{token}/accept': 'Consumes an invitation capability to create an account.',
     'GET /api/config': 'Login screen bootstrap exposes the public configuration subset.',
@@ -48,6 +54,13 @@ DEV_PUBLIC_ROUTES = {
     'HEAD /docs': 'Metadata for the development documentation UI.',
     'GET /docs/oauth2-redirect': 'OAuth callback used by the development documentation UI.',
     'HEAD /docs/oauth2-redirect': 'Metadata for the documentation OAuth callback.',
+}
+
+
+# Mounted only when a frontend build exists next to the backend (main.py, FRONTEND_BUILD_DIR).
+FRONTEND_PUBLIC_ROUTES = {
+    'MOUNT /pyodide': 'Public Pyodide runtime assets for browser-side code execution.',
+    'MOUNT ': 'Public single-page frontend assets needed before login.',
 }
 
 
@@ -95,9 +108,12 @@ def audit_routes(routes, public, authenticated):
 
 
 def test_route_authentication_inventory(application):
-    from open_webui.env import ENV
+    from open_webui.env import ENV, FRONTEND_BUILD_DIR
 
     public = PUBLIC_ROUTES | (DEV_PUBLIC_ROUTES if ENV == 'dev' else {})
+    if FRONTEND_BUILD_DIR.exists():
+        mounted = {key for key, _ in walk_routes(application.routes)}
+        public |= {key: reason for key, reason in FRONTEND_PUBLIC_ROUTES.items() if key in mounted}
     audit_routes(application.routes, public, authentication_dependencies())
 
 
