@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
-	import { page } from '$app/stores';
+	import { page as appPage } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import { getContext, tick } from 'svelte';
 	import fileSaver from 'file-saver';
@@ -40,7 +40,7 @@
 	export let chatId: string = '';
 
 	// [Gradient] Shared snapshots have no Office download route.
-	$: sharedChat = $page.url.pathname.startsWith('/s/');
+	$: sharedChat = $appPage.url.pathname.startsWith('/s/');
 	let downloadOpen = false;
 
 	const downloadFile = async () => {
