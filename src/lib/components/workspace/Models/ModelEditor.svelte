@@ -819,7 +819,7 @@
 										<Textarea
 											className="min-h-12 w-full resize-none overflow-y-hidden bg-transparent py-1 text-[0.8125rem] text-gray-700 outline-hidden placeholder:text-gray-300 dark:text-gray-300 dark:placeholder:text-gray-700"
 											placeholder={$i18n.t(
-												'Write your model system prompt content here\ne.g.) You are Mario from Super Mario Bros, acting as an assistant.'
+												'Write your model system prompt content here\ne.g. You assist the HR department. Answer concisely and refer to internal policy where relevant.'
 											)}
 											rows={2}
 											minSize={48}
