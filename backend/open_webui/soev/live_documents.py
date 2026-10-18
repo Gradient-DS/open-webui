@@ -90,6 +90,10 @@ def chat_file(file: FileModel) -> dict:
     }
 
 
+# Kept in sync with PREVIEW_PENDING_DETAIL in src/lib/utils/previewRetry.ts.
+ORIGINAL_PROCESSING = 'original_processing'
+
+
 async def stream_original(file: FileModel, user, *, attachment: bool):
     client = identity.build_client()
     ref = await identity.acting_ref(user, client)
@@ -100,6 +104,9 @@ async def stream_original(file: FileModel, user, *, attachment: bool):
         first = await anext(stream, b'')
     except SoevApiError as error:
         await stream.aclose()
+        # [Gradient] The original exists only once the reference job lands; say so, so previews wait.
+        if error.status == 404 and file.meta.get('status') in ('pending', 'processing'):
+            raise HTTPException(status_code=409, detail=ORIGINAL_PROCESSING) from None
         raise HTTPException(status_code=error.status, detail=error.detail) from None
     content_type = file.meta.get('content_type') or 'application/octet-stream'
     disposition = (

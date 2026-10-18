@@ -78,6 +78,10 @@ describe('shared citation documents', () => {
 		expect(await probeFileAvailable('file')).toBe(false);
 		expect(await probeFileAvailable('file')).toBe(false);
 	});
+	it('keeps the preview for an original that is still being prepared', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 409 }));
+		expect(await probeFileAvailable('file')).toBe(true);
+	});
 });
 describe('preview availability probe', () => {
 	const deferred = () => {
