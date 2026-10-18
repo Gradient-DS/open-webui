@@ -79,7 +79,11 @@ def fake_vector_modules(monkeypatch):
     monkeypatch.setitem(
         sys.modules, 'open_webui.retrieval.vector.async_client', SimpleNamespace(ASYNC_VECTOR_DB_CLIENT=vectors)
     )
-    monkeypatch.setitem(sys.modules, 'open_webui.retrieval.vector.factory', SimpleNamespace(VECTOR_DB_CLIENT=None))
+    monkeypatch.setitem(
+        sys.modules,
+        'open_webui.retrieval.vector.factory',
+        SimpleNamespace(VECTOR_DB_CLIENT=None, get_vector_db_client=lambda: vectors),
+    )
     return vectors
 
 
@@ -92,6 +96,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
         name: importlib.import_module(f'open_webui.models.{name}')
         for name in (
             'config',
+            'auths',
             'users',
             'groups',
             'knowledge',
@@ -109,6 +114,7 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
     tables = [
         modules['config'].Config,
         modules['users'].User,
+        modules['auths'].Auth,
         modules['groups'].Group,
         modules['groups'].GroupMember,
         modules['knowledge'].Knowledge,
@@ -158,6 +164,10 @@ async def env(identity_config, fake_api, monkeypatch, tmp_path, fake_vector_modu
     embedded = []
 
     async def embed(text, prefix=None, user=None):
+        # Upstream embeds a user's memories in one list call.
+        if isinstance(text, list):
+            embedded.extend(text)
+            return [[float(len(item)), 1.0] for item in text]
         embedded.append(text)
         return [float(len(text)), 1.0]
 
@@ -440,6 +450,19 @@ TABLE_DUMPS = {
 }
 
 
+async def seed_auth(env, *user_ids):
+    """Every real account has an Auth row; sign-out rotates its session_stamp."""
+    async with env.engine.begin() as connection:
+        for user_id in user_ids:
+            await connection.execute(
+                sa.text(
+                    'INSERT OR IGNORE INTO auth (id, email, password, active, session_stamp, totp_enabled)'
+                    " VALUES (:id, :email, '', 1, :stamp, 0)"
+                ),
+                {'id': user_id, 'email': f'{user_id}@example.test', 'stamp': f'stamp-{user_id}'},
+            )
+
+
 async def seed_models(env, monkeypatch):
     monkeypatch.setenv('SOEV_V2_MODEL_MAP', json.dumps(MODEL_MAP))
     statements = [
@@ -490,6 +513,7 @@ async def seed_models(env, monkeypatch):
     async with env.engine.begin() as connection:
         for statement, params in statements:
             await connection.execute(sa.text(statement), params)
+    await seed_auth(env, 'alice')
 
 
 async def dumps(env):
@@ -650,6 +674,7 @@ async def seed_knowledge(env, monkeypatch):
     monkeypatch.setattr(knowledge, 'AccessGrants', env.models['access_grants'].AccessGrantsTable())
     for user_id in ('alice', 'bob'):
         assert await users.insert_new_user(user_id, user_id, f'{user_id}@example.test', role='user')
+    await seed_auth(env, 'alice', 'bob')
     table = knowledge.KnowledgeTable()
     local = await table.insert_new_knowledge(
         'alice', knowledge.KnowledgeForm(name='Research', description='', type='local', access_grants=[])
@@ -892,19 +917,24 @@ async def test_apply_waits_for_running_ingest_when_asked(env, monkeypatch):
 async def test_users_are_signed_out_once_per_migration_after_success(env, monkeypatch, capsys):
     """Tokens issued before cutover fail the real revocation check; later runs revoke nothing."""
     await seed_knowledge(env, monkeypatch)
-    redis = env.redis
     auth = importlib.import_module('open_webui.utils.auth')
-    issued = {'id': 'alice', 'iat': 1}
+
+    async def stamps():
+        return dict(await rows(env, 'SELECT id, session_stamp FROM auth ORDER BY id'))
+
+    # Upstream revokes by rotating the account's session_stamp; a token carrying the old one is refused.
+    issued = {'id': 'alice', 'typ': 'session', 'session_stamp': 'stamp-alice'}
     assert await env.module.apply(options(env)) == 75
-    assert redis.sets == []
+    assert await stamps() == {'alice': 'stamp-alice', 'bob': 'stamp-bob'}
     await finish_jobs(env, monkeypatch)
     assert await env.module.apply(options(env)) == 0
-    assert sorted(redis.sets) == sorted(f'open-webui:auth:user:{u}:revoked_at' for u in ('alice', 'bob'))
-    assert not await auth.is_valid_token(issued, redis)
-    assert await auth.is_valid_token({'id': 'alice', 'iat': 10**12}, redis)
+    rotated = await stamps()
+    assert all(rotated[user_id] != f'stamp-{user_id}' for user_id in ('alice', 'bob'))
+    assert not await auth.is_valid_token(issued)
+    assert await auth.is_valid_token({**issued, 'session_stamp': rotated['alice']})
     assert '8 sign-out: sessions of 2 users revoked' in capsys.readouterr().out
     assert await env.module.apply(options(env)) == 0
-    assert len(redis.sets) == 2
+    assert await stamps() == rotated
     assert '8 sign-out: already done' in capsys.readouterr().out
 
 
@@ -1141,6 +1171,7 @@ async def seed_uploads(env, monkeypatch):
     monkeypatch.setattr(knowledge, 'AccessGrants', env.models['access_grants'].AccessGrantsTable())
     for user_id in ('alice', 'bob'):
         assert await users.insert_new_user(user_id, user_id, f'{user_id}@example.test', role='user')
+    await seed_auth(env, 'alice', 'bob')
     owned = ['loose', 'chat-level', 'gone', 'in-kb', 'picked', 'photo', 'png', 'quiet', 'trashed']
     for file_id, owner in [*((file_id, 'alice') for file_id in owned), ('bobs', 'bob')]:
         path = env.tmp_path / f'{file_id}.pdf'

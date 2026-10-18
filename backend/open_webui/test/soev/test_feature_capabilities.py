@@ -51,6 +51,8 @@ async def test_frontend_config_flags(monkeypatch, platform_capabilities, present
     monkeypatch.setattr(main, 'AGENT_API_ENABLED', True)
     monkeypatch.setattr(main, 'FEATURE_MEETINGS', enabled)
     monkeypatch.setattr(main, 'decode_token', lambda token: {'id': 'alice'})
+    # Upstream also revalidates the token (Auth row, session_stamp, revocation) before reading the user.
+    monkeypatch.setattr(main, 'is_valid_token', AsyncMock(return_value=True))
     monkeypatch.setattr(main.Users, 'get_user_by_id', AsyncMock(return_value=SimpleNamespace(id='alice', role='user')))
     monkeypatch.setattr(main.model_catalog, 'default_models', AsyncMock(return_value='tutorial'))
     saved = {
@@ -63,7 +65,14 @@ async def test_frontend_config_flags(monkeypatch, platform_capabilities, present
     monkeypatch.setattr(main.Config, 'get_many', AsyncMock(return_value=saved))
     if not present:
         platform_capabilities.clear()
-    request = Request({'type': 'http', 'path': '/api/config', 'headers': [(b'authorization', b'Bearer test')]})
+    request = Request(
+        {
+            'type': 'http',
+            'path': '/api/config',
+            'headers': [(b'authorization', b'Bearer test')],
+            'app': SimpleNamespace(state=SimpleNamespace(redis=None)),
+        }
+    )
     result = await main.get_app_config(request)
     for flag in ['enable_live_mail', 'enable_live_documents', 'feature_meetings', 'enable_onedrive_business']:
         assert bool(result['features'][flag]) is (present and enabled)

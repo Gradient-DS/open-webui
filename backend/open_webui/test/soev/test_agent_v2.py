@@ -2984,6 +2984,11 @@ async def test_a_follow_up_continues_the_thread_in_real_chat_storage(
     monkeypatch.setattr(agent, 'Config', SimpleNamespace(get=AsyncMock(return_value='test')))
     monkeypatch.setattr(agent_v2, 'get_event_emitter', AsyncMock(return_value=AsyncMock()))
     chat_id = str(uuid4())
+    from open_webui.models.users import Users
+
+    # Upstream only creates chats for an existing user.
+    if not await Users.get_user_by_id('alice'):
+        await Users.insert_new_user('alice', 'Alice', 'alice@example.invalid', role='user')
     await Chats.insert_new_chat(chat_id, 'alice', ChatForm(chat={'title': 'Chat', 'history': {'messages': {}}}))
     for message_id, parent in [('q1', None), ('a1', 'q1'), ('q2', 'a1'), ('a2', 'q2')]:
         role = 'user' if message_id.startswith('q') else 'assistant'

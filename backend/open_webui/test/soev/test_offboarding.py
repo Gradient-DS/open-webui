@@ -9,10 +9,11 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 
 @pytest_asyncio.fixture
-async def offboard_store(identity_config, chat_http, monkeypatch, platform_capabilities):
+async def offboard_store(identity_config, chat_http, monkeypatch, platform_capabilities, tmp_path):
     from open_webui.internal import db as database
     from open_webui.models.access_grants import AccessGrant
     from open_webui.models.chats import Chat
@@ -39,7 +40,9 @@ async def offboard_store(identity_config, chat_http, monkeypatch, platform_capab
 
     identity, _ = identity_config
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
-    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    # Upstream's group hierarchy writes open their own session, so every session must reach the same file.
+    engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/offboarding.db', poolclass=NullPool)
+    monkeypatch.setattr(database, 'AsyncSessionLocal', async_sessionmaker(engine, expire_on_commit=False))
     async with engine.begin() as conn:
         await conn.run_sync(database.Base.metadata.create_all)
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
@@ -567,7 +570,7 @@ async def test_scim_deletion_does_not_erase_threads_before_shared_confirmation(m
     from fastapi import HTTPException
     from open_webui.routers import scim
 
-    user = SimpleNamespace(id='fern', email='fern@example.invalid')
+    user = SimpleNamespace(id='fern', email='fern@example.invalid', role='user')
     monkeypatch.setattr(scim.Users, 'get_scim_user_by_id', AsyncMock(return_value=user))
     monkeypatch.setattr(
         scim.Users, 'delete_user_by_id', AsyncMock(side_effect=HTTPException(409, 'confirmation required'))

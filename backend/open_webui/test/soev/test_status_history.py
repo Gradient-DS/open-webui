@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from open_webui.models.chats import ChatForm, Chats
+from open_webui.models.users import Users
 
 
 @pytest.mark.asyncio
@@ -11,6 +12,9 @@ async def test_a_later_status_of_a_call_replaces_its_earlier_one():
     """Running then done keeps one entry per call; statuses without a call append."""
     chat_id = str(uuid4())
     history = {'messages': {'reply': {'role': 'assistant', 'content': ''}}}
+    # Upstream only creates chats for an existing user.
+    if not await Users.get_user_by_id('user'):
+        await Users.insert_new_user('user', 'user', 'user@example.invalid', role='user')
     await Chats.insert_new_chat(chat_id, 'user', ChatForm(chat={'title': 'Chat', 'history': history}))
     statuses = [
         {'action': 'web_search', 'call_id': 'c1', 'done': False},

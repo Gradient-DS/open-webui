@@ -5,6 +5,13 @@ from uuid import uuid4
 import pytest
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import ChatForm, Chats
+from open_webui.models.users import Users
+
+
+async def ensure_user(user_id):
+    """Upstream only creates chats for an existing user."""
+    if not await Users.get_user_by_id(user_id):
+        await Users.insert_new_user(user_id, user_id, f'{user_id}@example.invalid', role='user')
 
 
 @pytest.mark.asyncio
@@ -18,7 +25,10 @@ async def test_message_identity_roundtrip_and_partial_updates():
     message = (await ChatMessages.get_messages_map_by_chat_id(chat_id))['reply']
     assert message['model'] == 'llm'
     assert message['assistant_id'] == 'assistant'
+    # Upstream's bulk upsert only backfills missing rows; a partial upsert_message updates one.
     await ChatMessages.upsert_messages(chat_id, 'user', {'reply': {'assistant_id': 'other'}})
+    assert (await ChatMessages.get_message_by_id(f'{chat_id}-reply')).assistant_id == 'assistant'
+    await ChatMessages.upsert_message('reply', chat_id, 'user', {'assistant_id': 'other'})
     assert (await ChatMessages.get_message_by_id(f'{chat_id}-reply')).assistant_id == 'other'
     await ChatMessages.upsert_messages(chat_id, 'user', {'legacy': {'role': 'assistant', 'model': 'llm'}})
     assert 'assistant_id' not in (await ChatMessages.get_messages_map_by_chat_id(chat_id))['legacy']
@@ -28,6 +38,7 @@ async def test_message_identity_roundtrip_and_partial_updates():
 async def test_chat_binding_updates_only_meta():
     """Assistant binding preserves chat JSON and all unrelated metadata."""
     chat_id = str(uuid4())
+    await ensure_user('user')
     created = await Chats.insert_new_chat(
         chat_id, 'user', ChatForm(chat={'title': 'Original', 'history': {'messages': {}}}, meta={'kept': 'value'})
     )

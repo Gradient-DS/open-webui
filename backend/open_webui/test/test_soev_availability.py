@@ -243,7 +243,7 @@ async def test_previews(soev_state, monkeypatch, preview):
     from open_webui.routers import groups, users
 
     module = users if preview == 'user' else groups
-    target = SimpleNamespace(id='target', name='Target', permissions={})
+    target = SimpleNamespace(id='target', name='Target', permissions={}, parent_group_id=None, data=None)
     kb = SimpleNamespace(id='kb', name='Knowledge', user_id='target')
     monkeypatch.setattr(users.Users, 'get_user_by_id', AsyncMock(return_value=target))
     monkeypatch.setattr(module.Groups, 'get_groups_by_member_id', AsyncMock(return_value=[]))
@@ -253,7 +253,10 @@ async def test_previews(soev_state, monkeypatch, preview):
     monkeypatch.setattr(module.AccessGrants, 'get_accessible_resource_ids', AsyncMock(return_value={'kb'}))
     monkeypatch.setattr(module.Knowledges, 'get_knowledge_bases', AsyncMock(return_value=[kb]))
     handler = users.get_user_preview if preview == 'user' else groups.preview_group_access
-    result = await handler('target', user=None, db=None)
+    # Upstream's group preview reads the ancestor groups with its session directly.
+    no_rows = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+    db = SimpleNamespace(execute=AsyncMock(return_value=no_rows)) if preview == 'group' else None
+    result = await handler('target', user=None, db=db)
     assert result['knowledge'] == {
         'items': [{'id': 'kb', 'name': 'Knowledge'}] if soev_state else [],
         'total': int(soev_state),

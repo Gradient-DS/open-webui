@@ -91,6 +91,11 @@ async def test_import_chats_defaults_missing_role(db_session):
     """Cloning must dual-write role-less messages with a defaulted role
     instead of skipping the row (which left the graph with gaps that get
     re-filled from the raw legacy JSON)."""
+    from open_webui.models.users import Users
+
+    # Upstream only creates chats for an existing user.
+    if not await Users.get_user_by_id('user-1'):
+        await Users.insert_new_user('user-1', 'User', 'user-1@example.invalid', role='user')
     form = ChatImportForm(chat={'title': 'clone', 'history': _poisoned_history()})
     [chat] = await Chats.import_chats('user-1', [form])
 

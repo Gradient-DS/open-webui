@@ -395,10 +395,11 @@ def test_someone_who_cannot_read_the_folder_gets_no_sharing_view(monkeypatch):
     assert client.get('/project/sharing').status_code == 404
 
 
-def test_without_soev_api_a_write_member_may_still_share(monkeypatch):
+def test_without_soev_api_a_write_member_still_may_not_share(monkeypatch):
+    """Upstream v0.12.3: editing a folder's contents does not grant managing who it is shared with."""
     from open_webui.routers import folders
 
     folder = SimpleNamespace(id='project', user_id='dana', parent_id=None, data={})
     client = _route(monkeypatch, '/{id}/sharing', folder, method='GET')
     monkeypatch.setattr(folders, 'configured', lambda: False)
-    assert client.get('/project/sharing').json() == {'shares_knowledge': False, 'may_share': True, 'left_out': []}
+    assert client.get('/project/sharing').json() == {'shares_knowledge': False, 'may_share': False, 'left_out': []}

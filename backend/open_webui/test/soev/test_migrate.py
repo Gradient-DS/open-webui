@@ -21,10 +21,11 @@ import pytest_asyncio
 from open_webui.soev.client import SoevApiError
 from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 
 @pytest_asyncio.fixture
-async def env(identity_config, fake_api, monkeypatch):
+async def env(identity_config, fake_api, monkeypatch, tmp_path):
     """Seed original SQL classes, then reject every SQL write and rebound singleton call."""
     identity, _ = identity_config
     knowledge = importlib.import_module('open_webui.models.knowledge')
@@ -34,7 +35,9 @@ async def env(identity_config, fake_api, monkeypatch):
     database = importlib.import_module('open_webui.internal.db')
     raw, grants, group_table = knowledge.KnowledgeTable(), access.AccessGrantsTable(), groups.GroupTable()
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
-    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    # Upstream's group hierarchy writes open their own session, so every session must reach the same file.
+    engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/migrate.db', poolclass=NullPool)
+    monkeypatch.setattr(database, 'AsyncSessionLocal', async_sessionmaker(engine, expire_on_commit=False))
     users = importlib.import_module('open_webui.models.users')
     config = importlib.import_module('open_webui.models.config')
     referencing = [
