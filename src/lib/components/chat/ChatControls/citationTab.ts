@@ -79,3 +79,17 @@ export function latestMessageWithSources(
 	}
 	return null;
 }
+
+// [Gradient] The latest answer's citation of a chat file, matched by file id, for a chip click.
+export function findFileCitation(
+	groups: SourceGroup[],
+	fileId: string
+): { group: SourceGroup; citation: DisplayCitation } | null {
+	for (const group of [...groups].reverse()) {
+		const citation = group.used.find((item) =>
+			item.metadata.some((meta) => meta?.file_id === fileId)
+		);
+		if (citation) return { group, citation };
+	}
+	return null;
+}
