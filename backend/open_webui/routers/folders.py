@@ -813,12 +813,18 @@ async def delete_folder_by_id(
     folder_owner_id = folder.user_id
 
     folder_ids = await Folders.get_folder_ids_by_id_and_user_id_in_subtree(id, folder_owner_id, db=db)
-    if delete_contents and await Chats.count_chats_by_folder_ids_and_user_id(folder_ids, folder_owner_id, db=db):
-        chat_delete_permission = await has_permission(
-            user.id, 'chat.delete', await Config.get('user.permissions'), db=db
-        )
-        if (folder_owner_id != user.id and not can_access_admin_chats(user)) or (
-            user.role != 'admin' and not chat_delete_permission
+    if await Chats.count_chats_by_folder_ids_and_user_id(folder_ids, folder_owner_id, db=db):
+        # [Gradient] Moving another user's chats out of the folder still changes them, so admin chat
+        # access is required either way; upstream's chat.delete requirement applies only to delete_contents.
+        if folder_owner_id != user.id and not can_access_admin_chats(user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
+        if (
+            delete_contents
+            and user.role != 'admin'
+            and not await has_permission(user.id, 'chat.delete', await Config.get('user.permissions'), db=db)
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
