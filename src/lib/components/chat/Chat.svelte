@@ -164,7 +164,6 @@
 	import { getBanners } from '$lib/apis/configs';
 	import { logDataWarningAcceptance } from '$lib/apis/data-warnings';
 	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
-	import ContextUsageBanner from '$lib/components/chat/ContextUsageBanner.svelte';
 	import FeedbackButton from './FeedbackButton.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import EmbeddedChatHistoryDropdown from './EmbeddedChatHistoryDropdown.svelte';
@@ -518,11 +517,6 @@
 	};
 
 	let taskIds = null;
-
-	// [Gradient] Post-turn context-budget estimate from the agent service.
-	// Emitted once per turn over Socket.IO (see backend/utils/agent.py).
-	// Drives the banner above the chat input. Reset on chat switch / new chat.
-	let contextUsage: { tokens_used: number; tokens_budget: number; fraction: number } | null = null;
 
 	// Chat Input
 	let prompt = '';
@@ -936,7 +930,6 @@
 		files = [];
 		composerInitialized = false;
 		acceptedDataWarnings = new Set();
-		contextUsage = null;
 
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
@@ -1587,25 +1580,6 @@
 						} else {
 							message.uiBlocks = [block];
 						}
-					}
-				} else if (type === 'context_usage') {
-					// [Gradient] Post-turn context-budget estimate from the agent
-					// service. Drives the banner above the chat input. Also
-					// stamped onto the message so a frontend-driven history save
-					// preserves it (the backend persists it on `done`; this keeps
-					// the in-memory blob in sync). Mirrors the subagents handler.
-					if (
-						typeof data?.tokens_used === 'number' &&
-						typeof data?.tokens_budget === 'number' &&
-						typeof data?.fraction === 'number'
-					) {
-						const usage = {
-							tokens_used: data.tokens_used,
-							tokens_budget: data.tokens_budget,
-							fraction: data.fraction
-						};
-						contextUsage = usage;
-						message.contextUsage = usage;
 					}
 				} else if (type === 'source' || type === 'citation') {
 					if (data?.type === 'code_execution') {
@@ -2345,7 +2319,6 @@
 		// the previous chat) doesn't bleed into the empty-state Navbar.
 		chat = null;
 		acceptedDataWarnings = new Set();
-		contextUsage = null;
 		resetWebSearchConfirmation();
 
 		// Mark the outgoing chat as read before resetting; in-place created chats
@@ -2719,19 +2692,6 @@
 						) {
 							message.done = true;
 						}
-					}
-				}
-
-				// [Gradient] Rehydrate the context-usage banner from the
-				// persisted message field (set by the agent backend on `done`).
-				// Reflects the active branch's most recent turn; stays null when
-				// no agent turn recorded one (navigateHandler reset it first).
-				contextUsage = null;
-				const usageBranch = createMessagesList(history, history.currentId);
-				for (let i = usageBranch.length - 1; i >= 0; i--) {
-					if (usageBranch[i]?.contextUsage) {
-						contextUsage = usageBranch[i].contextUsage;
-						break;
 					}
 				}
 
@@ -5100,8 +5060,6 @@
 									(m) => m.role === 'assistant'
 								).length}
 							/>
-
-							<ContextUsageBanner usage={contextUsage} />
 
 							{#if readOnly}
 								<div class="pb-6 z-10">
