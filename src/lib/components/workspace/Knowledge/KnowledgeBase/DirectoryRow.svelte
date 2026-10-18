@@ -8,7 +8,7 @@
 	dayjs.extend(relativeTime);
 
 	import { getContext } from 'svelte';
-	const i18n = getContext('i18n');
+	const i18n = getContext<typeof import('$lib/i18n').default>('i18n');
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
@@ -229,9 +229,14 @@
 				{#if progress}
 					<!-- counters above carry the state -->
 				{:else if updatedAt}
-					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="min-w-0 truncate">
+					<Tooltip
+						content={dayjs(updatedAt).locale($i18n.language).format('LLLL')}
+						className="min-w-0 truncate"
+					>
 						<span class="text-xs text-gray-400">
-							&middot; {$i18n.t('Updated {{time}}', { time: dayjs(updatedAt).fromNow() })}
+							&middot; {$i18n.t('Updated {{time}}', {
+								time: dayjs(updatedAt).locale($i18n.language).fromNow()
+							})}
 						</span>
 					</Tooltip>
 				{:else if source && source.state !== 'syncing'}

@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import datetime
 import time
-from typing import Optional
+from typing import Literal, Optional
 from open_webui.env import DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.utils.misc import throttle
-from open_webui.utils.validate import validate_profile_image_url
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from open_webui.utils.validate import validate_image_url
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -34,6 +40,97 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # Hallowed be the columns defined here, for they hold the
 # daily bread of every session. Let none go hungry.
 ####################
+
+
+class InterfaceTitleSettings(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    auto: bool | None = None
+
+
+class InterfaceImageCompressionSize(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    width: int | float | Literal[''] | None = None
+    height: int | float | Literal[''] | None = None
+
+
+class InterfaceFloatingActionButton(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    id: str
+    label: str
+    input: bool
+    prompt: str
+
+
+class InterfaceSettings(BaseModel):
+    """Fields owned by the Interface settings panel; not the entire user UI dict."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    autoTags: bool | None = None
+    autoFollowUps: bool | None = None
+    highContrastMode: bool | None = None
+    detectArtifacts: bool | None = None
+    responseAutoCopy: bool | None = None
+    showUsername: bool | None = None
+    showUpdateToast: bool | None = None
+    showChangelog: bool | None = None
+    showEmojiInCall: bool | None = None
+    voiceInterruption: bool | None = None
+    displayMultiModelResponsesInTabs: bool | None = None
+    chatFadeStreamingText: bool | None = None
+    richTextInput: bool | None = None
+    showFormattingToolbar: bool | None = None
+    insertPromptAsRichText: bool | None = None
+    promptAutocomplete: bool | None = None
+    insertSuggestionPrompt: bool | None = None
+    keepFollowUpPrompts: bool | None = None
+    insertFollowUpPrompt: bool | None = None
+    regenerateMenu: bool | None = None
+    enableMessageQueue: bool | None = None
+    largeTextAsFile: bool | None = None
+    copyFormatted: bool | None = None
+    collapseCodeBlocks: bool | None = None
+    renderMarkdownInUserMessages: bool | None = None
+    renderMarkdownInAssistantMessages: bool | None = None
+    expandDetails: bool | None = None
+    chatHoverPreview: bool | None = None
+    renderMarkdownInPreviews: bool | None = None
+    chatBubble: bool | None = None
+    widescreenMode: bool | None = None
+    splitLargeChunks: bool | None = None
+    scrollOnBranchChange: bool | None = None
+    scrollOnResponseGeneration: bool | None = None
+    showFilesOnTerminalSelect: bool | None = None
+    temporaryChatByDefault: bool | None = None
+    userLocation: bool | None = None
+    showChatTitleInTab: bool | None = None
+    iframeSandboxAllowScripts: bool | None = None
+    iframeSandboxAllowSameOrigin: bool | None = None
+    iframeSandboxAllowForms: bool | None = None
+    iframeSandboxAllowDownloads: bool | None = None
+    terminalPreviewAllowSameOrigin: bool | None = None
+    stylizedPdfExport: bool | None = None
+    hapticFeedback: bool | None = None
+    ctrlEnterToSend: bool | None = None
+    showFloatingActionButtons: bool | None = None
+    imageCompression: bool | None = None
+    imageCompressionInChannels: bool | None = None
+
+    landingPageMode: Literal['', 'chat'] | None = None
+    chatDirection: Literal['LTR', 'RTL', 'auto'] | None = None
+    terminalFileDisplay: Literal['sidebar', 'inline'] | None = None
+    defaultUploadContext: Literal['full', 'focused'] | None = None
+    webSearch: Literal['always'] | None = None
+    models: list[str] | None = None
+    backgroundImageUrl: str | None = None
+    fontFamily: str | None = None
+    textScale: float | None = None
+    title: InterfaceTitleSettings | None = None
+    imageCompressionSize: InterfaceImageCompressionSize | None = None
+    floatingActionButtons: list[InterfaceFloatingActionButton] | None = None
 
 
 class UserSettings(BaseModel):
@@ -186,7 +283,7 @@ class UpdateProfileForm(BaseModel):
     @field_validator('profile_image_url')
     @classmethod
     def check_profile_image_url(cls, v: str) -> str:
-        return validate_profile_image_url(v)
+        return validate_image_url(v)
 
 
 class UserGroupIdsModel(UserModel):
@@ -219,6 +316,8 @@ class UserInfoResponse(UserStatus):
     email: str
     role: str
     bio: str | None = None
+    last_active_at: int | None = None
+    timezone: str | None = None
     groups: list | None = []
     is_active: bool = False
 
@@ -276,7 +375,7 @@ class UserUpdateForm(BaseModel):
     def check_profile_image_url(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        return validate_profile_image_url(v)
+        return validate_image_url(v)
 
 
 class UsersTable:
@@ -292,7 +391,7 @@ class UsersTable:
         db: AsyncSession | None = None,
     ) -> UserModel | None:
         try:
-            profile_image_url = validate_profile_image_url(profile_image_url)
+            profile_image_url = validate_image_url(profile_image_url)
         except ValueError:
             profile_image_url = '/user.png'
 
@@ -458,7 +557,7 @@ class UsersTable:
         async with get_async_db_context(db) as session:
             # Deferred imports to avoid circular dependencies
             from open_webui.models.channels import ChannelMember
-            from open_webui.models.groups import GroupMember
+            from open_webui.models.groups import GroupMember, group_user_memberships
 
             # Join GroupMember so we can order by group_id when requested
             stmt = select(User)
@@ -496,14 +595,8 @@ class UsersTable:
                     stmt = stmt.filter(User.id.in_(user_ids))
 
                 if group_ids:
-                    stmt = stmt.filter(
-                        exists(
-                            select(GroupMember.id).where(
-                                GroupMember.user_id == User.id,
-                                GroupMember.group_id.in_(group_ids),
-                            )
-                        )
-                    )
+                    memberships = group_user_memberships(group_ids, True)
+                    stmt = stmt.filter(User.id.in_(select(memberships.c.user_id)))
 
                 roles = filter.get('roles')
                 if roles:
@@ -622,7 +715,9 @@ class UsersTable:
     async def get_first_user(self, db: AsyncSession | None = None) -> UserModel | None:
         """Return the earliest-created user (bootstrap admin detection)."""
         async with get_async_db_context(db) as session:
-            stmt = select(User).order_by(User.created_at).limit(1)
+            # created_at has 1s resolution; admin wins ties
+            admin_first = case((User.role == 'admin', 0), else_=1)
+            stmt = select(User).order_by(User.created_at, admin_first, User.id).limit(1)
             row = (await session.execute(stmt)).scalars().first()
             return UserModel.model_validate(row) if row else None
 
@@ -679,7 +774,7 @@ class UsersTable:
         db: AsyncSession | None = None,
     ) -> UserModel | None:
         try:
-            profile_image_url = validate_profile_image_url(profile_image_url)
+            profile_image_url = validate_image_url(profile_image_url)
         except ValueError:
             profile_image_url = '/user.png'
 
@@ -728,7 +823,9 @@ class UsersTable:
                 return None
             scim = dict(user.scim or {})
             scim[provider] = {'external_id': external_id}
-            user.scim = scim
+            if scim != user.scim:
+                user.scim = scim
+                user.updated_at = int(time.time())
             await session.commit()
             return UserModel.model_validate(user)
 
@@ -745,6 +842,10 @@ class UsersTable:
                 ):
                     for key, value in updated.items():
                         setattr(user, key, value)
+                    if 'email' in updated:
+                        from open_webui.models.auths import Auth
+
+                        await session.execute(update(Auth).where(Auth.id == id).values(email=updated['email']))
                     await session.commit()
                 return UserModel.model_validate(user)
 
@@ -757,7 +858,18 @@ class UsersTable:
             if not user:
                 return None
             user_settings = dict(user.settings or {})
+            updated = dict(updated)
+            ui_settings = updated.pop('ui', None)
             user_settings.update(updated)
+            if ui_settings is not None:
+                # UI updates are field-level patches: omission keeps a value; null resets it.
+                current_ui_settings = dict(user_settings.get('ui') or {})
+                for key, value in ui_settings.items():
+                    if value is None:
+                        current_ui_settings.pop(key, None)
+                    else:
+                        current_ui_settings[key] = value
+                user_settings['ui'] = current_ui_settings
             user.settings = user_settings
             await session.commit()
             return UserModel.model_validate(user)

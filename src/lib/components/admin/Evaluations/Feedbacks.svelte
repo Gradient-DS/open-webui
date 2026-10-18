@@ -8,7 +8,7 @@
 	dayjs.extend(relativeTime);
 
 	import { onMount, getContext } from 'svelte';
-	const i18n = getContext('i18n');
+	const i18n = getContext<typeof import('$lib/i18n').default>('i18n');
 
 	import {
 		deleteFeedbackById,
@@ -214,7 +214,7 @@
 			return {
 				id: rest.id,
 				user_id: rest.user_id,
-				chat_id: data?.chat_id ?? '',
+				chat_id: rest.meta?.chat_id ?? '',
 				model_id: data?.model_id ?? '',
 				sibling_model_ids: (data?.sibling_model_ids ?? []).join(';'),
 				rating: data?.rating ?? '',
@@ -327,14 +327,14 @@
 				{#if msgTotal > 0}
 					<Dropdown align="end">
 						<button
-							class="flex h-8 shrink-0 items-center gap-1 px-2 py-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 dark:text-gray-200 transition text-xs"
+							class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-100 px-2.5 text-xs font-normal text-gray-800 transition hover:bg-gray-100/70 disabled:opacity-60 dark:bg-gray-850 dark:text-white dark:hover:bg-gray-850/60"
 						>
 							{$i18n.t('Export')}
 							<ChevronDown className="size-3" strokeWidth="2.5" />
 						</button>
 
 						<div slot="content">
-							<DropdownMenu className="w-[10.625rem]">
+							<DropdownMenu className="min-w-[10.625rem]">
 								<button
 									class="select-none flex w-full gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-xl"
 									type="button"
@@ -372,11 +372,11 @@
 						<th
 							scope="col"
 							class="px-2.5 py-2 cursor-pointer select-none w-3"
-							on:click={() => setMsgSortKey('user')}
+							on:click={() => setMsgSortKey('username')}
 						>
 							<div class="flex gap-1.5 items-center justify-end">
 								{$i18n.t('User')}
-								{#if msgOrderBy === 'user'}
+								{#if msgOrderBy === 'username'}
 									<span class="font-normal">
 										{#if msgDirection === 'asc'}
 											<ChevronUp className="size-2" />
@@ -628,11 +628,11 @@
 							<th
 								scope="col"
 								class="px-2.5 py-2 cursor-pointer select-none w-3"
-								on:click={() => setConvSortKey('user')}
+								on:click={() => setConvSortKey('username')}
 							>
 								<div class="flex gap-1.5 items-center justify-end">
 									{$i18n.t('User')}
-									{#if convOrderBy === 'user'}
+									{#if convOrderBy === 'username'}
 										<span class="font-normal">
 											{#if convDirection === 'asc'}
 												<ChevronUp className="size-2" />
@@ -743,7 +743,9 @@
 								</td>
 
 								<td class=" px-3 py-1 text-right font-normal">
-									{dayjs(feedback.updated_at * 1000).fromNow()}
+									{dayjs(feedback.updated_at * 1000)
+										.locale($i18n.language)
+										.fromNow()}
 								</td>
 
 								<td class=" px-3 py-1 text-right font-normal" on:click={(e) => e.stopPropagation()}>

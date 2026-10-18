@@ -1710,10 +1710,8 @@
 			}
 
 			const res = await updateKnowledgeById(localStorage.token, id, {
-				...knowledge,
 				name: knowledge.name,
-				description: knowledge.description,
-				access_grants: knowledge.access_grants ?? []
+				description: knowledge.description
 			}).catch((e) => {
 				toast.error(`${e}`);
 			});
@@ -2053,6 +2051,8 @@
 				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
 				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
 				shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
+					$user?.role === 'admin'}
+				allowGroups={($user?.permissions?.access_grants?.allow_groups ?? true) ||
 					$user?.role === 'admin'}
 				onChange={async () => {
 					try {

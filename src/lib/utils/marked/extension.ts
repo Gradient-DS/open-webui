@@ -1,3 +1,6 @@
+import { decode } from 'html-entities';
+import { type Token, type TokenizerThis } from 'marked';
+
 import { DOCUMENT_OPEN, readDocument } from '../agentDocument';
 
 // Helper function to find matching closing tag
@@ -28,7 +31,7 @@ function parseAttributes(tag: string): { [key: string]: string } {
 	return attributes;
 }
 
-function detailsTokenizer(src: string) {
+function detailsTokenizer(this: TokenizerThis, src: string) {
 	// Updated regex to capture attributes inside <details>
 	const detailsRegex = /^<details(\s+[^>]*)?>\n/;
 	const summaryRegex = /^<summary>(.*?)<\/summary>\n/;
@@ -51,11 +54,17 @@ function detailsTokenizer(src: string) {
 			content = content.slice(summaryMatch[0].length).trim();
 		}
 
+		const tokens: Token[] = [];
+		if (attributes.type !== 'tool_calls') {
+			this.lexer.blockTokens(decode(content), tokens);
+		}
+
 		return {
 			type: 'details',
 			raw: fullMatch,
 			summary: summary,
 			text: content,
+			tokens,
 			attributes: attributes // Include extracted attributes from <details>
 		};
 	}

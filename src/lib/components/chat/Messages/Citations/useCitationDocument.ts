@@ -4,6 +4,17 @@ import { rectsFromMetadata } from '$lib/utils/citationRects';
 import type { CitationDocument } from './citationDocuments';
 import type { DisplayCitation } from './reduceSources';
 
+// Same check as `$lib/utils:isValidHttpUrl` (upstream #29890), kept local so this
+// module stays free of the heavy utils barrel in unit tests.
+const isValidHttpUrl = (value: string): boolean => {
+	try {
+		const { protocol } = new URL(value);
+		return protocol === 'http:' || protocol === 'https:';
+	} catch {
+		return false;
+	}
+};
+
 export function citationFileInfo(
 	citation: DisplayCitation | null | undefined,
 	documents: CitationDocument[]
@@ -33,9 +44,9 @@ export function resolveExternalUrl(
 	documents: CitationDocument[]
 ): string | null {
 	const url = citation?.source?.url;
-	if (typeof url === 'string' && url.includes('http')) return url;
+	if (typeof url === 'string' && isValidHttpUrl(url)) return url;
 	const sourceUrl = documents[0]?.metadata?.source_url;
-	return typeof sourceUrl === 'string' && sourceUrl.includes('http') ? sourceUrl : null;
+	return typeof sourceUrl === 'string' && isValidHttpUrl(sourceUrl) ? sourceUrl : null;
 }
 
 export const isDocumentSnippet = (snippet: CitationDocument | undefined): boolean =>
@@ -83,7 +94,7 @@ export const getTextFragmentUrl = (doc: CitationDocument): string | null => {
 
 	const baseUrl = file_id
 		? `${WEBUI_API_BASE_URL}/files/${file_id}/content${page !== undefined ? `#page=${Number(page) + 1}` : ''}`
-		: sourceUrl?.includes('http')
+		: isValidHttpUrl(sourceUrl)
 			? sourceUrl
 			: null;
 

@@ -3,37 +3,38 @@
 	import { config } from '$lib/stores';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
-	import Checkbox from '$lib/components/common/Checkbox.svelte';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import { marked } from 'marked';
-	import { capabilityOffered } from '$lib/utils/assistantCapabilities';
+	import ModelSettingsSection from './ModelSettingsSection.svelte';
+	import ModelSettingToggle from './ModelSettingToggle.svelte';
+	import BuiltinTools from './BuiltinTools.svelte';
+	import { capabilityOffered, FEATURE_TOGGLES } from '$lib/utils/assistantCapabilities';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
-	const capabilityLabels = {
+	let capabilityLabels;
+	$: capabilityLabels = {
 		vision: {
-			label: $i18n.t('Vision'),
-			description: $i18n.t('Model accepts image inputs')
+			label: $i18n.t('settings.admin.models.capabilities.vision.label'),
+			description: $i18n.t('settings.admin.models.capabilities.vision.description')
 		},
 		file_upload: {
-			label: $i18n.t('File Upload'),
-			description: $i18n.t('Model accepts file inputs')
+			label: $i18n.t('settings.admin.models.capabilities.fileUpload.label'),
+			description: $i18n.t('settings.admin.models.capabilities.fileUpload.description')
 		},
 		file_context: {
-			label: $i18n.t('File Context'),
-			description: $i18n.t('Inject file content into conversation context')
+			label: $i18n.t('settings.admin.models.capabilities.fileContext.label'),
+			description: $i18n.t('settings.admin.models.capabilities.fileContext.description')
 		},
 		web_search: {
-			label: $i18n.t('Web Search'),
-			description: $i18n.t('Model can search the web for information')
+			label: $i18n.t('settings.admin.models.capabilities.webSearch.label'),
+			description: $i18n.t('settings.admin.models.capabilities.webSearch.description')
 		},
 		image_generation: {
-			label: $i18n.t('Image Generation'),
-			description: $i18n.t('Model can generate images based on text prompts')
+			label: $i18n.t('settings.admin.models.capabilities.imageGeneration.label'),
+			description: $i18n.t('settings.admin.models.capabilities.imageGeneration.description')
 		},
 		code_interpreter: {
-			label: $i18n.t('Code Interpreter'),
-			description: $i18n.t('Model can execute code and perform calculations')
+			label: $i18n.t('settings.admin.models.capabilities.codeInterpreter.label'),
+			description: $i18n.t('settings.admin.models.capabilities.codeInterpreter.description')
 		},
 		document_writer: {
 			label: $i18n.t('Document writer'),
@@ -48,34 +49,28 @@
 			description: $i18n.t("Model can search the user's mail")
 		},
 		terminal: {
-			label: $i18n.t('Terminal'),
-			description: $i18n.t(
-				'Model can access Open Terminal for command execution and file management'
-			)
+			label: $i18n.t('settings.admin.models.capabilities.terminal.label'),
+			description: $i18n.t('settings.admin.models.capabilities.terminal.description')
 		},
 		usage: {
-			label: $i18n.t('Usage'),
-			description: $i18n.t(
-				'Sends `stream_options: { include_usage: true }` in the request.\nSupported providers will return token usage information in the response when set.'
-			)
+			label: $i18n.t('settings.admin.models.capabilities.usage.label'),
+			description: $i18n.t('settings.admin.models.capabilities.usage.description')
 		},
 		citations: {
-			label: $i18n.t('Citations'),
-			description: $i18n.t('Displays citations in the response')
+			label: $i18n.t('settings.admin.models.capabilities.citations.label'),
+			description: $i18n.t('settings.admin.models.capabilities.citations.description')
 		},
 		status_updates: {
-			label: $i18n.t('Status Updates'),
-			description: $i18n.t('Displays status updates (e.g., web search progress) in the response')
+			label: $i18n.t('settings.admin.models.capabilities.statusUpdates.label'),
+			description: $i18n.t('settings.admin.models.capabilities.statusUpdates.description')
 		},
 		memory: {
-			label: $i18n.t('Memory'),
-			description: $i18n.t('Inject stored memories into conversation context')
+			label: $i18n.t('settings.admin.models.capabilities.memory.label'),
+			description: $i18n.t('settings.admin.models.capabilities.memory.description')
 		},
 		builtin_tools: {
-			label: $i18n.t('Builtin Tools'),
-			description: $i18n.t(
-				'Automatically inject system tools in native function calling mode (e.g., timestamps, memory, chat history, notes, etc.)'
-			)
+			label: $i18n.t('settings.admin.models.capabilities.builtinTools.label'),
+			description: $i18n.t('settings.admin.models.capabilities.builtinTools.description')
 		}
 	};
 
@@ -83,46 +78,98 @@
 
 	export let capabilities: Partial<Record<Capability, boolean>> = {};
 
-	const setCapability = (capability: Capability, checked: boolean) => {
-		capabilities[capability] = checked;
-		capabilities = capabilities;
+	export let defaultFeatureIds: string[] = [];
+	export let builtinTools: Record<string, boolean> = {};
+	export let disabled = false;
+	// [Gradient] Default features include document writer, OneDrive and mail search (FEATURE_TOGGLES).
+	const featureKeys: Capability[] = [...FEATURE_TOGGLES];
+	// Hide file_context when file_upload is disabled; [Gradient] hide capabilities the tenant does not offer.
+	$: visibleCapabilities = (Object.keys(capabilityLabels) as Capability[]).filter(
+		(key) =>
+			(key !== 'file_context' || capabilities.file_upload) &&
+			capabilityOffered(key, $config?.features)
+	);
+	$: enabledCapabilityIds = visibleCapabilities.filter((key) => capabilities[key]);
+	$: availableFeatures = featureKeys.filter((key) => capabilities[key]);
+	$: enabledDefaultIds = availableFeatures.filter((key) => defaultFeatureIds.includes(key));
+	const setDefault = (key: string, enabled: boolean) => {
+		defaultFeatureIds = enabled
+			? [...new Set([...defaultFeatureIds, key])]
+			: defaultFeatureIds.filter((id) => id !== key);
 	};
-
-	// Hide file_context when file_upload is disabled
-	$: visibleCapabilities = (Object.keys(capabilityLabels) as Capability[]).filter((cap) => {
-		if (cap === 'file_context' && !capabilities.file_upload) {
-			return false;
-		}
-		return capabilityOffered(cap, $config?.features);
-	});
 </script>
 
-<div>
-	<div class="mb-1.5 text-xs text-gray-400 dark:text-gray-600">{$i18n.t('Capabilities')}</div>
-	<div class="grid grid-cols-1 gap-x-5 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
-		{#each visibleCapabilities as capability}
-			<div class="flex min-h-6 items-center gap-2.5">
-				<Checkbox
-					ariaLabel={$i18n.t(capabilityLabels[capability].label)}
-					state={capabilities[capability] ? 'checked' : 'unchecked'}
-					on:change={(e) => {
-						setCapability(capability, e.detail === 'checked');
-					}}
+<div class="space-y-0.5">
+	<ModelSettingsSection
+		label={$i18n.t('settings.admin.models.capabilities.title')}
+		description={$i18n.t(
+			'Choose which features are available for this model. The connected model and provider must support them.'
+		)}
+	>
+		<span slot="summary" class="flex min-w-0 items-center gap-1 text-gray-900 dark:text-gray-100">
+			<span class="min-w-0 truncate"
+				>{enabledCapabilityIds
+					.slice(0, 3)
+					.map((key) => capabilityLabels[key].label)
+					.join(', ') || $i18n.t('None')}</span
+			>
+			{#if enabledCapabilityIds.length > 3}<span class="shrink-0 text-gray-500"
+					>+{enabledCapabilityIds.length - 3}</span
+				>{/if}
+		</span>
+		<div class="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+			{#each visibleCapabilities as key}
+				<ModelSettingToggle
+					label={capabilityLabels[key].label}
+					description={capabilityLabels[key].description}
+					bind:checked={capabilities[key]}
+					{disabled}
 				/>
-				<button
-					type="button"
-					class="min-w-0 cursor-pointer text-left text-xs text-gray-600 dark:text-gray-400"
-					on:click={() => setCapability(capability, !capabilities[capability])}
+			{/each}
+		</div>
+	</ModelSettingsSection>
+
+	<!-- Previous DefaultFeatures labels retained for i18n extraction:
+	{$i18n.t('settings.admin.models.defaultFeatures.webSearch.label')}
+	{$i18n.t('settings.admin.models.defaultFeatures.webSearch.description')}
+	{$i18n.t('settings.admin.models.defaultFeatures.imageGeneration.label')}
+	{$i18n.t('settings.admin.models.defaultFeatures.imageGeneration.description')}
+	{$i18n.t('settings.admin.models.defaultFeatures.codeInterpreter.label')}
+	{$i18n.t('settings.admin.models.defaultFeatures.codeInterpreter.description')}
+	-->
+	{#if availableFeatures.length}
+		<ModelSettingsSection
+			label={$i18n.t('settings.admin.models.defaultFeatures.title')}
+			description={$i18n.t('Choose which available features start enabled in new chats.')}
+		>
+			<span slot="summary" class="flex min-w-0 items-center gap-1 text-gray-900 dark:text-gray-100">
+				<span class="min-w-0 truncate"
+					>{enabledDefaultIds
+						.slice(0, 3)
+						.map((key) => capabilityLabels[key].label)
+						.join(', ') || $i18n.t('None')}</span
 				>
-					<Tooltip
-						as="span"
-						className="block min-w-0"
-						content={marked.parse(capabilityLabels[capability].description)}
-					>
-						<span class="block truncate">{$i18n.t(capabilityLabels[capability].label)}</span>
-					</Tooltip>
-				</button>
+				{#if enabledDefaultIds.length > 3}<span class="shrink-0 text-gray-500"
+						>+{enabledDefaultIds.length - 3}</span
+					>{/if}
+			</span>
+			<p class="mb-1 px-1 text-xs text-gray-500 dark:text-gray-400">
+				{$i18n.t('Start enabled in new chats')}
+			</p>
+			<div class="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+				{#each availableFeatures as key}
+					<ModelSettingToggle
+						label={capabilityLabels[key].label}
+						checked={defaultFeatureIds.includes(key)}
+						{disabled}
+						on:change={(e) => setDefault(key, e.detail)}
+					/>
+				{/each}
 			</div>
-		{/each}
-	</div>
+		</ModelSettingsSection>
+	{/if}
+
+	{#if capabilities.builtin_tools}
+		<BuiltinTools bind:builtinTools {disabled} />
+	{/if}
 </div>

@@ -16,26 +16,26 @@ from langchain_core.documents import Document
 import open_webui.routers.retrieval as retrieval_router
 
 
-def _config() -> SimpleNamespace:
-    return SimpleNamespace(
-        ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER=True,
-        CHUNK_MIN_SIZE_TARGET=0,
-        TEXT_SPLITTER='character',
-        CHUNK_SIZE=40,
-        CHUNK_OVERLAP=0,
-        RAG_EMBEDDING_ENGINE='',
-        RAG_EMBEDDING_MODEL='test-model',
-        RAG_OPENAI_API_BASE_URL='',
-        RAG_OPENAI_API_KEY='',
-        RAG_OLLAMA_BASE_URL='',
-        RAG_OLLAMA_API_KEY='',
-        RAG_AZURE_OPENAI_BASE_URL='',
-        RAG_AZURE_OPENAI_API_KEY='',
-        RAG_AZURE_OPENAI_API_VERSION=None,
-        RAG_EMBEDDING_BATCH_SIZE=1,
-        ENABLE_ASYNC_EMBEDDING=False,
-        RAG_EMBEDDING_CONCURRENT_REQUESTS=1,
-    )
+def _config() -> dict:
+    return {
+        'rag.enable_markdown_header_text_splitter': True,
+        'rag.chunk_min_size_target': 0,
+        'rag.text_splitter': 'character',
+        'rag.chunk_size': 40,
+        'rag.chunk_overlap': 0,
+        'rag.embedding_engine': '',
+        'rag.embedding_model': 'test-model',
+        'rag.openai.api_base_url': '',
+        'rag.openai.api_key': '',
+        'rag.ollama.base_url': '',
+        'rag.ollama.api_key': '',
+        'rag.azure_openai.base_url': '',
+        'rag.azure_openai.api_key': '',
+        'rag.azure_openai.api_version': None,
+        'rag.embedding_batch_size': 1,
+        'rag.enable_async_embedding': False,
+        'rag.embedding_concurrent_requests': 1,
+    }
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ def inserted_items(monkeypatch):
     vector_db = MagicMock()
     vector_db.has_collection.return_value = False
     vector_db.insert.side_effect = lambda collection_name, items: captured.extend(items)
-    monkeypatch.setattr(retrieval_router, 'VECTOR_DB_CLIENT', vector_db)
+    monkeypatch.setattr(retrieval_router, 'get_vector_db_client', lambda: vector_db)
 
     monkeypatch.setattr(retrieval_router, 'get_embedding_function', lambda *a, **k: MagicMock())
     monkeypatch.setattr(

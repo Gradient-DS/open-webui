@@ -6,7 +6,15 @@ from open_webui.routers import retrieval
 
 from .conftest import BLOCKED_URLS, INTERNAL, PUBLIC, assert_public_only
 
-CONFIG = {'web_loader_engine': 'safe_web', 'youtube_language': ['en']}
+CONFIG = {
+    'web.loader.engine': 'safe_web',
+    'web.loader.ssl_verification': True,
+    'web.loader.concurrent_requests': 10,
+    'web.search.trust_env': False,
+    'rag.youtube_loader_language': ['en'],
+    'rag.youtube_loader_proxy_url': None,
+    'rag.file.max_size': None,
+}
 
 
 @pytest.mark.parametrize('url', BLOCKED_URLS)

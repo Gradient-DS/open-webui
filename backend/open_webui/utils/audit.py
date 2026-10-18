@@ -43,6 +43,7 @@ class AuditLogEntry:
     request_uri: str
     user_agent: Optional[str] = None
     source_ip: Optional[str] = None
+    model_id: Optional[str] = None
     # `Request` audit level properties
     request_object: Any = None
     # `Request Response` level
@@ -113,6 +114,17 @@ class AuditContext:
             self.response_body.extend(chunk[: self.max_body_size - len(self.response_body)])
 
 
+def redact_passwords(body: str) -> str:
+    if 'password' not in body.lower():
+        return body
+    return re.sub(
+        r'"(\w*password)"\s*:\s*"(?:[^"\\]|\\.)*"',
+        r'"\1": "********"',
+        body,
+        flags=re.IGNORECASE,
+    )
+
+
 class AuditLoggingMiddleware:
     """
     ASGI middleware that intercepts HTTP requests and responses to perform audit logging. It captures request/response bodies (depending on audit level), headers, HTTP methods, and user information, then logs a structured audit entry at the end of the request cycle.
@@ -173,10 +185,13 @@ class AuditLoggingMiddleware:
         if self._should_skip_auditing(request):
             return await self.app(scope, receive, send)
 
+        capture_body = not (request.url.path.startswith('/api/v1/auths') or request.url.path.startswith('/oauth/'))
         async with self._audit_context(request) as context:
 
             async def send_wrapper(message: ASGISendEvent) -> None:
-                if self.audit_level == AuditLevel.REQUEST_RESPONSE:
+                if self.audit_level == AuditLevel.REQUEST_RESPONSE and (
+                    capture_body or message['type'] == 'http.response.start'
+                ):
                     await self._capture_response(message, context)
 
                 await send(message)
@@ -187,7 +202,7 @@ class AuditLoggingMiddleware:
                 nonlocal original_receive
                 message = await original_receive()
 
-                if self.audit_level in (
+                if capture_body and self.audit_level in (
                     AuditLevel.REQUEST,
                     AuditLevel.REQUEST_RESPONSE,
                 ):
@@ -230,6 +245,7 @@ class AuditLoggingMiddleware:
         '/api/v1/auths/signin',
         '/api/v1/auths/signout',
         '/api/v1/auths/signup',
+        '/api/v1/auths/mfa',
     )
 
     def _should_skip_auditing(self, request: Request) -> bool:
@@ -239,14 +255,17 @@ class AuditLoggingMiddleware:
         if request.method not in self.audited_methods:
             return True
 
+        if request.url.path.startswith('/ws/socket.io'):
+            return True
+
         path = request.url.path.lower()
         for endpoint in self.ALWAYS_LOG_ENDPOINTS:
             if path.startswith(endpoint):
                 return False  # Do NOT skip logging for auth endpoints
 
         # Skip logging if the request is not authenticated
-        # Check both Authorization header (API keys) and token cookie (browser sessions)
-        if not request.headers.get('authorization') and not request.cookies.get('token'):
+        # Token is set by AppHTTPMiddleware from any accepted credential
+        if not getattr(request.state, 'token', None):
             return True
 
         # Whitelist mode: only log paths that match included_paths
@@ -282,12 +301,8 @@ class AuditLoggingMiddleware:
             response_body = context.response_body.decode('utf-8', errors='replace')
 
             # Redact sensitive information
-            if 'password' in request_body:
-                request_body = re.sub(
-                    r'"password":\s*"(.*?)"',
-                    '"password": "********"',
-                    request_body,
-                )
+            request_body = redact_passwords(request_body)
+            response_body = redact_passwords(response_body)
 
             entry = AuditLogEntry(
                 id=str(uuid.uuid4()),
@@ -298,6 +313,7 @@ class AuditLoggingMiddleware:
                 response_status_code=context.metadata.get('response_status_code', None),
                 source_ip=request.client.host if request.client else None,
                 user_agent=request.headers.get('user-agent'),
+                model_id=getattr(request.state, 'model_id', None),
                 request_object=request_body,
                 response_object=response_body,
             )

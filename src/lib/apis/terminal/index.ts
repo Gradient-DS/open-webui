@@ -1,3 +1,36 @@
+import { get } from 'svelte/store';
+import { config } from '$lib/stores';
+import { checkSourceSize, readSourceResponse } from './sourceText';
+// The same attachment is used by @mentions, terminal uploads, and Files-pane requests.
+export type FilesystemFile = {
+	type: 'filesystem';
+	id: string;
+	path: string;
+	url: string;
+	name: string;
+	status: string;
+	size?: number;
+	modified?: number;
+	terminal_id?: string;
+	session_id?: string | null;
+};
+export const filesystemFile = (
+	entry: { path: string; name: string; size?: number; modified?: number },
+	terminalId: string,
+	sessionId: string | null
+): FilesystemFile => ({
+	type: 'filesystem',
+	id: entry.path,
+	path: entry.path,
+	url: entry.path,
+	name: entry.name,
+	size: entry.size,
+	modified: entry.modified,
+	status: 'processed',
+	terminal_id: terminalId,
+	session_id: sessionId
+});
+
 export type FileEntry = {
 	name: string;
 	type: 'file' | 'directory';
@@ -60,13 +93,84 @@ export type TerminalCwd = {
 	root?: TerminalFileRoot;
 };
 
+export type TerminalSkill = {
+	id: string;
+	name: string;
+	description: string;
+	is_active: boolean;
+	source: 'terminal';
+	terminal_path: string;
+	terminal_scope: 'global';
+	terminal_selector: string;
+	terminal_name?: string;
+};
+
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-const bearerHeaders = (apiKey: string): Record<string, string> => ({
-	Authorization: `Bearer ${apiKey.trim()}`
-});
+export type TerminalConnection = {
+	selector: string;
+	baseUrl: string;
+	key: string;
+	system: boolean;
+};
+export type TerminalProcess = {
+	id: string;
+	command: string;
+	status: 'running' | 'done' | 'killed';
+	exit_code: number | null;
+};
+export type TerminalProcessOutput = TerminalProcess & {
+	output: { type: string; data: string }[];
+	next_offset: number;
+	truncated: boolean;
+};
 
-const joinTerminalPath = (base: string, child: string) => {
+export const resolveTerminalConnection = (
+	selector: string | null,
+	servers: any[],
+	directServers: any[],
+	token: string
+): TerminalConnection | null => {
+	if (!get(config)?.features?.enable_tool_servers || !selector) return null;
+	if (servers.some((server) => server.id === selector)) {
+		return {
+			selector,
+			baseUrl: `${WEBUI_API_BASE_URL}/terminals/${encodeURIComponent(selector)}`,
+			key: token,
+			system: true
+		};
+	}
+	const direct = directServers.find((server) => server.url === selector);
+	return direct
+		? { selector, baseUrl: direct.url.replace(/\/$/, ''), key: direct.key ?? '', system: false }
+		: null;
+};
+
+export const terminalRequest = async <T>(
+	connection: TerminalConnection,
+	chatId: string | null,
+	path: string,
+	options: RequestInit = {}
+): Promise<T> => {
+	if (!get(config)?.features?.enable_tool_servers) throw new Error('Tool servers are disabled');
+	const response = await fetch(`${connection.baseUrl}${path}`, {
+		...options,
+		headers: {
+			Authorization: `Bearer ${connection.key.trim()}`,
+			...(chatId ? { 'X-Session-Id': chatId } : {}),
+			...options.headers
+		}
+	});
+	if (!response.ok) throw new Error(`Terminal request failed (${response.status})`);
+	return response.json();
+};
+
+const bearerHeaders = (apiKey: string): Record<string, string> => {
+	if (!get(config)?.features?.enable_tool_servers) throw new Error('Tool servers are disabled');
+	return { Authorization: `Bearer ${apiKey.trim()}` };
+};
+
+export const joinTerminalPath = (base: string, child: string) => {
 	if (!child) return base;
 	if (child.startsWith('/') || /^[A-Za-z]:[\\/]/.test(child)) return child;
 	return `${base.replace(/[\\/]+$/, '')}/${child.replace(/^[\\/]+/, '')}`;
@@ -93,6 +197,7 @@ export type TerminalServer = {
 };
 
 export const getTerminalServers = async (token: string): Promise<TerminalServer[]> => {
+	if (!get(config)?.features?.enable_tool_servers) return [];
 	const res = await fetch(`${WEBUI_API_BASE_URL}/terminals/`, {
 		headers: {
 			Authorization: `Bearer ${token}`
@@ -245,6 +350,27 @@ export const getFileMatches = async (
 	return Array.isArray(json?.results) ? json : null;
 };
 
+export const readComparisonSource = async (
+	baseUrl: string,
+	apiKey: string,
+	path: string,
+	signal: AbortSignal,
+	sessionId?: string,
+	size?: number
+): Promise<string> => {
+	checkSourceSize(size);
+	const headers = bearerHeaders(apiKey);
+	if (sessionId) headers['X-Session-Id'] = sessionId;
+	const response = await fetch(
+		`${baseUrl.replace(/\/$/, '')}/files/view?path=${encodeURIComponent(path)}`,
+		{ headers, signal }
+	).catch(() => {
+		signal.throwIfAborted();
+		throw new Error('Could not read file. Check your terminal connection.');
+	});
+	return readSourceResponse(response, signal);
+};
+
 export const readFile = async (
 	baseUrl: string,
 	apiKey: string,
@@ -273,16 +399,40 @@ export const readFile = async (
 	return json?.content ?? null;
 };
 
+export const listTerminalSkills = async (
+	connection: TerminalConnection | null,
+	chatId?: string | null
+): Promise<TerminalSkill[]> => {
+	if (!connection) return [];
+
+	const skills = await terminalRequest<TerminalSkill[]>(
+		connection,
+		chatId ?? null,
+		'/skills'
+	).catch(() => []);
+
+	return (Array.isArray(skills) ? skills : []).map((skill) => ({
+		...skill,
+		is_active: true,
+		source: 'terminal',
+		terminal_path: skill.terminal_path ?? (skill as any).location ?? '',
+		terminal_scope: skill.terminal_scope ?? (skill as any).scope ?? 'global',
+		terminal_selector: connection.selector,
+		terminal_name: connection.selector
+	}));
+};
+
 export const downloadFileBlob = async (
 	baseUrl: string,
 	apiKey: string,
 	path: string,
-	sessionId?: string
+	sessionId?: string,
+	signal?: AbortSignal
 ): Promise<{ blob: Blob; filename: string } | null> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/view?path=${encodeURIComponent(path)}`;
 	const headers: Record<string, string> = bearerHeaders(apiKey);
 	if (sessionId) headers['X-Session-Id'] = sessionId;
-	const res = await fetch(url, { headers }).catch(() => null);
+	const res = await fetch(url, { headers, signal }).catch(() => null);
 
 	if (!res || !res.ok) return null;
 
@@ -296,12 +446,13 @@ export const downloadFilePreview = async (
 	baseUrl: string,
 	apiKey: string,
 	path: string,
-	sessionId?: string
+	sessionId?: string,
+	signal?: AbortSignal
 ): Promise<{ blob: Blob; filename: string } | null> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/view?path=${encodeURIComponent(path)}&preview=true`;
 	const headers: Record<string, string> = bearerHeaders(apiKey);
 	if (sessionId) headers['X-Session-Id'] = sessionId;
-	const res = await fetch(url, { headers }).catch(() => null);
+	const res = await fetch(url, { headers, signal }).catch(() => null);
 
 	if (!res) return null;
 	if (!res.ok) return null;
@@ -369,6 +520,42 @@ export const uploadToTerminal = async (
 			return null;
 		});
 	return res;
+};
+
+// ponytail: serialize new uploads in this page; cross-client races need server-side protection.
+let newFileUploadQueue: Promise<void> = Promise.resolve();
+
+export const uploadNewFileToTerminal = async (
+	baseUrl: string,
+	apiKey: string,
+	directory: string,
+	file: File,
+	sessionId?: string
+): Promise<{ path: string; size: number } | null> => {
+	const upload = newFileUploadQueue.then(async () => {
+		const listing = await listFiles(baseUrl, apiKey, directory, sessionId);
+		if (!listing) return null;
+
+		const names = new Set(listing.entries.map((entry) => entry.name));
+		const extensionIndex = file.name.startsWith('.') ? -1 : file.name.lastIndexOf('.');
+		const stem = extensionIndex > 0 ? file.name.slice(0, extensionIndex) : file.name;
+		const extension = extensionIndex > 0 ? file.name.slice(extensionIndex) : '';
+		let name = file.name;
+		for (let suffix = 1; names.has(name); suffix++) {
+			name = `${stem} (${suffix})${extension}`;
+		}
+
+		const uploadFile =
+			name === file.name
+				? file
+				: new File([file], name, { type: file.type, lastModified: file.lastModified });
+		return uploadToTerminal(baseUrl, apiKey, directory, uploadFile, sessionId);
+	});
+	newFileUploadQueue = upload.then(
+		() => undefined,
+		() => undefined
+	);
+	return upload;
 };
 
 export const createDirectory = async (
@@ -482,11 +669,15 @@ export const moveEntry = async (
 
 export const getListeningPorts = async (
 	baseUrl: string,
-	apiKey: string
+	apiKey: string,
+	sessionId?: string | null
 ): Promise<ListeningPort[]> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/ports`;
 	const res = await fetch(url, {
-		headers: bearerHeaders(apiKey)
+		headers: {
+			...bearerHeaders(apiKey),
+			...(sessionId ? { 'X-Session-Id': sessionId } : {})
+		}
 	}).catch(() => null);
 	if (!res || !res.ok) return [];
 	const json = await res.json().catch(() => null);
@@ -494,6 +685,7 @@ export const getListeningPorts = async (
 };
 
 export const getPortProxyUrl = (baseUrl: string, port: number, path: string = ''): string => {
+	if (!get(config)?.features?.enable_tool_servers) return '';
 	return `${baseUrl.replace(/\/$/, '')}/proxy/${port}/${path}`;
 };
 
@@ -573,4 +765,60 @@ export const stopNotebookSession = async (
 		headers: bearerHeaders(apiKey)
 	}).catch(() => null);
 	return res?.ok ?? false;
+};
+
+export type TerminalDiffLine = {
+	type: 'added' | 'removed' | 'context';
+	oldNumber: number | null;
+	newNumber: number | null;
+	content: string;
+	revisedContent?: string;
+	segments: { text: string; changed: boolean }[];
+};
+export type TerminalComparisonRequest = {
+	original: string;
+	revised: string;
+	ignore_whitespace: boolean;
+};
+export type TerminalComparison = {
+	original: { name: string; path: string; notices: string[] };
+	revised: { name: string; path: string; notices: string[] };
+	additions: number;
+	deletions: number;
+	hunks: { header: string; lines: TerminalDiffLine[] }[];
+};
+
+export const compareFiles = async (
+	baseUrl: string,
+	apiKey: string,
+	request: TerminalComparisonRequest,
+	sessionId?: string,
+	signal?: AbortSignal
+): Promise<TerminalComparison> => {
+	const response = await fetch(`${baseUrl.replace(/\/$/, '')}/files/compare`, {
+		method: 'POST',
+		signal,
+		headers: {
+			...bearerHeaders(apiKey),
+			'Content-Type': 'application/json',
+			...(sessionId ? { 'X-Session-Id': sessionId } : {})
+		},
+		body: JSON.stringify(request)
+	});
+	const body = await response.json().catch(() => null);
+	if (
+		response.status === 405 ||
+		(response.status === 404 && ((!body?.detail && !body?.error) || body.detail === 'Not Found'))
+	) {
+		throw new Error(
+			'File comparison is not available on this terminal. Update Open Terminal to use Compare.'
+		);
+	}
+	if (!response.ok)
+		throw new Error(
+			typeof body?.detail === 'string'
+				? body.detail
+				: (body?.error ?? `Comparison failed (${response.status})`)
+		);
+	return body;
 };

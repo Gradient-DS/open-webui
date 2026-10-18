@@ -62,7 +62,7 @@
 				goto('/', { replaceState: true });
 			} else if (
 				$page.url.pathname.includes('/tools') &&
-				(!$config?.features?.enable_plugins || !$user?.permissions?.workspace?.tools)
+				(!$config?.features?.enable_tools || !$user?.permissions?.workspace?.tools)
 			) {
 				goto('/', { replaceState: true });
 			} else if ($page.url.pathname.includes('/skills') && !$user?.permissions?.workspace?.skills) {
@@ -123,9 +123,12 @@
 		</nav>
 
 		<div
-			class="pb-1 px-3 md:px-[18px] flex-1 min-h-0 min-w-0 max-h-full {$page.url.pathname.includes(
-				'/workspace/knowledge/'
-			)
+			class="pb-1 flex-1 min-h-0 min-w-0 max-h-full {[
+				'/workspace/models/create',
+				'/workspace/models/edit'
+			].includes($page.url.pathname)
+				? ''
+				: 'px-3 md:px-[18px]'} {$page.url.pathname.includes('/workspace/knowledge/')
 				? 'pt-4 overflow-hidden'
 				: 'overflow-y-auto overflow-x-hidden'}"
 			id="workspace-container"

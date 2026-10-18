@@ -210,6 +210,9 @@ class KnowledgeForm(BaseModel):
 
 
 class FileUserResponse(FileModelResponse):
+    directory_id: str | None = None
+    directory_path: str = ''
+    has_original: bool = True
     user: Optional[UserResponse] = None
     added_at: Optional[int] = None
 
@@ -754,7 +757,7 @@ class KnowledgeTable:
         if knowledge.user_id == user_id:
             return True
         if user_group_ids is None:
-            user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
+            user_groups = await Groups.get_groups_by_member_id(user_id, db=db, include_inherited=True)
             user_group_ids = {group.id for group in user_groups}
         return await AccessGrants.has_access(
             user_id=user_id,
@@ -986,7 +989,7 @@ class KnowledgeTable:
                     )
                 else:
                     stmt = (
-                        select(File, User, KnowledgeFile.created_at)
+                        select(File, User, KnowledgeFile.created_at, KnowledgeFile.directory_id)
                         .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
                         .outerjoin(User, User.id == KnowledgeFile.user_id)
                         .filter(KnowledgeFile.knowledge_id == knowledge_id)
@@ -1131,12 +1134,32 @@ class KnowledgeTable:
                             )
                         )
                 else:
-                    for file, user, added_at in items:
+                    directories = {
+                        directory.id: directory for directory in await self.get_all_directories(knowledge_id, db=db)
+                    }
+                    paths = {}
+
+                    def directory_path(directory_id):
+                        if directory_id not in paths:
+                            names, seen = [], set()
+                            current = directory_id
+                            while current in directories and current not in seen:
+                                seen.add(current)
+                                directory = directories[current]
+                                names.append(directory.name)
+                                current = directory.parent_id
+                            paths[directory_id] = '/'.join(reversed(names))
+                        return paths[directory_id]
+
+                    for file, user, added_at, directory_id in items:
                         # File.data is deferred — construct explicitly so we never
                         # touch (and lazy-load) the deferred column in async.
                         files.append(
                             FileUserResponse(
                                 id=file.id,
+                                directory_id=directory_id,
+                                directory_path=directory_path(directory_id),
+                                has_original=bool(file.path),
                                 user_id=file.user_id,
                                 hash=file.hash,
                                 filename=file.filename,
@@ -1170,6 +1193,7 @@ class KnowledgeTable:
                         for directory in directories
                     ],
                     breadcrumbs=await self.get_directory_breadcrumbs(
+                        knowledge_id,
                         filter.get('directory_id') if filter else None,
                         db=db,
                     ),
@@ -1961,6 +1985,7 @@ class KnowledgeTable:
 
     async def get_directory_breadcrumbs(
         self,
+        knowledge_id: str,
         directory_id: Optional[str],
         db: Optional[AsyncSession] = None,
     ) -> list[KnowledgeDirectoryModel]:
@@ -1975,7 +2000,10 @@ class KnowledgeTable:
 
             while current_id and current_id not in seen:
                 seen.add(current_id)
-                result = await db.execute(select(KnowledgeDirectory).filter_by(id=current_id))
+                # Scoped by knowledge base so a caller-supplied id cannot walk another one's tree.
+                result = await db.execute(
+                    select(KnowledgeDirectory).filter_by(id=current_id, knowledge_id=knowledge_id)
+                )
                 directory = result.scalars().first()
                 if not directory:
                     break
@@ -2126,6 +2154,26 @@ class KnowledgeTable:
         child_ids = [row[0] for row in result.all()]
         for child_id in child_ids:
             await self._delete_files_in_subtree(child_id, db=db)
+
+    async def get_files_by_id_and_directory_id(
+        self,
+        knowledge_id: str,
+        directory_id: str,
+        db: Optional[AsyncSession] = None,
+    ) -> list[FileModel]:
+        """Get all files in a directory and its subdirectories."""
+        async with get_async_db_context(db) as db:
+            directory_ids = [directory_id]
+            for parent_id in directory_ids:
+                result = await db.execute(select(KnowledgeDirectory.id).filter_by(parent_id=parent_id))
+                directory_ids.extend(result.scalars().all())
+            result = await db.execute(
+                select(File)
+                .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
+                .filter(KnowledgeFile.knowledge_id == knowledge_id)
+                .filter(KnowledgeFile.directory_id.in_(directory_ids))
+            )
+            return [FileModel.model_validate(file) for file in result.scalars().all()]
 
     async def move_file_to_directory(
         self,

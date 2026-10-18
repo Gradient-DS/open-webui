@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolveLocalizedResource } from '$lib/utils/localizedContent';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -46,7 +47,7 @@
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import ChevronUp from '../icons/ChevronUp.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<typeof import('$lib/i18n').default>('i18n');
 
 	let shiftKey = false;
 
@@ -116,6 +117,9 @@
 					(selectedType !== '' ? f.type === selectedType : true) &&
 					(query === '' ||
 						f.name.toLowerCase().includes(query.toLowerCase()) ||
+						resolveLocalizedResource(f, $i18n.language)
+							.toLowerCase()
+							.includes(query.toLowerCase()) ||
 						f.id.toLowerCase().includes(query.toLowerCase()) ||
 						(f.user?.name || '').toLowerCase().includes(query.toLowerCase()) ||
 						(f.user?.email || '').toLowerCase().includes(query.toLowerCase()) ||
@@ -363,7 +367,7 @@
 								},
 								{
 									id: 'functions-import-link',
-									label: $i18n.t('Import From Link'),
+									label: $i18n.t('Import from URL'),
 									onClick: () => {
 										showImportModal = true;
 									}
@@ -522,7 +526,7 @@
 													<div
 														class="truncate text-[0.8125rem] leading-5 text-gray-800 group-hover:underline dark:text-gray-200"
 													>
-														{func.name}
+														{resolveLocalizedResource(func, $i18n.language)}
 													</div>
 												</Tooltip>
 
@@ -534,26 +538,32 @@
 													</div>
 												{/if}
 
-												<Tooltip content={dayjs(func.updated_at * 1000).format('LLLL')}>
+												<Tooltip
+													content={dayjs(func.updated_at * 1000)
+														.locale($i18n.language)
+														.format('LLLL')}
+												>
 													<div
 														class="shrink-0 truncate text-[0.6875rem] leading-5 text-gray-400 dark:text-gray-600"
 													>
-														{dayjs(func.updated_at * 1000).fromNow()}
+														{dayjs(func.updated_at * 1000)
+															.locale($i18n.language)
+															.fromNow()}
 													</div>
 												</Tooltip>
 											</div>
 										</div>
 
-										{#if func?.meta?.description}
+										{#if resolveLocalizedResource(func, $i18n.language, 'description')}
 											<Tooltip
-												content={func?.meta?.description}
+												content={resolveLocalizedResource(func, $i18n.language, 'description')}
 												className="min-w-0"
 												placement="top-start"
 											>
 												<div
 													class="mt-0.5 truncate text-[0.6875rem] leading-4 text-gray-400 dark:text-gray-600"
 												>
-													{func?.meta?.description}
+													{resolveLocalizedResource(func, $i18n.language, 'description')}
 												</div>
 											</Tooltip>
 										{/if}
@@ -739,7 +749,7 @@
 
 		{#if $config?.features.enable_community_sharing}
 			<CommunityDiscover
-				href="https://openwebui.com/functions"
+				href="https://openwebui.com/search?type=function"
 				title={$i18n.t('Discover a function')}
 				description={$i18n.t('Discover, download, and explore custom functions')}
 			/>
@@ -754,7 +764,9 @@
 		}}
 	>
 		<div class=" text-sm text-gray-500 truncate">
-			{$i18n.t('This will delete')} <span class="  font-normal">{selectedFunction.name}</span>.
+			{$i18n.t('This will delete')}
+			<span class="  font-normal">{resolveLocalizedResource(selectedFunction, $i18n.language)}</span
+			>.
 		</div>
 	</DeleteConfirmDialog>
 
@@ -763,6 +775,7 @@
 		bind:show={showValvesModal}
 		type="function"
 		id={selectedFunction?.id ?? null}
+		meta={selectedFunction?.meta}
 		on:save={async () => {
 			await tick();
 			models.set(

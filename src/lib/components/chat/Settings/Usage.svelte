@@ -122,6 +122,8 @@
 		]
 	];
 
+	// Keep dynamically translated mode labels visible to i18next-parser.
+	// $i18n.t('Daily'); $i18n.t('Weekly'); $i18n.t('Cumulative');
 	const heatmapModes: Array<{ value: HeatmapMode; label: string }> = [
 		{ value: 'daily', label: 'Daily' },
 		{ value: 'weekly', label: 'Weekly' },
@@ -197,7 +199,9 @@
 			}
 
 			labels.push({
-				label: new Date(`${entry.date}T00:00:00`).toLocaleString(undefined, { month: 'short' }),
+				label: new Date(`${entry.date}T00:00:00`).toLocaleString($i18n.language, {
+					month: 'short'
+				}),
 				column,
 				span: Math.min(MIN_MONTH_LABEL_GAP, columns - column + 1)
 			});
@@ -271,7 +275,9 @@
 
 <div class="flex h-full min-h-0 flex-col">
 	<div class="mb-4">
-		<h2 class="text-sm font-medium text-gray-900 dark:text-white">{$i18n.t('Usage')}</h2>
+		<h2 class="text-sm font-medium text-gray-900 dark:text-white">
+			{$i18n.t('settings.personal.usage.title')}
+		</h2>
 	</div>
 
 	{#if loading}
@@ -284,7 +290,7 @@
 		</div>
 	{:else}
 		<div class="scrollbar-hover min-h-0 flex-1 overflow-y-auto pr-1.5">
-			<UserSettingSection title={$i18n.t('Overview')} first>
+			<UserSettingSection title={$i18n.t('settings.personal.usage.sections.overview.title')} first>
 				<div class="grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-5">
 					<div>
 						<div class="text-sm font-medium text-gray-900 dark:text-white">
@@ -406,13 +412,15 @@
 			</section>
 
 			{#if !hasUsage}
-				<UserSettingSection title={$i18n.t('Activity')}>
+				<UserSettingSection title={$i18n.t('settings.personal.usage.sections.activity.title')}>
 					<div class="text-xs text-gray-500 dark:text-gray-400">
 						{$i18n.t('No usage data found')}
 					</div>
 				</UserSettingSection>
 			{:else}
-				<UserSettingSection title={$i18n.t('Activity insights')}>
+				<UserSettingSection
+					title={$i18n.t('settings.personal.usage.sections.activityInsights.title')}
+				>
 					<UserSettingRow label={$i18n.t('Models')}>
 						<span class="text-xs text-gray-900 dark:text-white">
 							{usage.totals.models_used.toLocaleString()}
@@ -446,7 +454,7 @@
 					</UserSettingRow>
 				</UserSettingSection>
 
-				<UserSettingSection title={$i18n.t('Top models')}>
+				<UserSettingSection title={$i18n.t('settings.personal.usage.sections.topModels.title')}>
 					{#if usage.top_models.length === 0}
 						<div class="text-xs text-gray-500 dark:text-gray-400">
 							{$i18n.t('No model usage found')}
@@ -464,7 +472,9 @@
 				</UserSettingSection>
 
 				{#if usage.top_tools.length > 0}
-					<UserSettingSection title={$i18n.t('Most used tools')}>
+					<UserSettingSection
+						title={$i18n.t('settings.personal.usage.sections.mostUsedTools.title')}
+					>
 						{#each usage.top_tools as tool}
 							<UserSettingRow label={tool.name}>
 								<span class="text-xs text-gray-500 dark:text-gray-400">

@@ -32,11 +32,29 @@
 	import { LIVE_DOCUMENT_STATES } from '$lib/utils/toolState';
 	import { toast } from 'svelte-sonner';
 
-	import { config, user, tools as _tools, skills as _skills, toolServers } from '$lib/stores';
+	import {
+		chatId,
+		config,
+		functions as localizedFunctions,
+		selectedTerminalId,
+		settings,
+		terminalServers,
+		terminalSkills,
+		user,
+		tools as _tools,
+		skills as _skills,
+		toolServers
+	} from '$lib/stores';
 
 	import { deleteOAuthSession } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
+	import {
+		listTerminalSkills,
+		resolveTerminalConnection,
+		type TerminalSkill
+	} from '$lib/apis/terminal';
+	import { resolveLocalizedResource, resolveLocalizedFunction } from '$lib/utils/localizedContent';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
@@ -121,6 +139,7 @@
 
 	export let onUpload: ChatInputCallbacks['onUpload'];
 	export let onClose: () => void;
+	export let onCompare: () => void = () => {};
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: (mode: string) => void = () => {};
 
@@ -214,16 +233,16 @@
 		show = true;
 	};
 
-	const toolApprovalModes = [
+	$: toolApprovalModes = [
 		{
 			value: 'full',
-			label: 'Full access',
-			description: 'Run tools without asking for approval.'
+			label: $i18n.t('Full access'),
+			description: $i18n.t('Run tools without asking for approval.')
 		},
 		{
 			value: 'ask',
-			label: 'Ask for approval',
-			description: 'Stop before each tool call until you allow or deny it.'
+			label: $i18n.t('Ask for approval'),
+			description: $i18n.t('Stop before each tool call until you allow or deny it.')
 		}
 	];
 
@@ -255,6 +274,8 @@
 	$: showUploadFiles = itemAllowed('upload_files');
 	$: showCapture = itemAllowed('capture') && isFeatureEnabled('capture');
 	$: showWebpage = itemAllowed('attach_webpage') && isFeatureEnabled('webpage_url');
+	// Upstream's "Compare text" item; not pinnable.
+	$: showCompare = itemAllowed('compare');
 	$: showNotes = itemAllowed('attach_notes') && ($config?.features?.enable_notes ?? false);
 	$: showMeetings = itemAllowed('attach_meetings') && $meetingsAvailable;
 	$: showGoogleDrive =
@@ -293,6 +314,7 @@
 		showUploadFiles ||
 		showCapture ||
 		showWebpage ||
+		showCompare ||
 		showNotes ||
 		showMeetings ||
 		showGoogleDrive ||
@@ -388,14 +410,22 @@
 
 	const setTools = (toolItems: IntegrationItem[] | null, query = '') => {
 		const q = query.trim().toLowerCase();
-		const items = (toolItems ?? []).reduce<Record<string, IntegrationItem>>((a, tool) => {
-			a[tool.id] = {
-				...tool,
-				name: tool.name,
-				description: tool.meta?.description
-			};
-			return a;
-		}, {});
+		const items = (toolItems ?? [])
+			.filter(
+				(tool) =>
+					!q ||
+					`${tool.name} ${resolveLocalizedResource(tool, $i18n.language)} ${resolveLocalizedResource(tool, $i18n.language, 'description')}`
+						.toLowerCase()
+						.includes(q)
+			)
+			.reduce<Record<string, IntegrationItem>>((a, tool) => {
+				a[tool.id] = {
+					...tool,
+					name: tool.name,
+					description: tool.meta?.description
+				};
+				return a;
+			}, {});
 
 		const servers = ($toolServers ?? []) as {
 			url: string;
@@ -422,7 +452,14 @@
 
 	const setSkills = (skillItems: IntegrationItem[] | null, query = '') => {
 		skills = (skillItems ?? [])
-			.filter((skill) => skill.is_active)
+			.filter(
+				(skill) =>
+					skill.is_active &&
+					(!query.trim() ||
+						`${skill.name} ${resolveLocalizedResource(skill, $i18n.language)} ${resolveLocalizedResource(skill, $i18n.language, 'description')}`
+							.toLowerCase()
+							.includes(query.trim().toLowerCase()))
+			)
 			.reduce<Record<string, IntegrationItem>>((a, skill) => {
 				a[skill.id] = {
 					...skill,
@@ -433,17 +470,26 @@
 			}, {});
 	};
 
+	// Terminal skills (upstream): listed next to workspace skills, tagged by source.
+	const getTerminalSkillItems = async (): Promise<TerminalSkill[]> => {
+		const connection = resolveTerminalConnection(
+			$selectedTerminalId,
+			$terminalServers ?? [],
+			$settings?.terminalServers ?? [],
+			localStorage.token
+		);
+		const items = await listTerminalSkills(connection, $chatId || null).catch(() => []);
+		terminalSkills.set(items);
+		return items;
+	};
+
+	const skillSourceLabel = (skill: IntegrationItem | undefined) =>
+		skill?.source === 'terminal' ? $i18n.t('Terminal') : '';
+
 	const loadTools = async (query = toolQuery) => {
 		const requestId = ++toolRequestId;
 		const q = query.trim();
 		searchedToolQuery = query;
-
-		if (q) {
-			const toolItems = await getTools(localStorage.token, q).catch(() => []);
-			if (requestId !== toolRequestId) return;
-			setTools(toolItems, q);
-			return;
-		}
 
 		if ($_tools === null) {
 			await _tools.set(await getTools(localStorage.token));
@@ -457,18 +503,13 @@
 		const q = query.trim();
 		searchedSkillQuery = query;
 
-		if (q) {
-			const skillItems = await getSkills(localStorage.token, q).catch(() => []);
-			if (requestId !== skillRequestId) return;
-			setSkills(skillItems, q);
-			return;
-		}
-
 		if ($_skills === null) {
 			await _skills.set(await getSkills(localStorage.token));
 		}
 		if (requestId !== skillRequestId) return;
-		setSkills($_skills, q);
+		const terminalItems = await getTerminalSkillItems();
+		if (requestId !== skillRequestId) return;
+		setSkills([...($_skills ?? []), ...terminalItems], q);
 	};
 
 	const scheduleToolSearch = () => {
@@ -553,6 +594,10 @@
 		if (webSearchEnabled && imageGenerationEnabled) {
 			toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
 			imageGenerationEnabled = false;
+		}
+		// Left open, this menu would swallow the first click on the confirmation dialog (#31976).
+		if (wasOff && webSearchEnabled && $config?.features?.enable_web_search_confirmation) {
+			closeMenu();
 		}
 		// The confirmation flow cares about web search becoming possible, not about Altijd.
 		if (wasOff !== !webSearchEnabled) onWebSearchToggle(webSearchEnabled);
@@ -707,6 +752,32 @@
 							}}
 						>
 							<Link slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
+					{#if showCompare}
+						<MenuItem
+							label={$i18n.t('Compare text')}
+							onClick={async () => {
+								closeMenu();
+								await tick();
+								onCompare();
+							}}
+						>
+							<svg
+								slot="icon"
+								class="size-3.5 shrink-0"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.5"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<rect x="3" y="4" width="18" height="16" rx="2" />
+								<path d="M12 4v16M5.5 12h4M14.5 12h4M16.5 10v4" />
+							</svg>
 						</MenuItem>
 					{/if}
 
@@ -998,11 +1069,16 @@
 					{#if showFilters}
 						{#each sortedToggleFilters as filter (filter.id)}
 							<MenuItem
-								label={filter.name}
+								label={resolveLocalizedFunction(filter, $localizedFunctions, $i18n.language)}
 								pinId={`filter:${filter.id}`}
 								toggle={selectedFilterIds.includes(filter.id)}
 								tooltipPlacement="top-start"
-								tooltip={filter?.description ?? ''}
+								tooltip={resolveLocalizedFunction(
+									filter,
+									$localizedFunctions,
+									$i18n.language,
+									'description'
+								) ?? ''}
 								onClick={() => toggleFilter(filter.id)}
 							>
 								<svelte:fragment slot="icon">
@@ -1013,7 +1089,7 @@
 												? 'dark:invert-[80%]'
 												: ''}"
 											style="fill: currentColor;"
-											alt={filter.name}
+											alt={resolveLocalizedFunction(filter, $localizedFunctions, $i18n.language)}
 										/>
 									{:else}
 										<Sparkles className="size-3.5" strokeWidth="1.75" />
@@ -1222,16 +1298,21 @@
 											{/if}
 											<div class="flex-1 truncate">
 												<div class="flex flex-1 gap-2 items-center">
-													<Tooltip content={tools?.[toolId]?.name ?? ''} placement="top">
+													<Tooltip
+														content={resolveLocalizedResource(tools?.[toolId], $i18n.language, 'name')}
+														placement="top"
+													>
 														<div class="shrink-0">
 															<Wrench className="size-3.5" />
 														</div>
 													</Tooltip>
 													<Tooltip
-														content={tools?.[toolId]?.description ?? ''}
+														content={resolveLocalizedResource(tools?.[toolId], $i18n.language, 'description')}
 														placement="top-start"
 													>
-														<div class=" truncate">{tools?.[toolId]?.name}</div>
+														<div class=" truncate">
+															{resolveLocalizedResource(tools?.[toolId], $i18n.language, 'name')}
+														</div>
 													</Tooltip>
 												</div>
 											</div>
@@ -1322,17 +1403,27 @@
 										>
 											<div class="flex-1 truncate">
 												<div class="flex flex-1 gap-2 items-center">
-													<Tooltip content={skills?.[skillId]?.name ?? ''} placement="top">
+													<Tooltip
+														content={resolveLocalizedResource(skills?.[skillId], $i18n.language, 'name')}
+														placement="top"
+													>
 														<div class="shrink-0">
 															<Cube className="size-3.5" strokeWidth="1.75" />
 														</div>
 													</Tooltip>
 													<Tooltip
-														content={skills?.[skillId]?.description ?? ''}
+														content={resolveLocalizedResource(skills?.[skillId], $i18n.language, 'description')}
 														placement="top-start"
 													>
-														<div class=" truncate">{skills?.[skillId]?.name}</div>
+														<div class=" truncate">
+															{resolveLocalizedResource(skills?.[skillId], $i18n.language, 'name')}
+														</div>
 													</Tooltip>
+													{#if skillSourceLabel(skills?.[skillId])}
+														<div class="shrink-0 text-[0.6875rem] text-gray-500 dark:text-gray-400">
+															{skillSourceLabel(skills?.[skillId])}
+														</div>
+													{/if}
 												</div>
 											</div>
 

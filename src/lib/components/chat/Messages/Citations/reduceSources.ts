@@ -34,6 +34,8 @@ export interface RawSourceMeta {
 	// citation of the same file): "document" = whole-document read, no
 	// passage-level provenance — skip highlight attempts for this snippet.
 	granularity?: string;
+	// Upstream: an external source keeps its own name instead of the URL.
+	external?: boolean;
 	chunk_id?: string;
 	html?: string;
 	parameters?: unknown;
@@ -102,7 +104,7 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 				_source = { ..._source, name: metadata.name };
 			}
 			if (id.startsWith('http://') || id.startsWith('https://')) {
-				_source = { ..._source, name: id, url: id };
+				_source = { ..._source, name: metadata?.external ? _source.name : id, url: id };
 			}
 
 			let entry = acc.find((item) => item.id === id);

@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
+import { resolveBuildInfo } from './scripts/build-info.js';
 
 import { createReadStream, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,19 +38,43 @@ function ortWasm(): Plugin {
 	};
 }
 
+// [Gradient] Emits the vendored encryption build's third-party licenses to
+// licenses/encryption/, which upstream does with vite-plugin-static-copy.
+const encryptionLicensesFile = 'src/lib/encryption/vendor/THIRD_PARTY_LICENSES.txt';
+
+function encryptionLicenses(): Plugin {
+	return {
+		name: 'gradient:encryption-licenses',
+		generateBundle() {
+			if (this.environment.config.consumer !== 'client') return;
+			this.emitFile({
+				type: 'asset',
+				fileName: 'licenses/encryption/THIRD_PARTY_LICENSES.txt',
+				source: readFileSync(encryptionLicensesFile)
+			});
+		}
+	};
+}
+
 // [Gradient] An allocated dev-stack port takes precedence over the upstream URL override.
 const backendTarget = process.env.OWUI_BE_PORT
 	? `http://localhost:${process.env.OWUI_BE_PORT}`
 	: process.env.WEBUI_BACKEND_URL || 'http://localhost:8080';
+const buildInfo = resolveBuildInfo();
 
 export default defineConfig({
+	resolve: {
+		conditions: ['onnxruntime-web-use-extern-wasm']
+	},
 	plugins: [
 		sveltekit(),
-		ortWasm() // [Gradient]
+		ortWasm(), // [Gradient]
+		encryptionLicenses() // [Gradient]
 	],
 	define: {
 		APP_VERSION: JSON.stringify(process.env.npm_package_version),
-		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
+		APP_BUILD_HASH: JSON.stringify(buildInfo.hash),
+		APP_BUILD_CHANNEL: JSON.stringify(buildInfo.channel)
 	},
 	server: {
 		// Proxy target is env-driven so soev's multi-stack dev workflow

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { getContext, onMount } from 'svelte';
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	import { WEBUI_NAME, models, MODEL_DOWNLOAD_POOL, user, config, settings } from '$lib/stores';
 	import { splitStream } from '$lib/utils';
@@ -54,13 +54,9 @@
 	let createModelDigest = '';
 	let createModelPullProgress = null;
 
-	let digest = '';
-	let pullProgress = null;
-
 	let modelUploadMode = 'file';
 	let modelInputFile: File[] | null = null;
 	let modelFileUrl = '';
-	let modelFileContent = `TEMPLATE """{{ .System }}\nUSER: {{ .Prompt }}\nASSISTANT: """\nPARAMETER num_ctx 4096\nPARAMETER stop "</s>"\nPARAMETER stop "USER:"\nPARAMETER stop "ASSISTANT:"`;
 	let modelFileDigest = '';
 
 	let uploadProgress = null;
@@ -300,7 +296,6 @@
 
 		let uploaded = false;
 		let fileResponse = null;
-		let name = '';
 
 		if (modelUploadMode === 'file') {
 			const file = modelInputFile ? modelInputFile[0] : null;
@@ -353,13 +348,13 @@
 
 							if (data.done) {
 								modelFileDigest = data.blob;
-								name = data.name;
 								uploaded = true;
 							}
 						}
 					}
 				} catch (err) {
 					console.error(err);
+					toast.error(`${err}`);
 				}
 			}
 		} else {
@@ -368,65 +363,7 @@
 		}
 
 		if (uploaded) {
-			const res = await createModel(
-				localStorage.token,
-				`${name}:latest`,
-				`FROM @${modelFileDigest}\n${modelFileContent}`
-			);
-
-			if (res && res.ok) {
-				const reader = res.body
-					.pipeThrough(new TextDecoderStream())
-					.pipeThrough(splitStream('\n'))
-					.getReader();
-
-				while (true) {
-					const { value, done } = await reader.read();
-					if (done) break;
-
-					try {
-						let lines = value.split('\n');
-
-						for (const line of lines) {
-							if (line !== '') {
-								console.log(line);
-								let data = JSON.parse(line);
-								console.log(data);
-
-								if (data.error) {
-									throw data.error;
-								}
-								if (data.detail) {
-									throw data.detail;
-								}
-
-								if (data.status) {
-									if (
-										!data.digest &&
-										!data.status.includes('writing') &&
-										!data.status.includes('sha256')
-									) {
-										toast.success(data.status);
-									} else {
-										if (data.digest) {
-											digest = data.digest;
-
-											if (data.completed) {
-												pullProgress = Math.round((data.completed / data.total) * 1000) / 10;
-											} else {
-												pullProgress = 100;
-											}
-										}
-									}
-								}
-							}
-						}
-					} catch (err) {
-						console.error(err);
-						toast.error(`${err}`);
-					}
-				}
-			}
+			toast.success($i18n.t('Model created successfully!'));
 		}
 
 		modelFileUrl = '';
@@ -488,7 +425,6 @@
 			MODEL_DOWNLOAD_POOL.set({
 				...$MODEL_DOWNLOAD_POOL
 			});
-			await deleteModel(localStorage.token, model);
 			toast.success($i18n.t('{{model}} download has been canceled', { model: model }));
 		}
 	};
@@ -517,6 +453,13 @@
 			toast.error(`${error}`);
 			return null;
 		});
+
+		if (res && !res.ok) {
+			createModelLoading = false;
+			const error = await res.json();
+			toast.error(error.detail);
+			return;
+		}
 
 		if (res && res.ok) {
 			const reader = res.body
@@ -623,7 +566,7 @@
 						</div>
 
 						<div>
-							<Tooltip content="Update All Models" placement="top">
+							<Tooltip content={$i18n.t('Update All Models')} placement="top">
 								<button
 									class="flex gap-2 items-center bg-transparent rounded-lg transition"
 									aria-label={$i18n.t('Update All Models')}
@@ -726,7 +669,10 @@
 
 					{#if updateModelId}
 						<div class="text-xs flex justify-between items-center">
-							<div>Updating "{updateModelId}" {updateProgress ? `(${updateProgress}%)` : ''}</div>
+							<div>
+								{$i18n.t('Updating "{{modelId}}"', { modelId: updateModelId })}
+								{updateProgress ? `(${updateProgress}%)` : ''}
+							</div>
 
 							<Tooltip content={$i18n.t('Cancel')}>
 								<button
@@ -915,7 +861,7 @@
 
 					{#if createModelDigest !== ''}
 						<div class="flex flex-col mt-1">
-							<div class="font-normal mb-1">{createModelTag}</div>
+							<div class="font-normal mb-1">{createModelName}</div>
 							<div class="">
 								<div class="flex flex-row justify-between space-x-4 pr-2">
 									<div class=" flex-1">
@@ -1075,20 +1021,6 @@
 							{/if}
 						</div>
 
-						{#if (modelUploadMode === 'file' && modelInputFile && modelInputFile.length > 0) || (modelUploadMode === 'url' && modelFileUrl !== '')}
-							<div>
-								<div>
-									<div class=" my-2.5 text-sm font-normal">
-										{$i18n.t('Modelfile Content')}
-									</div>
-									<textarea
-										bind:value={modelFileContent}
-										class="{textareaClass} resize-none"
-										rows="6"
-									/>
-								</div>
-							</div>
-						{/if}
 						<div class=" mt-1 text-xs text-gray-400 dark:text-gray-500">
 							{$i18n.t('To access the GGUF models available for downloading,')}
 							<a

@@ -20,7 +20,6 @@
 	import { getChatsByFolderId } from '$lib/apis/chats';
 
 	import FolderModal from '$lib/components/layout/Sidebar/Folders/FolderModal.svelte';
-	import FolderShareModal from '$lib/components/layout/Sidebar/Folders/FolderShareModal.svelte';
 
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -38,19 +37,18 @@
 
 	let showFolderModal = false;
 	let showCreateSubFolderModal = false;
-	let showShareModal = false;
 	let showDeleteConfirm = false;
 	let deleteFolderContents = true;
 
 	const updateHandler = async ({ name, meta, data }) => {
-		if (name === '') {
+		name = name?.trim();
+		if (!name) {
 			toast.error($i18n.t('Folder name cannot be empty.'));
 			return;
 		}
 
 		const currentName = folder.name;
 
-		name = name.trim();
 		folder.name = name;
 
 		const res = await updateFolderById(localStorage.token, folder.id, {
@@ -140,12 +138,11 @@
 	};
 
 	const createSubFolderHandler = async ({ name, meta, data, parent_id }) => {
-		if (name === '') {
+		name = name?.trim();
+		if (!name) {
 			toast.error($i18n.t('Folder name cannot be empty.'));
 			return;
 		}
-
-		name = name.trim();
 
 		const res = await createNewFolder(localStorage.token, {
 			name,
@@ -177,8 +174,6 @@
 		parentId={folder.id}
 		onSubmit={createSubFolderHandler}
 	/>
-
-	<FolderShareModal bind:show={showShareModal} {folder} />
 
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}
@@ -251,9 +246,6 @@
 					align="end"
 					onEdit={() => {
 						showFolderModal = true;
-					}}
-					onShare={() => {
-						showShareModal = true;
 					}}
 					onDelete={() => {
 						showDeleteConfirm = true;

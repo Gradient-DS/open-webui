@@ -35,7 +35,7 @@ async def settled(system: list[dict]) -> tuple[dict, dict]:
     }
     metadata = {'chat_id': 'local:chat-1', 'route_to_agent': True}
     user = SimpleNamespace(id='alice', role='admin')
-    form_data, metadata, _ = await middleware.process_chat_payload(
+    form_data, metadata, _, _ = await middleware.process_chat_payload(
         request, form_data, user, metadata, {'id': 'agent', 'info': {}}
     )
     return form_data, metadata

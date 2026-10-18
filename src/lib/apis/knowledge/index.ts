@@ -392,7 +392,8 @@ export const searchKnowledgeBases = async (
 	type: string | null = null,
 	source: string | null = null,
 	orderBy: string | null = null,
-	direction: string | null = null
+	direction: string | null = null,
+	signal?: AbortSignal
 ) => {
 	let error = null;
 
@@ -407,6 +408,7 @@ export const searchKnowledgeBases = async (
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/knowledge/search?${searchParams.toString()}`, {
 		method: 'GET',
+		signal,
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
@@ -421,6 +423,7 @@ export const searchKnowledgeBases = async (
 			return json;
 		})
 		.catch((err) => {
+			if (signal?.aborted) return null;
 			error = err.detail;
 			console.error(err);
 			return null;

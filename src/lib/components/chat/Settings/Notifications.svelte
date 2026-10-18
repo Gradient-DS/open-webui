@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { canUseNotificationTargets } from '$lib/utils/settings-access';
 	import { getContext, onMount } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
@@ -25,13 +26,20 @@
 	let notificationEnabled = false;
 	let notificationSound = true;
 	let targets: NotificationTarget[] = [];
+	// Keep dynamically translated event keys visible to i18next-parser.
+	// $i18n.t('Chat finished'); $i18n.t('A chat run finished successfully.');
+	// $i18n.t('Chat failed'); $i18n.t('A chat run failed.');
 	let events: { event: string; label: string; description?: string }[] = [
 		{
 			event: 'chat.finished',
 			label: 'Chat finished',
 			description: 'A chat run finished successfully.'
 		},
-		{ event: 'chat.failed', label: 'Chat failed', description: 'A chat run failed.' }
+		{
+			event: 'chat.failed',
+			label: 'Chat failed',
+			description: 'A chat run failed.'
+		}
 	];
 	let loadingTargets = false;
 	let savingTarget = false;
@@ -46,22 +54,20 @@
 	};
 	let loadedTargets = false;
 
-	$: canUseWebhooks =
-		($config?.features as any)?.enable_user_webhooks &&
-		($user?.role === 'admin' || ($user?.permissions?.features?.webhooks ?? false));
+	$: canUseWebhooks = canUseNotificationTargets({ user: $user, config: $config });
 
 	$: if (canUseWebhooks && !loadedTargets) {
 		void loadTargets();
 	}
 
 	const toggleNotifications = async () => {
-		if (!notificationEnabled) {
+		if (notificationEnabled) {
 			const permission =
 				'Notification' in window ? await Notification.requestPermission() : 'denied';
 			if (permission === 'granted') {
-				notificationEnabled = true;
 				saveSettings({ notificationEnabled });
 			} else {
+				notificationEnabled = false;
 				toast.error(
 					$i18n.t(
 						'Response notifications cannot be activated as the website permissions have been denied. Please visit your browser settings to grant the necessary access.'
@@ -69,7 +75,6 @@
 				);
 			}
 		} else {
-			notificationEnabled = false;
 			saveSettings({ notificationEnabled });
 		}
 	};
@@ -188,17 +193,17 @@
 <div id="tab-notifications" class="flex h-full flex-col text-sm">
 	<div class="flex-1 min-h-0 w-full overflow-y-auto scrollbar-hover pr-1.5">
 		<h2 class="mb-4 text-sm font-medium text-gray-900 dark:text-white">
-			{$i18n.t('Notifications')}
+			{$i18n.t('settings.personal.notifications.title')}
 		</h2>
 
 		<div class="flex flex-col gap-2.5">
 			<label class="flex cursor-pointer items-center justify-between">
 				<span class="text-xs text-gray-600 dark:text-gray-400">
-					{$i18n.t('Browser Notifications')}
+					{$i18n.t('settings.personal.notifications.browserNotifications.label')}
 				</span>
 				<Switch
-					state={notificationEnabled}
-					ariaLabel={$i18n.t('Browser Notifications')}
+					bind:state={notificationEnabled}
+					ariaLabel={$i18n.t('settings.personal.notifications.browserNotifications.label')}
 					on:change={toggleNotifications}
 				/>
 			</label>
@@ -208,11 +213,11 @@
 
 			<label class="flex cursor-pointer items-center justify-between">
 				<span class="text-xs text-gray-600 dark:text-gray-400">
-					{$i18n.t('Notification Sound')}
+					{$i18n.t('settings.personal.notifications.notificationSound.label')}
 				</span>
 				<Switch
 					bind:state={notificationSound}
-					ariaLabel={$i18n.t('Notification Sound')}
+					ariaLabel={$i18n.t('settings.personal.notifications.notificationSound.label')}
 					on:change={() => {
 						saveSettings({ notificationSound });
 					}}
@@ -222,14 +227,14 @@
 			{#if canUseWebhooks}
 				<div class="mt-3 flex items-center justify-between">
 					<span class="text-xs font-medium text-gray-700 dark:text-gray-300">
-						{$i18n.t('Notification Targets')}
+						{$i18n.t('settings.personal.notifications.notificationTargets.label')}
 					</span>
 					<button
 						class="flex h-6 w-6 items-center justify-center rounded-lg text-gray-400 transition-colors duration-75 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300"
 						type="button"
 						on:click={openNewTarget}
-						title={$i18n.t('Add Notification Target')}
-						aria-label={$i18n.t('Add Notification Target')}
+						title={$i18n.t('settings.personal.notifications.addNotificationTarget.label')}
+						aria-label={$i18n.t('settings.personal.notifications.addNotificationTarget.label')}
 					>
 						<Plus className="size-3.5" strokeWidth="2" />
 					</button>
@@ -246,7 +251,7 @@
 						{#each targets as target, index}
 							{@const alertLabels = events
 								.filter((event) => target.events.includes(event.event))
-								.map((event) => event.label)
+								.map((event) => $i18n.t(event.label))
 								.join(', ')}
 							<div class="flex items-center gap-3 px-1 py-1.5">
 								<div class="min-w-0 flex-1">
@@ -341,7 +346,9 @@
 <Modal size="sm" bind:show={formOpen}>
 	<div class="p-4">
 		<h2 class="mb-3 text-sm font-medium text-gray-900 dark:text-white">
-			{editingId ? $i18n.t('Edit') : $i18n.t('Add Notification Target')}
+			{editingId
+				? $i18n.t('Edit')
+				: $i18n.t('settings.personal.notifications.addNotificationTarget.label')}
 		</h2>
 
 		<div class="text-[0.625rem] text-gray-400 dark:text-gray-600">
@@ -383,7 +390,7 @@
 					type="button"
 					on:click={() => toggleFormEvent(event.event)}
 				>
-					{event.label}
+					{$i18n.t(event.label)}
 				</button>
 			{/each}
 		</div>
@@ -422,7 +429,7 @@
 				{$i18n.t('Cancel')}
 			</button>
 			<button
-				class="text-[0.8125rem] text-gray-700 transition-colors duration-100 hover:text-gray-900 disabled:opacity-30 dark:text-gray-300 dark:hover:text-white"
+				class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 				type="button"
 				on:click={saveTarget}
 				disabled={savingTarget || (!editingId && !form.url.trim())}

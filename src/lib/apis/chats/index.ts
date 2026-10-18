@@ -1071,7 +1071,7 @@ export const cloneSharedChatById = async (token: string, id: string) => {
 	return res;
 };
 
-export const shareChatById = async (token: string, id: string) => {
+export const shareChatById = async (token: string, id: string, shareMode?: 'continue' | null) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/share`, {
@@ -1080,7 +1080,8 @@ export const shareChatById = async (token: string, id: string) => {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
 			...(token && { authorization: `Bearer ${token}` })
-		}
+		},
+		body: JSON.stringify({ share_mode: shareMode })
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
@@ -1202,7 +1203,12 @@ export const deleteSharedChatById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateChatAccessGrants = async (token: string, id: string, accessGrants: object[]) => {
+export const updateChatAccessGrants = async (
+	token: string,
+	id: string,
+	accessGrants: object[],
+	shareMode?: 'continue' | null
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/shared/${id}/access/update`, {
@@ -1213,7 +1219,8 @@ export const updateChatAccessGrants = async (token: string, id: string, accessGr
 			...(token && { authorization: `Bearer ${token}` })
 		},
 		body: JSON.stringify({
-			access_grants: accessGrants
+			access_grants: accessGrants,
+			share_mode: shareMode
 		})
 	})
 		.then(async (res) => {
@@ -1650,14 +1657,17 @@ export const exportChatStats = async (token: string, page: number = 1, params: o
 export const exportSingleChatStats = async (token: string, chatId: string) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/stats/export/${chatId}`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/chats/stats/export/${encodeURIComponent(chatId)}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				...(token && { authorization: `Bearer ${token}` })
+			}
 		}
-	})
+	)
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();

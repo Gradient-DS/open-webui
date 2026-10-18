@@ -115,6 +115,7 @@
 							done={messageDone || status?.done !== false}
 							forceVisible={true}
 							asHeader={true}
+							clamp={!showHistory || expandable}
 						/>
 					{/if}
 				</div>
@@ -179,6 +180,7 @@
 										status={item}
 										done={messageDone || item?.done !== false}
 										forceVisible={true}
+										clamp={false}
 									/>
 								{/if}
 							</div>

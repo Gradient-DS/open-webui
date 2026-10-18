@@ -5,7 +5,6 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import { downloadChatAsPDF } from '$lib/apis/utils';
 	import { copyToClipboard, createMessagesList } from '$lib/utils';
 	import { copyFormattedChat } from '$lib/utils/copy';
 	import { exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
@@ -115,50 +114,110 @@
 					document.body.appendChild(clonedElement);
 
 					// Override content-visibility so html2canvas can capture all messages
-					clonedElement.querySelectorAll('.message-listitem').forEach((el) => {
+					clonedElement.querySelectorAll('.message-virtualized').forEach((el) => {
 						el.style.contentVisibility = 'visible';
 					});
 
 					// Let the browser compute layout for the cloned element
 					await new Promise((r) => requestAnimationFrame(r));
 
-					const canvas = await html2canvas(clonedElement, {
-						backgroundColor: isDarkMode ? '#000' : '#fff',
-						useCORS: true,
-						scale: 2,
-						width: virtualWidth
-					});
-
-					document.body.removeChild(clonedElement);
-
 					const pdf = new jsPDF('p', 'mm', 'a4');
 					const pageWidthMM = 210;
 					const pageHeightMM = 297;
-					const pxPerPDFMM = canvas.width / pageWidthMM;
-					const pagePixelHeight = Math.floor(pxPerPDFMM * pageHeightMM);
+
+					const pagePixelHeight = Math.floor((virtualWidth * pageHeightMM) / pageWidthMM);
+					const rootTop = clonedElement.getBoundingClientRect().top;
+					const contentHeight = Math.ceil(clonedElement.getBoundingClientRect().height);
+
+					const blocks = [];
+					const trackedElements = new Set();
+					const collectBlocks = (element) => {
+						const children = Array.from(element.children);
+						const splittable =
+							children.length > 0 &&
+							(getComputedStyle(element).display === 'contents' ||
+								(element.getBoundingClientRect().height > pagePixelHeight / 4 &&
+									!Array.from(element.childNodes).some(
+										(childNode) =>
+											childNode.nodeType === Node.TEXT_NODE && childNode.textContent?.trim()
+									) &&
+									children.every(
+										(child) => !getComputedStyle(child).display.startsWith('inline')
+									)));
+
+						if (element !== clonedElement) trackedElements.add(element);
+
+						if (splittable) {
+							children.forEach(collectBlocks);
+						} else {
+							const { top, bottom } = element.getBoundingClientRect();
+							blocks.push({ element, top: top - rootTop, bottom: bottom - rootTop });
+						}
+					};
+					collectBlocks(clonedElement);
+
+					clonedElement.setAttribute('data-pdf-root', '');
 
 					let offsetY = 0;
 					let page = 0;
 
-					while (offsetY < canvas.height) {
-						const sliceHeight = Math.min(pagePixelHeight, canvas.height - offsetY);
-						const pageCanvas = document.createElement('canvas');
-						pageCanvas.width = canvas.width;
-						pageCanvas.height = sliceHeight;
-						const ctx = pageCanvas.getContext('2d');
-						ctx.drawImage(
-							canvas,
-							0,
-							offsetY,
-							canvas.width,
-							sliceHeight,
-							0,
-							0,
-							canvas.width,
-							sliceHeight
+					while (offsetY < contentHeight) {
+						const sliceHeight = Math.min(pagePixelHeight, contentHeight - offsetY);
+						const sliceBlocks = blocks.filter(
+							(block) => block.bottom > offsetY && block.top < offsetY + sliceHeight
 						);
-						const imgData = pageCanvas.toDataURL('image/jpeg', 0.7);
-						const imgHeightMM = (sliceHeight * pageWidthMM) / canvas.width;
+
+						const keptElements = new Set();
+						for (const { element } of sliceBlocks) {
+							for (
+								let current = element;
+								current && current !== clonedElement;
+								current = current.parentElement
+							) {
+								keptElements.add(current);
+							}
+						}
+
+						const anchor = sliceBlocks.find((block) => block.bottom > block.top);
+						anchor?.element.setAttribute('data-pdf-anchor', '');
+
+						const canvas = await html2canvas(clonedElement, {
+							backgroundColor: isDarkMode ? '#000' : '#fff',
+							useCORS: true,
+							logging: false,
+							scale: 2, // increase resolution
+							width: virtualWidth,
+							height: sliceHeight,
+							y: offsetY,
+							ignoreElements: (element) =>
+								(element.parentElement === document.body &&
+									element !== clonedElement &&
+									!['STYLE', 'LINK'].includes(element.tagName)) ||
+								(trackedElements.has(element) && !keptElements.has(element)),
+							onclone: (clonedDocument) => {
+								const clonedRoot = clonedDocument.querySelector('[data-pdf-root]');
+								const clonedAnchor = clonedDocument.querySelector('[data-pdf-anchor]');
+								if (!clonedRoot || !clonedAnchor) return;
+
+								const spacer = clonedDocument.createElement('div');
+								clonedRoot.prepend(spacer);
+
+								let spacerHeight = 0;
+								for (let pass = 0; pass < 2; pass++) {
+									spacerHeight +=
+										anchor.top -
+										(clonedAnchor.getBoundingClientRect().top -
+											clonedRoot.getBoundingClientRect().top);
+									spacer.style.height = `${spacerHeight}px`;
+								}
+							}
+						});
+
+						anchor?.element.removeAttribute('data-pdf-anchor');
+
+						const imgData = canvas.toDataURL('image/jpeg', 0.7);
+						const imgHeightMM = (sliceHeight * pageWidthMM) / virtualWidth;
+
 						if (page > 0) pdf.addPage();
 						if (isDarkMode) {
 							pdf.setFillColor(0, 0, 0);
@@ -168,6 +227,8 @@
 						offsetY += sliceHeight;
 						page++;
 					}
+
+					document.body.removeChild(clonedElement);
 
 					pdf.save(`chat-${chat.chat.title}.pdf`);
 					showFullMessages = false;
@@ -254,6 +315,7 @@
 {/if}
 
 <Dropdown
+	closeOnSelect
 	onOpenChange={(state) => {
 		if (state === false) {
 			onClose();
@@ -524,7 +586,9 @@
 					}}
 				>
 					<ArchiveBox className="size-3.5" strokeWidth="1.5" />
-					<div class="flex items-center">{$i18n.t('Archive')}</div>
+					<div class="flex items-center">
+						{chat?.archived ? $i18n.t('Unarchive') : $i18n.t('Archive')}
+					</div>
 				</button>
 
 				{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
@@ -542,7 +606,8 @@
 
 				<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
 
-				<div class="flex max-h-28 overflow-y-auto px-2 py-1">
+				<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+				<div class="flex max-h-28 overflow-y-auto px-2 py-1" on:click={(e) => e.preventDefault()}>
 					<Tags chatId={chat.id} />
 				</div>
 			{/if}

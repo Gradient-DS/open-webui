@@ -179,6 +179,13 @@ async def process_uploaded_file(
                 from open_webui.routers.knowledge import derive_relative_path_from_directory
 
                 directory_id = file_metadata.get('directory_id') if isinstance(file_metadata, dict) else None
+                if directory_id:
+                    directory = await Knowledges.get_directory_by_id(directory_id, db=db_session)
+                    if not directory or directory.knowledge_id != knowledge_id:
+                        log.warning(
+                            'Ignoring directory %s: not a directory of knowledge %s', directory_id, knowledge_id
+                        )
+                        directory_id = None
                 await derive_relative_path_from_directory(file_item.id, directory_id, db=db_session)
                 knowledge_file = await Knowledges.add_file_to_knowledge_by_id(
                     knowledge_id=knowledge_id,
@@ -641,7 +648,11 @@ async def upload_file_handler(
         log.exception(e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT('Error uploading file'),
+            detail=(
+                ERROR_MESSAGES.EMPTY_CONTENT
+                if isinstance(e, ValueError) and e.args == (ERROR_MESSAGES.EMPTY_CONTENT,)
+                else ERROR_MESSAGES.DEFAULT('Error uploading file')
+            ),
         )
 
 
@@ -931,12 +942,16 @@ async def update_file_data_content_by_id(
             raise
         except Exception as e:
             log.exception(e)
-            log.error(f'Error processing file: {file.id}')
+            log.error(f'Error processing file: {id}')
+            raise HTTPException(
+                status_code=500, detail='Failed to process indexed text. Your changes were not fully indexed.'
+            ) from e
 
         # Propagate content change to all knowledge collections referencing
         # this file.  Without this the old embeddings remain in the knowledge
         # collection and RAG returns both stale and current data (#20558).
         knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db) if configured() else []
+        failed_collections = []
         for knowledge in knowledges:
             try:
                 await process_file(
@@ -949,6 +964,7 @@ async def update_file_data_content_by_id(
                 raise
             except Exception as e:
                 log.warning(f'Failed to update knowledge {knowledge.id} after content change for file {id}: {e}')
+                failed_collections.append(knowledge.id)
 
         await publish_event(
             request,
@@ -957,6 +973,11 @@ async def update_file_data_content_by_id(
             subject_id=id,
             data={'content_preview': form_data.content[:300]},
         )
+        if failed_collections:
+            raise HTTPException(
+                status_code=500,
+                detail='Indexed text was saved, but some knowledge collections could not be reindexed. Retry saving to complete indexing.',
+            )
         return {'content': file.data.get('content', '')}
     else:
         raise HTTPException(
@@ -998,6 +1019,8 @@ async def get_file_content_by_id_inline(
         if (file.meta or {}).get('source'):
             return await stream_original(file, user, attachment=attachment)
         try:
+            if not file.path:
+                raise HTTPException(status_code=404, detail='Original file is unavailable.')
             file_path = await asyncio.to_thread(Storage.get_file, file.path)
             file_path = Path(file_path)
 
@@ -1131,12 +1154,10 @@ async def get_file_content_by_id(
             # Check if the file already exists in the cache
             if file_path.is_file():
                 return FileResponse(file_path, headers=headers)
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=ERROR_MESSAGES.NOT_FOUND,
-                )
-        else:
+
+        # Legacy records can retain a path after their original upload has disappeared.
+        # Preserve their indexed text as the download fallback.
+        if not file_path or not file_path.is_file():
             # File path doesn’t exist, return the content as .txt if possible
             file_content = file.data.get('content', '')
             file_name = file.filename

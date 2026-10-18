@@ -44,7 +44,11 @@ describe('calculateShowRelevance', () => {
 		expect(calculateShowRelevance([{ distances: [0.87, 0.7, 42] }])).toBe(false);
 	});
 
-	it('hides relevance when no source carried a score', () => {
+	it('shows relevance for a single score', () => {
+		expect(calculateShowRelevance([{ distances: [0.87] }, { distances: [undefined] }])).toBe(true);
+	});
+
+		it('hides relevance when no source carried a score', () => {
 		expect(calculateShowRelevance([{ distances: [undefined, undefined] }, {}])).toBe(false);
 	});
 

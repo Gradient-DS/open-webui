@@ -17,34 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The fork ships no chromadb (#274), so the upstream default VECTOR_DB=chroma
-    # cannot start; boot against Weaviate, the store the tenants run.
+    # cannot start; boot against pgvector, the store the tenants move to.
     env:
-      VECTOR_DB: weaviate
-      ENABLE_WEAVIATE_MULTITENANCY_MODE: 'true'
-      WEAVIATE_HTTP_HOST: localhost
-      WEAVIATE_HTTP_PORT: '8090'
-      WEAVIATE_GRPC_HOST: localhost
-      WEAVIATE_GRPC_PORT: '50051'
+      VECTOR_DB: pgvector
+      PGVECTOR_DB_URL: postgresql://postgres:postgres@localhost:5432/postgres
     services:
-      weaviate:
-        image: semitechnologies/weaviate:1.35.0
-        env:
-          AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
-          PERSISTENCE_DATA_PATH: /var/lib/weaviate
-          DEFAULT_VECTORIZER_MODULE: none
-          ENABLE_MODULES: ''
-          DISABLE_TELEMETRY: 'true'
-          CLUSTER_HOSTNAME: node1
-        options: >-
-          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/v1/.well-known/ready"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
-        ports:
-          - 8090:8080
-          - 50051:50051
       postgres:
-        image: postgres
+        image: pgvector/pgvector:0.8.6-pg16
         env:
           POSTGRES_PASSWORD: postgres
         options: >-

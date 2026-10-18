@@ -3,7 +3,7 @@
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 
-	import { formatFileSize, getLineCount } from '$lib/utils';
+	import { formatFileSize, getLineCount, safeLinkUrl } from '$lib/utils';
 	import { readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
@@ -18,7 +18,7 @@
 	import CodeBlock from '$lib/components/chat/Messages/CodeBlock.svelte';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	const CONTENT_PREVIEW_LIMIT = 10000;
 	let expandedContent = false;
@@ -59,17 +59,17 @@
 	let excelSheetNames: string[] = [];
 	let selectedSheet = '';
 	let excelHtml = '';
-	let excelError = '';
+	let excelError = false;
 	let rowCount = 0;
 
 	// DOCX state
 	let docxData: ArrayBuffer | null = null;
-	let docxError = '';
+	let docxError = false;
 
 	// PPTX state
 	let pptxSlides: string[] = [];
 	let pptxCurrentSlide = 0;
-	let pptxError = '';
+	let pptxError = false;
 
 	// [Gradient] The original is still being prepared (processing reference attachment); retrying.
 	let previewPending = false;
@@ -184,7 +184,7 @@
 
 	const loadExcelContent = async (content: OriginalContent) => {
 		try {
-			excelError = '';
+			excelError = false;
 			const arrayBuffer = await content;
 			if (arrayBuffer === undefined) return; // [Gradient] superseded
 			if (!arrayBuffer) throw new Error('Empty file content');
@@ -197,7 +197,7 @@
 			}
 		} catch (error) {
 			console.error('Error loading Excel/CSV file:', error);
-			excelError = $i18n.t('Failed to load Excel/CSV file. Please try downloading it instead.');
+			excelError = true;
 		}
 	};
 
@@ -214,19 +214,19 @@
 
 	const loadDocxContent = async (content: OriginalContent) => {
 		try {
-			docxError = '';
+			docxError = false;
 			const data = await content;
 			if (data === undefined) return; // [Gradient] superseded
 			docxData = data;
 		} catch (error) {
 			console.error('Error loading DOCX file:', error);
-			docxError = $i18n.t('Failed to load DOCX file. Please try downloading it instead.');
+			docxError = true;
 		}
 	};
 
 	const loadPptxContent = async (content: OriginalContent) => {
 		try {
-			pptxError = '';
+			pptxError = false;
 			const [arrayBuffer, { pptxToImages }] = await Promise.all([
 				content,
 				import('$lib/utils/pptxToHtml')
@@ -237,7 +237,7 @@
 			pptxCurrentSlide = 0;
 		} catch (error) {
 			console.error('Error loading PPTX file:', error);
-			pptxError = $i18n.t('Failed to load PPTX file. Please try downloading it instead.');
+			pptxError = true;
 		}
 	};
 
@@ -315,21 +315,16 @@
 				<div>
 					<div class=" font-normal text-lg dark:text-gray-100">
 						<a
-							href="#"
+							href={item?.type === 'file'
+								? item?.url?.startsWith('http')
+									? item.url
+									: `${WEBUI_API_BASE_URL}/files/${item?.id ?? item?.tempId}/content`
+								: item?.type === 'collection' && item?.id
+									? `/workspace/knowledge/${item.id}`
+									: safeLinkUrl(item?.url)}
+							target="_blank"
+							rel="noreferrer"
 							class="hover:underline line-clamp-1"
-							on:click|preventDefault={() => {
-								if (item.type === 'file' || item.url) {
-									let fileId = item?.id ?? item?.tempId;
-									window.open(
-										item.type === 'file'
-											? item?.url?.startsWith('http')
-												? item.url
-												: `${WEBUI_API_BASE_URL}/files/${fileId}/content`
-											: item.url,
-										'_blank'
-									);
-								}
-							}}
 						>
 							{item?.name ?? 'File'}
 						</a>
@@ -363,7 +358,9 @@
 
 							{#if item?.created_at}
 								<div class="capitalize shrink-0">
-									{dayjs(item.created_at * 1000).format('LL')}
+									{dayjs(item.created_at * 1000)
+										.locale($i18n.language)
+										.format('LL')}
 								</div>
 							{/if}
 						{/if}
@@ -554,7 +551,7 @@
 					{:else if isExcel}
 						{#if excelError}
 							<div class="text-red-500 text-sm p-4">
-								{excelError}
+								{$i18n.t('Failed to load Excel/CSV file. Please try downloading it instead.')}
 							</div>
 						{:else}
 							{#if excelSheetNames.length > 1}
@@ -580,7 +577,7 @@
 									{@html excelHtml}
 								</div>
 							{:else}
-								<div class="text-gray-500 text-sm p-4">No content available</div>
+								<div class="text-gray-500 text-sm p-4">{$i18n.t('No content available')}</div>
 							{/if}
 						{/if}
 					{:else if isCode}
@@ -602,15 +599,19 @@
 						</div>
 					{:else if isDocx}
 						{#if docxError}
-							<div class="text-red-500 text-sm p-4">{docxError}</div>
+							<div class="text-red-500 text-sm p-4">
+								{$i18n.t('Failed to load DOCX file. Please try downloading it instead.')}
+							</div>
 						{:else if docxData}
 							<DocxPreview data={docxData} className="h-[60vh]" />
 						{:else}
-							<div class="text-gray-500 text-sm p-4">No content available</div>
+							<div class="text-gray-500 text-sm p-4">{$i18n.t('No content available')}</div>
 						{/if}
 					{:else if isPptx}
 						{#if pptxError}
-							<div class="text-red-500 text-sm p-4">{pptxError}</div>
+							<div class="text-red-500 text-sm p-4">
+								{$i18n.t('Failed to load PPTX file. Please try downloading it instead.')}
+							</div>
 						{:else if pptxSlides.length > 0}
 							<PptxPreview
 								slides={pptxSlides}
@@ -618,7 +619,7 @@
 								className="h-[60vh]"
 							/>
 						{:else}
-							<div class="text-gray-500 text-sm p-4">No content available</div>
+							<div class="text-gray-500 text-sm p-4">{$i18n.t('No content available')}</div>
 						{/if}
 					{:else}
 						<div class="max-h-96 overflow-scroll scrollbar-hidden text-xs whitespace-pre-wrap">
@@ -634,52 +635,3 @@
 		</div>
 	</div>
 </Modal>
-
-<style>
-	:global(.excel-table-container table) {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.875rem;
-		line-height: 1.25rem;
-	}
-
-	:global(.excel-table-container table td),
-	:global(.excel-table-container table th) {
-		border-width: 1px;
-		border-style: solid;
-		border-color: var(--color-gray-300, #cdcdcd);
-		padding: 0.5rem 0.75rem;
-		text-align: left;
-	}
-
-	:global(.dark .excel-table-container table td),
-	:global(.dark .excel-table-container table th) {
-		border-color: var(--color-gray-600, #676767);
-	}
-
-	:global(.excel-table-container table th) {
-		background-color: var(--color-gray-100, #ececec);
-		font-weight: 600;
-	}
-
-	:global(.dark .excel-table-container table th) {
-		background-color: var(--color-gray-800, #333);
-		color: var(--color-gray-100, #ececec);
-	}
-
-	:global(.excel-table-container table tr:nth-child(even)) {
-		background-color: var(--color-gray-50, #f9f9f9);
-	}
-
-	:global(.dark .excel-table-container table tr:nth-child(even)) {
-		background-color: rgba(38, 38, 38, 0.5);
-	}
-
-	:global(.excel-table-container table tr:hover) {
-		background-color: var(--color-gray-100, #ececec);
-	}
-
-	:global(.dark .excel-table-container table tr:hover) {
-		background-color: rgba(51, 51, 51, 0.5);
-	}
-</style>

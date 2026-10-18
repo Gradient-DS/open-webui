@@ -14,10 +14,16 @@
 	import { sanitizeResponseContent } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
 	import { isAssistant } from '$lib/utils/assistants';
+	import {
+		resolveLocalizedModelDescription,
+		resolveLocalizedModelName,
+		resolveLocalizedModelPromptSuggestions,
+		resolveLocalizedPromptSuggestions
+	} from '$lib/utils/localizedContent';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	export let modelIds: string[] = []; // [Gradient] Shared with assistant greeting lookup.
 	export let models = [];
@@ -29,16 +35,27 @@
 	let selectedModelIdx = 0;
 	// [Gradient] Keep the LLM id out of assistant avatar URLs and greetings.
 	$: greetingModel = $activeAssistant ?? $_models.find((m) => m.id === modelIds[selectedModelIdx]);
+	$: greetingName = greetingModel ? resolveLocalizedModelName(greetingModel, $i18n.language) : '';
 	// [Gradient] Only an assistant's description greets; a catalog model shows its handle alone.
 	$: greetingDescription = isAssistant(greetingModel)
-		? (greetingModel?.info?.meta?.description ?? null)
+		? resolveLocalizedModelDescription(greetingModel, $i18n.language) || null
 		: null;
+	let selectedSuggestionPrompts = [];
 
 	$: if (modelIds.length > 0) {
 		selectedModelIdx = models.length - 1;
 	}
 
 	$: models = modelIds.map((id) => $_models.find((m) => m.id === id));
+	$: selectedSuggestionPrompts =
+		resolveLocalizedModelPromptSuggestions(atSelectedModel, $i18n.language) ??
+		resolveLocalizedModelPromptSuggestions(models[selectedModelIdx], $i18n.language) ??
+		resolveLocalizedPromptSuggestions(
+			$config?.default_prompt_suggestions,
+			$config?.default_prompt_suggestions_i18n ?? {},
+			$i18n.language,
+			(key) => $i18n.t(key)
+		);
 
 	onMount(() => {
 		mounted = true;
@@ -103,8 +120,8 @@
 							'{{name}}',
 							$user?.name ?? ''
 						)}
-					{:else if greetingModel?.name}
-						{greetingModel?.name}
+					{:else if greetingName}
+						{greetingName}
 					{:else}
 						{$i18n.t('Hello, {{name}}', { name: $user?.name })}
 					{/if}
@@ -123,7 +140,7 @@
 						</div>
 						{#if models[selectedModelIdx]?.info?.meta?.user}
 							<div class="mt-0.5 text-sm font-normal text-gray-400 dark:text-gray-500">
-								By
+								{$i18n.t('By')}
 								{#if models[selectedModelIdx]?.info?.meta?.user.community}
 									<a
 										href="https://openwebui.com/m/{models[selectedModelIdx]?.info?.meta?.user
@@ -149,10 +166,7 @@
 		<div class=" w-full" in:fade={{ duration: 200, delay: 300 }}>
 			<Suggestions
 				className="grid grid-cols-2"
-				suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
-					models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
-					$config?.default_prompt_suggestions ??
-					[]}
+				suggestionPrompts={selectedSuggestionPrompts}
 				{onSelect}
 			/>
 		</div>

@@ -10,6 +10,7 @@
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 	import SearchSnippetNote from './SearchSnippetNote.svelte';
 	import { settings, config } from '$lib/stores';
+	import { isValidHttpUrl } from '$lib/utils';
 	import { injectCsp } from '$lib/utils/csp';
 	import {
 		calculatePercentage,
@@ -38,7 +39,7 @@
 
 		<div>
 			<div class=" text-sm font-medium dark:text-gray-300 flex items-center gap-2 w-fit mb-1">
-				{#if document.source?.url?.includes('http')}
+				{#if isValidHttpUrl(document.source?.url)}
 					{@const snippetUrl = getTextFragmentUrl(document)}
 					{#if snippetUrl}
 						<a

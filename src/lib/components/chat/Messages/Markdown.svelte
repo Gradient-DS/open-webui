@@ -19,6 +19,8 @@
 	marked.use(footnoteExtension(options));
 	marked.use(colonFenceExtension(options));
 	marked.use(disableSingleTilde);
+	// Also set by RichTextInput, but messages can render before any input mounts.
+	marked.use({ breaks: true });
 	marked.use({
 		extensions: [
 			mentionExtension({ triggerChar: '@' }),
@@ -29,7 +31,7 @@
 </script>
 
 <script>
-	import { onDestroy } from 'svelte';
+	import { onDestroy, setContext } from 'svelte';
 	import { replaceTokens, processResponseContent } from '$lib/utils';
 	import { maskInFlightTag, markupSafeEnd } from '$lib/utils/streamMarkup';
 	import { user } from '$lib/stores';
@@ -49,7 +51,15 @@
 	export let paragraphTag = 'p';
 	export let editCodeBlock = true;
 	export let topPadding = false;
-	export let allowEmbeds = true;
+	export let allowEmbeds = false;
+	export let allowHtml = true;
+	export let allowRemoteContent = true;
+
+	setContext('markdown', {
+		get allowRemoteContent() {
+			return allowRemoteContent;
+		}
+	});
 
 	export let sourceIds = [];
 
@@ -99,7 +109,23 @@
 		if (processed === lastParsedContent) return;
 		lastParsedContent = processed;
 
-		tokens = applyCitationWalker(marked.lexer(processed));
+		tokens = marked.lexer(processed);
+		if (!allowHtml || !allowRemoteContent) {
+			marked.walkTokens(tokens, (token) => {
+				if (
+					(!allowHtml && token.type === 'html') ||
+					(!allowRemoteContent &&
+						['html', 'image', 'iframe', 'mention', 'details', 'colonFence'].includes(token.type))
+				) {
+					const raw = token.raw;
+					// Drop child tokens too, so blocked content cannot render through a nested renderer.
+					for (const key of Object.keys(token)) Reflect.deleteProperty(token, key);
+					Object.assign(token, { type: 'text', raw, text: raw });
+				}
+			});
+		}
+		// [Gradient] citation walker runs after the HTML/remote-content gate
+		tokens = applyCitationWalker(tokens);
 	};
 
 	const revealStep = () => {

@@ -183,6 +183,8 @@
 					sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
 					shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
 						$user?.role === 'admin'}
+					allowGroups={($user?.permissions?.access_grants?.allow_groups ?? true) ||
+						$user?.role === 'admin'}
 				/>
 			</div>
 		{/if}
@@ -190,7 +192,7 @@
 		<div class="flex justify-end {modal ? 'pt-3 gap-2' : 'mt-2'}">
 			{#if modal}
 				<button
-					class="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition"
+					class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-normal text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 disabled:opacity-60 dark:text-gray-400 dark:hover:bg-gray-850 dark:hover:text-white"
 					type="button"
 					on:click={() => {
 						onBack();
@@ -202,17 +204,17 @@
 
 			<div>
 				<button
-					class="{modal
-						? `px-3.5 py-1.5 text-sm bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full ${loading ? 'cursor-not-allowed' : ''}`
-						: `text-sm px-4 py-2 transition rounded-lg ${loading ? 'cursor-not-allowed bg-gray-100 dark:bg-gray-800' : 'bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800'}`} flex"
+					class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-normal transition disabled:opacity-60 disabled:cursor-not-allowed {modal
+						? 'bg-gray-900 text-white hover:bg-black dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white'
+						: 'bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800'}"
 					type="submit"
 					disabled={loading || $sourcePolicy === null}
 				>
 					<div class=" self-center font-normal">{$i18n.t('Create Knowledge')}</div>
 
 					{#if loading}
-						<div class="ml-1.5 self-center">
-							<Spinner />
+						<div class="shrink-0">
+							<Spinner className="size-3" />
 						</div>
 					{/if}
 				</button>

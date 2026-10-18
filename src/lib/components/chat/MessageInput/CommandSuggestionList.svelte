@@ -24,8 +24,10 @@
 	export let onFork: () => void = () => {};
 	// [Gradient] The assistant command opens @, leaving LLM selection in the picker.
 	export let onAssistant: () => void = () => {};
+	export let onCompare: (() => void) | null = null;
 	export let onSettings: () => void = () => {};
 	export let onTemporary: () => void = () => {};
+	export let onCreateSkill: () => void = () => {};
 	export let insertTextHandler: (text: string) => void = () => {};
 	export let canCompact: boolean | (() => boolean) = false;
 	export let compactDisabled: boolean | (() => boolean) = false;
@@ -34,6 +36,7 @@
 	export let forkDisabled: boolean | (() => boolean) = false;
 	export let canTemporary: boolean | (() => boolean) = false;
 	export let temporaryEnabled: boolean | (() => boolean) = false;
+	export let hasChatContent = false;
 	export let contextUsage = null;
 
 	$: compactAvailable = typeof canCompact === 'function' ? canCompact() : canCompact;
@@ -56,6 +59,7 @@
 
 	const onKeyDown = (event: KeyboardEvent) => {
 		if (!['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) return false;
+		if ((filteredItems ?? []).length === 0) return false;
 
 		if (event.key === 'ArrowUp') {
 			suggestionElement?.selectUp();
@@ -90,13 +94,17 @@
 	}
 </script>
 
-<div class={(filteredItems ?? []).length > 0 ? '' : 'hidden'} id="suggestions-container">
+<div
+	class={(filteredItems ?? []).length > 0 ? '' : 'hidden'}
+	id={(filteredItems ?? []).length > 0 ? 'suggestions-container' : undefined}
+>
 	<DropdownMenu className="w-72 max-w-[calc(100vw-1rem)] overflow-x-hidden font-sans text-xs">
 		<div class="max-h-60 overflow-y-auto overflow-x-hidden scrollbar-thin">
 			{#if char === '/' && isFeatureEnabled('prompts')}
 				<SlashCommands
 					bind:this={suggestionElement}
 					{query}
+					canCompare={onCompare !== null}
 					bind:filteredItems
 					canCompact={compactAvailable}
 					compactDisabled={isCompactDisabled}
@@ -107,6 +115,7 @@
 					temporaryEnabled={isTemporaryEnabled}
 					{contextPercent}
 					{contextHasThreshold}
+					{hasChatContent}
 					onSelect={(e) => {
 						const { type, data } = e;
 
@@ -129,12 +138,18 @@
 						} else if (type === 'command' && data.id === 'assistant') {
 							command({ id: data.id, label: data.id });
 							onAssistant();
+						} else if (type === 'command' && data.id === 'compare') {
+							command({ id: data.id, label: data.id });
+							onCompare?.();
 						} else if (type === 'command' && data.id === 'settings') {
 							command({ id: data.id, label: data.id });
 							onSettings();
 						} else if (type === 'command' && data.id === 'temporary') {
 							command({ id: data.id, label: data.id });
 							onTemporary();
+						} else if (type === 'command' && data.id === 'skills:create') {
+							command({ id: data.id, label: data.id });
+							onCreateSkill();
 						} else if (type === 'skill') {
 							command({
 								id: `${data.id}|${data.name}`,

@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { v4 as uuidv4 } from 'uuid';
+	import WorkspaceAccessModal from './common/WorkspaceAccessModal.svelte';
+	let accessModal: WorkspaceAccessModal;
+	import { resolveLocalizedResource } from '$lib/utils/localizedContent';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -8,7 +12,7 @@
 	dayjs.extend(relativeTime);
 
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
-	const i18n = getContext('i18n');
+	const i18n = getContext<typeof import('$lib/i18n').default>('i18n');
 
 	import { WEBUI_NAME, user, skills as _skills, workspaceActions } from '$lib/stores';
 	import { goto } from '$app/navigation';
@@ -48,6 +52,47 @@
 	import Badge from '$lib/components/common/Badge.svelte';
 	import Switch from '../common/Switch.svelte';
 	import SkillMenu from './Skills/SkillMenu.svelte';
+	import CommunityDiscover from './common/CommunityDiscover.svelte';
+	import { config } from '$lib/stores';
+	let stopSkillShare = () => {};
+	const shareHandler = (skill: { id: string }) => {
+		stopSkillShare();
+		const tab = window.open('https://openwebui.com/post?type=skill', '_blank');
+		if (!tab) {
+			toast.error($i18n.t('Please allow popups to share your skill.'));
+			return;
+		}
+		const receiveLoaded = async (event: MessageEvent) => {
+			if (
+				event.origin !== 'https://openwebui.com' ||
+				event.source !== tab ||
+				event.data !== 'loaded'
+			)
+				return;
+			stopSkillShare();
+			try {
+				const exported = JSON.parse(
+					await (await exportSkillBundle(localStorage.token, 'json', [skill.id])).text()
+				);
+				const { id, name, description, files } = Array.isArray(exported) ? exported[0] : exported;
+				const data = JSON.stringify({ id, name, description, files });
+				if (new Blob([data]).size > 15 * 1024 * 1024)
+					throw new Error('Community skill JSON exceeds 15 MiB');
+				tab.postMessage(data, 'https://openwebui.com');
+			} catch (error) {
+				toast.error(skillError(error));
+			}
+		};
+		window.addEventListener('message', receiveLoaded);
+		stopSkillShare = () => window.removeEventListener('message', receiveLoaded);
+	};
+	import SkillImport from './Skills/SkillImport.svelte';
+	import ImportModal from '$lib/components/ImportModal.svelte';
+	import { cloneSkill, exportSkillBundle, loadSkillByUrl, skillError } from '$lib/apis/skills';
+	let showImport = false;
+	let showImportFromLink = false;
+	let bundleFiles: File[] = [];
+	let folderImportInput: HTMLInputElement;
 	import Pagination from '../common/Pagination.svelte';
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import ChevronUp from '../icons/ChevronUp.svelte';
@@ -55,11 +100,11 @@
 	let shiftKey = false;
 	let loaded = false;
 
-	let importFiles;
 	let importInputElement: HTMLInputElement;
 
 	let query = '';
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
+	let searchController: AbortController;
 
 	let selectedSkill = null;
 	let showDeleteConfirm = false;
@@ -85,9 +130,35 @@
 			},
 			{
 				id: 'skills-import',
-				label: $i18n.t('Import JSON'),
+				label: $i18n.t('Import'),
 				onClick: () => importInputElement?.click(),
 				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.skills_import
+			},
+			{
+				id: 'skills-import-url',
+				label: $i18n.t('Import from URL'),
+				onClick: () => {
+					showImportFromLink = true;
+				},
+				visible: $user?.role === 'admin'
+			},
+			{
+				id: 'skills-import-folder',
+				label: 'Import folder',
+				onClick: () => folderImportInput?.click(),
+				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.skills_import
+			},
+			{
+				id: 'skills-export-zip',
+				label: 'Export ZIP',
+				onClick: async () => {
+					try {
+						saveAs(await exportSkillBundle(localStorage.token, 'zip'), 'skills.zip');
+					} catch (error) {
+						toast.error(skillError(error));
+					}
+				},
+				visible: $user?.role === 'admin' || $user?.permissions?.workspace?.skills_export
 			},
 			{
 				id: 'skills-export',
@@ -112,6 +183,11 @@
 	const loadSkillItems = async () => {
 		if (!loaded) return;
 
+		clearTimeout(searchDebounceTimer);
+		searchController?.abort();
+		searchController = new AbortController();
+		const { signal } = searchController;
+
 		loading = true;
 		try {
 			const res = await getSkillItems(
@@ -120,11 +196,14 @@
 				viewOption,
 				page,
 				sortKey,
-				sortDirection
+				sortDirection,
+				signal
 			).catch((error) => {
-				toast.error(`${error}`);
+				if (!signal.aborted) toast.error(`${error}`);
 				return null;
 			});
+
+			if (signal.aborted) return;
 
 			if (res) {
 				filteredItems = res.items;
@@ -133,11 +212,12 @@
 		} catch (err) {
 			console.error(err);
 		} finally {
-			loading = false;
+			if (!signal.aborted) loading = false;
 		}
 	};
 
 	const handleSearchInput = () => {
+		searchController?.abort();
 		loading = true;
 		clearTimeout(searchDebounceTimer);
 		searchDebounceTimer = setTimeout(() => {
@@ -178,32 +258,28 @@
 	};
 
 	const cloneHandler = async (skill) => {
-		const _skill = await getSkillById(localStorage.token, skill.id).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (_skill) {
-			sessionStorage.skill = JSON.stringify({
-				..._skill,
-				id: `${_skill.id}_clone`,
-				name: `${_skill.name} (Clone)`
-			});
-			goto('/workspace/skills/create');
+		try {
+			const suffix = uuidv4().slice(0, 7);
+			const result = await cloneSkill(
+				localStorage.token,
+				skill.id,
+				`${skill.name} (${suffix})`,
+				`${skill.id}-${suffix}`
+			);
+			await goto(`/workspace/skills/edit?id=${result.id}`);
+		} catch (error) {
+			toast.error(skillError(error));
 		}
 	};
 
-	const exportHandler = async (skill) => {
-		const _skill = await getSkillById(localStorage.token, skill.id).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (_skill) {
-			let blob = new Blob([JSON.stringify([_skill])], {
-				type: 'application/json'
-			});
-			saveAs(blob, `skill-${_skill.id}-export-${Date.now()}.json`);
+	const exportHandler = async (skill, format: 'json' | 'zip' | 'skill' = 'json') => {
+		try {
+			saveAs(
+				await exportSkillBundle(localStorage.token, format, [skill.id]),
+				`${skill.id}.${format}`
+			);
+		} catch (error) {
+			toast.error(skillError(error));
 		}
 	};
 
@@ -366,9 +442,13 @@
 	});
 
 	onDestroy(() => {
+		stopSkillShare();
+		searchController?.abort();
 		clearTimeout(searchDebounceTimer);
 	});
 </script>
+
+<WorkspaceAccessModal bind:this={accessModal} resourceType="skills" onUpdated={loadSkillItems} />
 
 <svelte:head>
 	<!-- LICENSE covers this Open WebUI browser-title identifier.
@@ -380,71 +460,61 @@
 </svelte:head>
 
 {#if loaded}
+	<ImportModal
+		bind:show={showImportFromLink}
+		loadUrlHandler={(url) => loadSkillByUrl(localStorage.token, url)}
+		transformResult={(packages) => packages}
+		successMessage={$i18n.t('Skills loaded for preview')}
+		onImport={(packages) => {
+			bundleFiles = [
+				new File([JSON.stringify(packages)], 'skills.json', { type: 'application/json' })
+			];
+			showImport = true;
+		}}
+	/>
+	<SkillImport
+		bind:show={showImport}
+		files={bundleFiles}
+		onImported={async () => {
+			toast.success($i18n.t('Skill imported successfully'));
+			page = 1;
+			await loadSkillItems();
+			_skills.set(await getSkills(localStorage.token));
+		}}
+	/>
 	<input
 		bind:this={importInputElement}
-		bind:files={importFiles}
 		type="file"
-		accept=".md,.json,.skill"
+		accept=".md,.json,.zip,.skill"
+		multiple
 		hidden
 		on:change={() => {
-			if (importFiles && importFiles.length > 0) {
-				const file = importFiles[0];
-				const ext = file.name.split('.').pop()?.toLowerCase();
-
-				if (ext === 'json') {
-					// JSON import: create skills via API
-					const reader = new FileReader();
-					reader.onload = async (event) => {
-						try {
-							const content = event.target?.result;
-							if (typeof content !== 'string') return;
-
-							const parsedSkills = JSON.parse(content);
-							const items = Array.isArray(parsedSkills) ? parsedSkills : [parsedSkills];
-
-							for (const skill of items) {
-								await createNewSkill(localStorage.token, skill).catch((error) => {
-									toast.error(`${error}`);
-								});
-							}
-
-							toast.success($i18n.t('Skill imported successfully'));
-							page = 1;
-							loadSkillItems();
-							_skills.set(await getSkills(localStorage.token));
-						} catch (e) {
-							toast.error($i18n.t('Invalid JSON file'));
-						}
-					};
-					reader.readAsText(file);
-				} else if (ext === 'skill') {
-					importSkillBundle(file);
-				} else {
-					// Markdown import: parse frontmatter and open in editor
-					const reader = new FileReader();
-					reader.onload = (event) => {
-						const mdContent = event.target?.result;
-						if (typeof mdContent === 'string') {
-							const fm = parseFrontmatter(mdContent);
-							const fileName = file.name.replace(/\.md$/, '');
-							const rawName = fm.name || fileName;
-							const displayName = formatSkillName(rawName);
-							sessionStorage.skill = JSON.stringify({
-								name: displayName,
-								id: slugify(rawName),
-								description: fm.description || '',
-								content: mdContent,
-								is_active: true,
-								access_grants: []
-							});
-							goto('/workspace/skills/create');
-						}
-					};
-					reader.readAsText(file);
-				}
-
-				importInputElement.value = '';
+			const picked = Array.from(importInputElement.files || []);
+			importInputElement.value = '';
+			// [Gradient] With skill files on, a single .skill bundle goes to the skill_files
+			// store that skill execution reads; everything else uses upstream's import preview.
+			if (
+				$config?.features?.feature_skill_files &&
+				picked.length === 1 &&
+				picked[0].name.toLowerCase().endsWith('.skill')
+			) {
+				importSkillBundle(picked[0]);
+				return;
 			}
+			bundleFiles = picked;
+			showImport = true;
+		}}
+	/>
+	<input
+		bind:this={folderImportInput}
+		type="file"
+		webkitdirectory
+		multiple
+		hidden
+		on:change={() => {
+			bundleFiles = Array.from(folderImportInput.files || []);
+			showImport = true;
+			folderImportInput.value = '';
 		}}
 	/>
 
@@ -573,7 +643,7 @@
 												<div
 													class="truncate text-[0.8125rem] leading-5 text-gray-800 group-hover:underline dark:text-gray-200"
 												>
-													{skill.name}
+													{resolveLocalizedResource(skill, $i18n.language)}
 												</div>
 											</Tooltip>
 
@@ -584,14 +654,16 @@
 											</div>
 
 											<Tooltip
-												content={dayjs((skill.updated_at ?? skill.created_at) * 1000).format(
-													'LLLL'
-												)}
+												content={dayjs((skill.updated_at ?? skill.created_at) * 1000)
+													.locale($i18n.language)
+													.format('LLLL')}
 											>
 												<div
 													class="shrink-0 truncate text-[0.6875rem] leading-5 text-gray-400 dark:text-gray-600"
 												>
-													{dayjs((skill.updated_at ?? skill.created_at) * 1000).fromNow()}
+													{dayjs((skill.updated_at ?? skill.created_at) * 1000)
+														.locale($i18n.language)
+														.fromNow()}
 												</div>
 											</Tooltip>
 
@@ -605,12 +677,16 @@
 										</div>
 									</div>
 
-									{#if skill.description}
-										<Tooltip content={skill.description} className="min-w-0" placement="top-start">
+									{#if resolveLocalizedResource(skill, $i18n.language, 'description')}
+										<Tooltip
+											content={resolveLocalizedResource(skill, $i18n.language, 'description')}
+											className="min-w-0"
+											placement="top-start"
+										>
 											<div
 												class="mt-0.5 truncate text-[0.6875rem] leading-4 text-gray-400 dark:text-gray-600"
 											>
-												{skill.description}
+												{resolveLocalizedResource(skill, $i18n.language, 'description')}
 											</div>
 										</Tooltip>
 									{/if}
@@ -653,7 +729,11 @@
 									{:else}
 										<div class="flex shrink-0 flex-row items-center gap-1.5 self-center">
 											<SkillMenu
-												exportBundleHandler={() => exportBundleHandler(skill)}
+												exportBundleHandler={$config?.features?.feature_skill_files
+													? () => exportBundleHandler(skill)
+													: null}
+												shareHandler={() => shareHandler(skill)}
+												accessHandler={() => accessModal.open(skill.id)}
 												show={openSkillMenuId === skill.id}
 												editHandler={() => {
 													goto(`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`);
@@ -661,8 +741,8 @@
 												cloneHandler={() => {
 													cloneHandler(skill);
 												}}
-												exportHandler={() => {
-													exportHandler(skill);
+												exportHandler={(format) => {
+													exportHandler(skill, format);
 												}}
 												deleteHandler={async () => {
 													selectedSkill = skill;
@@ -700,7 +780,8 @@
 													<Switch
 														bind:state={skill.is_active}
 														on:change={async () => {
-															toggleSkillById(localStorage.token, skill.id);
+															await toggleSkillById(localStorage.token, skill.id);
+															_skills.set(await getSkills(localStorage.token));
 														}}
 													/>
 												</Tooltip>
@@ -739,9 +820,17 @@
 		}}
 	>
 		<div class=" text-sm text-gray-500 truncate">
-			{$i18n.t('This will delete')} <span class="  font-normal">{selectedSkill.name}</span>.
+			{$i18n.t('This will delete')}
+			<span class="  font-normal">{resolveLocalizedResource(selectedSkill, $i18n.language)}</span>.
 		</div>
 	</DeleteConfirmDialog>
+	{#if $config?.features?.enable_community_sharing}
+		<CommunityDiscover
+			href="https://openwebui.com/search?type=skill"
+			title={$i18n.t('Discover a skill')}
+			description={$i18n.t('Discover, download, and explore community skills')}
+		/>
+	{/if}
 {:else}
 	<div class="w-full h-full flex justify-center items-center">
 		<Spinner className="size-5" />

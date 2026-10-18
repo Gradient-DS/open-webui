@@ -19,6 +19,7 @@ ARG USE_AUXILIARY_EMBEDDING_MODEL=TaylorAI/bge-micro-v2
 ARG USE_TIKTOKEN_ENCODING_NAME="cl100k_base"
 
 ARG BUILD_HASH=dev-build
+ARG BUILD_CHANNEL=unknown
 # Override at your own risk - non-root configurations are untested
 ARG UID=0
 ARG GID=0
@@ -26,6 +27,10 @@ ARG GID=0
 ######## WebUI frontend ########
 FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS build
 ARG BUILD_HASH
+ARG BUILD_CHANNEL
+ARG USE_SLIM
+ARG UID
+ARG GID
 
 # Set Node.js options (heap limit Allocation failed - JavaScript heap out of memory)
 ENV NODE_OPTIONS="--max-old-space-size=8192"
@@ -40,7 +45,15 @@ RUN npm ci --force
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
-RUN npm run build
+ENV APP_BUILD_CHANNEL=${BUILD_CHANNEL}
+RUN npm run build && \
+    if [ "$USE_SLIM" = "true" ]; then find build -type f -name '*.map' -delete; fi
+
+# Prepare backend ownership before the final copy so static assets occupy one layer.
+# Group 0 write access lets arbitrary OpenShift UIDs update these assets at startup.
+RUN chown -R $UID:$GID /app/backend && \
+    chgrp -R 0 /app/backend/open_webui/static && \
+    chmod -R g=u /app/backend/open_webui/static
 
 ######## WebUI backend ########
 FROM python:3.11-slim-bookworm AS base
@@ -123,6 +136,10 @@ RUN echo -n 00000000-0000-0000-0000-000000000000 > $HOME/.cache/chroma/telemetry
 # Make sure the user has access to the app and root directory
 RUN chown -R $UID:$GID /app $HOME
 
+# Slim cannot bundle a local model server or GPU runtime.
+RUN if [ "$USE_SLIM" = "true" ] && { [ "$USE_CUDA" = "true" ] || [ "$USE_OLLAMA" = "true" ]; }; then \
+    echo "USE_SLIM cannot be combined with USE_CUDA or USE_OLLAMA" >&2; exit 1; fi
+
 # Install common system dependencies
 # --only-upgrade on libcap2/libsystemd0/libudev1 pulls security-fixed versions
 # already published for bookworm (CVE-2026-4878, CVE-2026-29111) without
@@ -160,7 +177,7 @@ RUN apt-get update && \
 # install python dependencies
 COPY --chown=$UID:$GID ./backend/requirements.txt ./requirements.txt
 COPY --chown=$UID:$GID ./backend/requirements-slim.txt ./requirements-slim.txt
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.10 /uv /usr/local/bin/uv
 
 # Set UV_LINK_MODE to copy to prevent 0-byte file corruption in QEMU arm64 cross-builds
 ENV UV_LINK_MODE=copy
@@ -181,7 +198,6 @@ RUN set -e; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
     python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     else \
     # CPU build: torch CPU + pre-download models
     pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir; \
@@ -190,7 +206,6 @@ RUN set -e; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
     python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     fi; \
     mkdir -p /app/backend/data; chown -R $UID:$GID /app/backend/data/; \
     if [ -d /app/backend/data/cache ]; then chmod -R a+rX /app/backend/data/cache; fi; \
@@ -263,19 +278,8 @@ COPY --chown=$UID:$GID --from=build /app/build /app/build
 COPY --chown=$UID:$GID --from=build /app/CHANGELOG.md /app/CHANGELOG.md
 COPY --chown=$UID:$GID --from=build /app/package.json /app/package.json
 
-# copy backend files
-COPY --chown=$UID:$GID ./backend .
-
-# The backend rewrites its bundled static assets (favicons, splash, manifest,
-# loader.js, ...) under open_webui/static at startup. Make that directory
-# writable by an arbitrary UID -- which under OpenShift's restricted SCC is
-# always a member of GID 0 -- so those writes don't fail with EACCES and crash
-# the boot log with "[Errno 13] Permission denied". `chmod -R g=u` mirrors the
-# owner bits onto the group (the Red Hat arbitrary-UID idiom). This is applied
-# unconditionally because it targets a directory the app writes on every start;
-# the broader, opt-in USE_PERMISSION_HARDENING below covers the rest of /app.
-RUN chgrp -R 0 /app/backend/open_webui/static && \
-    chmod -R g=u /app/backend/open_webui/static
+# copy backend files with the ownership and static permissions prepared above
+COPY --from=build /app/backend .
 
 EXPOSE 8080
 
@@ -295,7 +299,7 @@ RUN if [ "$USE_PERMISSION_HARDENING" = "true" ]; then \
 USER $UID:$GID
 
 ARG BUILD_HASH
-ENV WEBUI_BUILD_VERSION=${BUILD_HASH}
+ENV WEBUI_BUILD_HASH=${BUILD_HASH}
 ENV DOCKER=true
 
 CMD [ "bash", "start.sh"]

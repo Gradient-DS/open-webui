@@ -16,7 +16,7 @@
 
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import type { ChatParticipant } from '$lib/apis/folders';
 	import { goto, invalidate, invalidateAll } from '$app/navigation';
 	import { onMount, getContext, createEventDispatcher, tick } from 'svelte';
 	import { LinkPreview } from 'bits-ui';
@@ -41,7 +41,7 @@
 		settings,
 		user
 	} from '$lib/stores';
-	import { refreshChatList } from '$lib/stores/chatList';
+	import { refreshChatList, refreshSidebar } from '$lib/stores/chatList';
 
 	import ChatMenu from './ChatMenu.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -50,6 +50,7 @@
 	import DragGhost from '$lib/components/common/DragGhost.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ChatHoverPreview from './ChatHoverPreview.svelte';
+	import ChatParticipants from '$lib/components/common/ChatParticipants.svelte';
 	import ChatIcon from './icons/Chat.svelte';
 	import MoreHorizontalIcon from './icons/MoreHorizontal.svelte';
 	import SparklesIcon from './icons/Sparkles.svelte';
@@ -78,6 +79,7 @@
 
 	export let ownerName: string | null = null;
 	export let ownerUserId: string | null = null;
+	export let participants: ChatParticipant[] = [];
 	export let onReadStateChange: (data: Record<string, unknown>) => void = () => {};
 
 	export let onDragEnd = () => {};
@@ -107,6 +109,10 @@
 	let focusWithin = false;
 	let menuOpen = false;
 	let openPreview = false;
+	let activeProfileId: string | null = null;
+	let overflowOpen = false;
+
+	$: if (activeProfileId || overflowOpen) openPreview = false;
 
 	const closeHoverPreview = () => {
 		if (openPreview) {
@@ -239,7 +245,7 @@
 		if (res) {
 			goto(`/c/${res.id}`);
 
-			await refreshChatList(localStorage.token, { refreshPinned: true });
+			await refreshSidebar(localStorage.token);
 		}
 	};
 
@@ -398,12 +404,20 @@
 	let showDeleteConfirm = false;
 
 	const chatTitleInputKeydownHandler = (e) => {
+		// Let Enter and Escape finish IME composition without saving or cancelling the rename.
+		if (e.isComposing || e.keyCode === 229) {
+			return;
+		}
+
 		if (e.key === 'Enter') {
 			e.preventDefault();
-			setTimeout(() => {
-				const input = document.getElementById(`chat-title-input-${id}`);
-				if (input) input.blur();
-			}, 0);
+
+			if (chatTitle !== title) {
+				editChatTitle(id, chatTitle);
+			}
+
+			confirmEdit = false;
+			chatTitle = '';
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			confirmEdit = false;
@@ -504,21 +518,6 @@
 </script>
 
 {#snippet chatItemContent()}
-	{#if ownerUserId}
-		<Tooltip content={ownerName || 'Unknown'}>
-			<img
-				src="{WEBUI_API_BASE_URL}/users/{ownerUserId}/profile/image"
-				alt=""
-				class="size-3.5 rounded-full shrink-0 object-cover mr-1.5"
-				on:error={(e) => {
-					if (!e.currentTarget.src.endsWith('/static/favicon.png')) {
-						e.currentTarget.src = `${WEBUI_BASE_URL}/static/favicon.png`;
-					}
-				}}
-			/>
-		</Tooltip>
-	{/if}
-
 	<!-- Loading spinner for active chat (left side) -->
 	{#if active}
 		<div class="shrink-0 self-center pr-2">
@@ -635,44 +634,63 @@
 				}}
 			/>
 		</div>
-	{:else if $mobile}
-		<a
-			id="sidebar-chat-item"
-			class={chatItemClass}
-			href="/c/{id}"
-			aria-current={id === $chatId ? 'page' : undefined}
-			on:click={selectChatHandler}
-			draggable="false"
-		>
-			{@render chatItemContent()}
-		</a>
 	{:else}
-		<LinkPreview.Root
-			openDelay={300}
-			closeDelay={0}
-			disabled={confirmEdit || dragged || !($settings?.chatHoverPreview ?? true)}
-			bind:open={openPreview}
-		>
-			<LinkPreview.Trigger
-				id="sidebar-chat-item"
-				class={chatItemClass}
-				href="/c/{id}"
-				aria-current={id === $chatId ? 'page' : undefined}
-				onclick={selectChatHandler}
-				ondblclick={renameChatFromDoubleClick}
-				draggable="false"
-			>
-				{@render chatItemContent()}
-			</LinkPreview.Trigger>
+		<div id="sidebar-chat-item" class={chatItemClass}>
+			{#if ownerUserId || participants.length > 1}
+				<div class="flex items-center self-center shrink-0 mr-2">
+					<ChatParticipants
+						{participants}
+						owner={ownerUserId ? { id: ownerUserId, name: ownerName } : null}
+						avatarClass="size-3.5"
+						bind:activeProfileId
+						bind:overflowOpen
+					/>
+				</div>
+			{/if}
+			{#if $mobile}
+				<a
+					class="flex min-w-0 flex-1 items-center"
+					href="/c/{id}"
+					aria-current={id === $chatId ? 'page' : undefined}
+					on:click={selectChatHandler}
+					draggable="false"
+				>
+					{@render chatItemContent()}
+				</a>
+			{:else}
+				<LinkPreview.Root
+					openDelay={300}
+					closeDelay={0}
+					disabled={confirmEdit || dragged || !($settings?.chatHoverPreview ?? true)}
+					bind:open={openPreview}
+					onOpenChange={(open) => {
+						if (open) {
+							activeProfileId = null;
+							overflowOpen = false;
+						}
+					}}
+				>
+					<LinkPreview.Trigger
+						class="flex min-w-0 flex-1 -my-1.5 py-1.5 items-center"
+						href="/c/{id}"
+						aria-current={id === $chatId ? 'page' : undefined}
+						onclick={selectChatHandler}
+						ondblclick={renameChatFromDoubleClick}
+						draggable="false"
+					>
+						{@render chatItemContent()}
+					</LinkPreview.Trigger>
 
-			<ChatHoverPreview
-				chatId={id}
-				title={chatTitle || title}
-				{openPreview}
-				side="right"
-				align="center"
-			/>
-		</LinkPreview.Root>
+					<ChatHoverPreview
+						chatId={id}
+						title={chatTitle || title}
+						{openPreview}
+						side="right"
+						align="center"
+					/>
+				</LinkPreview.Root>
+			{/if}
+		</div>
 	{/if}
 
 	{#if !readonly}
@@ -766,26 +784,12 @@
 					>
 						<button
 							type="button"
-							aria-label="Chat Menu"
+							aria-label={$i18n.t('Chat Menu')}
 							class="flex size-5 items-center justify-center self-center dark:hover:text-white transition m-0"
 						>
 							<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
 						</button>
 					</ChatMenu>
-
-					{#if id === $chatId && ($user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true))}
-						<!-- Shortcut support using "delete-chat-button" id -->
-						<button
-							id="delete-chat-button"
-							aria-label={$i18n.t('Delete')}
-							class="hidden"
-							on:click={() => {
-								showDeleteConfirm = true;
-							}}
-						>
-							<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
-						</button>
-					{/if}
 				</div>
 			{/if}
 		</div>

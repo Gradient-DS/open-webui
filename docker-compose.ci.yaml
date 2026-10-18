@@ -6,7 +6,7 @@
 # that need one are waived in security/route-coverage.toml (backed_by = "soev-solutions").
 services:
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
     environment:
       POSTGRES_DB: "openwebui"
       POSTGRES_USER: "openwebui"
@@ -18,26 +18,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    networks: [internal]
-
-  weaviate:
-    image: semitechnologies/weaviate:1.35.0
-    environment:
-      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
-      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
-      DEFAULT_VECTORIZER_MODULE: "none" # App supplies stub embeddings; no model downloads.
-      ENABLE_MODULES: ""
-      DISABLE_TELEMETRY: "true" # Weaviate must not generate ordinary public traffic either.
-      CLUSTER_HOSTNAME: "node1"
-      QUERY_DEFAULTS_LIMIT: "25"
-    tmpfs:
-      - /var/lib/weaviate
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/v1/.well-known/ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 10s
     networks: [internal]
 
   redis:
@@ -124,8 +104,7 @@ services:
       DATABASE_PASSWORD: "ci-only-password"
       DATABASE_ENABLE_IAM_TOKEN_AUTH: "false"
       # A real vector database and Redis keep retrieval and token revocation live.
-      VECTOR_DB: "weaviate"
-      ENABLE_WEAVIATE_MULTITENANCY_MODE: "true"
+      VECTOR_DB: "pgvector"
       BYPASS_ADMIN_ACCESS_CONTROL: "false"
       STORAGE_PROVIDER: "s3"
       S3_ENDPOINT_URL: "http://s3:9000"
@@ -134,12 +113,6 @@ services:
       S3_SECRET_ACCESS_KEY: "ci-only-s3-secret-key"
       S3_REGION_NAME: "us-east-1"
       S3_ADDRESSING_STYLE: "path" # The gateway has no bucket-specific DNS names.
-      WEAVIATE_HTTP_HOST: "weaviate"
-      WEAVIATE_GRPC_HOST: "weaviate"
-      WEAVIATE_HTTP_PORT: "8080"
-      WEAVIATE_GRPC_PORT: "50051"
-      WEAVIATE_HTTP_SECURE: "false"
-      WEAVIATE_GRPC_SECURE: "false"
       REDIS_URL: "redis://redis:6379/0"
       # The scalar default is real api.openai.com, even without a key.
       OPENAI_API_BASE_URL: "http://stub:8000/v1"
@@ -283,8 +256,6 @@ services:
       - ./scripts/security:/app/scripts/security:ro
     depends_on:
       postgres:
-        condition: service_healthy
-      weaviate:
         condition: service_healthy
       redis:
         condition: service_healthy

@@ -18,6 +18,7 @@
 	import { injectCsp } from '$lib/utils/csp';
 	import { createPreviewProbe, mergeCitationDocuments } from './citationDocuments';
 	import { citationFileInfo, resolveExternalUrl } from './useCitationDocument';
+	import { isValidHttpUrl } from '$lib/utils';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import ArrowTopRightOnSquare from '$lib/components/icons/ArrowTopRightOnSquare.svelte';
@@ -287,7 +288,7 @@
 
 		const baseUrl = file_id
 			? `${WEBUI_API_BASE_URL}/files/${file_id}/content${page !== undefined ? `#page=${page + 1}` : ''}`
-			: sourceUrl?.includes('http')
+			: isValidHttpUrl(sourceUrl)
 				? sourceUrl
 				: null;
 
@@ -575,7 +576,7 @@
 									<div
 										class=" text-sm font-medium dark:text-gray-300 flex items-center gap-2 w-fit mb-1"
 									>
-										{#if document.source?.url?.includes('http')}
+										{#if isValidHttpUrl(document.source?.url)}
 											{@const snippetUrl = getTextFragmentUrl(document)}
 											{#if snippetUrl}
 												<a

@@ -16,14 +16,15 @@
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import InterfaceSettings from '$lib/components/common/InterfaceSettings.svelte';
 	import SettingsSelect from '$lib/components/common/SettingsSelect.svelte';
+	import LanguageModeSelect from '$lib/components/common/LanguageModeSelect.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import { WEBUI_BASE_URL, WEBUI_BUILD_HASH, WEBUI_VERSION } from '$lib/constants';
+	import BuildVersion from '$lib/components/common/BuildVersion.svelte';
+	import { WEBUI_BASE_URL, WEBUI_BUILD_CHANNEL, WEBUI_VERSION } from '$lib/constants';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { banners as _banners, config, showChangelog } from '$lib/stores';
 	import type { Banner } from '$lib/types';
 	import { compareVersion } from '$lib/utils';
-	import { hasLocalizedContent } from '$lib/utils/localized';
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Textarea from '$lib/components/common/Textarea.svelte';
@@ -33,20 +34,25 @@
 	import AdminSettingRow from './AdminSettingRow.svelte';
 	import AdminSettingSection from './AdminSettingSection.svelte';
 	import Plus from '$lib/components/icons/Plus.svelte';
+	import I18nSettings from './I18nSettings.svelte';
+	import { updateI18n } from '$lib/i18n';
+	import { entriesToI18n, i18nToEntries, type I18nEntry } from '$lib/utils/translationDictionary';
 
 	const i18n: any = getContext('i18n');
 
 	export let saveHandler: Function;
 
-	let updateAvailable: boolean | null = false;
+	let updateAvailable: boolean | null = null;
 	let version = {
 		current: WEBUI_VERSION,
-		latest: WEBUI_VERSION
+		latest: ''
 	};
 
 	let adminConfig: any = null;
 	let defaultInterfaceSettings: Record<string, any> = {};
 	let showUserUiDefaults = false;
+	let uiI18nEntries: I18nEntry[] = [];
+	let saving = false;
 
 	let groups = [];
 
@@ -69,6 +75,7 @@
 		ciphers: ''
 	};
 
+	let bannerLocale = '';
 	const inputClass =
 		'w-full h-7 rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 text-xs text-gray-700 outline-hidden transition-colors placeholder:text-gray-300 focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:placeholder:text-gray-700 dark:focus:border-blue-500';
 	const textareaClass =
@@ -78,7 +85,7 @@
 		version = await getVersionUpdates(localStorage.token).catch((error) => {
 			return {
 				current: WEBUI_VERSION,
-				latest: WEBUI_VERSION
+				latest: null
 			};
 		});
 
@@ -113,25 +120,49 @@
 	};
 
 	const updateHandler = async () => {
-		adminConfig.DEFAULT_INTERFACE_SETTINGS = defaultInterfaceSettings;
+		if (saving) return;
+		saving = true;
+		try {
+			// [Gradient] LDAP stays inline (Q14); save it before the admin config,
+			// which may revoke sessions.
+			await updateLdapConfig(localStorage.token, ENABLE_LDAP);
+			await updateLdapServerHandler();
 
-		const res = await updateAdminConfig(localStorage.token, adminConfig);
-		await updateLdapConfig(localStorage.token, ENABLE_LDAP);
-		await updateLdapServerHandler();
-		await updateBanners();
-
-		await config.set(await getBackendConfig());
-
-		if (res) {
+			const cleaned = entriesToI18n(uiI18nEntries);
+			const res = await updateAdminConfig(localStorage.token, {
+				...adminConfig,
+				SKILL_CONTENT_MAX_CHARS: adminConfig.SKILL_CONTENT_MAX_CHARS ?? null,
+				SKILL_PREVIEW_MAX_CHARS: adminConfig.SKILL_PREVIEW_MAX_CHARS ?? null,
+				DEFAULT_INTERFACE_SETTINGS: defaultInterfaceSettings,
+				I18N: cleaned
+			});
+			if (!res) throw new Error($i18n.t('Failed to update settings'));
+			if (res.sessions_revoked) {
+				localStorage.removeItem('token');
+				window.location.href = '/auth?state=logout&form=signin';
+				return;
+			}
+			await updateI18n(res.I18N ?? cleaned);
+			await updateBanners();
+			await config.set(await getBackendConfig());
 			saveHandler();
-		} else {
-			toast.error($i18n.t('Failed to update settings'));
+		} catch (error) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: Array.isArray(error)
+						? error.map((entry) => entry.msg).join('\n')
+						: String(error)
+			);
+		} finally {
+			saving = false;
 		}
 	};
 
 	onMount(async () => {
 		adminConfig = await getAdminConfig(localStorage.token);
 		defaultInterfaceSettings = getDefaultInterfaceSettings();
+		uiI18nEntries = i18nToEntries(adminConfig.I18N ?? {});
 
 		groups = await getGroups(localStorage.token);
 
@@ -140,6 +171,14 @@
 		ENABLE_LDAP = ldapConfig.ENABLE_LDAP;
 
 		banners = [...$_banners];
+
+		if (
+			isFeatureEnabled('changelog') &&
+			WEBUI_BUILD_CHANNEL === 'main' &&
+			$config?.features?.enable_version_update_check
+		) {
+			checkForVersionUpdates();
+		}
 	});
 </script>
 
@@ -149,29 +188,39 @@
 		updateHandler();
 	}}
 >
-	<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">{$i18n.t('General')}</h2>
+	<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">
+		{$i18n.t('settings.admin.general.title')}
+	</h2>
 
 	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
 		{#if adminConfig !== null}
 			<AdminSettingSection first>
 				<div class="flex items-start justify-between gap-4">
 					<div class="min-w-0 text-xs">
-						<div class="text-gray-600 dark:text-gray-400">{$i18n.t('Version')}</div>
+						<div class="text-gray-600 dark:text-gray-400">
+							{$i18n.t('settings.admin.general.version.label')}
+						</div>
 						<div class="mt-1 flex flex-wrap gap-x-1 text-gray-700 dark:text-gray-200">
-							<Tooltip content={WEBUI_BUILD_HASH}>v{WEBUI_VERSION}</Tooltip>
+							<BuildVersion />
 
-							{#if isFeatureEnabled('changelog') && $config?.features?.enable_version_update_check}
-								<a
-									href="https://github.com/open-webui/open-webui/releases/tag/v{version.latest}"
-									target="_blank"
-									class="text-gray-500 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
-								>
-									{updateAvailable === null
-										? $i18n.t('Checking for updates...')
-										: updateAvailable
-											? `(v${version.latest} ${$i18n.t('available!')})`
-											: $i18n.t('(latest)')}
-								</a>
+							{#if isFeatureEnabled('changelog') && WEBUI_BUILD_CHANNEL === 'main' && $config?.features?.enable_version_update_check}
+								{#if version.latest === null}
+									<span class="text-gray-500 dark:text-gray-500"
+										>{$i18n.t('Could not check for updates')}</span
+									>
+								{:else}
+									<a
+										href="https://github.com/open-webui/open-webui/releases/tag/v{version.latest}"
+										target="_blank"
+										class="text-gray-500 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
+									>
+										{updateAvailable === null
+											? $i18n.t('Checking for updates...')
+											: updateAvailable
+												? `(v${version.latest} ${$i18n.t('available!')})`
+												: $i18n.t('(latest)')}
+									</a>
+								{/if}
 							{/if}
 						</div>
 
@@ -182,11 +231,11 @@
 									showChangelog.set(true);
 								}}
 							>
-								{$i18n.t("See what's new")}
+								{$i18n.t('settings.admin.general.seeWhatSNew.label')}
 							</button>{/if}
 					</div>
 
-					{#if isFeatureEnabled('changelog') && $config?.features?.enable_version_update_check}
+					{#if isFeatureEnabled('changelog') && WEBUI_BUILD_CHANNEL === 'main' && $config?.features?.enable_version_update_check}
 						<button
 							class="shrink-0 text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white"
 							type="button"
@@ -194,7 +243,7 @@
 								checkForVersionUpdates();
 							}}
 						>
-							{$i18n.t('Check for updates')}
+							{$i18n.t('settings.admin.general.checkForUpdates.label')}
 						</button>
 					{/if}
 				</div>
@@ -202,12 +251,14 @@
 				<div class="text-xs">
 					<div class="flex items-start justify-between gap-4">
 						<div class="min-w-0">
-							<div class="text-gray-600 dark:text-gray-400">{$i18n.t('Help')}</div>
+							<div class="text-gray-600 dark:text-gray-400">
+								{$i18n.t('settings.admin.general.help.label')}
+							</div>
 							<div class="mt-0.5 text-gray-400 dark:text-gray-600">
 								<!-- LICENSE covers this Open WebUI wordmark.
 								Do not alter, remove, obscure, or replace it except as LICENSE permits:
 								https://docs.openwebui.com/license. -->
-								{$i18n.t('Discover how to use Open WebUI and seek support from the community.')}
+								{$i18n.t('settings.admin.general.help.description')}
 							</div>
 						</div>
 
@@ -243,7 +294,9 @@
 					<!-- LICENSE covers this Open WebUI license attribution.
 					Do not alter, remove, obscure, or replace it except as LICENSE permits:
 					https://docs.openwebui.com/license. -->
-					<div class="text-gray-600 dark:text-gray-400">{$i18n.t('License')}</div>
+					<div class="text-gray-600 dark:text-gray-400">
+						{$i18n.t('settings.admin.general.license.label')}
+					</div>
 
 					{#if $config?.license_metadata}
 						<a
@@ -254,7 +307,7 @@
 							<span class="capitalize text-black dark:text-white"
 								>{$config?.license_metadata?.type} license</span
 							>
-							registered to
+							{$i18n.t('registered to')}
 							<span class="capitalize text-black dark:text-white"
 								>{$config?.license_metadata?.organization_name}</span
 							>
@@ -641,7 +694,7 @@
 				{/if}
 			</AdminSettingSection>
 
-			<AdminSettingSection title={$i18n.t('Features')}>
+			<AdminSettingSection title={$i18n.t('settings.admin.general.sections.features.title')}>
 				<!-- [Gradient] Fork attribution and citation-relevance control. -->
 				<AdminSettingRow label={$i18n.t('Powered by soev.ai')}>
 					<a
@@ -662,8 +715,8 @@
 					/></AdminSettingRow
 				>
 				<AdminSettingRow
-					label={$i18n.t('Community Sharing')}
-					description={$i18n.t('Allow users to share chats with the Open WebUI community.')}
+					label={$i18n.t('settings.admin.general.communitySharing.label')}
+					description={$i18n.t('settings.admin.general.communitySharing.description')}
 					let:labelId
 				>
 					<!-- LICENSE covers this Open WebUI Community wordmark.
@@ -672,15 +725,15 @@
 					<Switch bind:state={adminConfig.ENABLE_COMMUNITY_SHARING} ariaLabelledbyId={labelId} />
 				</AdminSettingRow>
 				<AdminSettingRow
-					label={$i18n.t('Message Rating')}
-					description={$i18n.t('Let users rate assistant responses.')}
+					label={$i18n.t('settings.admin.general.messageRating.label')}
+					description={$i18n.t('settings.admin.general.messageRating.description')}
 					let:labelId
 				>
 					<Switch bind:state={adminConfig.ENABLE_MESSAGE_RATING} ariaLabelledbyId={labelId} />
 				</AdminSettingRow>
 				<AdminSettingRow
-					label={$i18n.t('Folders')}
-					description={$i18n.t('Allow users to organize chats into folders.')}
+					label={$i18n.t('settings.admin.general.folders.label')}
+					description={$i18n.t('settings.admin.general.folders.description')}
 					let:labelId
 				>
 					<Switch bind:state={adminConfig.ENABLE_FOLDERS} ariaLabelledbyId={labelId} />
@@ -688,8 +741,8 @@
 
 				{#if adminConfig.ENABLE_FOLDERS}
 					<AdminSettingField
-						label={$i18n.t('Folder Max File Count')}
-						description={$i18n.t('Maximum number of files allowed per folder.')}
+						label={$i18n.t('settings.admin.general.folderMaxFileCount.label')}
+						description={$i18n.t('settings.admin.general.folderMaxFileCount.description')}
 					>
 						<input
 							class={inputClass}
@@ -702,16 +755,16 @@
 				{/if}
 
 				<AdminSettingRow
-					label={$i18n.t('Memories')}
-					description={$i18n.t('Allow users to save memories for more personalized responses.')}
+					label={$i18n.t('settings.admin.general.memories.label')}
+					description={$i18n.t('settings.admin.general.memories.description')}
 					let:labelId
 				>
 					<Switch bind:state={adminConfig.ENABLE_MEMORIES} ariaLabelledbyId={labelId} />
 				</AdminSettingRow>
 				{#if adminConfig.ENABLE_MEMORIES}
 					<AdminSettingRow
-						label={$i18n.t('Memory System Context')}
-						description={$i18n.t('Include saved memories in the system context.')}
+						label={$i18n.t('settings.admin.general.memorySystemContext.label')}
+						description={$i18n.t('settings.admin.general.memorySystemContext.description')}
 						labelClassName="text-gray-500 dark:text-gray-500"
 						let:labelId
 					>
@@ -721,26 +774,62 @@
 						/>
 					</AdminSettingRow>
 				{/if}
+				<AdminSettingField
+					forId="skill-content-max-chars"
+					label={$i18n.t('settings.admin.general.skillContentMaxChars.label')}
+					description={$i18n.t('settings.admin.general.skillContentMaxChars.description')}
+				>
+					<input
+						id="skill-content-max-chars"
+						class={inputClass}
+						type="number"
+						min="1"
+						step="1"
+						placeholder={$i18n.t('Default')}
+						bind:value={adminConfig.SKILL_CONTENT_MAX_CHARS}
+					/>
+				</AdminSettingField>
+				<AdminSettingField
+					forId="skill-preview-max-chars"
+					label={$i18n.t('settings.admin.general.skillPreviewMaxChars.label')}
+					description={$i18n.t('settings.admin.general.skillPreviewMaxChars.description')}
+				>
+					<input
+						id="skill-preview-max-chars"
+						class={inputClass}
+						type="number"
+						min="1"
+						step="1"
+						placeholder={$i18n.t('Default')}
+						bind:value={adminConfig.SKILL_PREVIEW_MAX_CHARS}
+					/>
+				</AdminSettingField>
 				<AdminSettingRow
-					label={$i18n.t('Notes')}
-					description={$i18n.t('Allow users to create and manage notes.')}
+					label={$i18n.t('settings.admin.general.notes.label')}
+					description={$i18n.t('settings.admin.general.notes.description')}
 					let:labelId
 				>
 					<Switch bind:state={adminConfig.ENABLE_NOTES} ariaLabelledbyId={labelId} />
 				</AdminSettingRow>
 				<AdminSettingRow
-					label={$i18n.t('Channels')}
-					description={$i18n.t('Allow users to use channels for shared conversations.')}
+					label={$i18n.t('settings.admin.general.channels.label')}
+					description={$i18n.t('settings.admin.general.channels.description')}
 					let:labelId
 				>
 					<Switch bind:state={adminConfig.ENABLE_CHANNELS} ariaLabelledbyId={labelId} />
 				</AdminSettingRow>
 				{#if adminConfig.ENABLE_CHANNELS}
 					<AdminSettingRow
-						label={$i18n.t('Model Response Mode')}
-						description={$i18n.t(
-							'Choose where model responses to root-level channel mentions are posted.'
-						)}
+						label={$i18n.t('settings.admin.general.encryptedChannels.label')}
+						description={$i18n.t('settings.admin.general.encryptedChannels.description')}
+						labelClassName="text-gray-500 dark:text-gray-500"
+						let:labelId
+					>
+						<Switch bind:state={adminConfig.ENABLE_ENCRYPTED_CHANNELS} ariaLabelledbyId={labelId} />
+					</AdminSettingRow>
+					<AdminSettingRow
+						label={$i18n.t('settings.admin.general.modelResponseMode.label')}
+						description={$i18n.t('settings.admin.general.modelResponseMode.description')}
 						labelClassName="text-gray-500 dark:text-gray-500"
 						let:labelId
 					>
@@ -754,37 +843,44 @@
 					</AdminSettingRow>
 				{/if}
 				<AdminSettingRow
-					label={$i18n.t('Calendar')}
-					description={$i18n.t('Allow users to access calendar features.')}
+					label={$i18n.t('settings.admin.general.apps.label')}
+					description={$i18n.t('settings.admin.general.apps.description')}
+					let:labelId
+				>
+					<Switch bind:state={adminConfig.ENABLE_APPS} ariaLabelledbyId={labelId} />
+				</AdminSettingRow>
+				<AdminSettingRow
+					label={$i18n.t('settings.admin.general.calendar.label')}
+					description={$i18n.t('settings.admin.general.calendar.description')}
 					let:labelId
 				>
 					<Switch bind:state={adminConfig.ENABLE_CALENDAR} ariaLabelledbyId={labelId} />
 				</AdminSettingRow>
 				<AdminSettingRow
-					label={$i18n.t('Automations')}
-					description={$i18n.t('Allow users to create and run automations.')}
+					label={$i18n.t('settings.admin.general.automations.label')}
+					description={$i18n.t('settings.admin.general.automations.description')}
 					let:labelId
 				>
 					<Switch bind:state={adminConfig.ENABLE_AUTOMATIONS} ariaLabelledbyId={labelId} />
 				</AdminSettingRow>
 				<AdminSettingRow
-					label={$i18n.t('User Webhooks')}
-					description={$i18n.t('Allow users to configure webhooks from their account.')}
+					label={$i18n.t('settings.admin.general.userWebhooks.label')}
+					description={$i18n.t('settings.admin.general.userWebhooks.description')}
 					let:labelId
 				>
 					<Switch bind:state={adminConfig.ENABLE_USER_WEBHOOKS} ariaLabelledbyId={labelId} />
 				</AdminSettingRow>
 				<AdminSettingRow
-					label={$i18n.t('User Status')}
-					description={$i18n.t('Show user status information in the app.')}
+					label={$i18n.t('settings.admin.general.userStatus.label')}
+					description={$i18n.t('settings.admin.general.userStatus.description')}
 					let:labelId
 				>
 					<Switch bind:state={adminConfig.ENABLE_USER_STATUS} ariaLabelledbyId={labelId} />
 				</AdminSettingRow>
 
 				<AdminSettingField
-					label={$i18n.t('Response Watermark')}
-					description={$i18n.t('Append a watermark to assistant responses when configured.')}
+					label={$i18n.t('settings.admin.general.responseWatermark.label')}
+					description={$i18n.t('settings.admin.general.responseWatermark.description')}
 				>
 					<Textarea
 						className={textareaClass}
@@ -794,10 +890,8 @@
 				</AdminSettingField>
 
 				<AdminSettingField
-					label={$i18n.t('WebUI URL')}
-					description={$i18n.t(
-						'Enter the public URL of your WebUI. This URL will be used to generate links in the notifications.'
-					)}
+					label={$i18n.t('settings.admin.general.webuiUrl.label')}
+					description={$i18n.t('settings.admin.general.webuiUrl.description')}
 				>
 					<input
 						class={inputClass}
@@ -810,7 +904,10 @@
 
 			<Events />
 
-			<AdminSettingSection title={$i18n.t('UI')}>
+			<AdminSettingSection title={$i18n.t('settings.admin.general.sections.ui.title')}>
+				<fieldset id="ui-i18n-settings" disabled={saving} class="min-w-0">
+					<I18nSettings bind:entries={uiI18nEntries} />
+				</fieldset>
 				<div class="shrink-0">
 					<div class="flex items-center justify-between gap-4 py-0.5">
 						<button
@@ -871,39 +968,42 @@
 				</div>
 
 				<div>
-					<div class="mb-2 flex w-full items-start justify-between gap-4">
-						<div class="min-w-0">
-							<div class="text-xs text-gray-600 dark:text-gray-400">{$i18n.t('Banners')}</div>
-							<div class="mt-1.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-								{$i18n.t('Create announcements shown to users in the app.')}
-							</div>
+					<div class="mb-1 flex min-h-7 w-full items-center justify-between gap-2">
+						<div class="min-w-0 text-xs text-gray-600 dark:text-gray-400">
+							{$i18n.t('settings.admin.general.banners.label')}
 						</div>
-
-						<button
-							class="flex size-6 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-black/5 hover:text-gray-900 dark:text-gray-600 dark:hover:bg-white/5 dark:hover:text-white"
-							type="button"
-							aria-label={$i18n.t('Add banner')}
-							on:click={() => {
-								if (banners.length === 0 || hasLocalizedContent(banners.at(-1).content)) {
-									banners = [
-										...banners,
-										{
-											id: uuidv4(),
-											type: '',
-											title: '',
-											content: {},
-											dismissible: true,
-											timestamp: Math.floor(Date.now() / 1000)
-										}
-									];
-								}
-							}}
-						>
-							<Plus />
-						</button>
+						<div class="flex shrink-0 items-center gap-1">
+							{#if banners.length > 0}
+								<LanguageModeSelect bind:value={bannerLocale} className="w-fit" />
+							{/if}
+							<button
+								class="flex size-6 items-center justify-center text-gray-400 dark:text-gray-600"
+								type="button"
+								aria-label={$i18n.t('settings.admin.general.addBanner.label')}
+								on:click={() => {
+									if (banners.length === 0 || banners[banners.length - 1]?.content !== '') {
+										banners = [
+											...banners,
+											{
+												id: uuidv4(),
+												type: '',
+												title: '',
+												content: '',
+												dismissible: true,
+												timestamp: Math.floor(Date.now() / 1000)
+											}
+										];
+									}
+								}}
+							>
+								<Plus />
+							</button>
+						</div>
 					</div>
-
-					<Banners bind:banners />
+					<div class="mb-2 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+						{$i18n.t('Create announcements shown to users in the app.')}
+					</div>
+					<Banners bind:banners locale={bannerLocale} />
 				</div>
 			</AdminSettingSection>
 		{/if}
@@ -911,8 +1011,9 @@
 
 	<div class="flex justify-end pt-6 text-sm font-normal">
 		<button
-			class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+			class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 			type="submit"
+			disabled={saving}
 		>
 			{$i18n.t('Save')}
 		</button>

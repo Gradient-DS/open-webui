@@ -10,13 +10,13 @@ from typing import Awaitable, Optional, Union
 from urllib.parse import quote
 
 import aiohttp
+import numpy as np
 import requests
-from huggingface_hub import snapshot_download
+from fastapi import HTTPException
 from langchain_classic.retrievers import (
     ContextualCompressionRetriever,
     EnsembleRetriever,
 )
-from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 from open_webui.config import (
     RAG_EMBEDDING_CONTENT_PREFIX,
@@ -32,7 +32,10 @@ from open_webui.env import (
     BYPASS_RETRIEVAL_ACCESS_CONTROL,
     ENABLE_FORWARD_USER_INFO_HEADERS,
     ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS,
+    MPS_INFERENCE_LOCK,
     OFFLINE_MODE,
+    RAG_SOURCE_METADATA_KEYS,
+    USE_SLIM,
 )
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import Chats
@@ -46,7 +49,7 @@ from open_webui.soev.availability import configured
 from open_webui.retrieval.loaders.youtube import YoutubeLoader
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.retrieval.external import retrieve_external_knowledge
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.factory import get_vector_db_client
 from open_webui.retrieval.vector.main import GetResult, SearchResult
 from open_webui.retrieval.web.utils import get_web_loader
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files, has_access_to_file
@@ -64,113 +67,39 @@ from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.retrievers import BaseRetriever
 
 
+class BM25Retriever(BaseRetriever):
+    docs: list[Document]
+    vectorizer: Any
+    k: int
+
+    def _get_relevant_documents(self, query: str, *, run_manager: CallbackManagerForRetrieverRun) -> list[Document]:
+        return self.vectorizer.get_top_n(query.split(), self.docs, n=self.k)
+
+
 def is_youtube_url(url: str) -> bool:
     youtube_regex = r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$'
     return re.match(youtube_regex, url) is not None
-
-
-LOADER_CONFIG_KEYS = {
-    'file_max_size': 'rag.file.max_size',
-    'youtube_language': 'rag.youtube_loader_language',
-    'youtube_proxy_url': 'rag.youtube_loader_proxy_url',
-    'web_loader_ssl_verification': 'web.loader.ssl_verification',
-    'web_loader_concurrent_requests': 'web.loader.concurrent_requests',
-    'web_search_trust_env': 'web.search.trust_env',
-    'web_loader_engine': 'web.loader.engine',
-    'web_loader_timeout': 'web.loader.timeout',
-    'playwright_ws_url': 'web.loader.playwright_ws_url',
-    'playwright_timeout': 'web.loader.playwright_timeout',
-    'firecrawl_api_key': 'web.loader.firecrawl_api_key',
-    'firecrawl_api_url': 'web.loader.firecrawl_api_url',
-    'firecrawl_timeout': 'web.loader.firecrawl_timeout',
-    'tavily_api_key': 'web.search.tavily_api_key',
-    'tavily_extract_depth': 'web.search.tavily_extract_depth',
-    'microsoft_web_iq_api_base_url': 'web.search.microsoft_web_iq_api_base_url',
-    'microsoft_web_iq_api_key': 'web.search.microsoft_web_iq_api_key',
-    'microsoft_web_iq_language': 'web.search.microsoft_web_iq_language',
-    'external_web_loader_url': 'web.loader.external_web_loader_url',
-    'external_web_loader_api_key': 'web.loader.external_web_loader_api_key',
-    'CONTENT_EXTRACTION_ENGINE': 'rag.content_extraction_engine',
-    'DATALAB_MARKER_API_KEY': 'rag.datalab_marker_api_key',
-    'DATALAB_MARKER_API_BASE_URL': 'rag.datalab_marker_api_base_url',
-    'DATALAB_MARKER_ADDITIONAL_CONFIG': 'rag.datalab_marker_additional_config',
-    'DATALAB_MARKER_SKIP_CACHE': 'rag.datalab_marker_skip_cache',
-    'DATALAB_MARKER_FORCE_OCR': 'rag.datalab_marker_force_ocr',
-    'DATALAB_MARKER_PAGINATE': 'rag.datalab_marker_paginate',
-    'DATALAB_MARKER_STRIP_EXISTING_OCR': 'rag.datalab_marker_strip_existing_ocr',
-    'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': 'rag.datalab_marker_disable_image_extraction',
-    'DATALAB_MARKER_FORMAT_LINES': 'rag.datalab_marker_format_lines',
-    'DATALAB_MARKER_USE_LLM': 'rag.datalab_marker_use_llm',
-    'DATALAB_MARKER_OUTPUT_FORMAT': 'rag.datalab_marker_output_format',
-    'EXTERNAL_DOCUMENT_LOADER_URL': 'rag.external_document_loader_url',
-    'EXTERNAL_DOCUMENT_LOADER_API_KEY': 'rag.external_document_loader_api_key',
-    'EXTERNAL_DOCUMENT_LOADER_HEADERS': 'rag.external_document_loader_headers',
-    'TIKA_SERVER_URL': 'rag.tika_server_url',
-    'TIKA_SERVER_VERSION': 'rag.tika_server_version',
-    'DOCLING_SERVER_URL': 'rag.docling_server_url',
-    'DOCLING_API_KEY': 'rag.docling_api_key',
-    'DOCLING_PARAMS': 'rag.docling_params',
-    'PDF_EXTRACT_IMAGES': 'rag.pdf_extract_images',
-    'PDF_LOADER_MODE': 'rag.pdf_loader_mode',
-    'DOCUMENT_INTELLIGENCE_ENDPOINT': 'rag.document_intelligence_endpoint',
-    'DOCUMENT_INTELLIGENCE_KEY': 'rag.document_intelligence_key',
-    'DOCUMENT_INTELLIGENCE_MODEL': 'rag.document_intelligence_model',
-    'MISTRAL_OCR_API_BASE_URL': 'rag.mistral_ocr_api_base_url',
-    'MISTRAL_OCR_API_KEY': 'rag.mistral_ocr_api_key',
-    'MISTRAL_OCR_USE_BASE64': 'rag.mistral_ocr_use_base64',
-    'PADDLEOCR_VL_BASE_URL': 'rag.paddleocr_vl_base_url',
-    'PADDLEOCR_VL_TOKEN': 'rag.paddleocr_vl_token',
-    'MINERU_API_MODE': 'rag.mineru_api_mode',
-    'MINERU_API_URL': 'rag.mineru_api_url',
-    'MINERU_API_KEY': 'rag.mineru_api_key',
-    'MINERU_API_TIMEOUT': 'rag.mineru_api_timeout',
-    'MINERU_PARAMS': 'rag.mineru_params',
-    'MINERU_FILE_EXTENSIONS': 'rag.mineru_file_extensions',
-}
-
-
-async def get_loader_config():
-    values = await Config.get_many(*LOADER_CONFIG_KEYS.values())
-    return {name: values.get(key) for name, key in LOADER_CONFIG_KEYS.items()}
 
 
 def get_loader(request, url: str, config: dict):
     if is_youtube_url(url):
         return YoutubeLoader(
             url,
-            language=config.get('youtube_language'),
-            proxy_url=config.get('youtube_proxy_url'),
+            language=config['rag.youtube_loader_language'],
+            proxy_url=config['rag.youtube_loader_proxy_url'],
         )
-    return get_web_loader(
-        url,
-        verify_ssl=config.get('web_loader_ssl_verification'),
-        requests_per_second=config.get('web_loader_concurrent_requests'),
-        trust_env=config.get('web_search_trust_env'),
-        loader_config=config,
-    )
+    return get_web_loader(url, config)
 
 
-def build_loader_from_config(request, config: dict | None = None):
-    """Build a Loader instance with the admin's configured extraction engine settings.
-
-    ``config`` is the loader-config dict from :func:`get_loader_config`. It defaults
-    to ``None`` so legacy 1-arg call sites keep working; callers in async contexts
-    pass ``await get_loader_config()`` (Config is async-only, so this sync builder
-    cannot self-fetch).
-    """
+def build_loader_from_config(config: dict):
+    """Build a document loader with the shared retrieval settings."""
     from open_webui.retrieval.loaders.main import Loader
 
-    config = config or {}
-    loader_config = {key: config.get(key) for key in LOADER_CONFIG_KEYS if key.isupper()}
-    loader_config['FILE_MAX_SIZE'] = config.get('file_max_size')
-    return Loader(
-        engine=loader_config['CONTENT_EXTRACTION_ENGINE'],
-        **{key: value for key, value in loader_config.items() if key != 'CONTENT_EXTRACTION_ENGINE'},
-    )
+    return Loader(config)
 
 
 def _extract_text_from_binary_response(
-    request, response: requests.Response, url: str, loader_config: dict
+    request, response: requests.Response, url: str, config: dict
 ) -> tuple[str, list]:
     """Download response body to a temp file and extract text using the Loader pipeline."""
     import mimetypes
@@ -192,10 +121,13 @@ def _extract_text_from_binary_response(
     if not filename or '.' not in filename:
         ext = mimetypes.guess_extension(content_type) or ''
         filename = f'download{ext}'
+    elif not mimetypes.guess_type(filename)[0] and content_type != 'application/octet-stream':
+        # The dot in names like arXiv's 1706.03762 is not an extension.
+        filename += mimetypes.guess_extension(content_type) or ''
 
     suffix = '.' + filename.split('.')[-1].lower() if '.' in filename else ''
 
-    max_size = loader_config.get('file_max_size')
+    max_size = config['rag.file.max_size']
     max_bytes = int(max_size) * 1024 * 1024 if max_size else 0
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
@@ -209,7 +141,7 @@ def _extract_text_from_binary_response(
                     raise ValueError(ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size} MB'))
                 tmp.write(chunk)
 
-        loader = build_loader_from_config(request, loader_config)
+        loader = build_loader_from_config(config)
         docs = loader.load(filename, content_type, tmp_path)
         for doc in docs:
             doc.metadata['source'] = url
@@ -239,17 +171,76 @@ def _is_text_content_type(content_type: str) -> bool:
     return ct.endswith(('+xml', '+json'))
 
 
-async def get_content_from_url(request, url: str) -> str:
-    loader_config = await get_loader_config()
+async def get_content_from_url(request, url: str, *, config: dict | None = None) -> tuple[str, list]:
+    if config is None:
+        config = await Config.get_many(
+            'rag.content_extraction_engine',
+            'rag.datalab_marker_additional_config',
+            'rag.datalab_marker_api_base_url',
+            'rag.datalab_marker_api_key',
+            'rag.datalab_marker_disable_image_extraction',
+            'rag.datalab_marker_force_ocr',
+            'rag.datalab_marker_format_lines',
+            'rag.datalab_marker_output_format',
+            'rag.datalab_marker_paginate',
+            'rag.datalab_marker_skip_cache',
+            'rag.datalab_marker_strip_existing_ocr',
+            'rag.datalab_marker_use_llm',
+            'rag.docling_api_key',
+            'rag.docling_params',
+            'rag.docling_server_url',
+            'rag.document_intelligence_endpoint',
+            'rag.document_intelligence_key',
+            'rag.document_intelligence_model',
+            'web.loader.ssl_verification',
+            'web.search.exa_api_key',
+            'rag.external_document_loader_api_key',
+            'rag.external_document_loader_headers',
+            'rag.external_document_loader_url',
+            'web.loader.external_web_loader_api_key',
+            'web.loader.external_web_loader_url',
+            'rag.file.max_size',
+            'web.loader.firecrawl_api_url',
+            'web.loader.firecrawl_api_key',
+            'web.loader.firecrawl_timeout',
+            'web.search.microsoft_web_iq_api_base_url',
+            'web.search.microsoft_web_iq_api_key',
+            'web.search.microsoft_web_iq_language',
+            'rag.mineru_api_key',
+            'rag.mineru_api_mode',
+            'rag.mineru_api_timeout',
+            'rag.mineru_api_url',
+            'rag.mineru_file_extensions',
+            'rag.mineru_params',
+            'rag.mistral_ocr_api_base_url',
+            'rag.mistral_ocr_api_key',
+            'rag.mistral_ocr_use_base64',
+            'rag.paddleocr_vl_base_url',
+            'rag.paddleocr_vl_token',
+            'rag.pdf_extract_images',
+            'rag.pdf_loader_mode',
+            'web.loader.playwright_timeout',
+            'web.loader.playwright_ws_url',
+            'web.search.tavily_api_key',
+            'web.search.tavily_extract_depth',
+            'rag.tika_server_url',
+            'rag.tika_server_version',
+            'web.loader.concurrent_requests',
+            'web.loader.engine',
+            'web.loader.timeout',
+            'web.search.trust_env',
+            'rag.youtube_loader_language',
+            'rag.youtube_loader_proxy_url',
+        )
 
     # The rest of this function performs synchronous, blocking work: an SSRF-guarded
     # `requests` probe and a synchronous document loader (`loader.load()`). Run it in a
     # worker thread so the event loop stays free while waiting on network/parsing.
-    return await asyncio.to_thread(_get_content_from_url_sync, request, url, loader_config)
+    return await asyncio.to_thread(_get_content_from_url_sync, request, url, config)
 
 
-def _get_content_from_url_sync(request, url: str, loader_config):
-    from open_webui.retrieval.web.utils import validate_url, get_ssrf_safe_requests_session
+def _get_content_from_url_sync(request, url: str, config: dict):
+    from open_webui.retrieval.web.utils import WEB_LOADER_HEADERS, validate_url, get_ssrf_safe_requests_session
 
     # Validate URL before making any request (blocks private IPs, non-HTTP, filter list)
     validate_url(url)
@@ -261,7 +252,7 @@ def _get_content_from_url_sync(request, url: str, loader_config):
     # when allow_redirects=False, causing the binary-content path to run
     # and produce empty docs → HTTP 400.
     if is_youtube_url(url):
-        loader = get_loader(request, url, loader_config)
+        loader = get_loader(request, url, config)
         docs = loader.load()
         content = ' '.join([doc.page_content for doc in docs])
         return content, docs
@@ -274,6 +265,9 @@ def _get_content_from_url_sync(request, url: str, loader_config):
     try:
         # Probe through the connect-time SSRF guard; bare requests.get re-resolves (DNS-rebinding gap).
         session = get_ssrf_safe_requests_session()
+        # Match the web loader's request, or sites that block unknown clients make a file look like a web page.
+        session.headers = WEB_LOADER_HEADERS
+        session.verify = config['web.loader.ssl_verification']
         response = session.get(url, stream=True, timeout=30, allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS)
         response.raise_for_status()
         content_type = response.headers.get('Content-Type', '')
@@ -285,14 +279,14 @@ def _get_content_from_url_sync(request, url: str, loader_config):
     if response is None or _is_text_content_type(content_type):
         if response is not None:
             response.close()
-        loader = get_loader(request, url, loader_config)
+        loader = get_loader(request, url, config)
         docs = loader.load()
         content = ' '.join([doc.page_content for doc in docs])
         return content, docs
 
     # Binary content (PDF, DOCX, XLSX, PPTX, etc.) — download and extract
     try:
-        return _extract_text_from_binary_response(request, response, url, loader_config)
+        return _extract_text_from_binary_response(request, response, url, config)
     finally:
         response.close()
 
@@ -339,27 +333,23 @@ class VectorSearchRetriever(BaseRetriever):
 
 
 def query_doc(collection_name: str, query_embedding: list[float], k: int, user: UserModel = None):
-    try:
-        log.debug('query_doc:doc %s', collection_name)
-        result = VECTOR_DB_CLIENT.search(
-            collection_name=collection_name,
-            vectors=[query_embedding],
-            limit=k,
-        )
+    log.debug('query_doc:doc %s', collection_name)
+    result = get_vector_db_client().search(
+        collection_name=collection_name,
+        vectors=[query_embedding],
+        limit=k,
+    )
 
-        if result:
-            log.info(f'query_doc:result count={len(result.ids[0]) if result.ids else 0}')
+    if result:
+        log.info(f'query_doc:result count={len(result.ids[0]) if result.ids else 0}')
 
-        return result
-    except Exception as e:
-        log.exception(f'Error querying doc {collection_name} with limit {k}: {e}')
-        raise e
+    return result
 
 
 def get_doc(collection_name: str, user: UserModel = None):
     try:
         log.debug('get_doc:doc %s', collection_name)
-        result = VECTOR_DB_CLIENT.get(collection_name=collection_name)
+        result = get_vector_db_client().get(collection_name=collection_name)
 
         if result:
             log.info(f'get_doc:result count={len(result.ids[0]) if result.ids else 0}')
@@ -504,124 +494,116 @@ async def query_doc_with_hybrid_search(
     enable_enriched_texts: bool = False,
     native_hybrid_search: bool = True,
 ) -> dict:
-    try:
-        if native_hybrid_search and not enable_enriched_texts:
-            native_result = await query_doc_with_native_hybrid_search(
-                collection_name=collection_name,
-                query=query,
-                embedding_function=embedding_function,
-                k=k,
-                reranking_function=reranking_function,
-                k_reranker=k_reranker,
-                r=r,
-                hybrid_bm25_weight=hybrid_bm25_weight,
-            )
-            if native_result is not None:
-                return native_result
-
-        if collection_result is None:
-            collection_result = await ASYNC_VECTOR_DB_CLIENT.get(collection_name=collection_name)
-
-        # First check if collection_result has the required attributes
-        if (
-            not collection_result
-            or not hasattr(collection_result, 'documents')
-            or not hasattr(collection_result, 'metadatas')
-        ):
-            log.warning(f'query_doc_with_hybrid_search:no_docs {collection_name}')
-            return {'documents': [], 'metadatas': [], 'distances': []}
-
-        # Now safely check the documents content after confirming attributes exist
-        if (
-            not collection_result.documents
-            or len(collection_result.documents) == 0
-            or not collection_result.documents[0]
-        ):
-            log.warning(f'query_doc_with_hybrid_search:no_docs {collection_name}')
-            return {'documents': [], 'metadatas': [], 'distances': []}
-
-        log.debug('query_doc_with_hybrid_search:doc %s', collection_name)
-
-        original_texts = collection_result.documents[0]
-        bm25_metadatas = [
-            {**meta, CHUNK_HASH_KEY: _content_hash(original_texts[idx])}
-            for idx, meta in enumerate(collection_result.metadatas[0])
-        ]
-
-        bm25_texts = get_enriched_texts(collection_result) if enable_enriched_texts else original_texts
-
-        bm25_retriever = BM25Retriever.from_texts(
-            texts=bm25_texts,
-            metadatas=bm25_metadatas,
-        )
-        bm25_retriever.k = k
-
-        vector_search_retriever = VectorSearchRetriever(
+    if native_hybrid_search and not enable_enriched_texts:
+        native_result = await query_doc_with_native_hybrid_search(
             collection_name=collection_name,
+            query=query,
             embedding_function=embedding_function,
-            top_k=k,
-        )
-
-        # Use CHUNK_HASH_KEY for dedup so enriched BM25 texts don't defeat RRF
-        if hybrid_bm25_weight <= 0:
-            ensemble_retriever = EnsembleRetriever(
-                retrievers=[vector_search_retriever],
-                weights=[1.0],
-                id_key=CHUNK_HASH_KEY,
-            )
-        elif hybrid_bm25_weight >= 1:
-            ensemble_retriever = EnsembleRetriever(
-                retrievers=[bm25_retriever],
-                weights=[1.0],
-                id_key=CHUNK_HASH_KEY,
-            )
-        else:
-            ensemble_retriever = EnsembleRetriever(
-                retrievers=[bm25_retriever, vector_search_retriever],
-                weights=[hybrid_bm25_weight, 1.0 - hybrid_bm25_weight],
-                id_key=CHUNK_HASH_KEY,
-            )
-
-        compressor = RerankCompressor(
-            embedding_function=embedding_function,
-            top_n=k_reranker,
+            k=k,
             reranking_function=reranking_function,
-            r_score=r,
+            k_reranker=k_reranker,
+            r=r,
+            hybrid_bm25_weight=hybrid_bm25_weight,
+        )
+        if native_result is not None:
+            return native_result
+
+    if collection_result is None:
+        collection_result = await ASYNC_VECTOR_DB_CLIENT.get(collection_name=collection_name)
+
+    # First check if collection_result has the required attributes
+    if (
+        not collection_result
+        or not hasattr(collection_result, 'documents')
+        or not hasattr(collection_result, 'metadatas')
+    ):
+        log.warning(f'query_doc_with_hybrid_search:no_docs {collection_name}')
+        return {'documents': [], 'metadatas': [], 'distances': []}
+
+    # Now safely check the documents content after confirming attributes exist
+    if not collection_result.documents or len(collection_result.documents) == 0 or not collection_result.documents[0]:
+        log.warning(f'query_doc_with_hybrid_search:no_docs {collection_name}')
+        return {'documents': [], 'metadatas': [], 'distances': []}
+
+    log.debug('query_doc_with_hybrid_search:doc %s', collection_name)
+
+    original_texts = collection_result.documents[0]
+    bm25_metadatas = [
+        {**meta, CHUNK_HASH_KEY: _content_hash(original_texts[idx])}
+        for idx, meta in enumerate(collection_result.metadatas[0])
+    ]
+
+    bm25_texts = get_enriched_texts(collection_result) if enable_enriched_texts else original_texts
+
+    from rank_bm25 import BM25Okapi
+
+    bm25_retriever = BM25Retriever(
+        docs=[Document(page_content=text, metadata=meta) for text, meta in zip(bm25_texts, bm25_metadatas)],
+        vectorizer=BM25Okapi([text.split() for text in bm25_texts]),
+        k=k,
+    )
+
+    vector_search_retriever = VectorSearchRetriever(
+        collection_name=collection_name,
+        embedding_function=embedding_function,
+        top_k=k,
+    )
+
+    # Use CHUNK_HASH_KEY for dedup so enriched BM25 texts don't defeat RRF
+    if hybrid_bm25_weight <= 0:
+        ensemble_retriever = EnsembleRetriever(
+            retrievers=[vector_search_retriever],
+            weights=[1.0],
+            id_key=CHUNK_HASH_KEY,
+        )
+    elif hybrid_bm25_weight >= 1:
+        ensemble_retriever = EnsembleRetriever(
+            retrievers=[bm25_retriever],
+            weights=[1.0],
+            id_key=CHUNK_HASH_KEY,
+        )
+    else:
+        ensemble_retriever = EnsembleRetriever(
+            retrievers=[bm25_retriever, vector_search_retriever],
+            weights=[hybrid_bm25_weight, 1.0 - hybrid_bm25_weight],
+            id_key=CHUNK_HASH_KEY,
         )
 
-        compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor, base_retriever=ensemble_retriever
-        )
+    compressor = RerankCompressor(
+        embedding_function=embedding_function,
+        top_n=k_reranker,
+        reranking_function=reranking_function,
+        r_score=r,
+    )
 
-        result = await compression_retriever.ainvoke(query)
+    compression_retriever = ContextualCompressionRetriever(
+        base_compressor=compressor, base_retriever=ensemble_retriever
+    )
 
-        distances = [d.metadata.get('score') for d in result]
-        documents = [d.page_content for d in result]
-        metadatas = [d.metadata for d in result]
+    result = await compression_retriever.ainvoke(query)
 
-        # retrieve only min(k, k_reranker) items, sort and cut by distance if k < k_reranker
-        if k < k_reranker:
-            sorted_items = sorted(zip(distances, documents, metadatas), key=lambda x: x[0], reverse=True)
-            sorted_items = sorted_items[:k]
+    distances = [d.metadata.get('score') for d in result]
+    documents = [d.page_content for d in result]
+    metadatas = [d.metadata for d in result]
 
-            if sorted_items:
-                distances, documents, metadatas = map(list, zip(*sorted_items))
-            else:
-                distances, documents, metadatas = [], [], []
+    # retrieve only min(k, k_reranker) items, sort and cut by distance if k < k_reranker
+    if k < k_reranker:
+        sorted_items = sorted(zip(distances, documents, metadatas), key=lambda x: x[0], reverse=True)
+        sorted_items = sorted_items[:k]
 
-        result = {
-            'distances': [distances],
-            'documents': [documents],
-            'metadatas': [metadatas],
-        }
+        if sorted_items:
+            distances, documents, metadatas = map(list, zip(*sorted_items))
+        else:
+            distances, documents, metadatas = [], [], []
 
-        log.info(
-            f'query_doc_with_hybrid_search:result count={len(result["documents"][0]) if result["documents"] else 0}'
-        )
-        return result
-    except Exception as e:
-        log.exception(f'Error querying doc {collection_name} with hybrid search: {e}')
-        raise e
+    result = {
+        'distances': [distances],
+        'documents': [documents],
+        'metadatas': [metadatas],
+    }
+
+    log.info(f'query_doc_with_hybrid_search:result count={len(documents)}')
+    return result
 
 
 def merge_get_results(get_results: list[dict]) -> dict:
@@ -711,6 +693,7 @@ async def query_collection(
     queries: list[str],
     embedding_function,
     k: int,
+    user: UserModel | None = None,
 ) -> dict:
     config = await Config.get_many(
         'rag.enable_hybrid_search',
@@ -723,7 +706,7 @@ async def query_collection(
     if request and config.get('rag.enable_hybrid_search'):
         try:
             reranking_function = (
-                (lambda query, documents: request.app.state.RERANKING_FUNCTION(query, documents))
+                (lambda query, documents: request.app.state.RERANKING_FUNCTION(query, documents, user=user))
                 if request.app.state.RERANKING_FUNCTION
                 else None
             )
@@ -742,7 +725,8 @@ async def query_collection(
             log.debug('Hybrid search failed, falling back to vector search: %s', e)
 
     results = []
-    error = False
+    last_error = None
+    failed_collection_names = set()
 
     def process_query_collection(collection_name, query_embedding):
         try:
@@ -753,11 +737,10 @@ async def query_collection(
                     query_embedding=query_embedding,
                 )
                 if result is not None:
-                    return result.model_dump(), None
-            return None, None
+                    return result.model_dump(), None, collection_name
+            return None, None, collection_name
         except Exception as e:
-            log.exception(f'Error when querying the collection: {e}')
-            return None, e
+            return None, e, collection_name
 
     # Sanitize: filter out None/empty queries to prevent embedding crashes
     # (e.g. when get_last_user_message returns None)
@@ -778,14 +761,20 @@ async def query_collection(
         ]
     )
 
-    for result, err in task_results:
+    for result, err, collection_name in task_results:
         if err is not None:
-            error = True
+            last_error = err
+            failed_collection_names.add(collection_name)
         elif result is not None:
             results.append(result)
 
-    if error and not results:
-        log.warning('All collection queries failed. No results returned.')
+    if failed_collection_names:
+        log.error(
+            'query_collection: %s collection(s) had failing queries: %s',
+            len(failed_collection_names),
+            ', '.join(sorted(failed_collection_names)),
+            exc_info=last_error,
+        )
 
     return merge_and_sort_query_results(results, k=k)
 
@@ -802,7 +791,8 @@ async def query_collection_with_hybrid_search(
     enable_enriched_texts: bool = False,
 ) -> dict:
     results = []
-    error = False
+    last_error = None
+    failed_collection_names = set()
 
     if not enable_enriched_texts:
 
@@ -840,6 +830,7 @@ async def query_collection_with_hybrid_search(
             return name, await ASYNC_VECTOR_DB_CLIENT.get(collection_name=name)
         except Exception as e:
             log.exception(f'Failed to fetch collection {name}: {e}')
+            failed_collection_names.add(name)
             return name, None
 
     collection_results = dict(await asyncio.gather(*(_fetch_collection(name) for name in collection_names)))
@@ -861,10 +852,9 @@ async def query_collection_with_hybrid_search(
                 enable_enriched_texts=enable_enriched_texts,
                 native_hybrid_search=False,
             )
-            return result, None
+            return result, None, collection_name
         except Exception as e:
-            log.exception(f'Error when querying the collection with hybrid_search: {e}')
-            return None, e
+            return None, e, collection_name
 
     # Prepare tasks for all collections and queries
     # Avoid running any tasks for collections that failed to fetch data (have assigned None)
@@ -878,13 +868,22 @@ async def query_collection_with_hybrid_search(
     # Run all queries in parallel using asyncio.gather
     task_results = await asyncio.gather(*[process_query(collection_name, query) for collection_name, query in tasks])
 
-    for result, err in task_results:
+    for result, err, collection_name in task_results:
         if err is not None:
-            error = True
+            last_error = err
+            failed_collection_names.add(collection_name)
         elif result is not None:
             results.append(result)
 
-    if error and not results:
+    if failed_collection_names:
+        log.error(
+            'query_collection_with_hybrid_search: %s collection(s) had failing queries: %s',
+            len(failed_collection_names),
+            ', '.join(sorted(failed_collection_names)),
+            exc_info=last_error,
+        )
+
+    if failed_collection_names and not results:
         raise Exception('Hybrid search failed for all collections. Using Non-hybrid search as fallback.')
 
     return merge_and_sort_query_results(results, k=k)
@@ -1120,6 +1119,8 @@ def get_embedding_function(
     if embedding_engine == '':
         # Sentence transformers: CPU-bound sync operation
         async def async_embedding_function(query, prefix=None, user=None):
+            if USE_SLIM:
+                raise HTTPException(503, 'Configure an external embedding engine (openai, ollama, azure_openai).')
             # Deferred so a missing local model degrades RAG instead of crashing boot.
             if embedding_function is None:
                 raise ValueError(
@@ -1127,17 +1128,16 @@ def get_embedding_function(
                     'SentenceTransformer model name, or configure an external '
                     'RAG_EMBEDDING_ENGINE (ollama, openai, azure_openai).'
                 )
-            return await asyncio.to_thread(
-                (
-                    lambda query, prefix=None: embedding_function.encode(
+
+            def encode():
+                with MPS_INFERENCE_LOCK:
+                    return embedding_function.encode(
                         query,
                         batch_size=int(embedding_batch_size),
                         **({'prompt': prefix} if prefix else {}),
                     ).tolist()
-                ),
-                query,
-                prefix,
-            )
+
+            return await asyncio.to_thread(encode)
 
         return async_embedding_function
     elif embedding_engine in ['ollama', 'openai', 'azure_openai']:
@@ -1254,6 +1254,14 @@ async def generate_embeddings(
 
 
 def get_reranking_function(reranking_engine, reranking_model, reranking_function, reranking_batch_size=32):
+    if USE_SLIM and reranking_model and reranking_engine != 'external':
+
+        def unavailable(query, documents, user=None):
+            raise HTTPException(
+                503, 'Configure an external reranker, or clear the reranking model to use cosine scoring.'
+            )
+
+        return unavailable
     if reranking_function is None:
         return None
     if reranking_engine == 'external':
@@ -1261,9 +1269,14 @@ def get_reranking_function(reranking_engine, reranking_model, reranking_function
             [(query, doc.page_content) for doc in documents], user=user
         )
     else:
-        return lambda query, documents, user=None: reranking_function.predict(
-            [(query, doc.page_content) for doc in documents], batch_size=int(reranking_batch_size)
-        )
+
+        def predict(query, documents, user=None):
+            with MPS_INFERENCE_LOCK:
+                return reranking_function.predict(
+                    [(query, doc.page_content) for doc in documents], batch_size=int(reranking_batch_size)
+                )
+
+        return predict
 
 
 # UUIDs, SHA-256 digests, and prefixed variants thereof all fit [A-Za-z0-9_-].
@@ -1312,20 +1325,22 @@ async def filter_accessible_collections(
 
     validated = set()
     for name in safe_names:
-        if name == 'knowledge-bases':
+        # Some vector stores fold case and _/- together, so authorize a name as the collection it can resolve to.
+        canonical = name.lower().replace('_', '-')
+        if canonical == 'knowledge-bases':
             # System meta-collection — never exposed to non-admins.
             continue
-        elif name.startswith('file-'):
-            file_id = name[len('file-') :]
+        elif canonical.startswith('file-'):
+            file_id = canonical[len('file-') :]
             if await has_access_to_file(file_id=file_id, access_type=access_type, user=user):
                 validated.add(name)
-        elif name.startswith('user-memory-'):
-            if name == f'user-memory-{user.id}':
+        elif canonical.startswith('user-memory-'):
+            if canonical == f'user-memory-{user.id}':
                 validated.add(name)
-        elif name.startswith('web-search-'):
+        elif canonical.startswith('web-search-'):
             # Ephemeral per-query collections, owner-bound: process_web_search mints
             # them as web-search-{user.id}-<hash>, so only the creator may read/write.
-            if name.startswith(f'web-search-{user.id}-'):
+            if canonical.startswith(f'web-search-{user.id}-'):
                 validated.add(name)
         else:
             # May be a knowledge-base ID or a legacy/ephemeral collection.
@@ -1336,12 +1351,17 @@ async def filter_accessible_collections(
             #   True  — allow (preserves legacy behaviour)
             if not configured():
                 continue
-            if await Knowledges.check_access_by_user_id(name, user.id, permission=access_type):
+            if await Knowledges.check_access_by_user_id(canonical, user.id, permission=access_type):
                 validated.add(name)
-            elif ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS and not await Knowledges.get_knowledge_by_id(name):
+            elif ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS and not await Knowledges.get_knowledge_by_id(canonical):
                 # Not a KB at all — legacy/ephemeral collection, allow
                 validated.add(name)
     return validated
+
+
+def filter_source_metadata(metadata: dict) -> dict:
+    """Keep only the chunk metadata keys the operator allowed the model to see."""
+    return {key: metadata[key] for key in RAG_SOURCE_METADATA_KEYS if metadata.get(key) is not None}
 
 
 async def get_sources_from_items(
@@ -1412,7 +1432,7 @@ async def get_sources_from_items(
                     # Fallback to item content
                     query_result = {
                         'documents': [[item.get('content')]],
-                        'metadatas': [[{'file_id': item.get('id'), 'name': item.get('name')}]],
+                        'metadatas': [[{'name': item.get('name')}]],
                     }
 
         elif item.get('type') == 'note':
@@ -1671,6 +1691,7 @@ async def get_sources_from_items(
                         queries=queries,
                         embedding_function=embedding_function,
                         k=k,
+                        user=user,
                     )
             except Exception as e:
                 log.exception(e)
@@ -1698,10 +1719,32 @@ async def get_sources_from_items(
                     sources.append(source)
         except Exception as e:
             log.exception(e)
+
+    file_ids = {
+        metadata['file_id']
+        for source in sources
+        for metadata in source['metadata']
+        if isinstance(metadata, dict) and metadata.get('file_id') and not metadata.get('external')
+    }
+    if file_ids:
+        file_names = {
+            file.id: (file.meta or {}).get('name') for file in await Files.get_file_metadatas_by_ids(list(file_ids))
+        }
+        for source in sources:
+            for metadata in source['metadata']:
+                if isinstance(metadata, dict) and metadata.get('external'):
+                    continue
+                file_name = file_names.get(metadata.get('file_id')) if isinstance(metadata, dict) else None
+                if file_name:
+                    if metadata.get('source') == metadata.get('name'):
+                        metadata['source'] = file_name
+                    metadata['name'] = file_name
     return sources
 
 
 def get_model_path(model: str, update_model: bool = False):
+    from huggingface_hub import snapshot_download
+
     # Construct huggingface_hub kwargs with local_files_only to return the snapshot path
     cache_dir = os.getenv('SENTENCE_TRANSFORMERS_HOME')
 
@@ -1750,6 +1793,17 @@ from langchain_core.callbacks import Callbacks
 from langchain_core.documents import BaseDocumentCompressor
 
 
+def cosine_similarity(query, documents) -> np.ndarray:
+    """Score one query against documents without loading a model runtime."""
+    if len(documents) == 0:
+        return np.array([], dtype=float)
+    query = np.asarray(query, dtype=float).reshape(-1)
+    documents = np.asarray(documents, dtype=float)
+    query = query / max(np.linalg.norm(query), 1e-12)
+    documents = documents / np.maximum(np.linalg.norm(documents, axis=1, keepdims=True), 1e-12)
+    return documents @ query
+
+
 class RerankCompressor(BaseDocumentCompressor):
     embedding_function: Any
     top_n: int
@@ -1785,29 +1839,18 @@ class RerankCompressor(BaseDocumentCompressor):
         query: str,
         callbacks: Callbacks | None = None,
     ) -> Sequence[Document]:
+        if not documents:
+            return []
         reranking = self.reranking_function is not None
 
         scores = None
         if reranking:
             scores = await asyncio.to_thread(self.reranking_function, query, documents)
         else:
-            import numpy as np
-
             query_embedding = await self.embedding_function(query, RAG_EMBEDDING_QUERY_PREFIX)
-            document_embedding = await self.embedding_function(
-                [doc.page_content for doc in documents], RAG_EMBEDDING_CONTENT_PREFIX
-            )
-            # numpy cosine similarity; matches sentence_transformers.util.cos_sim(q, d)[0]
-            # so we don't need sentence_transformers in the slim image.
-            q = np.asarray(query_embedding, dtype=np.float32)
-            if q.ndim == 1:
-                q = q[None, :]
-            d = np.asarray(document_embedding, dtype=np.float32)
-            if d.ndim == 1:
-                d = d[None, :]
-            q_norm = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-12)
-            d_norm = d / (np.linalg.norm(d, axis=1, keepdims=True) + 1e-12)
-            scores = (q_norm @ d_norm.T)[0]
+            doc_texts = [doc.page_content for doc in documents]
+            document_embedding = await self.embedding_function(doc_texts, RAG_EMBEDDING_CONTENT_PREFIX)
+            scores = cosine_similarity(query_embedding, document_embedding)
 
         if scores is not None:
             docs_with_scores = list(

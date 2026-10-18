@@ -5,7 +5,7 @@
 	import Drawer from './Drawer.svelte';
 	import RichTextInput from './RichTextInput.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	export let id = 'input-modal';
 
@@ -17,13 +17,14 @@
 	export let generateAutoCompletion = null;
 
 	export let onChange = () => {};
+	export let oninput: ((event: Event) => void) | undefined = undefined;
 	export let onClose = () => {};
 
 	let inputElement;
 </script>
 
 <Drawer bind:show>
-	<div class="flex h-full min-h-screen flex-col">
+	<div class="flex h-full min-h-screen flex-col" {oninput}>
 		<div
 			class=" sticky top-0 z-30 flex justify-between bg-white px-4.5 pt-3 pb-3 dark:bg-gray-900 dark:text-gray-100"
 		>
@@ -32,7 +33,7 @@
 			</div>
 			<button
 				class="self-center"
-				aria-label="Close"
+				aria-label={$i18n.t('Close')}
 				onclick={() => {
 					show = false;
 					onClose();

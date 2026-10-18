@@ -39,6 +39,7 @@ from open_webui.models.skills import Skills
 from open_webui.models.users import Users
 from open_webui.utils.auth import decode_token, get_optional_verified_user, get_verified_user
 from pydantic import BaseModel
+from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.utils.access_control import can_bypass_access_control
 
@@ -603,6 +604,7 @@ async def get_skill_file_content(
     path: str = Query(..., description='Virtual skill-bundle path, e.g. "assets/logo.png"'),
     session_user=Depends(get_optional_verified_user),
     db: AsyncSession = Depends(get_async_session),
+    version_id: str | None = None,
 ):
     """Stream the raw bytes of a skill-bundle file with the correct Content-Type.
 
@@ -616,6 +618,15 @@ async def get_skill_file_content(
        build_agent_payload.  Accepted ONLY here; get_current_user in auth.py
        blocks it on every other route.
     """
+    # [Gradient] This router is mounted before upstream's skills router, which serves the same
+    # path for its versioned skill snapshots; a version_id selects upstream's handler.
+    if version_id is not None:
+        if session_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.UNAUTHORIZED)
+        from open_webui.routers.skills import get_skill_file
+
+        return await get_skill_file(id=id, path=path, version_id=version_id, user=session_user, db=db)
+
     # Phase 8b: check for a scoped token when session auth returned None.
     user = session_user
     if user is None:
@@ -647,12 +658,19 @@ async def get_skill_file_content(
 ############################
 
 
-@router.get('/id/{id}/files', response_model=SkillFileListResponse)
+@router.get('/id/{id}/files', response_model=SkillFileListResponse | dict[str, Any])
 async def list_skill_files(
     id: str,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
+    version_id: str | None = None,
 ):
+    # [Gradient] A version_id selects upstream's versioned snapshot listing (see get_skill_file_content).
+    if version_id is not None:
+        from open_webui.routers.skills import get_skill_files
+
+        return await get_skill_files(id=id, version_id=version_id, user=user, db=db)
+
     skill = await _get_skill_or_404(id, db)
 
     # Read auth: owner, admin, or any AccessGrant read

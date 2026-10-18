@@ -139,7 +139,7 @@ def access(monkeypatch):
     monkeypatch.setattr(files.Groups, 'get_groups_by_member_id', AsyncMock(return_value=[]))
     monkeypatch.setattr(files.Channels, 'get_channels_by_file_id_and_user_id', AsyncMock(return_value=[]))
     monkeypatch.setattr(files.Chats, 'get_shared_chat_ids_by_file_id', AsyncMock(return_value=[]))
-    monkeypatch.setattr(files.Models, 'get_model_owners_attaching_file', AsyncMock(return_value={}))
+    monkeypatch.setattr(files.Models, 'get_model_owner_ids_by_file_id', AsyncMock(return_value={}))
     monkeypatch.setattr(files.AccessGrants, 'get_accessible_resource_ids', AsyncMock(return_value=set()))
     return files
 
@@ -166,7 +166,7 @@ async def test_local_grants_still_work_without_soev(access, monkeypatch, grant):
         access.Chats.get_shared_chat_ids_by_file_id.return_value = ['chat']
         access.AccessGrants.get_accessible_resource_ids.return_value = {'chat'}
     else:
-        access.Models.get_model_owners_attaching_file.return_value = {'model': 'reader'}
+        access.Models.get_model_owner_ids_by_file_id.return_value = {'model': 'reader'}
     assert await access.has_access_to_file('file', 'read', SimpleNamespace(id='reader', role='user'))
     access.Knowledges.get_knowledges_by_file_id.assert_not_awaited()
     access.Knowledges.get_knowledge_by_id.assert_not_awaited()
@@ -230,8 +230,9 @@ async def test_reset_always_resets_vectors(soev_state, monkeypatch):
 
     monkeypatch.setattr(retrieval.ASYNC_VECTOR_DB_CLIENT, 'reset', AsyncMock())
     monkeypatch.setattr(retrieval.Knowledges, 'delete_all_knowledge', AsyncMock())
+    monkeypatch.setattr(retrieval, 'publish_event', AsyncMock())
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
-    await retrieval.reset_vector_db(user=SimpleNamespace(role='admin'), db=None)
+    await retrieval.reset_vector_db(request=None, user=SimpleNamespace(role='admin'), db=None)
     retrieval.ASYNC_VECTOR_DB_CLIENT.reset.assert_awaited_once()
     assert retrieval.Knowledges.delete_all_knowledge.await_count == int(soev_state)
 

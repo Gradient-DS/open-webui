@@ -204,7 +204,9 @@
 </script>
 
 <div class="flex flex-col h-full justify-between text-sm">
-	<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">{$i18n.t('Database')}</h2>
+	<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">
+		{$i18n.t('settings.admin.db.title')}
+	</h2>
 
 	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
 		<input
@@ -234,10 +236,10 @@
 			}}
 		/>
 
-		<AdminSettingSection title={$i18n.t('Config')} first>
+		<AdminSettingSection title={$i18n.t('settings.admin.db.sections.config.title')} first>
 			<AdminSettingRow
-				label={$i18n.t('Import Config')}
-				description={$i18n.t('Import admin configuration from a JSON export file.')}
+				label={$i18n.t('settings.admin.db.importConfig.label')}
+				description={$i18n.t('settings.admin.db.importConfig.description')}
 			>
 				<button
 					class={actionButtonClass}
@@ -251,8 +253,8 @@
 			</AdminSettingRow>
 
 			<AdminSettingRow
-				label={$i18n.t('Export Config')}
-				description={$i18n.t('Download the current admin configuration as JSON.')}
+				label={$i18n.t('settings.admin.db.exportConfig.label')}
+				description={$i18n.t('settings.admin.db.exportConfig.description')}
 			>
 				<button
 					class={actionButtonClass}
@@ -271,10 +273,10 @@
 		</AdminSettingSection>
 
 		{#if $config?.features.enable_admin_export ?? true}
-			<AdminSettingSection title={$i18n.t('Export')}>
+			<AdminSettingSection title={$i18n.t('settings.admin.db.sections.export.title')}>
 				<AdminSettingRow
-					label={$i18n.t('Database')}
-					description={$i18n.t('Download the application database when supported.')}
+					label={$i18n.t('settings.admin.db.database.label')}
+					description={$i18n.t('settings.admin.db.database.description')}
 				>
 					<button
 						class={actionButtonClass}
@@ -285,13 +287,13 @@
 						}}
 						type="button"
 					>
-						{$i18n.t('Database')}
+						{$i18n.t('settings.admin.db.database.label')}
 					</button>
 				</AdminSettingRow>
 
 				<AdminSettingRow
-					label={$i18n.t('All Chats')}
-					description={$i18n.t("Download every user's chat history as JSON.")}
+					label={$i18n.t('settings.admin.db.allChats.label')}
+					description={$i18n.t('settings.admin.db.allChats.description')}
 				>
 					<button class={actionButtonClass} on:click={exportAllUserChats} type="button">
 						{$i18n.t('Export')}
@@ -299,8 +301,8 @@
 				</AdminSettingRow>
 
 				<AdminSettingRow
-					label={$i18n.t('Users')}
-					description={$i18n.t('Download all users as CSV.')}
+					label={$i18n.t('settings.admin.db.users.label')}
+					description={$i18n.t('settings.admin.db.users.description')}
 				>
 					<button class={actionButtonClass} on:click={exportUsers} type="button">
 						{$i18n.t('Export')}

@@ -565,7 +565,7 @@
 				<div class="mt-3">
 					<div class="flex justify-between items-center">
 						<label for="event-webhook-all-events" class={`text-xs text-gray-500`}
-							>{$i18n.t('Events')}</label
+							>{$i18n.t('settings.admin.general.events.events.label')}</label
 						>
 						<label class="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
 							<input
@@ -670,7 +670,7 @@
 
 					<button
 						type="submit"
-						class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center"
+						class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 					>
 						{$i18n.t('Save')}
 					</button>
@@ -690,16 +690,18 @@
 />
 
 <div class="mt-5">
-	<div class="mb-2 text-xs text-gray-400 dark:text-gray-600">{$i18n.t('Events')}</div>
+	<div class="mb-2 text-xs text-gray-400 dark:text-gray-600">
+		{$i18n.t('settings.admin.general.events.events.label')}
+	</div>
 
 	<div class="flex flex-col w-full justify-between gap-2.5">
 		<div class="flex w-full items-start justify-between gap-4">
 			<div class="min-w-0">
-				<div class="text-xs text-gray-600 dark:text-gray-400">{$i18n.t('Webhooks')}</div>
+				<div class="text-xs text-gray-600 dark:text-gray-400">
+					{$i18n.t('settings.admin.general.events.webhooks.label')}
+				</div>
 				<div class="mt-1.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-					{$i18n.t(
-						'Send product events as JSON to external services. Chat destinations receive readable messages.'
-					)}
+					{$i18n.t('settings.admin.general.events.webhooks.description')}
 				</div>
 			</div>
 			<Tooltip content={$i18n.t('Add webhook')}>

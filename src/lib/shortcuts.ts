@@ -1,7 +1,7 @@
 import { get, writable } from 'svelte/store';
 
 export type ShortcutDefinition = {
-	name: string;
+	name: (t: (key: string) => string) => string;
 	keys: string[];
 	category: string;
 	tooltip?: string;
@@ -36,6 +36,7 @@ export enum Shortcut {
 
 	//Input
 	FOCUS_INPUT = 'focusInput',
+	CLEAR_INPUT_SELECTIONS = 'clearInputSelections',
 	ACCEPT_AUTOCOMPLETE = 'acceptAutocomplete',
 	PREVENT_FILE_CREATION = 'preventFileCreation',
 	NAVIGATE_PROMPT_HISTORY_UP = 'navigatePromptHistoryUp',
@@ -71,6 +72,7 @@ export const CONFIGURABLE_SHORTCUTS = [
 	Shortcut.TOGGLE_CONTROLS,
 	Shortcut.CLOSE_MODAL,
 	Shortcut.FOCUS_INPUT,
+	Shortcut.CLEAR_INPUT_SELECTIONS,
 	Shortcut.GENERATE_MESSAGE_PAIR,
 	Shortcut.REGENERATE_RESPONSE,
 	Shortcut.ALLOW_TOOL_CALL,
@@ -97,6 +99,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
 	[Shortcut.TOGGLE_CONTROLS]: '',
 	[Shortcut.CLOSE_MODAL]: 'Escape',
 	[Shortcut.FOCUS_INPUT]: 'Shift+Escape',
+	[Shortcut.CLEAR_INPUT_SELECTIONS]: 'Escape',
 	[Shortcut.GENERATE_MESSAGE_PAIR]: 'Cmd+Shift+Enter',
 	[Shortcut.REGENERATE_RESPONSE]: 'Cmd+R',
 	[Shortcut.ALLOW_TOOL_CALL]: 'Cmd+Alt+Enter',
@@ -132,6 +135,8 @@ export function resetKeybindings(): void {
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
 export function eventToChord(event: KeyboardEvent): string {
+	if (typeof event.key !== 'string' || !event.key) return '';
+
 	const parts: string[] = [];
 
 	if (IS_MAC) {
@@ -211,43 +216,43 @@ export function matchKeybinding(event: KeyboardEvent): ConfigurableShortcut | nu
 export const shortcuts: ShortcutRegistry = {
 	//Chat
 	[Shortcut.NEW_CHAT]: {
-		name: 'New Chat',
+		name: (t) => t('settings.personal.shortcuts.newChat.label'),
 		keys: ['mod', 'shift', 'O'],
 		category: 'Chat',
 		configurable: true
 	},
 	[Shortcut.NEW_TEMPORARY_CHAT]: {
-		name: 'New Temporary Chat',
+		name: (t) => t('settings.personal.shortcuts.newTemporaryChat.label'),
 		keys: ['mod', 'shift', `'`],
 		category: 'Chat',
 		configurable: true
 	},
 	[Shortcut.DELETE_CHAT]: {
-		name: 'Delete Chat',
+		name: (t) => t('settings.personal.shortcuts.deleteChat.label'),
 		keys: ['mod', 'shift', 'Backspace'],
 		category: 'Chat',
 		configurable: true
 	},
 	[Shortcut.OPEN_MODEL_SELECTOR]: {
-		name: 'Open Model Selector',
+		name: (t) => t('settings.personal.shortcuts.openModelSelector.label'),
 		keys: ['mod', 'shift', 'M'],
 		category: 'Chat',
 		configurable: true
 	},
 	[Shortcut.TOGGLE_DICTATION]: {
-		name: 'Toggle Dictation',
+		name: (t) => t('settings.personal.shortcuts.toggleDictation.label'),
 		keys: ['mod', 'shift', 'L'],
 		category: 'Chat',
 		configurable: true
 	},
 	[Shortcut.NAVIGATE_CHAT_UP]: {
-		name: 'Navigate to Previous Chat',
+		name: (t) => t('settings.personal.shortcuts.navigateChatUp.label'),
 		keys: [],
 		category: 'Chat',
 		configurable: true
 	},
 	[Shortcut.NAVIGATE_CHAT_DOWN]: {
-		name: 'Navigate to Next Chat',
+		name: (t) => t('settings.personal.shortcuts.navigateChatDown.label'),
 		keys: [],
 		category: 'Chat',
 		configurable: true
@@ -255,37 +260,37 @@ export const shortcuts: ShortcutRegistry = {
 
 	//Global
 	[Shortcut.SEARCH]: {
-		name: 'Search',
+		name: (t) => t('settings.personal.shortcuts.search.label'),
 		keys: ['mod', 'K'],
 		category: 'Global',
 		configurable: true
 	},
 	[Shortcut.OPEN_SETTINGS]: {
-		name: 'Open Settings',
+		name: (t) => t('settings.personal.shortcuts.openSettings.label'),
 		keys: ['mod', '.'],
 		category: 'Global',
 		configurable: true
 	},
 	[Shortcut.SHOW_SHORTCUTS]: {
-		name: 'Show Shortcuts',
+		name: (t) => t('settings.personal.shortcuts.showShortcuts.label'),
 		keys: ['mod', '/'],
 		category: 'Global',
 		configurable: true
 	},
 	[Shortcut.TOGGLE_SIDEBAR]: {
-		name: 'Toggle Sidebar',
+		name: (t) => t('settings.personal.shortcuts.toggleSidebar.label'),
 		keys: ['mod', 'shift', 'S'],
 		category: 'Global',
 		configurable: true
 	},
 	[Shortcut.TOGGLE_CONTROLS]: {
-		name: 'Toggle Controls',
+		name: (t) => t('settings.personal.shortcuts.toggleControls.label'),
 		keys: [],
 		category: 'Global',
 		configurable: true
 	},
 	[Shortcut.CLOSE_MODAL]: {
-		name: 'Close Modal',
+		name: (t) => t('settings.personal.shortcuts.closeModal.label'),
 		keys: ['Escape'],
 		category: 'Global',
 		configurable: true
@@ -293,86 +298,95 @@ export const shortcuts: ShortcutRegistry = {
 
 	//Input
 	[Shortcut.FOCUS_INPUT]: {
-		name: 'Focus Chat Input',
+		name: (t) => t('settings.personal.shortcuts.focusInput.label'),
 		keys: ['shift', 'Escape'],
 		category: 'Input',
 		configurable: true
 	},
+	[Shortcut.CLEAR_INPUT_SELECTIONS]: {
+		name: (t) => t('settings.personal.shortcuts.clearInputSelections.label'),
+		keys: ['Escape'],
+		category: 'Input',
+		configurable: true,
+		// Tooltips are translated dynamically; keep this key visible to the extractor.
+		// t('settings.personal.shortcuts.clearInputSelections.description');
+		tooltip: 'settings.personal.shortcuts.clearInputSelections.description'
+	},
 	[Shortcut.ACCEPT_AUTOCOMPLETE]: {
-		name: 'Accept Autocomplete Generation\nJump to Prompt Variable',
+		name: (t) => t('settings.personal.shortcuts.acceptAutocomplete.label'),
 		keys: ['Tab'],
 		category: 'Input'
 	},
 	[Shortcut.PREVENT_FILE_CREATION]: {
-		name: 'Prevent File Creation',
+		name: (t) => t('settings.personal.shortcuts.preventFileCreation.label'),
 		keys: ['mod', 'shift', 'V'],
 		category: 'Input',
 		tooltip: 'Only active when "Paste Large Text as File" setting is toggled on.'
 	},
 	[Shortcut.ATTACH_FILE]: {
-		name: 'Attach File From Knowledge',
+		name: (t) => t('settings.personal.shortcuts.attachFile.label'),
 		keys: ['#'],
 		category: 'Input'
 	},
 	[Shortcut.ADD_PROMPT]: {
-		name: 'Add Custom Prompt',
+		name: (t) => t('settings.personal.shortcuts.addPrompt.label'),
 		keys: ['/'],
 		category: 'Input'
 	},
 	[Shortcut.TALK_TO_MODEL]: {
-		name: 'Talk to Model',
+		name: (t) => t('settings.personal.shortcuts.talkToModel.label'),
 		keys: ['@'],
 		category: 'Input'
 	},
 
 	//Message
 	[Shortcut.GENERATE_MESSAGE_PAIR]: {
-		name: 'Generate Message Pair',
+		name: (t) => t('settings.personal.shortcuts.generateMessagePair.label'),
 		keys: ['mod', 'shift', 'Enter'],
 		category: 'Message',
 		configurable: true,
 		tooltip: 'Only active when the chat input is in focus.'
 	},
 	[Shortcut.REGENERATE_RESPONSE]: {
-		name: 'Regenerate Response',
+		name: (t) => t('settings.personal.shortcuts.regenerateResponse.label'),
 		keys: ['mod', 'R'],
 		category: 'Message',
 		configurable: true
 	},
 	[Shortcut.ALLOW_TOOL_CALL]: {
-		name: 'Allow Tool Call',
+		name: (t) => t('settings.personal.shortcuts.allowToolCall.label'),
 		keys: ['mod', 'alt', 'Enter'],
 		category: 'Message',
 		configurable: true,
 		tooltip: 'Only active when a tool call is waiting for approval.'
 	},
 	[Shortcut.DENY_TOOL_CALL]: {
-		name: 'Deny Tool Call',
+		name: (t) => t('settings.personal.shortcuts.denyToolCall.label'),
 		keys: ['mod', 'alt', 'Backspace'],
 		category: 'Message',
 		configurable: true,
 		tooltip: 'Only active when a tool call is waiting for approval.'
 	},
 	[Shortcut.STOP_GENERATING]: {
-		name: 'Stop Generating',
+		name: (t) => t('settings.personal.shortcuts.stopGenerating.label'),
 		keys: ['Escape'],
 		category: 'Message',
 		tooltip: 'Only active when the chat input is in focus and an LLM is generating a response.'
 	},
 	[Shortcut.NAVIGATE_PROMPT_HISTORY_UP]: {
-		name: 'Edit Last Message',
+		name: (t) => t('settings.personal.shortcuts.navigatePromptHistoryUp.label'),
 		keys: ['ArrowUp'],
 		category: 'Message',
 		tooltip: 'Only can be triggered when the chat input is in focus.'
 	},
 	[Shortcut.COPY_LAST_RESPONSE]: {
-		name: 'Copy Last Response',
+		name: (t) => t('settings.personal.shortcuts.copyLastResponse.label'),
 		keys: ['mod', 'shift', 'C'],
 		category: 'Message',
 		configurable: true
 	},
 	[Shortcut.COPY_LAST_CODE_BLOCK]: {
-		name: 'Copy Last Code Block',
+		name: (t) => t('settings.personal.shortcuts.copyLastCodeBlock.label'),
 		keys: ['mod', 'shift', ';'],
 		category: 'Message',
 		configurable: true
@@ -380,7 +394,7 @@ export const shortcuts: ShortcutRegistry = {
 
 	//Voice
 	[Shortcut.TOGGLE_MUTE]: {
-		name: 'Toggle Mute',
+		name: (t) => t('settings.personal.shortcuts.toggleMute.label'),
 		keys: ['M'],
 		category: 'Voice',
 		tooltip: 'Only active during Voice Mode.'

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
-from open_webui.models.access_grants import AccessGrants
+from open_webui.models.access_grants import AccessGrants, normalize_access_grants
 from open_webui.models.config import Config
 from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.groups import Groups
@@ -98,7 +98,7 @@ async def get_prompt_list(
         filter['direction'] = direction
 
     # Pre-fetch user group IDs once - used for both filter and write_access check
-    groups = await Groups.get_groups_by_member_id(user.id, db=db)
+    groups = await Groups.get_groups_by_member_id(user.id, db=db, include_inherited=True)
     user_group_ids = {group.id for group in groups}
 
     if not can_bypass_access_control(user):
@@ -288,13 +288,28 @@ async def update_prompt_by_id(
                 detail=ERROR_MESSAGES.COMMAND_TAKEN,
             )
 
-    form_data.access_grants = await filter_allowed_access_grants(
-        await Config.get('user.permissions'),
-        user.id,
-        user.role,
-        form_data.access_grants,
-        'sharing.public_prompts',
-    )
+    if form_data.access_grants is not None:
+        existing_access_grants = {
+            (grant.principal_type, grant.principal_id, grant.permission) for grant in prompt.access_grants
+        }
+        submitted_access_grants_map = {
+            (grant['principal_type'], grant['principal_id'], grant['permission']): grant
+            for grant in normalize_access_grants(form_data.access_grants)
+        }
+        preserved_access_grants = [
+            grant for key, grant in submitted_access_grants_map.items() if key in existing_access_grants
+        ]
+        new_access_grants = [
+            grant for key, grant in submitted_access_grants_map.items() if key not in existing_access_grants
+        ]
+
+        form_data.access_grants = preserved_access_grants + await filter_allowed_access_grants(
+            await Config.get('user.permissions'),
+            user.id,
+            user.role,
+            new_access_grants,
+            'sharing.public_prompts',
+        )
 
     # Use the ID from the found prompt
     updated_prompt = await Prompts.update_prompt_by_id(prompt.id, form_data, user.id, db=db)

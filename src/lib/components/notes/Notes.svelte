@@ -1,4 +1,6 @@
 <script lang="ts">
+	import WorkspaceAccessModal from '$lib/components/workspace/common/WorkspaceAccessModal.svelte';
+	let accessModal: WorkspaceAccessModal;
 	import { marked } from 'marked';
 	import { toast } from 'svelte-sonner';
 	import fileSaver from 'file-saver';
@@ -12,22 +14,9 @@
 	dayjs.extend(duration);
 	dayjs.extend(relativeTime);
 
-	async function loadLocale(locales) {
-		for (const locale of locales) {
-			try {
-				dayjs.locale(locale);
-				break; // Stop after successfully loading the first available locale
-			} catch (error) {
-				console.error(`Could not load locale '${locale}':`, error);
-			}
-		}
-	}
-
 	import { onMount, getContext, onDestroy } from 'svelte';
 
-	const i18n = getContext('i18n');
-	// Assuming $i18n.languages is an array of language codes
-	$: loadLocale($i18n.languages);
+	const i18n = getContext<typeof import('$lib/i18n').default>('i18n');
 
 	import { goto } from '$app/navigation';
 	import { WEBUI_NAME, config, user, pinnedNotes, mobile, showSidebar } from '$lib/stores';
@@ -44,6 +33,7 @@
 	import { downloadPdf, createNoteHandler } from './utils';
 
 	import EllipsisHorizontal from '../icons/EllipsisHorizontal.svelte';
+	import GarbageBin from '../icons/GarbageBin.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Search from '../icons/Search.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -66,6 +56,7 @@
 	let selectedNote = null;
 	let openNoteMenuId: string | null = null;
 	let showDeleteConfirm = false;
+	let shiftKey = false;
 
 	let notes = {};
 
@@ -321,8 +312,33 @@
 		dropzoneElement?.addEventListener('drop', onDrop);
 		dropzoneElement?.addEventListener('dragleave', onDragLeave);
 
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === 'Shift') {
+				shiftKey = true;
+				openNoteMenuId = null;
+			}
+		};
+
+		const onKeyUp = (event: KeyboardEvent) => {
+			if (event.key === 'Shift') {
+				shiftKey = false;
+			}
+		};
+
+		const onBlur = () => {
+			shiftKey = false;
+		};
+
+		window.addEventListener('keydown', onKeyDown);
+		window.addEventListener('keyup', onKeyUp);
+		window.addEventListener('blur', onBlur);
+
 		return () => {
 			clearTimeout(searchDebounceTimer);
+
+			window.removeEventListener('keydown', onKeyDown);
+			window.removeEventListener('keyup', onKeyUp);
+			window.removeEventListener('blur', onBlur);
 
 			if (dropzoneElement) {
 				dropzoneElement?.removeEventListener('dragover', onDragOver);
@@ -332,6 +348,8 @@
 		};
 	});
 </script>
+
+<WorkspaceAccessModal bind:this={accessModal} resourceType="notes" onUpdated={init} />
 
 <svelte:head>
 	<!-- LICENSE covers this Open WebUI browser-title identifier.
@@ -419,7 +437,9 @@
 								id: 'notes-new',
 								label: $i18n.t('Create'),
 								onClick: async () => {
-									const res = await createNoteHandler(dayjs().format('YYYY-MM-DD'));
+									const res = await createNoteHandler(
+										dayjs().locale($i18n.language).format('YYYY-MM-DD')
+									);
 
 									if (res) {
 										goto(`/notes/${res.id}`);
@@ -600,11 +620,17 @@
 														</div>
 													</Tooltip>
 
-													<Tooltip content={dayjs(note.updated_at / 1000000).format('LLLL')}>
+													<Tooltip
+														content={dayjs(note.updated_at / 1000000)
+															.locale($i18n.language)
+															.format('LLLL')}
+													>
 														<div
 															class="shrink-0 truncate text-[0.6875rem] leading-5 text-gray-400 dark:text-gray-600"
 														>
-															{dayjs(note.updated_at / 1000000).fromNow()}
+															{dayjs(note.updated_at / 1000000)
+																.locale($i18n.language)
+																.fromNow()}
 														</div>
 													</Tooltip>
 												</div>
@@ -626,52 +652,72 @@
 														</Tooltip>
 													</div>
 
-													<NoteMenu
-														show={openNoteMenuId === note.id}
-														onDownload={(type) => {
-															selectedNote = note;
+													{#if shiftKey}
+														<Tooltip content={$i18n.t('Delete')}>
+															<button
+																class="flex size-5 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
+																type="button"
+																aria-label={$i18n.t('Delete')}
+																on:click={(e) => {
+																	e.preventDefault();
+																	e.stopPropagation();
+																	deleteNoteHandler(note.id);
+																}}
+															>
+																<GarbageBin className="size-3.5" />
+															</button>
+														</Tooltip>
+													{:else}
+														<NoteMenu
+															onAccess={note.user_id === $user?.id || $user?.role === 'admin'
+																? () => accessModal.open(note.id)
+																: null}
+															show={openNoteMenuId === note.id}
+															onDownload={(type) => {
+																selectedNote = note;
 
-															downloadHandler(type);
-														}}
-														onCopyLink={async () => {
-															const baseUrl = window.location.origin;
-															const res = await copyToClipboard(`${baseUrl}/notes/${note.id}`);
+																downloadHandler(type);
+															}}
+															onCopyLink={async () => {
+																const baseUrl = window.location.origin;
+																const res = await copyToClipboard(`${baseUrl}/notes/${note.id}`);
 
-															if (res) {
-																toast.success($i18n.t('Copied link to clipboard'));
-															} else {
-																toast.error($i18n.t('Failed to copy link'));
-															}
-														}}
-														onDelete={() => {
-															selectedNote = note;
-															showDeleteConfirm = true;
-														}}
-														isPinned={note.is_pinned ?? false}
-														onPin={async () => {
-															await toggleNotePinnedStatusById(localStorage.token, note.id);
-															pinnedNotes.set(
-																await getPinnedNoteList(localStorage.token).catch(() => [])
-															);
-															init();
-														}}
-														onChange={(state) => {
-															openNoteMenuId = state ? note.id : null;
-														}}
-													>
-														<button
-															class="flex size-5 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
-															type="button"
-															aria-label={$i18n.t('Note Menu')}
-															on:click={(e) => {
-																e.preventDefault();
-																e.stopPropagation();
-																openNoteMenuId = openNoteMenuId === note.id ? null : note.id;
+																if (res) {
+																	toast.success($i18n.t('Copied link to clipboard'));
+																} else {
+																	toast.error($i18n.t('Failed to copy link'));
+																}
+															}}
+															onDelete={() => {
+																selectedNote = note;
+																showDeleteConfirm = true;
+															}}
+															isPinned={note.is_pinned ?? false}
+															onPin={async () => {
+																await toggleNotePinnedStatusById(localStorage.token, note.id);
+																pinnedNotes.set(
+																	await getPinnedNoteList(localStorage.token).catch(() => [])
+																);
+																init();
+															}}
+															onChange={(state) => {
+																openNoteMenuId = state ? note.id : null;
 															}}
 														>
-															<EllipsisHorizontal className="size-3.5" />
-														</button>
-													</NoteMenu>
+															<button
+																class="flex size-5 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
+																type="button"
+																aria-label={$i18n.t('Note Menu')}
+																on:click={(e) => {
+																	e.preventDefault();
+																	e.stopPropagation();
+																	openNoteMenuId = openNoteMenuId === note.id ? null : note.id;
+																}}
+															>
+																<EllipsisHorizontal className="size-3.5" />
+															</button>
+														</NoteMenu>
+													{/if}
 												</div>
 											</button>
 										{/each}
@@ -697,43 +743,63 @@
 														</Tooltip>
 													</a>
 
-													<NoteMenu
-														onDownload={(type) => {
-															selectedNote = note;
+													{#if shiftKey}
+														<Tooltip content={$i18n.t('Delete')}>
+															<button
+																class="flex size-5 items-center justify-center rounded-lg text-gray-400 transition hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
+																type="button"
+																aria-label={$i18n.t('Delete')}
+																on:click={(e) => {
+																	e.preventDefault();
+																	e.stopPropagation();
+																	deleteNoteHandler(note.id);
+																}}
+															>
+																<GarbageBin className="size-3.5" />
+															</button>
+														</Tooltip>
+													{:else}
+														<NoteMenu
+															onAccess={note.user_id === $user?.id || $user?.role === 'admin'
+																? () => accessModal.open(note.id)
+																: null}
+															onDownload={(type) => {
+																selectedNote = note;
 
-															downloadHandler(type);
-														}}
-														onCopyLink={async () => {
-															const baseUrl = window.location.origin;
-															const res = await copyToClipboard(`${baseUrl}/notes/${note.id}`);
+																downloadHandler(type);
+															}}
+															onCopyLink={async () => {
+																const baseUrl = window.location.origin;
+																const res = await copyToClipboard(`${baseUrl}/notes/${note.id}`);
 
-															if (res) {
-																toast.success($i18n.t('Copied link to clipboard'));
-															} else {
-																toast.error($i18n.t('Failed to copy link'));
-															}
-														}}
-														onDelete={() => {
-															selectedNote = note;
-															showDeleteConfirm = true;
-														}}
-														isPinned={note.is_pinned ?? false}
-														onPin={async () => {
-															await toggleNotePinnedStatusById(localStorage.token, note.id);
-															pinnedNotes.set(
-																await getPinnedNoteList(localStorage.token).catch(() => [])
-															);
-															init();
-														}}
-													>
-														<button
-															class="flex size-5 items-center justify-center rounded-lg text-gray-400 transition hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
-															type="button"
-															aria-label={$i18n.t('Note Menu')}
+																if (res) {
+																	toast.success($i18n.t('Copied link to clipboard'));
+																} else {
+																	toast.error($i18n.t('Failed to copy link'));
+																}
+															}}
+															onDelete={() => {
+																selectedNote = note;
+																showDeleteConfirm = true;
+															}}
+															isPinned={note.is_pinned ?? false}
+															onPin={async () => {
+																await toggleNotePinnedStatusById(localStorage.token, note.id);
+																pinnedNotes.set(
+																	await getPinnedNoteList(localStorage.token).catch(() => [])
+																);
+																init();
+															}}
 														>
-															<EllipsisHorizontal className="size-3.5" />
-														</button>
-													</NoteMenu>
+															<button
+																class="flex size-5 items-center justify-center rounded-lg text-gray-400 transition hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
+																type="button"
+																aria-label={$i18n.t('Note Menu')}
+															>
+																<EllipsisHorizontal className="size-3.5" />
+															</button>
+														</NoteMenu>
+													{/if}
 												</div>
 
 												<a href={`/notes/${note.id}`} class="mt-1 flex min-h-0 flex-1 flex-col">
@@ -762,9 +828,15 @@
 															</div>
 														</Tooltip>
 
-														<Tooltip content={dayjs(note.updated_at / 1000000).format('LLLL')}>
+														<Tooltip
+															content={dayjs(note.updated_at / 1000000)
+																.locale($i18n.language)
+																.format('LLLL')}
+														>
 															<div class="shrink-0">
-																{dayjs(note.updated_at / 1000000).fromNow()}
+																{dayjs(note.updated_at / 1000000)
+																	.locale($i18n.language)
+																	.fromNow()}
 															</div>
 														</Tooltip>
 													</div>

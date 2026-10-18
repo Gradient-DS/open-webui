@@ -7,23 +7,22 @@
 	} from '$lib/utils/features';
 	import { toast } from 'svelte-sonner';
 	import { onMount, tick, getContext } from 'svelte';
-	import { openDB, deleteDB } from 'idb';
-	import fileSaver from 'file-saver';
-	const { saveAs } = fileSaver;
 
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { fade } from 'svelte/transition';
 
-	import { getModels, getToolServersData, getVersionUpdates } from '$lib/apis';
+	import { getBackendConfig, getModels, getToolServersData, getVersionUpdates } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
+	import { getSkills } from '$lib/apis/skills';
+	import { getSessionUser } from '$lib/apis/auths';
 	import { getBanners } from '$lib/apis/configs';
 	import { get2FAStatus } from '$lib/apis/auths';
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { getUserSettings } from '$lib/apis/users';
 	import { setAppFontFamily, setTextScale } from '$lib/utils/text-scale';
 
-	import { WEBUI_VERSION, WEBUI_API_BASE_URL } from '$lib/constants';
+	import { WEBUI_VERSION, WEBUI_API_BASE_URL, WEBUI_BUILD_CHANNEL } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
@@ -34,6 +33,8 @@
 		models,
 		knowledge,
 		tools,
+		skills,
+		socket,
 		functions,
 		tags,
 		banners,
@@ -65,8 +66,6 @@
 	const i18n = getContext('i18n');
 
 	let loaded = false;
-	let DB = null;
-	let localDBChats = [];
 
 	let show2FAOverlay = false;
 	let grace2FAExpiresAt: number | null = null;
@@ -102,26 +101,6 @@
 		}
 	};
 
-	const checkLocalDBChats = async () => {
-		try {
-			// Check if IndexedDB exists
-			DB = await openDB('Chats', 1);
-
-			if (!DB) {
-				return;
-			}
-
-			const chats = await DB.getAllFromIndex('chats', 'timestamp');
-			localDBChats = chats.map((item, idx) => chats[chats.length - 1 - idx]);
-
-			if (localDBChats.length === 0) {
-				await deleteDB('Chats');
-			}
-		} catch (error) {
-			// IndexedDB Not Found
-		}
-	};
-
 	const setUserSettings = async (cb?: () => Promise<void>) => {
 		const userSettings = await getUserSettings(localStorage.token);
 
@@ -148,6 +127,11 @@
 	};
 
 	const setToolServers = async () => {
+		if (!$config?.features?.enable_tool_servers) {
+			toolServers.set([]);
+			terminalServers.set([]);
+			return;
+		}
 		let toolServersData = await getToolServersData($settings?.toolServers ?? []);
 		toolServersData = toolServersData.filter((data) => {
 			if (!data || data.error) {
@@ -221,6 +205,38 @@
 		tools.set(toolsData);
 	};
 
+	const refreshAccess = async () => {
+		if (!localStorage.token) return;
+		try {
+			user.set(await getSessionUser(localStorage.token));
+			const results = await Promise.allSettled([
+				getBackendConfig().then((value) => config.set(value)),
+				setModels(),
+				setTools(),
+				setToolServers(),
+				getSkills(localStorage.token).then((value) => skills.set(value))
+			]);
+			for (const result of results) {
+				if (result.status === 'rejected') console.error('Unable to refresh access', result.reason);
+			}
+		} catch (error) {
+			console.error('Unable to refresh permissions', error);
+		}
+	};
+
+	onMount(() => {
+		const socketInstance = $socket;
+		const scheduleAccessRefresh = () => {
+			socketInstance?.off('connect', refreshAccess);
+			socketInstance?.once('connect', refreshAccess);
+		};
+		socketInstance?.on('access:updated', scheduleAccessRefresh);
+		return () => {
+			socketInstance?.off('access:updated', scheduleAccessRefresh);
+			socketInstance?.off('connect', refreshAccess);
+		};
+	});
+
 	const openSettingsFromUrl = async () => {
 		const requestedSettings = $page.url.searchParams.get('settings');
 		if (!requestedSettings) {
@@ -284,7 +300,6 @@
 		clearChatInputStorage();
 		try {
 			await Promise.all([
-				checkLocalDBChats(),
 				setBanners().catch((e) => console.error('Failed to load banners:', e)),
 				setTools().catch((e) => console.error('Failed to load tools:', e)),
 				(async () => {
@@ -316,18 +331,14 @@
 			return;
 		}
 
-		selectedTerminalId.set(localStorage.selectedTerminalId ?? null);
+		selectedTerminalId.set(
+			$config?.features?.enable_tool_servers ? (localStorage.selectedTerminalId ?? null) : null
+		);
 
-		const loadToolServers = setToolServers().catch((e) => {
+		setToolServers().catch((e) => {
 			console.error('Failed to load tool servers:', e);
 			terminalServers.set([]);
 		});
-		if (
-			$page.url.searchParams.get('q') &&
-			($page.url.searchParams.get('submit') ?? 'true') === 'true'
-		) {
-			await loadToolServers;
-		}
 
 		const setupKeyboardShortcuts = () => {
 			document.addEventListener('keydown', async (event) => {
@@ -384,10 +395,6 @@
 					console.log('Shortcut triggered: SHOW_SHORTCUTS');
 					event.preventDefault();
 					showSettings.set('shortcuts');
-				} else if (shortcut === Shortcut.CLOSE_MODAL) {
-					console.log('Shortcut triggered: CLOSE_MODAL');
-					event.preventDefault();
-					showSettings.set(false);
 				} else if (shortcut === Shortcut.OPEN_MODEL_SELECTOR) {
 					console.log('Shortcut triggered: OPEN_MODEL_SELECTOR');
 					event.preventDefault();
@@ -459,6 +466,7 @@
 		// Check for version updates
 		if (
 			isFeatureEnabled('changelog') &&
+			WEBUI_BUILD_CHANNEL === 'main' &&
 			$user?.role === 'admin' &&
 			$config?.features?.enable_version_update_check
 		) {
@@ -485,6 +493,7 @@
 
 		// Persist selectedTerminalId across page loads
 		selectedTerminalId.subscribe((value) => {
+			if (!$config?.features?.enable_tool_servers) return;
 			if (value === null) {
 				delete localStorage.selectedTerminalId;
 			} else {
@@ -511,7 +520,7 @@
 		version = await getVersionUpdates(localStorage.token).catch((error) => {
 			return {
 				current: WEBUI_VERSION,
-				latest: WEBUI_VERSION
+				latest: null
 			};
 		});
 	};
@@ -520,7 +529,7 @@
 <SettingsModal bind:show={$showSettings} />
 <ChangelogModal bind:show={$showChangelog} />
 
-{#if isFeatureEnabled('changelog') && version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast ?? true)}
+{#if isFeatureEnabled('changelog') && WEBUI_BUILD_CHANNEL === 'main' && version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast ?? true)}
 	<div class=" absolute bottom-8 right-8 z-50" in:fade={{ duration: 100 }}>
 		<UpdateInfoToast
 			{version}
@@ -546,61 +555,6 @@
 			{:else if showAcceptanceModal}
 				<AcceptanceModal bind:show={showAcceptanceModal} />
 			{:else}
-				{#if localDBChats.length > 0}
-					<div class="fixed w-full h-full flex z-50">
-						<div
-							class="absolute w-full h-full backdrop-blur-md bg-white/20 dark:bg-gray-900/50 flex justify-center"
-						>
-							<div class="m-auto pb-44 flex flex-col justify-center">
-								<div class="max-w-md">
-									<div class="text-center dark:text-white text-2xl font-normal z-50">
-										{$i18n.t('Important Update')}<br />
-										{$i18n.t('Action Required for Chat Log Storage')}
-									</div>
-
-									<div class=" mt-4 text-center text-sm dark:text-gray-200 w-full">
-										{$i18n.t(
-											"Saving chat logs directly to your browser's storage is no longer supported. Please take a moment to download and delete your chat logs by clicking the button below. Don't worry, you can easily re-import your chat logs to the backend through"
-										)}
-										<span class="font-normal dark:text-white"
-											>{$i18n.t('Settings')} > {$i18n.t('Chats')} > {$i18n.t('Import Chats')}</span
-										>. {$i18n.t(
-											'This ensures that your valuable conversations are securely saved to your backend database. Thank you!'
-										)}
-									</div>
-
-									<div class=" mt-6 mx-auto relative group w-fit">
-										<button
-											class="relative z-20 flex px-5 py-2 rounded-full bg-white border border-gray-100 dark:border-none hover:bg-gray-100 transition font-normal text-sm"
-											on:click={async () => {
-												let blob = new Blob([JSON.stringify(localDBChats)], {
-													type: 'application/json'
-												});
-												saveAs(blob, `chat-export-${Date.now()}.json`);
-
-												const tx = DB.transaction('chats', 'readwrite');
-												await Promise.all([tx.store.clear(), tx.done]);
-												await deleteDB('Chats');
-
-												localDBChats = [];
-											}}
-										>
-											{$i18n.t('Download & Delete')}
-										</button>
-
-										<button
-											class="text-xs text-center w-full mt-2 text-gray-400 underline"
-											on:click={async () => {
-												localDBChats = [];
-											}}>{$i18n.t('Close')}</button
-										>
-									</div>
-								</div>
-							</div>
-						</div>
-					</div>
-				{/if}
-
 				<TwoFactorRequired bind:show={show2FAOverlay} gracePeriodExpiresAt={grace2FAExpiresAt} />
 
 				<Sidebar />

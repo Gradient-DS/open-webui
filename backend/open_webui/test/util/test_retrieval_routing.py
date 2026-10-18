@@ -47,7 +47,6 @@ def _setup(monkeypatch, *, api_url='https://soev.invalid', bypass=False):
     loader = MagicMock()
     loader.aload = AsyncMock(return_value=[Document(page_content='hello world', metadata={})])
     monkeypatch.setattr(retrieval_router, 'build_loader_from_config', MagicMock(return_value=loader))
-    monkeypatch.setattr(retrieval_router, 'get_loader_config', AsyncMock(return_value={}))
     monkeypatch.setattr(retrieval_router.Storage, 'get_file', lambda path: '/tmp/x')  # nosec B108
     save = MagicMock(return_value=True)
     monkeypatch.setattr(retrieval_router, 'save_docs_to_vector_db', save)
@@ -61,10 +60,9 @@ def _setup(monkeypatch, *, api_url='https://soev.invalid', bypass=False):
     vector_client = MagicMock()
     vector_client.delete_collection = AsyncMock()
     monkeypatch.setattr(retrieval_router, 'ASYNC_VECTOR_DB_CLIENT', vector_client)
-    config = SimpleNamespace(
-        BYPASS_EMBEDDING_AND_RETRIEVAL=bypass,
-    )
-    monkeypatch.setattr(retrieval_router, 'get_rag_config_state', AsyncMock(return_value=config))
+    config = {'rag.bypass_embedding_and_retrieval': bypass}
+    monkeypatch.setattr(retrieval_router.Config, 'get_many', AsyncMock(return_value=config))
+    monkeypatch.setattr(retrieval_router, 'has_duplicate_content', MagicMock(return_value=False))
     return SimpleNamespace(
         file=file,
         request=MagicMock(),

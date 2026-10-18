@@ -10,12 +10,12 @@
 		// [Gradient] Tenant gates also apply to administrators.
 		if (!isFeatureEnabled('tools')) {
 			goto('/');
-		} else if (!$config?.features?.enable_plugins) {
+		} else if (!$config?.features?.enable_tools) {
 			goto('/workspace', { replaceState: true });
 		}
 	});
 </script>
 
-{#if $config?.features?.enable_plugins}
+{#if $config?.features?.enable_tools}
 	<Tools />
 {/if}

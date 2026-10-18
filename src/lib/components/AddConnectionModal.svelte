@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { getContext, onMount } from 'svelte';
-	const i18n = getContext('i18n');
+	const i18n = getContext<any>('i18n');
 
 	import { verifyOpenAIConnection } from '$lib/apis/openai';
 	import { verifyOllamaConnection } from '$lib/apis/ollama';
@@ -29,21 +29,15 @@
 	export let ollama = false;
 	export let direct = false;
 
-	export let connection = null;
+	export let connection: any = null;
 
 	let url = '';
 	let key = '';
 	let auth_type = 'bearer';
+	let forwardCookies = false;
 
 	let connectionType = 'external';
 	let provider = '';
-	$: azure =
-		provider === 'azure' ||
-		((url.includes('azure.') || url.includes('cognitive.microsoft.com')) &&
-			!direct &&
-			provider === '' &&
-			!/\/openai\/v1(\/|$)/.test(url));
-
 	let prefixId = '';
 	let enable = true;
 	let apiVersion = '';
@@ -56,6 +50,7 @@
 
 	let modelId = '';
 	let modelIds = [];
+	let availableModelIds: string[] = [];
 
 	let loading = false;
 	let showDeleteConfirmDialog = false;
@@ -76,9 +71,29 @@
 		// remove trailing slash from url
 		url = url.replace(/\/$/, '');
 
+		let _headers = null;
+
+		if (headers) {
+			try {
+				_headers = JSON.parse(headers);
+				if (typeof _headers !== 'object' || Array.isArray(_headers)) {
+					_headers = null;
+					throw new Error('Headers must be a valid JSON object');
+				}
+				headers = JSON.stringify(_headers, null, 2);
+			} catch (error) {
+				toast.error($i18n.t('Headers must be a valid JSON object'));
+				return;
+			}
+		}
+
 		const res = await verifyOllamaConnection(localStorage.token, {
 			url,
-			key
+			key,
+			config: {
+				auth_type,
+				...(_headers ? { headers: _headers } : {})
+			}
 		}).catch((error) => {
 			toast.error(`${error}`);
 		});
@@ -89,6 +104,7 @@
 	};
 
 	const verifyOpenAIHandler = async () => {
+		availableModelIds = [];
 		// remove trailing slash from url
 		url = url.replace(/\/$/, '');
 
@@ -115,6 +131,7 @@
 				key,
 				config: {
 					auth_type,
+					...(!direct && !ollama ? { forward_cookies: forwardCookies } : {}),
 					...(provider ? { provider } : {}),
 					...(azure ? { azure: true } : {}),
 					api_version: apiVersion,
@@ -126,6 +143,15 @@
 		).catch((error) => {
 			toast.error(`${error}`);
 		});
+
+		const models = Array.isArray(res) ? res : res?.data;
+		if (show && !azure && Array.isArray(models)) {
+			availableModelIds = [
+				...new Set<string>(
+					models.map((model) => model?.id).filter((id) => typeof id === 'string' && id.trim())
+				)
+			];
+		}
 
 		if (res) {
 			toast.success($i18n.t('Server connection verified'));
@@ -197,6 +223,7 @@
 				}
 				headers = JSON.stringify(_headers, null, 2);
 			} catch (error) {
+				loading = false;
 				toast.error($i18n.t('Headers must be a valid JSON object'));
 				return;
 			}
@@ -215,6 +242,7 @@
 				model_ids: modelIds,
 				connection_type: connectionType,
 				auth_type,
+				...(!direct && !ollama ? { forward_cookies: forwardCookies } : {}),
 				headers: headers ? JSON.parse(headers) : undefined,
 				passthrough_params: parsePassthroughParams(passthroughParams),
 				...(provider ? { provider } : {}),
@@ -232,14 +260,23 @@
 		url = '';
 		key = '';
 		auth_type = 'bearer';
+		forwardCookies = false;
 		prefixId = '';
 		passthroughParams = '';
 		showAdvanced = false;
 		tags = [];
 		modelIds = [];
+		headers = '';
+		enable = true;
+		connectionType = 'external';
+		provider = '';
+		apiVersion = '';
+		apiType = '';
 	};
 
 	const init = () => {
+		availableModelIds = [];
+		forwardCookies = connection?.config?.forward_cookies ?? false;
 		if (connection) {
 			url = connection.url;
 			key = connection.key;
@@ -271,6 +308,13 @@
 	$: if (show) {
 		init();
 	}
+
+	$: azure =
+		provider === 'azure' ||
+		((url.includes('azure.') || url.includes('cognitive.microsoft.com')) &&
+			!direct &&
+			provider === '' &&
+			!/\/openai\/v1(\/|$)/.test(url));
 
 	onMount(() => {
 		init();
@@ -506,6 +550,24 @@
 						</div>
 
 						{#if showAdvanced}
+							{#if !direct && !ollama}
+								<div class="flex items-center justify-between gap-3 mt-2">
+									<div>
+										<label for="forward-cookies" class="text-xs text-gray-500">
+											{$i18n.t('Forward cookies')}
+										</label>
+										<p class="text-xs text-gray-500">
+											{$i18n.t('Forward cookies from your Open WebUI request to this server.')}
+										</p>
+									</div>
+									<Switch
+										id="forward-cookies"
+										ariaLabel={$i18n.t('Forward cookies')}
+										bind:state={forwardCookies}
+									/>
+								</div>
+							{/if}
+
 							{#if !direct}
 								<div class="flex gap-2 mt-2">
 									<div class="flex flex-col w-full">
@@ -602,7 +664,7 @@
 										<select
 											id="provider-select"
 											bind:value={provider}
-											class="text-xs text-gray-700 dark:text-gray-300 bg-transparent outline-hidden"
+											class="text-xs text-gray-700 dark:text-gray-300 bg-transparent pr-5 outline-hidden"
 										>
 											<option value="">{$i18n.t('Default')}</option>
 											<option value="azure">{$i18n.t('Azure OpenAI')}</option>
@@ -704,7 +766,18 @@
 									bind:value={modelId}
 									id="add-model-id-input"
 									placeholder={$i18n.t('Add a model ID')}
+									list={availableModelIds.length ? 'model-id-suggestions' : undefined}
+									on:keydown={(event) => {
+										if (event.key === 'Enter') event.preventDefault();
+									}}
 								/>
+								{#if availableModelIds.length}
+									<datalist id="model-id-suggestions">
+										{#each availableModelIds.filter((id) => !modelIds.includes(id)) as id}
+											<option value={id}></option>
+										{/each}
+									</datalist>
+								{/if}
 
 								<div>
 									<button
@@ -765,9 +838,7 @@
 						</div>
 
 						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 whitespace-nowrap {loading
-								? ' cursor-not-allowed'
-								: ''}"
+							class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white disabled:cursor-not-allowed"
 							type="submit"
 							disabled={loading}
 						>
@@ -775,7 +846,7 @@
 
 							{#if loading}
 								<span class="shrink-0">
-									<Spinner />
+									<Spinner className="size-3" />
 								</span>
 							{/if}
 						</button>

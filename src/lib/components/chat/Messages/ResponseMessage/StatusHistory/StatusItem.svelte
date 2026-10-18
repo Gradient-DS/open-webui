@@ -17,6 +17,7 @@
 	// toggle button. Suppresses any nested expandable so the parent button
 	// remains the sole click target.
 	export let asHeader = false;
+	export let clamp = true;
 </script>
 
 {#if forceVisible || !status?.hidden}
@@ -138,7 +139,8 @@
 				<div
 					class="{(done || status?.done) === false
 						? 'shimmer'
-						: ''} text-gray-500 dark:text-gray-500 text-[0.9375rem] line-clamp-1 text-wrap"
+						: ''} text-gray-500 dark:text-gray-500 text-[0.9375rem] text-wrap"
+					class:line-clamp-1={clamp}
 				>
 					<!-- Parser hints for translation keys emitted by the agent under emit_translatable_status=true. -->
 					<!-- $i18n.t("Searching {{collection_name}} for \"{{query}}\"...") -->

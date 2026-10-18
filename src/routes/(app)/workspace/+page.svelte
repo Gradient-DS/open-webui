@@ -23,7 +23,7 @@
 			goto('/workspace/prompts', { replaceState: true });
 		} else if (
 			isFeatureEnabled('tools') &&
-			$config?.features?.enable_plugins &&
+			$config?.features?.enable_tools &&
 			($user?.role === 'admin' || $user?.permissions?.workspace?.tools)
 		) {
 			goto('/workspace/tools', { replaceState: true });

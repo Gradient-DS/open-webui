@@ -2,6 +2,7 @@
 	import SourceIcon from './Citations/SourceIcon.svelte';
 	import { getContext } from 'svelte';
 	import { config, embed, showControls, showEmbeds } from '$lib/stores';
+	import { isValidHttpUrl } from '$lib/utils';
 
 	import CitationModal from './Citations/CitationModal.svelte';
 	import { citationAt, reduceSources } from './Citations/reduceSources';
@@ -43,7 +44,11 @@
 
 			if (citation?.source?.embed_url) {
 				const embedUrl = citation.source.embed_url;
-				if (embedUrl) {
+				// The embed panel renders anything it cannot read as a URL as raw HTML
+				if (
+					typeof embedUrl === 'string' &&
+					(isValidHttpUrl(embedUrl) || embedUrl.startsWith('//'))
+				) {
 					if (readOnly) {
 						// Open in new tab if readOnly
 						window.open(embedUrl, '_blank');

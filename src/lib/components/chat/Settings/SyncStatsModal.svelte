@@ -6,6 +6,7 @@
 	import { exportChatStats, exportSingleChatStats, downloadChatStats } from '$lib/apis/chats';
 	import { getVersion } from '$lib/apis';
 	import { settings } from '$lib/stores';
+	import { COMMUNITY_ORIGINS } from '$lib/constants';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -19,6 +20,10 @@
 
 	// Listen for verify:chat messages from opener
 	const handleMessage = async (event: MessageEvent) => {
+		if (!COMMUNITY_ORIGINS.includes(event.origin)) {
+			return;
+		}
+
 		// Community sends: { type: 'verify:chat', data: { id: ... } }
 		const chatId = event.data?.data?.id ?? event.data?.id;
 		if (event.data?.type === 'verify:chat' && chatId) {
@@ -32,7 +37,7 @@
 							chatId: chatId,
 							requestId: event.data.requestId ?? null
 						},
-						'*'
+						event.origin
 					);
 				}
 			} catch (err: any) {
@@ -45,7 +50,7 @@
 							chatId: chatId,
 							requestId: event.data.requestId ?? null
 						},
-						'*'
+						event.origin
 					);
 				}
 			}
@@ -89,7 +94,10 @@
 	// Helper to send postMessage to opener
 	const postToOpener = (message: object) => {
 		if (window.opener) {
-			window.opener.postMessage({ ...message, requestId: eventData?.requestId ?? null }, '*');
+			const payload = { ...message, requestId: eventData?.requestId ?? null };
+			for (const origin of COMMUNITY_ORIGINS) {
+				window.opener.postMessage(payload, origin);
+			}
 		}
 	};
 
@@ -328,7 +336,7 @@
 
 				<div class="flex justify-end">
 					<button
-						class="flex items-center justify-center gap-2 rounded-full bg-black px-4 py-2 text-sm text-white transition hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
+						class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 						on:click={closeModal}
 					>
 						{$i18n.t('Done')}
@@ -344,7 +352,7 @@
 
 				<div class="flex justify-end">
 					<button
-						class="flex items-center justify-center gap-2 rounded-full bg-black px-4 py-2 text-sm text-white transition hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
+						class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 						on:click={() => {
 							error = false;
 							errorMessage = '';
@@ -475,7 +483,7 @@
 					</div>
 
 					<button
-						class="rounded-full bg-gray-100 px-4 py-2 text-sm font-normal text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+						class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-normal transition disabled:opacity-60 bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:cursor-not-allowed dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
 						on:click={() => {
 							if (syncing) {
 								cancelOperation();
@@ -488,7 +496,7 @@
 					</button>
 
 					<button
-						class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-colors rounded-full"
+						class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 						on:click={syncStats}
 						disabled={syncing}
 					>

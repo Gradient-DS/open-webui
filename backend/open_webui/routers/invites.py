@@ -6,9 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from typing import Optional
 
-from open_webui.models.auths import Auths
+from open_webui.models.auths import Auths, SessionUserResponse
 from open_webui.models.config import Config
-from open_webui.routers.auths import SessionUserResponse
 from open_webui.models.invites import AcceptInviteForm, InviteForm, InviteModel, Invites
 from open_webui.models.users import Users
 
@@ -301,8 +300,17 @@ async def accept_invite(
         if expires_delta:
             expires_at = int(time.time()) + int(expires_delta.total_seconds())
 
+        # Upstream's is_valid_token requires the session claims, session_stamp included.
+        auth = await Auths.get_auth_by_id(new_user.id)
         session_token = create_token(
-            data={'id': new_user.id},
+            data={
+                'id': new_user.id,
+                'typ': 'session',
+                'auth_method': 'password',
+                'auth_time': int(time.time()),
+                'session_stamp': auth.session_stamp if auth else None,
+                'mfa_verified': False,
+            },
             expires_delta=expires_delta,
         )
 

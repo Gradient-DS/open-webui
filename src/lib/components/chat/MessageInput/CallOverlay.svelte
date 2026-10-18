@@ -11,11 +11,15 @@
 	import { toast } from 'svelte-sonner';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 	import VideoInputMenu from './CallOverlay/VideoInputMenu.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import type { RealtimeCall } from '$lib/utils/realtime';
+	import VoiceAvatar from './CallOverlay/VoiceAvatar.svelte';
+	import type { AvatarAnimationCommand } from '$lib/utils/voice-avatar';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	export let eventTarget: EventTarget;
 	export let submitPrompt: Function;
@@ -23,8 +27,7 @@
 	export let files;
 	export let chatId;
 	export let modelId;
-
-	let wakeLock = null;
+	export let bridge: RealtimeCall | undefined = undefined;
 
 	let model = null;
 
@@ -43,10 +46,97 @@
 	let hasStartedSpeaking = false;
 	let mediaRecorder;
 	let audioStream = null;
+	let audioContext: AudioContext | undefined;
 	let audioChunks = [];
+	let destroyed = false;
+	let avatarView: VoiceAvatar | undefined;
+	let failedAvatar = '';
+	let readyAvatar = '';
+	let avatarSpeaking = false;
+	let outputLevel = 0;
+	let callAudioElement: HTMLAudioElement;
+	let playbackContext: AudioContext | undefined;
+	let playbackSource: MediaElementAudioSourceNode | undefined;
+	let playbackAnalyser: AnalyserNode | undefined;
+	let playbackFrame = 0;
+	$: avatar = $models.find((m) => m.id === modelId)?.info?.meta?.voice_avatar;
+	$: showAvatar = !!avatar?.file_id && failedAvatar !== avatar.file_id;
+	$: if (camera) {
+		avatarView?.cancelAnimation();
+		readyAvatar = '';
+	}
+
+	const resetAvatarPlayback = () => {
+		cancelAnimationFrame(playbackFrame);
+		playbackFrame = 0;
+		avatarSpeaking = false;
+		outputLevel = 0;
+	};
+	const cancelAvatarAnimation = () => {
+		interrupted = true;
+		avatarView?.cancelAnimation();
+	};
+	const playAvatarAnimation = (event: Event) => {
+		const command = (event as CustomEvent<AvatarAnimationCommand>).detail;
+		if (interrupted || command.messageId !== currentMessageId) {
+			command.result = { status: 'cancelled' };
+		} else if (
+			!destroyed &&
+			$showCallOverlay &&
+			showAvatar &&
+			!camera &&
+			readyAvatar === avatar?.file_id
+		) {
+			command.result = { status: avatarView?.playAnimation(command.name) ?? 'unavailable' };
+		}
+	};
+
+	const analysePlayback = async (audio: HTMLAudioElement) => {
+		resetAvatarPlayback();
+		avatarSpeaking = true;
+		if (!showAvatar) return;
+		try {
+			if (!playbackContext) {
+				playbackContext = new AudioContext();
+				playbackAnalyser = playbackContext.createAnalyser();
+				playbackAnalyser.fftSize = 256;
+			}
+			await playbackContext.resume();
+			if (destroyed || audio.paused || audio.ended || playbackContext.state !== 'running') return;
+			if (!playbackSource) {
+				playbackSource = playbackContext.createMediaElementSource(audio);
+				playbackSource.connect(playbackAnalyser!);
+				playbackAnalyser!.connect(playbackContext.destination);
+			}
+			cancelAnimationFrame(playbackFrame);
+			const samples = new Float32Array(playbackAnalyser!.fftSize);
+			const sample = () => {
+				if (destroyed || audio.paused || audio.ended) {
+					resetAvatarPlayback();
+					return;
+				}
+				playbackAnalyser!.getFloatTimeDomainData(samples);
+				outputLevel = Math.sqrt(
+					samples.reduce((sum, value) => sum + value * value, 0) / samples.length
+				);
+				playbackFrame = requestAnimationFrame(sample);
+			};
+			sample();
+		} catch (error) {
+			console.error('Could not analyse avatar playback:', error);
+			outputLevel = 0;
+		}
+	};
 
 	let videoInputDevices = [];
 	let selectedVideoInputDeviceId = null;
+
+	$: if (bridge) {
+		assistantSpeaking = bridge.speaking;
+		muted = bridge.muted;
+		loading = bridge.connecting || (bridge.working && !bridge.speaking);
+		model = $models.find((m) => m.id === modelId);
+	}
 
 	const getVideoInputDevices = async () => {
 		const devices = await navigator.mediaDevices.enumerateDevices();
@@ -57,7 +147,7 @@
 				...videoInputDevices,
 				{
 					deviceId: 'screen',
-					label: 'Screen Share'
+					label: ''
 				}
 			];
 		}
@@ -184,7 +274,8 @@
 	};
 
 	const stopRecordingCallback = async (_continue = true) => {
-		if ($showCallOverlay) {
+		// $showCallOverlay stays true when the chat page unmounts
+		if ($showCallOverlay && !destroyed) {
 			console.log('%c%s', 'color: red; font-size: 20px;', '🚨 stopRecordingCallback 🚨');
 
 			// deep copy the audioChunks array
@@ -231,7 +322,7 @@
 	};
 
 	const startRecording = async () => {
-		if ($showCallOverlay) {
+		if ($showCallOverlay && !destroyed) {
 			if (!audioStream) {
 				audioStream = await navigator.mediaDevices.getUserMedia({
 					audio: {
@@ -268,6 +359,12 @@
 		}
 	};
 
+	// Chrome on Android caps open audio outputs at 10.
+	const closeAudioContext = () => {
+		void audioContext?.close();
+		audioContext = undefined;
+	};
+
 	const stopAudioStream = async () => {
 		try {
 			if (mediaRecorder) {
@@ -276,6 +373,8 @@
 		} catch (error) {
 			console.log('Error stopping audio stream:', error);
 		}
+
+		closeAudioContext();
 
 		if (!audioStream) return;
 
@@ -297,7 +396,8 @@
 	};
 
 	const analyseAudio = (stream) => {
-		const audioContext = new AudioContext();
+		closeAudioContext();
+		audioContext = new AudioContext();
 		const audioStreamSource = audioContext.createMediaStreamSource(stream);
 
 		const analyser = audioContext.createAnalyser();
@@ -379,7 +479,8 @@
 	};
 
 	let finishedMessages = {};
-	let currentMessageId = null;
+	let failedMessages: Record<string, boolean> = {};
+	let currentMessageId = '';
 	let currentUtterance: SpeechSynthesisUtterance | null = null;
 
 	// Get voice: model-specific > user settings > config default
@@ -396,42 +497,46 @@
 	};
 
 	const speakSpeechSynthesisHandler = (content) => {
-		if ($showCallOverlay) {
-			return new Promise((resolve) => {
-				let voices = [];
-				const getVoicesLoop = setInterval(async () => {
-					voices = await speechSynthesis.getVoices();
-					if (voices.length > 0) {
-						clearInterval(getVoicesLoop);
-
-						const voiceId = getVoiceId();
-						const voice = voices?.filter((v) => v.voiceURI === voiceId)?.at(0) ?? undefined;
-
-						currentUtterance = new SpeechSynthesisUtterance(content);
-						currentUtterance.rate = $settings.audio?.tts?.playbackRate ?? 1;
-
-						if (voice) {
-							currentUtterance.voice = voice;
-						}
-
-						speechSynthesis.speak(currentUtterance);
-						currentUtterance.onend = async (e) => {
-							await new Promise((r) => setTimeout(r, 200));
-							resolve(e);
-						};
-					}
-				}, 100);
-			});
-		} else {
-			return Promise.resolve();
-		}
+		if (!$showCallOverlay) return Promise.resolve();
+		const signal = audioAbortController.signal;
+		return new Promise<void>((resolve) => {
+			let utterance: SpeechSynthesisUtterance | null = null;
+			const finish = () => {
+				clearInterval(getVoicesLoop);
+				signal.removeEventListener('abort', finish);
+				if (currentUtterance === utterance) {
+					resetAvatarPlayback();
+					currentUtterance = null;
+				}
+				resolve();
+			};
+			const getVoicesLoop = setInterval(() => {
+				const voices = speechSynthesis.getVoices();
+				if (!voices.length) return;
+				clearInterval(getVoicesLoop);
+				utterance = new SpeechSynthesisUtterance(content);
+				currentUtterance = utterance;
+				utterance.rate = $settings.audio?.tts?.playbackRate ?? 1;
+				const voice = voices.find((v) => v.voiceURI === getVoiceId());
+				if (voice) utterance.voice = voice;
+				utterance.onstart = utterance.onresume = () => {
+					if (currentUtterance === utterance && !signal.aborted) avatarSpeaking = true;
+				};
+				utterance.onpause = () => {
+					if (currentUtterance === utterance) resetAvatarPlayback();
+				};
+				utterance.onend = utterance.onerror = finish;
+				speechSynthesis.speak(utterance);
+			}, 100);
+			signal.addEventListener('abort', finish, { once: true });
+			if (signal.aborted) finish();
+		});
 	};
 
 	const playAudio = (audio: HTMLAudioElement) => {
 		if ($showCallOverlay) {
 			return new Promise((resolve) => {
-				const audioElement = document.getElementById('audioElement') as HTMLAudioElement;
-
+				const audioElement = callAudioElement;
 				if (!audioElement) {
 					resolve(null);
 					return;
@@ -444,6 +549,9 @@
 					}
 
 					settled = true;
+					resetAvatarPlayback();
+					audioElement.onplaying = null;
+					audioElement.onwaiting = null;
 					audioElement.onended = null;
 					audioElement.onerror = null;
 					audioElement.onpause = null;
@@ -453,41 +561,43 @@
 				};
 
 				audioElement.src = audio.src;
-				audioElement.muted = true;
+				// stopAllAudio mutes it; unmuting after play() outside a gesture makes WebKit pause it
+				audioElement.muted = false;
 				audioElement.playbackRate = $settings.audio?.tts?.playbackRate ?? 1;
+				audioElement.onplaying = () => analysePlayback(audioElement);
+				audioElement.onwaiting = resetAvatarPlayback;
 				audioElement.onended = finish;
 				audioElement.onerror = () => finish();
 				audioElement.onpause = finish;
 
-				audioElement
-					.play()
-					.then(() => {
-						audioElement.muted = false;
-					})
-					.catch((error) => {
-						console.error(error);
-						finish(error);
-					});
+				audioElement.play().catch((error) => {
+					console.error(error);
+					finish(error);
+				});
 			});
 		} else {
 			return Promise.resolve();
 		}
 	};
 
-	const stopAllAudio = async () => {
+	const stopAllAudio = async (stopChat = true) => {
+		if (bridge) return bridge.stopSpeaking();
 		assistantSpeaking = false;
-		interrupted = true;
+		resetAvatarPlayback();
+		cancelAvatarAnimation();
+		const utterance = currentUtterance;
+		audioAbortController.abort();
 
-		if (chatStreaming) {
+		if (stopChat && chatStreaming) {
 			stopResponse();
 		}
 
-		if (currentUtterance) {
+		if (utterance) {
 			speechSynthesis.cancel();
 			currentUtterance = null;
 		}
 
-		const audioElement = document.getElementById('audioElement') as HTMLAudioElement;
+		const audioElement = callAudioElement;
 		if (audioElement) {
 			audioElement.muted = true;
 			audioElement.pause();
@@ -502,7 +612,9 @@
 	const emojiCache = new Map();
 
 	const fetchAudio = async (content) => {
-		if (!audioCache.has(content)) {
+		const id = currentMessageId;
+
+		if (!audioCache.has(content) && !failedMessages[id]) {
 			try {
 				// Set the emoji for the content if needed
 				if ($settings?.showEmojiInCall ?? false) {
@@ -535,6 +647,10 @@
 					const res = await synthesizeOpenAISpeech(localStorage.token, getVoiceId(), content).catch(
 						(error) => {
 							console.error(error);
+							if (!failedMessages[id]) {
+								failedMessages[id] = true;
+								toast.error(`${error}`);
+							}
 							return null;
 						}
 					);
@@ -549,6 +665,10 @@
 				}
 			} catch (error) {
 				console.error('Error synthesizing speech:', error);
+			}
+
+			if (!audioCache.has(content)) {
+				failedMessages[id] = true;
 			}
 		}
 
@@ -573,7 +693,7 @@
 						emoji = null;
 					}
 
-					if ($config.audio.tts.engine !== '') {
+					if ($settings.audio?.tts?.engine === 'browser-kokoro' || !!$config?.audio?.tts?.engine) {
 						try {
 							console.log(
 								'%c%s',
@@ -591,7 +711,7 @@
 					} else {
 						await speakSpeechSynthesisHandler(content);
 					}
-				} else {
+				} else if (!failedMessages[id]) {
 					// If not available in the cache, push it back to the queue and delay
 					messages[id].unshift(content); // Re-queue the content at the start
 					console.log(`Audio for "${content}" not yet available in the cache, re-queued...`);
@@ -617,10 +737,9 @@
 		if (currentMessageId !== id) {
 			console.log(`Received chat start event for message ID ${id}`);
 
+			void stopAllAudio(false);
 			currentMessageId = id;
-			if (audioAbortController) {
-				audioAbortController.abort();
-			}
+			interrupted = false;
 			audioAbortController = new AbortController();
 
 			assistantSpeaking = true;
@@ -664,6 +783,7 @@
 	};
 
 	const toggleMute = () => {
+		if (bridge) return bridge.mute();
 		muted = !muted;
 		if (muted && hasStartedSpeaking) {
 			// Abort the ongoing recording so it doesn't accidentally send a partial sentence
@@ -677,7 +797,7 @@
 	};
 
 	let wasAssistantSpeaking = false;
-	$: {
+	$: if (!bridge) {
 		if (assistantSpeaking && !wasAssistantSpeaking) {
 			wasAssistantSpeaking = true;
 		} else if (!assistantSpeaking && wasAssistantSpeaking) {
@@ -704,36 +824,36 @@
 		}
 	};
 
-	onMount(async () => {
-		const setWakeLock = async () => {
-			try {
-				wakeLock = await navigator.wakeLock.request('screen');
-			} catch (err) {
-				// The Wake Lock request has failed - usually system related, such as battery.
-				console.log(err);
-			}
-
-			if (wakeLock) {
-				// Add a listener to release the wake lock when the page is unloaded
-				wakeLock.addEventListener('release', () => {
-					// the wake lock has been released
-					console.log('Wake Lock released');
-				});
-			}
+	onMount(() => {
+		eventTarget.addEventListener('voice:play_animation', playAvatarAnimation);
+		eventTarget.addEventListener('voice:cancel_animation', cancelAvatarAnimation);
+		return () => {
+			eventTarget.removeEventListener('voice:play_animation', playAvatarAnimation);
+			eventTarget.removeEventListener('voice:cancel_animation', cancelAvatarAnimation);
 		};
+	});
 
-		if ('wakeLock' in navigator) {
-			await setWakeLock();
-
-			document.addEventListener('visibilitychange', async () => {
-				// Re-request the wake lock if the document becomes visible
-				if (wakeLock !== null && document.visibilityState === 'visible') {
-					await setWakeLock();
-				}
-			});
+	onMount(async () => {
+		if (bridge) {
+			document.addEventListener('keydown', handleKeydown);
+			return;
 		}
-
 		model = $models.find((m) => m.id === modelId);
+
+		if ($settings.audio?.tts?.engine === 'browser-kokoro' && !$TTSWorker) {
+			try {
+				await TTSWorker.set(
+					new KokoroWorker({
+						dtype: $settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
+					})
+				);
+
+				await $TTSWorker.init();
+			} catch (error) {
+				console.error(error);
+				toast.error(`${error}`);
+			}
+		}
 
 		startRecording();
 
@@ -765,6 +885,15 @@
 	});
 
 	onDestroy(async () => {
+		if (bridge) {
+			document.removeEventListener('keydown', handleKeydown);
+			return;
+		}
+		destroyed = true;
+		resetAvatarPlayback();
+		playbackSource?.disconnect();
+		playbackAnalyser?.disconnect();
+		void playbackContext?.close();
 		await stopAllAudio();
 		await stopRecordingCallback(false);
 		await stopCamera();
@@ -785,6 +914,8 @@
 </script>
 
 {#if $showCallOverlay}
+	<!-- A media element can only have one Web Audio source, even after its context closes. -->
+	<audio bind:this={callAudioElement} class="hidden"></audio>
 	<div class="max-w-lg w-full h-full max-h-[100dvh] flex flex-col justify-between p-3 md:p-6">
 		{#if camera}
 			<button
@@ -866,73 +997,108 @@
 			{#if !camera}
 				<button
 					type="button"
+					class={showAvatar
+						? 'relative w-full h-full min-h-64 flex items-center justify-center'
+						: ''}
+					aria-label={assistantSpeaking ? $i18n.t('Stop speaking') : $i18n.t('Voice call')}
 					on:click={() => {
 						if (assistantSpeaking) {
 							stopAllAudio();
 						}
 					}}
 				>
-					{#if emoji}
-						<div
-							class="  transition-all rounded-full"
-							style="font-size:{rmsLevel * 100 > 4
-								? '13'
-								: rmsLevel * 100 > 2
-									? '12'
-									: rmsLevel * 100 > 1
-										? '11.5'
-										: '11'}rem;width:100%;text-align:center;"
-						>
-							{emoji}
+					{#if showAvatar && avatar}
+						{@const selectedAvatar = avatar}
+						{#key selectedAvatar.file_id}
+							<div
+								class="absolute inset-0"
+								class:invisible={readyAvatar !== selectedAvatar.file_id}
+							>
+								<VoiceAvatar
+									bind:this={avatarView}
+									config={selectedAvatar}
+									speaking={avatarSpeaking}
+									listening={hasStartedSpeaking && !muted && !avatarSpeaking}
+									level={outputLevel}
+									active={!destroyed && $showCallOverlay}
+									on:ready={() => {
+										readyAvatar = selectedAvatar.file_id;
+									}}
+									on:error={() => {
+										failedAvatar = selectedAvatar.file_id;
+									}}
+								/>
+							</div>
+						{/key}
+					{/if}
+					{#if showAvatar && readyAvatar !== avatar?.file_id}
+						<div class="absolute inset-0 grid place-items-center" role="status">
+							<Spinner className="size-6 text-gray-400 dark:text-gray-500" />
+							<span class="sr-only">{$i18n.t('Loading avatar...')}</span>
 						</div>
-					{:else if loading || assistantSpeaking}
-						<svg
-							class="size-44 text-gray-900 dark:text-gray-400"
-							viewBox="0 0 24 24"
-							fill="currentColor"
-							xmlns="http://www.w3.org/2000/svg"
-							><style>
-								.spinner_qM83 {
-									animation: spinner_8HQG 1.05s infinite;
-								}
-								.spinner_oXPr {
-									animation-delay: 0.1s;
-								}
-								.spinner_ZTLf {
-									animation-delay: 0.2s;
-								}
-								@keyframes spinner_8HQG {
-									0%,
-									57.14% {
-										animation-timing-function: cubic-bezier(0.33, 0.66, 0.66, 1);
-										transform: translate(0);
+					{:else if !showAvatar}
+						{#if emoji}
+							<div
+								class="  transition-all rounded-full"
+								style="font-size:{rmsLevel * 100 > 4
+									? '13'
+									: rmsLevel * 100 > 2
+										? '12'
+										: rmsLevel * 100 > 1
+											? '11.5'
+											: '11'}rem;width:100%;text-align:center;"
+							>
+								{emoji}
+							</div>
+						{:else if loading || assistantSpeaking}
+							<svg
+								class="size-44 text-gray-900 dark:text-gray-400"
+								viewBox="0 0 24 24"
+								fill="currentColor"
+								xmlns="http://www.w3.org/2000/svg"
+								><style>
+									.spinner_qM83 {
+										animation: spinner_8HQG 1.05s infinite;
 									}
-									28.57% {
-										animation-timing-function: cubic-bezier(0.33, 0, 0.66, 0.33);
-										transform: translateY(-6px);
+									.spinner_oXPr {
+										animation-delay: 0.1s;
 									}
-									100% {
-										transform: translate(0);
+									.spinner_ZTLf {
+										animation-delay: 0.2s;
 									}
-								}
-							</style><circle class="spinner_qM83" cx="4" cy="12" r="3" /><circle
-								class="spinner_qM83 spinner_oXPr"
-								cx="12"
-								cy="12"
-								r="3"
-							/><circle class="spinner_qM83 spinner_ZTLf" cx="20" cy="12" r="3" /></svg
-						>
-					{:else}
-						<div
-							class=" {rmsLevel * 100 > 4
-								? ' size-52'
-								: rmsLevel * 100 > 2
-									? 'size-48'
-									: rmsLevel * 100 > 1
-										? 'size-44'
-										: 'size-40'} transition-all rounded-full bg-cover bg-center bg-no-repeat"
-							style={`background-image: url('${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}&voice=true');`}
-						/>
+									@keyframes spinner_8HQG {
+										0%,
+										57.14% {
+											animation-timing-function: cubic-bezier(0.33, 0.66, 0.66, 1);
+											transform: translate(0);
+										}
+										28.57% {
+											animation-timing-function: cubic-bezier(0.33, 0, 0.66, 0.33);
+											transform: translateY(-6px);
+										}
+										100% {
+											transform: translate(0);
+										}
+									}
+								</style><circle class="spinner_qM83" cx="4" cy="12" r="3" /><circle
+									class="spinner_qM83 spinner_oXPr"
+									cx="12"
+									cy="12"
+									r="3"
+								/><circle class="spinner_qM83 spinner_ZTLf" cx="20" cy="12" r="3" /></svg
+							>
+						{:else}
+							<div
+								class=" {rmsLevel * 100 > 4
+									? ' size-52'
+									: rmsLevel * 100 > 2
+										? 'size-48'
+										: rmsLevel * 100 > 1
+											? 'size-44'
+											: 'size-40'} transition-all rounded-full bg-cover bg-center bg-no-repeat"
+								style={`background-image: url('${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}&voice=true');`}
+							/>
+						{/if}
 					{/if}
 				</button>
 			{:else}
@@ -982,8 +1148,12 @@
 					}
 				}}
 			>
-				<div class="line-clamp-1 text-sm font-normal">
-					{#if loading}
+				<div class="line-clamp-1 text-sm font-normal" role="status" aria-live="polite">
+					{#if bridge?.connecting}
+						{$i18n.t('Connecting')}
+					{:else if bridge?.approval}
+						{$i18n.t('Waiting for approval')}
+					{:else if loading}
 						{$i18n.t('Thinking...')}
 					{:else if muted}
 						{$i18n.t('Muted')}
@@ -998,7 +1168,9 @@
 			<div class="flex items-center justify-center gap-4 z-10">
 				{#if camera}
 					<VideoInputMenu
-						devices={videoInputDevices}
+						devices={videoInputDevices.map((device) =>
+							device.deviceId === 'screen' ? { ...device, label: $i18n.t('Screen Share') } : device
+						)}
 						on:change={async (e) => {
 							console.log(e.detail);
 							selectedVideoInputDeviceId = e.detail;
@@ -1026,7 +1198,7 @@
 							</svg>
 						</button>
 					</VideoInputMenu>
-				{:else}
+				{:else if !bridge}
 					<Tooltip content={$i18n.t('Camera')}>
 						<button
 							aria-label={$i18n.t('Camera')}
@@ -1114,15 +1286,30 @@
 					</button>
 				</Tooltip>
 
+				{#if bridge?.working}
+					<Tooltip content={$i18n.t('Stop')}>
+						<button
+							type="button"
+							aria-label={$i18n.t('Stop')}
+							class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
+							on:click={() => bridge?.stopBackend()}
+						>
+							<svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+								<rect x="4" y="4" width="12" height="12" rx="2" />
+							</svg>
+						</button>
+					</Tooltip>
+				{/if}
+
 				<button
 					aria-label={$i18n.t('End call')}
 					class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
 					on:click={async () => {
-						await stopAudioStream();
-						await stopVideoStream();
-
-						console.log(audioStream);
-						console.log(cameraStream);
+						if (bridge) bridge.end();
+						else {
+							await stopAudioStream();
+							await stopVideoStream();
+						}
 
 						showCallOverlay.set(false);
 						dispatch('close');

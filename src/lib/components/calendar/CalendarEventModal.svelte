@@ -28,6 +28,8 @@
 	let startDate = '';
 	let startTime = '';
 	let endDate = '';
+	let endDayOffset = 0;
+	let overnight = false;
 	let endTime = '';
 	let allDay = false;
 	let location = '';
@@ -75,6 +77,10 @@
 		return new Date(`${dateStr}T${timeStr || '00:00'}`).getTime() * NS;
 	}
 
+	function endsPastMidnight(): boolean {
+		return !allDay && endTime < startTime;
+	}
+
 	function reset() {
 		if (event) {
 			title = event.title;
@@ -111,6 +117,13 @@
 			alertMinutes = 10;
 			repeatFrequency = '';
 		}
+		endDayOffset = endDate
+			? Math.round(
+					(dateTimeToNs(endDate, '12:00') - dateTimeToNs(startDate, '12:00')) /
+						(24 * 60 * 60 * 1000 * NS)
+				)
+			: 0;
+		overnight = endDayOffset === 1 && endsPastMidnight();
 	}
 
 	$: if (show) reset();
@@ -129,7 +142,13 @@
 		loading = true;
 		try {
 			const startNs = dateTimeToNs(startDate, allDay ? '00:00' : startTime);
-			let endNs = endDate ? dateTimeToNs(endDate, allDay ? '23:59' : endTime) : undefined;
+			const endDays = overnight && !endsPastMidnight() ? 0 : endDayOffset;
+			const shiftedEndDate = endDate
+				? nsToDateStr(dateTimeToNs(startDate, '12:00') + endDays * 24 * 60 * 60 * 1000 * NS)
+				: '';
+			let endNs = shiftedEndDate
+				? dateTimeToNs(shiftedEndDate, allDay ? '23:59' : endTime)
+				: undefined;
 			if (endNs !== undefined && endNs < startNs) {
 				const duration =
 					event?.end_at && event.end_at > event.start_at ? event.end_at - event.start_at : 0;
@@ -140,12 +159,12 @@
 				const result = await updateCalendarEvent(localStorage.token, event.id, {
 					calendar_id: calendarId,
 					title: title.trim(),
-					description: description.trim() || undefined,
+					description: description.trim() || null,
 					start_at: startNs,
 					end_at: endNs,
 					all_day: allDay,
-					rrule: getRepeatRrule(),
-					location: location.trim() || undefined,
+					rrule: getRepeatRrule() ?? null,
+					location: location.trim() || null,
 					meta: { alert_minutes: alertMinutes }
 				});
 				if (result) {
@@ -308,7 +327,7 @@
 			<div class="flex items-center gap-0.5 flex-1 min-w-0">
 				{#if event && !event.meta?.automation_id}
 					<button
-						class="px-3 py-1 text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
+						class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-normal text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 disabled:opacity-60 dark:text-gray-400 dark:hover:bg-gray-850 dark:hover:text-white"
 						type="button"
 						on:click={() => (showDeleteConfirmDialog = true)}
 						disabled={loading}
@@ -320,23 +339,21 @@
 
 			<div class="flex items-center gap-2 shrink-0">
 				<button
-					class="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition"
+					class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-normal text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 disabled:opacity-60 dark:text-gray-400 dark:hover:bg-gray-850 dark:hover:text-white"
 					type="button"
 					on:click={() => (show = false)}
 				>
 					{$i18n.t('Cancel')}
 				</button>
 				<button
-					class="px-3.5 py-1.5 text-sm bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 {loading
-						? 'cursor-not-allowed'
-						: ''}"
+					class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white disabled:cursor-not-allowed"
 					on:click={submitHandler}
 					type="button"
 					disabled={loading}
 				>
 					{event && !event.meta?.automation_id ? $i18n.t('Save') : $i18n.t('Create')}
 					{#if loading}
-						<span class="shrink-0"><Spinner /></span>
+						<span class="shrink-0"><Spinner className="size-3" /></span>
 					{/if}
 				</button>
 			</div>

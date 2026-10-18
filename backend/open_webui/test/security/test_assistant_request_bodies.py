@@ -109,7 +109,7 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
 
     async def payload(request, form_data, user, metadata, model):
         processed.append(copy.deepcopy(model))
-        return form_data, metadata, []
+        return form_data, metadata, [], False
 
     async def capture(request, form_data, *args, **kwargs):
         seen.append(copy.deepcopy(form_data))

@@ -35,7 +35,7 @@ _SENTINEL_RETRYABLE = (
     _redis_sync.exceptions.ReadOnlyError,
     _redis_sync.exceptions.TimeoutError,
 )
-_FACTORY_METHODS = frozenset({'pipeline', 'pubsub', 'monitor', 'client', 'transaction'})
+_FACTORY_METHODS = frozenset({'pipeline', 'pubsub', 'monitor', 'client', 'transaction', 'lock'})
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,8 @@ def parse_redis_url(url: str) -> dict[str, Any]:
     if parts.scheme not in _ACCEPTED_SCHEMES:
         raise ValueError(f"Invalid Redis URL scheme '{parts.scheme}'; expected 'redis' or 'rediss'.")
     return {
-        'service': parts.hostname or 'mymaster',
+        # hostname lowercases, but Sentinel service names are case-sensitive
+        'service': parts.netloc.rpartition('@')[2].split(':')[0] or 'mymaster',
         'port': parts.port or 6379,
         'db': int(parts.path.lstrip('/') or '0'),
         'username': parts.username or None,
@@ -117,6 +118,13 @@ def build_sentinel_url(
         auth = f'{cfg["username"] or ""}:{cfg["password"] or ""}@'
     nodes = ','.join(f'{host.strip()}:{port}' for host in hosts_csv.split(',') if host.strip())
     return f'redis+sentinel://{auth}{nodes}/{cfg["db"]}/{cfg["service"]}'
+
+
+def build_sentinel_kwargs(base_url: str, redis_options: dict[str, Any]) -> dict[str, Any]:
+    """Kwargs for the Sentinel connections: ``base_url`` credentials plus the ``socket_*`` options."""
+    cfg = parse_redis_url(base_url)
+    socket_options = {key: value for key, value in redis_options.items() if key.startswith('socket_')}
+    return {'username': cfg['username'], 'password': cfg['password'], **socket_options}
 
 
 def get_redis_client(async_mode: bool = False) -> Any | None:
@@ -316,6 +324,9 @@ def _build_sentinel(
         db=cfg['db'],
         username=cfg['username'],
         password=cfg['password'],
+        sentinel_kwargs=build_sentinel_kwargs(
+            url, {'socket_connect_timeout': REDIS_SOCKET_CONNECT_TIMEOUT, **_socket_options()}
+        ),
         decode_responses=decode_responses,
         socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT,
         **{k: v for k, v in _socket_options().items() if k != 'socket_connect_timeout'},
@@ -380,7 +391,9 @@ def get_redis_connection(
         )
     elif redis_url:
         factory = getattr(redis_mod, 'from_url', None) or redis_mod.Redis.from_url
-        connection = factory(redis_url, decode_responses=decode_responses, **extra)
+        # reconnect once when Redis has closed a pooled connection, e.g. after a restart
+        retry = redis_mod.retry.Retry(_redis_sync.backoff.NoBackoff(), 1, supported_errors=(redis_mod.ConnectionError,))
+        connection = factory(redis_url, decode_responses=decode_responses, retry=retry, **extra)
 
     _CONNECTION_CACHE[cache_key] = connection
     return connection

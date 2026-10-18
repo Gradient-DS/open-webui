@@ -9,6 +9,7 @@ import urllib
 import uuid
 from ssl import CERT_NONE, CERT_REQUIRED, PROTOCOL_TLS
 
+import jwt
 from aiohttp import BasicAuth, ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
@@ -21,7 +22,6 @@ from open_webui.config import (
     OAUTH_PROVIDERS,
 )
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.events import EVENTS, publish_event
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     ENABLE_INITIAL_ADMIN_SIGNUP,
@@ -38,16 +38,19 @@ from open_webui.env import (
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
     WEBUI_AUTH_TRUSTED_ROLE_HEADER,
 )
+from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.auths import (
     AddUserForm,
+    AddUserResponse,
+    AuthModel,
     ApiKey,
     Auths,
     LdapForm,
+    SessionUserInfoResponse,
     SigninForm,
-    SigninResponse,
+    SigninResult,
     SignupForm,
-    Token,
     UpdatePasswordForm,
 )
 from open_webui.models.config import Config
@@ -58,27 +61,29 @@ from open_webui.models.users import (
     UserModel,
     UserProfileImageResponse,
     Users,
-    UserStatus,
 )
+from open_webui.routers.mfa import MfaRoute
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
     create_api_key,
+    create_signin_response,
     create_token,
     decode_token,
     get_admin_user,
     get_current_user,
     get_http_authorization_cred,
+    get_human_user,
     get_password_hash,
     get_verified_user,
     invalidate_token,
-    revoke_user_tokens,
     validate_password,
     verify_password,
 )
 from open_webui.utils.groups import apply_default_group_assignment
+from open_webui.utils.json_codec import JSONCodec
+from open_webui.utils.mfa import MFA_CONFIG_KEYS, MfaConfigForm, get_mfa_config, limit_account, update_mfa_config
 from open_webui.utils.misc import parse_duration, validate_email_format
 from open_webui.utils.rate_limit import RateLimiter
-from open_webui.utils.redis import get_redis_client
 from open_webui.utils.totp import compute_twofa_grace
 from open_webui.models.password_reset import PasswordResetTokens
 from open_webui.utils.password_reset import (
@@ -87,23 +92,22 @@ from open_webui.utils.password_reset import (
     is_reset_token_usable,
 )
 from open_webui.services.email.auth import is_mail_configured
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StrictStr, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
-router = APIRouter()
+router = APIRouter(route_class=MfaRoute)
 
 log = logging.getLogger(__name__)
 
 # Forgive us our failed attempts, as we forgive those
 # who exceed their allotted rate against this gate.
-signin_rate_limiter = RateLimiter(redis_client=get_redis_client(), limit=5 * 3, window=60 * 3)
+signin_rate_limiter = RateLimiter(limit=5 * 3, window=60 * 3)
 # Best-effort throttle only: there is no caller identity before the provider answers,
 # and deployments may derive request.client from proxy headers.
 token_exchange_rate_limiter = (
     RateLimiter(
-        redis_client=get_redis_client(),
         limit=OAUTH_TOKEN_EXCHANGE_RATE_LIMIT,
         window=OAUTH_TOKEN_EXCHANGE_RATE_LIMIT_WINDOW,
     )
@@ -112,7 +116,7 @@ token_exchange_rate_limiter = (
 )
 
 
-password_reset_rate_limiter = RateLimiter(redis_client=get_redis_client(), limit=5, window=60 * 15)
+password_reset_rate_limiter = RateLimiter(limit=5, window=60 * 15)
 
 GENERIC_PASSWORD_RESET_MESSAGE = 'If an account with that email exists, a password reset link has been sent.'
 
@@ -127,9 +131,11 @@ class ResetPasswordForm(BaseModel):
 
 
 ADMIN_CONFIG_KEYS = {
+    **MFA_CONFIG_KEYS,
     'SHOW_ADMIN_DETAILS': 'auth.admin.show',
     'ADMIN_EMAIL': 'auth.admin.email',
     'WEBUI_URL': 'webui.url',
+    'ENABLE_LOGIN_FORM': 'ui.enable_login_form',
     'ENABLE_SIGNUP': 'ui.enable_signup',
     'ENABLE_API_KEYS': 'auth.enable_api_keys',
     'ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS': 'auth.api_key.endpoint_restrictions',
@@ -137,6 +143,7 @@ ADMIN_CONFIG_KEYS = {
     'DEFAULT_USER_ROLE': 'ui.default_user_role',
     'DEFAULT_GROUP_ID': 'ui.default_group_id',
     'DEFAULT_INTERFACE_SETTINGS': 'ui.default_interface_settings',
+    'I18N': 'ui.i18n',
     'JWT_EXPIRES_IN': 'auth.jwt_expiry',
     'ENABLE_COMMUNITY_SHARING': 'ui.enable_community_sharing',
     'ENABLE_MESSAGE_RATING': 'ui.enable_message_rating',
@@ -146,10 +153,14 @@ ADMIN_CONFIG_KEYS = {
     'AUTOMATION_MIN_INTERVAL': 'automations.min_interval',
     'ENABLE_AUTOMATIONS': 'automations.enable',
     'ENABLE_CHANNELS': 'channels.enable',
+    'ENABLE_ENCRYPTED_CHANNELS': 'channels.encryption.enable',
+    'ENABLE_APPS': 'apps.enable',
     'CHANNEL_MODEL_RESPONSE_MODE': 'channels.model_response_mode',
     'ENABLE_CALENDAR': 'calendar.enable',
     'ENABLE_MEMORIES': 'memories.enable',
     'ENABLE_MEMORY_SYSTEM_CONTEXT': 'memories.system_context.enable',
+    'SKILL_CONTENT_MAX_CHARS': 'skills.content_max_chars',
+    'SKILL_PREVIEW_MAX_CHARS': 'skills.preview_max_chars',
     'ENABLE_NOTES': 'notes.enable',
     'ENABLE_USER_WEBHOOKS': 'ui.enable_user_webhooks',
     'ENABLE_USER_STATUS': 'users.enable_status',
@@ -203,6 +214,8 @@ async def create_session_response(
     set_cookie: bool = False,
     expires_at_cap: Optional[int] = None,
     source: str = 'api',
+    *,
+    auth: AuthModel | None = None,
 ) -> dict:
     """
     Create JWT token and build session response for a user.
@@ -216,7 +229,19 @@ async def create_session_response(
         set_cookie: Whether to set the auth cookie on the response
         expires_at_cap: Optional epoch second to cap the session lifetime at
             (e.g. the 2FA grace deadline) so the token cannot outlive it.
+        auth: Credential snapshot that authorized this login; a password or
+            session_stamp change since then refuses the session (upstream CAS).
+
+    [Gradient] Kept here (upstream moved its own copy to utils/auth.py) for the TOTP
+    flow and expires_at_cap. Tokens carry upstream's session claims so
+    is_valid_token accepts them and "sign out all devices" revokes them.
     """
+    current = await Auths.get_auth_by_id(user.id, db=db)
+    if current is None or not current.active:
+        raise HTTPException(401, detail=ERROR_MESSAGES.INVALID_CRED)
+    if auth is not None and (current.session_stamp != auth.session_stamp or current.password != auth.password):
+        raise HTTPException(409, 'Authentication changed. Please sign in again.')
+
     expires_delta = parse_duration(await Config.get('auth.jwt_expiry'))
     expires_at = None
     if expires_delta:
@@ -230,7 +255,14 @@ async def create_session_response(
         expires_delta = datetime.timedelta(seconds=max(1, expires_at_cap - int(time.time())))
 
     token = create_token(
-        data={'id': user.id},
+        data={
+            'id': user.id,
+            'typ': 'session',
+            'auth_method': source,
+            'auth_time': int(time.time()),
+            'session_stamp': current.session_stamp,
+            'mfa_verified': False,
+        },
         expires_delta=expires_delta,
     )
 
@@ -313,22 +345,11 @@ async def evaluate_2fa_grace(request: Request, user, auth_record, db) -> dict:
 ############################
 
 
-class SessionUserResponse(Token, UserProfileImageResponse):
-    expires_at: int | None = None
-    permissions: dict | None = None
-
-
-class SessionUserInfoResponse(SessionUserResponse, UserStatus):
-    bio: str | None = None
-    gender: str | None = None
-    date_of_birth: datetime.date | None = None
-
-
 @router.get('/', response_model=SessionUserInfoResponse)
 async def get_session_user(
     request: Request,
     response: Response,
-    user=Depends(get_current_user),
+    user=Depends(get_human_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     token = None
@@ -472,11 +493,12 @@ async def update_password(
     if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
     if session_user:
-        user = await Auths.authenticate_user(
+        authenticated = await Auths.authenticate_user(
             session_user.email,
             lambda pw: verify_password(form_data.password, pw),
             db=db,
         )
+        user, auth = authenticated if authenticated else (None, None)
 
         if user:
             try:
@@ -484,9 +506,14 @@ async def update_password(
             except Exception as e:
                 raise HTTPException(400, detail=str(e))
             hashed = await get_password_hash(form_data.new_password)
-            success = await Auths.update_user_password_by_id(user.id, hashed, db=db)
+            try:
+                success = await Auths.update_user_password_by_id(user.id, hashed, current_auth=auth, db=db)
+            except ValueError:
+                raise HTTPException(409, 'Authentication changed. Please sign in again.') from None
             if success:
-                await revoke_user_tokens(request, user.id)
+                from open_webui.socket.main import disconnect_user_sessions
+
+                await disconnect_user_sessions(user.id)
                 await publish_event(
                     request,
                     EVENTS.AUTH_PASSWORD_CHANGED,
@@ -569,7 +596,7 @@ async def forgot_password(
             and ENABLE_PASSWORD_AUTH
             and not WEBUI_AUTH_TRUSTED_EMAIL_HEADER
             and validate_email_format(email)
-            and not password_reset_rate_limiter.is_limited(email)
+            and not await password_reset_rate_limiter.is_limited(request.app.state.redis, email)
         )
         if eligible:
             user = await Users.get_user_by_email(email, db=db)
@@ -643,7 +670,11 @@ async def reset_password(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     hashed = await get_password_hash(form_data.new_password)
-    updated = await Auths.update_user_password_by_id(record.user_id, hashed, db=db)
+    try:
+        # Upstream's password update also rotates session_stamp, so a reset signs out every device.
+        updated = await Auths.update_user_password_by_id(record.user_id, hashed, db=db)
+    except ValueError:
+        raise HTTPException(409, 'Authentication changed. Please sign in again.') from None
     if not updated:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -657,7 +688,7 @@ async def reset_password(
 ############################
 # LDAP Authentication
 ############################
-@router.post('/ldap', response_model=SessionUserResponse)
+@router.post('/ldap', response_model=SigninResult)
 async def ldap_auth(
     request: Request,
     response: Response,
@@ -810,6 +841,10 @@ async def ldap_auth(
             )
 
         if username_list and form_data.user.lower() in username_list:
+            if (await get_mfa_config()).ENABLE_MFA:
+                existing = await Users.get_user_by_email(email, db=db)
+                if existing:
+                    await limit_account(existing.id, 'password')
             connection_user = Connection(
                 server,
                 user_dn,
@@ -875,11 +910,13 @@ async def ldap_auth(
                     except Exception as e:
                         log.error(f'Failed to sync groups for user {user.id}: {e}')
 
-                return await create_session_response(request, user, db, response, set_cookie=True, source='ldap')
+                return await create_signin_response(request, user, db, response, set_cookie=True, source='ldap')
             else:
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
         else:
             raise HTTPException(400, 'User record mismatch.')
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f'LDAP authentication error: {str(e)}')
         raise HTTPException(400, detail='LDAP authentication failed.')
@@ -890,7 +927,7 @@ async def ldap_auth(
 ############################
 
 
-@router.post('/signin', response_model=SessionUserResponse)
+@router.post('/signin', response_model=SigninResult)
 async def signin(
     request: Request,
     response: Response,
@@ -907,6 +944,7 @@ async def signin(
     # not to trusted-header / no-auth infrastructure modes.
     password_login = False
     auth_source = 'password'
+    auth = None
 
     if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
         auth_source = 'trusted_header'
@@ -970,11 +1008,12 @@ async def signin(
         admin_password = 'admin'
 
         if await Users.get_user_by_email(admin_email.lower(), db=db):
-            user = await Auths.authenticate_user(
+            authenticated = await Auths.authenticate_user(
                 admin_email.lower(),
                 lambda pw: verify_password(admin_password, pw),
                 db=db,
             )
+            user, auth = authenticated if authenticated else (None, None)
         else:
             if await Users.has_users(db=db):
                 raise HTTPException(400, detail=ERROR_MESSAGES.EXISTING_USERS)
@@ -988,27 +1027,41 @@ async def signin(
                 source='system',
             )
 
-            user = await Auths.authenticate_user(
+            authenticated = await Auths.authenticate_user(
                 admin_email.lower(),
                 lambda pw: verify_password(admin_password, pw),
                 db=db,
             )
+            user, auth = authenticated if authenticated else (None, None)
     else:
         password_login = True
 
-        if signin_rate_limiter.is_limited(form_data.email.lower()):
+        if await signin_rate_limiter.is_limited(request.app.state.redis, form_data.email.lower()):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED,
             )
 
-        user = await Auths.authenticate_user(
+        if (await get_mfa_config()).ENABLE_MFA:
+            existing = await Users.get_user_by_email(form_data.email.lower(), db=db)
+            if existing:
+                await limit_account(existing.id, 'password')
+
+        authenticated = await Auths.authenticate_user(
             form_data.email.lower(),
             lambda pw: verify_password(form_data.password, pw),
             db=db,
         )
+        user, auth = authenticated if authenticated else (None, None)
 
     if user:
+        # [Gradient] Upstream native MFA (ENABLE_MFA, default off) replaces our TOTP flow
+        # while it is on; otherwise our TOTP 2FA + grace flow runs exactly as before.
+        if (await get_mfa_config()).ENABLE_MFA:
+            return await create_signin_response(
+                request, user, db, response, set_cookie=True, source=auth_source, auth=auth
+            )
+
         # Check if 2FA is enabled for this user
         if await Config.get('auth.enable_2fa'):
             auth_record = await Auths.get_auth_by_user_id(user.id, db=db)
@@ -1050,9 +1103,12 @@ async def signin(
                     set_cookie=True,
                     expires_at_cap=grace['grace_expires_at'],
                     source=auth_source,
+                    auth=auth,
                 )
 
-        return await create_session_response(request, user, db, response, set_cookie=True, source=auth_source)
+        return await create_session_response(
+            request, user, db, response, set_cookie=True, source=auth_source, auth=auth
+        )
     else:
         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
@@ -1120,7 +1176,7 @@ async def signup_handler(
     return user
 
 
-@router.post('/signup', response_model=SessionUserResponse)
+@router.post('/signup', response_model=SigninResult)
 async def signup(
     request: Request,
     response: Response,
@@ -1172,6 +1228,9 @@ async def signup(
         # Start the 2FA grace clock for the new account and cap its session at
         # the deadline. With a zero-day grace period a fresh account is already
         # past grace, so it is gated into setup straight away (same as signin).
+        if (await get_mfa_config()).ENABLE_MFA:
+            return await create_signin_response(request, user, db, response, set_cookie=True, source='password')
+
         grace_cap = None
         if await Config.get('auth.enable_2fa'):
             auth_record = await Auths.get_auth_by_user_id(user.id, db=db)
@@ -1189,7 +1248,9 @@ async def signup(
                 )
             grace_cap = grace['grace_expires_at']
 
-        return await create_session_response(request, user, db, response, set_cookie=True, expires_at_cap=grace_cap)
+        return await create_session_response(
+            request, user, db, response, set_cookie=True, expires_at_cap=grace_cap, source='password'
+        )
     except HTTPException:
         raise
     except Exception as err:
@@ -1343,7 +1404,7 @@ async def delete_oauth_session_by_provider(
 ############################
 
 
-@router.post('/add', response_model=SigninResponse)
+@router.post('/add', response_model=AddUserResponse, response_model_exclude_none=True)
 async def add_user(
     request: Request,
     form_data: AddUserForm,
@@ -1389,7 +1450,12 @@ async def add_user(
             )
 
             expires_delta = parse_duration(await Config.get('auth.jwt_expiry'))
-            token = create_token(data={'id': user.id}, expires_delta=expires_delta)
+            if (await get_mfa_config()).ENABLE_MFA:
+                return user.model_dump()
+            auth = await Auths.get_auth_by_id(user.id, db=db)
+            token = create_token(
+                data={'id': user.id, 'typ': 'session', 'session_stamp': auth.session_stamp}, expires_delta=expires_delta
+            )
             return {
                 'token': token,
                 'token_type': 'Bearer',
@@ -1451,10 +1517,11 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
     return await get_config_values(ADMIN_CONFIG_KEYS)
 
 
-class AdminConfig(BaseModel):
+class AdminConfig(MfaConfigForm):
     SHOW_ADMIN_DETAILS: bool
     ADMIN_EMAIL: str | None = None
     WEBUI_URL: str
+    ENABLE_LOGIN_FORM: bool = True
     ENABLE_SIGNUP: bool
     ENABLE_API_KEYS: bool
     ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS: bool
@@ -1462,6 +1529,7 @@ class AdminConfig(BaseModel):
     DEFAULT_USER_ROLE: str
     DEFAULT_GROUP_ID: str
     DEFAULT_INTERFACE_SETTINGS: dict | None = None
+    I18N: dict[str, dict[str, StrictStr]] | None = None
     JWT_EXPIRES_IN: str
     ENABLE_COMMUNITY_SHARING: bool
     ENABLE_CITATION_RELEVANCE: bool
@@ -1472,10 +1540,14 @@ class AdminConfig(BaseModel):
     AUTOMATION_MIN_INTERVAL: int | str | None = None
     ENABLE_AUTOMATIONS: bool
     ENABLE_CHANNELS: bool
+    ENABLE_ENCRYPTED_CHANNELS: bool = False
+    ENABLE_APPS: bool = False
     CHANNEL_MODEL_RESPONSE_MODE: str = 'thread'
     ENABLE_CALENDAR: bool
     ENABLE_MEMORIES: bool
     ENABLE_MEMORY_SYSTEM_CONTEXT: bool
+    SKILL_CONTENT_MAX_CHARS: int | None = Field(default=None, gt=0, strict=True)
+    SKILL_PREVIEW_MAX_CHARS: int | None = Field(default=None, gt=0, strict=True)
     ENABLE_NOTES: bool
     ENABLE_USER_WEBHOOKS: bool
     ENABLE_USER_STATUS: bool
@@ -1498,10 +1570,51 @@ def _whole_number(value, name):
     except (TypeError, ValueError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f'{name} must be a whole number.')
 
+    @field_validator('I18N')
+    @classmethod
+    def validate_i18n(cls, value):
+        if value is None:
+            raise ValueError('I18N must be a dictionary')
+        unsafe_keys = {'__proto__', 'prototype', 'constructor'}
+
+        def placeholders(text):
+            return {match.strip() for match in re.findall(r'\{\{\s*-?\s*([^},]+)(?:,[^}]+)?\s*\}\}', text)}
+
+        cleaned = {}
+        for locale, entries in value.items():
+            if not locale.strip() or locale in unsafe_keys:
+                raise ValueError(f'Invalid language: {locale}')
+            translations = {}
+            for key, text in entries.items():
+                if not key.strip() or key in unsafe_keys:
+                    raise ValueError(f'Invalid translation key: {key}')
+                if text.strip():
+                    if placeholders(key) != placeholders(text):
+                        raise ValueError(f'Interpolation placeholders do not match: {locale}: {key}')
+                    translations[key] = text
+            if translations:
+                cleaned[locale] = translations
+        return cleaned
+
 
 @router.post('/admin/config')
 async def update_admin_config(request: Request, form_data: AdminConfig, user=Depends(get_admin_user)):
     updates = config_updates(form_data.model_dump(), ADMIN_CONFIG_KEYS)
+    for field, key in MFA_CONFIG_KEYS.items():
+        if field not in form_data.model_fields_set:
+            updates.pop(key, None)
+    if 'ENABLE_LOGIN_FORM' not in form_data.model_fields_set:
+        updates.pop('ui.enable_login_form', None)
+    if 'ENABLE_ENCRYPTED_CHANNELS' not in form_data.model_fields_set:
+        updates.pop('channels.encryption.enable', None)
+    if 'ENABLE_APPS' not in form_data.model_fields_set:
+        updates.pop('apps.enable', None)
+    if 'I18N' not in form_data.model_fields_set:
+        updates.pop('ui.i18n', None)
+    if 'SKILL_CONTENT_MAX_CHARS' not in form_data.model_fields_set:
+        updates.pop('skills.content_max_chars', None)
+    if 'SKILL_PREVIEW_MAX_CHARS' not in form_data.model_fields_set:
+        updates.pop('skills.preview_max_chars', None)
     updates['ui.default_interface_settings'] = form_data.DEFAULT_INTERFACE_SETTINGS or {}
     updates['folders.max_file_count'] = _whole_number(form_data.FOLDER_MAX_FILE_COUNT, 'FOLDER_MAX_FILE_COUNT')
     updates['automations.max_count'] = _whole_number(form_data.AUTOMATION_MAX_COUNT, 'AUTOMATION_MAX_COUNT')
@@ -1519,8 +1632,8 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
     if not re.match(pattern, form_data.JWT_EXPIRES_IN):
         updates.pop('auth.jwt_expiry', None)
 
-    await Config.upsert(updates)
-    return await get_config_values(ADMIN_CONFIG_KEYS)
+    changed = await update_mfa_config(request, updates)
+    return {**(await get_config_values(ADMIN_CONFIG_KEYS)), 'sessions_revoked': changed}
 
 
 class LdapServerConfig(BaseModel):
@@ -1691,6 +1804,9 @@ OAUTH_CONFIG_KEYS = {
 
 
 def _format_oauth_form_value(field: str, value):
+    if field == 'OAUTH_BLOCKED_GROUPS' and isinstance(value, list):
+        # Preserve commas in group names and regex patterns when the form is saved.
+        return JSONCodec.dumps(value)
     if field in OAUTH_COMMA_LIST_FIELDS and isinstance(value, list):
         return ','.join(str(item) for item in value)
     return value
@@ -1845,7 +1961,7 @@ async def get_token_client_id(client, token: str) -> str | None:
         return None
 
 
-@router.post('/oauth/{provider}/token/exchange', response_model=SessionUserResponse)
+@router.post('/oauth/{provider}/token/exchange', response_model=SigninResult)
 async def token_exchange(
     request: Request,
     response: Response,
@@ -1863,8 +1979,8 @@ async def token_exchange(
             detail='Token exchange is disabled',
         )
 
-    if token_exchange_rate_limiter and token_exchange_rate_limiter.is_limited(
-        request.client.host if request.client else 'unknown'
+    if token_exchange_rate_limiter and await token_exchange_rate_limiter.is_limited(
+        request.app.state.redis, request.client.host if request.client else 'unknown'
     ):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -1975,11 +2091,20 @@ async def token_exchange(
             detail='User not found. Please sign in via the web interface first.',
         )
 
+    # The provider's userinfo endpoint has already accepted this token.
+    # Keep an empty dict for opaque tokens so exchange role checks still apply.
+    token_claims = {}
+    try:
+        token_claims = jwt.decode(form_data.token, options={'verify_signature': False})
+    except jwt.PyJWTError as e:
+        log.debug('Token exchange: cannot decode token claims: %s', e)
+
     user = await oauth_manager.update_user_role_from_oauth(
         request=request,
         user=user,
         user_data=user_data,
         provider=provider,
+        token_claims=token_claims,
         db=db,
     )
     if await Config.get('oauth.enable_group_mapping'):
@@ -1988,7 +2113,8 @@ async def token_exchange(
             user=user,
             user_data=user_data,
             default_permissions=await Config.get('user.permissions'),
+            token_claims=token_claims,
             db=db,
         )
 
-    return await create_session_response(request, user, db, source='oauth')
+    return await create_signin_response(request, user, db, source='oauth')

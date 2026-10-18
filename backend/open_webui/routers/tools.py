@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -10,14 +11,20 @@ import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT, ENABLE_PLUGINS
+from open_webui.env import (
+    AIOHTTP_CLIENT_SESSION_SSL,
+    AIOHTTP_CLIENT_TIMEOUT,
+    ENABLE_TOOL_SERVERS,
+    ENABLE_TOOLS,
+)
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
-from open_webui.models.access_grants import AccessGrants
+from open_webui.models.access_grants import AccessGrants, normalize_access_grants
 from open_webui.models.config import Config
 from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
+from open_webui.models.tool_history import ToolHistories, tool_diff
 from open_webui.models.tools import (
     ToolAccessResponse,
     ToolForm,
@@ -28,18 +35,21 @@ from open_webui.models.tools import (
 )
 from open_webui.utils.access_control import (
     filter_allowed_access_grants,
-    has_access,
+    has_connection_access,
     has_permission,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.plugin import (
-    get_tools_cache,
+    get_tool_contents_cache,
     get_tool_module_from_cache,
+    get_tools_cache,
     load_tool_module_by_id,
     replace_imports,
     resolve_valves_schema_options,
+    set_tool_module_in_cache,
 )
-from open_webui.utils.tools import get_tool_servers, get_tool_specs
+from open_webui.utils.tools import connect_mcp_server, get_tool_servers
+from open_webui.utils.tools import get_tool_specs as get_local_tool_specs
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui import config
@@ -76,11 +86,13 @@ async def get_tools(
     tools = []
     bypass_access_control = can_bypass_access_control(user)
     user_group_ids = (
-        set() if bypass_access_control else {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
+        set()
+        if bypass_access_control
+        else {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db, include_inherited=True)}
     )
 
     # Local Tools
-    if ENABLE_PLUGINS:
+    if ENABLE_TOOLS:
         tools_cache = get_tools_cache(request)
         for tool in await Tools.get_tools(
             defer_content=True,
@@ -104,7 +116,7 @@ async def get_tools(
             )
 
     # OpenAPI Tool Servers
-    server_access_grants = {}
+    server_connections = {}
     for server in await get_tool_servers(request):
         server_idx = server.get('idx', 0)
         connections = await Config.get('tool_server.connections', [])
@@ -115,10 +127,8 @@ async def get_tools(
             )
             continue
         connection = connections[server_idx]
-        server_config = connection.get('config', {})
-
         server_id = f'server:{server.get("id")}'
-        server_access_grants[server_id] = server_config.get('access_grants', [])
+        server_connections[server_id] = connection
 
         tools.append(
             ToolUserResponse(
@@ -136,7 +146,7 @@ async def get_tools(
         )
 
     # MCP Tool Servers
-    for server in await Config.get('tool_server.connections', []):
+    for server in (await Config.get('tool_server.connections', [])) if ENABLE_TOOL_SERVERS else []:
         if server.get('type', 'openapi') == 'mcp' and (server.get('config') or {}).get('enable'):
             info = server.get('info') or {}
             server_id = info.get('id')
@@ -151,10 +161,8 @@ async def get_tools(
                     user.id, f'mcp:{server_id}'
                 )
 
-            server_config = server.get('config') or {}
-
             tool_id = f'server:mcp:{info.get("id")}'
-            server_access_grants[tool_id] = server_config.get('access_grants', [])
+            server_connections[tool_id] = server
 
             tools.append(
                 ToolUserResponse(
@@ -183,12 +191,10 @@ async def get_tools(
             tool
             for tool in tools
             if not str(tool.id).startswith('server:')
-            or await has_access(
-                user.id,
-                'read',
-                server_access_grants.get(str(tool.id), []),
+            or await has_connection_access(
+                user,
+                server_connections[str(tool.id)],
                 user_group_ids,
-                db=db,
             )
         ]
 
@@ -199,6 +205,32 @@ async def get_tools(
     return tools
 
 
+@router.get('/id/{id}/specs')
+async def get_tool_specs(request: Request, id: str, user=Depends(get_verified_user)):
+    """Discover tools for an accessible connection. Currently supports MCP."""
+    if not id.startswith('server:mcp:'):
+        raise HTTPException(status_code=404, detail='Tool not found')
+
+    try:
+        # Keep connect, discovery and cleanup in one task for the MCP transport.
+        async with asyncio.timeout(15):
+            result = await connect_mcp_server(request, id.removeprefix('server:mcp:'), user, {})
+            if result is None:
+                raise HTTPException(status_code=404, detail='Tool not found')
+            client, specs = result
+            try:
+                return {'specs': [{'name': spec['name'], 'description': spec.get('description', '')} for spec in specs]}
+            finally:
+                await client.disconnect()
+    except HTTPException:
+        raise
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail='Tool discovery timed out')
+    except Exception:
+        log.exception('Failed to discover tool specs')
+        raise HTTPException(status_code=502, detail='Unable to load tools')
+
+
 ############################
 # GetToolList
 ############################
@@ -206,12 +238,14 @@ async def get_tools(
 
 @router.get('/list', response_model=list[ToolAccessResponse])
 async def get_tool_list(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    if not ENABLE_PLUGINS:
+    if not ENABLE_TOOLS:
         return []
 
     bypass_access_control = can_bypass_access_control(user)
     user_group_ids = (
-        set() if bypass_access_control else {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
+        set()
+        if bypass_access_control
+        else {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db, include_inherited=True)}
     )
     tools = await Tools.get_tools(
         defer_content=True,
@@ -345,6 +379,7 @@ async def export_tools(
     return await Tools.get_tools(
         db=db,
         user_id=None if bypass_access_control else user.id,
+        permission='write',
     )
 
 
@@ -395,20 +430,20 @@ async def create_new_tools(
             )
 
             form_data.content = replace_imports(form_data.content)
-            tool_module, frontmatter = await load_tool_module_by_id(form_data.id, content=form_data.content)
+            tool_module, frontmatter, source_module = await load_tool_module_by_id(
+                form_data.id, content=form_data.content
+            )
             form_data.meta.manifest = frontmatter
             form_data.meta.has_user_valves = hasattr(tool_module, 'UserValves')
 
-            TOOLS = get_tools_cache(request)
-            TOOLS[form_data.id] = tool_module
-
-            specs = get_tool_specs(TOOLS[form_data.id])
-            tools = await Tools.insert_new_tool(user.id, form_data, specs, db=db)
+            specs = get_local_tool_specs(tool_module)
+            tools = await Tools.insert_new_tool(user.id, form_data, specs, db=db, module=tool_module)
 
             tool_cache_dir = CACHE_DIR / 'tools' / form_data.id
             tool_cache_dir.mkdir(parents=True, exist_ok=True)
 
             if tools:
+                set_tool_module_in_cache(request, tools.id, tools.content, tool_module, source_module)
                 await publish_event(
                     request,
                     EVENTS.TOOL_CREATED,
@@ -499,6 +534,10 @@ async def update_tools_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    return await _update_tool(request, id, form_data, user, db)
+
+
+async def _update_tool(request, id, form_data, user, db, version_id=None):
     """Update an existing tool's source code and metadata."""
     # CVE-2026-45395: enforce workspace.tools permission so a non-admin user
     # who has lost workspace.tools cannot keep mutating tools they own.
@@ -537,45 +576,63 @@ async def update_tools_by_id(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    # Content edits trigger exec on load — gate them behind workspace.tools (matches /create).
-    if form_data.content != tools.content:
-        if user.role != 'admin' and not (
-            await has_permission(user.id, 'workspace.tools', await Config.get('user.permissions'), db=db)
-            or await has_permission(user.id, 'workspace.tools_import', await Config.get('user.permissions'), db=db)
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=ERROR_MESSAGES.UNAUTHORIZED,
-            )
+    # Check again under the row lock when committing, in case Production changes meanwhile.
+    allow_code_changes = await can_change_tool_code(user, db)
+    if form_data.content != tools.content and not allow_code_changes:
+        raise HTTPException(401, ERROR_MESSAGES.UNAUTHORIZED)
 
     try:
-        form_data.content = replace_imports(form_data.content)
-        tool_module, frontmatter = await load_tool_module_by_id(id, content=form_data.content)
+        if version_id is None:
+            form_data.content = replace_imports(form_data.content)
+        tool_module, frontmatter, source_module = await load_tool_module_by_id(id, content=form_data.content)
         form_data.meta.manifest = frontmatter
         form_data.meta.has_user_valves = hasattr(tool_module, 'UserValves')
 
-        TOOLS = get_tools_cache(request)
-        TOOLS[id] = tool_module
+        specs = get_local_tool_specs(tool_module)
 
-        specs = get_tool_specs(TOOLS[id])
+        if version_id is None and form_data.access_grants is not None:
+            existing_access_grants = {
+                (grant.principal_type, grant.principal_id, grant.permission) for grant in tools.access_grants
+            }
+            submitted_access_grants_map = {
+                (grant['principal_type'], grant['principal_id'], grant['permission']): grant
+                for grant in normalize_access_grants(form_data.access_grants)
+            }
+            preserved_access_grants = [
+                grant for key, grant in submitted_access_grants_map.items() if key in existing_access_grants
+            ]
+            new_access_grants = [
+                grant for key, grant in submitted_access_grants_map.items() if key not in existing_access_grants
+            ]
 
-        form_data.access_grants = await filter_allowed_access_grants(
-            await Config.get('user.permissions'),
-            user.id,
-            user.role,
-            form_data.access_grants,
-            'sharing.public_tools',
-        )
+            form_data.access_grants = preserved_access_grants + await filter_allowed_access_grants(
+                await Config.get('user.permissions'),
+                user.id,
+                user.role,
+                new_access_grants,
+                'sharing.public_tools',
+            )
 
         updated = {
             **form_data.model_dump(exclude={'id'}),
             'specs': specs,
         }
 
-        log.debug(updated)
-        tools = await Tools.update_tool_by_id(id, updated, db=db)
+        if version_id is not None:
+            updated.pop('access_grants', None)
+
+        tools = await Tools.update_tool_by_id(
+            id,
+            updated,
+            db=db,
+            user_id=user.id,
+            version_id=version_id,
+            module=tool_module,
+            allow_code_changes=allow_code_changes,
+        )
 
         if tools:
+            set_tool_module_in_cache(request, tools.id, tools.content, tool_module, source_module)
             await publish_event(
                 request,
                 EVENTS.TOOL_UPDATED,
@@ -595,7 +652,7 @@ async def update_tools_by_id(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e, 'Error updating tool'),
+            detail=str(e),
         )
 
 
@@ -699,6 +756,8 @@ async def delete_tools_by_id(
     if result:
         TOOLS = get_tools_cache(request)
         TOOLS.pop(id, None)
+        TOOL_CONTENTS = get_tool_contents_cache(request)
+        TOOL_CONTENTS.pop(id, None)
         await publish_event(
             request,
             EVENTS.TOOL_DELETED,
@@ -1006,3 +1065,89 @@ async def update_tools_user_valves_by_id(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
+
+
+async def can_change_tool_code(user, db):
+    return user.role == 'admin' or (
+        await has_permission(user.id, 'workspace.tools', await Config.get('user.permissions'), db=db)
+        or await has_permission(user.id, 'workspace.tools_import', await Config.get('user.permissions'), db=db)
+    )
+
+
+async def require_tool_history_access(id, user, db):
+    resource = await Tools.get_tool_by_id(id, db=db)
+    if not resource:
+        raise HTTPException(404, 'Not found')
+    if not (
+        (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+        or resource.user_id == user.id
+        or await AccessGrants.has_access(
+            user_id=user.id, resource_type='tool', resource_id=id, permission='write', db=db
+        )
+    ):
+        raise HTTPException(401, ERROR_MESSAGES.ACCESS_PROHIBITED)
+    return resource
+
+
+async def require_tool_history_entry(id, history_id, db):
+    entry = await ToolHistories.get_history_by_id(id, history_id, db=db)
+    if not entry:
+        raise HTTPException(404, 'Version not found')
+    return entry
+
+
+@router.get('/id/{id}/history')
+async def get_tool_history(
+    id: str, page: int = 1, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    await require_tool_history_access(id, user, db)
+    return await ToolHistories.get_history_by_tool_id(id, page, db=db)
+
+
+@router.get('/id/{id}/history/diff')
+async def get_tool_history_diff(
+    id: str, from_id: str, to_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    await require_tool_history_access(id, user, db)
+    before = await require_tool_history_entry(id, from_id, db)
+    after = await require_tool_history_entry(id, to_id, db)
+    return tool_diff(before, after)
+
+
+@router.get('/id/{id}/history/{history_id}')
+async def get_tool_history_entry(
+    id: str, history_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    await require_tool_history_access(id, user, db)
+    return await require_tool_history_entry(id, history_id, db)
+
+
+@router.delete('/id/{id}/history/{history_id}')
+async def delete_tool_history_entry(
+    id: str, history_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    await require_tool_history_access(id, user, db)
+    if not await ToolHistories.delete_history_entry(id, history_id, db=db):
+        raise HTTPException(404, 'Version not found')
+    return True
+
+
+class ToolVersionForm(BaseModel):
+    version_id: str
+
+
+@router.post('/id/{id}/update/version', response_model=ToolModel)
+async def set_tool_production(
+    request: Request,
+    id: str,
+    form_data: ToolVersionForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    await require_tool_history_access(id, user, db)
+    entry = await require_tool_history_entry(id, form_data.version_id, db)
+    try:
+        saved = ToolForm(id=id, **entry.snapshot)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    return await _update_tool(request, id, saved, user, db, version_id=entry.id)

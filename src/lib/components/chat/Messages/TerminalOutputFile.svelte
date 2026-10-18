@@ -1,4 +1,8 @@
 <script lang="ts">
+	// Keep keys in nested template expressions visible to i18next-parser.
+	// $i18n.t("Terminal unavailable");
+	// $i18n.t("No preview available");
+
 	import { getContext, onDestroy } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
@@ -54,6 +58,13 @@
 	$: terminal = resolveTerminal();
 	$: unavailable = !terminal;
 	$: previewKey = terminal ? `${terminal.url}|${terminal.key}|${path}|${chatId}` : '';
+	$: isPerChatTerminal =
+		($terminalServers ?? []).find((server: any) => server.id === selector)?.contexts?.chat
+			?.context_id === 'chat_id';
+	$: previewBaseUrl =
+		terminal && isPerChatTerminal && chatId
+			? `${terminal.url}/chats/${encodeURIComponent(chatId)}`
+			: (terminal?.url ?? '');
 	$: previewClass = isImage(path)
 		? 'h-[22rem]'
 		: isPdf(path) ||
@@ -295,7 +306,7 @@
 					{fileSqliteData}
 					{fileDocxData}
 					{fileContent}
-					baseUrl={terminal?.url ?? ''}
+					baseUrl={previewBaseUrl}
 					apiKey={terminal?.key ?? ''}
 					{fileOfficeHtml}
 					{fileOfficeSlides}

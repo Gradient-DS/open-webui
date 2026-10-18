@@ -360,30 +360,33 @@ def test_an_embedding_engine_the_app_cannot_build_is_refused_and_not_saved(monke
     from fastapi import HTTPException
     from open_webui.routers import retrieval
 
-    config = SimpleNamespace(
-        RAG_EMBEDDING_ENGINE='openai',
-        RAG_EMBEDDING_MODEL='model',
-        RAG_EMBEDDING_BATCH_SIZE=1,
-        ENABLE_ASYNC_EMBEDDING=True,
-        RAG_EMBEDDING_CONCURRENT_REQUESTS=0,
-        RAG_OPENAI_API_BASE_URL='',
-        RAG_OPENAI_API_KEY='',
-        RAG_OLLAMA_BASE_URL='',
-        RAG_OLLAMA_API_KEY='',
-        RAG_AZURE_OPENAI_BASE_URL='',
-        RAG_AZURE_OPENAI_API_KEY='',
-        RAG_AZURE_OPENAI_API_VERSION='',
-    )
+    config = {
+        'rag.embedding_engine': 'openai',
+        'rag.embedding_model': 'model',
+        'rag.embedding_batch_size': 1,
+        'rag.enable_async_embedding': True,
+        'rag.embedding_concurrent_requests': 0,
+        'rag.openai.api_base_url': '',
+        'rag.openai.api_key': '',
+        'rag.ollama.base_url': '',
+        'rag.ollama.api_key': '',
+        'rag.azure_openai.base_url': '',
+        'rag.azure_openai.api_key': '',
+        'rag.azure_openai.api_version': '',
+    }
     saved = []
 
-    async def state():
-        return config
+    async def get_many(*keys):
+        return dict(config)
 
     async def upsert(values):
         saved.append(values)
 
-    monkeypatch.setattr(retrieval, 'get_rag_config_state', state)
-    monkeypatch.setattr(retrieval, 'unload_embedding_model', lambda request, config: None)
+    async def unload(request):
+        return None
+
+    monkeypatch.setattr(retrieval.Config, 'get_many', get_many)
+    monkeypatch.setattr(retrieval, 'unload_embedding_model', unload)
     monkeypatch.setattr(retrieval, 'get_ef', lambda *args, **kwargs: None)
     monkeypatch.setattr(retrieval.Config, 'upsert', upsert)
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))

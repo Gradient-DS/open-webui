@@ -4,6 +4,9 @@
 	import { enabledProviders } from '$lib/sources/policy';
 	import { providerFor } from '$lib/sources/registry';
 	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
+	import { isLocalKnowledgeType } from './Knowledge/utils/structure';
+	import WorkspaceAccessModal from './common/WorkspaceAccessModal.svelte';
+	let accessModal: WorkspaceAccessModal;
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	dayjs.extend(relativeTime);
@@ -70,6 +73,7 @@
 
 	let queryDebounceActive = false;
 	let fetchId = 0;
+	let searchController: AbortController | null = null;
 
 	$: if (loaded) {
 		// [Gradient] One debounce and stale-response guard covers every list filter.
@@ -159,6 +163,9 @@
 		const cacheKey = listCacheKey();
 		const cacheRevision = knowledgeListCache.revision;
 		const requestedPage = page;
+		searchController?.abort();
+		searchController = new AbortController();
+		const { signal } = searchController;
 		itemsLoading = true;
 		const res = await searchKnowledgeBases(
 			localStorage.token,
@@ -168,11 +175,13 @@
 			typeFilter || null,
 			sourceOption,
 			sortKey,
-			sortDirection
+			sortDirection,
+			signal
 		).catch(() => {
 			return [];
 		});
 
+		if (signal.aborted) return;
 		if (currentFetchId !== fetchId || cacheRevision !== knowledgeListCache.revision) return;
 
 		if (res) {
@@ -315,9 +324,12 @@
 
 	onDestroy(() => {
 		fetchId += 1;
+		searchController?.abort();
 		clearTimeout(searchDebounceTimer);
 	});
 </script>
+
+<WorkspaceAccessModal bind:this={accessModal} resourceType="knowledge" onUpdated={init} />
 
 <svelte:head>
 	<!-- LICENSE covers this Open WebUI browser-title identifier.
@@ -578,11 +590,17 @@
 								</div>
 
 								<div class="w-36 shrink-0 text-right">
-									<Tooltip content={dayjs(item.updated_at * 1000).format('LLLL')}>
+									<Tooltip
+										content={dayjs(item.updated_at * 1000)
+											.locale($i18n.language)
+											.format('LLLL')}
+									>
 										<div
 											class="shrink-0 truncate text-[0.6875rem] leading-5 text-gray-400 dark:text-gray-600"
 										>
-											{dayjs(item.updated_at * 1000).fromNow()}
+											{dayjs(item.updated_at * 1000)
+												.locale($i18n.language)
+												.fromNow()}
 										</div>
 									</Tooltip>
 								</div>
@@ -590,6 +608,11 @@
 								{#if item?.write_access || $user?.role === 'admin'}
 									<div class="ml-2 flex shrink-0 flex-row items-center self-center">
 										<ItemMenu
+											accessHandler={item?.user_id === $user?.id &&
+											isLocalKnowledgeType(item?.type) &&
+											item?.meta?.source !== 'external'
+												? () => accessModal.open(item.id)
+												: null}
 											onExport={$user?.role === 'admin'
 												? () => {
 														exportHandler(item);

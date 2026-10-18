@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { canUseApiKeys } from '$lib/utils/settings-access';
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
 
@@ -15,6 +16,7 @@
 	// [Gradient] Subject-owned cloud accounts and their knowledge base usage.
 	import ConnectedAccounts from './ConnectedAccounts.svelte';
 	import UpdatePassword from './Account/UpdatePassword.svelte';
+	import Mfa from './Account/Mfa.svelte';
 	import { generateInitialsImage } from '$lib/utils';
 
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -214,8 +216,8 @@
 			profileImageUrl = user?.profile_image_url ?? '';
 			bio = user?.bio ?? '';
 
-			_gender = user?.gender ?? '';
-			gender = _gender;
+			gender = user?.gender ?? '';
+			_gender = ['', 'male', 'female'].includes(gender) ? gender : 'custom';
 
 			dateOfBirth = user?.date_of_birth ?? '';
 		}
@@ -240,11 +242,23 @@
 	});
 </script>
 
-<div id="tab-account" class="flex h-full flex-col text-sm">
-	<div class="flex-1 min-h-0 w-full overflow-y-auto scrollbar-hover pr-1.5">
-		<h2 class="mb-4 text-sm font-medium text-gray-900 dark:text-white">{$i18n.t('Account')}</h2>
+<form
+	id="tab-account"
+	class="flex h-full flex-col text-sm"
+	on:submit|preventDefault={async () => {
+		const res = await submitHandler();
 
-		<UserSettingSection title={$i18n.t('Profile')} first>
+		if (res) {
+			saveHandler();
+		}
+	}}
+>
+	<div class="flex-1 min-h-0 w-full overflow-y-auto scrollbar-hover pr-1.5">
+		<h2 class="mb-4 text-sm font-medium text-gray-900 dark:text-white">
+			{$i18n.t('settings.personal.account.title')}
+		</h2>
+
+		<UserSettingSection title={$i18n.t('settings.personal.account.sections.profile.title')} first>
 			<UserProfileImage
 				bind:profileImageUrl
 				user={$user}
@@ -253,28 +267,28 @@
 			/>
 
 			<UserSettingField
-				label={$i18n.t('Name')}
-				description={$i18n.t('Set the display name shown across your account.')}
+				label={$i18n.t('settings.personal.account.name.label')}
+				description={$i18n.t('settings.personal.account.name.description')}
 			>
 				<input
 					class={inputClass}
 					type="text"
 					bind:value={name}
-					aria-label={$i18n.t('Name')}
+					aria-label={$i18n.t('settings.personal.account.name.label')}
 					required
 					placeholder={$i18n.t('Enter your name')}
 				/>
 			</UserSettingField>
 
 			<UserSettingField
-				label={$i18n.t('Bio')}
-				description={$i18n.t('Add optional profile context visible where profiles are shown.')}
+				label={$i18n.t('settings.personal.account.bio.label')}
+				description={$i18n.t('settings.personal.account.bio.description')}
 			>
 				<Textarea
 					className={textareaClass}
 					minSize={60}
 					bind:value={bio}
-					ariaLabel={$i18n.t('Bio')}
+					ariaLabel={$i18n.t('settings.personal.account.bio.label')}
 					placeholder={$i18n.t('Share your background and interests')}
 				/>
 			</UserSettingField>
@@ -282,13 +296,13 @@
 			<!-- [Gradient] Tenant-controlled demographic fields. -->
 			{#if isFeatureEnabled('user_demographics')}
 				<UserSettingField
-					label={$i18n.t('Gender')}
-					description={$i18n.t('Choose the gender value stored on your profile.')}
+					label={$i18n.t('settings.personal.account.gender.label')}
+					description={$i18n.t('settings.personal.account.gender.description')}
 				>
 					<SettingsSelect
 						bind:value={_gender}
 						className="w-full"
-						ariaLabel={$i18n.t('Gender')}
+						ariaLabel={$i18n.t('settings.personal.account.gender.label')}
 						on:change={() => {
 							console.log(_gender);
 
@@ -319,15 +333,14 @@
 				</UserSettingField>
 
 				<UserSettingField
-					label={$i18n.t('Birth Date')}
-					description={$i18n.t('Set the birth date saved with your profile.')}
+					label={$i18n.t('settings.personal.account.birthDate.label')}
+					description={$i18n.t('settings.personal.account.birthDate.description')}
 				>
 					<input
 						class="{inputClass} dark:scheme-dark"
 						type="date"
-						aria-label={$i18n.t('Birth Date')}
+						aria-label={$i18n.t('settings.personal.account.birthDate.label')}
 						bind:value={dateOfBirth}
-						required
 					/>
 				</UserSettingField>
 			{/if}
@@ -378,11 +391,12 @@
 		<ConnectedAccounts />
 
 		{#if $config?.features.enable_login_form && $config?.features.enable_password_change_form}
-			<UserSettingSection title={$i18n.t('Password')}>
+			<UserSettingSection title={$i18n.t('settings.personal.account.sections.password.title')}>
 				<UpdatePassword />
 			</UserSettingSection>
 		{/if}
 
+		<!-- [Gradient] Our TOTP 2FA is the active second factor. -->
 		{#if $config?.features?.enable_2fa && $config?.features?.enable_login_form}
 			<hr class="border-gray-50 dark:border-gray-850/30 my-4" />
 			<div class="mt-2">
@@ -390,10 +404,15 @@
 			</div>
 		{/if}
 
-		{#if ($config?.features?.enable_api_keys ?? true) && ($user?.role === 'admin' || ($user?.permissions?.features?.api_keys ?? false))}
-			<UserSettingSection title={$i18n.t('API keys')}>
-				<UserSettingRow description={$i18n.t('Show or hide sensitive account secrets.')}>
-					<span slot="label">{$i18n.t('Secrets')}</span>
+		<!-- [Gradient] Upstream MFA stays hidden unless ENABLE_MFA is exposed and on. -->
+		{#if $config?.features?.enable_mfa === true}
+			<UserSettingSection title={$i18n.t('Multi-factor authentication')}><Mfa /></UserSettingSection>
+		{/if}
+
+		{#if canUseApiKeys({ user: $user, config: $config })}
+			<UserSettingSection title={$i18n.t('settings.personal.account.sections.apiKeys.title')}>
+				<UserSettingRow description={$i18n.t('settings.personal.account.secrets.description')}>
+					<span slot="label">{$i18n.t('settings.personal.account.secrets.label')}</span>
 					<button
 						class={actionButtonClass}
 						type="button"
@@ -407,13 +426,14 @@
 					<div class="flex flex-col gap-2.5">
 						{#if $user?.role === 'admin'}
 							<UserSettingField
-								label={$i18n.t('JWT Token')}
-								description={$i18n.t('Copy the current session token for authenticated requests.')}
+								label={$i18n.t('settings.personal.account.jwtToken.label')}
+								description={$i18n.t('settings.personal.account.jwtToken.description')}
 							>
 								<div class="flex">
 									<SensitiveInput variant="settings" value={localStorage.token} readOnly={true} />
 
 									<button
+										type="button"
 										class="ml-1.5 rounded-sm px-1.5 py-1 text-gray-500 transition hover:text-gray-700 dark:hover:text-gray-300"
 										aria-label={$i18n.t('Copy Token')}
 										on:click={() => {
@@ -461,16 +481,17 @@
 							</UserSettingField>
 						{/if}
 
-						{#if ($config?.features?.enable_api_keys ?? true) && ($user?.role === 'admin' || ($user?.permissions?.features?.api_keys ?? false))}
+						{#if canUseApiKeys({ user: $user, config: $config })}
 							<UserSettingField
-								label={$i18n.t('API Key')}
-								description={$i18n.t('Create, copy, or rotate your API key.')}
+								label={$i18n.t('settings.personal.account.apiKey.label')}
+								description={$i18n.t('settings.personal.account.apiKey.description')}
 							>
 								<div class="flex">
 									{#if APIKey}
 										<SensitiveInput variant="settings" value={APIKey} readOnly={true} />
 
 										<button
+											type="button"
 											class="ml-1.5 rounded-sm px-1.5 py-1 text-gray-500 transition hover:text-gray-700 dark:hover:text-gray-300"
 											aria-label={$i18n.t('Copy API Key')}
 											on:click={() => {
@@ -564,7 +585,7 @@
 										>
 											<Plus strokeWidth="2" className="size-3.5" />
 
-											{$i18n.t('Create new secret key')}</button
+											{$i18n.t('settings.personal.account.createNewSecretKey.label')}</button
 										>
 									{/if}
 								</div>
@@ -578,19 +599,13 @@
 
 	<div class="shrink-0 flex w-full justify-end pt-3 text-sm font-normal">
 		<button
-			class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-			on:click={async () => {
-				const res = await submitHandler();
-
-				if (res) {
-					saveHandler();
-				}
-			}}
+			class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+			type="submit"
 		>
 			{$i18n.t('Save')}
 		</button>
 	</div>
-</div>
+</form>
 
 <ConfirmDialog
 	bind:show={showDeleteAPIKeyConfirm}
@@ -658,7 +673,7 @@
 					{$i18n.t('Cancel')}
 				</button>
 				<button
-					class="rounded-full bg-black px-3.5 py-1.5 text-sm font-normal text-white transition hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
+					class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 					type="submit"
 				>
 					{$i18n.t('Done')}

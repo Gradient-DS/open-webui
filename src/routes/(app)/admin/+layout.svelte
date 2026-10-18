@@ -23,7 +23,7 @@
 			await goto('/', { replaceState: true });
 			return;
 		} else if (
-			!$config?.features?.enable_plugins &&
+			!$config?.features?.enable_functions &&
 			$page.url.pathname.includes('/admin/functions')
 		) {
 			await goto('/admin', { replaceState: true });
@@ -113,7 +113,7 @@
 							>
 						{/if}
 
-						{#if isFeatureEnabled('admin_functions') && $config?.features?.enable_plugins}
+						{#if isFeatureEnabled('admin_functions') && $config?.features?.enable_functions}
 							<a
 								draggable="false"
 								class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/functions')

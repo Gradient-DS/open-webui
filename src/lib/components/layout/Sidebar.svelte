@@ -34,6 +34,7 @@
 		sidebarWidth
 	} from '$lib/stores';
 	import {
+		allLoaded,
 		loadNextChatListPage,
 		refreshChatList,
 		registerFolderRefreshHandler,
@@ -43,7 +44,7 @@
 	} from '$lib/stores/chatList';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	$: canImportChats = $user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true);
 
@@ -124,7 +125,8 @@
 	// Pagination variables
 	let chatListLoading = false;
 	let chatListReady = false;
-	let allChatsLoaded = false;
+	// Read pagination state when the shared list publishes its rows.
+	$: allChatsLoaded = $chats !== null && allLoaded;
 
 	let showCreateFolderModal = false;
 
@@ -213,7 +215,10 @@
 
 		// Merge shared folders into the same structure
 		for (const sf of sharedFolders) {
-			if (folderMap[sf.id]) continue; // Already owned by user
+			if (folderMap[sf.id]) {
+				folderMap[sf.id].showOwnerInfo = true;
+				continue;
+			}
 			folderMap[sf.id] = { ...sf, shared: true };
 		}
 
@@ -229,7 +234,7 @@
 		folders = folderMap;
 	};
 
-	const createFolder = async ({ name, data, parent_id }) => {
+	const createFolder = async ({ name, data, meta, parent_id }) => {
 		name = name?.trim();
 		if (!name) {
 			toast.error($i18n.t('Folder name cannot be empty.'));
@@ -266,6 +271,7 @@
 		const res = await createNewFolder(localStorage.token, {
 			name,
 			data,
+			meta,
 			parent_id
 		}).catch((error) => {
 			toast.error(`${error}`);
@@ -298,7 +304,6 @@
 	const initChatList = async () => {
 		// Reset pagination variables
 		console.log('initChatList');
-		allChatsLoaded = false;
 		chatListReady = false;
 
 		await Promise.all([
@@ -347,7 +352,6 @@
 		]);
 		if (result.accepted) {
 			await Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
-			allChatsLoaded = result.allLoaded;
 			chatListReady = true;
 		}
 	};
@@ -359,8 +363,7 @@
 
 		chatListLoading = true;
 
-		const result = await loadNextChatListPage(localStorage.token);
-		allChatsLoaded = result.allLoaded;
+		await loadNextChatListPage(localStorage.token);
 
 		chatListLoading = false;
 	};
@@ -578,6 +581,12 @@
 		if (isResizing) {
 			document.body.style.userSelect = '';
 		}
+	});
+
+	onMount(() => {
+		const socketInstance = $socket;
+		socketInstance?.on('connect', initChannels);
+		return () => socketInstance?.off('connect', initChannels);
 	});
 
 	onMount(async () => {
@@ -1066,7 +1075,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+					{#if isFeatureEnabled('tools') && $config?.features?.enable_tools && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
 						<div class="">
 							<Tooltip content={$i18n.t('Tools')} placement="right">
 								<a
@@ -1412,7 +1421,7 @@
 								</div>
 							{/if}
 
-							{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+							{#if isFeatureEnabled('tools') && $config?.features?.enable_tools && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
 								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-tools-button"
@@ -1714,6 +1723,10 @@
 										});
 
 										folderRegistry[chat.folder_id]?.setFolderItems();
+
+										if (res) {
+											chat = res;
+										}
 									}
 
 									if (chat.pinned) {
@@ -1811,6 +1824,10 @@
 															toast.error(`${error}`);
 															return null;
 														});
+
+														if (res) {
+															chat = res;
+														}
 													}
 
 													if (!chat.pinned) {

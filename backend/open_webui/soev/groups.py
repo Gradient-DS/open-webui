@@ -32,16 +32,22 @@ class SoevGroupTable(GroupTable):
 
     @group_sync.serialized
     async def update_group_by_id(
-        self, id: str, form_data: GroupUpdateForm, overwrite: bool = False, db: AsyncSession | None = None
+        self,
+        id: str,
+        form_data: GroupUpdateForm,
+        overwrite: bool = False,
+        db: AsyncSession | None = None,
+        *,
+        changes: dict | None = None,
     ) -> GroupModel | None:
-        result = await super().update_group_by_id(id, form_data, overwrite=overwrite, db=db)
+        result = await super().update_group_by_id(id, form_data, overwrite=overwrite, db=db, changes=changes)
         await group_sync.publish(self, [id], db=db)
         return result
 
     @group_sync.serialized
-    async def delete_group_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
+    async def delete_group_by_id(self, id: str, db: AsyncSession | None = None, *, changes: dict | None = None) -> bool:
         await group_sync.narrow(id, [])
-        return await super().delete_group_by_id(id, db=db)
+        return await super().delete_group_by_id(id, db=db, changes=changes)
 
     @group_sync.serialized
     async def delete_all_groups(self, db: AsyncSession | None = None) -> bool:

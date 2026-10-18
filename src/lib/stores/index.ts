@@ -7,6 +7,7 @@ import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 import type { AudioQueue } from '$lib/utils/audio';
 import type { ProfileRule } from '$lib/utils/models/profile';
+import type { I18nOverrides } from '$lib/utils/translationDictionary';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
 
@@ -57,7 +58,16 @@ export const TTSWorker = writable(null);
 export const chatId = writable('');
 export const chatTitle = writable('');
 
-export const channels = writable([]);
+type ChannelListItem = {
+	id: string;
+	type: string | null;
+	is_channel_muted: boolean;
+	unread_count: number;
+	last_message_at: number | null;
+	[key: string]: unknown;
+};
+
+export const channels = writable<ChannelListItem[]>([]);
 export const channelId = writable(null);
 
 export { chats, pinnedChats } from './chatList';
@@ -72,7 +82,8 @@ export const models: Writable<Model[]> = writable([]);
 export const prompts: Writable<null | Prompt[]> = writable(null);
 export const knowledge: Writable<null | Document[]> = writable(null);
 export const tools = writable(null);
-export const skills = writable(null);
+export const skills: Writable<null | any[]> = writable(null);
+export const terminalSkills: Writable<any[]> = writable([]);
 export const functions = writable(null);
 
 export type WorkspaceAction = {
@@ -128,8 +139,21 @@ export const visiblePinnedAgents = derived(
 
 export const audioQueue = writable<AudioQueue | null>(null);
 export const chatRequestQueues: Writable<
-	Record<string, { id: string; prompt: string; files: any[] }[]>
+	Record<string, { id: string; prompt: string; files: any[]; error?: string }[]>
 > = writable({});
+
+export type ChannelQueuedMessage = {
+	id: string;
+	prompt: string;
+	files: any[];
+	user_id: string;
+	channel_id: string;
+	parent_id: string | null;
+	reply_to_message: any;
+	sending?: boolean;
+	error?: string;
+};
+export const channelRequestQueues = writable<Record<string, ChannelQueuedMessage[]>>({});
 
 export const sidebarWidth = writable(245);
 
@@ -158,6 +182,9 @@ export type FileNavOpenRequest = string | { path: string; page?: number | null }
 export const showFileNavPath: Writable<FileNavOpenRequest | null> = writable(null);
 export const showFileNavDir: Writable<string | null> = writable(null);
 export const selectedTerminalId: Writable<string | null> = writable(null);
+export const connectedUserTerminals = writable(
+	new Map<symbol, { terminalId: string; chatId: string }>()
+);
 
 export const artifactCode = writable(null);
 export const artifactContents = writable(null);
@@ -272,6 +299,7 @@ type Settings = {
 	hapticFeedback?: boolean;
 	responseAutoCopy?: any;
 	richTextInput?: boolean;
+	showFormattingToolbar?: boolean;
 	params?: any;
 	userLocation?: any;
 	webSearch?: any;
@@ -279,7 +307,7 @@ type Settings = {
 	autoTags?: boolean;
 	autoFollowUps?: boolean;
 	splitLargeChunks?(body: any, splitLargeChunks: any): unknown;
-	backgroundImageUrl?: null;
+	backgroundImageUrl?: string | null;
 	landingPageMode?: string;
 	iframeSandboxAllowScripts?: boolean;
 	iframeSandboxAllowForms?: boolean;
@@ -334,8 +362,8 @@ type ModelOptions = {
 };
 
 type AudioSettings = {
-	stt: any;
-	tts: any;
+	stt?: any;
+	tts?: any;
 	STTEngine?: string;
 	TTSEngine?: string;
 	speaker?: string;
@@ -372,15 +400,22 @@ type Config = {
 		max_size?: number | null;
 		max_count?: number | null;
 	};
+	audio?: {
+		realtime?: { enabled: boolean; model: string; voice: string };
+		stt: { engine: string };
+		tts: { engine: string; voice: string; split_on: string };
+	};
 	license_metadata: any;
 	status: boolean;
 	name: string;
 	version: string;
 	default_locale: string;
 	invite_heading?: string;
+	i18n?: I18nOverrides;
 	default_models: string;
 	default_pinned_models?: string | null;
-	default_prompt_suggestions: PromptSuggestion[];
+	default_prompt_suggestions: PromptSuggestion[] | null;
+	default_prompt_suggestions_i18n?: Record<string, { suggestion_prompts: PromptSuggestion[] }>;
 	// Per-deployment model → datacenter/hosting mapping (Helm MODEL_HOSTING env).
 	// Same matching convention as model_profiles; see hostingFromDeployment in
 	// $lib/utils/models/profile.ts. Empty/absent when the deployment doesn't set it.
@@ -390,6 +425,8 @@ type Config = {
 	// $lib/utils/models/profile.ts. Empty/absent when the deployment doesn't set it.
 	model_profiles?: ProfileRule[];
 	features: {
+		enable_encrypted_channels?: boolean;
+		slim?: boolean;
 		auth: boolean;
 		auth_trusted_header: boolean;
 		enable_api_keys: boolean;
@@ -421,8 +458,13 @@ type Config = {
 		enable_citation_text_highlight?: boolean;
 		enable_memories: boolean;
 		enable_plugins?: boolean;
+		enable_tools?: boolean;
+		enable_functions?: boolean;
+		enable_tool_servers?: boolean;
+		enable_apps?: boolean;
 		enable_autocomplete_generation: boolean;
 		enable_direct_connections: boolean;
+		enable_direct_integrations?: boolean;
 		enable_version_update_check: boolean;
 		enable_pyodide_file_persistence?: boolean;
 		folder_max_file_count?: number;
@@ -466,6 +508,7 @@ type Config = {
 		enable_data_warnings?: boolean;
 		enable_feedback_report?: boolean;
 		websocket_heartbeat_interval?: number | null;
+
 	};
 	oauth: {
 		providers: {

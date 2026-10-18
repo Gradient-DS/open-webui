@@ -9,18 +9,21 @@
 	import {
 		updateUserById,
 		getUserGroupsById,
+		revokeUserSessions,
 		adminDisableUser2FA,
 		adminGetUser2FAStatus
 	} from '$lib/apis/users';
 	import { config } from '$lib/stores';
 
 	import Modal from '$lib/components/common/Modal.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	let showRevokeConfirmation = false;
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import UserProfileImage from '$lib/components/chat/Settings/Account/UserProfileImage.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<typeof import('$lib/i18n').default>('i18n');
 	const dispatch = createEventDispatcher();
 	dayjs.extend(localizedFormat);
 
@@ -34,8 +37,7 @@
 
 	const init = () => {
 		if (selectedUser) {
-			_user = selectedUser;
-			_user.password = '';
+			_user = { ...selectedUser, password: '' };
 			loadUserGroups();
 			load2FAStatus();
 		}
@@ -95,6 +97,20 @@
 	};
 </script>
 
+<ConfirmDialog
+	bind:show={showRevokeConfirmation}
+	title={$i18n.t('Sign out all devices?')}
+	message={$i18n.t('This user will need to sign in again on every device. API keys remain active.')}
+	on:confirm={async () => {
+		try {
+			await revokeUserSessions(localStorage.token, selectedUser.id);
+			toast.success($i18n.t('All sessions revoked'));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		}
+	}}
+/>
+
 <Modal size="sm" bind:show>
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-4 pt-3 pb-1">
@@ -136,7 +152,9 @@
 
 									<div class="text-xs text-gray-500">
 										{$i18n.t('Created at')}
-										{dayjs(selectedUser.created_at * 1000).format('LL')}
+										{dayjs(selectedUser.created_at * 1000)
+											.locale($i18n.language)
+											.format('LL')}
 									</div>
 								</div>
 
@@ -262,9 +280,16 @@
 							</div>
 						</div>
 
-						<div class="flex justify-end pt-3 text-sm font-normal">
+						<div class="flex justify-between pt-3 text-sm font-normal">
 							<button
-								class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center"
+								type="button"
+								class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+								on:click={() => {
+									showRevokeConfirmation = true;
+								}}>{$i18n.t('Sign out all devices')}</button
+							>
+							<button
+								class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 								type="submit"
 							>
 								{$i18n.t('Save')}

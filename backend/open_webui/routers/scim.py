@@ -14,17 +14,20 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from open_webui.config import OAUTH_PROVIDERS
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.env import SCIM_AUTH_PROVIDER
 from open_webui.internal.db import get_async_session
-from open_webui.models.groups import GroupModel, Groups
+from open_webui.models.auths import Auths
+from open_webui.models.groups import GroupModel, Groups, GroupHierarchyError
 from open_webui.models.users import UserModel, Users
 from open_webui.utils.auth import (
     decode_token,
     get_admin_user,
     get_current_user,
+    get_password_hash,
     get_verified_user,
 )
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,7 +35,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+
+class SCIMGroupRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def handle(request):
+            try:
+                return await handler(request)
+            except GroupHierarchyError as error:
+                return scim_error(error.status_code, str(error), 'invalidValue')
+
+        return handle
+
+
+router = APIRouter(route_class=SCIMGroupRoute)
 
 # SCIM 2.0 Schema URIs
 SCIM_USER_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:User'
@@ -115,6 +132,8 @@ class SCIMPhoto(BaseModel):
 
 class SCIMGroupMember(BaseModel):
     """SCIM Group Member"""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     value: str  # User ID
     ref: Optional[str] = Field(None, alias='$ref')
@@ -603,9 +622,6 @@ async def create_user(
             detail=f'User with email {email} already exists',
         )
 
-    # Create user
-    user_id = str(uuid.uuid4())
-
     # Parse name if provided
     name = user_data.displayName
     if user_data.name:
@@ -619,10 +635,10 @@ async def create_user(
     if user_data.photos and len(user_data.photos) > 0:
         profile_image = user_data.photos[0].value
 
-    new_user = await Users.insert_new_user(
-        id=user_id,
-        name=name,
+    new_user = await Auths.insert_new_auth(
         email=email,
+        password=await get_password_hash(str(uuid.uuid4())),
+        name=name,
         profile_image_url=profile_image,
         role='user' if user_data.active else 'pending',
         db=db,
@@ -634,7 +650,7 @@ async def create_user(
             detail='Failed to create user',
         )
 
-    new_user = await Users.update_user_scim_by_id(user_id, get_scim_provider(), user_data.externalId, db=db)
+    new_user = await Users.update_user_scim_by_id(new_user.id, get_scim_provider(), user_data.externalId, db=db)
     if not new_user:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -753,31 +769,60 @@ async def patch_user(
         )
 
     update_data = {}
+    fields = {
+        'userName': 'email',
+        'displayName': 'name',
+        'emails[primary eq true].value': 'email',
+        'name.formatted': 'name',
+    }
 
     for operation in patch_data.Operations:
         op = operation.op.lower()
         path = operation.path
-        value = operation.value
 
-        if op == 'replace':
+        if op not in ('add', 'replace', 'remove'):
+            return scim_error(400, f'Unsupported PATCH operation: {operation.op}')
+        if op == 'remove':
+            if not path:
+                return scim_error(400, 'Remove requires a path', 'noTarget')
+            if path != 'externalId':
+                return scim_error(400, f'Removing {path} is not supported', 'mutability')
+            values = {path: None}
+        elif path is None:
+            if not isinstance(operation.value, dict) or not operation.value:
+                return scim_error(400, 'A pathless operation requires an attribute object', 'invalidValue')
+            values = operation.value
+        else:
+            values = {path: operation.value}
+
+        for path, value in values.items():
             if path == 'active':
+                if not isinstance(value, bool):
+                    return scim_error(400, 'active must be a boolean', 'invalidValue')
                 # Same guard as update_user: never demote an existing admin via SCIM.
                 if user.role != 'admin':
                     update_data['role'] = 'user' if value else 'pending'
-            elif path == 'userName':
-                update_data['email'] = value
-            elif path == 'displayName':
-                update_data['name'] = value
-            elif path == 'emails[primary eq true].value':
-                update_data['email'] = value
-            elif path == 'name.formatted':
-                update_data['name'] = value
+            elif path in fields:
+                if not isinstance(value, str):
+                    return scim_error(400, f'{path} must be a string', 'invalidValue')
+                update_data[fields[path]] = value
             elif path == 'externalId':
+                if value is not None and not isinstance(value, str):
+                    return scim_error(400, 'externalId must be a string or null', 'invalidValue')
                 provider = get_scim_provider()
-                await Users.update_user_scim_by_id(user_id, provider, value, db=db)
+                scim = dict(update_data.get('scim', user.scim) or {})
+                scim[provider] = {'external_id': value}
+                update_data['scim'] = scim
+            else:
+                return scim_error(400, f'Unsupported PATCH path: {path}', 'invalidPath')
+
+    # Validate all operations before persisting once, and leave identical writes unchanged.
+    update_data = {key: value for key, value in update_data.items() if value != getattr(user, key)}
+    user_updated_fields = ['externalId' if field == 'scim' else field for field in update_data if field != 'role']
 
     # Update user
     if update_data:
+        update_data['updated_at'] = int(time.time())
         updated_user = await Users.update_user_by_id(user_id, update_data, db=db)
         if not updated_user:
             raise HTTPException(
@@ -788,7 +833,6 @@ async def patch_user(
         updated_user = user
 
     role_changed = updated_user.role != user.role
-    user_updated_fields = [field for field in update_data.keys() if field != 'role']
 
     if user_updated_fields:
         await publish_event(
@@ -826,7 +870,14 @@ async def delete_user(
             detail=f'User {user_id} not found',
         )
 
-    success = await Users.delete_user_by_id(user_id, db=db)
+    # An IdP prune must not lock the instance out by deleting an admin.
+    if user.role == 'admin':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACTION_PROHIBITED,
+        )
+
+    success = await Auths.delete_auth_by_id(user_id, db=db)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -907,6 +958,19 @@ async def get_group(
     return await group_to_scim(group, request, db=db)
 
 
+async def validate_user_members(members, db):
+    ids = []
+    for member in members or []:
+        value = member if isinstance(member, dict) else member.model_dump(by_alias=True)
+        if value.get('type') not in (None, 'User') or '/Groups/' in (value.get('$ref') or ''):
+            raise GroupHierarchyError('Only direct User members are supported by SCIM.')
+        if not value.get('value'):
+            raise GroupHierarchyError('A member user ID is required.')
+        ids.append(value['value'])
+    if set(await Users.get_valid_user_ids(ids, db=db)) != set(ids):
+        raise GroupHierarchyError('One or more member users were not found.')
+
+
 @router.post('/Groups', response_model=SCIMGroup, status_code=status.HTTP_201_CREATED)
 async def create_group(
     request: Request,
@@ -915,6 +979,7 @@ async def create_group(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Create SCIM Group"""
+    await validate_user_members(group_data.members, db)
     # Extract member IDs
     member_ids = []
     if group_data.members:
@@ -986,6 +1051,7 @@ async def update_group(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Update SCIM Group (full update)"""
+    await validate_user_members(group_data.members, db)
     group = await Groups.get_group_by_id(group_id, db=db)
     if not group:
         raise HTTPException(
@@ -1072,6 +1138,13 @@ async def patch_group(
     added_member_ids = []
     removed_member_ids = []
 
+    # Validate all requested assignments before applying any patch operation.
+    for operation in patch_data.Operations:
+        if operation.path == 'members' and operation.op.lower() in ('add', 'replace'):
+            if not isinstance(operation.value, list):
+                raise GroupHierarchyError('Members must be a list of users.')
+            await validate_user_members(operation.value, db)
+
     for operation in patch_data.Operations:
         op = operation.op.lower()
         path = operation.path
@@ -1154,7 +1227,8 @@ async def delete_group(
             detail=f'Group {group_id} not found',
         )
 
-    success = await Groups.delete_group_by_id(group_id, db=db)
+    changes = {}
+    success = await Groups.delete_group_by_id(group_id, db=db, changes=changes)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1166,7 +1240,15 @@ async def delete_group(
         EVENTS.GROUP_DELETED,
         subject_id=group_id,
         source='scim',
-        data={'name': group.name},
+        data={'name': group.name, **changes},
     )
 
+    for child_id in changes['promoted_child_ids']:
+        await publish_event(
+            request,
+            EVENTS.GROUP_UPDATED,
+            subject_id=child_id,
+            source='scim',
+            data={'old_parent_group_id': group_id, 'parent_group_id': changes['parent_group_id']},
+        )
     return None

@@ -509,32 +509,30 @@ class TestCiStubsEveryDeclaredSink:
         # Execute only this function's AST, with deferred annotations and no
         # real provider imports. Importing the router would boot the app.
         tree = ast.parse((SERVER / 'routers/retrieval.py').read_text())
-        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'search_web')
+        function = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'search_web')
         module = ast.Module(
             body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), function],
             type_ignores=[],
         )
-        from types import SimpleNamespace
-        from unittest.mock import Mock
+        import asyncio
+        from unittest.mock import AsyncMock
 
-        provider = Mock(return_value=['provider reached'])
-        # v0.11.3 routes provider calls through run_on_main_loop. The synthetic
-        # namespace has no event loop, and the control only needs to observe that
-        # dispatch reached the provider, so run it straight through.
-        namespace = {'search_searxng': provider, 'run_on_main_loop': lambda coro: coro}
+        provider = AsyncMock(return_value=['provider reached'])
+        namespace = {'search_searxng': provider}
         # nosec B102 - compiles one function lifted from this repo's own source, with a
         # mocked provider and no untrusted input. Importing the router instead would boot
         # the application, which is what this test exists to avoid.
         exec(compile(ast.fix_missing_locations(module), '<search_web>', 'exec'), namespace)  # nosec B102
         engine = compose['services']['open-webui']['environment']['WEB_SEARCH_ENGINE']
-        config = SimpleNamespace(
-            SEARXNG_QUERY_URL=compose['services']['open-webui']['environment']['SEARXNG_QUERY_URL'],
-            SEARXNG_LANGUAGE='all',
-            WEB_SEARCH_RESULT_COUNT=1,
-            WEB_SEARCH_DOMAIN_FILTER_LIST=[],
-        )
-        assert namespace['search_web'](None, engine, 'CI probe', config=config) == ['provider reached']
-        provider.assert_called_once_with('http://stub:8000/search', 'CI probe', 1, [], language='all')
+        config = {
+            'web.search.searxng_query_url': compose['services']['open-webui']['environment']['SEARXNG_QUERY_URL'],
+            'web.search.searxng_language': 'all',
+            'web.search.result_count': 1,
+            'web.search.domain.filter_list': [],
+        }
+        result = asyncio.run(namespace['search_web'](None, engine, 'CI probe', config=config))
+        assert result == ['provider reached']
+        provider.assert_awaited_once_with('http://stub:8000/search', 'CI probe', 1, [], language='all')
 
     def test_marker_key_guards_the_public_url_fallback(self, compose):
         from types import SimpleNamespace

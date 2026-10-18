@@ -76,7 +76,8 @@
 	};
 
 	const getConflict = (id: Shortcut, chord: string): Shortcut | null => {
-		if (!isConfigurableShortcut(id) || !chord) return null;
+		// Modals always close on Esc on their own, so sharing it is not a conflict
+		if (!isConfigurableShortcut(id) || !chord || chord === 'Escape') return null;
 		for (const [otherId, otherChord] of Object.entries($keybindings)) {
 			if (otherId !== id && otherChord === chord) return otherId as Shortcut;
 		}
@@ -101,19 +102,19 @@
 	};
 </script>
 
-<svelte:window on:keydown={handleRecordingKeydown} />
+<svelte:window on:keydown|capture={handleRecordingKeydown} />
 
 <div id="tab-shortcuts" class="flex h-full flex-col text-sm">
 	<div class="mb-4 flex items-center justify-between">
 		<h2 class="text-sm font-medium text-gray-900 dark:text-white">
-			{$i18n.t('Keyboard')}
+			{$i18n.t('settings.personal.shortcuts.title')}
 		</h2>
 
 		<button
 			class="text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white"
 			on:click={resetBindings}
 		>
-			{$i18n.t('Reset Defaults')}
+			{$i18n.t('settings.personal.shortcuts.resetDefaults.label')}
 		</button>
 	</div>
 
@@ -123,7 +124,7 @@
 				id="enable-keyboard-shortcuts-label"
 				class="min-w-0 text-xs text-gray-600 dark:text-gray-400"
 			>
-				{$i18n.t('Enable Keyboard Shortcuts')}
+				{$i18n.t('settings.personal.shortcuts.enableKeyboardShortcuts.label')}
 			</div>
 
 			<div class="flex shrink-0 items-center justify-end gap-1.5">
@@ -138,14 +139,14 @@
 			</div>
 		</div>
 		<p class="mt-1.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-			{$i18n.t('When disabled, keyboard shortcuts will not trigger any actions.')}
+			{$i18n.t('settings.personal.shortcuts.enableKeyboardShortcuts.description')}
 		</p>
 	</div>
 
 	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
 		<div class="flex items-center gap-2 px-1 pb-1">
 			<span class="flex-1 text-[0.625rem] text-gray-400 dark:text-gray-600">
-				{$i18n.t('Command')}
+				{$i18n.t('settings.personal.shortcuts.command.label')}
 			</span>
 			<span class="w-[9.5rem] shrink-0 text-right text-[0.625rem] text-gray-400 dark:text-gray-600">
 				{$i18n.t('Key')}
@@ -240,7 +241,7 @@
 										<span
 											class="text-[0.5625rem] text-amber-500"
 											title={$i18n.t('Also bound to {{action}}', {
-												action: $i18n.t(shortcuts[conflict]?.name ?? conflict)
+												action: shortcuts[conflict]?.name($i18n.t) ?? conflict
 											})}>!</span
 										>
 									{/if}

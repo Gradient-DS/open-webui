@@ -15,7 +15,7 @@ export const pinnedChats = readonly(pinnedChatsStore);
 let currentPage = 1;
 let paginationReady = false;
 let requestGeneration = 0;
-let allLoaded = false;
+export let allLoaded = false;
 let loadingNextPage = false;
 
 type RefreshChatListOptions = {
@@ -47,9 +47,9 @@ export const refreshChatList = async (
 		return { accepted: false, allLoaded };
 	}
 
-	chatsStore.set(nextChats);
 	currentPage = 1;
 	allLoaded = nextChats.length === 0;
+	chatsStore.set(nextChats);
 
 	if (options.clearPinned) {
 		pinnedChatsStore.set([]);
@@ -77,6 +77,14 @@ export const refreshFolderChatLists = async (
 	chat?: ChatListItem | null
 ) => {
 	await Promise.all([...folderRefreshHandlers].map((handler) => handler(folderId, chat)));
+};
+
+export const refreshSidebar = async (token: string = '') => {
+	await Promise.all([
+		refreshChatList(token, { refreshPinned: true }),
+		refreshFolderChatLists(null),
+		refreshFolderChatLists()
+	]);
 };
 
 export const loadNextChatListPage = async (token: string = ''): Promise<ChatListResult> => {

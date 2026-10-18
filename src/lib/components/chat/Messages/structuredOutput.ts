@@ -1,3 +1,5 @@
+import { encode } from 'html-entities';
+
 export type OutputContentPart = {
 	type?: string;
 	text?: unknown;
@@ -239,9 +241,10 @@ function buildToolCallToken(item: OutputItem, toolOutputByCallId: Record<string,
 			name,
 			done: isDone ? 'true' : 'false',
 			status,
-			arguments: stringifyAttribute(item.arguments ?? ''),
-			files: stringifyAttribute(resultItem?.files),
-			embeds: stringifyAttribute(resultItem?.embeds)
+			// ToolCallDisplay HTML-decodes these, like legacy <details> attributes.
+			arguments: encode(stringifyAttribute(item.arguments ?? '')),
+			files: encode(stringifyAttribute(resultItem?.files)),
+			embeds: encode(stringifyAttribute(resultItem?.embeds))
 		}
 	};
 }
@@ -493,6 +496,16 @@ export function buildOutputDisplayItems(
 	});
 
 	flushDetails();
+
+	// Providers can reuse item ids across tool-call rounds.
+	const seenIds = new Set<string>();
+	displayItems.forEach((displayItem, index) => {
+		if (seenIds.has(displayItem.id)) {
+			displayItem.id = `${displayItem.id}-${index}`;
+		}
+		seenIds.add(displayItem.id);
+	});
+
 	return displayItems;
 }
 
@@ -780,7 +793,7 @@ function findOutputItemIndex(output: OutputItem[], item: OutputItem): number {
 	return output.findIndex(
 		(existing) =>
 			(!!item.id && existing?.id === item.id) ||
-			(!!item.call_id && existing?.call_id === item.call_id)
+			(!!item.call_id && existing?.type === item.type && existing?.call_id === item.call_id)
 	);
 }
 
@@ -803,7 +816,19 @@ export function applyResponseStreamEvent(
 	}
 
 	if (eventType === 'response.completed') {
-		return event.response?.output ? [...event.response.output] : output;
+		if (!event.response?.output?.length) return output;
+
+		// Completion covers one provider response, not the earlier tool-call rounds.
+		const nextOutput = [...output];
+		for (const item of event.response.output) {
+			const index = findOutputItemIndex(nextOutput, item);
+			if (index >= 0) {
+				nextOutput[index] = item;
+			} else {
+				nextOutput.push(item);
+			}
+		}
+		return nextOutput;
 	}
 
 	const nextOutput = [...output];
@@ -895,6 +920,11 @@ export function applyResponseStreamEvent(
 			return nextOutput;
 		}
 
+		if (item.type === 'open_webui:code_interpreter') {
+			item.code = `${item.code ?? ''}${event.delta ?? ''}`;
+			return nextOutput;
+		}
+
 		const key = deltaType === 'output_text' || deltaType === 'reasoning_text' ? 'text' : deltaType;
 		item.content = [...(item.content ?? [])];
 		const part = ensurePart(item.content, event.content_index ?? 0);
@@ -958,7 +988,7 @@ export function replaceOutputMessageText(
 		const part = nextContent[partIndex];
 		nextContent[partIndex] = {
 			...part,
-			text: (part.text as string).replace(oldContent, newContent)
+			text: (part.text as string).replace(oldContent, () => newContent)
 		};
 
 		return {
@@ -968,4 +998,24 @@ export function replaceOutputMessageText(
 	});
 
 	return replaced ? nextOutput : output;
+}
+
+export function setOutputText(output: OutputItem[], text: string): OutputItem[] {
+	if (text === getOutputText(output)) {
+		return output;
+	}
+
+	const lastMessage = output.filter((item) => item?.type === 'message').at(-1);
+	if (!lastMessage) {
+		return [
+			...output,
+			{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }
+		];
+	}
+
+	return output.map((item) =>
+		item?.type === 'message'
+			? { ...item, content: item === lastMessage ? [{ type: 'output_text', text }] : [] }
+			: item
+	);
 }

@@ -48,9 +48,13 @@ def get_response_error_detail(response: object) -> str:
         body = response.body
         if not isinstance(body, str):
             body = body.decode('utf-8', 'replace')
-        detail = JSONCodec.loads(body)
     except Exception:
         return fallback
+
+    try:
+        detail = JSONCodec.loads(body)
+    except JSONCodec.JSONDecodeError:
+        return body.strip() or fallback
 
     while isinstance(detail, dict):
         next_detail = None
@@ -263,6 +267,26 @@ def get_output_text(output: list | None) -> str:
     return '\n'.join(texts)
 
 
+def get_paired_tool_call_ids(messages: list[dict]) -> list[set[str]]:
+    """Tool call ids answered within each message's assistant-plus-tool-results block."""
+    paired_ids_by_message = [set() for _ in messages]
+    for index, message in enumerate(messages):
+        if message.get('role') != 'assistant' or not message.get('tool_calls'):
+            continue
+
+        block_end = index + 1
+        while block_end < len(messages) and messages[block_end].get('role') == 'tool':
+            block_end += 1
+
+        requested_ids = {tool_call.get('id') for tool_call in message['tool_calls'] if tool_call.get('id')}
+        completed_ids = {tool_message.get('tool_call_id') for tool_message in messages[index + 1 : block_end]}
+        paired_ids = requested_ids & completed_ids
+        for block_index in range(index, block_end):
+            paired_ids_by_message[block_index] = paired_ids
+
+    return paired_ids_by_message
+
+
 def reconcile_tool_pairs(messages: list[dict]) -> list[dict]:
     """Drop unpaired tool_use / tool_result from a reconstructed conversation.
 
@@ -273,22 +297,14 @@ def reconcile_tool_pairs(messages: list[dict]) -> list[dict]:
 
     Well-formed output is unaffected: every id pairs, so nothing is stripped.
     """
-    completed_tool_call_ids = {
-        message['tool_call_id'] for message in messages if message.get('role') == 'tool' and message.get('tool_call_id')
-    }
-    requested_tool_call_ids = {
-        tool_call['id']
-        for message in messages
-        for tool_call in message.get('tool_calls') or ()
-        if message.get('role') == 'assistant' and tool_call.get('id')
-    }
+    paired_ids_by_message = get_paired_tool_call_ids(messages)
 
     reconciled_messages = []
-    for message in messages:
+    for message, paired_ids in zip(messages, paired_ids_by_message):
         role = message.get('role')
 
-        # Orphan tool result — no assistant ever claimed this call_id.
-        if role == 'tool' and message.get('tool_call_id') not in requested_tool_call_ids:
+        # Orphan tool result: not claimed by the assistant heading its tool block.
+        if role == 'tool' and message.get('tool_call_id') not in paired_ids:
             continue
 
         # Non-assistant or no tool_calls — pass through unchanged.
@@ -296,10 +312,8 @@ def reconcile_tool_pairs(messages: list[dict]) -> list[dict]:
             reconciled_messages.append(message)
             continue
 
-        # Keep only tool_calls whose id received a tool-role response.
-        valid_tool_calls = [
-            tool_call for tool_call in message['tool_calls'] if tool_call.get('id') in completed_tool_call_ids
-        ]
+        # Keep only tool_calls whose id received an adjacent tool-role response.
+        valid_tool_calls = [tool_call for tool_call in message['tool_calls'] if tool_call.get('id') in paired_ids]
 
         if valid_tool_calls:
             reconciled_messages.append({**message, 'tool_calls': valid_tool_calls})
@@ -322,6 +336,18 @@ def get_reasoning_details(payload: dict):
     provider_fields = payload.get('provider_specific_fields') or {}
     provider_details = provider_fields.get('reasoning_details') if isinstance(provider_fields, dict) else None
     return payload.get('reasoning_details') or provider_details
+
+
+def get_provider_function(item: dict) -> dict:
+    """Restore the model's call when OWUI displays and executes a resolved target instead."""
+    function = item.get('provider_function')
+    if not isinstance(function, dict):
+        function = item
+    arguments = function.get('arguments', '{}')
+    return {
+        'name': function.get('name', ''),
+        'arguments': arguments if isinstance(arguments, str) else JSONCodec.dumps(arguments),
+    }
 
 
 def convert_output_to_messages(
@@ -471,7 +497,7 @@ def convert_output_to_messages(
 
     for item in output:
         item_type = item.get('type', '')
-        if item_type not in {'function_call', 'function_call_output'}:
+        if item_type != 'function_call_output':
             flush_tool_outputs()
             flush_tool_images()
 
@@ -490,18 +516,11 @@ def convert_output_to_messages(
                 continue
 
             # Collect tool calls to batch into assistant message
-            arguments = item.get('arguments', '{}')
-            # Ensure arguments is always a JSON string
-            if not isinstance(arguments, str):
-                arguments = JSONCodec.dumps(arguments)
             pending_tool_calls.append(
                 {
                     'id': item.get('call_id', ''),
                     'type': 'function',
-                    'function': {
-                        'name': item.get('name', ''),
-                        'arguments': arguments,
-                    },
+                    'function': get_provider_function(item),
                 }
             )
 
@@ -1223,6 +1242,12 @@ def strict_match_mime_type(supported: list[str] | str, header: str) -> str | Non
     except Exception as e:
         log.exception(f'Failed to match mime type {header}: {e}')
         return None
+
+
+def is_raster_image_content_type(content_type: str | None) -> bool:
+    """Return True if the content type is an image that decodes as a bitmap; SVG is XML."""
+    base_content_type = (content_type or '').split(';')[0].strip().lower()
+    return base_content_type.startswith('image/') and base_content_type != 'image/svg+xml'
 
 
 def extract_urls(text: str) -> list[str]:

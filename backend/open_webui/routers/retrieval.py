@@ -8,14 +8,18 @@ import os
 import re
 import shutil
 import uuid
-from types import SimpleNamespace
-from typing import List, Optional, Union
+from datetime import datetime
+from pathlib import Path
+from typing import Callable, Iterator, Optional, Sequence, Union
 from urllib.parse import unquote, urlparse
 
 import tiktoken
 from fastapi import (
     APIRouter,
     Depends,
+    FastAPI,
+    File,
+    Form,
     HTTPException,
     Query,
     Request,
@@ -23,6 +27,7 @@ from fastapi import (
     status,
 )
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.documents import Document
 from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
@@ -31,6 +36,7 @@ from langchain_text_splitters import (
 )
 from open_webui import config as soev_config
 from open_webui.config import (
+    Config,
     DEFAULT_LOCALE,
     ENV,
     RAG_EMBEDDING_CONTENT_PREFIX,
@@ -53,21 +59,21 @@ from open_webui.env import (
     SENTENCE_TRANSFORMERS_CROSS_ENCODER_MODEL_KWARGS,
     SENTENCE_TRANSFORMERS_CROSS_ENCODER_SIGMOID_ACTIVATION_FUNCTION,
     SENTENCE_TRANSFORMERS_MODEL_KWARGS,
+    USE_SLIM,
+    USER_AGENT,
 )
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_db, get_async_session
-from open_webui.models.config import Config
 from open_webui.models.files import FileModel, Files, FileUpdateForm
 from open_webui.models.knowledge import Knowledges
 
 # Document loaders
-from open_webui.retrieval.loaders.youtube import YoutubeTranscriptError
+from open_webui.retrieval.loaders.youtube import YoutubeLoader, YoutubeTranscriptError
 from open_webui.retrieval.utils import (
     build_loader_from_config,
     filter_accessible_collections,
     get_content_from_url,
     get_embedding_function,
-    get_loader_config,
     get_model_path,
     get_reranking_function,
     is_youtube_url,
@@ -77,7 +83,7 @@ from open_webui.retrieval.utils import (
     query_doc_with_hybrid_search,
 )
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.factory import get_vector_db_client
 from open_webui.retrieval.vector.utils import filter_metadata
 from open_webui.retrieval.web.azure import search_azure
 from open_webui.retrieval.web.bing import search_bing
@@ -91,17 +97,17 @@ from open_webui.retrieval.web.firecrawl import search_firecrawl
 from open_webui.retrieval.web.google_pse import search_google_pse
 from open_webui.retrieval.web.jina_search import search_jina
 from open_webui.retrieval.web.kagi import search_kagi
-from open_webui.retrieval.web.linkup import search_linkup
+from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
 
 # Web search engines
 from open_webui.retrieval.web.main import SearchResult
 from open_webui.retrieval.web.microsoft_web_iq import search_microsoft_web_iq
 from open_webui.retrieval.web.mojeek import search_mojeek
 from open_webui.retrieval.web.ollama import search_ollama_cloud
-from open_webui.retrieval.web.openserp import search_openserp
 from open_webui.retrieval.web.perplexity import search_perplexity
 from open_webui.retrieval.web.perplexity_search import search_perplexity_search
 from open_webui.retrieval.web.searchapi import search_searchapi
+from open_webui.retrieval.web.openserp import search_openserp
 from open_webui.retrieval.web.searxng import search_searxng
 from open_webui.retrieval.web.serpapi import search_serpapi
 from open_webui.retrieval.web.serper import search_serper
@@ -109,35 +115,145 @@ from open_webui.retrieval.web.serphouse import search_serphouse
 from open_webui.retrieval.web.serply import search_serply
 from open_webui.retrieval.web.serpstack import search_serpstack
 from open_webui.retrieval.web.sougou import search_sougou
+from open_webui.retrieval.web.staan import search_staan
 from open_webui.retrieval.web.tavily import search_tavily
-from open_webui.retrieval.web.utils import get_ssrf_safe_session, get_web_loader, validate_url
+from open_webui.retrieval.web.utils import get_web_loader
 from open_webui.retrieval.web.yacy import search_yacy
 from open_webui.retrieval.web.yandex import search_yandex
 from open_webui.retrieval.web.ydc import search_youcom
+from open_webui.retrieval.web.linkup import search_linkup
 from open_webui.soev import identity, ingest
 from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.soev.client import SoevApiError
 from open_webui.storage.provider import Storage
-from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control import can_bypass_access_control, has_permission
+from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.content_types import content_type_for  # [Gradient]
-from open_webui.utils.loop_bridge import run_on_main_loop
 from open_webui.utils.misc import (
     calculate_sha256_string,
     sanitize_text_for_db,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
 TIKTOKEN_DISALLOWED_SPECIAL = ()
 
-# [Gradient] ── Per-key config access (replaces the removed per-request app-state config object) ──
-# Legacy UPPERCASE attribute name -> per-key Config storage key. Authoritative mapping
-# derived from config.py::DEFAULT_CONFIG (upstream renamed several rag.* keys).
-RAG_CONFIG_KEYS: dict[str, str] = {
+##########################################
+#
+# Utility functions
+# Give us this day our relevant chunks, and lead us
+# not into hallucination, but deliver us from noise.
+#
+##########################################
+
+
+def get_ef(
+    engine: str,
+    embedding_model: str,
+    auto_update: bool = RAG_EMBEDDING_MODEL_AUTO_UPDATE,
+):
+    ef = None
+    if embedding_model and engine == '' and not USE_SLIM:
+        from sentence_transformers import SentenceTransformer
+
+        try:
+            ef = SentenceTransformer(
+                get_model_path(embedding_model, auto_update),
+                device=DEVICE_TYPE,
+                trust_remote_code=RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
+                backend=SENTENCE_TRANSFORMERS_BACKEND,
+                model_kwargs=SENTENCE_TRANSFORMERS_MODEL_KWARGS,
+            )
+        except Exception as e:
+            log.error(f'Error loading SentenceTransformer: {e}')
+
+    return ef
+
+
+def get_rf(
+    engine: str = '',
+    reranking_model: str | None = None,
+    external_reranker_url: str = '',
+    external_reranker_api_key: str = '',
+    external_reranker_timeout: str = '',
+    auto_update: bool = RAG_RERANKING_MODEL_AUTO_UPDATE,
+):
+    rf = None
+    # Convert timeout string to int or None (system default)
+    timeout_value = int(external_reranker_timeout) if external_reranker_timeout else None
+    if reranking_model and engine == 'external':
+        from open_webui.retrieval.models.external import ExternalReranker
+
+        return ExternalReranker(
+            url=external_reranker_url,
+            api_key=external_reranker_api_key,
+            model=reranking_model,
+            timeout=timeout_value,
+        )
+    if USE_SLIM:
+        return None
+    if reranking_model:
+        if any(model in reranking_model for model in ['jinaai/jina-colbert-v2']):
+            try:
+                from open_webui.retrieval.models.colbert import ColBERT
+
+                rf = ColBERT(
+                    get_model_path(reranking_model, auto_update),
+                    env='docker' if DOCKER else None,
+                )
+
+            except Exception as e:
+                log.error(f'ColBERT: {e}')
+                raise Exception(ERROR_MESSAGES.DEFAULT(e, 'Error loading reranking model'))
+        else:
+            import sentence_transformers
+            import torch
+
+            try:
+                rf = sentence_transformers.CrossEncoder(
+                    get_model_path(reranking_model, auto_update),
+                    device=DEVICE_TYPE,
+                    trust_remote_code=RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
+                    backend=SENTENCE_TRANSFORMERS_CROSS_ENCODER_BACKEND,
+                    model_kwargs=SENTENCE_TRANSFORMERS_CROSS_ENCODER_MODEL_KWARGS,
+                    activation_fn=(
+                        torch.nn.Sigmoid() if SENTENCE_TRANSFORMERS_CROSS_ENCODER_SIGMOID_ACTIVATION_FUNCTION else None
+                    ),
+                )
+            except Exception as e:
+                log.error(f'CrossEncoder: {e}')
+                raise Exception(ERROR_MESSAGES.DEFAULT(e, 'CrossEncoder error'))
+
+            # Safely adjust pad_token_id if missing as some models do not have this in config
+            try:
+                model_cfg = getattr(rf, 'model', None)
+                if model_cfg and hasattr(model_cfg, 'config'):
+                    cfg = model_cfg.config
+                    if getattr(cfg, 'pad_token_id', None) is None:
+                        # Fallback to eos_token_id when available
+                        eos = getattr(cfg, 'eos_token_id', None)
+                        if eos is not None:
+                            cfg.pad_token_id = eos
+                            log.debug('Missing pad_token_id detected; set to eos_token_id=%s', eos)
+                        else:
+                            log.warning('Neither pad_token_id nor eos_token_id present in model config')
+            except Exception as e2:
+                log.warning(f'Failed to adjust pad_token_id on CrossEncoder: {e2}')
+
+    return rf
+
+
+##########################################
+#
+# API routes
+#
+##########################################
+
+
+RETRIEVAL_CONFIG_KEYS = {
     'ALLOWED_FILE_EXTENSIONS': 'rag.file.allowed_extensions',
     'AZURE_AI_SEARCH_API_KEY': 'web.search.azure_ai_search_api_key',
     'AZURE_AI_SEARCH_ENDPOINT': 'web.search.azure_ai_search_endpoint',
@@ -174,7 +290,7 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'DOCUMENT_INTELLIGENCE_KEY': 'rag.document_intelligence_key',
     'DOCUMENT_INTELLIGENCE_MODEL': 'rag.document_intelligence_model',
     'ENABLE_ASYNC_EMBEDDING': 'rag.enable_async_embedding',
-    'ENABLE_CONFLUENCE_INTEGRATION': 'confluence.enable',
+    'ENABLE_CONFLUENCE_INTEGRATION': 'confluence.enable',  # [Gradient]
     'ENABLE_GOOGLE_DRIVE_INTEGRATION': 'google_drive.enable',
     'ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER': 'rag.enable_markdown_header_text_splitter',
     'ENABLE_ONEDRIVE_INTEGRATION': 'onedrive.enable',
@@ -182,8 +298,12 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS': 'rag.enable_hybrid_search_enriched_texts',
     'ENABLE_WEB_LOADER_SSL_VERIFICATION': 'web.loader.ssl_verification',
     'ENABLE_WEB_SEARCH': 'web.search.enable',
+    'ENABLE_WEB_SEARCH_CONFIRMATION': 'web.search.confirmation.enable',
+    'WEB_SEARCH_CONFIRMATION_CONTENT': 'web.search.confirmation.content',
     'EXA_API_KEY': 'web.search.exa_api_key',
+    'EXA_MAX_CONTENT_LENGTH': 'web.search.exa_max_content_length',
     'EXTERNAL_DOCUMENT_LOADER_API_KEY': 'rag.external_document_loader_api_key',
+    'EXTERNAL_DOCUMENT_LOADER_HEADERS': 'rag.external_document_loader_headers',
     'EXTERNAL_DOCUMENT_LOADER_URL': 'rag.external_document_loader_url',
     'EXTERNAL_WEB_LOADER_API_KEY': 'web.loader.external_web_loader_api_key',
     'EXTERNAL_WEB_LOADER_URL': 'web.loader.external_web_loader_url',
@@ -202,13 +322,20 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'JINA_API_BASE_URL': 'web.search.jina_api_base_url',
     'JINA_API_KEY': 'web.search.jina_api_key',
     'KAGI_SEARCH_API_KEY': 'web.search.kagi_search_api_key',
+    'LINKUP_API_KEY': 'web.search.linkup_api_key',
+    'LINKUP_SEARCH_PARAMS': 'web.search.linkup_search_params',
     'MINERU_API_KEY': 'rag.mineru_api_key',
     'MINERU_API_MODE': 'rag.mineru_api_mode',
     'MINERU_API_TIMEOUT': 'rag.mineru_api_timeout',
     'MINERU_API_URL': 'rag.mineru_api_url',
+    'MINERU_FILE_EXTENSIONS': 'rag.mineru_file_extensions',
     'MINERU_PARAMS': 'rag.mineru_params',
+    'MICROSOFT_WEB_IQ_API_BASE_URL': 'web.search.microsoft_web_iq_api_base_url',
+    'MICROSOFT_WEB_IQ_API_KEY': 'web.search.microsoft_web_iq_api_key',
+    'MICROSOFT_WEB_IQ_LANGUAGE': 'web.search.microsoft_web_iq_language',
     'MISTRAL_OCR_API_BASE_URL': 'rag.mistral_ocr_api_base_url',
     'MISTRAL_OCR_API_KEY': 'rag.mistral_ocr_api_key',
+    'MISTRAL_OCR_USE_BASE64': 'rag.mistral_ocr_use_base64',
     'MOJEEK_SEARCH_API_KEY': 'web.search.mojeek_search_api_key',
     'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': 'web.search.ollama_cloud_api_key',
     'PADDLEOCR_VL_BASE_URL': 'rag.paddleocr_vl_base_url',
@@ -228,6 +355,7 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'RAG_EMBEDDING_CONCURRENT_REQUESTS': 'rag.embedding_concurrent_requests',
     'RAG_EMBEDDING_ENGINE': 'rag.embedding_engine',
     'RAG_EMBEDDING_MODEL': 'rag.embedding_model',
+    'RAG_TOKENIZER_MODEL': 'rag.tokenizer_model',
     'RAG_EXTERNAL_RERANKER_API_KEY': 'rag.external_reranker_api_key',
     'RAG_EXTERNAL_RERANKER_TIMEOUT': 'rag.external_reranker_timeout',
     'RAG_EXTERNAL_RERANKER_URL': 'rag.external_reranker_url',
@@ -249,13 +377,19 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'SERPAPI_API_KEY': 'web.search.serpapi_api_key',
     'SERPAPI_ENGINE': 'web.search.serpapi_engine',
     'SERPER_API_KEY': 'web.search.serper_api_key',
+    'SERPHOUSE_API_KEY': 'web.search.serphouse_api_key',
+    'SERPHOUSE_DOMAIN': 'web.search.serphouse_domain',
     'SERPLY_API_KEY': 'web.search.serply_api_key',
     'SERPSTACK_API_KEY': 'web.search.serpstack_api_key',
     'SERPSTACK_HTTPS': 'web.search.serpstack_https',
     'SOUGOU_API_SID': 'web.search.sougou_api_sid',
     'SOUGOU_API_SK': 'web.search.sougou_api_sk',
+    'STAAN_API_KEY': 'web.search.staan_api_key',
+    'STAAN_MARKET': 'web.search.staan_market',
+    'STAAN_MAX_SNIPPETS': 'web.search.staan_max_snippets',
     'TAVILY_API_KEY': 'web.search.tavily_api_key',
     'TAVILY_EXTRACT_DEPTH': 'web.search.tavily_extract_depth',
+    'TAVILY_SEARCH_DEPTH': 'web.search.tavily_search_depth',
     'TEXT_SPLITTER': 'rag.text_splitter',
     'TIKA_SERVER_URL': 'rag.tika_server_url',
     'TIKA_SERVER_VERSION': 'rag.tika_server_version',
@@ -282,155 +416,14 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'YOUCOM_API_KEY': 'web.search.youcom_api_key',
     'YOUTUBE_LOADER_LANGUAGE': 'rag.youtube_loader_language',
     'YOUTUBE_LOADER_PROXY_URL': 'rag.youtube_loader_proxy_url',
-    'ENABLE_WEB_SEARCH_CONFIRMATION': 'web.search.confirmation.enable',
-    'EXTERNAL_DOCUMENT_LOADER_HEADERS': 'rag.external_document_loader_headers',
-    'LINKUP_API_KEY': 'web.search.linkup_api_key',
-    'LINKUP_SEARCH_PARAMS': 'web.search.linkup_search_params',
-    'MICROSOFT_WEB_IQ_API_BASE_URL': 'web.search.microsoft_web_iq_api_base_url',
-    'MICROSOFT_WEB_IQ_API_KEY': 'web.search.microsoft_web_iq_api_key',
-    'MICROSOFT_WEB_IQ_LANGUAGE': 'web.search.microsoft_web_iq_language',
-    'MINERU_FILE_EXTENSIONS': 'rag.mineru_file_extensions',
-    'MISTRAL_OCR_USE_BASE64': 'rag.mistral_ocr_use_base64',
-    'RAG_TOKENIZER_MODEL': 'rag.tokenizer_model',
-    'SERPHOUSE_API_KEY': 'web.search.serphouse_api_key',
-    'SERPHOUSE_DOMAIN': 'web.search.serphouse_domain',
-    'WEB_SEARCH_CONFIRMATION_CONTENT': 'web.search.confirmation.content',
 }
-
-
-async def get_rag_config_state() -> SimpleNamespace:
-    """All retrieval config as an attribute-access namespace (one Config.get_many).
-
-    Drop-in for the removed per-request app-state config object: handlers keep the
-    UPPERCASE attribute names they always used; values now come from the per-key
-    Config store. Sync callers (threadpool workers) fetch this via run_on_main_loop.
-    """
-    values = await Config.get_many(*RAG_CONFIG_KEYS.values())
-    return SimpleNamespace(**{attr: values.get(key) for attr, key in RAG_CONFIG_KEYS.items()})
-
-
-##########################################
-#
-# Utility functions
-# Give us this day our relevant chunks, and lead us
-# not into hallucination, but deliver us from noise.
-#
-##########################################
-
-
-def get_ef(
-    engine: str,
-    embedding_model: str,
-    auto_update: bool = RAG_EMBEDDING_MODEL_AUTO_UPDATE,
-):
-    ef = None
-    if embedding_model and engine == '':
-        from sentence_transformers import SentenceTransformer
-
-        try:
-            ef = SentenceTransformer(
-                get_model_path(embedding_model, auto_update),
-                device=DEVICE_TYPE,
-                trust_remote_code=RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
-                backend=SENTENCE_TRANSFORMERS_BACKEND,
-                model_kwargs=SENTENCE_TRANSFORMERS_MODEL_KWARGS,
-            )
-        except Exception as e:
-            log.error(f'Error loading SentenceTransformer: {e}')
-
-    return ef
-
-
-def get_rf(
-    engine: str = '',
-    reranking_model: Optional[str] = None,
-    external_reranker_url: str = '',
-    external_reranker_api_key: str = '',
-    external_reranker_timeout: str = '',
-    auto_update: bool = RAG_RERANKING_MODEL_AUTO_UPDATE,
-):
-    rf = None
-    # Convert timeout string to int or None (system default)
-    timeout_value = int(external_reranker_timeout) if external_reranker_timeout else None
-    if reranking_model:
-        if any(model in reranking_model for model in ['jinaai/jina-colbert-v2']):
-            try:
-                from open_webui.retrieval.models.colbert import ColBERT
-
-                rf = ColBERT(
-                    get_model_path(reranking_model, auto_update),
-                    env='docker' if DOCKER else None,
-                )
-
-            except Exception as e:
-                log.error(f'ColBERT: {e}')
-                raise Exception(ERROR_MESSAGES.DEFAULT(e))
-        else:
-            if engine == 'external':
-                try:
-                    from open_webui.retrieval.models.external import ExternalReranker
-
-                    rf = ExternalReranker(
-                        url=external_reranker_url,
-                        api_key=external_reranker_api_key,
-                        model=reranking_model,
-                        timeout=timeout_value,
-                    )
-                except Exception as e:
-                    log.error(f'ExternalReranking: {e}')
-                    raise Exception(ERROR_MESSAGES.DEFAULT(e))
-            else:
-                import sentence_transformers
-                import torch
-
-                try:
-                    rf = sentence_transformers.CrossEncoder(
-                        get_model_path(reranking_model, auto_update),
-                        device=DEVICE_TYPE,
-                        trust_remote_code=RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
-                        backend=SENTENCE_TRANSFORMERS_CROSS_ENCODER_BACKEND,
-                        model_kwargs=SENTENCE_TRANSFORMERS_CROSS_ENCODER_MODEL_KWARGS,
-                        activation_fn=(
-                            torch.nn.Sigmoid()
-                            if SENTENCE_TRANSFORMERS_CROSS_ENCODER_SIGMOID_ACTIVATION_FUNCTION
-                            else None
-                        ),
-                    )
-                except Exception as e:
-                    log.error(f'CrossEncoder: {e}')
-                    raise Exception(ERROR_MESSAGES.DEFAULT('CrossEncoder error'))
-
-                # Safely adjust pad_token_id if missing as some models do not have this in config
-                try:
-                    model_cfg = getattr(rf, 'model', None)
-                    if model_cfg and hasattr(model_cfg, 'config'):
-                        cfg = model_cfg.config
-                        if getattr(cfg, 'pad_token_id', None) is None:
-                            # Fallback to eos_token_id when available
-                            eos = getattr(cfg, 'eos_token_id', None)
-                            if eos is not None:
-                                cfg.pad_token_id = eos
-                                log.debug(f'Missing pad_token_id detected; set to eos_token_id={eos}')
-                            else:
-                                log.warning('Neither pad_token_id nor eos_token_id present in model config')
-                except Exception as e2:
-                    log.warning(f'Failed to adjust pad_token_id on CrossEncoder: {e2}')
-
-    return rf
-
-
-##########################################
-#
-# API routes
-#
-##########################################
 
 
 router = APIRouter()
 
 
 class CollectionNameForm(BaseModel):
-    collection_name: Optional[str] = None
+    collection_name: str | None = None
 
 
 class ProcessUrlForm(CollectionNameForm):
@@ -448,31 +441,31 @@ class ProcessUrlResponse(BaseModel):
 
 
 class SearchForm(BaseModel):
-    queries: List[str]
+    queries: list[str]
 
 
 @router.get('/embedding')
 async def get_embedding_config(request: Request, user=Depends(get_admin_user)):
-    config = await get_rag_config_state()
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
     return {
         'status': True,
-        'RAG_EMBEDDING_ENGINE': config.RAG_EMBEDDING_ENGINE,
-        'RAG_EMBEDDING_MODEL': config.RAG_EMBEDDING_MODEL,
-        'RAG_EMBEDDING_BATCH_SIZE': config.RAG_EMBEDDING_BATCH_SIZE,
-        'ENABLE_ASYNC_EMBEDDING': config.ENABLE_ASYNC_EMBEDDING,
-        'RAG_EMBEDDING_CONCURRENT_REQUESTS': config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+        'RAG_EMBEDDING_ENGINE': config['rag.embedding_engine'],
+        'RAG_EMBEDDING_MODEL': config['rag.embedding_model'],
+        'RAG_EMBEDDING_BATCH_SIZE': config['rag.embedding_batch_size'],
+        'ENABLE_ASYNC_EMBEDDING': config['rag.enable_async_embedding'],
+        'RAG_EMBEDDING_CONCURRENT_REQUESTS': config['rag.embedding_concurrent_requests'],
         'openai_config': {
-            'url': config.RAG_OPENAI_API_BASE_URL,
-            'key': config.RAG_OPENAI_API_KEY,
+            'url': config['rag.openai.api_base_url'],
+            'key': config['rag.openai.api_key'],
         },
         'ollama_config': {
-            'url': config.RAG_OLLAMA_BASE_URL,
-            'key': config.RAG_OLLAMA_API_KEY,
+            'url': config['rag.ollama.base_url'],
+            'key': config['rag.ollama.api_key'],
         },
         'azure_openai_config': {
-            'url': config.RAG_AZURE_OPENAI_BASE_URL,
-            'key': config.RAG_AZURE_OPENAI_API_KEY,
-            'version': config.RAG_AZURE_OPENAI_API_VERSION,
+            'url': config['rag.azure_openai.base_url'],
+            'key': config['rag.azure_openai.api_key'],
+            'version': config['rag.azure_openai.api_version'],
         },
     }
 
@@ -494,18 +487,19 @@ class AzureOpenAIConfigForm(BaseModel):
 
 
 class EmbeddingModelUpdateForm(BaseModel):
-    openai_config: Optional[OpenAIConfigForm] = None
-    ollama_config: Optional[OllamaConfigForm] = None
-    azure_openai_config: Optional[AzureOpenAIConfigForm] = None
+    openai_config: OpenAIConfigForm | None = None
+    ollama_config: OllamaConfigForm | None = None
+    azure_openai_config: AzureOpenAIConfigForm | None = None
     RAG_EMBEDDING_ENGINE: str
     RAG_EMBEDDING_MODEL: str
-    RAG_EMBEDDING_BATCH_SIZE: Optional[int] = 1
-    ENABLE_ASYNC_EMBEDDING: Optional[bool] = True
-    RAG_EMBEDDING_CONCURRENT_REQUESTS: Optional[int] = 0
+    RAG_EMBEDDING_BATCH_SIZE: int | None = 1
+    ENABLE_ASYNC_EMBEDDING: bool | None = True
+    RAG_EMBEDDING_CONCURRENT_REQUESTS: int | None = 0
 
 
-def unload_embedding_model(request: Request, config):
-    if config.RAG_EMBEDDING_ENGINE == '':
+async def unload_embedding_model(request: Request):
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
+    if config['rag.embedding_engine'] == '':
         # unloads current internal embedding model and clears VRAM cache
         request.app.state.ef = None
         request.app.state.EMBEDDING_FUNCTION = None
@@ -521,614 +515,497 @@ def unload_embedding_model(request: Request, config):
 
 @router.post('/embedding/update')
 async def update_embedding_config(request: Request, form_data: EmbeddingModelUpdateForm, user=Depends(get_admin_user)):
-    config = await get_rag_config_state()
-    _original_config = dict(vars(config))
-    log.info(f'Updating embedding model: {config.RAG_EMBEDDING_MODEL} to {form_data.RAG_EMBEDDING_MODEL}')
-    unload_embedding_model(request, config)
+    if USE_SLIM and form_data.RAG_EMBEDDING_ENGINE == '':
+        raise HTTPException(400, 'Slim requires an external embedding engine (openai, ollama, azure_openai).')
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
+    log.info('Updating embedding model: %s to %s', config['rag.embedding_model'], form_data.RAG_EMBEDDING_MODEL)
+    await unload_embedding_model(request)
     try:
-        config.RAG_EMBEDDING_ENGINE = form_data.RAG_EMBEDDING_ENGINE
-        config.RAG_EMBEDDING_MODEL = form_data.RAG_EMBEDDING_MODEL.strip()
-        config.RAG_EMBEDDING_BATCH_SIZE = form_data.RAG_EMBEDDING_BATCH_SIZE
-        config.ENABLE_ASYNC_EMBEDDING = form_data.ENABLE_ASYNC_EMBEDDING
-        config.RAG_EMBEDDING_CONCURRENT_REQUESTS = form_data.RAG_EMBEDDING_CONCURRENT_REQUESTS
+        updates = {
+            'rag.embedding_engine': form_data.RAG_EMBEDDING_ENGINE,
+            'rag.embedding_model': form_data.RAG_EMBEDDING_MODEL.strip(),
+            'rag.embedding_batch_size': form_data.RAG_EMBEDDING_BATCH_SIZE,
+            'rag.enable_async_embedding': form_data.ENABLE_ASYNC_EMBEDDING,
+            'rag.embedding_concurrent_requests': form_data.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+        }
+        if form_data.RAG_EMBEDDING_ENGINE == 'openai' and form_data.openai_config is not None:
+            updates['rag.openai.api_base_url'] = form_data.openai_config.url or ''
+            updates['rag.openai.api_key'] = form_data.openai_config.key or ''
+        if form_data.RAG_EMBEDDING_ENGINE == 'ollama' and form_data.ollama_config is not None:
+            updates['rag.ollama.base_url'] = form_data.ollama_config.url or ''
+            updates['rag.ollama.api_key'] = form_data.ollama_config.key or ''
+        if form_data.RAG_EMBEDDING_ENGINE == 'azure_openai' and form_data.azure_openai_config is not None:
+            updates['rag.azure_openai.base_url'] = form_data.azure_openai_config.url or ''
+            updates['rag.azure_openai.api_key'] = form_data.azure_openai_config.key or ''
+            updates['rag.azure_openai.api_version'] = form_data.azure_openai_config.version or ''
+        config.update(updates)
 
-        if config.RAG_EMBEDDING_ENGINE == 'openai' and form_data.openai_config is not None:
-            config.RAG_OPENAI_API_BASE_URL = form_data.openai_config.url or ''
-            config.RAG_OPENAI_API_KEY = form_data.openai_config.key or ''
-
-        if config.RAG_EMBEDDING_ENGINE == 'ollama' and form_data.ollama_config is not None:
-            config.RAG_OLLAMA_BASE_URL = form_data.ollama_config.url or ''
-            config.RAG_OLLAMA_API_KEY = form_data.ollama_config.key or ''
-
-        if config.RAG_EMBEDDING_ENGINE == 'azure_openai' and form_data.azure_openai_config is not None:
-            config.RAG_AZURE_OPENAI_BASE_URL = form_data.azure_openai_config.url or ''
-            config.RAG_AZURE_OPENAI_API_KEY = form_data.azure_openai_config.key or ''
-            config.RAG_AZURE_OPENAI_API_VERSION = form_data.azure_openai_config.version or ''
-
-        # Build before saving: an engine get_embedding_function refuses must not be
+        # [Gradient] Build before saving: an engine get_embedding_function refuses must not be
         # persisted for every later request (PLANE-001).
         ef = get_ef(
-            config.RAG_EMBEDDING_ENGINE,
-            config.RAG_EMBEDDING_MODEL,
+            config['rag.embedding_engine'],
+            config['rag.embedding_model'],
         )
 
         embedding_function = get_embedding_function(
-            config.RAG_EMBEDDING_ENGINE,
-            config.RAG_EMBEDDING_MODEL,
+            config['rag.embedding_engine'],
+            config['rag.embedding_model'],
             ef,
             (
-                config.RAG_OPENAI_API_BASE_URL
-                if config.RAG_EMBEDDING_ENGINE == 'openai'
+                config['rag.openai.api_base_url']
+                if config['rag.embedding_engine'] == 'openai'
                 else (
-                    config.RAG_OLLAMA_BASE_URL
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_BASE_URL
+                    config['rag.ollama.base_url']
+                    if config['rag.embedding_engine'] == 'ollama'
+                    else config['rag.azure_openai.base_url']
                 )
             ),
             (
-                config.RAG_OPENAI_API_KEY
-                if config.RAG_EMBEDDING_ENGINE == 'openai'
+                config['rag.openai.api_key']
+                if config['rag.embedding_engine'] == 'openai'
                 else (
-                    config.RAG_OLLAMA_API_KEY
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_API_KEY
+                    config['rag.ollama.api_key']
+                    if config['rag.embedding_engine'] == 'ollama'
+                    else config['rag.azure_openai.api_key']
                 )
             ),
-            config.RAG_EMBEDDING_BATCH_SIZE,
+            config['rag.embedding_batch_size'],
             azure_api_version=(
-                config.RAG_AZURE_OPENAI_API_VERSION if config.RAG_EMBEDDING_ENGINE == 'azure_openai' else None
+                config['rag.azure_openai.api_version'] if config['rag.embedding_engine'] == 'azure_openai' else None
             ),
-            enable_async=config.ENABLE_ASYNC_EMBEDDING,
-            concurrent_requests=config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+            enable_async=config['rag.enable_async_embedding'],
+            concurrent_requests=config['rag.embedding_concurrent_requests'],
         )
 
-        await Config.upsert({RAG_CONFIG_KEYS[k]: v for k, v in vars(config).items() if _original_config.get(k) != v})
+        await Config.upsert(updates)
         request.app.state.ef = ef
         request.app.state.EMBEDDING_FUNCTION = embedding_function
-
         return {
             'status': True,
-            'RAG_EMBEDDING_ENGINE': config.RAG_EMBEDDING_ENGINE,
-            'RAG_EMBEDDING_MODEL': config.RAG_EMBEDDING_MODEL,
-            'RAG_EMBEDDING_BATCH_SIZE': config.RAG_EMBEDDING_BATCH_SIZE,
-            'ENABLE_ASYNC_EMBEDDING': config.ENABLE_ASYNC_EMBEDDING,
-            'RAG_EMBEDDING_CONCURRENT_REQUESTS': config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+            'RAG_EMBEDDING_ENGINE': config['rag.embedding_engine'],
+            'RAG_EMBEDDING_MODEL': config['rag.embedding_model'],
+            'RAG_EMBEDDING_BATCH_SIZE': config['rag.embedding_batch_size'],
+            'ENABLE_ASYNC_EMBEDDING': config['rag.enable_async_embedding'],
+            'RAG_EMBEDDING_CONCURRENT_REQUESTS': config['rag.embedding_concurrent_requests'],
             'openai_config': {
-                'url': config.RAG_OPENAI_API_BASE_URL,
-                'key': config.RAG_OPENAI_API_KEY,
+                'url': config['rag.openai.api_base_url'],
+                'key': config['rag.openai.api_key'],
             },
             'ollama_config': {
-                'url': config.RAG_OLLAMA_BASE_URL,
-                'key': config.RAG_OLLAMA_API_KEY,
+                'url': config['rag.ollama.base_url'],
+                'key': config['rag.ollama.api_key'],
             },
             'azure_openai_config': {
-                'url': config.RAG_AZURE_OPENAI_BASE_URL,
-                'key': config.RAG_AZURE_OPENAI_API_KEY,
-                'version': config.RAG_AZURE_OPENAI_API_VERSION,
+                'url': config['rag.azure_openai.base_url'],
+                'key': config['rag.azure_openai.api_key'],
+                'version': config['rag.azure_openai.api_version'],
             },
         }
     except ValueError as e:
+        # [Gradient] PLANE-001: a refused engine is a client error, and nothing was saved.
         log.warning(f'Refused embedding configuration: {e}')
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT(e))
     except Exception as e:
         log.exception(f'Problem updating embedding model: {e}')
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error updating embedding configuration'),
         )
 
 
 @router.get('/config')
 async def get_rag_config(request: Request, user=Depends(get_admin_user)):
-    config = await get_rag_config_state()
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
     return {
         'status': True,
         # RAG settings
-        'RAG_TEMPLATE': config.RAG_TEMPLATE,
-        'TOP_K': config.TOP_K,
-        'BYPASS_EMBEDDING_AND_RETRIEVAL': config.BYPASS_EMBEDDING_AND_RETRIEVAL,
-        'RAG_FULL_CONTEXT': config.RAG_FULL_CONTEXT,
+        'RAG_TEMPLATE': config['rag.template'],
+        'TOP_K': config['rag.top_k'],
+        'BYPASS_EMBEDDING_AND_RETRIEVAL': config['rag.bypass_embedding_and_retrieval'],
+        'RAG_FULL_CONTEXT': config['rag.full_context'],
         # Hybrid search settings
-        'ENABLE_RAG_HYBRID_SEARCH': config.ENABLE_RAG_HYBRID_SEARCH,
-        'ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS': config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
-        'TOP_K_RERANKER': config.TOP_K_RERANKER,
-        'RELEVANCE_THRESHOLD': config.RELEVANCE_THRESHOLD,
-        'HYBRID_BM25_WEIGHT': config.HYBRID_BM25_WEIGHT,
+        'ENABLE_RAG_HYBRID_SEARCH': config['rag.enable_hybrid_search'],
+        'ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS': config['rag.enable_hybrid_search_enriched_texts'],
+        'TOP_K_RERANKER': config['rag.top_k_reranker'],
+        'RELEVANCE_THRESHOLD': config['rag.relevance_threshold'],
+        'HYBRID_BM25_WEIGHT': config['rag.hybrid_bm25_weight'],
         # Content extraction settings
-        'CONTENT_EXTRACTION_ENGINE': config.CONTENT_EXTRACTION_ENGINE,
-        'CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES': config.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES,
-        'PDF_EXTRACT_IMAGES': config.PDF_EXTRACT_IMAGES,
-        'PDF_LOADER_MODE': config.PDF_LOADER_MODE,
-        'DATALAB_MARKER_API_KEY': config.DATALAB_MARKER_API_KEY,
-        'DATALAB_MARKER_API_BASE_URL': config.DATALAB_MARKER_API_BASE_URL,
-        'DATALAB_MARKER_ADDITIONAL_CONFIG': config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-        'DATALAB_MARKER_SKIP_CACHE': config.DATALAB_MARKER_SKIP_CACHE,
-        'DATALAB_MARKER_FORCE_OCR': config.DATALAB_MARKER_FORCE_OCR,
-        'DATALAB_MARKER_PAGINATE': config.DATALAB_MARKER_PAGINATE,
-        'DATALAB_MARKER_STRIP_EXISTING_OCR': config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-        'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-        'DATALAB_MARKER_FORMAT_LINES': config.DATALAB_MARKER_FORMAT_LINES,
-        'DATALAB_MARKER_USE_LLM': config.DATALAB_MARKER_USE_LLM,
-        'DATALAB_MARKER_OUTPUT_FORMAT': config.DATALAB_MARKER_OUTPUT_FORMAT,
-        'EXTERNAL_DOCUMENT_LOADER_URL': config.EXTERNAL_DOCUMENT_LOADER_URL,
-        'EXTERNAL_DOCUMENT_LOADER_API_KEY': config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-        'EXTERNAL_DOCUMENT_LOADER_HEADERS': config.EXTERNAL_DOCUMENT_LOADER_HEADERS,
-        'TIKA_SERVER_URL': config.TIKA_SERVER_URL,
-        'TIKA_SERVER_VERSION': config.TIKA_SERVER_VERSION,
-        'DOCLING_SERVER_URL': config.DOCLING_SERVER_URL,
-        'DOCLING_API_KEY': config.DOCLING_API_KEY,
-        'DOCLING_PARAMS': config.DOCLING_PARAMS,
-        'DOCUMENT_INTELLIGENCE_ENDPOINT': config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-        'DOCUMENT_INTELLIGENCE_KEY': config.DOCUMENT_INTELLIGENCE_KEY,
-        'DOCUMENT_INTELLIGENCE_MODEL': config.DOCUMENT_INTELLIGENCE_MODEL,
-        'MISTRAL_OCR_API_BASE_URL': config.MISTRAL_OCR_API_BASE_URL,
-        'MISTRAL_OCR_API_KEY': config.MISTRAL_OCR_API_KEY,
-        'MISTRAL_OCR_USE_BASE64': config.MISTRAL_OCR_USE_BASE64,
-        'PADDLEOCR_VL_BASE_URL': config.PADDLEOCR_VL_BASE_URL,
-        'PADDLEOCR_VL_TOKEN': config.PADDLEOCR_VL_TOKEN,
+        'CONTENT_EXTRACTION_ENGINE': config['rag.content_extraction_engine'],
+        'CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES': config['rag.content_extraction.supported_media_mime_types'],
+        'PDF_EXTRACT_IMAGES': config['rag.pdf_extract_images'],
+        'PDF_LOADER_MODE': config['rag.pdf_loader_mode'],
+        'DATALAB_MARKER_API_KEY': config['rag.datalab_marker_api_key'],
+        'DATALAB_MARKER_API_BASE_URL': config['rag.datalab_marker_api_base_url'],
+        'DATALAB_MARKER_ADDITIONAL_CONFIG': config['rag.datalab_marker_additional_config'],
+        'DATALAB_MARKER_SKIP_CACHE': config['rag.datalab_marker_skip_cache'],
+        'DATALAB_MARKER_FORCE_OCR': config['rag.datalab_marker_force_ocr'],
+        'DATALAB_MARKER_PAGINATE': config['rag.datalab_marker_paginate'],
+        'DATALAB_MARKER_STRIP_EXISTING_OCR': config['rag.datalab_marker_strip_existing_ocr'],
+        'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': config['rag.datalab_marker_disable_image_extraction'],
+        'DATALAB_MARKER_FORMAT_LINES': config['rag.datalab_marker_format_lines'],
+        'DATALAB_MARKER_USE_LLM': config['rag.datalab_marker_use_llm'],
+        'DATALAB_MARKER_OUTPUT_FORMAT': config['rag.datalab_marker_output_format'],
+        'EXTERNAL_DOCUMENT_LOADER_URL': config['rag.external_document_loader_url'],
+        'EXTERNAL_DOCUMENT_LOADER_API_KEY': config['rag.external_document_loader_api_key'],
+        'EXTERNAL_DOCUMENT_LOADER_HEADERS': config['rag.external_document_loader_headers'],
+        'TIKA_SERVER_URL': config['rag.tika_server_url'],
+        'TIKA_SERVER_VERSION': config['rag.tika_server_version'],
+        'DOCLING_SERVER_URL': config['rag.docling_server_url'],
+        'DOCLING_API_KEY': config['rag.docling_api_key'],
+        'DOCLING_PARAMS': config['rag.docling_params'],
+        'DOCUMENT_INTELLIGENCE_ENDPOINT': config['rag.document_intelligence_endpoint'],
+        'DOCUMENT_INTELLIGENCE_KEY': config['rag.document_intelligence_key'],
+        'DOCUMENT_INTELLIGENCE_MODEL': config['rag.document_intelligence_model'],
+        'MISTRAL_OCR_API_BASE_URL': config['rag.mistral_ocr_api_base_url'],
+        'MISTRAL_OCR_API_KEY': config['rag.mistral_ocr_api_key'],
+        'MISTRAL_OCR_USE_BASE64': config['rag.mistral_ocr_use_base64'],
+        'PADDLEOCR_VL_BASE_URL': config['rag.paddleocr_vl_base_url'],
+        'PADDLEOCR_VL_TOKEN': config['rag.paddleocr_vl_token'],
         # MinerU settings
-        'MINERU_API_MODE': config.MINERU_API_MODE,
-        'MINERU_API_URL': config.MINERU_API_URL,
-        'MINERU_API_KEY': config.MINERU_API_KEY,
-        'MINERU_API_TIMEOUT': config.MINERU_API_TIMEOUT,
-        'MINERU_PARAMS': config.MINERU_PARAMS,
-        'MINERU_FILE_EXTENSIONS': config.MINERU_FILE_EXTENSIONS,
+        'MINERU_API_MODE': config['rag.mineru_api_mode'],
+        'MINERU_API_URL': config['rag.mineru_api_url'],
+        'MINERU_API_KEY': config['rag.mineru_api_key'],
+        'MINERU_API_TIMEOUT': config['rag.mineru_api_timeout'],
+        'MINERU_PARAMS': config['rag.mineru_params'],
+        'MINERU_FILE_EXTENSIONS': config['rag.mineru_file_extensions'],
         # Reranking settings
-        'RAG_RERANKING_MODEL': config.RAG_RERANKING_MODEL,
-        'RAG_RERANKING_ENGINE': config.RAG_RERANKING_ENGINE,
-        'RAG_RERANKING_BATCH_SIZE': config.RAG_RERANKING_BATCH_SIZE,
-        'RAG_EXTERNAL_RERANKER_URL': config.RAG_EXTERNAL_RERANKER_URL,
-        'RAG_EXTERNAL_RERANKER_API_KEY': config.RAG_EXTERNAL_RERANKER_API_KEY,
-        'RAG_EXTERNAL_RERANKER_TIMEOUT': config.RAG_EXTERNAL_RERANKER_TIMEOUT,
+        'RAG_RERANKING_MODEL': config['rag.reranking_model'],
+        'RAG_RERANKING_ENGINE': config['rag.reranking_engine'],
+        'RAG_RERANKING_BATCH_SIZE': config['rag.reranking_batch_size'],
+        'RAG_EXTERNAL_RERANKER_URL': config['rag.external_reranker_url'],
+        'RAG_EXTERNAL_RERANKER_API_KEY': config['rag.external_reranker_api_key'],
+        'RAG_EXTERNAL_RERANKER_TIMEOUT': config['rag.external_reranker_timeout'],
         # Chunking settings
-        'TEXT_SPLITTER': config.TEXT_SPLITTER,
-        'RAG_TOKENIZER_MODEL': config.RAG_TOKENIZER_MODEL,
-        'ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER': config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
-        'CHUNK_SIZE': config.CHUNK_SIZE,
-        'CHUNK_MIN_SIZE_TARGET': config.CHUNK_MIN_SIZE_TARGET,
-        'CHUNK_OVERLAP': config.CHUNK_OVERLAP,
+        'TEXT_SPLITTER': config['rag.text_splitter'],
+        'RAG_TOKENIZER_MODEL': config['rag.tokenizer_model'],
+        'ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER': config['rag.enable_markdown_header_text_splitter'],
+        'CHUNK_SIZE': config['rag.chunk_size'],
+        'CHUNK_MIN_SIZE_TARGET': config['rag.chunk_min_size_target'],
+        'CHUNK_OVERLAP': config['rag.chunk_overlap'],
         # File upload settings
-        'FILE_MAX_SIZE': config.FILE_MAX_SIZE,
-        'FILE_MAX_COUNT': config.FILE_MAX_COUNT,
-        'FILE_IMAGE_COMPRESSION_WIDTH': config.FILE_IMAGE_COMPRESSION_WIDTH,
-        'FILE_IMAGE_COMPRESSION_HEIGHT': config.FILE_IMAGE_COMPRESSION_HEIGHT,
-        'ALLOWED_FILE_EXTENSIONS': config.ALLOWED_FILE_EXTENSIONS,
+        'FILE_MAX_SIZE': config['rag.file.max_size'],
+        'FILE_MAX_COUNT': config['rag.file.max_count'],
+        'FILE_IMAGE_COMPRESSION_WIDTH': config['file.image_compression_width'],
+        'FILE_IMAGE_COMPRESSION_HEIGHT': config['file.image_compression_height'],
+        'ALLOWED_FILE_EXTENSIONS': config['rag.file.allowed_extensions'],
         # Integration settings
-        'ENABLE_GOOGLE_DRIVE_INTEGRATION': config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
-        'ENABLE_ONEDRIVE_INTEGRATION': config.ENABLE_ONEDRIVE_INTEGRATION,
-        'ENABLE_CONFLUENCE_INTEGRATION': config.ENABLE_CONFLUENCE_INTEGRATION,
+        'ENABLE_GOOGLE_DRIVE_INTEGRATION': config['google_drive.enable'],
+        'ENABLE_ONEDRIVE_INTEGRATION': config['onedrive.enable'],
+        'ENABLE_CONFLUENCE_INTEGRATION': config.get('confluence.enable'),  # [Gradient] not in DEFAULTS
         # Web search settings
         'web': {
-            'ENABLE_WEB_SEARCH': config.ENABLE_WEB_SEARCH,
-            'ENABLE_WEB_SEARCH_CONFIRMATION': config.ENABLE_WEB_SEARCH_CONFIRMATION,
-            'WEB_SEARCH_CONFIRMATION_CONTENT': config.WEB_SEARCH_CONFIRMATION_CONTENT,
-            'WEB_SEARCH_ENGINE': config.WEB_SEARCH_ENGINE,
-            'WEB_SEARCH_TRUST_ENV': config.WEB_SEARCH_TRUST_ENV,
-            'WEB_SEARCH_RESULT_COUNT': config.WEB_SEARCH_RESULT_COUNT,
-            'WEB_SEARCH_CONCURRENT_REQUESTS': config.WEB_SEARCH_CONCURRENT_REQUESTS,
-            'WEB_FETCH_MAX_CONTENT_LENGTH': config.WEB_FETCH_MAX_CONTENT_LENGTH,
-            'WEB_LOADER_CONCURRENT_REQUESTS': config.WEB_LOADER_CONCURRENT_REQUESTS,
-            'WEB_SEARCH_DOMAIN_FILTER_LIST': config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-            'BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL': config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
-            'BYPASS_WEB_SEARCH_WEB_LOADER': config.BYPASS_WEB_SEARCH_WEB_LOADER,
-            'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
-            'SEARXNG_QUERY_URL': config.SEARXNG_QUERY_URL,
-            'SEARXNG_LANGUAGE': config.SEARXNG_LANGUAGE,
-            'OPENSERP_BASE_URL': config.OPENSERP_BASE_URL,
-            'YACY_QUERY_URL': config.YACY_QUERY_URL,
-            'YACY_USERNAME': config.YACY_USERNAME,
-            'YACY_PASSWORD': config.YACY_PASSWORD,
-            'GOOGLE_PSE_API_KEY': config.GOOGLE_PSE_API_KEY,
-            'GOOGLE_PSE_ENGINE_ID': config.GOOGLE_PSE_ENGINE_ID,
-            'BRAVE_SEARCH_API_KEY': config.BRAVE_SEARCH_API_KEY,
-            'BRAVE_SEARCH_CONTEXT_TOKENS': config.BRAVE_SEARCH_CONTEXT_TOKENS,
-            'KAGI_SEARCH_API_KEY': config.KAGI_SEARCH_API_KEY,
-            'MOJEEK_SEARCH_API_KEY': config.MOJEEK_SEARCH_API_KEY,
-            'BOCHA_SEARCH_API_KEY': config.BOCHA_SEARCH_API_KEY,
-            'SERPSTACK_API_KEY': config.SERPSTACK_API_KEY,
-            'SERPSTACK_HTTPS': config.SERPSTACK_HTTPS,
-            'SERPER_API_KEY': config.SERPER_API_KEY,
-            'SERPHOUSE_API_KEY': config.SERPHOUSE_API_KEY,
-            'SERPHOUSE_DOMAIN': config.SERPHOUSE_DOMAIN,
-            'SERPLY_API_KEY': config.SERPLY_API_KEY,
-            'DDGS_BACKEND': config.DDGS_BACKEND,
-            'TAVILY_API_KEY': config.TAVILY_API_KEY,
-            'SEARCHAPI_API_KEY': config.SEARCHAPI_API_KEY,
-            'SEARCHAPI_ENGINE': config.SEARCHAPI_ENGINE,
-            'SERPAPI_API_KEY': config.SERPAPI_API_KEY,
-            'SERPAPI_ENGINE': config.SERPAPI_ENGINE,
-            'JINA_API_KEY': config.JINA_API_KEY,
-            'JINA_API_BASE_URL': config.JINA_API_BASE_URL,
-            'BING_SEARCH_V7_ENDPOINT': config.BING_SEARCH_V7_ENDPOINT,
-            'BING_SEARCH_V7_SUBSCRIPTION_KEY': config.BING_SEARCH_V7_SUBSCRIPTION_KEY,
-            'EXA_API_KEY': config.EXA_API_KEY,
-            'PERPLEXITY_API_KEY': config.PERPLEXITY_API_KEY,
-            'PERPLEXITY_MODEL': config.PERPLEXITY_MODEL,
-            'PERPLEXITY_SEARCH_CONTEXT_USAGE': config.PERPLEXITY_SEARCH_CONTEXT_USAGE,
-            'PERPLEXITY_SEARCH_API_URL': config.PERPLEXITY_SEARCH_API_URL,
-            'MICROSOFT_WEB_IQ_API_BASE_URL': config.MICROSOFT_WEB_IQ_API_BASE_URL,
-            'MICROSOFT_WEB_IQ_API_KEY': config.MICROSOFT_WEB_IQ_API_KEY,
-            'MICROSOFT_WEB_IQ_LANGUAGE': config.MICROSOFT_WEB_IQ_LANGUAGE,
-            'SOUGOU_API_SID': config.SOUGOU_API_SID,
-            'SOUGOU_API_SK': config.SOUGOU_API_SK,
-            'WEB_LOADER_ENGINE': config.WEB_LOADER_ENGINE,
-            'WEB_LOADER_TIMEOUT': config.WEB_LOADER_TIMEOUT,
-            'ENABLE_WEB_LOADER_SSL_VERIFICATION': config.ENABLE_WEB_LOADER_SSL_VERIFICATION,
-            'PLAYWRIGHT_WS_URL': config.PLAYWRIGHT_WS_URL,
-            'PLAYWRIGHT_TIMEOUT': config.PLAYWRIGHT_TIMEOUT,
-            'FIRECRAWL_API_KEY': config.FIRECRAWL_API_KEY,
-            'FIRECRAWL_API_BASE_URL': config.FIRECRAWL_API_BASE_URL,
-            'FIRECRAWL_TIMEOUT': config.FIRECRAWL_TIMEOUT,
-            'TAVILY_EXTRACT_DEPTH': config.TAVILY_EXTRACT_DEPTH,
-            'EXTERNAL_WEB_SEARCH_URL': config.EXTERNAL_WEB_SEARCH_URL,
-            'EXTERNAL_WEB_SEARCH_API_KEY': config.EXTERNAL_WEB_SEARCH_API_KEY,
-            'EXTERNAL_WEB_LOADER_URL': config.EXTERNAL_WEB_LOADER_URL,
-            'EXTERNAL_WEB_LOADER_API_KEY': config.EXTERNAL_WEB_LOADER_API_KEY,
-            'YOUTUBE_LOADER_LANGUAGE': config.YOUTUBE_LOADER_LANGUAGE,
-            'YOUTUBE_LOADER_PROXY_URL': config.YOUTUBE_LOADER_PROXY_URL,
+            'ENABLE_WEB_SEARCH': config['web.search.enable'],
+            'ENABLE_WEB_SEARCH_CONFIRMATION': config['web.search.confirmation.enable'],
+            'WEB_SEARCH_CONFIRMATION_CONTENT': config['web.search.confirmation.content'],
+            'WEB_SEARCH_ENGINE': config['web.search.engine'],
+            'WEB_SEARCH_TRUST_ENV': config['web.search.trust_env'],
+            'WEB_SEARCH_RESULT_COUNT': config['web.search.result_count'],
+            'WEB_SEARCH_CONCURRENT_REQUESTS': config['web.search.concurrent_requests'],
+            'WEB_FETCH_MAX_CONTENT_LENGTH': config['web.fetch.max_content_length'],
+            'WEB_LOADER_CONCURRENT_REQUESTS': config['web.loader.concurrent_requests'],
+            'WEB_SEARCH_DOMAIN_FILTER_LIST': config['web.search.domain.filter_list'],
+            'BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL': config['web.search.bypass_embedding_and_retrieval'],
+            'BYPASS_WEB_SEARCH_WEB_LOADER': config['web.search.bypass_web_loader'],
+            'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': config['web.search.ollama_cloud_api_key'],
+            'SEARXNG_QUERY_URL': config['web.search.searxng_query_url'],
+            'SEARXNG_LANGUAGE': config['web.search.searxng_language'],
+            'OPENSERP_BASE_URL': config['web.search.openserp_base_url'],
+            'YACY_QUERY_URL': config['web.search.yacy_query_url'],
+            'YACY_USERNAME': config['web.search.yacy_username'],
+            'YACY_PASSWORD': config['web.search.yacy_password'],
+            'GOOGLE_PSE_API_KEY': config['web.search.google_pse_api_key'],
+            'GOOGLE_PSE_ENGINE_ID': config['web.search.google_pse_engine_id'],
+            'BRAVE_SEARCH_API_KEY': config['web.search.brave_search_api_key'],
+            'BRAVE_SEARCH_CONTEXT_TOKENS': config['web.search.brave_search_context_tokens'],
+            'KAGI_SEARCH_API_KEY': config['web.search.kagi_search_api_key'],
+            'MOJEEK_SEARCH_API_KEY': config['web.search.mojeek_search_api_key'],
+            'BOCHA_SEARCH_API_KEY': config['web.search.bocha_search_api_key'],
+            'SERPSTACK_API_KEY': config['web.search.serpstack_api_key'],
+            'SERPSTACK_HTTPS': config['web.search.serpstack_https'],
+            'SERPER_API_KEY': config['web.search.serper_api_key'],
+            'SERPHOUSE_API_KEY': config['web.search.serphouse_api_key'],
+            'SERPHOUSE_DOMAIN': config['web.search.serphouse_domain'],
+            'SERPLY_API_KEY': config['web.search.serply_api_key'],
+            'DDGS_BACKEND': config['web.search.ddgs_backend'],
+            'TAVILY_API_KEY': config['web.search.tavily_api_key'],
+            'STAAN_API_KEY': config['web.search.staan_api_key'],
+            'STAAN_MARKET': config['web.search.staan_market'],
+            'STAAN_MAX_SNIPPETS': config['web.search.staan_max_snippets'],
+            'SEARCHAPI_API_KEY': config['web.search.searchapi_api_key'],
+            'SEARCHAPI_ENGINE': config['web.search.searchapi_engine'],
+            'SERPAPI_API_KEY': config['web.search.serpapi_api_key'],
+            'SERPAPI_ENGINE': config['web.search.serpapi_engine'],
+            'JINA_API_KEY': config['web.search.jina_api_key'],
+            'JINA_API_BASE_URL': config['web.search.jina_api_base_url'],
+            'BING_SEARCH_V7_ENDPOINT': config['web.search.bing_search_v7_endpoint'],
+            'BING_SEARCH_V7_SUBSCRIPTION_KEY': config['web.search.bing_search_v7_subscription_key'],
+            'EXA_API_KEY': config['web.search.exa_api_key'],
+            'EXA_MAX_CONTENT_LENGTH': config['web.search.exa_max_content_length'],
+            'PERPLEXITY_API_KEY': config['web.search.perplexity_api_key'],
+            'PERPLEXITY_MODEL': config['web.search.perplexity_model'],
+            'PERPLEXITY_SEARCH_CONTEXT_USAGE': config['web.search.perplexity_search_context_usage'],
+            'PERPLEXITY_SEARCH_API_URL': config['web.search.perplexity_search_api_url'],
+            'MICROSOFT_WEB_IQ_API_BASE_URL': config['web.search.microsoft_web_iq_api_base_url'],
+            'MICROSOFT_WEB_IQ_API_KEY': config['web.search.microsoft_web_iq_api_key'],
+            'MICROSOFT_WEB_IQ_LANGUAGE': config['web.search.microsoft_web_iq_language'],
+            'SOUGOU_API_SID': config['web.search.sougou_api_sid'],
+            'SOUGOU_API_SK': config['web.search.sougou_api_sk'],
+            'WEB_LOADER_ENGINE': config['web.loader.engine'],
+            'WEB_LOADER_TIMEOUT': config['web.loader.timeout'],
+            'ENABLE_WEB_LOADER_SSL_VERIFICATION': config['web.loader.ssl_verification'],
+            'PLAYWRIGHT_WS_URL': config['web.loader.playwright_ws_url'],
+            'PLAYWRIGHT_TIMEOUT': config['web.loader.playwright_timeout'],
+            'FIRECRAWL_API_KEY': config['web.loader.firecrawl_api_key'],
+            'FIRECRAWL_API_BASE_URL': config['web.loader.firecrawl_api_url'],
+            'FIRECRAWL_TIMEOUT': config['web.loader.firecrawl_timeout'],
+            'TAVILY_EXTRACT_DEPTH': config['web.search.tavily_extract_depth'],
+            'TAVILY_SEARCH_DEPTH': config['web.search.tavily_search_depth'],
+            'EXTERNAL_WEB_SEARCH_URL': config['web.search.external_web_search_url'],
+            'EXTERNAL_WEB_SEARCH_API_KEY': config['web.search.external_web_search_api_key'],
+            'EXTERNAL_WEB_LOADER_URL': config['web.loader.external_web_loader_url'],
+            'EXTERNAL_WEB_LOADER_API_KEY': config['web.loader.external_web_loader_api_key'],
+            'YOUTUBE_LOADER_LANGUAGE': config['rag.youtube_loader_language'],
+            'YOUTUBE_LOADER_PROXY_URL': config['rag.youtube_loader_proxy_url'],
             'YOUTUBE_LOADER_TRANSLATION': request.app.state.YOUTUBE_LOADER_TRANSLATION,
-            'YANDEX_WEB_SEARCH_URL': config.YANDEX_WEB_SEARCH_URL,
-            'YANDEX_WEB_SEARCH_API_KEY': config.YANDEX_WEB_SEARCH_API_KEY,
-            'YANDEX_WEB_SEARCH_CONFIG': config.YANDEX_WEB_SEARCH_CONFIG,
-            'YOUCOM_API_KEY': config.YOUCOM_API_KEY,
-            'LINKUP_API_KEY': config.LINKUP_API_KEY,
-            'LINKUP_SEARCH_PARAMS': config.LINKUP_SEARCH_PARAMS,
+            'YANDEX_WEB_SEARCH_URL': config['web.search.yandex_web_search_url'],
+            'YANDEX_WEB_SEARCH_API_KEY': config['web.search.yandex_web_search_api_key'],
+            'YANDEX_WEB_SEARCH_CONFIG': config['web.search.yandex_web_search_config'],
+            'YOUCOM_API_KEY': config['web.search.youcom_api_key'],
+            'LINKUP_API_KEY': config['web.search.linkup_api_key'],
+            'LINKUP_SEARCH_PARAMS': config['web.search.linkup_search_params'],
         },
     }
 
 
 class WebConfig(BaseModel):
-    ENABLE_WEB_SEARCH: Optional[bool] = None
-    WEB_SEARCH_ENGINE: Optional[str] = None
-    WEB_SEARCH_TRUST_ENV: Optional[bool] = None
-    WEB_SEARCH_RESULT_COUNT: Optional[int] = None
-    WEB_SEARCH_CONCURRENT_REQUESTS: Optional[int] = None
-    WEB_FETCH_MAX_CONTENT_LENGTH: Optional[int] = None
-    WEB_LOADER_CONCURRENT_REQUESTS: Optional[int] = None
-    WEB_SEARCH_DOMAIN_FILTER_LIST: Optional[List[str]] = []
-    BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL: Optional[bool] = None
-    BYPASS_WEB_SEARCH_WEB_LOADER: Optional[bool] = None
-    OLLAMA_CLOUD_WEB_SEARCH_API_KEY: Optional[str] = None
-    SEARXNG_QUERY_URL: Optional[str] = None
-    SEARXNG_LANGUAGE: Optional[str] = None
-    YACY_QUERY_URL: Optional[str] = None
-    YACY_USERNAME: Optional[str] = None
-    YACY_PASSWORD: Optional[str] = None
-    GOOGLE_PSE_API_KEY: Optional[str] = None
-    GOOGLE_PSE_ENGINE_ID: Optional[str] = None
-    BRAVE_SEARCH_API_KEY: Optional[str] = None
-    BRAVE_SEARCH_CONTEXT_TOKENS: Optional[int] = None
-    KAGI_SEARCH_API_KEY: Optional[str] = None
-    MOJEEK_SEARCH_API_KEY: Optional[str] = None
-    BOCHA_SEARCH_API_KEY: Optional[str] = None
-    SERPSTACK_API_KEY: Optional[str] = None
-    SERPSTACK_HTTPS: Optional[bool] = None
-    SERPER_API_KEY: Optional[str] = None
-    SERPLY_API_KEY: Optional[str] = None
-    DDGS_BACKEND: Optional[str] = None
-    TAVILY_API_KEY: Optional[str] = None
-    SEARCHAPI_API_KEY: Optional[str] = None
-    SEARCHAPI_ENGINE: Optional[str] = None
-    SERPAPI_API_KEY: Optional[str] = None
-    SERPAPI_ENGINE: Optional[str] = None
-    JINA_API_KEY: Optional[str] = None
-    JINA_API_BASE_URL: Optional[str] = None
-    BING_SEARCH_V7_ENDPOINT: Optional[str] = None
-    BING_SEARCH_V7_SUBSCRIPTION_KEY: Optional[str] = None
-    EXA_API_KEY: Optional[str] = None
-    PERPLEXITY_API_KEY: Optional[str] = None
-    PERPLEXITY_MODEL: Optional[str] = None
-    PERPLEXITY_SEARCH_CONTEXT_USAGE: Optional[str] = None
-    PERPLEXITY_SEARCH_API_URL: Optional[str] = None
-    SOUGOU_API_SID: Optional[str] = None
-    SOUGOU_API_SK: Optional[str] = None
-    WEB_LOADER_ENGINE: Optional[str] = None
-    WEB_LOADER_TIMEOUT: Optional[str] = None
-    ENABLE_WEB_LOADER_SSL_VERIFICATION: Optional[bool] = None
-    PLAYWRIGHT_WS_URL: Optional[str] = None
-    PLAYWRIGHT_TIMEOUT: Optional[int] = None
-    FIRECRAWL_API_KEY: Optional[str] = None
-    FIRECRAWL_API_BASE_URL: Optional[str] = None
-    FIRECRAWL_TIMEOUT: Optional[str] = None
-    TAVILY_EXTRACT_DEPTH: Optional[str] = None
-    EXTERNAL_WEB_SEARCH_URL: Optional[str] = None
-    EXTERNAL_WEB_SEARCH_API_KEY: Optional[str] = None
-    EXTERNAL_WEB_LOADER_URL: Optional[str] = None
-    EXTERNAL_WEB_LOADER_API_KEY: Optional[str] = None
-    YOUTUBE_LOADER_LANGUAGE: Optional[List[str]] = None
-    YOUTUBE_LOADER_PROXY_URL: Optional[str] = None
-    YOUTUBE_LOADER_TRANSLATION: Optional[str] = None
-    YANDEX_WEB_SEARCH_URL: Optional[str] = None
-    YANDEX_WEB_SEARCH_API_KEY: Optional[str] = None
-    YANDEX_WEB_SEARCH_CONFIG: Optional[str] = None
-    YOUCOM_API_KEY: Optional[str] = None
-    ENABLE_WEB_SEARCH_CONFIRMATION: Optional[bool] = None
-    WEB_SEARCH_CONFIRMATION_CONTENT: Optional[str] = None
-    OPENSERP_BASE_URL: Optional[str] = None
-    SERPHOUSE_API_KEY: Optional[str] = None
-    SERPHOUSE_DOMAIN: Optional[str] = None
-    MICROSOFT_WEB_IQ_API_BASE_URL: Optional[str] = None
-    MICROSOFT_WEB_IQ_API_KEY: Optional[str] = None
-    MICROSOFT_WEB_IQ_LANGUAGE: Optional[str] = None
-    LINKUP_API_KEY: Optional[str] = None
-    LINKUP_SEARCH_PARAMS: Optional[dict] = None
+    ENABLE_WEB_SEARCH: bool | None = None
+    ENABLE_WEB_SEARCH_CONFIRMATION: bool | None = None
+    WEB_SEARCH_CONFIRMATION_CONTENT: str | None = None
+    WEB_SEARCH_ENGINE: str | None = None
+    WEB_SEARCH_TRUST_ENV: bool | None = None
+    WEB_SEARCH_RESULT_COUNT: int | None = None
+    WEB_SEARCH_CONCURRENT_REQUESTS: int | None = None
+    WEB_SEARCH_DOMAIN_FILTER_LIST: list[str] | None = []
+    WEB_FETCH_MAX_CONTENT_LENGTH: int | None = None
+    WEB_LOADER_CONCURRENT_REQUESTS: int | None = None
+    BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL: bool | None = None
+    BYPASS_WEB_SEARCH_WEB_LOADER: bool | None = None
+    OLLAMA_CLOUD_WEB_SEARCH_API_KEY: str | None = None
+    SEARXNG_QUERY_URL: str | None = None
+    SEARXNG_LANGUAGE: str | None = None
+    OPENSERP_BASE_URL: str | None = None
+    YACY_QUERY_URL: str | None = None
+    YACY_USERNAME: str | None = None
+    YACY_PASSWORD: str | None = None
+    GOOGLE_PSE_API_KEY: str | None = None
+    GOOGLE_PSE_ENGINE_ID: str | None = None
+    BRAVE_SEARCH_API_KEY: str | None = None
+    BRAVE_SEARCH_CONTEXT_TOKENS: int | None = None
+    KAGI_SEARCH_API_KEY: str | None = None
+    MOJEEK_SEARCH_API_KEY: str | None = None
+    BOCHA_SEARCH_API_KEY: str | None = None
+    SERPSTACK_API_KEY: str | None = None
+    SERPSTACK_HTTPS: bool | None = None
+    SERPER_API_KEY: str | None = None
+    SERPHOUSE_API_KEY: str | None = None
+    SERPHOUSE_DOMAIN: str | None = None
+    SERPLY_API_KEY: str | None = None
+    DDGS_BACKEND: str | None = None
+    TAVILY_API_KEY: str | None = None
+    STAAN_API_KEY: str | None = None
+    STAAN_MARKET: str | None = None
+    STAAN_MAX_SNIPPETS: int | None = None
+    SEARCHAPI_API_KEY: str | None = None
+    SEARCHAPI_ENGINE: str | None = None
+    SERPAPI_API_KEY: str | None = None
+    SERPAPI_ENGINE: str | None = None
+    JINA_API_KEY: str | None = None
+    JINA_API_BASE_URL: str | None = None
+    BING_SEARCH_V7_ENDPOINT: str | None = None
+    BING_SEARCH_V7_SUBSCRIPTION_KEY: str | None = None
+    EXA_API_KEY: str | None = None
+    EXA_MAX_CONTENT_LENGTH: int | None = Field(default=None, gt=0, strict=True)
+    PERPLEXITY_API_KEY: str | None = None
+    PERPLEXITY_MODEL: str | None = None
+    PERPLEXITY_SEARCH_CONTEXT_USAGE: str | None = None
+    PERPLEXITY_SEARCH_API_URL: str | None = None
+    MICROSOFT_WEB_IQ_API_BASE_URL: str | None = None
+    MICROSOFT_WEB_IQ_API_KEY: str | None = None
+    MICROSOFT_WEB_IQ_LANGUAGE: str | None = None
+    SOUGOU_API_SID: str | None = None
+    SOUGOU_API_SK: str | None = None
+    WEB_LOADER_ENGINE: str | None = None
+    WEB_LOADER_TIMEOUT: str | None = None
+    ENABLE_WEB_LOADER_SSL_VERIFICATION: bool | None = None
+    PLAYWRIGHT_WS_URL: str | None = None
+    PLAYWRIGHT_TIMEOUT: int | None = None
+    FIRECRAWL_API_KEY: str | None = None
+    FIRECRAWL_API_BASE_URL: str | None = None
+    FIRECRAWL_TIMEOUT: str | None = None
+    TAVILY_EXTRACT_DEPTH: str | None = None
+    TAVILY_SEARCH_DEPTH: str | None = None
+    EXTERNAL_WEB_SEARCH_URL: str | None = None
+    EXTERNAL_WEB_SEARCH_API_KEY: str | None = None
+    EXTERNAL_WEB_LOADER_URL: str | None = None
+    EXTERNAL_WEB_LOADER_API_KEY: str | None = None
+    YOUTUBE_LOADER_LANGUAGE: list[str] | None = None
+    YOUTUBE_LOADER_PROXY_URL: str | None = None
+    YOUTUBE_LOADER_TRANSLATION: str | None = None
+    YANDEX_WEB_SEARCH_URL: str | None = None
+    YANDEX_WEB_SEARCH_API_KEY: str | None = None
+    YANDEX_WEB_SEARCH_CONFIG: str | None = None
+    YOUCOM_API_KEY: str | None = None
+    LINKUP_API_KEY: str | None = None
+    LINKUP_SEARCH_PARAMS: dict | None = None
 
 
 class ConfigForm(BaseModel):
     # RAG settings
-    RAG_TEMPLATE: Optional[str] = None
-    TOP_K: Optional[int] = None
-    BYPASS_EMBEDDING_AND_RETRIEVAL: Optional[bool] = None
-    RAG_FULL_CONTEXT: Optional[bool] = None
+    RAG_TEMPLATE: str | None = None
+    TOP_K: int | None = None
+    BYPASS_EMBEDDING_AND_RETRIEVAL: bool | None = None
+    RAG_FULL_CONTEXT: bool | None = None
 
     # Hybrid search settings
-    ENABLE_RAG_HYBRID_SEARCH: Optional[bool] = None
-    ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS: Optional[bool] = None
-    TOP_K_RERANKER: Optional[int] = None
-    RELEVANCE_THRESHOLD: Optional[float] = None
-    HYBRID_BM25_WEIGHT: Optional[float] = None
+    ENABLE_RAG_HYBRID_SEARCH: bool | None = None
+    ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS: bool | None = None
+    TOP_K_RERANKER: int | None = None
+    RELEVANCE_THRESHOLD: float | None = None
+    HYBRID_BM25_WEIGHT: float | None = None
 
     # Content extraction settings
-    CONTENT_EXTRACTION_ENGINE: Optional[str] = None
-    PDF_EXTRACT_IMAGES: Optional[bool] = None
-    PDF_LOADER_MODE: Optional[str] = None
-    CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES: Optional[list[str]] = None
+    CONTENT_EXTRACTION_ENGINE: str | None = None
+    CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES: list[str] | None = None
+    PDF_EXTRACT_IMAGES: bool | None = None
+    PDF_LOADER_MODE: str | None = None
 
-    DATALAB_MARKER_API_KEY: Optional[str] = None
-    DATALAB_MARKER_API_BASE_URL: Optional[str] = None
-    DATALAB_MARKER_ADDITIONAL_CONFIG: Optional[str] = None
-    DATALAB_MARKER_SKIP_CACHE: Optional[bool] = None
-    DATALAB_MARKER_FORCE_OCR: Optional[bool] = None
-    DATALAB_MARKER_PAGINATE: Optional[bool] = None
-    DATALAB_MARKER_STRIP_EXISTING_OCR: Optional[bool] = None
-    DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION: Optional[bool] = None
-    DATALAB_MARKER_FORMAT_LINES: Optional[bool] = None
-    DATALAB_MARKER_USE_LLM: Optional[bool] = None
-    DATALAB_MARKER_OUTPUT_FORMAT: Optional[str] = None
+    DATALAB_MARKER_API_KEY: str | None = None
+    DATALAB_MARKER_API_BASE_URL: str | None = None
+    DATALAB_MARKER_ADDITIONAL_CONFIG: str | None = None
+    DATALAB_MARKER_SKIP_CACHE: bool | None = None
+    DATALAB_MARKER_FORCE_OCR: bool | None = None
+    DATALAB_MARKER_PAGINATE: bool | None = None
+    DATALAB_MARKER_STRIP_EXISTING_OCR: bool | None = None
+    DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION: bool | None = None
+    DATALAB_MARKER_FORMAT_LINES: bool | None = None
+    DATALAB_MARKER_USE_LLM: bool | None = None
+    DATALAB_MARKER_OUTPUT_FORMAT: str | None = None
 
-    EXTERNAL_DOCUMENT_LOADER_URL: Optional[str] = None
-    EXTERNAL_DOCUMENT_LOADER_API_KEY: Optional[str] = None
+    EXTERNAL_DOCUMENT_LOADER_URL: str | None = None
+    EXTERNAL_DOCUMENT_LOADER_API_KEY: str | None = None
+    EXTERNAL_DOCUMENT_LOADER_HEADERS: dict | None = None
 
-    TIKA_SERVER_URL: Optional[str] = None
-    DOCLING_SERVER_URL: Optional[str] = None
-    DOCLING_API_KEY: Optional[str] = None
-    DOCLING_PARAMS: Optional[dict] = None
-    DOCUMENT_INTELLIGENCE_ENDPOINT: Optional[str] = None
-    DOCUMENT_INTELLIGENCE_KEY: Optional[str] = None
-    DOCUMENT_INTELLIGENCE_MODEL: Optional[str] = None
-    MISTRAL_OCR_API_BASE_URL: Optional[str] = None
-    MISTRAL_OCR_API_KEY: Optional[str] = None
-    PADDLEOCR_VL_BASE_URL: Optional[str] = None
-    PADDLEOCR_VL_TOKEN: Optional[str] = None
-    TIKA_SERVER_VERSION: Optional[str] = None
-    MISTRAL_OCR_USE_BASE64: Optional[bool] = None
+    TIKA_SERVER_URL: str | None = None
+    TIKA_SERVER_VERSION: str | None = None
+    DOCLING_SERVER_URL: str | None = None
+    DOCLING_API_KEY: str | None = None
+    DOCLING_PARAMS: dict | None = None
+    DOCUMENT_INTELLIGENCE_ENDPOINT: str | None = None
+    DOCUMENT_INTELLIGENCE_KEY: str | None = None
+    DOCUMENT_INTELLIGENCE_MODEL: str | None = None
+    MISTRAL_OCR_API_BASE_URL: str | None = None
+    MISTRAL_OCR_API_KEY: str | None = None
+    MISTRAL_OCR_USE_BASE64: bool | None = None
+    PADDLEOCR_VL_BASE_URL: str | None = None
+    PADDLEOCR_VL_TOKEN: str | None = None
 
     # MinerU settings
-    MINERU_API_MODE: Optional[str] = None
-    MINERU_API_URL: Optional[str] = None
-    MINERU_API_KEY: Optional[str] = None
-    MINERU_API_TIMEOUT: Optional[str] = None
-    MINERU_PARAMS: Optional[dict] = None
+    MINERU_API_MODE: str | None = None
+    MINERU_API_URL: str | None = None
+    MINERU_API_KEY: str | None = None
+    MINERU_API_TIMEOUT: int | None = None
+    MINERU_PARAMS: dict | None = None
+    MINERU_FILE_EXTENSIONS: list[str] | None = None
 
     # Reranking settings
-    RAG_RERANKING_MODEL: Optional[str] = None
-    RAG_RERANKING_ENGINE: Optional[str] = None
-    RAG_RERANKING_BATCH_SIZE: Optional[int] = None
-    RAG_EXTERNAL_RERANKER_URL: Optional[str] = None
-    RAG_EXTERNAL_RERANKER_API_KEY: Optional[str] = None
-    RAG_EXTERNAL_RERANKER_TIMEOUT: Optional[str] = None
+    RAG_RERANKING_MODEL: str | None = None
+    RAG_RERANKING_ENGINE: str | None = None
+    RAG_RERANKING_BATCH_SIZE: int | None = None
+    RAG_EXTERNAL_RERANKER_URL: str | None = None
+    RAG_EXTERNAL_RERANKER_API_KEY: str | None = None
+    RAG_EXTERNAL_RERANKER_TIMEOUT: str | None = None
 
     # Chunking settings
-    TEXT_SPLITTER: Optional[str] = None
-    ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER: Optional[bool] = None
-    CHUNK_SIZE: Optional[int] = None
-    CHUNK_MIN_SIZE_TARGET: Optional[int] = None
-    CHUNK_OVERLAP: Optional[int] = None
+    TEXT_SPLITTER: str | None = None
+    RAG_TOKENIZER_MODEL: str | None = None
+    ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER: bool | None = None
+    CHUNK_SIZE: int | None = None
+    CHUNK_MIN_SIZE_TARGET: int | None = None
+    CHUNK_OVERLAP: int | None = None
 
     # File upload settings
-    FILE_MAX_SIZE: Optional[Union[int, str]] = None
-    FILE_MAX_COUNT: Optional[Union[int, str]] = None
-    FILE_IMAGE_COMPRESSION_WIDTH: Optional[Union[int, str]] = None
-    FILE_IMAGE_COMPRESSION_HEIGHT: Optional[Union[int, str]] = None
-    ALLOWED_FILE_EXTENSIONS: Optional[List[str]] = None
+    FILE_MAX_SIZE: Union[int, str | None] = None
+    FILE_MAX_COUNT: Union[int, str | None] = None
+    FILE_IMAGE_COMPRESSION_WIDTH: Union[int, str | None] = None
+    FILE_IMAGE_COMPRESSION_HEIGHT: Union[int, str | None] = None
+    ALLOWED_FILE_EXTENSIONS: list[str] | None = None
 
     # Integration settings
-    ENABLE_GOOGLE_DRIVE_INTEGRATION: Optional[bool] = None
-    ENABLE_ONEDRIVE_INTEGRATION: Optional[bool] = None
-    ENABLE_CONFLUENCE_INTEGRATION: Optional[bool] = None
+    ENABLE_GOOGLE_DRIVE_INTEGRATION: bool | None = None
+    ENABLE_ONEDRIVE_INTEGRATION: bool | None = None
+    ENABLE_CONFLUENCE_INTEGRATION: bool | None = None  # [Gradient]
 
     # Web search settings
-    web: Optional[WebConfig] = None
-    EXTERNAL_DOCUMENT_LOADER_HEADERS: Optional[dict] = None
-    MINERU_FILE_EXTENSIONS: Optional[list[str]] = None
-    RAG_TOKENIZER_MODEL: Optional[str] = None
+    web: WebConfig | None = None
 
 
 @router.post('/config/update')
 async def update_rag_config(request: Request, form_data: ConfigForm, user=Depends(get_admin_user)):
     # RAG settings
-    config = await get_rag_config_state()
-    _original_config = dict(vars(config))
-    # [Gradient] Keep the re-synced form fields in the per-key persistence path.
-    if form_data.EXTERNAL_DOCUMENT_LOADER_HEADERS is not None:
-        config.EXTERNAL_DOCUMENT_LOADER_HEADERS = form_data.EXTERNAL_DOCUMENT_LOADER_HEADERS
-    if form_data.MINERU_FILE_EXTENSIONS is not None:
-        config.MINERU_FILE_EXTENSIONS = form_data.MINERU_FILE_EXTENSIONS
-    if form_data.MISTRAL_OCR_USE_BASE64 is not None:
-        config.MISTRAL_OCR_USE_BASE64 = form_data.MISTRAL_OCR_USE_BASE64
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
+    if USE_SLIM:
+        if (
+            form_data.web
+            and form_data.web.WEB_SEARCH_ENGINE == 'duckduckgo'
+            and config['web.search.engine'] != 'duckduckgo'
+        ):
+            raise HTTPException(
+                400,
+                'DDGS is unavailable in slim. Configure another web search provider in Admin Settings > Web Search.',
+            )
+        if (
+            form_data.web
+            and form_data.web.WEB_LOADER_ENGINE == 'playwright'
+            and config['web.loader.engine'] != 'playwright'
+        ):
+            raise HTTPException(
+                400, 'Playwright is unavailable in slim. Use basic HTTP fetching or an external web loader.'
+            )
+        if form_data.TEXT_SPLITTER == 'token_transformers' and config['rag.text_splitter'] != 'token_transformers':
+            raise HTTPException(
+                400, 'Transformers tokenization is unavailable in slim. Use character or token splitting.'
+            )
+        reranker_engine = (
+            form_data.RAG_RERANKING_ENGINE
+            if form_data.RAG_RERANKING_ENGINE is not None
+            else config['rag.reranking_engine']
+        )
+        reranker_model = (
+            form_data.RAG_RERANKING_MODEL
+            if form_data.RAG_RERANKING_MODEL is not None
+            else config['rag.reranking_model']
+        )
+        if (
+            reranker_engine != 'external'
+            and reranker_model
+            and (reranker_engine != config['rag.reranking_engine'] or reranker_model != config['rag.reranking_model'])
+        ):
+            raise HTTPException(
+                400, 'Slim requires an external reranker, or an empty reranking model for cosine scoring.'
+            )
+    # Only write submitted values; unrelated settings may have changed since this read.
+    updates = {
+        RETRIEVAL_CONFIG_KEYS[field]: value
+        for field, value in form_data.model_dump(exclude={'web'}, exclude_none=True).items()
+    }
     if form_data.RAG_TOKENIZER_MODEL is not None:
-        config.RAG_TOKENIZER_MODEL = form_data.RAG_TOKENIZER_MODEL
-    config.RAG_TEMPLATE = form_data.RAG_TEMPLATE if form_data.RAG_TEMPLATE is not None else config.RAG_TEMPLATE
-    config.TOP_K = form_data.TOP_K if form_data.TOP_K is not None else config.TOP_K
-    config.BYPASS_EMBEDDING_AND_RETRIEVAL = (
-        form_data.BYPASS_EMBEDDING_AND_RETRIEVAL
-        if form_data.BYPASS_EMBEDDING_AND_RETRIEVAL is not None
-        else config.BYPASS_EMBEDDING_AND_RETRIEVAL
-    )
-    config.RAG_FULL_CONTEXT = (
-        form_data.RAG_FULL_CONTEXT if form_data.RAG_FULL_CONTEXT is not None else config.RAG_FULL_CONTEXT
-    )
+        updates['rag.tokenizer_model'] = form_data.RAG_TOKENIZER_MODEL.strip()
+    for field in ('FILE_MAX_SIZE', 'FILE_MAX_COUNT', 'FILE_IMAGE_COMPRESSION_WIDTH', 'FILE_IMAGE_COMPRESSION_HEIGHT'):
+        if getattr(form_data, field) == '':
+            updates[RETRIEVAL_CONFIG_KEYS[field]] = None
 
-    # Hybrid search settings
-    config.ENABLE_RAG_HYBRID_SEARCH = (
-        form_data.ENABLE_RAG_HYBRID_SEARCH
-        if form_data.ENABLE_RAG_HYBRID_SEARCH is not None
-        else config.ENABLE_RAG_HYBRID_SEARCH
-    )
-    config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = (
-        form_data.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
-        if form_data.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS is not None
-        else config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
-    )
-
-    config.TOP_K_RERANKER = form_data.TOP_K_RERANKER if form_data.TOP_K_RERANKER is not None else config.TOP_K_RERANKER
-    config.RELEVANCE_THRESHOLD = (
-        form_data.RELEVANCE_THRESHOLD if form_data.RELEVANCE_THRESHOLD is not None else config.RELEVANCE_THRESHOLD
-    )
-    config.HYBRID_BM25_WEIGHT = (
-        form_data.HYBRID_BM25_WEIGHT if form_data.HYBRID_BM25_WEIGHT is not None else config.HYBRID_BM25_WEIGHT
-    )
-
-    # Content extraction settings
-    config.CONTENT_EXTRACTION_ENGINE = (
-        form_data.CONTENT_EXTRACTION_ENGINE
-        if form_data.CONTENT_EXTRACTION_ENGINE is not None
-        else config.CONTENT_EXTRACTION_ENGINE
-    )
-    config.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES = (
-        form_data.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES
-        if form_data.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES is not None
-        else config.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES
-    )
-    config.PDF_EXTRACT_IMAGES = (
-        form_data.PDF_EXTRACT_IMAGES if form_data.PDF_EXTRACT_IMAGES is not None else config.PDF_EXTRACT_IMAGES
-    )
-    config.PDF_LOADER_MODE = (
-        form_data.PDF_LOADER_MODE if form_data.PDF_LOADER_MODE is not None else config.PDF_LOADER_MODE
-    )
-    config.DATALAB_MARKER_API_KEY = (
-        form_data.DATALAB_MARKER_API_KEY
-        if form_data.DATALAB_MARKER_API_KEY is not None
-        else config.DATALAB_MARKER_API_KEY
-    )
-    config.DATALAB_MARKER_API_BASE_URL = (
-        form_data.DATALAB_MARKER_API_BASE_URL
-        if form_data.DATALAB_MARKER_API_BASE_URL is not None
-        else config.DATALAB_MARKER_API_BASE_URL
-    )
-    config.DATALAB_MARKER_ADDITIONAL_CONFIG = (
-        form_data.DATALAB_MARKER_ADDITIONAL_CONFIG
-        if form_data.DATALAB_MARKER_ADDITIONAL_CONFIG is not None
-        else config.DATALAB_MARKER_ADDITIONAL_CONFIG
-    )
-    config.DATALAB_MARKER_SKIP_CACHE = (
-        form_data.DATALAB_MARKER_SKIP_CACHE
-        if form_data.DATALAB_MARKER_SKIP_CACHE is not None
-        else config.DATALAB_MARKER_SKIP_CACHE
-    )
-    config.DATALAB_MARKER_FORCE_OCR = (
-        form_data.DATALAB_MARKER_FORCE_OCR
-        if form_data.DATALAB_MARKER_FORCE_OCR is not None
-        else config.DATALAB_MARKER_FORCE_OCR
-    )
-    config.DATALAB_MARKER_PAGINATE = (
-        form_data.DATALAB_MARKER_PAGINATE
-        if form_data.DATALAB_MARKER_PAGINATE is not None
-        else config.DATALAB_MARKER_PAGINATE
-    )
-    config.DATALAB_MARKER_STRIP_EXISTING_OCR = (
-        form_data.DATALAB_MARKER_STRIP_EXISTING_OCR
-        if form_data.DATALAB_MARKER_STRIP_EXISTING_OCR is not None
-        else config.DATALAB_MARKER_STRIP_EXISTING_OCR
-    )
-    config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION = (
-        form_data.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION
-        if form_data.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION is not None
-        else config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION
-    )
-    config.DATALAB_MARKER_FORMAT_LINES = (
-        form_data.DATALAB_MARKER_FORMAT_LINES
-        if form_data.DATALAB_MARKER_FORMAT_LINES is not None
-        else config.DATALAB_MARKER_FORMAT_LINES
-    )
-    config.DATALAB_MARKER_OUTPUT_FORMAT = (
-        form_data.DATALAB_MARKER_OUTPUT_FORMAT
-        if form_data.DATALAB_MARKER_OUTPUT_FORMAT is not None
-        else config.DATALAB_MARKER_OUTPUT_FORMAT
-    )
-    config.DATALAB_MARKER_USE_LLM = (
-        form_data.DATALAB_MARKER_USE_LLM
-        if form_data.DATALAB_MARKER_USE_LLM is not None
-        else config.DATALAB_MARKER_USE_LLM
-    )
-    config.EXTERNAL_DOCUMENT_LOADER_URL = (
-        form_data.EXTERNAL_DOCUMENT_LOADER_URL
-        if form_data.EXTERNAL_DOCUMENT_LOADER_URL is not None
-        else config.EXTERNAL_DOCUMENT_LOADER_URL
-    )
-    config.EXTERNAL_DOCUMENT_LOADER_API_KEY = (
-        form_data.EXTERNAL_DOCUMENT_LOADER_API_KEY
-        if form_data.EXTERNAL_DOCUMENT_LOADER_API_KEY is not None
-        else config.EXTERNAL_DOCUMENT_LOADER_API_KEY
-    )
-    config.TIKA_SERVER_URL = (
-        form_data.TIKA_SERVER_URL if form_data.TIKA_SERVER_URL is not None else config.TIKA_SERVER_URL
-    )
-    config.TIKA_SERVER_VERSION = (
-        form_data.TIKA_SERVER_VERSION if form_data.TIKA_SERVER_VERSION is not None else config.TIKA_SERVER_VERSION
-    )
-    config.DOCLING_SERVER_URL = (
-        form_data.DOCLING_SERVER_URL if form_data.DOCLING_SERVER_URL is not None else config.DOCLING_SERVER_URL
-    )
-    config.DOCLING_API_KEY = (
-        form_data.DOCLING_API_KEY if form_data.DOCLING_API_KEY is not None else config.DOCLING_API_KEY
-    )
-    config.DOCLING_PARAMS = form_data.DOCLING_PARAMS if form_data.DOCLING_PARAMS is not None else config.DOCLING_PARAMS
-    config.DOCUMENT_INTELLIGENCE_ENDPOINT = (
-        form_data.DOCUMENT_INTELLIGENCE_ENDPOINT
-        if form_data.DOCUMENT_INTELLIGENCE_ENDPOINT is not None
-        else config.DOCUMENT_INTELLIGENCE_ENDPOINT
-    )
-    config.DOCUMENT_INTELLIGENCE_KEY = (
-        form_data.DOCUMENT_INTELLIGENCE_KEY
-        if form_data.DOCUMENT_INTELLIGENCE_KEY is not None
-        else config.DOCUMENT_INTELLIGENCE_KEY
-    )
-    config.DOCUMENT_INTELLIGENCE_MODEL = (
-        form_data.DOCUMENT_INTELLIGENCE_MODEL
-        if form_data.DOCUMENT_INTELLIGENCE_MODEL is not None
-        else config.DOCUMENT_INTELLIGENCE_MODEL
-    )
-
-    config.MISTRAL_OCR_API_BASE_URL = (
-        form_data.MISTRAL_OCR_API_BASE_URL
-        if form_data.MISTRAL_OCR_API_BASE_URL is not None
-        else config.MISTRAL_OCR_API_BASE_URL
-    )
-    config.MISTRAL_OCR_API_KEY = (
-        form_data.MISTRAL_OCR_API_KEY if form_data.MISTRAL_OCR_API_KEY is not None else config.MISTRAL_OCR_API_KEY
-    )
-    config.PADDLEOCR_VL_BASE_URL = (
-        form_data.PADDLEOCR_VL_BASE_URL if form_data.PADDLEOCR_VL_BASE_URL is not None else config.PADDLEOCR_VL_BASE_URL
-    )
-    config.PADDLEOCR_VL_TOKEN = (
-        form_data.PADDLEOCR_VL_TOKEN if form_data.PADDLEOCR_VL_TOKEN is not None else config.PADDLEOCR_VL_TOKEN
-    )
-
-    # MinerU settings
-    config.MINERU_API_MODE = (
-        form_data.MINERU_API_MODE if form_data.MINERU_API_MODE is not None else config.MINERU_API_MODE
-    )
-    config.MINERU_API_URL = form_data.MINERU_API_URL if form_data.MINERU_API_URL is not None else config.MINERU_API_URL
-    config.MINERU_API_KEY = form_data.MINERU_API_KEY if form_data.MINERU_API_KEY is not None else config.MINERU_API_KEY
-    config.MINERU_API_TIMEOUT = (
-        form_data.MINERU_API_TIMEOUT if form_data.MINERU_API_TIMEOUT is not None else config.MINERU_API_TIMEOUT
-    )
-    config.MINERU_PARAMS = form_data.MINERU_PARAMS if form_data.MINERU_PARAMS is not None else config.MINERU_PARAMS
-
-    # Reranking settings
-    if config.RAG_RERANKING_ENGINE == '':
-        # Unloading the internal reranker and clear VRAM memory
+    # Unload the previous internal reranker before applying its new settings.
+    if config['rag.reranking_engine'] == '':
         request.app.state.rf = None
         request.app.state.RERANKING_FUNCTION = None
         import gc
@@ -1139,358 +1016,194 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-    config.RAG_RERANKING_ENGINE = (
-        form_data.RAG_RERANKING_ENGINE if form_data.RAG_RERANKING_ENGINE is not None else config.RAG_RERANKING_ENGINE
-    )
 
-    config.RAG_EXTERNAL_RERANKER_URL = (
-        form_data.RAG_EXTERNAL_RERANKER_URL
-        if form_data.RAG_EXTERNAL_RERANKER_URL is not None
-        else config.RAG_EXTERNAL_RERANKER_URL
-    )
-
-    config.RAG_EXTERNAL_RERANKER_API_KEY = (
-        form_data.RAG_EXTERNAL_RERANKER_API_KEY
-        if form_data.RAG_EXTERNAL_RERANKER_API_KEY is not None
-        else config.RAG_EXTERNAL_RERANKER_API_KEY
-    )
-
-    config.RAG_EXTERNAL_RERANKER_TIMEOUT = (
-        form_data.RAG_EXTERNAL_RERANKER_TIMEOUT
-        if form_data.RAG_EXTERNAL_RERANKER_TIMEOUT is not None
-        else config.RAG_EXTERNAL_RERANKER_TIMEOUT
-    )
-
-    config.RAG_RERANKING_BATCH_SIZE = (
-        form_data.RAG_RERANKING_BATCH_SIZE
-        if form_data.RAG_RERANKING_BATCH_SIZE is not None
-        else config.RAG_RERANKING_BATCH_SIZE
-    )
-
-    log.info('Updating reranking model: %s to %s', config.RAG_RERANKING_MODEL, form_data.RAG_RERANKING_MODEL)
+    if form_data.RAG_RERANKING_MODEL is not None:
+        log.info('Updating reranking model: %s to %s', config['rag.reranking_model'], form_data.RAG_RERANKING_MODEL)
+    config.update(updates)
     try:
-        config.RAG_RERANKING_MODEL = (
-            form_data.RAG_RERANKING_MODEL if form_data.RAG_RERANKING_MODEL is not None else config.RAG_RERANKING_MODEL
-        )
-
-        try:
-            if config.ENABLE_RAG_HYBRID_SEARCH and not config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-                request.app.state.rf = get_rf(
-                    config.RAG_RERANKING_ENGINE,
-                    config.RAG_RERANKING_MODEL,
-                    config.RAG_EXTERNAL_RERANKER_URL,
-                    config.RAG_EXTERNAL_RERANKER_API_KEY,
-                    config.RAG_EXTERNAL_RERANKER_TIMEOUT,
-                )
-
-                request.app.state.RERANKING_FUNCTION = get_reranking_function(
-                    config.RAG_RERANKING_ENGINE,
-                    config.RAG_RERANKING_MODEL,
-                    request.app.state.rf,
-                    reranking_batch_size=config.RAG_RERANKING_BATCH_SIZE,
-                )
-        except Exception as e:
-            log.error(f'Error loading reranking model: {e}')
-            config.ENABLE_RAG_HYBRID_SEARCH = False
+        if config['rag.enable_hybrid_search'] and not config['rag.bypass_embedding_and_retrieval']:
+            request.app.state.rf = get_rf(
+                config['rag.reranking_engine'],
+                config['rag.reranking_model'],
+                config['rag.external_reranker_url'],
+                config['rag.external_reranker_api_key'],
+                config['rag.external_reranker_timeout'],
+            )
+            request.app.state.RERANKING_FUNCTION = get_reranking_function(
+                config['rag.reranking_engine'],
+                config['rag.reranking_model'],
+                request.app.state.rf,
+                reranking_batch_size=config['rag.reranking_batch_size'],
+            )
     except Exception as e:
-        log.exception(f'Problem updating reranking model: {e}')
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DEFAULT(e),
-        )
-
-    # Chunking settings
-    config.TEXT_SPLITTER = form_data.TEXT_SPLITTER if form_data.TEXT_SPLITTER is not None else config.TEXT_SPLITTER
-    config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER = (
-        form_data.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER
-        if form_data.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER is not None
-        else config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER
-    )
-    config.CHUNK_SIZE = form_data.CHUNK_SIZE if form_data.CHUNK_SIZE is not None else config.CHUNK_SIZE
-    config.CHUNK_MIN_SIZE_TARGET = (
-        form_data.CHUNK_MIN_SIZE_TARGET if form_data.CHUNK_MIN_SIZE_TARGET is not None else config.CHUNK_MIN_SIZE_TARGET
-    )
-    config.CHUNK_OVERLAP = form_data.CHUNK_OVERLAP if form_data.CHUNK_OVERLAP is not None else config.CHUNK_OVERLAP
-
-    # File upload settings
-    # Empty string means "clear to None" (unlimited/no compression),
-    # None means "don't change", int means "set to this value"
-    if form_data.FILE_MAX_SIZE is not None:
-        config.FILE_MAX_SIZE = None if form_data.FILE_MAX_SIZE == '' else form_data.FILE_MAX_SIZE
-    if form_data.FILE_MAX_COUNT is not None:
-        config.FILE_MAX_COUNT = None if form_data.FILE_MAX_COUNT == '' else form_data.FILE_MAX_COUNT
-    if form_data.FILE_IMAGE_COMPRESSION_WIDTH is not None:
-        config.FILE_IMAGE_COMPRESSION_WIDTH = (
-            None if form_data.FILE_IMAGE_COMPRESSION_WIDTH == '' else form_data.FILE_IMAGE_COMPRESSION_WIDTH
-        )
-    if form_data.FILE_IMAGE_COMPRESSION_HEIGHT is not None:
-        config.FILE_IMAGE_COMPRESSION_HEIGHT = (
-            None if form_data.FILE_IMAGE_COMPRESSION_HEIGHT == '' else form_data.FILE_IMAGE_COMPRESSION_HEIGHT
-        )
-
-    config.ALLOWED_FILE_EXTENSIONS = (
-        form_data.ALLOWED_FILE_EXTENSIONS
-        if form_data.ALLOWED_FILE_EXTENSIONS is not None
-        else config.ALLOWED_FILE_EXTENSIONS
-    )
-
-    # Integration settings
-    config.ENABLE_GOOGLE_DRIVE_INTEGRATION = (
-        form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION
-        if form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION is not None
-        else config.ENABLE_GOOGLE_DRIVE_INTEGRATION
-    )
-    config.ENABLE_ONEDRIVE_INTEGRATION = (
-        form_data.ENABLE_ONEDRIVE_INTEGRATION
-        if form_data.ENABLE_ONEDRIVE_INTEGRATION is not None
-        else config.ENABLE_ONEDRIVE_INTEGRATION
-    )
-    config.ENABLE_CONFLUENCE_INTEGRATION = (
-        form_data.ENABLE_CONFLUENCE_INTEGRATION
-        if form_data.ENABLE_CONFLUENCE_INTEGRATION is not None
-        else config.ENABLE_CONFLUENCE_INTEGRATION
-    )
+        log.error(f'Error loading reranking model: {e}')
+        updates['rag.enable_hybrid_search'] = False
+        config['rag.enable_hybrid_search'] = False
 
     if form_data.web is not None:
-        if form_data.web.ENABLE_WEB_SEARCH_CONFIRMATION is not None:
-            config.ENABLE_WEB_SEARCH_CONFIRMATION = form_data.web.ENABLE_WEB_SEARCH_CONFIRMATION
-        if form_data.web.WEB_SEARCH_CONFIRMATION_CONTENT is not None:
-            config.WEB_SEARCH_CONFIRMATION_CONTENT = form_data.web.WEB_SEARCH_CONFIRMATION_CONTENT
-        if form_data.web.SERPHOUSE_API_KEY is not None:
-            config.SERPHOUSE_API_KEY = form_data.web.SERPHOUSE_API_KEY
-        if form_data.web.SERPHOUSE_DOMAIN is not None:
-            config.SERPHOUSE_DOMAIN = form_data.web.SERPHOUSE_DOMAIN
-        if form_data.web.MICROSOFT_WEB_IQ_API_BASE_URL is not None:
-            config.MICROSOFT_WEB_IQ_API_BASE_URL = form_data.web.MICROSOFT_WEB_IQ_API_BASE_URL
-        if form_data.web.MICROSOFT_WEB_IQ_API_KEY is not None:
-            config.MICROSOFT_WEB_IQ_API_KEY = form_data.web.MICROSOFT_WEB_IQ_API_KEY
-        if form_data.web.MICROSOFT_WEB_IQ_LANGUAGE is not None:
-            config.MICROSOFT_WEB_IQ_LANGUAGE = form_data.web.MICROSOFT_WEB_IQ_LANGUAGE
-        if form_data.web.LINKUP_API_KEY is not None:
-            config.LINKUP_API_KEY = form_data.web.LINKUP_API_KEY
-        if form_data.web.LINKUP_SEARCH_PARAMS is not None:
-            config.LINKUP_SEARCH_PARAMS = form_data.web.LINKUP_SEARCH_PARAMS
-        # Web search settings
-        config.ENABLE_WEB_SEARCH = form_data.web.ENABLE_WEB_SEARCH
-        config.WEB_SEARCH_ENGINE = form_data.web.WEB_SEARCH_ENGINE
-        config.WEB_SEARCH_TRUST_ENV = form_data.web.WEB_SEARCH_TRUST_ENV
-        config.WEB_SEARCH_RESULT_COUNT = form_data.web.WEB_SEARCH_RESULT_COUNT
-        config.WEB_SEARCH_CONCURRENT_REQUESTS = form_data.web.WEB_SEARCH_CONCURRENT_REQUESTS
-        config.WEB_FETCH_MAX_CONTENT_LENGTH = form_data.web.WEB_FETCH_MAX_CONTENT_LENGTH
-        config.WEB_LOADER_CONCURRENT_REQUESTS = form_data.web.WEB_LOADER_CONCURRENT_REQUESTS
-        config.WEB_SEARCH_DOMAIN_FILTER_LIST = form_data.web.WEB_SEARCH_DOMAIN_FILTER_LIST
-        config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = form_data.web.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
-        config.BYPASS_WEB_SEARCH_WEB_LOADER = form_data.web.BYPASS_WEB_SEARCH_WEB_LOADER
-        config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = form_data.web.OLLAMA_CLOUD_WEB_SEARCH_API_KEY
-        config.SEARXNG_QUERY_URL = form_data.web.SEARXNG_QUERY_URL
-        config.SEARXNG_LANGUAGE = form_data.web.SEARXNG_LANGUAGE
-        config.OPENSERP_BASE_URL = form_data.web.OPENSERP_BASE_URL
-        config.YACY_QUERY_URL = form_data.web.YACY_QUERY_URL
-        config.YACY_USERNAME = form_data.web.YACY_USERNAME
-        config.YACY_PASSWORD = form_data.web.YACY_PASSWORD
-        config.GOOGLE_PSE_API_KEY = form_data.web.GOOGLE_PSE_API_KEY
-        config.GOOGLE_PSE_ENGINE_ID = form_data.web.GOOGLE_PSE_ENGINE_ID
-        config.BRAVE_SEARCH_API_KEY = form_data.web.BRAVE_SEARCH_API_KEY
-        if form_data.web.BRAVE_SEARCH_CONTEXT_TOKENS is not None:
-            config.BRAVE_SEARCH_CONTEXT_TOKENS = form_data.web.BRAVE_SEARCH_CONTEXT_TOKENS
-        config.KAGI_SEARCH_API_KEY = form_data.web.KAGI_SEARCH_API_KEY
-        config.MOJEEK_SEARCH_API_KEY = form_data.web.MOJEEK_SEARCH_API_KEY
-        config.BOCHA_SEARCH_API_KEY = form_data.web.BOCHA_SEARCH_API_KEY
-        config.SERPSTACK_API_KEY = form_data.web.SERPSTACK_API_KEY
-        config.SERPSTACK_HTTPS = form_data.web.SERPSTACK_HTTPS
-        config.SERPER_API_KEY = form_data.web.SERPER_API_KEY
-        config.SERPLY_API_KEY = form_data.web.SERPLY_API_KEY
-        config.DDGS_BACKEND = form_data.web.DDGS_BACKEND
-        config.TAVILY_API_KEY = form_data.web.TAVILY_API_KEY
-        config.SEARCHAPI_API_KEY = form_data.web.SEARCHAPI_API_KEY
-        config.SEARCHAPI_ENGINE = form_data.web.SEARCHAPI_ENGINE
-        config.SERPAPI_API_KEY = form_data.web.SERPAPI_API_KEY
-        config.SERPAPI_ENGINE = form_data.web.SERPAPI_ENGINE
-        config.JINA_API_KEY = form_data.web.JINA_API_KEY
-        config.JINA_API_BASE_URL = form_data.web.JINA_API_BASE_URL
-        config.BING_SEARCH_V7_ENDPOINT = form_data.web.BING_SEARCH_V7_ENDPOINT
-        config.BING_SEARCH_V7_SUBSCRIPTION_KEY = form_data.web.BING_SEARCH_V7_SUBSCRIPTION_KEY
-        config.EXA_API_KEY = form_data.web.EXA_API_KEY
-        config.PERPLEXITY_API_KEY = form_data.web.PERPLEXITY_API_KEY
-        config.PERPLEXITY_MODEL = form_data.web.PERPLEXITY_MODEL
-        config.PERPLEXITY_SEARCH_CONTEXT_USAGE = form_data.web.PERPLEXITY_SEARCH_CONTEXT_USAGE
-        config.PERPLEXITY_SEARCH_API_URL = form_data.web.PERPLEXITY_SEARCH_API_URL
-        config.SOUGOU_API_SID = form_data.web.SOUGOU_API_SID
-        config.SOUGOU_API_SK = form_data.web.SOUGOU_API_SK
+        for field, value in form_data.web.model_dump(exclude_unset=True).items():
+            if field == 'YOUTUBE_LOADER_TRANSLATION':
+                request.app.state.YOUTUBE_LOADER_TRANSLATION = value
+            elif field == 'BRAVE_SEARCH_CONTEXT_TOKENS' and value is None:
+                continue
+            else:
+                updates[RETRIEVAL_CONFIG_KEYS[field]] = value
+        config.update(updates)
 
-        # Web loader settings
-        config.WEB_LOADER_ENGINE = form_data.web.WEB_LOADER_ENGINE
-        config.WEB_LOADER_TIMEOUT = form_data.web.WEB_LOADER_TIMEOUT
+    await Config.upsert(updates)
 
-        config.ENABLE_WEB_LOADER_SSL_VERIFICATION = form_data.web.ENABLE_WEB_LOADER_SSL_VERIFICATION
-        config.PLAYWRIGHT_WS_URL = form_data.web.PLAYWRIGHT_WS_URL
-        config.PLAYWRIGHT_TIMEOUT = form_data.web.PLAYWRIGHT_TIMEOUT
-        config.FIRECRAWL_API_KEY = form_data.web.FIRECRAWL_API_KEY
-        config.FIRECRAWL_API_BASE_URL = form_data.web.FIRECRAWL_API_BASE_URL
-        config.FIRECRAWL_TIMEOUT = form_data.web.FIRECRAWL_TIMEOUT
-        config.EXTERNAL_WEB_SEARCH_URL = form_data.web.EXTERNAL_WEB_SEARCH_URL
-        config.EXTERNAL_WEB_SEARCH_API_KEY = form_data.web.EXTERNAL_WEB_SEARCH_API_KEY
-        config.EXTERNAL_WEB_LOADER_URL = form_data.web.EXTERNAL_WEB_LOADER_URL
-        config.EXTERNAL_WEB_LOADER_API_KEY = form_data.web.EXTERNAL_WEB_LOADER_API_KEY
-        config.TAVILY_EXTRACT_DEPTH = form_data.web.TAVILY_EXTRACT_DEPTH
-        config.YOUTUBE_LOADER_LANGUAGE = form_data.web.YOUTUBE_LOADER_LANGUAGE
-        config.YOUTUBE_LOADER_PROXY_URL = form_data.web.YOUTUBE_LOADER_PROXY_URL
-        request.app.state.YOUTUBE_LOADER_TRANSLATION = form_data.web.YOUTUBE_LOADER_TRANSLATION
-        config.YANDEX_WEB_SEARCH_URL = form_data.web.YANDEX_WEB_SEARCH_URL
-        config.YANDEX_WEB_SEARCH_API_KEY = form_data.web.YANDEX_WEB_SEARCH_API_KEY
-        config.YANDEX_WEB_SEARCH_CONFIG = form_data.web.YANDEX_WEB_SEARCH_CONFIG
-        config.YOUCOM_API_KEY = form_data.web.YOUCOM_API_KEY
-
-    await Config.upsert({RAG_CONFIG_KEYS[k]: v for k, v in vars(config).items() if _original_config.get(k) != v})
     return {
         'status': True,
         # RAG settings
-        'RAG_TEMPLATE': config.RAG_TEMPLATE,
-        'TOP_K': config.TOP_K,
-        'BYPASS_EMBEDDING_AND_RETRIEVAL': config.BYPASS_EMBEDDING_AND_RETRIEVAL,
-        'RAG_FULL_CONTEXT': config.RAG_FULL_CONTEXT,
+        'RAG_TEMPLATE': config['rag.template'],
+        'TOP_K': config['rag.top_k'],
+        'BYPASS_EMBEDDING_AND_RETRIEVAL': config['rag.bypass_embedding_and_retrieval'],
+        'RAG_FULL_CONTEXT': config['rag.full_context'],
         # Hybrid search settings
-        'ENABLE_RAG_HYBRID_SEARCH': config.ENABLE_RAG_HYBRID_SEARCH,
-        'TOP_K_RERANKER': config.TOP_K_RERANKER,
-        'RELEVANCE_THRESHOLD': config.RELEVANCE_THRESHOLD,
-        'HYBRID_BM25_WEIGHT': config.HYBRID_BM25_WEIGHT,
+        'ENABLE_RAG_HYBRID_SEARCH': config['rag.enable_hybrid_search'],
+        'TOP_K_RERANKER': config['rag.top_k_reranker'],
+        'RELEVANCE_THRESHOLD': config['rag.relevance_threshold'],
+        'HYBRID_BM25_WEIGHT': config['rag.hybrid_bm25_weight'],
         # Content extraction settings
-        'CONTENT_EXTRACTION_ENGINE': config.CONTENT_EXTRACTION_ENGINE,
-        'CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES': config.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES,
-        'PDF_EXTRACT_IMAGES': config.PDF_EXTRACT_IMAGES,
-        'PDF_LOADER_MODE': config.PDF_LOADER_MODE,
-        'DATALAB_MARKER_API_KEY': config.DATALAB_MARKER_API_KEY,
-        'DATALAB_MARKER_API_BASE_URL': config.DATALAB_MARKER_API_BASE_URL,
-        'DATALAB_MARKER_ADDITIONAL_CONFIG': config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-        'DATALAB_MARKER_SKIP_CACHE': config.DATALAB_MARKER_SKIP_CACHE,
-        'DATALAB_MARKER_FORCE_OCR': config.DATALAB_MARKER_FORCE_OCR,
-        'DATALAB_MARKER_PAGINATE': config.DATALAB_MARKER_PAGINATE,
-        'DATALAB_MARKER_STRIP_EXISTING_OCR': config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-        'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-        'DATALAB_MARKER_USE_LLM': config.DATALAB_MARKER_USE_LLM,
-        'DATALAB_MARKER_OUTPUT_FORMAT': config.DATALAB_MARKER_OUTPUT_FORMAT,
-        'EXTERNAL_DOCUMENT_LOADER_URL': config.EXTERNAL_DOCUMENT_LOADER_URL,
-        'EXTERNAL_DOCUMENT_LOADER_API_KEY': config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-        'EXTERNAL_DOCUMENT_LOADER_HEADERS': config.EXTERNAL_DOCUMENT_LOADER_HEADERS,
-        'TIKA_SERVER_URL': config.TIKA_SERVER_URL,
-        'TIKA_SERVER_VERSION': config.TIKA_SERVER_VERSION,
-        'DOCLING_SERVER_URL': config.DOCLING_SERVER_URL,
-        'DOCLING_API_KEY': config.DOCLING_API_KEY,
-        'DOCLING_PARAMS': config.DOCLING_PARAMS,
-        'DOCUMENT_INTELLIGENCE_ENDPOINT': config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-        'DOCUMENT_INTELLIGENCE_KEY': config.DOCUMENT_INTELLIGENCE_KEY,
-        'DOCUMENT_INTELLIGENCE_MODEL': config.DOCUMENT_INTELLIGENCE_MODEL,
-        'MISTRAL_OCR_API_BASE_URL': config.MISTRAL_OCR_API_BASE_URL,
-        'MISTRAL_OCR_API_KEY': config.MISTRAL_OCR_API_KEY,
-        'MISTRAL_OCR_USE_BASE64': config.MISTRAL_OCR_USE_BASE64,
-        'PADDLEOCR_VL_BASE_URL': config.PADDLEOCR_VL_BASE_URL,
-        'PADDLEOCR_VL_TOKEN': config.PADDLEOCR_VL_TOKEN,
+        'CONTENT_EXTRACTION_ENGINE': config['rag.content_extraction_engine'],
+        'CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES': config['rag.content_extraction.supported_media_mime_types'],
+        'PDF_EXTRACT_IMAGES': config['rag.pdf_extract_images'],
+        'PDF_LOADER_MODE': config['rag.pdf_loader_mode'],
+        'DATALAB_MARKER_API_KEY': config['rag.datalab_marker_api_key'],
+        'DATALAB_MARKER_API_BASE_URL': config['rag.datalab_marker_api_base_url'],
+        'DATALAB_MARKER_ADDITIONAL_CONFIG': config['rag.datalab_marker_additional_config'],
+        'DATALAB_MARKER_SKIP_CACHE': config['rag.datalab_marker_skip_cache'],
+        'DATALAB_MARKER_FORCE_OCR': config['rag.datalab_marker_force_ocr'],
+        'DATALAB_MARKER_PAGINATE': config['rag.datalab_marker_paginate'],
+        'DATALAB_MARKER_STRIP_EXISTING_OCR': config['rag.datalab_marker_strip_existing_ocr'],
+        'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': config['rag.datalab_marker_disable_image_extraction'],
+        'DATALAB_MARKER_USE_LLM': config['rag.datalab_marker_use_llm'],
+        'DATALAB_MARKER_OUTPUT_FORMAT': config['rag.datalab_marker_output_format'],
+        'EXTERNAL_DOCUMENT_LOADER_URL': config['rag.external_document_loader_url'],
+        'EXTERNAL_DOCUMENT_LOADER_API_KEY': config['rag.external_document_loader_api_key'],
+        'EXTERNAL_DOCUMENT_LOADER_HEADERS': config['rag.external_document_loader_headers'],
+        'TIKA_SERVER_URL': config['rag.tika_server_url'],
+        'TIKA_SERVER_VERSION': config['rag.tika_server_version'],
+        'DOCLING_SERVER_URL': config['rag.docling_server_url'],
+        'DOCLING_API_KEY': config['rag.docling_api_key'],
+        'DOCLING_PARAMS': config['rag.docling_params'],
+        'DOCUMENT_INTELLIGENCE_ENDPOINT': config['rag.document_intelligence_endpoint'],
+        'DOCUMENT_INTELLIGENCE_KEY': config['rag.document_intelligence_key'],
+        'DOCUMENT_INTELLIGENCE_MODEL': config['rag.document_intelligence_model'],
+        'MISTRAL_OCR_API_BASE_URL': config['rag.mistral_ocr_api_base_url'],
+        'MISTRAL_OCR_API_KEY': config['rag.mistral_ocr_api_key'],
+        'MISTRAL_OCR_USE_BASE64': config['rag.mistral_ocr_use_base64'],
+        'PADDLEOCR_VL_BASE_URL': config['rag.paddleocr_vl_base_url'],
+        'PADDLEOCR_VL_TOKEN': config['rag.paddleocr_vl_token'],
         # MinerU settings
-        'MINERU_API_MODE': config.MINERU_API_MODE,
-        'MINERU_API_URL': config.MINERU_API_URL,
-        'MINERU_API_KEY': config.MINERU_API_KEY,
-        'MINERU_API_TIMEOUT': config.MINERU_API_TIMEOUT,
-        'MINERU_PARAMS': config.MINERU_PARAMS,
-        'MINERU_FILE_EXTENSIONS': config.MINERU_FILE_EXTENSIONS,
+        'MINERU_API_MODE': config['rag.mineru_api_mode'],
+        'MINERU_API_URL': config['rag.mineru_api_url'],
+        'MINERU_API_KEY': config['rag.mineru_api_key'],
+        'MINERU_API_TIMEOUT': config['rag.mineru_api_timeout'],
+        'MINERU_PARAMS': config['rag.mineru_params'],
         # Reranking settings
-        'RAG_RERANKING_MODEL': config.RAG_RERANKING_MODEL,
-        'RAG_RERANKING_ENGINE': config.RAG_RERANKING_ENGINE,
-        'RAG_RERANKING_BATCH_SIZE': config.RAG_RERANKING_BATCH_SIZE,
-        'RAG_EXTERNAL_RERANKER_URL': config.RAG_EXTERNAL_RERANKER_URL,
-        'RAG_EXTERNAL_RERANKER_API_KEY': config.RAG_EXTERNAL_RERANKER_API_KEY,
-        'RAG_EXTERNAL_RERANKER_TIMEOUT': config.RAG_EXTERNAL_RERANKER_TIMEOUT,
+        'RAG_RERANKING_MODEL': config['rag.reranking_model'],
+        'RAG_RERANKING_ENGINE': config['rag.reranking_engine'],
+        'RAG_EXTERNAL_RERANKER_URL': config['rag.external_reranker_url'],
+        'RAG_EXTERNAL_RERANKER_API_KEY': config['rag.external_reranker_api_key'],
+        'RAG_EXTERNAL_RERANKER_TIMEOUT': config['rag.external_reranker_timeout'],
         # Chunking settings
-        'TEXT_SPLITTER': config.TEXT_SPLITTER,
-        'RAG_TOKENIZER_MODEL': config.RAG_TOKENIZER_MODEL,
-        'CHUNK_SIZE': config.CHUNK_SIZE,
-        'CHUNK_MIN_SIZE_TARGET': config.CHUNK_MIN_SIZE_TARGET,
-        'ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER': config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
-        'CHUNK_OVERLAP': config.CHUNK_OVERLAP,
+        'TEXT_SPLITTER': config['rag.text_splitter'],
+        'RAG_TOKENIZER_MODEL': config['rag.tokenizer_model'],
+        'CHUNK_SIZE': config['rag.chunk_size'],
+        'CHUNK_MIN_SIZE_TARGET': config['rag.chunk_min_size_target'],
+        'ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER': config['rag.enable_markdown_header_text_splitter'],
+        'CHUNK_OVERLAP': config['rag.chunk_overlap'],
         # File upload settings
-        'FILE_MAX_SIZE': config.FILE_MAX_SIZE,
-        'FILE_MAX_COUNT': config.FILE_MAX_COUNT,
-        'FILE_IMAGE_COMPRESSION_WIDTH': config.FILE_IMAGE_COMPRESSION_WIDTH,
-        'FILE_IMAGE_COMPRESSION_HEIGHT': config.FILE_IMAGE_COMPRESSION_HEIGHT,
-        'ALLOWED_FILE_EXTENSIONS': config.ALLOWED_FILE_EXTENSIONS,
+        'FILE_MAX_SIZE': config['rag.file.max_size'],
+        'FILE_MAX_COUNT': config['rag.file.max_count'],
+        'FILE_IMAGE_COMPRESSION_WIDTH': config['file.image_compression_width'],
+        'FILE_IMAGE_COMPRESSION_HEIGHT': config['file.image_compression_height'],
+        'ALLOWED_FILE_EXTENSIONS': config['rag.file.allowed_extensions'],
         # Integration settings
-        'ENABLE_GOOGLE_DRIVE_INTEGRATION': config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
-        'ENABLE_ONEDRIVE_INTEGRATION': config.ENABLE_ONEDRIVE_INTEGRATION,
-        'ENABLE_CONFLUENCE_INTEGRATION': config.ENABLE_CONFLUENCE_INTEGRATION,
+        'ENABLE_GOOGLE_DRIVE_INTEGRATION': config['google_drive.enable'],
+        'ENABLE_ONEDRIVE_INTEGRATION': config['onedrive.enable'],
+        'ENABLE_CONFLUENCE_INTEGRATION': config.get('confluence.enable'),  # [Gradient] not in DEFAULTS
         # Web search settings
         'web': {
-            'ENABLE_WEB_SEARCH': config.ENABLE_WEB_SEARCH,
-            'ENABLE_WEB_SEARCH_CONFIRMATION': config.ENABLE_WEB_SEARCH_CONFIRMATION,
-            'WEB_SEARCH_CONFIRMATION_CONTENT': config.WEB_SEARCH_CONFIRMATION_CONTENT,
-            'WEB_SEARCH_ENGINE': config.WEB_SEARCH_ENGINE,
-            'WEB_SEARCH_TRUST_ENV': config.WEB_SEARCH_TRUST_ENV,
-            'WEB_SEARCH_RESULT_COUNT': config.WEB_SEARCH_RESULT_COUNT,
-            'WEB_SEARCH_CONCURRENT_REQUESTS': config.WEB_SEARCH_CONCURRENT_REQUESTS,
-            'WEB_FETCH_MAX_CONTENT_LENGTH': config.WEB_FETCH_MAX_CONTENT_LENGTH,
-            'WEB_LOADER_CONCURRENT_REQUESTS': config.WEB_LOADER_CONCURRENT_REQUESTS,
-            'WEB_SEARCH_DOMAIN_FILTER_LIST': config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-            'BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL': config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
-            'BYPASS_WEB_SEARCH_WEB_LOADER': config.BYPASS_WEB_SEARCH_WEB_LOADER,
-            'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
-            'SEARXNG_QUERY_URL': config.SEARXNG_QUERY_URL,
-            'SEARXNG_LANGUAGE': config.SEARXNG_LANGUAGE,
-            'OPENSERP_BASE_URL': config.OPENSERP_BASE_URL,
-            'YACY_QUERY_URL': config.YACY_QUERY_URL,
-            'YACY_USERNAME': config.YACY_USERNAME,
-            'YACY_PASSWORD': config.YACY_PASSWORD,
-            'GOOGLE_PSE_API_KEY': config.GOOGLE_PSE_API_KEY,
-            'GOOGLE_PSE_ENGINE_ID': config.GOOGLE_PSE_ENGINE_ID,
-            'BRAVE_SEARCH_API_KEY': config.BRAVE_SEARCH_API_KEY,
-            'BRAVE_SEARCH_CONTEXT_TOKENS': config.BRAVE_SEARCH_CONTEXT_TOKENS,
-            'KAGI_SEARCH_API_KEY': config.KAGI_SEARCH_API_KEY,
-            'MOJEEK_SEARCH_API_KEY': config.MOJEEK_SEARCH_API_KEY,
-            'BOCHA_SEARCH_API_KEY': config.BOCHA_SEARCH_API_KEY,
-            'SERPSTACK_API_KEY': config.SERPSTACK_API_KEY,
-            'SERPSTACK_HTTPS': config.SERPSTACK_HTTPS,
-            'SERPER_API_KEY': config.SERPER_API_KEY,
-            'SERPHOUSE_API_KEY': config.SERPHOUSE_API_KEY,
-            'SERPHOUSE_DOMAIN': config.SERPHOUSE_DOMAIN,
-            'SERPLY_API_KEY': config.SERPLY_API_KEY,
-            'TAVILY_API_KEY': config.TAVILY_API_KEY,
-            'SEARCHAPI_API_KEY': config.SEARCHAPI_API_KEY,
-            'SEARCHAPI_ENGINE': config.SEARCHAPI_ENGINE,
-            'SERPAPI_API_KEY': config.SERPAPI_API_KEY,
-            'SERPAPI_ENGINE': config.SERPAPI_ENGINE,
-            'JINA_API_KEY': config.JINA_API_KEY,
-            'JINA_API_BASE_URL': config.JINA_API_BASE_URL,
-            'BING_SEARCH_V7_ENDPOINT': config.BING_SEARCH_V7_ENDPOINT,
-            'BING_SEARCH_V7_SUBSCRIPTION_KEY': config.BING_SEARCH_V7_SUBSCRIPTION_KEY,
-            'EXA_API_KEY': config.EXA_API_KEY,
-            'PERPLEXITY_API_KEY': config.PERPLEXITY_API_KEY,
-            'PERPLEXITY_MODEL': config.PERPLEXITY_MODEL,
-            'PERPLEXITY_SEARCH_CONTEXT_USAGE': config.PERPLEXITY_SEARCH_CONTEXT_USAGE,
-            'PERPLEXITY_SEARCH_API_URL': config.PERPLEXITY_SEARCH_API_URL,
-            'MICROSOFT_WEB_IQ_API_BASE_URL': config.MICROSOFT_WEB_IQ_API_BASE_URL,
-            'MICROSOFT_WEB_IQ_API_KEY': config.MICROSOFT_WEB_IQ_API_KEY,
-            'MICROSOFT_WEB_IQ_LANGUAGE': config.MICROSOFT_WEB_IQ_LANGUAGE,
-            'SOUGOU_API_SID': config.SOUGOU_API_SID,
-            'SOUGOU_API_SK': config.SOUGOU_API_SK,
-            'WEB_LOADER_ENGINE': config.WEB_LOADER_ENGINE,
-            'WEB_LOADER_TIMEOUT': config.WEB_LOADER_TIMEOUT,
-            'ENABLE_WEB_LOADER_SSL_VERIFICATION': config.ENABLE_WEB_LOADER_SSL_VERIFICATION,
-            'PLAYWRIGHT_WS_URL': config.PLAYWRIGHT_WS_URL,
-            'PLAYWRIGHT_TIMEOUT': config.PLAYWRIGHT_TIMEOUT,
-            'FIRECRAWL_API_KEY': config.FIRECRAWL_API_KEY,
-            'FIRECRAWL_API_BASE_URL': config.FIRECRAWL_API_BASE_URL,
-            'FIRECRAWL_TIMEOUT': config.FIRECRAWL_TIMEOUT,
-            'TAVILY_EXTRACT_DEPTH': config.TAVILY_EXTRACT_DEPTH,
-            'EXTERNAL_WEB_SEARCH_URL': config.EXTERNAL_WEB_SEARCH_URL,
-            'EXTERNAL_WEB_SEARCH_API_KEY': config.EXTERNAL_WEB_SEARCH_API_KEY,
-            'EXTERNAL_WEB_LOADER_URL': config.EXTERNAL_WEB_LOADER_URL,
-            'EXTERNAL_WEB_LOADER_API_KEY': config.EXTERNAL_WEB_LOADER_API_KEY,
-            'YOUTUBE_LOADER_LANGUAGE': config.YOUTUBE_LOADER_LANGUAGE,
-            'YOUTUBE_LOADER_PROXY_URL': config.YOUTUBE_LOADER_PROXY_URL,
+            'ENABLE_WEB_SEARCH': config['web.search.enable'],
+            'ENABLE_WEB_SEARCH_CONFIRMATION': config['web.search.confirmation.enable'],
+            'WEB_SEARCH_CONFIRMATION_CONTENT': config['web.search.confirmation.content'],
+            'WEB_SEARCH_ENGINE': config['web.search.engine'],
+            'WEB_SEARCH_TRUST_ENV': config['web.search.trust_env'],
+            'WEB_SEARCH_RESULT_COUNT': config['web.search.result_count'],
+            'WEB_SEARCH_CONCURRENT_REQUESTS': config['web.search.concurrent_requests'],
+            'WEB_FETCH_MAX_CONTENT_LENGTH': config['web.fetch.max_content_length'],
+            'WEB_LOADER_CONCURRENT_REQUESTS': config['web.loader.concurrent_requests'],
+            'WEB_SEARCH_DOMAIN_FILTER_LIST': config['web.search.domain.filter_list'],
+            'BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL': config['web.search.bypass_embedding_and_retrieval'],
+            'BYPASS_WEB_SEARCH_WEB_LOADER': config['web.search.bypass_web_loader'],
+            'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': config['web.search.ollama_cloud_api_key'],
+            'SEARXNG_QUERY_URL': config['web.search.searxng_query_url'],
+            'SEARXNG_LANGUAGE': config['web.search.searxng_language'],
+            'OPENSERP_BASE_URL': config['web.search.openserp_base_url'],
+            'YACY_QUERY_URL': config['web.search.yacy_query_url'],
+            'YACY_USERNAME': config['web.search.yacy_username'],
+            'YACY_PASSWORD': config['web.search.yacy_password'],
+            'GOOGLE_PSE_API_KEY': config['web.search.google_pse_api_key'],
+            'GOOGLE_PSE_ENGINE_ID': config['web.search.google_pse_engine_id'],
+            'BRAVE_SEARCH_API_KEY': config['web.search.brave_search_api_key'],
+            'BRAVE_SEARCH_CONTEXT_TOKENS': config['web.search.brave_search_context_tokens'],
+            'KAGI_SEARCH_API_KEY': config['web.search.kagi_search_api_key'],
+            'MOJEEK_SEARCH_API_KEY': config['web.search.mojeek_search_api_key'],
+            'BOCHA_SEARCH_API_KEY': config['web.search.bocha_search_api_key'],
+            'SERPSTACK_API_KEY': config['web.search.serpstack_api_key'],
+            'SERPSTACK_HTTPS': config['web.search.serpstack_https'],
+            'SERPER_API_KEY': config['web.search.serper_api_key'],
+            'SERPHOUSE_API_KEY': config['web.search.serphouse_api_key'],
+            'SERPHOUSE_DOMAIN': config['web.search.serphouse_domain'],
+            'SERPLY_API_KEY': config['web.search.serply_api_key'],
+            'TAVILY_API_KEY': config['web.search.tavily_api_key'],
+            'STAAN_API_KEY': config['web.search.staan_api_key'],
+            'STAAN_MARKET': config['web.search.staan_market'],
+            'STAAN_MAX_SNIPPETS': config['web.search.staan_max_snippets'],
+            'SEARCHAPI_API_KEY': config['web.search.searchapi_api_key'],
+            'SEARCHAPI_ENGINE': config['web.search.searchapi_engine'],
+            'SERPAPI_API_KEY': config['web.search.serpapi_api_key'],
+            'SERPAPI_ENGINE': config['web.search.serpapi_engine'],
+            'JINA_API_KEY': config['web.search.jina_api_key'],
+            'JINA_API_BASE_URL': config['web.search.jina_api_base_url'],
+            'BING_SEARCH_V7_ENDPOINT': config['web.search.bing_search_v7_endpoint'],
+            'BING_SEARCH_V7_SUBSCRIPTION_KEY': config['web.search.bing_search_v7_subscription_key'],
+            'EXA_API_KEY': config['web.search.exa_api_key'],
+            'EXA_MAX_CONTENT_LENGTH': config['web.search.exa_max_content_length'],
+            'PERPLEXITY_API_KEY': config['web.search.perplexity_api_key'],
+            'PERPLEXITY_MODEL': config['web.search.perplexity_model'],
+            'PERPLEXITY_SEARCH_CONTEXT_USAGE': config['web.search.perplexity_search_context_usage'],
+            'PERPLEXITY_SEARCH_API_URL': config['web.search.perplexity_search_api_url'],
+            'MICROSOFT_WEB_IQ_API_BASE_URL': config['web.search.microsoft_web_iq_api_base_url'],
+            'MICROSOFT_WEB_IQ_API_KEY': config['web.search.microsoft_web_iq_api_key'],
+            'MICROSOFT_WEB_IQ_LANGUAGE': config['web.search.microsoft_web_iq_language'],
+            'SOUGOU_API_SID': config['web.search.sougou_api_sid'],
+            'SOUGOU_API_SK': config['web.search.sougou_api_sk'],
+            'WEB_LOADER_ENGINE': config['web.loader.engine'],
+            'WEB_LOADER_TIMEOUT': config['web.loader.timeout'],
+            'ENABLE_WEB_LOADER_SSL_VERIFICATION': config['web.loader.ssl_verification'],
+            'PLAYWRIGHT_WS_URL': config['web.loader.playwright_ws_url'],
+            'PLAYWRIGHT_TIMEOUT': config['web.loader.playwright_timeout'],
+            'FIRECRAWL_API_KEY': config['web.loader.firecrawl_api_key'],
+            'FIRECRAWL_API_BASE_URL': config['web.loader.firecrawl_api_url'],
+            'FIRECRAWL_TIMEOUT': config['web.loader.firecrawl_timeout'],
+            'TAVILY_EXTRACT_DEPTH': config['web.search.tavily_extract_depth'],
+            'TAVILY_SEARCH_DEPTH': config['web.search.tavily_search_depth'],
+            'EXTERNAL_WEB_SEARCH_URL': config['web.search.external_web_search_url'],
+            'EXTERNAL_WEB_SEARCH_API_KEY': config['web.search.external_web_search_api_key'],
+            'EXTERNAL_WEB_LOADER_URL': config['web.loader.external_web_loader_url'],
+            'EXTERNAL_WEB_LOADER_API_KEY': config['web.loader.external_web_loader_api_key'],
+            'YOUTUBE_LOADER_LANGUAGE': config['rag.youtube_loader_language'],
+            'YOUTUBE_LOADER_PROXY_URL': config['rag.youtube_loader_proxy_url'],
             'YOUTUBE_LOADER_TRANSLATION': request.app.state.YOUTUBE_LOADER_TRANSLATION,
-            'YANDEX_WEB_SEARCH_URL': config.YANDEX_WEB_SEARCH_URL,
-            'YANDEX_WEB_SEARCH_API_KEY': config.YANDEX_WEB_SEARCH_API_KEY,
-            'YANDEX_WEB_SEARCH_CONFIG': config.YANDEX_WEB_SEARCH_CONFIG,
-            'YOUCOM_API_KEY': config.YOUCOM_API_KEY,
-            'LINKUP_API_KEY': config.LINKUP_API_KEY,
-            'LINKUP_SEARCH_PARAMS': config.LINKUP_SEARCH_PARAMS,
+            'YANDEX_WEB_SEARCH_URL': config['web.search.yandex_web_search_url'],
+            'YANDEX_WEB_SEARCH_API_KEY': config['web.search.yandex_web_search_api_key'],
+            'YANDEX_WEB_SEARCH_CONFIG': config['web.search.yandex_web_search_config'],
+            'YOUCOM_API_KEY': config['web.search.youcom_api_key'],
+            'LINKUP_API_KEY': config['web.search.linkup_api_key'],
+            'LINKUP_SEARCH_PARAMS': config['web.search.linkup_search_params'],
         },
     }
 
@@ -1500,82 +1213,6 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
 # Document process and retrieval
 #
 ####################################
-
-
-def save_embeddings_to_vector_db(
-    collection_name: str,
-    chunks: List[dict],
-    file_metadata: Optional[dict] = None,
-    overwrite: bool = False,
-    add: bool = False,
-) -> bool:
-    """
-    Save pre-computed embeddings directly to vector database.
-    Bypasses parsing, chunking, and embedding generation.
-
-    Args:
-        collection_name: Name of the collection to store in
-        chunks: List of chunks with structure:
-            {
-                "text": str,
-                "embedding": List[float],
-                "metadata": dict (optional)
-            }
-        file_metadata: Optional file-level metadata to merge with chunk metadata
-        overwrite: If True, delete existing collection before inserting
-        add: If True, add to existing collection (default: False)
-
-    Returns:
-        bool: True if successful
-    """
-    try:
-        if not chunks:
-            raise ValueError('No chunks provided')
-
-        # Check if collection exists
-        if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
-            log.info(f'collection {collection_name} already exists')
-
-            if overwrite:
-                VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
-                log.info(f'deleting existing collection {collection_name}')
-            elif add is False:
-                log.info(f'collection {collection_name} already exists, overwrite is False and add is False')
-                return True
-
-        # Prepare items for insertion
-        items = []
-        for chunk in chunks:
-            # Validate chunk structure
-            if 'text' not in chunk or 'embedding' not in chunk:
-                raise ValueError("Chunk must contain 'text' and 'embedding' fields")
-
-            # Merge metadata
-            metadata = chunk.get('metadata', {})
-            if file_metadata:
-                metadata = {**metadata, **file_metadata}
-
-            items.append(
-                {
-                    'id': chunk.get('id', str(uuid.uuid4())),
-                    'text': chunk['text'],
-                    'vector': chunk['embedding'],
-                    'metadata': metadata,
-                }
-            )
-
-        log.info(f'adding {len(items)} items to collection {collection_name}')
-        VECTOR_DB_CLIENT.insert(
-            collection_name=collection_name,
-            items=items,
-        )
-
-        log.info(f'added {len(items)} items to collection {collection_name}')
-        return True
-
-    except Exception as e:
-        log.exception(e)
-        raise e
 
 
 def can_merge_chunks(a: Document, b: Document) -> bool:
@@ -1594,7 +1231,7 @@ def can_merge_chunks(a: Document, b: Document) -> bool:
 def merge_docs_to_target_size(
     request: Request,
     chunks: list[Document],
-    config=None,
+    config: dict,
 ) -> list[Document]:
     """
     Best-effort normalization of chunk sizes.
@@ -1602,22 +1239,40 @@ def merge_docs_to_target_size(
     Attempts to grow small chunks up to a desired minimum size,
     without exceeding the maximum size or crossing source/file
     boundaries.
-    """
-    if config is None:
-        config = run_on_main_loop(get_rag_config_state())
-    min_chunk_size_target = config.CHUNK_MIN_SIZE_TARGET
-    max_chunk_size = config.CHUNK_SIZE
 
-    if min_chunk_size_target <= 0:
+    Uses forward merging first (absorb the next chunk), then
+    backward merging (append into the previous emitted chunk)
+    for undersized chunks that can't grow forward.
+    """
+    min_size = config['rag.chunk_min_size_target']
+    max_size = config['rag.chunk_size']
+
+    if min_size <= 0:
         return chunks
 
-    measure_chunk_size = len
-    if config.TEXT_SPLITTER == 'token':
-        encoding = tiktoken.get_encoding(str(config.TIKTOKEN_ENCODING_NAME))
-        measure_chunk_size = lambda text: len(encoding.encode(text))
+    measure = get_splitter_length_function(request, config)
 
-    processed_chunks: list[Document] = []
+    def _merge_backward(result: list[Document], content: str, chunk: Document) -> bool:
+        """Try to append content into the last emitted chunk. Returns True on success."""
+        if not result:
+            return False
+        prev = result[-1]
+        if not can_merge_chunks(prev, chunk):
+            return False
+        merged = f'{prev.page_content}\n\n{content}'
+        if measure(merged) > max_size:
+            return False
+        result[-1] = Document(page_content=merged, metadata={**prev.metadata})
+        return True
 
+    def _emit(result: list[Document], content: str, chunk: Document) -> None:
+        """Emit a chunk, trying backward merge first if it's undersized."""
+        is_undersized = measure(content) < min_size
+        if is_undersized and _merge_backward(result, content, chunk):
+            return
+        result.append(Document(page_content=content, metadata={**chunk.metadata}))
+
+    result: list[Document] = []
     current_chunk: Document | None = None
     current_content: str = ''
 
@@ -1625,53 +1280,117 @@ def merge_docs_to_target_size(
         if current_chunk is None:
             current_chunk = next_chunk
             current_content = next_chunk.page_content
-            continue  # First chunk initialization
+            continue
 
-        proposed_content = f'{current_content}\n\n{next_chunk.page_content}'
-
-        can_merge = (
+        # Forward merge: absorb next chunk into current if undersized and fits
+        merged_content = f'{current_content}\n\n{next_chunk.page_content}'
+        can_merge_forward = (
             can_merge_chunks(current_chunk, next_chunk)
-            and measure_chunk_size(current_content) < min_chunk_size_target
-            and measure_chunk_size(proposed_content) <= max_chunk_size
+            and measure(current_content) < min_size
+            and measure(merged_content) <= max_size
         )
 
-        if can_merge:
-            current_content = proposed_content
+        if can_merge_forward:
+            current_content = merged_content
         else:
-            processed_chunks.append(
-                Document(
-                    page_content=current_content,
-                    metadata={**current_chunk.metadata},
-                )
-            )
+            _emit(result, current_content, current_chunk)
             current_chunk = next_chunk
             current_content = next_chunk.page_content
 
     if current_chunk is not None:
-        processed_chunks.append(
-            Document(
-                page_content=current_content,
-                metadata={**current_chunk.metadata},
-            )
-        )
+        _emit(result, current_content, current_chunk)
 
-    return processed_chunks
+    return result
+
+
+def get_transformers_tokenizer(request: Request, config: dict):
+    if USE_SLIM:
+        raise HTTPException(503, 'Transformers tokenization is unavailable in slim. Use character or token splitting.')
+    if config['rag.tokenizer_model']:
+        from transformers import AutoTokenizer
+
+        tokenizer_model = config['rag.tokenizer_model']
+        if not os.path.exists(tokenizer_model) and '/' not in tokenizer_model:
+            tokenizer_model = f'sentence-transformers/{tokenizer_model}'
+
+        cache_dir = os.getenv('SENTENCE_TRANSFORMERS_HOME') or os.getenv('HF_HUB_CACHE')
+        local_files_only = not RAG_EMBEDDING_MODEL_AUTO_UPDATE
+        tokenizer_key = (tokenizer_model, cache_dir, local_files_only)
+        cached_tokenizer = getattr(request.app.state, 'transformers_tokenizer', None)
+        if cached_tokenizer and cached_tokenizer[0] == tokenizer_key:
+            return cached_tokenizer[1]
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_model,
+            cache_dir=cache_dir,
+            trust_remote_code=RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
+            local_files_only=local_files_only,
+        )
+        request.app.state.transformers_tokenizer = (tokenizer_key, tokenizer)
+        return tokenizer
+
+    tokenizer = getattr(getattr(request.app.state, 'ef', None), 'tokenizer', None)
+    if tokenizer is not None:
+        return tokenizer
+
+    raise ValueError('Tokenizer model required for Token (Transformers) text splitter')
+
+
+def get_splitter_length_function(
+    request: Request,
+    config: dict,
+) -> Callable[[str], int]:
+    if config['rag.text_splitter'] == 'token':
+        encoding = tiktoken.get_encoding(str(config['rag.tiktoken_encoding_name']))
+        return lambda text: len(encoding.encode(text, disallowed_special=TIKTOKEN_DISALLOWED_SPECIAL))
+
+    if config['rag.text_splitter'] == 'token_transformers':
+        tokenizer = get_transformers_tokenizer(request, config)
+        return lambda text: len(tokenizer.encode(text))
+
+    return len
+
+
+def filter_file_metadata(metadata: dict | None) -> dict:
+    metadata = dict(metadata or {})
+    data = metadata.pop('data', None)
+    if isinstance(data, dict):
+        metadata = {**filter_metadata(data), **metadata}
+    return filter_metadata(metadata)
+
+
+def has_duplicate_content(collection_name: str, hash: str, file_id: str | None) -> bool:
+    result = get_vector_db_client().query(
+        collection_name=collection_name,
+        filter={'hash': hash},
+    )
+
+    if result is not None and result.ids and len(result.ids) > 0:
+        existing_doc_ids = result.ids[0]
+        if existing_doc_ids:
+            # Check if the existing document belongs to the same file
+            # If same file_id, this is a re-add/reindex - allow it
+            # If different file_id, this is a duplicate - block it
+            existing_file_id = None
+            if result.metadatas and result.metadatas[0]:
+                existing_file_id = result.metadatas[0][0].get('file_id')
+
+            return existing_file_id != file_id
+
+    return False
 
 
 def save_docs_to_vector_db(
     request: Request,
     docs,
     collection_name,
-    metadata: Optional[dict] = None,
+    config: dict,
+    metadata: dict | None = None,
     overwrite: bool = False,
     split: bool = True,
     add: bool = False,
     user=None,
-    config=None,
 ) -> bool:
-    if config is None:
-        config = run_on_main_loop(get_rag_config_state())
-
     def _get_docs_info(docs: list[Document]) -> str:
         docs_info = set()
 
@@ -1688,40 +1407,21 @@ def save_docs_to_vector_db(
 
         return ', '.join(docs_info)
 
-    log.debug(f'save_docs_to_vector_db: {len(docs)} docs to {collection_name}')
+    # [Gradient] Content-free: counts only, never document names.
+    log.debug('save_docs_to_vector_db: %s docs to %s', len(docs), collection_name)
 
     # Check if entries with the same hash (metadata.hash) already exist
     if metadata and 'hash' in metadata:
-        result = VECTOR_DB_CLIENT.query(
-            collection_name=collection_name,
-            filter={'hash': metadata['hash']},
-        )
-
-        if result is not None and result.ids and len(result.ids) > 0:
-            existing_doc_ids = result.ids[0]
-            if existing_doc_ids:
-                existing_file_id = None
-                if result.metadatas and result.metadatas[0]:
-                    existing_file_id = result.metadatas[0][0].get('file_id')
-
-                if existing_file_id == metadata.get('file_id'):
-                    # Same file re-added/reindexed - allow it
-                    pass
-                else:
-                    # Different file with same content hash - remove old entries
-                    # and re-add with the new file's metadata (supports re-uploads
-                    # of the same document under a different file ID).
-                    log.info(
-                        f'Replacing existing document with hash {metadata["hash"]} '
-                        f'(old file_id={existing_file_id}, new file_id={metadata.get("file_id")})'
-                    )
-                    VECTOR_DB_CLIENT.delete(
-                        collection_name=collection_name,
-                        filter={'hash': metadata['hash']},
-                    )
+        if has_duplicate_content(collection_name, metadata['hash'], metadata.get('file_id')):
+            # [Gradient] A different file with the same content hash: remove the old entries and
+            # re-add under the new file's metadata (re-uploads of the same document under a new id).
+            log.info(
+                'Replacing existing document with hash %s (new file_id=%s)', metadata['hash'], metadata.get('file_id')
+            )
+            get_vector_db_client().delete(collection_name=collection_name, filter={'hash': metadata['hash']})
 
     if split:
-        if config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER:
+        if config['rag.enable_markdown_header_text_splitter']:
             log.info('Using markdown header text splitter')
             # Define headers to split on - covering most common markdown header levels
             markdown_splitter = MarkdownHeaderTextSplitter(
@@ -1749,37 +1449,48 @@ def save_docs_to_vector_db(
                 )
 
             docs = split_docs
-            if config.CHUNK_MIN_SIZE_TARGET > 0:
-                docs = merge_docs_to_target_size(request, docs, config=config)
+            if config['rag.chunk_min_size_target'] > 0:
+                docs = merge_docs_to_target_size(request, docs, config)
 
-        if config.TEXT_SPLITTER in ['', 'character']:
+        if config['rag.text_splitter'] in ['', 'character']:
             text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=config.CHUNK_SIZE,
-                chunk_overlap=config.CHUNK_OVERLAP,
+                chunk_size=config['rag.chunk_size'],
+                chunk_overlap=config['rag.chunk_overlap'],
                 add_start_index=True,
             )
             docs = text_splitter.split_documents(docs)
-        elif config.TEXT_SPLITTER == 'token':
-            log.info('Using token text splitter: %s', config.TIKTOKEN_ENCODING_NAME)
+        elif config['rag.text_splitter'] == 'token':
+            log.info('Using token text splitter: %s', config['rag.tiktoken_encoding_name'])
 
-            tiktoken.get_encoding(str(config.TIKTOKEN_ENCODING_NAME))
+            tiktoken.get_encoding(str(config['rag.tiktoken_encoding_name']))
             text_splitter = TokenTextSplitter(
-                encoding_name=str(config.TIKTOKEN_ENCODING_NAME),
-                chunk_size=config.CHUNK_SIZE,
-                chunk_overlap=config.CHUNK_OVERLAP,
+                encoding_name=str(config['rag.tiktoken_encoding_name']),
+                chunk_size=config['rag.chunk_size'],
+                chunk_overlap=config['rag.chunk_overlap'],
                 add_start_index=True,
                 disallowed_special=TIKTOKEN_DISALLOWED_SPECIAL,
+            )
+            docs = text_splitter.split_documents(docs)
+        elif config['rag.text_splitter'] == 'token_transformers':
+            log.info('Using transformers token text splitter')
+
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=config['rag.chunk_size'],
+                chunk_overlap=config['rag.chunk_overlap'],
+                length_function=get_splitter_length_function(request, config),
+                add_start_index=True,
             )
             docs = text_splitter.split_documents(docs)
         else:
             raise ValueError(ERROR_MESSAGES.DEFAULT('Invalid text splitter'))
 
     if len(docs) == 0:
-        log.warning(f'No text content could be extracted for collection {collection_name}')
+        # [Gradient] Nothing extractable is not an error: the file is kept, just not searchable.
+        log.warning('No text content could be extracted for collection %s', collection_name)
         return True
 
     texts = [sanitize_text_for_db(doc.page_content) for doc in docs]
-    # `chunk_index` is the list position in the final (post-split) doc list, which
+    # [Gradient] `chunk_index` is the list position in the final (post-split) doc list, which
     # is the authoritative document order: markdown sections extend in order, the
     # character/token splitter preserves order within a section, pages come in
     # order. `start_index` cannot stand in for it — the markdown header splitter
@@ -1790,19 +1501,19 @@ def save_docs_to_vector_db(
             **(metadata if metadata else {}),
             'chunk_index': chunk_index,
             'embedding_config': {
-                'engine': config.RAG_EMBEDDING_ENGINE,
-                'model': config.RAG_EMBEDDING_MODEL,
+                'engine': config['rag.embedding_engine'],
+                'model': config['rag.embedding_model'],
             },
         }
         for chunk_index, doc in enumerate(docs)
     ]
 
     try:
-        if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
+        if get_vector_db_client().has_collection(collection_name=collection_name):
             log.info('collection %s already exists', collection_name)
 
             if overwrite:
-                VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
+                get_vector_db_client().delete_collection(collection_name=collection_name)
                 log.info('deleting existing collection %s', collection_name)
             elif add is False:
                 log.info('collection %s already exists, overwrite is False and add is False', collection_name)
@@ -1810,33 +1521,33 @@ def save_docs_to_vector_db(
 
         log.info('generating embeddings for %s', collection_name)
         embedding_function = get_embedding_function(
-            config.RAG_EMBEDDING_ENGINE,
-            config.RAG_EMBEDDING_MODEL,
+            config['rag.embedding_engine'],
+            config['rag.embedding_model'],
             request.app.state.ef,
             (
-                config.RAG_OPENAI_API_BASE_URL
-                if config.RAG_EMBEDDING_ENGINE == 'openai'
+                config['rag.openai.api_base_url']
+                if config['rag.embedding_engine'] == 'openai'
                 else (
-                    config.RAG_OLLAMA_BASE_URL
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_BASE_URL
+                    config['rag.ollama.base_url']
+                    if config['rag.embedding_engine'] == 'ollama'
+                    else config['rag.azure_openai.base_url']
                 )
             ),
             (
-                config.RAG_OPENAI_API_KEY
-                if config.RAG_EMBEDDING_ENGINE == 'openai'
+                config['rag.openai.api_key']
+                if config['rag.embedding_engine'] == 'openai'
                 else (
-                    config.RAG_OLLAMA_API_KEY
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_API_KEY
+                    config['rag.ollama.api_key']
+                    if config['rag.embedding_engine'] == 'ollama'
+                    else config['rag.azure_openai.api_key']
                 )
             ),
-            config.RAG_EMBEDDING_BATCH_SIZE,
+            config['rag.embedding_batch_size'],
             azure_api_version=(
-                config.RAG_AZURE_OPENAI_API_VERSION if config.RAG_EMBEDDING_ENGINE == 'azure_openai' else None
+                config['rag.azure_openai.api_version'] if config['rag.embedding_engine'] == 'azure_openai' else None
             ),
-            enable_async=config.ENABLE_ASYNC_EMBEDDING,
-            concurrent_requests=config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+            enable_async=config['rag.enable_async_embedding'],
+            concurrent_requests=config['rag.embedding_concurrent_requests'],
         )
 
         # Run async embedding in sync context using the main event loop
@@ -1865,7 +1576,7 @@ def save_docs_to_vector_db(
         ]
 
         log.info('adding to collection %s', collection_name)
-        VECTOR_DB_CLIENT.insert(
+        get_vector_db_client().insert(
             collection_name=collection_name,
             items=items,
         )
@@ -1879,8 +1590,8 @@ def save_docs_to_vector_db(
 
 class ProcessFileForm(BaseModel):
     file_id: str
-    content: Optional[str] = None
-    collection_name: Optional[str] = None
+    content: str | None = None
+    collection_name: str | None = None
 
 
 @router.post('/process/file')
@@ -1895,11 +1606,12 @@ async def process_file(
     Note: granular session management is used to prevent connection pool exhaustion.
     The session is committed before external API calls, and updates use a fresh session.
     """
-    config = await get_rag_config_state()
-    if can_bypass_access_control(user):
-        file = await Files.get_file_by_id(form_data.file_id, db=db)
-    else:
-        file = await Files.get_file_by_id_and_user_id(form_data.file_id, user.id, db=db)
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
+    file = await Files.get_file_by_id(form_data.file_id, db=db)
+    # [Gradient] Admins pass only through the explicit bypass helper.
+    if file and file.user_id != user.id and not can_bypass_access_control(user):
+        if not await has_access_to_file(file.id, 'write', user, db=db):
+            file = None
 
     if file:
         try:
@@ -1911,6 +1623,8 @@ async def process_file(
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
 
+            # [Gradient] With soev-api configured, all file processing is an ingest job there;
+            # the local loaders below are the fallback only.
             if soev_config.SOEV_API_URL:
                 try:
                     collection_key = form_data.collection_name or await ingest.ensure_attachments_collection(
@@ -1946,7 +1660,7 @@ async def process_file(
                     Document(
                         page_content=form_data.content.replace('<br/>', '\n'),
                         metadata={
-                            **file.meta,
+                            **filter_file_metadata(file.meta),
                             'name': file.filename,
                             'created_by': file.user_id,
                             'file_id': file.id,
@@ -1957,21 +1671,20 @@ async def process_file(
 
                 text_content = form_data.content
             elif form_data.collection_name:
-                # Check if the file has already been processed and save the content.
+                # Add this file to a knowledge collection.
                 # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update,
                 # and /files/ uploads with knowledge_id (workspace KB upload).
                 #
-                # Previously this branch first queried a per-file `file-{id}`
-                # cache collection. KB-bound uploads no longer create that
-                # collection (dev's e64b083b9), so we fall straight through to
-                # the existing content / disk-load path.
-                existing_content = file.data.get('content', '')
+                # [Gradient] KB-bound uploads never create a per-file `file-{id}`
+                # collection (e64b083b9), so there is nothing to reuse: take the
+                # stored content, or load and extract the file from storage.
+                existing_content = (file.data or {}).get('content', '')
                 if existing_content:
                     docs = [
                         Document(
                             page_content=existing_content,
                             metadata={
-                                **file.meta,
+                                **filter_file_metadata(file.meta),
                                 'name': file.filename,
                                 'created_by': file.user_id,
                                 'file_id': file.id,
@@ -1979,47 +1692,56 @@ async def process_file(
                             },
                         )
                     ]
-                else:
+                elif file.path:
                     # File hasn't been processed yet (e.g. background processing
                     # hasn't completed). Load and extract content directly.
-                    file_path = file.path
-                    if file_path:
-                        file_path = await asyncio.to_thread(Storage.get_file, file_path)
-                        loader = build_loader_from_config(request, await get_loader_config())
-                        loader.user = user
-                        docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
-                        docs = [
-                            Document(
-                                page_content=doc.page_content,
-                                metadata={
-                                    **filter_metadata(doc.metadata),
-                                    'name': file.filename,
-                                    'created_by': file.user_id,
-                                    'file_id': file.id,
-                                    'source': file.filename,
-                                },
-                            )
-                            for doc in docs
-                        ]
-                    else:
-                        raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
+                    file_path = await asyncio.to_thread(Storage.get_file, file.path)
+                    loader = build_loader_from_config(config)
+                    loader.user = user
+                    loader.metadata = {
+                        'file_id': file.id,
+                        'file_name': file.filename,
+                        'file_content_type': file.meta.get('content_type'),
+                    }
+                    docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
+                    docs = [
+                        Document(
+                            page_content=doc.page_content,
+                            metadata={
+                                **filter_file_metadata(file.meta),
+                                **filter_metadata(doc.metadata),
+                                'name': file.filename,
+                                'created_by': file.user_id,
+                                'file_id': file.id,
+                                'source': file.filename,
+                            },
+                        )
+                        for doc in docs
+                    ]
+                else:
+                    raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
 
-                text_content = ' '.join([doc.page_content for doc in docs]) if docs else file.data.get('content', '')
+                text_content = ' '.join([doc.page_content for doc in docs]) if docs else ''
             else:
                 # Process the file and save the content
                 # Usage: /files/
                 file_path = file.path
                 if file_path:
                     file_path = await asyncio.to_thread(Storage.get_file, file_path)
-                    loader = build_loader_from_config(request, await get_loader_config())
+                    loader = build_loader_from_config(config)
                     loader.user = user
-
+                    loader.metadata = {
+                        'file_id': file.id,
+                        'file_name': file.filename,
+                        'file_content_type': file.meta.get('content_type'),
+                    }
                     docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
 
                     docs = [
                         Document(
                             page_content=doc.page_content,
                             metadata={
+                                **filter_file_metadata(file.meta),
                                 **filter_metadata(doc.metadata),
                                 'name': file.filename,
                                 'created_by': file.user_id,
@@ -2034,7 +1756,7 @@ async def process_file(
                         Document(
                             page_content=file.data.get('content', ''),
                             metadata={
-                                **file.meta,
+                                **filter_file_metadata(file.meta),
                                 'name': file.filename,
                                 'created_by': file.user_id,
                                 'file_id': file.id,
@@ -2044,7 +1766,7 @@ async def process_file(
                     ]
                 text_content = ' '.join([doc.page_content for doc in docs])
 
-            log.debug(f'text_content length: {len(text_content)}')
+            log.debug('text_content length: %s', len(text_content))  # [Gradient] content-free
             await Files.update_file_data_by_id(
                 file.id,
                 {'content': text_content},
@@ -2052,9 +1774,17 @@ async def process_file(
             )
             hash = calculate_sha256_string(text_content)
 
-            if config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-                await Files.set_status(file.id, 'completed', db=db)
+            if config['rag.bypass_embedding_and_retrieval']:
+                await Files.set_status(file.id, 'completed', db=db)  # [Gradient] data+meta dual-write
                 await Files.update_file_hash_by_id(file.id, hash, db=db)
+                await publish_event(
+                    request,
+                    EVENTS.RETRIEVAL_CONTENT_PROCESSED,
+                    actor=user,
+                    subject_id=file.id,
+                    subject_type='file',
+                    data={'collection_name': None, 'filename': file.filename},
+                )
                 return {
                     'status': True,
                     'collection_name': None,
@@ -2067,11 +1797,9 @@ async def process_file(
                     # Note: file is already a Pydantic model (not ORM), so no expunge needed.
                     await db.commit()
 
-                    # External embedding API takes time (5-60s+).
-                    # Subsequent updates use fresh async sessions.
                     if not text_content.strip():
-                        # File has no extractable text (e.g. image-only PDF).
-                        # Still add it to the KB for bookkeeping, but skip embedding.
+                        # [Gradient] No extractable text (e.g. an image-only PDF): keep the file
+                        # in the knowledge base for bookkeeping, but skip embedding.
                         log.warning(
                             'No text content extracted from file, skipping embedding but adding to knowledge base'
                         )
@@ -2093,8 +1821,12 @@ async def process_file(
                             'It has been added but will not be searchable.',
                         }
 
-                    # save_docs_to_vector_db is sync and blocks on embedding +
-                    # vector-DB I/O. Offload so the event loop stays responsive.
+                    # External embedding API takes time (5-60s+).
+                    # Subsequent updates use fresh async sessions.
+                    # NOTE: save_docs_to_vector_db is a sync function that
+                    # calls asyncio.run_coroutine_threadsafe(..., main_loop).result()
+                    # which blocks the calling thread.  We MUST run it in a
+                    # worker thread to avoid deadlocking the event loop.
                     result = await run_in_threadpool(
                         save_docs_to_vector_db,
                         request,
@@ -2109,7 +1841,7 @@ async def process_file(
                         add=(True if form_data.collection_name else False),
                         user=user,
                     )
-                    log.info(f'added {len(docs)} items to collection {collection_name}')
+                    log.info('added %s items to collection %s', len(docs), collection_name)
 
                     if result:
                         # Fresh session for the final update.
@@ -2122,9 +1854,17 @@ async def process_file(
                                 db=session,
                             )
 
-                            await Files.set_status(file.id, 'completed', db=session)
+                            await Files.set_status(file.id, 'completed', db=session)  # [Gradient]
                             await Files.update_file_hash_by_id(file.id, hash, db=session)
 
+                            await publish_event(
+                                request,
+                                EVENTS.RETRIEVAL_CONTENT_PROCESSED,
+                                actor=user,
+                                subject_id=file.id,
+                                subject_type='file',
+                                data={'collection_name': collection_name, 'filename': file.filename},
+                            )
                             return {
                                 'status': True,
                                 'collection_name': collection_name,
@@ -2144,7 +1884,7 @@ async def process_file(
             log.exception(e)
             # Fresh session for error status update.
             async with get_async_db() as session:
-                await Files.set_status(file.id, 'failed', error=str(e), db=session)
+                await Files.set_status(file.id, 'failed', error=str(e), db=session)  # [Gradient]
                 # Clear the hash so the file can be re-uploaded after fixing the issue
                 await Files.update_file_hash_by_id(file.id, None, db=session)
 
@@ -2179,7 +1919,7 @@ async def process_file(
 class ProcessTextForm(BaseModel):
     name: str
     content: str
-    collection_name: Optional[str] = None
+    collection_name: str | None = None
 
 
 @router.post('/process/text')
@@ -2201,10 +1941,19 @@ async def process_text(
         )
     ]
     text_content = form_data.content
-    log.debug(f'text_content length: {len(text_content)}')
+    log.debug('text_content length: %s', len(text_content))  # [Gradient] content-free
 
-    result = await run_in_threadpool(save_docs_to_vector_db, request, docs, collection_name, user=user)
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
+    result = await run_in_threadpool(save_docs_to_vector_db, request, docs, collection_name, config, user=user)
     if result:
+        await publish_event(
+            request,
+            EVENTS.RETRIEVAL_CONTENT_PROCESSED,
+            actor=user,
+            subject_id=collection_name,
+            subject_type='retrieval.collection',
+            data={'name': form_data.name, 'content_preview': text_content[:300]},
+        )
         return {
             'status': True,
             'collection_name': collection_name,
@@ -2226,9 +1975,11 @@ async def _fetch_url(url: str, max_size_mb: int | str | None) -> dict:
         except (TypeError, ValueError):
             max_bytes = None
 
+    headers = {'User-Agent': USER_AGENT} if USER_AGENT else None
+
     async with get_ssrf_safe_session() as session:
         async with session.get(
-            url, ssl=AIOHTTP_CLIENT_SESSION_SSL, allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS
+            url, headers=headers, ssl=AIOHTTP_CLIENT_SESSION_SSL, allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS
         ) as response:
             response.raise_for_status()
 
@@ -2346,8 +2097,17 @@ async def process_url(
                 'content': result.get('content'),
             }
 
-        config = await get_rag_config_state()
-        url_result = await _fetch_url(form_data.url, config.FILE_MAX_SIZE)
+        config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
+        try:
+            url_result = await _fetch_url(form_data.url, config['rag.file.max_size'])
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.exception(e)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(e, f'Could not read content from {form_data.url}'),
+            )
 
         if url_result['kind'] == 'web':
             result = await process_web(request, form_data, process=process, user=user)
@@ -2411,14 +2171,14 @@ async def process_web(
     overwrite: bool = Query(True, description='Whether to overwrite existing collection'),
     user=Depends(get_verified_user),
 ):
-    config = await get_rag_config_state()
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
 
     try:
-        content, docs = await get_content_from_url(request, form_data.url)
+        content, docs = await get_content_from_url(request, form_data.url, config=config)
     except HTTPException:
         raise
     except YoutubeTranscriptError as e:
-        log.warning('YouTube transcript unavailable')
+        log.warning('YouTube transcript unavailable')  # [Gradient] no URLs in logs
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -2430,8 +2190,15 @@ async def process_web(
             detail=ERROR_MESSAGES.DEFAULT(e, f'Could not read content from {form_data.url}'),
         )
 
+    # web loaders swallow fetch errors and return no documents
+    if not docs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(f'Could not read content from {form_data.url}'),
+        )
+
     try:
-        log.debug(f'text_content length: {len(content) if content else 0}')
+        log.debug('text_content length: %s', len(content) if content else 0)  # [Gradient] content-free
 
         if process:
             collection_name = form_data.collection_name
@@ -2440,12 +2207,13 @@ async def process_web(
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
 
-            if not config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
+            if not config['web.search.bypass_embedding_and_retrieval']:
                 await run_in_threadpool(
                     save_docs_to_vector_db,
                     request,
                     docs,
                     collection_name,
+                    config,
                     overwrite=overwrite,
                     add=(not overwrite),
                     user=user,
@@ -2473,396 +2241,405 @@ async def process_web(
                 'status': True,
                 'content': content,
             }
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error querying knowledge base'),
         )
 
 
-# [Gradient] TODO(merge-v0.11.3): Converge search_web to async with the retrieval config carve-out?
-# Keep its worker-thread contract; pooled async engines run on the serving loop.
-def search_web(request: Request, engine: str, query: str, user=None, config=None) -> list[SearchResult]:
-    """Search the web using a search engine and return the results as a list of SearchResult objects.
-    Will look for a search engine API key in environment variables in the following order:
-    - SEARXNG_QUERY_URL
-    - YACY_QUERY_URL + YACY_USERNAME + YACY_PASSWORD
-    - GOOGLE_PSE_API_KEY + GOOGLE_PSE_ENGINE_ID
-    - BRAVE_SEARCH_API_KEY
-    - KAGI_SEARCH_API_KEY
-    - MOJEEK_SEARCH_API_KEY
-    - BOCHA_SEARCH_API_KEY
-    - SERPSTACK_API_KEY
-    - SERPER_API_KEY
-    - SERPLY_API_KEY
-    - TAVILY_API_KEY
-    - EXA_API_KEY
-    - PERPLEXITY_API_KEY
-    - SOUGOU_API_SID + SOUGOU_API_SK
-    - SEARCHAPI_API_KEY + SEARCHAPI_ENGINE (by default `google`)
-    - SERPAPI_API_KEY + SERPAPI_ENGINE (by default `google`)
-    Args:
-        query (str): The query to search for
+async def search_web(
+    request: Request, engine: str, query: str, user=None, *, config: dict | None = None
+) -> list[SearchResult]:
+    """Dispatch a web search query to the configured engine and return results.
+
+    Providers that have been migrated to async (aiohttp) are awaited natively.
+    Legacy sync providers are offloaded via ``asyncio.to_thread`` to avoid
+    blocking the event loop.
     """
 
     # TODO: add playwright to search the web
     if config is None:
-        config = run_on_main_loop(get_rag_config_state())
+        config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
     if engine == 'ollama_cloud':
-        return search_ollama_cloud(
+        return await asyncio.to_thread(
+            search_ollama_cloud,
             'https://ollama.com',
-            config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
+            config['web.search.ollama_cloud_api_key'],
             query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+            config['web.search.result_count'],
+            config['web.search.domain.filter_list'],
         )
     elif engine == 'perplexity_search':
-        if config.PERPLEXITY_API_KEY:
-            return search_perplexity_search(
-                config.PERPLEXITY_API_KEY,
+        if config['web.search.perplexity_api_key']:
+            return await asyncio.to_thread(
+                search_perplexity_search,
+                config['web.search.perplexity_api_key'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                config.PERPLEXITY_SEARCH_API_URL,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
+                config['web.search.perplexity_search_api_url'],
                 user,
             )
         else:
             raise Exception('No PERPLEXITY_API_KEY found in environment variables')
     elif engine == 'searxng':
-        if config.SEARXNG_QUERY_URL:
-            searxng_kwargs = {'language': config.SEARXNG_LANGUAGE}
-            return run_on_main_loop(
-                search_searxng(
-                    config.SEARXNG_QUERY_URL,
-                    query,
-                    config.WEB_SEARCH_RESULT_COUNT,
-                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                    **searxng_kwargs,
-                )
+        if config['web.search.searxng_query_url']:
+            searxng_kwargs = {'language': config['web.search.searxng_language']}
+            return await search_searxng(
+                config['web.search.searxng_query_url'],
+                query,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
+                **searxng_kwargs,
             )
         else:
             raise Exception('No SEARXNG_QUERY_URL found in environment variables')
     elif engine == 'openserp':
-        if config.OPENSERP_BASE_URL:
-            return run_on_main_loop(
-                search_openserp(
-                    config.OPENSERP_BASE_URL,
-                    query,
-                    config.WEB_SEARCH_RESULT_COUNT,
-                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                )
+        if config['web.search.openserp_base_url']:
+            return await search_openserp(
+                config['web.search.openserp_base_url'],
+                query,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No OPENSERP_BASE_URL found in environment variables')
     elif engine == 'yacy':
-        if config.YACY_QUERY_URL:
-            return search_yacy(
-                config.YACY_QUERY_URL,
-                config.YACY_USERNAME,
-                config.YACY_PASSWORD,
+        if config['web.search.yacy_query_url']:
+            return await asyncio.to_thread(
+                search_yacy,
+                config['web.search.yacy_query_url'],
+                config['web.search.yacy_username'],
+                config['web.search.yacy_password'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No YACY_QUERY_URL found in environment variables')
     elif engine == 'google_pse':
-        if config.GOOGLE_PSE_API_KEY and config.GOOGLE_PSE_ENGINE_ID:
-            return run_on_main_loop(
-                search_google_pse(
-                    config.GOOGLE_PSE_API_KEY,
-                    config.GOOGLE_PSE_ENGINE_ID,
-                    query,
-                    config.WEB_SEARCH_RESULT_COUNT,
-                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                    referer=config.WEBUI_URL,
-                )
+        if config['web.search.google_pse_api_key'] and config['web.search.google_pse_engine_id']:
+            return await search_google_pse(
+                config['web.search.google_pse_api_key'],
+                config['web.search.google_pse_engine_id'],
+                query,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
+                referer=config['webui.url'],
             )
         else:
             raise Exception('No GOOGLE_PSE_API_KEY or GOOGLE_PSE_ENGINE_ID found in environment variables')
     elif engine == 'brave':
-        if config.BRAVE_SEARCH_API_KEY:
-            return run_on_main_loop(
-                search_brave(
-                    config.BRAVE_SEARCH_API_KEY,
-                    query,
-                    config.WEB_SEARCH_RESULT_COUNT,
-                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                )
+        if config['web.search.brave_search_api_key']:
+            return await search_brave(
+                config['web.search.brave_search_api_key'],
+                query,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No BRAVE_SEARCH_API_KEY found in environment variables')
     elif engine == 'brave_llm_context':
-        if config.BRAVE_SEARCH_API_KEY:
-            return search_brave_llm_context(
-                config.BRAVE_SEARCH_API_KEY,
+        if config['web.search.brave_search_api_key']:
+            return await asyncio.to_thread(
+                search_brave_llm_context,
+                config['web.search.brave_search_api_key'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                config.BRAVE_SEARCH_CONTEXT_TOKENS,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
+                config['web.search.brave_search_context_tokens'],
             )
         else:
             raise Exception('No BRAVE_SEARCH_API_KEY found in environment variables')
     elif engine == 'kagi':
-        if config.KAGI_SEARCH_API_KEY:
-            return search_kagi(
-                config.KAGI_SEARCH_API_KEY,
+        if config['web.search.kagi_search_api_key']:
+            return await asyncio.to_thread(
+                search_kagi,
+                config['web.search.kagi_search_api_key'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No KAGI_SEARCH_API_KEY found in environment variables')
     elif engine == 'mojeek':
-        if config.MOJEEK_SEARCH_API_KEY:
-            return search_mojeek(
-                config.MOJEEK_SEARCH_API_KEY,
+        if config['web.search.mojeek_search_api_key']:
+            return await asyncio.to_thread(
+                search_mojeek,
+                config['web.search.mojeek_search_api_key'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No MOJEEK_SEARCH_API_KEY found in environment variables')
     elif engine == 'bocha':
-        if config.BOCHA_SEARCH_API_KEY:
-            return search_bocha(
-                config.BOCHA_SEARCH_API_KEY,
+        if config['web.search.bocha_search_api_key']:
+            return await asyncio.to_thread(
+                search_bocha,
+                config['web.search.bocha_search_api_key'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No BOCHA_SEARCH_API_KEY found in environment variables')
     elif engine == 'serpstack':
-        if config.SERPSTACK_API_KEY:
-            return run_on_main_loop(
-                search_serpstack(
-                    config.SERPSTACK_API_KEY,
-                    query,
-                    config.WEB_SEARCH_RESULT_COUNT,
-                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                    https_enabled=config.SERPSTACK_HTTPS,
-                )
+        if config['web.search.serpstack_api_key']:
+            return await search_serpstack(
+                config['web.search.serpstack_api_key'],
+                query,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
+                https_enabled=config['web.search.serpstack_https'],
             )
         else:
             raise Exception('No SERPSTACK_API_KEY found in environment variables')
     elif engine == 'serper':
-        if config.SERPER_API_KEY:
-            return run_on_main_loop(
-                search_serper(
-                    config.SERPER_API_KEY,
-                    query,
-                    config.WEB_SEARCH_RESULT_COUNT,
-                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                )
+        if config['web.search.serper_api_key']:
+            return await search_serper(
+                config['web.search.serper_api_key'],
+                query,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No SERPER_API_KEY found in environment variables')
     elif engine == 'serphouse':
-        if config.SERPHOUSE_API_KEY:
-            return run_on_main_loop(
-                search_serphouse(
-                    config.SERPHOUSE_API_KEY,
-                    config.SERPHOUSE_DOMAIN,
-                    query,
-                    config.WEB_SEARCH_RESULT_COUNT,
-                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                )
+        if config['web.search.serphouse_api_key']:
+            return await search_serphouse(
+                config['web.search.serphouse_api_key'],
+                config['web.search.serphouse_domain'],
+                query,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No SERPHOUSE_API_KEY found in environment variables')
     elif engine == 'serply':
-        if config.SERPLY_API_KEY:
-            return search_serply(
-                config.SERPLY_API_KEY,
+        if config['web.search.serply_api_key']:
+            return await asyncio.to_thread(
+                search_serply,
+                config['web.search.serply_api_key'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                filter_list=config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                filter_list=config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No SERPLY_API_KEY found in environment variables')
     elif engine == 'duckduckgo':
-        return search_duckduckgo(
+        return await asyncio.to_thread(
+            search_duckduckgo,
             query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-            concurrent_requests=config.WEB_SEARCH_CONCURRENT_REQUESTS,
-            backend=config.DDGS_BACKEND,
+            config['web.search.result_count'],
+            config['web.search.domain.filter_list'],
+            concurrent_requests=config['web.search.concurrent_requests'],
+            backend=config['web.search.ddgs_backend'],
         )
     elif engine == 'tavily':
-        if config.TAVILY_API_KEY:
-            return search_tavily(
-                config.TAVILY_API_KEY,
+        if config['web.search.tavily_api_key']:
+            return await asyncio.to_thread(
+                search_tavily,
+                config['web.search.tavily_api_key'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
+                search_depth=config['web.search.tavily_search_depth'],
             )
         else:
             raise Exception('No TAVILY_API_KEY found in environment variables')
-    elif engine == 'exa':
-        if config.EXA_API_KEY:
-            return search_exa(
-                config.EXA_API_KEY,
+    elif engine == 'staan':
+        if config['web.search.staan_api_key']:
+            return await asyncio.to_thread(
+                search_staan,
+                config['web.search.staan_api_key'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
+                market=config['web.search.staan_market'],
+                max_snippets=config['web.search.staan_max_snippets'],
+            )
+        else:
+            raise Exception('No STAAN_API_KEY found in environment variables')
+    elif engine == 'exa':
+        if config['web.search.exa_api_key']:
+            return await asyncio.to_thread(
+                search_exa,
+                config['web.search.exa_api_key'],
+                query,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
+                max_content_length=config['web.search.exa_max_content_length'],
             )
         else:
             raise Exception('No EXA_API_KEY found in environment variables')
     elif engine == 'searchapi':
-        if config.SEARCHAPI_API_KEY:
-            return search_searchapi(
-                config.SEARCHAPI_API_KEY,
-                config.SEARCHAPI_ENGINE,
+        if config['web.search.searchapi_api_key']:
+            return await asyncio.to_thread(
+                search_searchapi,
+                config['web.search.searchapi_api_key'],
+                config['web.search.searchapi_engine'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No SEARCHAPI_API_KEY found in environment variables')
     elif engine == 'serpapi':
-        if config.SERPAPI_API_KEY:
-            return search_serpapi(
-                config.SERPAPI_API_KEY,
-                config.SERPAPI_ENGINE,
+        if config['web.search.serpapi_api_key']:
+            return await asyncio.to_thread(
+                search_serpapi,
+                config['web.search.serpapi_api_key'],
+                config['web.search.serpapi_engine'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No SERPAPI_API_KEY found in environment variables')
     elif engine == 'jina':
-        return search_jina(
-            config.JINA_API_KEY,
+        return await asyncio.to_thread(
+            search_jina,
+            config['web.search.jina_api_key'],
             query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.JINA_API_BASE_URL,
+            config['web.search.result_count'],
+            config['web.search.jina_api_base_url'],
         )
     elif engine == 'bing':
-        return search_bing(
-            config.BING_SEARCH_V7_SUBSCRIPTION_KEY,
-            config.BING_SEARCH_V7_ENDPOINT,
+        return await asyncio.to_thread(
+            search_bing,
+            config['web.search.bing_search_v7_subscription_key'],
+            config['web.search.bing_search_v7_endpoint'],
             str(DEFAULT_LOCALE),
             query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+            config['web.search.result_count'],
+            config['web.search.domain.filter_list'],
         )
     elif engine == 'azure':
-        if config.AZURE_AI_SEARCH_API_KEY and config.AZURE_AI_SEARCH_ENDPOINT and config.AZURE_AI_SEARCH_INDEX_NAME:
-            return search_azure(
-                config.AZURE_AI_SEARCH_API_KEY,
-                config.AZURE_AI_SEARCH_ENDPOINT,
-                config.AZURE_AI_SEARCH_INDEX_NAME,
+        if (
+            config['web.search.azure_ai_search_api_key']
+            and config['web.search.azure_ai_search_endpoint']
+            and config['web.search.azure_ai_search_index_name']
+        ):
+            return await asyncio.to_thread(
+                search_azure,
+                config['web.search.azure_ai_search_api_key'],
+                config['web.search.azure_ai_search_endpoint'],
+                config['web.search.azure_ai_search_index_name'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception(
                 'AZURE_AI_SEARCH_API_KEY, AZURE_AI_SEARCH_ENDPOINT, and AZURE_AI_SEARCH_INDEX_NAME are required for Azure AI Search'
             )
-    elif engine == 'exa':
-        return search_exa(
-            config.EXA_API_KEY,
-            query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-        )
     elif engine == 'perplexity':
-        return search_perplexity(
-            config.PERPLEXITY_API_KEY,
+        return await asyncio.to_thread(
+            search_perplexity,
+            config['web.search.perplexity_api_key'],
             query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-            model=config.PERPLEXITY_MODEL,
-            search_context_usage=config.PERPLEXITY_SEARCH_CONTEXT_USAGE,
+            config['web.search.result_count'],
+            config['web.search.domain.filter_list'],
+            model=config['web.search.perplexity_model'],
+            search_context_usage=config['web.search.perplexity_search_context_usage'],
         )
     elif engine == 'microsoft_web_iq':
-        if config.MICROSOFT_WEB_IQ_API_KEY:
-            return search_microsoft_web_iq(
-                config.MICROSOFT_WEB_IQ_API_BASE_URL,
-                config.MICROSOFT_WEB_IQ_API_KEY,
+        if config['web.search.microsoft_web_iq_api_key']:
+            return await asyncio.to_thread(
+                search_microsoft_web_iq,
+                config['web.search.microsoft_web_iq_api_base_url'],
+                config['web.search.microsoft_web_iq_api_key'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                config.MICROSOFT_WEB_IQ_LANGUAGE,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
+                config['web.search.microsoft_web_iq_language'],
                 user,
             )
         else:
             raise Exception('No MICROSOFT_WEB_IQ_API_KEY found in environment variables')
     elif engine == 'sougou':
-        if config.SOUGOU_API_SID and config.SOUGOU_API_SK:
-            return search_sougou(
-                config.SOUGOU_API_SID,
-                config.SOUGOU_API_SK,
+        if config['web.search.sougou_api_sid'] and config['web.search.sougou_api_sk']:
+            return await asyncio.to_thread(
+                search_sougou,
+                config['web.search.sougou_api_sid'],
+                config['web.search.sougou_api_sk'],
                 query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config['web.search.result_count'],
+                config['web.search.domain.filter_list'],
             )
         else:
             raise Exception('No SOUGOU_API_SID or SOUGOU_API_SK found in environment variables')
     elif engine == 'firecrawl':
-        return search_firecrawl(
-            config.FIRECRAWL_API_BASE_URL,
-            config.FIRECRAWL_API_KEY,
+        return await asyncio.to_thread(
+            search_firecrawl,
+            config['web.loader.firecrawl_api_url'],
+            config['web.loader.firecrawl_api_key'],
             query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+            config['web.search.result_count'],
+            config['web.search.domain.filter_list'],
         )
     elif engine == 'external':
-        return search_external(
+        return await asyncio.to_thread(
+            search_external,
             request,
-            config.EXTERNAL_WEB_SEARCH_URL,
-            config.EXTERNAL_WEB_SEARCH_API_KEY,
+            config['web.search.external_web_search_url'],
+            config['web.search.external_web_search_api_key'],
             query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+            config['web.search.result_count'],
+            config['web.search.domain.filter_list'],
             user=user,
         )
     elif engine == 'yandex':
-        return search_yandex(
+        return await asyncio.to_thread(
+            search_yandex,
             request,
-            config.YANDEX_WEB_SEARCH_URL,
-            config.YANDEX_WEB_SEARCH_API_KEY,
-            config.YANDEX_WEB_SEARCH_CONFIG,
+            config['web.search.yandex_web_search_url'],
+            config['web.search.yandex_web_search_api_key'],
+            config['web.search.yandex_web_search_config'],
             query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+            config['web.search.result_count'],
+            config['web.search.domain.filter_list'],
             user=user,
         )
+    elif engine == 'youcom':
+        return await asyncio.to_thread(
+            search_youcom,
+            config['web.search.youcom_api_key'],
+            query,
+            config['web.search.result_count'],
+            config['web.search.domain.filter_list'],
+        )
     elif engine == 'linkup':
-        if config.LINKUP_API_KEY:
-            return search_linkup(
-                api_key=config.LINKUP_API_KEY,
+        if config['web.search.linkup_api_key']:
+            return await asyncio.to_thread(
+                search_linkup,
+                api_key=config['web.search.linkup_api_key'],
                 query=query,
-                count=config.WEB_SEARCH_RESULT_COUNT,
-                filter_list=config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                params=config.LINKUP_SEARCH_PARAMS,
+                count=config['web.search.result_count'],
+                filter_list=config['web.search.domain.filter_list'],
+                params=config['web.search.linkup_search_params'],
             )
         else:
             raise Exception('No LINKUP_API_KEY found in environment variables')
-    elif engine == 'youcom':
-        return search_youcom(
-            config.YOUCOM_API_KEY,
-            query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-        )
     else:
         raise Exception('No search engine API key found in environment variables')
 
 
 @router.post('/process/web/search')
 async def process_web_search(request: Request, form_data: SearchForm, user=Depends(get_verified_user)):
-    config = await get_rag_config_state()
-    if not config.ENABLE_WEB_SEARCH:
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
+    if not config['web.search.enable']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    if user.role != 'admin' and not await has_permission(user.id, 'features.web_search', config.USER_PERMISSIONS):
+    if user.role != 'admin' and not await has_permission(user.id, 'features.web_search', config['user.permissions']):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -2873,12 +2650,12 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
 
     try:
         # [Gradient] Search logs contain counts only.
-        log.debug('web search: engine=%s queries=%s', config.WEB_SEARCH_ENGINE, len(form_data.queries))
+        log.debug('web search: engine=%s queries=%s', config['web.search.engine'], len(form_data.queries))
 
         # Use semaphore to limit concurrent requests based on WEB_SEARCH_CONCURRENT_REQUESTS
         # 0 or None = unlimited (previous behavior), positive number = limited concurrency
         # Set to 1 for sequential execution (rate-limited APIs like Brave free tier)
-        concurrent_limit = config.WEB_SEARCH_CONCURRENT_REQUESTS
+        concurrent_limit = config['web.search.concurrent_requests']
 
         if concurrent_limit:
             # Limited concurrency with semaphore
@@ -2886,24 +2663,24 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
 
             async def search_query_with_semaphore(query):
                 async with semaphore:
-                    return await run_in_threadpool(
-                        search_web,
+                    return await search_web(
                         request,
-                        config.WEB_SEARCH_ENGINE,
+                        config['web.search.engine'],
                         query,
                         user,
+                        config=config,
                     )
 
             search_tasks = [search_query_with_semaphore(query) for query in form_data.queries]
         else:
-            # Unlimited parallel execution (previous behavior)
+            # Unlimited parallel execution
             search_tasks = [
-                run_in_threadpool(
-                    search_web,
+                search_web(
                     request,
-                    config.WEB_SEARCH_ENGINE,
+                    config['web.search.engine'],
                     query,
                     user,
+                    config=config,
                 )
                 for query in form_data.queries
             ]
@@ -2918,7 +2695,7 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
                         urls.append(item.link)
 
         urls = list(dict.fromkeys(urls))
-        log.debug(f'web search returned {len(urls)} urls')
+        log.debug('web search returned %s urls', len(urls))  # [Gradient] counts only
 
     except Exception as e:
         log.exception('Web search failed')
@@ -2934,7 +2711,7 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
         )
 
     try:
-        if config.BYPASS_WEB_SEARCH_WEB_LOADER:
+        if config['web.search.bypass_web_loader']:
             search_results = [item for result in search_results for item in result if result]
 
             docs = [
@@ -2951,14 +2728,7 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
                 if hasattr(result, 'snippet') and result.snippet is not None
             ]
         else:
-            loader_config = await get_loader_config()
-            loader = get_web_loader(
-                urls,
-                verify_ssl=loader_config.get('web_loader_ssl_verification'),
-                requests_per_second=loader_config.get('web_loader_concurrent_requests'),
-                trust_env=loader_config.get('web_search_trust_env'),
-                loader_config=loader_config,
-            )
+            loader = get_web_loader(urls, config)
             docs = await loader.aload()
 
         urls = [
@@ -2969,7 +2739,7 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
             dict(item) for item in result_items if item.link in url_set
         ]  # only keep the search results that have been loaded
 
-        if config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
+        if config['web.search.bypass_embedding_and_retrieval']:
             return {
                 'status': True,
                 'collection_name': None,
@@ -2985,6 +2755,12 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
                 'loaded_count': len(docs),
             }
         else:
+            if not any(doc.page_content.strip() for doc in docs):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=ERROR_MESSAGES.DEFAULT('None of the web search results could be loaded'),
+                )
+
             # Create a single collection for all documents
             # Bind the ephemeral collection to its owner so filter_accessible_collections can scope it per-user.
             collection_name = f'web-search-{user.id}-{calculate_sha256_string("-".join(form_data.queries))}'[:63]
@@ -2995,6 +2771,7 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
                     request,
                     docs,
                     collection_name,
+                    config,
                     overwrite=True,
                     user=user,
                 )
@@ -3013,8 +2790,10 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
                 'filenames': urls,
                 'loaded_count': len(docs),
             }
+    except HTTPException:
+        raise
     except Exception as e:
-        log.exception(e)
+        log.exception('Web search content loading failed')
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.DEFAULT(e, ERROR_MESSAGES.WEB_SEARCH_ERROR),
@@ -3025,8 +2804,7 @@ async def _validate_collection_access(collection_names: list[str], user, access_
     """
     Raise 403 if the user lacks access to any of the requested collections.
     Delegates to the shared filter_accessible_collections utility so the
-    access rules (file-*, user-memory-*, web-search-*, KB ownership/grants,
-    legacy collections) stay in one place.
+    access rules stay in one place.
     """
     requested = set(collection_names)
     allowed = await filter_accessible_collections(requested, user, access_type=access_type)
@@ -3041,10 +2819,11 @@ async def _validate_collection_access(collection_names: list[str], user, access_
 class QueryDocForm(BaseModel):
     collection_name: str
     query: str
-    k: Optional[int] = None
-    k_reranker: Optional[int] = None
-    r: Optional[float] = None
-    hybrid: Optional[bool] = None
+    k: int | None = None
+    k_reranker: int | None = None
+    r: float | None = None
+    hybrid: bool | None = None
+    hybrid_bm25_weight: float | None = None
 
 
 @router.post('/query/doc')
@@ -3053,65 +2832,64 @@ async def query_doc_handler(
     form_data: QueryDocForm,
     user=Depends(get_verified_user),
 ):
-    config = await get_rag_config_state()
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
     await _validate_collection_access([form_data.collection_name], user)
 
     try:
-        if config.ENABLE_RAG_HYBRID_SEARCH and (form_data.hybrid is None or form_data.hybrid):
-            collection_results = {}
-            collection_results[form_data.collection_name] = await ASYNC_VECTOR_DB_CLIENT.get(
-                collection_name=form_data.collection_name
-            )
+        if config['rag.enable_hybrid_search'] and (form_data.hybrid is None or form_data.hybrid):
             return await query_doc_with_hybrid_search(
                 collection_name=form_data.collection_name,
-                collection_result=collection_results[form_data.collection_name],
+                collection_result=None,
                 query=form_data.query,
                 embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
                     query, prefix=prefix, user=user
                 ),
-                k=form_data.k if form_data.k else config.TOP_K,
+                k=form_data.k if form_data.k else config['rag.top_k'],
                 reranking_function=(
                     (lambda query, documents: request.app.state.RERANKING_FUNCTION(query, documents, user=user))
                     if request.app.state.RERANKING_FUNCTION
                     else None
                 ),
-                k_reranker=form_data.k_reranker or config.TOP_K_RERANKER,
-                r=(form_data.r if form_data.r else config.RELEVANCE_THRESHOLD),
+                k_reranker=form_data.k_reranker or config['rag.top_k_reranker'],
+                r=(form_data.r if form_data.r else config['rag.relevance_threshold']),
                 hybrid_bm25_weight=(
-                    form_data.hybrid_bm25_weight if form_data.hybrid_bm25_weight else config.HYBRID_BM25_WEIGHT
+                    form_data.hybrid_bm25_weight
+                    if form_data.hybrid_bm25_weight is not None
+                    else config['rag.hybrid_bm25_weight']
                 ),
-                user=user,
             )
         else:
             query_embedding = await request.app.state.EMBEDDING_FUNCTION(
                 form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
             )
-            # query_doc wraps a blocking VECTOR_DB_CLIENT.search call; offload
-            # so the request's event loop stays responsive.
+            # query_doc wraps a blocking get_vector_db_client().search call;
+            # offload so the request's event loop stays responsive.
             return await asyncio.to_thread(
                 query_doc,
                 collection_name=form_data.collection_name,
                 query_embedding=query_embedding,
-                k=form_data.k if form_data.k else config.TOP_K,
+                k=form_data.k if form_data.k else config['rag.top_k'],
                 user=user,
             )
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error querying knowledge base'),
         )
 
 
 class QueryCollectionsForm(BaseModel):
     collection_names: list[str]
     query: str
-    k: Optional[int] = None
-    k_reranker: Optional[int] = None
-    r: Optional[float] = None
-    hybrid: Optional[bool] = None
-    hybrid_bm25_weight: Optional[float] = None
-    enable_enriched_texts: Optional[bool] = None
+    k: int | None = None
+    k_reranker: int | None = None
+    r: float | None = None
+    hybrid: bool | None = None
+    hybrid_bm25_weight: float | None = None
+    enable_enriched_texts: bool | None = None
 
 
 @router.post('/query/collection')
@@ -3120,32 +2898,34 @@ async def query_collection_handler(
     form_data: QueryCollectionsForm,
     user=Depends(get_verified_user),
 ):
-    config = await get_rag_config_state()
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
     await _validate_collection_access(form_data.collection_names, user)
 
     try:
-        if config.ENABLE_RAG_HYBRID_SEARCH and (form_data.hybrid is None or form_data.hybrid):
+        if config['rag.enable_hybrid_search'] and (form_data.hybrid is None or form_data.hybrid):
             return await query_collection_with_hybrid_search(
                 collection_names=form_data.collection_names,
                 queries=[form_data.query],
                 embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
                     query, prefix=prefix, user=user
                 ),
-                k=form_data.k if form_data.k else config.TOP_K,
+                k=form_data.k if form_data.k else config['rag.top_k'],
                 reranking_function=(
                     (lambda query, documents: request.app.state.RERANKING_FUNCTION(query, documents, user=user))
                     if request.app.state.RERANKING_FUNCTION
                     else None
                 ),
-                k_reranker=form_data.k_reranker or config.TOP_K_RERANKER,
-                r=(form_data.r if form_data.r else config.RELEVANCE_THRESHOLD),
+                k_reranker=form_data.k_reranker or config['rag.top_k_reranker'],
+                r=(form_data.r if form_data.r else config['rag.relevance_threshold']),
                 hybrid_bm25_weight=(
-                    form_data.hybrid_bm25_weight if form_data.hybrid_bm25_weight else config.HYBRID_BM25_WEIGHT
+                    form_data.hybrid_bm25_weight
+                    if form_data.hybrid_bm25_weight is not None
+                    else config['rag.hybrid_bm25_weight']
                 ),
                 enable_enriched_texts=(
                     form_data.enable_enriched_texts
                     if form_data.enable_enriched_texts is not None
-                    else config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
+                    else config['rag.enable_hybrid_search_enriched_texts']
                 ),
             )
         else:
@@ -3156,14 +2936,17 @@ async def query_collection_handler(
                 embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
                     query, prefix=prefix, user=user
                 ),
-                k=form_data.k if form_data.k else config.TOP_K,
+                k=form_data.k if form_data.k else config['rag.top_k'],
+                user=user,
             )
 
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error querying knowledge base'),
         )
 
 
@@ -3181,10 +2964,12 @@ class DeleteForm(BaseModel):
 
 @router.post('/delete')
 async def delete_entries_from_collection(
+    request: Request,
     form_data: DeleteForm,
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # [Gradient] Admin role alone does not grant write on a collection.
     await _validate_collection_access([form_data.collection_name], user, access_type='write')
     try:
         if await ASYNC_VECTOR_DB_CLIENT.has_collection(collection_name=form_data.collection_name):
@@ -3196,11 +2981,12 @@ async def delete_entries_from_collection(
                 )
             hash = file.hash
 
-            # Refuse to issue a `filter={'hash': None}` query — the match
-            # semantics of a null filter value are backend-dependent (some
-            # backends ignore the key, some match every row whose metadata
-            # lacks `hash`) and risk deleting unrelated entries. Files without
-            # a hash are typically unprocessed / failed / legacy records that
+            # Refuse to issue a `filter={'hash': None}` query — the
+            # match semantics of a null filter value are
+            # backend-dependent (some backends ignore the key, some
+            # match every row whose metadata lacks `hash`) and risk
+            # deleting unrelated entries. Files without a hash are
+            # typically unprocessed / failed / legacy records that
             # can't be targeted by hash anyway.
             if hash is None:
                 raise HTTPException(
@@ -3208,22 +2994,30 @@ async def delete_entries_from_collection(
                     detail=ERROR_MESSAGES.DEFAULT('File has no hash; cannot delete vector entries by hash.'),
                 )
 
-            # Pre-existing bug: this used `metadata=` which is not a parameter
-            # on `VectorDBBase.delete` nor on any backend implementation, so
-            # the call always raised TypeError that was silently swallowed by
-            # the surrounding `except Exception` and the endpoint reported
-            # `{'status': False}` for every request. Use `filter` to actually
-            # do what the endpoint name promises.
+            # Pre-existing bug: this used `metadata=` which is not a
+            # parameter on `VectorDBBase.delete` nor on any backend
+            # implementation, so the call always raised TypeError that
+            # was silently swallowed by the surrounding `except
+            # Exception` and the endpoint reported `{'status': False}`
+            # for every request. Use `filter` to actually do what the
+            # endpoint name promises.
             await ASYNC_VECTOR_DB_CLIENT.delete(
                 collection_name=form_data.collection_name,
                 filter={'hash': hash},
+            )
+            await publish_event(
+                request,
+                EVENTS.RETRIEVAL_COLLECTION_DELETED,
+                actor=user,
+                subject_id=form_data.collection_name,
+                data={'file_id': form_data.file_id},
             )
             return {'status': True}
         else:
             return {'status': False}
     except HTTPException:
-        # Caller-meaningful errors (404/400 above) must not be swallowed and
-        # re-shaped as `{'status': False}`.
+        # Caller-meaningful errors (404/400 above) must not be
+        # swallowed and re-shaped as `{'status': False}`.
         raise
     except Exception as e:
         log.exception(e)
@@ -3231,16 +3025,28 @@ async def delete_entries_from_collection(
 
 
 @router.post('/reset/db')
-async def reset_vector_db(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def reset_vector_db(
+    request: Request,
+    user=Depends(get_admin_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    # [Gradient] Destructive maintenance needs the explicit admin bypass.
     if not can_bypass_access_control(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     await ASYNC_VECTOR_DB_CLIENT.reset()
     if configured():
         await Knowledges.delete_all_knowledge(db=db)
+    await publish_event(
+        request,
+        EVENTS.RETRIEVAL_VECTOR_DB_RESET,
+        actor=user,
+        subject_id='default',
+    )
 
 
 @router.post('/reset/uploads')
 async def reset_upload_dir(request: Request, user=Depends(get_admin_user)) -> bool:
+    # [Gradient] Destructive maintenance needs the explicit admin bypass.
     if not can_bypass_access_control(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
     folder = f'{UPLOAD_DIR}'
@@ -3277,24 +3083,25 @@ async def reset_upload_dir(request: Request, user=Depends(get_admin_user)) -> bo
 if ENV == 'dev':
 
     @router.get('/ef/{text}')
-    async def get_embeddings(request: Request, text: Optional[str] = 'Hello World!', user=Depends(get_admin_user)):
+    # [Gradient] Admin only: unauthenticated callers must not run the embedding model.
+    async def get_embeddings(request: Request, text: str | None = 'Hello World!', user=Depends(get_admin_user)):
         return {'result': await request.app.state.EMBEDDING_FUNCTION(text, prefix=RAG_EMBEDDING_QUERY_PREFIX)}
 
 
 class BatchProcessFilesForm(BaseModel):
-    files: List[FileModel]
+    files: list[FileModel]
     collection_name: str
 
 
 class BatchProcessFilesResult(BaseModel):
     file_id: str
     status: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class BatchProcessFilesResponse(BaseModel):
-    results: List[BatchProcessFilesResult]
-    errors: List[BatchProcessFilesResult]
+    results: list[BatchProcessFilesResult]
+    errors: list[BatchProcessFilesResult]
 
 
 @router.post('/process/files/batch')
@@ -3313,18 +3120,19 @@ async def process_files_batch(
     embedding (Files.update_file_by_id) manage their own short-lived sessions.
     """
 
-    config = await get_rag_config_state()
+    config = await Config.get_many(*RETRIEVAL_CONFIG_KEYS.values())
     collection_name = form_data.collection_name
 
     if collection_name:
         await _validate_collection_access([collection_name], user, access_type='write')
 
-    file_results: List[BatchProcessFilesResult] = []
-    file_errors: List[BatchProcessFilesResult] = []
-    file_updates: List[FileUpdateForm] = []
+    file_results: list[BatchProcessFilesResult] = []
+    file_errors: list[BatchProcessFilesResult] = []
+    file_updates: list[FileUpdateForm] = []
+    seen_hashes: set[str] = set()
 
     # Prepare all documents first
-    all_docs: List[Document] = []
+    all_docs: list[Document] = []
 
     for file in form_data.files:
         try:
@@ -3349,6 +3157,7 @@ async def process_files_batch(
                 )
                 continue
 
+            # [Gradient] soev-api ingests the file; nothing is embedded locally.
             if soev_config.SOEV_API_URL:
                 try:
                     await ingest.submit(db_file, collection_key=collection_name, user_id=user.id)
@@ -3362,15 +3171,21 @@ async def process_files_batch(
                 continue
 
             text_content = file.data.get('content', '')
-            docs: List[Document] = [
+            hash = calculate_sha256_string(text_content)
+            if hash in seen_hashes or await run_in_threadpool(has_duplicate_content, collection_name, hash, file.id):
+                raise ValueError(ERROR_MESSAGES.DUPLICATE_CONTENT)
+            seen_hashes.add(hash)
+
+            docs: list[Document] = [
                 Document(
                     page_content=text_content.replace('<br/>', '\n'),
                     metadata={
-                        **file.meta,
+                        **filter_file_metadata(file.meta),
                         'name': file.filename,
                         'created_by': file.user_id,
                         'file_id': file.id,
                         'source': file.filename,
+                        'hash': hash,
                     },
                 )
             ]
@@ -3379,7 +3194,7 @@ async def process_files_batch(
 
             file_updates.append(
                 FileUpdateForm(
-                    hash=calculate_sha256_string(text_content),
+                    hash=hash,
                     data={'content': text_content},
                 )
             )
@@ -3399,6 +3214,7 @@ async def process_files_batch(
                 request,
                 all_docs,
                 collection_name,
+                config,
                 add=True,
                 user=user,
             )
@@ -3414,4 +3230,16 @@ async def process_files_batch(
                 file_result.status = 'failed'
                 file_errors.append(BatchProcessFilesResult(file_id=file_result.file_id, status='failed', error=str(e)))
 
-    return BatchProcessFilesResponse(results=file_results, errors=file_errors)
+    response = BatchProcessFilesResponse(results=file_results, errors=file_errors)
+    await publish_event(
+        request,
+        EVENTS.RETRIEVAL_CONTENT_PROCESSED,
+        actor=user,
+        subject_id=collection_name,
+        subject_type='retrieval.collection',
+        data={
+            'count': len([item for item in file_results if item.status == 'completed']),
+            'errors': len(file_errors),
+        },
+    )
+    return response

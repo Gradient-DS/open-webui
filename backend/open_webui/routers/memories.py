@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Literal
 
@@ -142,15 +141,11 @@ async def reindex_memory_vectors_for_user(
     if not memories:
         return 0
 
-    vectors = await asyncio.gather(
-        *[
-            request.app.state.EMBEDDING_FUNCTION(
-                memory_vector_text(memory.content, memory.path),
-                prefix=RAG_EMBEDDING_CONTENT_PREFIX,
-                user=user,
-            )
-            for memory in memories
-        ]
+    # One list call so batching and the concurrency limit apply.
+    vectors = await request.app.state.EMBEDDING_FUNCTION(
+        [memory_vector_text(memory.content, memory.path) for memory in memories],
+        prefix=RAG_EMBEDDING_CONTENT_PREFIX,
+        user=user,
     )
 
     await ASYNC_VECTOR_DB_CLIENT.upsert(
@@ -241,6 +236,7 @@ async def update_memories(
 
     operations = validate_memory_operations(form_data)
     metadata = getattr(request.state, 'metadata', {}) or {}
+    model = metadata.get('model')
     source = form_data.source or 'tool'
     for operation in operations:
         if operation.get('action') in {'add', 'replace', 'move'}:
@@ -248,7 +244,7 @@ async def update_memories(
                 'created_by': source,
                 'chat_id': metadata.get('chat_id'),
                 'message_id': metadata.get('message_id'),
-                'model': metadata.get('model'),
+                'model': model.get('id') if isinstance(model, dict) else None,
             }
 
     try:
@@ -263,7 +259,7 @@ async def update_memories(
     for result in results:
         memory = result.get('memory')
         if isinstance(memory, MemoryModel):
-            result = {**result, 'memory': memory.model_dump()}
+            result = {**result, 'memory': memory.model_dump(exclude={'meta'})}
             if result.get('status') in {'created', 'updated'}:
                 vector = await request.app.state.EMBEDDING_FUNCTION(
                     memory_vector_text(memory.content, memory.path),
@@ -438,7 +434,7 @@ async def read_memory_path(
     )
     return {
         **result,
-        'memories': [memory.model_dump() for memory in result['memories']],
+        'memories': [memory.model_dump(exclude={'meta'}) for memory in result['memories']],
     }
 
 
@@ -487,10 +483,9 @@ async def reset_memory_from_vector_db(
     """Reset user's memory vector embeddings.
 
     CRITICAL: We intentionally do NOT use Depends(get_async_session) here.
-    This endpoint generates embeddings for ALL user memories in parallel using
-    asyncio.gather(). A user with 100 memories would trigger 100 embedding API
-    calls simultaneously. With a session held, this could block a connection
-    for MINUTES, completely exhausting the connection pool.
+    This endpoint generates embeddings for ALL user memories. With a session
+    held, this could block a connection for MINUTES, completely exhausting the
+    connection pool.
     """
     await check_memories_permission(user)
 

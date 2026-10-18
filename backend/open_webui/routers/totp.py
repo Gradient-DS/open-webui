@@ -21,9 +21,9 @@ from open_webui.utils.auth import (
     create_token,
     decode_token,
     get_current_user,
+    is_valid_token,
     verify_password,
 )
-from open_webui.utils.redis import get_redis_client
 from open_webui.utils.rate_limit import RateLimiter
 from open_webui.utils.totp import (
     decrypt_secret,
@@ -66,6 +66,9 @@ async def get_2fa_setup_user(request: Request):
     purpose = data.get('purpose')
     if purpose not in (None, '2fa_setup_pending'):
         raise HTTPException(status_code=401, detail='Invalid token type')
+    # A full session token must still be live (session_stamp, per-token revocation).
+    if purpose is None and not await is_valid_token(data, getattr(request.app.state, 'redis', None)):
+        raise HTTPException(status_code=401, detail='Invalid or expired token')
 
     user = await Users.get_user_by_id(data['id'])
     if not user:
@@ -76,7 +79,7 @@ async def get_2fa_setup_user(request: Request):
 
 
 # Rate limiter: 5 attempts per 15 minutes per user
-totp_verify_rate_limiter = RateLimiter(redis_client=get_redis_client(), limit=5, window=60 * 15)
+totp_verify_rate_limiter = RateLimiter(limit=5, window=60 * 15)
 
 
 ####################
@@ -214,7 +217,7 @@ async def enable_totp(
     # When enrolled via a grace-expired setup token the user holds no full
     # session — issue one now so they can proceed straight into the app.
     if getattr(request.state, 'is_2fa_setup_token', False):
-        session = await create_session_response(request, user, db, response, set_cookie=True)
+        session = await create_session_response(request, user, db, response, set_cookie=True, source='password')
         result = {**session, **result}
 
     return result
@@ -280,7 +283,7 @@ async def verify_2fa(
         raise HTTPException(status_code=401, detail='Invalid token')
 
     # Rate limit by user_id
-    if totp_verify_rate_limiter.is_limited(user_id):
+    if await totp_verify_rate_limiter.is_limited(getattr(request.app.state, 'redis', None), user_id):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail='Too many verification attempts. Please try again later.',
@@ -314,7 +317,7 @@ async def verify_2fa(
         raise HTTPException(status_code=400, detail='Invalid code format')
 
     # Success — issue full session
-    return await create_session_response(request, user, db, response, set_cookie=True)
+    return await create_session_response(request, user, db, response, set_cookie=True, source='password')
 
 
 @router.post('/recovery/regenerate')

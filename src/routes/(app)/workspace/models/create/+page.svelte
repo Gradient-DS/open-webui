@@ -4,7 +4,7 @@
 	import { page } from '$app/stores';
 	import { config, models, settings } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { COMMUNITY_ORIGINS, WEBUI_BASE_URL } from '$lib/constants';
 
 	import { onMount, getContext } from 'svelte';
 
@@ -20,7 +20,7 @@
 	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
 	import SimpleModelEditor from '$lib/components/workspace/Models/SimpleModelEditor.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<any>('i18n');
 
 	$: useSimpleBuilder =
 		isFeatureEnabled('simple_assistant_builder') && $page.url.searchParams.get('advanced') === null;
@@ -35,12 +35,12 @@
 					{ modelId: modelInfo.id }
 				)
 			);
-			return;
+			return false;
 		}
 
 		if (modelInfo.id === '') {
 			toast.error($i18n.t('Error: Model ID cannot be empty. Please enter a valid ID to proceed.'));
-			return;
+			return false;
 		}
 
 		if (modelInfo) {
@@ -64,45 +64,49 @@
 			});
 
 			if (res) {
-				await models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				try {
+					await models.set(
+						await getModels(
+							localStorage.token,
+							$config?.features?.enable_direct_connections
+								? ($settings?.directConnections ?? null)
+								: null
+						)
+					);
 
-				// Auto-pin the newly created agent for the creator
-				const pinnedModels = $settings?.pinnedModels ?? [];
-				if (!pinnedModels.includes(modelInfo.id)) {
-					const updatedPinned = [...new Set([...pinnedModels, modelInfo.id])];
-					settings.set({ ...$settings, pinnedModels: updatedPinned });
-					await updateUserSettings(localStorage.token, { ui: $settings });
-				}
+					// [Gradient] Auto-pin the newly created agent for the creator
+					const pinnedModels = $settings?.pinnedModels ?? [];
+					if (!pinnedModels.includes(modelInfo.id)) {
+						const updatedPinned = [...new Set([...pinnedModels, modelInfo.id])];
+						settings.set({ ...$settings, pinnedModels: updatedPinned });
+						await updateUserSettings(localStorage.token, { ui: $settings });
+					}
 
-				toast.success(
-					useSimpleBuilder
-						? $i18n.t('Assistant created successfully!')
-						: $i18n.t('Model created successfully!')
-				);
-				// Land on the edit page for the just-created assistant, where
-				// Sharing is available. The "+ Add knowledge" flow passes
-				// skipNavigate so it can route to the KB-create flow itself.
-				if (!skipNavigate) {
-					await goto(`/workspace/models/edit?id=${encodeURIComponent(modelInfo.id)}`);
+					toast.success(
+						useSimpleBuilder
+							? $i18n.t('Assistant created successfully!')
+							: $i18n.t('Model created successfully!')
+					);
+					// [Gradient] Land on the edit page for the just-created assistant, where
+					// Sharing is available. The "+ Add knowledge" flow passes
+					// skipNavigate so it can route to the KB-create flow itself.
+					if (!skipNavigate) {
+						await goto(`/workspace/models/edit?id=${encodeURIComponent(modelInfo.id)}`);
+					}
+				} catch (error: any) {
+					toast.error(`${error?.message ?? error}`);
 				}
+				return res;
 			}
 		}
+		return false;
 	};
 
 	let model = null;
 
 	onMount(() => {
 		const handleMessageEvent = async (event: MessageEvent) => {
-			if (
-				!['https://openwebui.com', 'https://www.openwebui.com', 'http://localhost:9999'].includes(
-					event.origin
-				)
-			) {
+			if (!COMMUNITY_ORIGINS.includes(event.origin)) {
 				return;
 			}
 

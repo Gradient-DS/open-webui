@@ -98,7 +98,10 @@
 			{/if}
 
 			{#if !isWritable}
-				<div class="shrink-0 text-[0.625rem] text-gray-400 dark:text-gray-600" title="Read only">
+				<div
+					class="shrink-0 text-[0.625rem] text-gray-400 dark:text-gray-600"
+					title={$i18n.t('Read only')}
+				>
 					<Eye className="size-3" />
 				</div>
 			{/if}
@@ -108,7 +111,7 @@
 	{#if expanded}
 		<div class="pl-3">
 			{#if loading && !loaded}
-				<div class="flex gap-1 px-2 py-1.5" aria-label="Loading">
+				<div class="flex gap-1 px-2 py-1.5" aria-label={$i18n.t('Loading')}>
 					<span class="size-1 rounded-full bg-gray-400 animate-pulse dark:bg-gray-600"></span>
 					<span
 						class="size-1 rounded-full bg-gray-400 animate-pulse [animation-delay:150ms] dark:bg-gray-600"
@@ -127,6 +130,7 @@
 						lastReadAt={chat.last_read_at}
 						active={chat.active ?? false}
 						ownerName={chat.owner_name}
+						participants={chat.participants ?? []}
 						ownerUserId={chat.user_id}
 						readonly={chat.readonly ?? !isWritable}
 					/>
@@ -143,7 +147,7 @@
 						on:click={() => loadChats(true)}
 					>
 						{#if loading}
-							<div class="flex gap-1 px-2 py-1.5" aria-label="Loading">
+							<div class="flex gap-1 px-2 py-1.5" aria-label={$i18n.t('Loading')}>
 								<span class="size-1 rounded-full bg-gray-400 animate-pulse dark:bg-gray-600"></span>
 								<span
 									class="size-1 rounded-full bg-gray-400 animate-pulse [animation-delay:150ms] dark:bg-gray-600"

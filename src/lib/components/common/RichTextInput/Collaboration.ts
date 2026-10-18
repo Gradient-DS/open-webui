@@ -1,6 +1,8 @@
 import * as Y from 'yjs';
+import { marked } from 'marked';
 import {
 	ySyncPlugin,
+	ySyncPluginKey,
 	yCursorPlugin,
 	yUndoPlugin,
 	undo,
@@ -11,6 +13,7 @@ import type { Socket } from 'socket.io-client';
 import type { SessionUser } from '$lib/stores';
 import { Editor, Extension } from '@tiptap/core';
 import { keymap } from 'prosemirror-keymap';
+import { Plugin } from 'prosemirror-state';
 import { tick } from 'svelte';
 
 const USER_COLORS = [
@@ -43,6 +46,7 @@ export class SocketIOCollaborationProvider {
 	private synced = false;
 	private editor: Editor | null = null;
 	private editorContentGetter: EditorContentGetter | null = null;
+	private contentSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(
 		private readonly documentId: string,
@@ -62,6 +66,15 @@ export class SocketIOCollaborationProvider {
 				if (!yXmlFragment) return [];
 
 				const plugins = [
+					new Plugin({
+						filterTransaction: (tr) => {
+							// Preserve literal URLs received from another editor.
+							if (tr.getMeta(ySyncPluginKey)?.isChangeOrigin) {
+								tr.setMeta('preventAutolink', true);
+							}
+							return true;
+						}
+					}),
 					ySyncPlugin(yXmlFragment),
 					yUndoPlugin(),
 					keymap({
@@ -91,16 +104,28 @@ export class SocketIOCollaborationProvider {
 		}
 	}
 
-	private applyInitialContent() {
-		if (!this.editor || !this.initialContent) return;
+	private applyInitialContent(content = this.initialContent) {
+		if (!this.editor || !content) return;
 
-		if (typeof this.initialContent === 'string') {
-			this.editor.commands.setContent(this.initialContent);
+		if (typeof content === 'string') {
+			this.editor.commands.setContent(content);
 			return;
 		}
 
-		const doc = prosemirrorJSONToYDoc(this.editor.schema, this.initialContent);
+		const doc = prosemirrorJSONToYDoc(this.editor.schema, content);
 		Y.applyUpdate(this.doc, Y.encodeStateAsUpdate(doc));
+	}
+
+	// Send the merged content; the remote sender had not seen our edits yet.
+	private sendContentSnapshot() {
+		this.contentSnapshotTimer = null;
+		const getContent = this.editorContentGetter;
+		if (!this.isConnected || !getContent) return;
+
+		this.socket.emit('ydoc:document:update', {
+			document_id: this.documentId,
+			data: { content: getContent() }
+		});
 	}
 
 	private joinDocument() {
@@ -130,7 +155,13 @@ export class SocketIOCollaborationProvider {
 			if (data.document_id === this.documentId && data.socket_id !== this.socket.id) {
 				try {
 					const update = new Uint8Array(data.update);
-					Y.applyUpdate(this.doc, update);
+					// 'server' stops the local update listener sending this straight back out
+					Y.applyUpdate(this.doc, update, 'server');
+
+					if (this.contentSnapshotTimer) {
+						clearTimeout(this.contentSnapshotTimer);
+					}
+					this.contentSnapshotTimer = setTimeout(() => this.sendContentSnapshot(), 500);
 				} catch (error) {
 					console.error('Error applying Yjs update:', error);
 				}
@@ -151,10 +182,17 @@ export class SocketIOCollaborationProvider {
 								this.doc.getXmlFragment('prosemirror').length === 0
 							) {
 								if (
-									this.initialContent &&
+									(data.content || this.initialContent) &&
 									[...(data.sessions ?? [])].sort()[0] === this.socket.id
 								) {
-									this.applyInitialContent();
+									// The HTTP snapshot may predate the last socket save.
+									this.applyInitialContent(
+										data.content
+											? data.content.json ||
+													data.content.html ||
+													marked.parse(data.content.md ?? '', { async: false })
+											: this.initialContent
+									);
 								}
 							} else {
 								// If the editor already has content, we don't need to send an empty state
@@ -218,6 +256,11 @@ export class SocketIOCollaborationProvider {
 						}
 					}
 				});
+
+				if (this.contentSnapshotTimer) {
+					clearTimeout(this.contentSnapshotTimer);
+					this.contentSnapshotTimer = null;
+				}
 			}
 		});
 
@@ -261,6 +304,11 @@ export class SocketIOCollaborationProvider {
 		this.socket.off('ydoc:awareness:update');
 		this.socket.off('connect', this.onConnect);
 		this.socket.off('disconnect', this.onDisconnect);
+
+		if (this.contentSnapshotTimer) {
+			clearTimeout(this.contentSnapshotTimer);
+			this.sendContentSnapshot();
+		}
 
 		if (this.isConnected) {
 			this.socket.emit('ydoc:document:leave', {

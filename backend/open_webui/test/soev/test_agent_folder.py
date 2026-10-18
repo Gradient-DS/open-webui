@@ -42,7 +42,7 @@ async def settled(route_to_agent: bool, function_calling: str) -> tuple[dict, di
         'params': {'function_calling': function_calling},
     }
     user = SimpleNamespace(id='alice', role='user')
-    form_data, metadata, _ = await middleware.process_chat_payload(
+    form_data, metadata, _, _ = await middleware.process_chat_payload(
         request, form_data, user, metadata, {'id': 'agent', 'info': {}}
     )
     return form_data, metadata

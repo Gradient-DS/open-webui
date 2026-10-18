@@ -192,6 +192,24 @@ async def derive_relative_path_from_directory(
     await Files.update_file_metadata_by_id(file_id, {'relative_path': relative_path}, db=db)
 
 
+async def _verify_directory_in_knowledge(
+    id: str,
+    directory_id: str | None,
+    db: AsyncSession,
+    detail: str = ERROR_MESSAGES.NOT_FOUND,
+):
+    """Verify a caller-supplied directory belongs to the knowledge base in the URL. Unset means the root level."""
+    if not directory_id:
+        return None
+
+    directory = await Knowledges.get_directory_by_id(directory_id, db=db)
+    if not directory or directory.knowledge_id != id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=detail,
+        )
+
+
 @router.get('/', response_model=KnowledgeAccessListResponse)
 async def get_knowledge_bases(
     page: Optional[int] = 1,
@@ -207,7 +225,7 @@ async def get_knowledge_bases(
     if type:
         filter['type'] = type
 
-    groups = await Groups.get_groups_by_member_id(user.id, db=db)
+    groups = await Groups.get_groups_by_member_id(user.id, db=db, include_inherited=True)
     user_group_ids = {group.id for group in groups}
 
     if not can_bypass_access_control(user):
@@ -274,7 +292,7 @@ async def search_knowledge_bases(
     if direction in {'asc', 'desc'}:
         filter['direction'] = direction
 
-    groups = await Groups.get_groups_by_member_id(user.id, db=db)
+    groups = await Groups.get_groups_by_member_id(user.id, db=db, include_inherited=True)
     user_group_ids = {group.id for group in groups}
 
     if not can_bypass_access_control(user):
@@ -326,7 +344,7 @@ async def search_knowledge_files(
     if query:
         filter['query'] = query
 
-    groups = await Groups.get_groups_by_member_id(user.id, db=db)
+    groups = await Groups.get_groups_by_member_id(user.id, db=db, include_inherited=True)
     if groups:
         filter['group_ids'] = [group.id for group in groups]
 
@@ -1526,6 +1544,8 @@ async def add_file_to_knowledge_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    await _verify_directory_in_knowledge(id, form_data.directory_id, db, detail='Target directory not found.')
+
     # Check file count limit for non-local KBs
     if knowledge.type != 'local':
         current_files = await Knowledges.get_files_by_id(id, db=db)
@@ -1771,13 +1791,9 @@ async def remove_file_from_knowledge_by_id(
 
     # Remove content from the vector database
     try:
-        await ASYNC_VECTOR_DB_CLIENT.delete(
-            collection_name=knowledge.id, filter={'file_id': form_data.file_id}
-        )  # Remove by file_id first
-
-        await ASYNC_VECTOR_DB_CLIENT.delete(
-            collection_name=knowledge.id, filter={'hash': file.hash}
-        )  # Remove by hash as well in case of duplicates
+        await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'file_id': form_data.file_id})
+        if file.hash:
+            await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'hash': file.hash})
     except Exception as e:
         log.debug('This was most likely caused by bypassing embedding processing')
         log.debug(e)
@@ -2118,6 +2134,9 @@ async def add_files_to_knowledge_batch(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    for directory_id in {form.directory_id for form in form_data if form.directory_id}:
+        await _verify_directory_in_knowledge(id, directory_id, db, detail='Target directory not found.')
+
     # Check file count limit for non-local KBs
     if knowledge.type != 'local':
         current_files = await Knowledges.get_files_by_id(id, db=db)
@@ -2331,6 +2350,8 @@ async def create_knowledge_directory(
     # here; the sync daemon that once shared this route is gone (11038e9e4).
     await _verify_knowledge_write_access(id, user, db)
 
+    await _verify_directory_in_knowledge(id, form_data.parent_id, db, detail='Parent directory not found.')
+
     directory = await Knowledges.create_directory(
         knowledge_id=id,
         name=form_data.name,
@@ -2363,14 +2384,11 @@ async def update_knowledge_directory(
     db: AsyncSession = Depends(get_async_session),
 ):
     await _verify_knowledge_write_access(id, user, db)
+    await _verify_directory_in_knowledge(id, dir_id, db)
 
-    # Verify directory belongs to this knowledge base
-    directory = await Knowledges.get_directory_by_id(dir_id, db=db)
-    if not directory or directory.knowledge_id != id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
+    # '__unset__' leaves the parent alone, None moves the directory to the root
+    if form_data.parent_id not in (None, '__unset__'):
+        await _verify_directory_in_knowledge(id, form_data.parent_id, db, detail='Parent directory not found.')
 
     result = await Knowledges.update_directory(
         directory_id=dir_id,
@@ -2403,14 +2421,10 @@ async def delete_knowledge_directory(
     db: AsyncSession = Depends(get_async_session),
 ):
     await _verify_knowledge_write_access(id, user, db)
+    await _verify_directory_in_knowledge(id, dir_id, db)
 
-    # Verify directory belongs to this knowledge base
-    directory = await Knowledges.get_directory_by_id(dir_id, db=db)
-    if not directory or directory.knowledge_id != id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
+    # Collect before delete_directory drops the KnowledgeFile rows (ids returned to the caller)
+    files = [] if move_files else await Knowledges.get_files_by_id_and_directory_id(id, dir_id, db=db)
 
     # Full fork cascade (P2-8 ledger #4): with move_files=False the subtree's
     # files are deleted like single-file deletes (KB vectors, file-{id}
@@ -2434,7 +2448,7 @@ async def delete_knowledge_directory(
         subject_id=dir_id,
         data={'knowledge_id': id, 'move_files': move_files},
     )
-    return {'status': True}
+    return {'status': True, 'file_ids': [file.id for file in files]}
 
 
 @router.post('/{id}/file/move')
@@ -2454,14 +2468,7 @@ async def move_file_in_knowledge(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    # If target directory is set, verify it belongs to this knowledge base
-    if form_data.directory_id:
-        directory = await Knowledges.get_directory_by_id(form_data.directory_id, db=db)
-        if not directory or directory.knowledge_id != id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail='Target directory not found.',
-            )
+    await _verify_directory_in_knowledge(id, form_data.directory_id, db, detail='Target directory not found.')
 
     success = await Knowledges.move_file_to_directory(
         knowledge_id=id,

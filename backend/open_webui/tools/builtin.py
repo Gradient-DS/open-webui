@@ -10,6 +10,7 @@ import asyncio
 import logging
 import time
 from typing import Literal, Optional
+from urllib.parse import unquote
 
 from fastapi import HTTPException, Request
 
@@ -28,7 +29,7 @@ from open_webui.models.memories import Memories
 from open_webui.models.messages import Message, Messages
 from open_webui.models.notes import Notes
 from open_webui.models.users import UserModel
-from open_webui.retrieval.utils import get_content_from_url
+from open_webui.retrieval.utils import filter_source_metadata, get_content_from_url
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.images import (
     CreateImageForm,
@@ -70,6 +71,7 @@ from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.notifications import notify_target
 from open_webui.utils.sanitize import sanitize_code
 from open_webui.utils.access_control import can_bypass_access_control
+from open_webui.utils.skill_files import SkillFile, SkillFileOperation, skill_content_page, skill_overview
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +84,7 @@ async def _has_write_access_to_note(note, user_id: str) -> bool:
 
     from open_webui.models.access_grants import AccessGrants
 
-    user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+    user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
     return await AccessGrants.has_access(
         user_id=user_id,
         resource_type='note',
@@ -317,7 +319,7 @@ async def search_web(
         max_count = 5 if configured is None else configured
         count = max(1, min(count, max_count)) if count is not None else max_count
 
-        results = await asyncio.to_thread(_search_web, __request__, engine, query, user)
+        results = await _search_web(__request__, engine, query, user)
 
         # Limit results
         results = results[:count] if results else []
@@ -370,6 +372,7 @@ async def fetch_url(
 
 async def generate_image(
     prompt: str,
+    size: Optional[str] = None,
     __request__: Request = None,
     __user__: dict = None,
     __event_emitter__: callable = None,
@@ -380,6 +383,8 @@ async def generate_image(
     Generate an image based on a text prompt.
 
     :param prompt: A detailed description of the image to generate
+    :param size: Optional output size in WIDTHxHEIGHT pixels (e.g. "1536x1024"), supported by the configured image model.
+        Omit to use the configured default.
     :return: Confirmation that the image was generated, or an error message
     """
     if __request__ is None:
@@ -390,7 +395,7 @@ async def generate_image(
 
         images = await image_generations(
             request=__request__,
-            form_data=CreateImageForm(prompt=prompt),
+            form_data=CreateImageForm(prompt=prompt, size=size),
             metadata=(
                 {'channel_id': __chat_id__.removeprefix('channel:'), 'message_id': __message_id__}
                 if isinstance(__chat_id__, str) and __chat_id__.startswith('channel:')
@@ -441,6 +446,7 @@ async def generate_image(
 async def edit_image(
     prompt: str,
     image_urls: list[str],
+    size: Optional[str] = None,
     __request__: Request = None,
     __user__: dict = None,
     __event_emitter__: callable = None,
@@ -453,6 +459,8 @@ async def edit_image(
 
     :param prompt: A description of the transformation to apply to the provided images
     :param image_urls: Source image URLs to modify or use as composition inputs
+    :param size: Optional output size in WIDTHxHEIGHT pixels (e.g. "1536x1024"), supported by the configured image model.
+        Omit to use the configured default.
     :return: Confirmation that the images were edited, or an error message
     """
     if __request__ is None:
@@ -463,7 +471,7 @@ async def edit_image(
 
         images = await image_edits(
             request=__request__,
-            form_data=EditImageForm(prompt=prompt, image=image_urls),
+            form_data=EditImageForm(prompt=prompt, image=image_urls, size=size),
             metadata=(
                 {'channel_id': __chat_id__.removeprefix('channel:'), 'message_id': __message_id__}
                 if isinstance(__chat_id__, str) and __chat_id__.startswith('channel:')
@@ -527,6 +535,7 @@ async def ask_user(
     Use this when the next step depends on user intent, preference, or a tradeoff that cannot be inferred safely.
 
     :param questions: 1-3 question objects, each with id, header, question, and 2-3 options. Each option needs label and description.
+        List the option you recommend first; the UI labels the first option Recommended.
     :param allow_other: Whether users may enter a free-form answer instead of choosing one of the options
     :param timeout_ms: How long the browser should keep the prompt open before cancelling it
     :return: JSON with status and answers keyed by question id
@@ -1149,7 +1158,7 @@ async def search_notes(
 
     try:
         user_id = __user__.get('id')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
 
         result = await Notes.search_notes(
             user_id=user_id,
@@ -1246,7 +1255,7 @@ async def view_note(
 
         # Check access permission
         user_id = __user__.get('id')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
 
         from open_webui.models.access_grants import AccessGrants
 
@@ -1342,6 +1351,14 @@ async def replace_note_content(
 ) -> str:
     """
     Update an existing note by replacing the whole markdown content or applying range operations.
+
+    Prefer "replace_range" when only part of the note changes.
+    A "replace" operation must be the only operation in the request.
+    start and end are 0-indexed character offsets into the markdown content from view_note.
+    end is exclusive.
+    Offsets never shift as operations are applied.
+    Ranges must not overlap.
+    expected is optional. When set, the request is rejected if the range's current text does not match it.
 
     :param note_id: The ID of the note to update
     :param content: The new markdown content for a whole-note update
@@ -2059,7 +2076,7 @@ async def list_knowledge_bases(
         from open_webui.models.knowledge import Knowledges
 
         user_id = __user__.get('id')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
 
         result = await Knowledges.search_knowledge_bases(
             user_id,
@@ -2121,7 +2138,7 @@ async def search_knowledge_bases(
         from open_webui.models.knowledge import Knowledges
 
         user_id = __user__.get('id')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
 
         result = await Knowledges.search_knowledge_bases(
             user_id,
@@ -2190,7 +2207,7 @@ async def search_knowledge_files(
 
         user_id = __user__.get('id')
         user_role = __user__.get('role', 'user')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
 
         # When model has attached knowledge, scope to attached KBs/files only
         if __model_knowledge__:
@@ -2460,6 +2477,7 @@ async def grep_chat_files(
     """
     Search exact text across files attached to the current chat.
     Pass file_id from the attached_files block to search one file.
+    Auto-detected regex uses RE2 syntax; no lookarounds/backreferences, and shorthand classes are ASCII-only.
 
     :param pattern: The text pattern to search for
     :param file_id: Optional attached file ID to search within a single file
@@ -2497,7 +2515,7 @@ async def grep_chat_files(
         if not files_to_search:
             return JSONCodec.dumps({'error': 'No accessible files found'})
 
-        return _grep_file_models(files_to_search, pattern, case_insensitive, count_only)
+        return await asyncio.to_thread(_grep_file_models, files_to_search, pattern, case_insensitive, count_only)
     except Exception as e:
         log.exception(f'grep_chat_files error: {e}')
         return JSONCodec.dumps({'error': str(e)})
@@ -2608,6 +2626,7 @@ async def query_chat_files(
             for idx, doc in enumerate(documents):
                 metadata = metadatas[idx] if idx < len(metadatas) and isinstance(metadatas[idx], dict) else {}
                 chunk = {
+                    **filter_source_metadata(metadata),
                     'content': doc,
                     'source': metadata.get('source', metadata.get('name', source_info.get('name', 'Unknown'))),
                     'file_id': metadata.get('file_id', source_info.get('id', '')),
@@ -2637,6 +2656,7 @@ async def grep_knowledge_files(
     Search for exact text across knowledge files. Returns matching lines with line numbers.
     Unlike query_knowledge_files (semantic/vector search), this performs exact string matching.
     Automatically detects regex patterns (e.g. "error|warn", "version \\d+").
+    Regex uses RE2 syntax; no lookarounds/backreferences, and shorthand character classes are ASCII-only.
     Helpful for literal strings, identifiers, error messages, or regex-style searches.
 
     :param pattern: The text pattern to search for (regex auto-detected)
@@ -2660,7 +2680,7 @@ async def grep_knowledge_files(
 
         user_id = __user__.get('id')
         user_role = __user__.get('role', 'user')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
 
         # Collect files to search
         files_to_search = []
@@ -2737,7 +2757,7 @@ async def grep_knowledge_files(
         if not files_to_search:
             return JSONCodec.dumps({'error': 'No accessible files found'})
 
-        return _grep_file_models(files_to_search, pattern, case_insensitive, count_only)
+        return await asyncio.to_thread(_grep_file_models, files_to_search, pattern, case_insensitive, count_only)
 
     except SoevNotConfigured:
         raise
@@ -2909,7 +2929,7 @@ async def view_knowledge_file(
 
         user_id = __user__.get('id')
         user_role = __user__.get('role', 'user')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
 
         file = await Files.get_file_by_id(file_id)
         if not file:
@@ -3061,7 +3081,7 @@ async def list_knowledge(
 
         user_id = __user__.get('id')
         user_role = __user__.get('role', 'user')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
 
         knowledge_bases = []
         files = []
@@ -3204,7 +3224,7 @@ async def query_knowledge_files(
 
         user_id = __user__.get('id')
         user_role = __user__.get('role', 'user')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
 
         embedding_function = getattr(__request__.app.state, 'EMBEDDING_FUNCTION', None)
         if not embedding_function:
@@ -3343,6 +3363,7 @@ async def query_knowledge_files(
                 queries=[query],
                 embedding_function=lambda queries, prefix: embedding_function(queries, prefix=prefix, user=user_model),
                 k=count,
+                user=user_model,
             )
 
             if query_results and 'documents' in query_results:
@@ -3350,8 +3371,22 @@ async def query_knowledge_files(
                 metadatas = query_results.get('metadatas', [[]])[0]
                 distances = query_results.get('distances', [[]])[0]
 
+                file_ids = {metadata['file_id'] for metadata in metadatas if metadata.get('file_id')}
+                if file_ids:
+                    file_names = {
+                        file.id: (file.meta or {}).get('name')
+                        for file in await Files.get_file_metadatas_by_ids(list(file_ids))
+                    }
+                    for metadata in metadatas:
+                        file_name = file_names.get(metadata.get('file_id'))
+                        if file_name:
+                            if metadata.get('source') == metadata.get('name'):
+                                metadata['source'] = file_name
+                            metadata['name'] = file_name
+
                 for idx, doc in enumerate(documents):
                     chunk_info = {
+                        **filter_source_metadata(metadatas[idx]),
                         'content': doc,
                         'source': metadatas[idx].get('source', metadatas[idx].get('name', 'Unknown')),
                         'file_id': metadatas[idx].get('file_id', ''),
@@ -3375,9 +3410,9 @@ async def query_knowledge_files(
             for idx, doc in enumerate(documents):
                 metadata = metadatas[idx] if idx < len(metadatas) else {}
                 chunk_info = {
+                    **filter_source_metadata(metadata),
                     'content': doc,
                     'source': metadata.get('source', metadata.get('name', knowledge.name)),
-                    'file_id': metadata.get('file_id', f'external-{knowledge.id}'),
                     'type': 'external',
                     'knowledge_id': knowledge.id,
                 }
@@ -3425,7 +3460,7 @@ async def query_knowledge_bases(
         from open_webui.routers.knowledge import KNOWLEDGE_BASES_COLLECTION
 
         user_id = __user__.get('id')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
+        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
         embedding_function = getattr(__request__.app.state, 'EMBEDDING_FUNCTION', None)
         if not embedding_function:
             return JSONCodec.dumps({'error': 'Embedding function not configured'})
@@ -3512,55 +3547,357 @@ async def view_skill(
     id: str,
     __request__: Request = None,
     __user__: dict = None,
+    __metadata__: dict = None,
+    __event_call__: callable = None,
 ) -> str:
+    """Read skill instructions and file list. Large skills return an opening preview and next_offset.
+
+    :param id: Skill ID from the available skills manifest.
     """
-    Load the full instructions of a skill by its id from the available skills manifest.
-    Use this when you need detailed instructions for a skill listed in <available_skills>.
-
-    :param id: The id of the skill to load (as shown in the manifest)
-    :return: The full skill instructions as markdown content
-    """
-    if __request__ is None:
-        return JSONCodec.dumps({'error': 'Request context not available'})
-
-    if not __user__:
-        return JSONCodec.dumps({'error': 'User context not available'})
-
+    if __request__ is None or not __user__:
+        return JSONCodec.dumps({'error': 'Request and user context required'})
     try:
-        from open_webui.models.access_grants import AccessGrants
-        from open_webui.models.skills import Skills
+        terminal_skill_prefix = 'terminal:'
+        if isinstance(id, str) and id.startswith(terminal_skill_prefix):
+            from open_webui.utils.terminals import get_terminal_skill
 
-        user_id = __user__.get('id')
+            skill_name = unquote(id.removeprefix(terminal_skill_prefix))
+            skill = await get_terminal_skill(
+                __request__,
+                __user__,
+                __metadata__ if __metadata__ is not None else {},
+                skill_name,
+                {'__event_call__': __event_call__},
+                overview=True,
+            )
+            if not skill:
+                return JSONCodec.dumps({'error': f"Skill '{id}' not found"})
+            return JSONCodec.dumps(skill, ensure_ascii=False)
 
-        # Direct DB lookup by id (case-insensitive since IDs are stored lowercase)
-        skill = await Skills.get_skill_by_id(id.lower())
+        from types import SimpleNamespace
+        from open_webui.models.skills import get_skill_snapshot
+        from open_webui.routers.skills import authorized_skill
+        from open_webui.utils.skill_files import file_summaries
 
-        if not skill or not skill.is_active:
-            return JSONCodec.dumps({'error': f"Skill '{id}' not found"})
-
-        # Check user access
-        user_role = __user__.get('role', 'user')
-        if not can_bypass_access_control({'role': user_role}) and skill.user_id != user_id:
-            user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
-            if not await AccessGrants.has_access(
-                user_id=user_id,
-                resource_type='skill',
-                resource_id=skill.id,
-                permission='read',
-                user_group_ids=set(user_group_ids),
-            ):
-                return JSONCodec.dumps({'error': 'Access denied'})
-
+        actor = SimpleNamespace(**__user__)
+        skill = await authorized_skill(id.lower(), actor)
+        if not skill.is_active:
+            await authorized_skill(skill.id, actor, 'write')
+        metadata = __metadata__ if __metadata__ is not None else {}
+        context = metadata.get('chat_context') or {}
+        metadata['chat_context'] = context
+        versions = context.setdefault('skill_versions', {})
+        version_id = skill.version_id
+        snapshot = await get_skill_snapshot(skill, version_id)
+        versions[skill.id] = version_id
         return JSONCodec.dumps(
             {
-                'name': skill.name,
-                'content': skill.content,
+                'id': skill.id,
+                'name': snapshot['name'],
+                **await skill_overview(snapshot['content'], file_summaries(snapshot['data']['files'])),
             },
             ensure_ascii=False,
         )
-    except Exception as e:
-        log.exception(f'view_skill error: {e}')
-        return JSONCodec.dumps({'error': str(e)})
+    except Exception as error:
+        return JSONCodec.dumps({'error': getattr(error, 'detail', str(error))})
+
+
+async def read_skill_file(
+    id: str,
+    path: str,
+    offset: int = 0,
+    max_chars: int = 10000,
+    __request__: Request = None,
+    __user__: dict = None,
+    __metadata__: dict = None,
+    __event_call__: callable = None,
+) -> str:
+    """Read a skill file from the loaded snapshot. Terminal skills support SKILL.md only.
+
+    :param id: Skill ID.
+    :param path: Relative path within the skill.
+    :param offset: Character offset for paging text.
+    :param max_chars: Maximum characters to return, capped by the admin skill content limit (default 10000).
+    """
+    try:
+        from types import SimpleNamespace
+        from urllib.parse import urlencode
+        from open_webui.models.skills import get_skill_snapshot
+        from open_webui.routers.skills import authorized_skill
+        from open_webui.utils.skill_files import file_summaries
+
+        if not __user__ or __request__ is None:
+            raise ValueError('Request and user context required')
+        if id.startswith('terminal:'):
+            from open_webui.utils.terminals import get_terminal_skill
+
+            if path != 'SKILL.md':
+                raise ValueError('Terminal skills support SKILL.md only; use terminal tools for supporting files.')
+            skill = await get_terminal_skill(
+                __request__,
+                __user__,
+                __metadata__ if __metadata__ is not None else {},
+                unquote(id.removeprefix('terminal:')),
+                {'__event_call__': __event_call__},
+                offset=offset,
+                max_chars=max_chars,
+                refresh=False,
+            )
+            if not skill:
+                raise ValueError(f"Skill '{id}' not found")
+            return JSONCodec.dumps(
+                {'path': path, 'content': skill['content'], 'next_offset': skill['next_offset']}, ensure_ascii=False
+            )
+        skill = await authorized_skill(id, SimpleNamespace(**__user__))
+        if not skill.is_active:
+            await authorized_skill(id, SimpleNamespace(**__user__), 'write')
+        metadata = __metadata__ if __metadata__ is not None else {}
+        context = metadata.get('chat_context') or {}
+        metadata['chat_context'] = context
+        versions = context.setdefault('skill_versions', {})
+        version_id = versions.get(skill.id) or skill.version_id
+        snapshot = await get_skill_snapshot(skill, version_id)
+        versions[skill.id] = version_id
+        file = next((f for f in snapshot['data']['files'] if f['path'] == path), None)
+        if file is None:
+            raise ValueError('File not found')
+        if file.get('encoding'):
+            return JSONCodec.dumps(
+                {
+                    **file_summaries([file])[0],
+                    'url': '/workspace/skills/edit?' + urlencode({'id': id, 'path': path}),
+                }
+            )
+        return JSONCodec.dumps(
+            {
+                'path': path,
+                **await skill_content_page(file['content'], offset, max_chars),
+            },
+            ensure_ascii=False,
+        )
+    except Exception as error:
+        return JSONCodec.dumps({'error': getattr(error, 'detail', str(error))})
+
+
+async def grep_skill_files(
+    id: str,
+    pattern: str,
+    path: str | None = None,
+    case_insensitive: bool = True,
+    max_results: int = 10,
+    __request__: Request = None,
+    __user__: dict = None,
+    __metadata__: dict = None,
+    __event_call__: callable = None,
+) -> str:
+    """Search skill files for text or regex matches.
+
+    Literal text or auto-detected RE2 regex; no lookarounds/backreferences, and shorthand character classes are ASCII-only.
+    Searches each line for non-empty, non-overlapping matches and returns merged, bounded excerpts (6000 characters total).
+    Offsets and match_length describe the first match in each excerpt, in original-file characters; total_matches counts
+    occurrences, not excerpts. Omitted excerpts have compact locations in omitted_matches; omitted_matches_truncated
+    indicates when more locations remain. Terminal skills support SKILL.md only. No skill version is created.
+
+    :param id: Skill ID, including terminal: IDs.
+    :param pattern: Text or auto-detected regex to find (up to 4096 characters).
+    :param path: Optional exact skill file path; otherwise search all text files, skipping binary files.
+    :param case_insensitive: Ignore case when matching (default true).
+    :param max_results: Maximum excerpts to return, from 1 to 30 (default 10).
+    """
+    from open_webui.utils.skill_files import SKILL_GREP_MAX_CHARS, grep_skill_content
+
+    try:
+        if __request__ is None or not __user__:
+            raise ValueError('Request and user context required')
+        metadata = __metadata__ if __metadata__ is not None else {}
+        if id.startswith('terminal:'):
+            from open_webui.utils.terminals import load_terminal_skill
+
+            if path is not None and path != 'SKILL.md':
+                raise ValueError('Terminal skills support SKILL.md only; use terminal tools for supporting files.')
+            skill = await load_terminal_skill(
+                __request__,
+                __user__,
+                metadata,
+                unquote(id.removeprefix('terminal:')),
+                {'__event_call__': __event_call__},
+                refresh=False,
+            )
+            if skill is None:
+                raise ValueError(f"Skill '{id}' not found")
+            files = [{'path': 'SKILL.md', 'content': skill['content']}]
+        else:
+            from types import SimpleNamespace
+            from open_webui.models.skills import get_skill_snapshot
+            from open_webui.routers.skills import authorized_skill
+
+            actor = SimpleNamespace(**__user__)
+            skill = await authorized_skill(id, actor)
+            if not skill.is_active:
+                await authorized_skill(id, actor, 'write')
+            context = metadata.get('chat_context') or {}
+            metadata['chat_context'] = context
+            versions = context.setdefault('skill_versions', {})
+            version_id = versions.get(skill.id) or skill.version_id
+            snapshot = await get_skill_snapshot(skill, version_id)
+            versions[skill.id] = version_id
+            files = snapshot['data']['files']
+            if path is not None:
+                file = next((file for file in files if file['path'] == path), None)
+                if file is None:
+                    raise ValueError('File not found')
+                if file.get('encoding'):
+                    raise ValueError('File is not a text file')
+                files = [file]
+        return await asyncio.to_thread(grep_skill_content, files, pattern, case_insensitive, max_results)
+    except Exception as error:
+        detail = str(getattr(error, 'detail', str(error)))
+        result = JSONCodec.dumps({'error': detail}, ensure_ascii=False)
+        while len(result) > SKILL_GREP_MAX_CHARS:
+            detail = detail[: max(0, len(detail) - (len(result) - SKILL_GREP_MAX_CHARS))]
+            result = JSONCodec.dumps({'error': detail}, ensure_ascii=False)
+        return result
+
+
+async def create_skill(
+    id: str,
+    name: str,
+    content: str,
+    files: list[SkillFile] = None,
+    commit_message: str = None,
+    __request__: Request = None,
+    __user__: dict = None,
+) -> str:
+    """Create a private workspace skill with SKILL.md and optional UTF-8 supporting files. No terminal is needed.
+
+    :param id: Unique lowercase skill slug.
+    :param name: Display name.
+    :param content: Complete SKILL.md text, including name and description frontmatter.
+    :param files: Optional supporting files, each with path and content. UTF-8 text only.
+    :param commit_message: Optional description of this save.
+    """
+    try:
+        from types import SimpleNamespace
+        from open_webui.routers.skills import create_new_skill
+        from open_webui.models.skills import SkillForm
+        from open_webui.utils.skill_files import frontmatter
+        from open_webui.utils.access_control import has_permission
+
+        if __request__ is None or not __user__:
+            raise ValueError('Request and user context required')
+        files = [f.model_dump(exclude_none=True) if isinstance(f, SkillFile) else f for f in files or []]
+        if any(f.get('encoding') or f.get('path') == 'SKILL.md' for f in files):
+            raise ValueError('Supporting files must be UTF-8 text; pass SKILL.md in content')
+        # Agent authoring requires the workspace editor permission, not just import access.
+        if __user__.get('role') != 'admin' and not await has_permission(
+            __user__['id'], 'workspace.skills', await Config.get('user.permissions')
+        ):
+            raise ValueError('Skill authoring permission required')
+        result = await create_new_skill(
+            __request__,
+            SkillForm(
+                id=id,
+                name=name,
+                content=content,
+                description=str(frontmatter(content).get('description', '')),
+                files=[{'path': 'SKILL.md', 'content': content}, *(files or [])],
+                commit_message=commit_message,
+                access_grants=[],
+            ),
+            SimpleNamespace(**__user__),
+            None,
+        )
+        return JSONCodec.dumps({'id': result.id, 'url': '/workspace/skills/edit?id=' + result.id})
+    except Exception as error:
+        return JSONCodec.dumps({'error': getattr(error, 'detail', str(error))})
+
+
+async def update_skill_files(
+    id: str,
+    operations: list[SkillFileOperation],
+    commit_message: str = None,
+    __request__: Request = None,
+    __user__: dict = None,
+    __metadata__: dict = None,
+) -> str:
+    """Save file operations as a new skill version, preserving untouched files. If the skill changed since it was read, call view_skill again and reapply the edit.
+
+    :param id: Skill to edit. Requires write access.
+    :param operations: File operations: {op: put, path, content}, {op: move, path, destination}, or {op: delete, path}. Use put with path SKILL.md to edit the instructions. Text writes only.
+    :param commit_message: Optional description of the change.
+    """
+    try:
+        from types import SimpleNamespace
+        from open_webui.routers.skills import authorized_skill
+        from open_webui.models.skills import Skills
+        from open_webui.events import EVENTS, publish_event
+
+        if __request__ is None or not __user__:
+            raise ValueError('Request and user context required')
+        user = SimpleNamespace(**__user__)
+        skill = await authorized_skill(id, user, 'write')
+        metadata = __metadata__ if __metadata__ is not None else {}
+        context = metadata.get('chat_context') or {}
+        metadata['chat_context'] = context
+        versions = context.setdefault('skill_versions', {})
+        expected_version_id = versions.get(skill.id) or skill.version_id
+        operations = [
+            op.model_dump(exclude_none=True) if isinstance(op, SkillFileOperation) else op for op in operations or []
+        ]
+        if any(op.get('encoding') for op in operations):
+            raise ValueError('Agent file writes support UTF-8 text only')
+        result = await Skills.update_skill_by_id(
+            id,
+            {
+                'expected_version_id': expected_version_id,
+                'operations': operations or [],
+                'commit_message': commit_message,
+            },
+            user_id=user.id,
+        )
+        versions[skill.id] = result.version_id
+        await publish_event(__request__, EVENTS.SKILL_UPDATED, actor=user, subject_id=id, data={'name': result.name})
+        return JSONCodec.dumps({'id': result.id})
+    except Exception as error:
+        detail = getattr(error, 'detail', str(error))
+        if isinstance(detail, dict) and detail.get('code') == 'version_conflict':
+            detail = {
+                'code': 'version_conflict',
+                'message': 'Skill changed. Call view_skill again and reapply the edit.',
+            }
+        return JSONCodec.dumps({'error': detail})
+
+
+# =============================================================================
+# TOOL SEARCH
+# =============================================================================
+
+
+async def search_tools(
+    query: str,
+    count: int = 5,
+    __metadata__: dict = None,
+) -> str:
+    """
+    Search the tools listed in <available_tools> and return their full definitions.
+    Pass the exact tool name when you already know it.
+    Invoke a result with call_tool(tool_name, params), where params is a JSON-encoded object
+    matching the tool's parameters. Do not call deferred tools directly by name.
+
+    :param query: Keywords describing the capability you need (e.g. "jira create issue"), or an exact tool name
+    :param count: Maximum number of results to return (default: 5, max: 20)
+    :return: JSON with the definitions of the matching tools, which can then be invoked through call_tool
+    """
+    from open_webui.utils.tool_search import search_deferred_tools
+
+    tools = __metadata__['tools']
+    candidates = {name: tools[name]['spec'] for name in __metadata__['deferred_tools']}
+    matches = search_deferred_tools(query, candidates, count)
+    if not matches:
+        return JSONCodec.dumps(
+            {'tools': [], 'message': 'No matching tools found. Try different keywords or the exact tool name.'}
+        )
+    return JSONCodec.dumps({'tools': [candidates[name] for name in matches]})
 
 
 # =============================================================================
@@ -3786,7 +4123,7 @@ async def create_automation(
 
         # Validate the RRULE
         try:
-            validate_rrule(rrule, tz=user.timezone)
+            await validate_rrule(rrule, tz=user.timezone)
         except ValueError as e:
             return JSONCodec.dumps({'error': f'Invalid schedule: {e}'})
 
@@ -3812,7 +4149,7 @@ async def create_automation(
             is_active=True,
         )
 
-        automation = await Automations.insert(user_id, form, next_run_ns(rrule, tz=tz))
+        automation = await Automations.insert(user_id, form, await next_run_ns(rrule, tz=tz))
 
         return JSONCodec.dumps(
             {
@@ -3823,7 +4160,7 @@ async def create_automation(
                 'model_id': model_id,
                 'target': automation.data.get('target'),
                 'is_active': automation.is_active,
-                'next_runs': next_n_runs_ns(rrule, tz=tz),
+                'next_runs': await next_n_runs_ns(rrule, tz=tz),
             },
             ensure_ascii=False,
         )
@@ -3894,7 +4231,7 @@ async def update_automation(
         # Validate RRULE if changed
         if rrule is not None:
             try:
-                validate_rrule(new_rrule, tz=user.timezone)
+                await validate_rrule(new_rrule, tz=user.timezone)
             except ValueError as e:
                 return JSONCodec.dumps({'error': f'Invalid schedule: {e}'})
 
@@ -3916,7 +4253,7 @@ async def update_automation(
             is_active=automation.is_active,
         )
 
-        updated = await Automations.update_by_id(automation_id, form, next_run_ns(new_rrule, tz=tz))
+        updated = await Automations.update_by_id(automation_id, form, await next_run_ns(new_rrule, tz=tz))
 
         return JSONCodec.dumps(
             {
@@ -3927,7 +4264,7 @@ async def update_automation(
                 'model_id': new_model_id,
                 'target': updated.data.get('target'),
                 'is_active': updated.is_active,
-                'next_runs': next_n_runs_ns(new_rrule, tz=tz),
+                'next_runs': await next_n_runs_ns(new_rrule, tz=tz),
             },
             ensure_ascii=False,
         )
@@ -3995,7 +4332,7 @@ async def list_automations(
                     'rrule': rrule,
                     'is_active': item.is_active,
                     'last_run_at': item.last_run_at,
-                    'next_runs': next_n_runs_ns(rrule, tz=user.timezone if user else None),
+                    'next_runs': await next_n_runs_ns(rrule, tz=user.timezone if user else None),
                 }
             )
 
@@ -4042,7 +4379,7 @@ async def toggle_automation(
         rrule = automation.data.get('rrule', '')
         toggled = await Automations.toggle(
             automation_id,
-            next_run_ns(rrule, tz=user.timezone if user else None),
+            await next_run_ns(rrule, tz=user.timezone if user else None),
         )
 
         return JSONCodec.dumps(
@@ -4312,7 +4649,7 @@ async def create_calendar_event(
             from open_webui.models.access_grants import AccessGrants
             from open_webui.models.groups import Groups
 
-            user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id)]
+            user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
             if not await AccessGrants.has_access(
                 user_id=user_id,
                 resource_type='calendar',
@@ -4428,11 +4765,11 @@ async def update_calendar_event(
             return JSONCodec.dumps({'error': 'Event not found'})
 
         # Check write access to the event's calendar
-        if event.user_id != user_id and not can_bypass_access_control(__user__):
-            cal = await Calendars.get_calendar_by_id(event.calendar_id)
-            if not cal:
-                return JSONCodec.dumps({'error': 'Access denied'})
-            user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id)]
+        cal = await Calendars.get_calendar_by_id(event.calendar_id)
+        if not cal:
+            return JSONCodec.dumps({'error': 'Access denied'})
+        if cal.user_id != user_id and not can_bypass_access_control(__user__):
+            user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
             if not await AccessGrants.has_access(
                 user_id=user_id,
                 resource_type='calendar',
@@ -4532,11 +4869,11 @@ async def delete_calendar_event(
             return JSONCodec.dumps({'error': 'Event not found'})
 
         # Check write access
-        if event.user_id != user_id and not can_bypass_access_control(__user__):
-            cal = await Calendars.get_calendar_by_id(event.calendar_id)
-            if not cal:
-                return JSONCodec.dumps({'error': 'Access denied'})
-            user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id)]
+        cal = await Calendars.get_calendar_by_id(event.calendar_id)
+        if not cal:
+            return JSONCodec.dumps({'error': 'Access denied'})
+        if cal.user_id != user_id and not can_bypass_access_control(__user__):
+            user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id, include_inherited=True)]
             if not await AccessGrants.has_access(
                 user_id=user_id,
                 resource_type='calendar',

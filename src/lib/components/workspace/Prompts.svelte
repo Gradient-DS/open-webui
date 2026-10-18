@@ -1,4 +1,6 @@
 <script lang="ts">
+	import WorkspaceAccessModal from './common/WorkspaceAccessModal.svelte';
+	let accessModal: WorkspaceAccessModal;
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
@@ -12,13 +14,15 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_NAME, config, user, workspaceActions } from '$lib/stores';
+	import { COMMUNITY_ORIGINS } from '$lib/constants';
 
 	import {
 		createNewPrompt,
 		deletePromptById,
 		togglePromptById,
 		getPromptItems,
-		getPromptTags
+		getPromptTags,
+		getPrompts
 	} from '$lib/apis/prompts';
 	import { capitalizeFirstLetter, slugify, copyToClipboard } from '$lib/utils';
 
@@ -67,6 +71,7 @@
 	let importFiles = null;
 	let query = '';
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
+	let searchController: AbortController;
 
 	let prompts = null;
 	let tags = [];
@@ -108,7 +113,14 @@
 				id: 'prompts-export',
 				label: $i18n.t('Export JSON'),
 				onClick: async () => {
-					let blob = new Blob([JSON.stringify(prompts)], {
+					const _prompts = await getPrompts(localStorage.token).catch((error) => {
+						toast.error(`${error}`);
+						return null;
+					});
+					if (!_prompts) {
+						return;
+					}
+					let blob = new Blob([JSON.stringify(_prompts)], {
 						type: 'application/json'
 					});
 					saveAs(blob, `prompts-export-${Date.now()}.json`);
@@ -157,6 +169,9 @@
 		if (!loaded) return;
 
 		const currentFetchId = ++fetchId;
+		searchController?.abort();
+		searchController = new AbortController();
+		const { signal } = searchController;
 		loading = true;
 		try {
 			// [Gradient] Tags load alongside the page instead of after it.
@@ -168,18 +183,21 @@
 					selectedTag,
 					sortKey,
 					sortDirection,
-					page
+					page,
+					signal
 				).catch((error) => {
-					toast.error(`${error}`);
+					if (!signal.aborted) toast.error(`${error}`);
 					return null;
 				}),
 				getPromptTags(localStorage.token).catch((error) => {
-					toast.error(`${error}`);
+					if (!signal.aborted) toast.error(`${error}`);
 					return [];
 				})
 			]);
 
 			if (currentFetchId !== fetchId) return; // Stale response, discard
+
+			if (signal.aborted) return;
 
 			if (res) {
 				prompts = res.items;
@@ -240,10 +258,7 @@
 	};
 
 	const createPromptHandler = async (prompt: PromptDraft) => {
-		const res = await createNewPrompt(localStorage.token, prompt).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
+		const res = await createNewPrompt(localStorage.token, prompt);
 
 		if (res) {
 			toast.success($i18n.t('Prompt created successfully'));
@@ -251,6 +266,7 @@
 			await getPromptList();
 			await closeCreateModal();
 		}
+		return res;
 	};
 
 	const cloneHandler = async (prompt) => {
@@ -305,11 +321,7 @@
 		loaded = true;
 
 		const onMessage = async (event: MessageEvent) => {
-			if (
-				!['https://openwebui.com', 'https://www.openwebui.com', 'http://localhost:9999'].includes(
-					event.origin
-				)
-			) {
+			if (!COMMUNITY_ORIGINS.includes(event.origin)) {
 				return;
 			}
 
@@ -360,9 +372,12 @@
 	});
 
 	onDestroy(() => {
+		searchController?.abort();
 		clearTimeout(searchDebounceTimer);
 	});
 </script>
+
+<WorkspaceAccessModal bind:this={accessModal} resourceType="prompts" onUpdated={getPromptList} />
 
 <svelte:head>
 	<!-- LICENSE covers this Open WebUI browser-title identifier.
@@ -594,14 +609,16 @@
 											</div>
 
 											<Tooltip
-												content={dayjs((prompt.updated_at ?? prompt.created_at) * 1000).format(
-													'LLLL'
-												)}
+												content={dayjs((prompt.updated_at ?? prompt.created_at) * 1000)
+													.locale($i18n.language)
+													.format('LLLL')}
 											>
 												<div
 													class="shrink-0 truncate text-[0.6875rem] leading-5 text-gray-400 dark:text-gray-600"
 												>
-													{dayjs((prompt.updated_at ?? prompt.created_at) * 1000).fromNow()}
+													{dayjs((prompt.updated_at ?? prompt.created_at) * 1000)
+														.locale($i18n.language)
+														.fromNow()}
 												</div>
 											</Tooltip>
 
@@ -643,9 +660,10 @@
 								{#if shiftKey}
 									<Tooltip content={$i18n.t('Delete')}>
 										<button
-											class="flex size-6 items-center justify-center rounded-lg text-gray-400 transition dark:text-gray-500"
+											class="flex size-6 items-center justify-center rounded-lg text-gray-400 transition dark:text-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
 											type="button"
 											aria-label={$i18n.t('Delete')}
+											disabled={!prompt.write_access}
 											on:click={(e) => {
 												e.preventDefault();
 												e.stopPropagation();
@@ -677,6 +695,8 @@
 
 									<div class="ml-0.5 flex shrink-0 flex-row items-center gap-1.5 self-center">
 										<PromptMenu
+											accessHandler={() => accessModal.open(prompt.id)}
+											writeAccess={prompt.write_access}
 											show={openPromptMenuId === prompt.id}
 											editHandler={() => {
 												goto(`/workspace/prompts/${prompt.id}`);
@@ -715,6 +735,7 @@
 										<button
 											class="flex h-6 items-center"
 											type="button"
+											disabled={!prompt.write_access}
 											on:click={(e) => {
 												e.stopPropagation();
 												e.preventDefault();
@@ -727,6 +748,8 @@
 											>
 												<Switch
 													bind:state={prompt.is_active}
+													disabled={!prompt.write_access}
+													ariaLabel={$i18n.t('Enabled')}
 													on:change={async () => {
 														togglePromptById(localStorage.token, prompt.id);
 													}}
@@ -760,7 +783,7 @@
 
 	{#if $config?.features.enable_community_sharing}
 		<CommunityDiscover
-			href="https://openwebui.com/prompts"
+			href="https://openwebui.com/search?type=prompt"
 			title={$i18n.t('Discover a prompt')}
 			description={$i18n.t('Discover, download, and explore custom prompts')}
 		/>

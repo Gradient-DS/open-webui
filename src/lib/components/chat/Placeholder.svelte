@@ -8,6 +8,7 @@
 		ChatInputCallbacks,
 		AskUserPrompt
 	} from '$lib/types/chatAttachment';
+	import type { TerminalContext } from '$lib/types';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
 
@@ -23,6 +24,12 @@
 	import { isAssistant } from '$lib/utils/assistants';
 	import { isAgentRouted } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import {
+		resolveLocalizedModelDescription,
+		resolveLocalizedModelName,
+		resolveLocalizedModelPromptSuggestions,
+		resolveLocalizedPromptSuggestions
+	} from '$lib/utils/localizedContent';
 
 	import Suggestions from './Suggestions.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -31,12 +38,14 @@
 	import FolderPlaceholder from './Placeholder/FolderPlaceholder.svelte';
 	import FolderTitle from './Placeholder/FolderTitle.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	export let createMessagePair: ChatInputCallbacks['createMessagePair'];
 	export let stopResponse: ChatInputCallbacks['stopResponse'];
 
 	export let autoScroll = false;
+	export let callActive = false;
+	export let callEnabled = true;
 
 	export let atSelectedModel: Model | undefined;
 	export let selectedModels: [''];
@@ -45,6 +54,7 @@
 
 	export let prompt = '';
 	export let files = [];
+	export let terminalContext: TerminalContext | null = null;
 	export let messageInput = null;
 
 	export let selectedToolIds = [];
@@ -87,20 +97,27 @@
 	export let dragged = false;
 
 	let models = [];
-	let selectedModelIdx = 0;
+	export let selectedModelIdx = 0;
 	// [Gradient] Keep the LLM id out of assistant avatar URLs and greetings.
 	$: greetingModel =
 		$activeAssistant ?? $_models.find((m) => m.id === selectedModels[selectedModelIdx]);
+	$: greetingName = greetingModel ? resolveLocalizedModelName(greetingModel, $i18n.language) : '';
 	// [Gradient] Only an assistant's description greets; a catalog model shows its handle alone.
 	$: greetingDescription = isAssistant(greetingModel)
-		? (greetingModel?.info?.meta?.description ?? null)
+		? resolveLocalizedModelDescription(greetingModel, $i18n.language) || null
 		: null;
-
-	$: if (selectedModels.length > 0) {
-		selectedModelIdx = models.length - 1;
-	}
+	let selectedSuggestionPrompts = [];
 
 	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
+	$: selectedSuggestionPrompts =
+		resolveLocalizedModelPromptSuggestions(atSelectedModel, $i18n.language) ??
+		resolveLocalizedModelPromptSuggestions(models[selectedModelIdx], $i18n.language) ??
+		resolveLocalizedPromptSuggestions(
+			$config?.default_prompt_suggestions,
+			$config?.default_prompt_suggestions_i18n ?? {},
+			$i18n.language,
+			(key) => $i18n.t(key)
+		);
 
 	// The welcome message adds a content block above the input; shrink the
 	// placeholder's vertical padding so the screen still fits without scrolling.
@@ -111,7 +128,7 @@
 	$: folderReadOnly =
 		$selectedFolder != null &&
 		$selectedFolder.user_id !== $user?.id &&
-		$selectedFolder.permission !== 'write';
+		!$selectedFolder.write_access;
 </script>
 
 <div
@@ -194,14 +211,14 @@
 								'{{name}}',
 								$user?.name ?? ''
 							)}
-						{:else if greetingModel?.name}
+						{:else if greetingName}
 							<Tooltip
-								content={greetingModel?.name}
+								content={greetingName}
 								placement="top"
 								className=" flex items-center "
 							>
 								<span class="line-clamp-1">
-									{greetingModel?.name}
+									{greetingName}
 								</span>
 							</Tooltip>
 						{:else}
@@ -236,7 +253,7 @@
 
 							{#if models[selectedModelIdx]?.info?.meta?.user}
 								<div class="mt-0.5 text-sm font-normal text-gray-400 dark:text-gray-500">
-									By
+									{$i18n.t('By')}
 									{#if models[selectedModelIdx]?.info?.meta?.user.community}
 										<a
 											href="https://openwebui.com/m/{models[selectedModelIdx]?.info?.meta?.user
@@ -258,6 +275,9 @@
 			<div class="text-base font-normal @md:max-w-3xl w-full py-3 {atSelectedModel ? 'mt-2' : ''}">
 				{#if !($selectedFolder && folderReadOnly)}
 					<MessageInput
+						{terminalContext}
+						{callActive}
+						{callEnabled}
 						bind:this={messageInput}
 						agentRouted={isAgentRouted()}
 						{history}
@@ -312,14 +332,7 @@
 	{:else}
 		<div class="mx-auto max-w-2xl mt-2" in:fade={{ duration: 200, delay: 200 }}>
 			<div class="mx-5">
-				<Suggestions
-					suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
-						models[selectedModelIdx]?.info?.meta?.suggestion_prompts ??
-						$config?.default_prompt_suggestions ??
-						[]}
-					inputValue={prompt}
-					{onSelect}
-				/>
+				<Suggestions suggestionPrompts={selectedSuggestionPrompts} inputValue={prompt} {onSelect} />
 			</div>
 		</div>
 	{/if}

@@ -1,7 +1,8 @@
 <script lang="ts">
 	import '$lib/utils/codemirror';
+	import { toast } from 'svelte-sonner';
 	import { basicSetup, EditorView } from 'codemirror';
-	import { keymap } from '@codemirror/view';
+	import { keymap, placeholder as editorPlaceholder } from '@codemirror/view';
 	import { Compartment, EditorState } from '@codemirror/state';
 	import { indentWithTab } from '@codemirror/commands';
 	import { indentUnit, LanguageDescription } from '@codemirror/language';
@@ -10,6 +11,9 @@
 	import { onMount, onDestroy } from 'svelte';
 
 	export let value = '';
+	export let readOnly = false;
+	export let placeholder = '';
+	export let ariaLabel = '';
 	export let filePath: string | null = null;
 	export let onSave: ((content: string) => Promise<void>) | null = null;
 	export let searchTarget: {
@@ -23,8 +27,18 @@
 	let editor: EditorView | null = null;
 	let editorTheme = new Compartment();
 	let editorLanguage = new Compartment();
+	let editorReadOnly = new Compartment();
 	let internalValue = '';
 	let lastSearchTargetRequestId = 0;
+
+	export const getSelection = () => {
+		if (!editor || editor.state.selection.main.empty) return undefined;
+		const { from, to } = editor.state.selection.main;
+		return {
+			text: editor.state.sliceDoc(from, to),
+			location: `Lines ${editor.state.doc.lineAt(from).number}–${editor.state.doc.lineAt(to).number}`
+		};
+	};
 
 	/** Return the current editor content */
 	export const getValue = (): string => {
@@ -69,6 +83,16 @@
 		}
 	};
 
+	$: if (editor)
+		editor.dispatch({
+			effects: editorReadOnly.reconfigure([
+				EditorState.readOnly.of(readOnly),
+				EditorView.editable.of(!readOnly),
+				EditorView.contentAttributes.of(ariaLabel ? { 'aria-label': ariaLabel } : {}),
+				placeholder ? editorPlaceholder(placeholder) : []
+			])
+		});
+
 	// React to external value changes (e.g. switching files)
 	$: if (editor && value !== internalValue) {
 		internalValue = value;
@@ -97,8 +121,8 @@
 				{
 					key: 'Mod-s',
 					run: () => {
-						if (onSave) {
-							onSave(editor?.state.doc.toString() ?? '');
+						if (onSave && !readOnly) {
+							void onSave(editor?.state.doc.toString() ?? '').catch((e) => toast.error(String(e)));
 						}
 						return true;
 					}
@@ -113,6 +137,12 @@
 			}),
 			editorTheme.of(isDark ? oneDark : []),
 			editorLanguage.of([]),
+			editorReadOnly.of([
+				EditorState.readOnly.of(readOnly),
+				EditorView.editable.of(!readOnly),
+				EditorView.contentAttributes.of(ariaLabel ? { 'aria-label': ariaLabel } : {}),
+				placeholder ? editorPlaceholder(placeholder) : []
+			]),
 			EditorView.theme({
 				'&': { fontSize: '0.75rem', height: '100%' },
 				'.cm-content': {

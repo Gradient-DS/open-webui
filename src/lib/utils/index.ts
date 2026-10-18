@@ -1,7 +1,8 @@
 import type { Writable } from 'svelte/store';
 import { v4 as uuidv4 } from 'uuid';
 import sha256 from 'js-sha256';
-import DOMPurify from 'dompurify';
+import { parse as parseYaml } from 'yaml';
+import DOMPurify, { type UponSanitizeAttributeHookEvent } from 'dompurify';
 import { WEBUI_BASE_URL } from '$lib/constants';
 import type { FileNavOpenRequest } from '$lib/stores';
 import { normalizeDocumentTargetPage } from '$lib/utils/documentPreview';
@@ -32,6 +33,18 @@ import { decode } from 'html-entities';
 // No one thanks the foundation, but without it the
 // house falls. Let the quiet work here hold.
 //////////////////////////
+
+export const resolveDefaultModelIds = (
+	models: { id: string; info?: { meta?: { hidden?: boolean } } }[],
+	...preferences: (string[] | null | undefined)[]
+): string[] => {
+	const available = models.filter((model) => !model.info?.meta?.hidden).map((model) => model.id);
+	for (const preference of preferences) {
+		const selected = [...new Set(preference ?? [])].filter((id) => available.includes(id));
+		if (selected.length) return selected;
+	}
+	return available.length ? [available[0]] : [];
+};
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -502,6 +515,10 @@ export const generateInitialsImage = (name) => {
 	return canvas.toDataURL();
 };
 
+// These keys are translated by callers after choosing a date format.
+// t('Today at {{LOCALIZED_TIME}}');
+// t('Yesterday at {{LOCALIZED_TIME}}');
+// t('{{LOCALIZED_DATE}} at {{LOCALIZED_TIME}}');
 export const formatDate = (inputDate) => {
 	const date = dayjs(inputDate);
 
@@ -519,16 +536,16 @@ const messageTimestampDate = (inputDate) => {
 	return Number.isNaN(date.getTime()) ? null : date;
 };
 
-export const formatMessageTimestamp = (inputDate) =>
-	messageTimestampDate(inputDate)?.toLocaleString(undefined, {
+export const formatMessageTimestamp = (inputDate, locale: string) =>
+	messageTimestampDate(inputDate)?.toLocaleString(locale, {
 		month: 'short',
 		day: 'numeric',
 		hour: 'numeric',
 		minute: '2-digit'
 	}) ?? '';
 
-export const formatMessageTimestampFull = (inputDate) =>
-	messageTimestampDate(inputDate)?.toLocaleString(undefined, {
+export const formatMessageTimestampFull = (inputDate, locale: string) =>
+	messageTimestampDate(inputDate)?.toLocaleString(locale, {
 		weekday: 'long',
 		year: 'numeric',
 		month: 'long',
@@ -695,7 +712,7 @@ export const copyToClipboard = async (
 };
 
 export const compareVersion = (latest, current) => {
-	return current === '0.0.0'
+	return !latest || current === '0.0.0'
 		? false
 		: current.localeCompare(latest, undefined, {
 				numeric: true,
@@ -1006,6 +1023,11 @@ export const convertOpenAIChats = (_chats) => {
 	return chats;
 };
 
+export const isRasterImageContentType = (contentType: string | null | undefined) => {
+	const baseContentType = (contentType ?? '').split(';')[0].trim().toLowerCase();
+	return baseContentType.startsWith('image/') && baseContentType !== 'image/svg+xml';
+};
+
 export const isValidHttpUrl = (string: string) => {
 	let url;
 
@@ -1016,6 +1038,20 @@ export const isValidHttpUrl = (string: string) => {
 	}
 
 	return url.protocol === 'http:' || url.protocol === 'https:';
+};
+
+const SAFE_LINK_PROTOCOLS = ['http:', 'https:', 'mailto:', 'tel:'];
+
+export const safeLinkUrl = (url: string): string | undefined => {
+	let protocol;
+	try {
+		protocol = new URL(url).protocol;
+	} catch (_) {
+		// No scheme to parse, so the browser resolves it against our own origin.
+		return url;
+	}
+
+	return SAFE_LINK_PROTOCOLS.includes(protocol) ? url : undefined;
 };
 
 export const isYoutubeUrl = (url: string) => {
@@ -1358,7 +1394,7 @@ export const getTimeRange = (timestamp) => {
 
 	if (nowYear === dateYear && nowMonth === dateMonth && nowDate === dateDate) {
 		return 'Today';
-	} else if (nowYear === dateYear && nowMonth === dateMonth && nowDate - dateDate === 1) {
+	} else if (dayjs(date).isYesterday()) {
 		return 'Yesterday';
 	} else if (diffDays <= 7) {
 		return 'Previous 7 days';
@@ -1473,6 +1509,29 @@ export const createMessagesList = (history, messageId) => {
 	return list.reverse();
 };
 
+export const getDeepestChildId = (history, messageId) => {
+	let deepestId = messageId;
+	const visitedMessageIds = new Set([deepestId]);
+	let childrenIds =
+		deepestId === null
+			? Object.keys(history.messages).filter((id) => history.messages[id].parentId === null)
+			: (history.messages[deepestId]?.childrenIds ?? []);
+
+	while (childrenIds.length !== 0) {
+		const childId = childrenIds.at(-1);
+		if (visitedMessageIds.has(childId)) {
+			console.warn('Circular dependency detected in message history', childId);
+			break;
+		}
+
+		visitedMessageIds.add(childId);
+		deepestId = childId;
+		childrenIds = history.messages[deepestId]?.childrenIds ?? [];
+	}
+
+	return deepestId;
+};
+
 const toTokenCount = (value: unknown) => {
 	const parsed = Number(value || 0);
 	return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
@@ -1518,7 +1577,11 @@ export const getLineCount = (text) => {
 };
 
 // Helper function to recursively resolve OpenAPI schema into JSON schema format
-function resolveSchema(schemaRef, components, resolvedSchemas = new Set()) {
+export function resolveSchema(
+	schemaRef,
+	components,
+	resolvedSchemas = new Set()
+): Record<string, any> {
 	if (!schemaRef) return {};
 
 	if (schemaRef['$ref']) {
@@ -2115,10 +2178,18 @@ export const getAge = (birthDate) => {
 	return age.toString();
 };
 
+const HEIC_EXTENSION_PATTERN = /\.(heic|heif)$/i;
+
+// Browsers label HEIC photos inconsistently (Firefox uses image/heif, some leave it empty).
+export const isHeicImage = (file: File) =>
+	['image/heic', 'image/heif'].includes(file.type) || HEIC_EXTENSION_PATTERN.test(file.name);
+
 export const convertHeicToJpeg = async (file: File) => {
 	const { default: heic2any } = await import('heic2any');
 	try {
-		return await heic2any({ blob: file, toType: 'image/jpeg' });
+		const jpegBlob = (await heic2any({ blob: file, toType: 'image/jpeg' })) as Blob;
+		const jpegName = `${file.name.replace(HEIC_EXTENSION_PATTERN, '')}.jpg`;
+		return new File([jpegBlob], jpegName, { type: 'image/jpeg' });
 	} catch (err: any) {
 		if (err?.message?.includes('already browser readable')) {
 			return file;
@@ -2141,7 +2212,8 @@ export const initMermaid = async () => {
 		startOnLoad: false, // Should be false when using render API
 		theme: document.documentElement.classList.contains('dark') ? 'dark' : 'default',
 		securityLevel: 'loose',
-		htmlLabels: false
+		htmlLabels: false,
+		secure: ['htmlLabels']
 	});
 	return mermaid;
 };
@@ -2156,43 +2228,133 @@ const cleanupMermaidTempElements = (id: string) => {
 	document.getElementById(`i${id}`)?.remove();
 };
 
+const isLocalResourceUrl = (url: string): boolean => {
+	try {
+		const resolved = new URL(url, document.baseURI);
+		return resolved.protocol === 'data:' || resolved.origin === location.origin;
+	} catch {
+		return false;
+	}
+};
+
+// Escapes and image-set() read as a plain url() to a browser, so match the parsed CSS, not the text.
+const CSS_URL_SYNTAX = /url\(|image-set\(|@import|\\/i;
+
+const cssRules = (css: string): string[] => {
+	const parsed = new DOMParser().parseFromString(`<style>${css}</style>`, 'text/html');
+	return [...(parsed.querySelector('style')?.sheet?.cssRules ?? [])].map((rule) => rule.cssText);
+};
+
+const referencesExternalCss = (css: string): boolean => {
+	if (!CSS_URL_SYNTAX.test(css)) {
+		return false;
+	}
+
+	// A value arrives as a stylesheet, a declaration list or a bare presentation value.
+	return [css, `a{${css}}`, `a{background-image:${css}}`].some((stylesheet) => {
+		const urls = cssRules(stylesheet)
+			.join('')
+			.matchAll(/url\(["']?([^"')]*)/g);
+		return [...urls].some(([, url]) => !isLocalResourceUrl(url));
+	});
+};
+
+const dropExternalResourceRefs = (node: Node, data: UponSanitizeAttributeHookEvent) => {
+	const tagName = node.nodeName.toLowerCase();
+	const isImageRef =
+		(tagName === 'image' || tagName === 'feimage') &&
+		(data.attrName === 'href' || data.attrName === 'xlink:href');
+
+	if (isImageRef && !isLocalResourceUrl(data.attrValue)) {
+		data.keepAttr = false;
+	}
+	if (!isImageRef && referencesExternalCss(data.attrValue)) {
+		data.keepAttr = false;
+	}
+};
+
+// use hrefs point at defs inside the same document (#id) or fetch another file, keep only the former.
+const dropExternalUseRefs = (node: Node, data: UponSanitizeAttributeHookEvent) => {
+	if (node.nodeName.toLowerCase() !== 'use') {
+		return;
+	}
+	if (data.attrName !== 'href' && data.attrName !== 'xlink:href') {
+		return;
+	}
+	if (!data.attrValue.trim().startsWith('#')) {
+		data.keepAttr = false;
+	}
+};
+
+const dropExternalStyleRules = (node: Node) => {
+	if (node.nodeName.toLowerCase() !== 'style') {
+		return;
+	}
+
+	const css = node.textContent ?? '';
+	if (!referencesExternalCss(css)) {
+		return;
+	}
+
+	node.textContent = cssRules(css)
+		.filter((rule) => !referencesExternalCss(rule))
+		.join('');
+};
+
 // Mermaid runs with securityLevel:'loose', which emits unsanitized SVG (raw javascript: hrefs,
 // HTML labels); strip active content before it reaches any innerHTML/{@html} sink.
-export const sanitizeSvg = (svg: string): string =>
-	DOMPurify.sanitize(svg, {
-		USE_PROFILES: { svg: true, svgFilters: true },
-		WHOLE_DOCUMENT: false,
-		ADD_TAGS: ['style', 'foreignObject'],
-		ADD_ATTR: [
-			'class',
-			'style',
-			'id',
-			'data-*',
-			'viewBox',
-			'preserveAspectRatio',
-			'markerWidth',
-			'markerHeight',
-			'markerUnits',
-			'refX',
-			'refY',
-			'orient',
-			'href',
-			'xlink:href',
-			'dominant-baseline',
-			'text-anchor',
-			'clipPathUnits',
-			'filterUnits',
-			'patternUnits',
-			'patternContentUnits',
-			'maskUnits',
-			'role',
-			'aria-label',
-			'aria-labelledby',
-			'aria-hidden',
-			'tabindex'
-		],
-		SANITIZE_DOM: true
-	});
+export const sanitizeSvg = (svg: string): string => {
+	DOMPurify.addHook('uponSanitizeAttribute', dropExternalResourceRefs);
+	DOMPurify.addHook('uponSanitizeElement', dropExternalStyleRules);
+	DOMPurify.addHook('uponSanitizeAttribute', dropExternalUseRefs);
+	try {
+		return DOMPurify.sanitize(svg, {
+			USE_PROFILES: { svg: true, svgFilters: true },
+			WHOLE_DOCUMENT: false,
+			ADD_TAGS: ['style', 'foreignObject', 'use'],
+			ADD_ATTR: [
+				'class',
+				'style',
+				'id',
+				'data-*',
+				'viewBox',
+				'preserveAspectRatio',
+				'markerWidth',
+				'markerHeight',
+				'markerUnits',
+				'refX',
+				'refY',
+				'orient',
+				'href',
+				'xlink:href',
+				'dominant-baseline',
+				'text-anchor',
+				'clipPathUnits',
+				'filterUnits',
+				'patternUnits',
+				'patternContentUnits',
+				'maskUnits',
+				'role',
+				'aria-label',
+				'aria-labelledby',
+				'aria-hidden',
+				'tabindex'
+			],
+			SANITIZE_DOM: true
+		});
+	} finally {
+		DOMPurify.removeHook('uponSanitizeAttribute', dropExternalResourceRefs);
+		DOMPurify.removeHook('uponSanitizeElement', dropExternalStyleRules);
+		DOMPurify.removeHook('uponSanitizeAttribute', dropExternalUseRefs);
+	}
+};
+
+const configStrings = (value: any): string[] => {
+	if (typeof value === 'string') {
+		return [value];
+	}
+	return value && typeof value === 'object' ? Object.values(value).flatMap(configStrings) : [];
+};
 
 export const renderMermaidDiagram = async (
 	mermaid: typeof import('mermaid').default,
@@ -2201,12 +2363,28 @@ export const renderMermaidDiagram = async (
 ) => {
 	const id = renderId ?? `mermaid-${uuidv4()}`;
 	try {
-		const parseResult = await mermaid.parse(code, { suppressErrors: false });
-		if (parseResult) {
-			const { svg } = await mermaid.render(id, code);
-			return sanitizeSvg(svg);
+		// Mermaid renders into a live document, so its own fetches have to be ruled out beforehand.
+		const { config } = (await mermaid.parse(code, { suppressErrors: false })) as any;
+		const diagram: any = await mermaid.mermaidAPI.getDiagramFromText(code);
+		const imageUrls = [
+			...[...(diagram.db.getVertices?.() ?? []).values()].map((vertex: any) => vertex.img),
+			...[...(diagram.db.getActors?.() ?? []).values()].map((actor: any) => actor.properties?.icon)
+		];
+		const classStyles = [...(diagram.db.getClasses?.() ?? []).values()].flatMap((classDef: any) => [
+			...(classDef.styles ?? []),
+			...(classDef.textStyles ?? [])
+		]);
+
+		if (
+			imageUrls.some((url) => url && !isLocalResourceUrl(url)) ||
+			classStyles.some(referencesExternalCss) ||
+			configStrings(config).some(referencesExternalCss)
+		) {
+			throw new Error('External resource loading is disabled for rendered diagrams');
 		}
-		return '';
+
+		const { svg } = await mermaid.render(id, code);
+		return sanitizeSvg(svg);
 	} finally {
 		// Mermaid can leave temporary d*/i* wrappers on error paths.
 		cleanupMermaidTempElements(id);
@@ -2346,22 +2524,16 @@ export const getCodeBlockContents = (content: string): object => {
 			}))
 	};
 };
-export const parseFrontmatter = (content) => {
-	const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
-	if (match) {
-		const frontmatter = {};
-		match[1].split('\n').forEach((line) => {
-			const [key, ...value] = line.split(':');
-			if (key && value) {
-				frontmatter[key.trim()] = value
-					.join(':')
-					.trim()
-					.replace(/^["']|["']$/g, '');
-			}
-		});
-		return frontmatter;
+export const parseFrontmatter = (content: string): Record<string, unknown> => {
+	const match = content.match(/^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
+	if (!match) return {};
+	try {
+		const fields = parseYaml(match[1]);
+		return fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : {};
+	} catch {
+		// Incomplete frontmatter is normal while typing.
+		return {};
 	}
-	return {};
 };
 
 export const formatSkillName = (name) => {

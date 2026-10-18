@@ -33,7 +33,8 @@ export interface ChatDraft {
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
 	documentWriterRequired: boolean;
-	toolApprovalMode: string;
+	/** Upstream v0.12 keeps approval mode in chat params and user settings, not drafts. */
+	toolApprovalMode?: string;
 }
 
 export interface ChatInputCallbacks {
@@ -50,6 +51,7 @@ export interface ChatInputCallbacks {
 }
 
 export interface AskUserPrompt {
+	id?: string;
 	show: boolean;
 	questions: {
 		id: string;

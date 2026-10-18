@@ -4,7 +4,9 @@
 	const i18n = getContext<any>('i18n');
 
 	import Modal from '$lib/components/common/Modal.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 	import AccessButton from '$lib/components/common/AccessButton.svelte';
@@ -29,14 +31,18 @@
 	export let onSubmit: Function = () => {};
 	export let onDelete: () => void = () => {};
 
+	let loading = false;
 	let url = '';
 	let key = '';
 	let name = '';
 	let id = '';
 	let auth_type = 'bearer';
+	let forwardCookies = false;
 	let path = '/openapi.json';
 	let enabled = false;
 	let chatUploads: 'default' | 'filesystem' = 'default';
+	let workingDirectoryContext = true;
+	let userShellTools: 'auto' | 'always' = 'auto';
 	let chatContextMode: 'default' | 'chat_id' | 'off' = 'default';
 	let automationContextMode: 'default' | 'automation_id' | 'off' = 'default';
 	let showAdvanced = false;
@@ -73,6 +79,9 @@
 	};
 
 	const init = () => {
+		forwardCookies = connection?.forward_cookies ?? false;
+		workingDirectoryContext = connection?.config?.working_directory_context ?? true;
+		userShellTools = connection?.config?.user_shell_tools === 'always' ? 'always' : 'auto';
 		if (connection) {
 			id = connection?.id ?? '';
 			url = connection.url;
@@ -125,6 +134,7 @@
 			key = '';
 			name = '';
 			auth_type = 'bearer';
+			forwardCookies = false;
 			path = '/openapi.json';
 			enabled = false;
 			chatUploads = 'default';
@@ -325,83 +335,100 @@
 	};
 
 	const submitHandler = async () => {
-		if (url === '') {
-			toast.error($i18n.t('Please enter a valid URL'));
-			return;
-		}
+		if (loading) return;
+		loading = true;
 
-		// Remove trailing slash
-		url = url.replace(/\/$/, '');
-		// Bearer key whitespace breaks the terminal WebSocket auth (HTTP headers strip it, JSON doesn't)
-		key = key.trim();
-		if (loadingPolicy) {
-			toast.error($i18n.t('Policy is still loading'));
-			return;
-		}
-		if (policyLoadError) {
-			toast.error($i18n.t('Failed to load policy: {{error}}', { error: policyLoadError }));
-			return;
-		}
-
-		// Save policy to orchestrator if applicable
-		let policyData = {};
-		let lifecycleData = {};
-		if (serverType === 'orchestrator' && !direct && policyId) {
-			const parsedLifecycle = parseJson('Lifecycle JSON', lifecycleJson);
-			if (!parsedLifecycle) return;
-			policyData = buildPolicyData();
-			lifecycleData = parsedLifecycle;
-
-			try {
-				await putOrchestratorPolicy(localStorage.token, url, key, policyId, policyData, auth_type);
-				await putOrchestratorLifecycle(
-					localStorage.token,
-					url,
-					key,
-					policyId,
-					lifecycleData,
-					auth_type
-				);
-			} catch (err) {
-				toast.error($i18n.t('Failed to save policy: {{error}}', { error: err }));
+		try {
+			if (url === '') {
+				toast.error($i18n.t('Please enter a valid URL'));
 				return;
 			}
+
+			// Remove trailing slash
+			url = url.replace(/\/$/, '');
+			// Bearer key whitespace breaks the terminal WebSocket auth (HTTP headers strip it, JSON doesn't)
+			key = key.trim();
+			if (loadingPolicy) {
+				toast.error($i18n.t('Policy is still loading'));
+				return;
+			}
+			if (policyLoadError) {
+				toast.error($i18n.t('Failed to load policy: {{error}}', { error: policyLoadError }));
+				return;
+			}
+
+			// Save policy to orchestrator if applicable
+			let policyData = {};
+			let lifecycleData = {};
+			if (serverType === 'orchestrator' && !direct && policyId) {
+				const parsedLifecycle = parseJson('Lifecycle JSON', lifecycleJson);
+				if (!parsedLifecycle) return;
+				policyData = buildPolicyData();
+				lifecycleData = parsedLifecycle;
+
+				try {
+					await putOrchestratorPolicy(
+						localStorage.token,
+						url,
+						key,
+						policyId,
+						policyData,
+						auth_type
+					);
+					await putOrchestratorLifecycle(
+						localStorage.token,
+						url,
+						key,
+						policyId,
+						lifecycleData,
+						auth_type
+					);
+				} catch (err) {
+					toast.error($i18n.t('Failed to save policy: {{error}}', { error: err }));
+					return;
+				}
+			}
+
+			const contexts: Record<string, false | { context_id: string }> = {};
+			if (chatContextMode === 'off') contexts.chat = false;
+			else if (chatContextMode === 'chat_id') contexts.chat = { context_id: 'chat_id' };
+			if (automationContextMode === 'off') contexts.automation = false;
+			else if (automationContextMode === 'automation_id') {
+				contexts.automation = { context_id: 'automation_id' };
+			}
+			const useContexts =
+				!direct && serverType === 'orchestrator' && Object.keys(contexts).length > 0;
+			const connectionConfig: Record<string, any> =
+				connection?.config && typeof connection.config === 'object' ? { ...connection.config } : {};
+			if (!direct) connectionConfig.access_grants = accessGrants;
+			else delete connectionConfig.access_grants;
+			if (useContexts) connectionConfig.contexts = contexts;
+			else delete connectionConfig.contexts;
+			if (chatUploads === 'filesystem') connectionConfig.chat_uploads = 'filesystem';
+			else delete connectionConfig.chat_uploads;
+			if (!direct) connectionConfig.working_directory_context = workingDirectoryContext;
+			connectionConfig.user_shell_tools = userShellTools;
+
+			const result = {
+				...(!direct && id.trim() ? { id: id.trim() } : {}),
+				url,
+				key,
+				name,
+				path,
+				auth_type,
+				...(!direct ? { forward_cookies: forwardCookies } : {}),
+				enabled: enabled,
+				config: connectionConfig,
+				// Policy fields
+				...(serverType ? { server_type: serverType } : {}),
+				...(serverType === 'orchestrator' && policyId ? { policy_id: policyId } : {})
+			};
+
+			await onSubmit(result);
+			show = false;
+		} finally {
+			loading = false;
 		}
-
-		const contexts: Record<string, false | { context_id: string }> = {};
-		if (chatContextMode === 'off') contexts.chat = false;
-		else if (chatContextMode === 'chat_id') contexts.chat = { context_id: 'chat_id' };
-		if (automationContextMode === 'off') contexts.automation = false;
-		else if (automationContextMode === 'automation_id') {
-			contexts.automation = { context_id: 'automation_id' };
-		}
-		const useContexts =
-			!direct && serverType === 'orchestrator' && Object.keys(contexts).length > 0;
-		const connectionConfig: Record<string, any> =
-			connection?.config && typeof connection.config === 'object' ? { ...connection.config } : {};
-		if (!direct) connectionConfig.access_grants = accessGrants;
-		else delete connectionConfig.access_grants;
-		if (useContexts) connectionConfig.contexts = contexts;
-		else delete connectionConfig.contexts;
-		if (chatUploads === 'filesystem') connectionConfig.chat_uploads = 'filesystem';
-		else delete connectionConfig.chat_uploads;
-
-		const result = {
-			...(!direct && id.trim() ? { id: id.trim() } : {}),
-			url,
-			key,
-			name,
-			path,
-			auth_type,
-			enabled: enabled,
-			config: connectionConfig,
-			// Policy fields
-			...(serverType ? { server_type: serverType } : {}),
-			...(serverType === 'orchestrator' && policyId ? { policy_id: policyId } : {})
-		};
-
-		onSubmit(result);
-		show = false;
 	};
 </script>
 
@@ -832,7 +859,7 @@
 									</div>
 									<button
 										type="button"
-										class="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 hover:bg-gray-200 dark:bg-gray-850 dark:hover:bg-gray-800 transition"
+										class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-normal transition disabled:opacity-60 bg-gray-100 hover:bg-gray-200 dark:bg-gray-850 dark:hover:bg-gray-800"
 										disabled={refreshing}
 										on:click={refreshHandler}
 									>
@@ -874,11 +901,77 @@
 						</div>
 
 						{#if showAdvanced}
+							{#if !direct}
+								<div class="flex items-center justify-between gap-3 mt-2">
+									<div>
+										<label
+											for="working-directory-context"
+											class="text-xs font-medium text-gray-900 dark:text-gray-100"
+										>
+											{$i18n.t('Working Directory Context')}
+										</label>
+										<p class="text-xs text-gray-500">
+											{$i18n.t('Include the current directory in tool instructions.')}
+										</p>
+									</div>
+									<Switch
+										id="working-directory-context"
+										ariaLabel={$i18n.t('Working Directory Context')}
+										bind:state={workingDirectoryContext}
+									/>
+								</div>
+							{/if}
+							<div class="flex items-center justify-between gap-3 mt-2">
+								<div>
+									<label
+										for="user-shell-tools"
+										class="text-xs font-medium text-gray-900 dark:text-gray-100"
+									>
+										{$i18n.t('User Shell Tools')}
+									</label>
+									<p class="text-xs text-gray-500">
+										{#if userShellTools === 'auto'}
+											{$i18n.t('Include tools only while your shell is connected.')}
+										{:else}
+											{$i18n.t('Keep tools listed even while your shell is closed.')}
+										{/if}
+									</p>
+								</div>
+								<select
+									id="user-shell-tools"
+									class={`text-xs shrink-0 ${selectClass}`}
+									bind:value={userShellTools}
+								>
+									<option value="auto">{$i18n.t('Automatic')}</option>
+									<option value="always">{$i18n.t('Always Include')}</option>
+								</select>
+							</div>
+							{#if !direct}
+								<div class="flex items-center justify-between gap-3 mt-2">
+									<div>
+										<label
+											for="forward-cookies"
+											class="text-xs font-medium text-gray-900 dark:text-gray-100"
+										>
+											{$i18n.t('Forward cookies')}
+										</label>
+										<p class="text-xs text-gray-500">
+											{$i18n.t('Forward cookies from your Open WebUI request to this server.')}
+										</p>
+									</div>
+									<Switch
+										id="forward-cookies"
+										ariaLabel={$i18n.t('Forward cookies')}
+										bind:state={forwardCookies}
+									/>
+								</div>
+							{/if}
+
 							<div class="flex gap-2 mt-2">
 								<div class="flex flex-col w-full">
 									<div class="flex justify-between items-center mb-0.5">
 										<div class="flex gap-2 items-center">
-											<div class={`text-xs text-gray-500`}>
+											<div class="text-xs font-medium text-gray-900 dark:text-gray-100">
 												{$i18n.t('OpenAPI Spec')}
 											</div>
 										</div>
@@ -977,11 +1070,17 @@
 							</div>
 
 							<button
-								class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 disabled:opacity-50 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center"
+								class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
 								type="submit"
-								disabled={loadingPolicy || !!policyLoadError}
+								disabled={loading || loadingPolicy || !!policyLoadError}
 							>
 								{$i18n.t('Save')}
+
+								{#if loading}
+									<span class="shrink-0">
+										<Spinner className="size-3" />
+									</span>
+								{/if}
 							</button>
 						</div>
 					</div>
