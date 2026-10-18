@@ -2,7 +2,7 @@
 /**
  * Generate TypeScript types from committed JSON Schemas.
  *
- * Source: ../genai-utils/agents/agents/capabilities/components/schemas/*.schema.json
+ * Source: ../soev-solutions/core/agents/agents/components/schemas/*.schema.json
  * Output: src/lib/types/present_ui/<name>.ts + index.ts barrel
  *
  * Run via `npm run generate:ui-schemas`. CI runs this and diffs the
@@ -25,7 +25,7 @@ const __dirname = dirname(__filename);
 
 const SCHEMAS_DIR = resolve(
 	__dirname,
-	'../../genai-utils/agents/agents/capabilities/components/schemas'
+	'../../soev-solutions/core/agents/agents/components/schemas'
 );
 const OUTPUT_DIR = resolve(__dirname, '../src/lib/types/present_ui');
 

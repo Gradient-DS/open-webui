@@ -1,9 +1,11 @@
 <script lang="ts">
+	// [Gradient] Suggestions use effective LLMs; presentation uses assistant identity.
+	import { effectiveModels as _models, activeAssistant } from '$lib/stores/assistant';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
 
-	import { config, user, models as _models, temporaryChatEnabled } from '$lib/stores';
+	import { config, user, temporaryChatEnabled } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
 
 	import { blur, fade } from 'svelte/transition';
@@ -11,12 +13,13 @@
 	import Suggestions from './Suggestions.svelte';
 	import { sanitizeResponseContent } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
+	import { isAssistant } from '$lib/utils/assistants';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 
 	const i18n = getContext('i18n');
 
-	export let modelIds = [];
+	export let modelIds: string[] = []; // [Gradient] Shared with assistant greeting lookup.
 	export let models = [];
 	export let atSelectedModel;
 
@@ -24,6 +27,12 @@
 
 	let mounted = false;
 	let selectedModelIdx = 0;
+	// [Gradient] Keep the LLM id out of assistant avatar URLs and greetings.
+	$: greetingModel = $activeAssistant ?? $_models.find((m) => m.id === modelIds[selectedModelIdx]);
+	// [Gradient] Only an assistant's description greets; a catalog model shows its handle alone.
+	$: greetingDescription = isAssistant(greetingModel)
+		? (greetingModel?.info?.meta?.description ?? null)
+		: null;
 
 	$: if (modelIds.length > 0) {
 		selectedModelIdx = models.length - 1;
@@ -37,7 +46,7 @@
 </script>
 
 {#key mounted}
-	<div class="m-auto w-full max-w-6xl px-8 lg:px-20">
+	<div class="m-auto w-full max-w-[58rem] px-8 lg:px-20">
 		<div class="flex justify-start">
 			<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 200 }}>
 				{#each models as model, modelIdx}
@@ -49,19 +58,20 @@
 						<Tooltip
 							content={DOMPurify.sanitize(
 								marked.parse(
-									sanitizeResponseContent(
-										models[selectedModelIdx]?.info?.meta?.description ?? ''
-									).replaceAll('\n', '<br>')
+									sanitizeResponseContent(greetingDescription ?? '').replaceAll('\n', '<br>')
 								)
 							)}
 							placement="right"
 						>
 							<img
-								src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
-								class=" size-[2.7rem] rounded-full border-[1px] border-gray-100 dark:border-none"
+								src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${($activeAssistant ?? model)?.id}&lang=${$i18n.language}`}
+								class=" size-[2.7rem] rounded-full"
 								alt="logo"
 								draggable="false"
 								on:error={(e) => {
+									// LICENSE covers this Open WebUI fallback logo.
+									// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+									// https://docs.openwebui.com/license.
 									e.currentTarget.src = '/favicon.png';
 								}}
 							/>
@@ -77,39 +87,37 @@
 				className="w-full flex justify-start mb-0.5"
 				placement="top"
 			>
-				<div class="flex items-center gap-2 text-gray-500 text-lg mt-2 w-fit">
-					<EyeSlash strokeWidth="2.5" className="size-5" />{$i18n.t('Temporary Chat')}
+				<div class="flex items-center gap-1.5 text-gray-500 text-xs mt-1 w-fit">
+					<EyeSlash strokeWidth="2" className="size-3.5" />{$i18n.t('Temporary Chat')}
 				</div>
 			</Tooltip>
 		{/if}
 
 		<div
-			class=" mt-2 mb-4 text-3xl text-gray-800 dark:text-gray-100 text-left flex items-center gap-4 font-primary"
+			class=" mt-2 mb-4 text-3xl text-gray-800 dark:text-gray-100 text-left flex items-center gap-4"
 		>
 			<div>
 				<div class=" capitalize line-clamp-1" in:fade={{ duration: 200 }}>
-					{#if $config?.ui?.greeting_template}
+					{#if $config?.ui?.greeting_template && !$activeAssistant}
 						{resolveLocalized($config.ui.greeting_template, $i18n?.language).replace(
 							'{{name}}',
 							$user?.name ?? ''
 						)}
-					{:else if models[selectedModelIdx]?.name}
-						{models[selectedModelIdx]?.name}
+					{:else if greetingModel?.name}
+						{greetingModel?.name}
 					{:else}
 						{$i18n.t('Hello, {{name}}', { name: $user?.name })}
 					{/if}
 				</div>
 
 				<div in:fade={{ duration: 200, delay: 200 }}>
-					{#if models[selectedModelIdx]?.info?.meta?.description ?? null}
+					{#if greetingDescription}
 						<div
 							class="mt-0.5 text-base font-normal text-gray-500 dark:text-gray-400 line-clamp-3 markdown"
 						>
 							{@html DOMPurify.sanitize(
 								marked.parse(
-									sanitizeResponseContent(
-										models[selectedModelIdx]?.info?.meta?.description
-									).replaceAll('\n', '<br>')
+									sanitizeResponseContent(greetingDescription ?? '').replaceAll('\n', '<br>')
 								)
 							)}
 						</div>
@@ -138,7 +146,7 @@
 			</div>
 		</div>
 
-		<div class=" w-full font-primary" in:fade={{ duration: 200, delay: 300 }}>
+		<div class=" w-full" in:fade={{ duration: 200, delay: 300 }}>
 			<Suggestions
 				className="grid grid-cols-2"
 				suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??

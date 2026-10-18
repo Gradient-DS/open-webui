@@ -7,7 +7,7 @@
  * cumulative SourceCitation set after every tool call and every text
  * answer in a turn, so the same chunk can arrive multiple times in
  * `message.sources`. The backend runner now dedupes across dispatches
- * (genai-utils `CitationChunkDeduper`), but this reducer keeps the
+ * (soev-solutions `CitationChunkDeduper`), but this reducer keeps the
  * defense in place for:
  *   - legacy chats persisted before the backend fix shipped,
  *   - other agent variants whose source emission path does not dedupe
@@ -25,6 +25,15 @@ export interface RawSourceMeta {
 	name?: string;
 	file_id?: string;
 	page?: number | string;
+	// Citation geometry: [{page?, x0, y0, x1, y1}] in PDF points, top-left
+	// origin, 0-based pages — or that list as a JSON string (Weaviate MT
+	// stores it as TEXT). Parsed by `$lib/utils/citationRects`.
+	bboxes?: string | { page?: number; x0: number; y0: number; x1: number; y1: number }[];
+	// Stamped per-chunk from the owning RawSource during the merge (a merged
+	// document entry can mix chunks from a search citation and a read
+	// citation of the same file): "document" = whole-document read, no
+	// passage-level provenance — skip highlight attempts for this snippet.
+	granularity?: string;
 	chunk_id?: string;
 	html?: string;
 	parameters?: unknown;
@@ -36,6 +45,7 @@ export interface RawSourceObject {
 	name?: string;
 	type?: string;
 	url?: string;
+	provider?: string;
 	[key: string]: unknown;
 }
 
@@ -44,14 +54,13 @@ export interface RawSource {
 	document?: string[];
 	metadata?: RawSourceMeta[];
 	distances?: number[];
-	// [Gradient] Per-source provenance from the agent service. `n` is the
-	// cumulative `[N]` id; `current_turn` is true when a tool retrieved the
-	// source this turn; `cited_this_turn` is true when the model wrote its
-	// `[N]` in this turn's answer. Absent for legacy chats / upstream
-	// providers. The per-message panel renders `current_turn ∪ cited_this_turn`.
+	// [Gradient] `n` is the agent service's cumulative `[N]` id, absent for
+	// legacy chats / upstream providers. `granularity` is "document" when the citation's contents are
+	// whole-document reads (read_document/summarize/fetch_url) rather than
+	// retrieved passages — the modal skips passage highlighting for those.
+	// Absent (= chunk) for retrieval citations and all legacy payloads.
+	granularity?: string;
 	n?: number;
-	current_turn?: boolean;
-	cited_this_turn?: boolean;
 }
 
 export interface DisplayCitation {
@@ -59,14 +68,15 @@ export interface DisplayCitation {
 	source: RawSourceObject;
 	document: string[];
 	metadata: RawSourceMeta[];
-	distances: number[];
-	n?: number;
-	current_turn?: boolean;
-	cited_this_turn?: boolean;
+	// Parallel to `document`; `undefined` holes keep positions aligned for
+	// chunks whose source carried no distances (e.g. whole-document reads).
+	distances: (number | undefined)[];
+	// [Gradient] The `[N]` this entry answers to: the agent's `n`, else (legacy sources) its position.
+	n: number;
 }
 
 export function reduceSources(sources: RawSource[]): DisplayCitation[] {
-	const acc: DisplayCitation[] = [];
+	const acc: (Omit<DisplayCitation, 'n'> & { n?: number })[] = [];
 	const seenChunks = new Map<string, Set<string>>();
 
 	for (const source of sources) {
@@ -75,10 +85,17 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 		const documents = source?.document ?? [];
 
 		documents.forEach((document, index) => {
-			const metadata = source?.metadata?.[index];
+			const rawMetadata = source?.metadata?.[index];
+			// Stamp the owning source's granularity onto the chunk so it
+			// survives the merge (entries can mix chunks from a search
+			// citation and a read citation of the same document).
+			const metadata: RawSourceMeta =
+				source.granularity === 'document'
+					? { ...(rawMetadata ?? {}), granularity: 'document' }
+					: (rawMetadata ?? {});
 			const distance = source?.distances?.[index];
 
-			const id = String(metadata?.source ?? source?.source?.id ?? 'N/A');
+			const id = sourceKey(source, metadata);
 			let _source: RawSourceObject = source?.source ?? {};
 
 			if (metadata?.name) {
@@ -101,15 +118,11 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 				seenChunks.set(id, new Set());
 			}
 
-			// [Gradient] Carry the agent's per-source provenance flags onto the
-			// merged entry — they live at the top level of each `event: source`
-			// payload, and this reducer rebuilds entries from scratch, so without
-			// this they'd be dropped before the panel filter sees them. Re-applied
-			// on every dispatch so the latest (post-answer) flags win:
-			// `current_turn` / `cited_this_turn` flip as a turn progresses.
+			// [Gradient] Carry the agent's `n` and provider onto the merged entry —
+			// they live at the top level of each `event: source` payload, and this
+			// reducer rebuilds entries from scratch, so without this they'd be dropped.
 			if (source.n !== undefined) entry.n = source.n;
-			if (source.current_turn !== undefined) entry.current_turn = source.current_turn;
-			if (source.cited_this_turn !== undefined) entry.cited_this_turn = source.cited_this_turn;
+			if (_source.provider) entry.source = { ...entry.source, provider: _source.provider };
 
 			const seen = seenChunks.get(id)!;
 			const fingerprint = chunkFingerprint(document, metadata);
@@ -118,22 +131,38 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 			}
 			seen.add(fingerprint);
 
+			// Push unconditionally: `document`, `metadata` and `distances` are
+			// parallel arrays consumed positionally (CitationModal pairs
+			// `metadata?.[i]` / `distances?.[i]` with `document[i]`) — a
+			// conditional push desyncs every later index as soon as one chunk
+			// lacks metadata or a distance (e.g. read-tool citations merged
+			// into a searched document's entry).
 			entry.document.push(document);
-			if (metadata) entry.metadata.push(metadata);
-			if (distance !== undefined) entry.distances.push(distance);
+			entry.metadata.push(metadata);
+			entry.distances.push(distance);
 		});
 	}
 
-	return acc;
+	return acc.map((entry, index) => ({ ...entry, n: entry.n ?? index + 1 }));
+}
+
+/** [Gradient] The entry a `[N]` marker (`3` or `'3#suffix'`) opens, by its number, not its position. */
+export function citationAt(
+	citations: DisplayCitation[],
+	marker: string | number
+): DisplayCitation | undefined {
+	const number = typeof marker === 'string' ? parseInt(marker.split('#')[0]) : marker;
+	return citations.find((citation) => citation.n === number);
+}
+
+// [Gradient] The document a chunk belongs to: one citation entry, and one `[N]`, per key.
+export function sourceKey(source: RawSource, metadata: RawSourceMeta | undefined): string {
+	return String(metadata?.source ?? source?.source?.id ?? 'N/A');
 }
 
 function chunkFingerprint(document: string, metadata: RawSourceMeta | undefined): string {
 	const chunkId = metadata?.chunk_id;
 	if (chunkId) return `id:${chunkId}`;
-	const normalized = (document ?? '')
-		.split(/\s+/)
-		.filter(Boolean)
-		.join(' ')
-		.slice(0, 200);
+	const normalized = (document ?? '').split(/\s+/).filter(Boolean).join(' ').slice(0, 200);
 	return `text:${normalized}`;
 }

@@ -6,7 +6,16 @@ metadata:
   labels:
     {{- include "open-webui-tenant.labels" . | nindent 4 }}
 spec:
+  {{- if not (has .Values.networkPolicy.scope (list "namespace" "release")) }}
+  {{- fail "networkPolicy.scope must be namespace or release" }}
+  {{- end }}
+  {{- if eq .Values.networkPolicy.scope "release" }}
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- else }}
   podSelector: {}
+  {{- end }}
   policyTypes:
     - Ingress
     - Egress
@@ -25,6 +34,22 @@ spec:
     - from:
         - podSelector: {}
   egress:
+    {{- include "open-webui-tenant.validateEgress" . }}
+    {{- if .Values.networkPolicy.egress.strict }}
+    {{- include "open-webui-tenant.releaseEgress" . | nindent 4 }}
+    {{- include "open-webui-tenant.egressAllow" (list . .Values.networkPolicy.egress.allow) | nindent 4 }}
+    {{- if .Values.openWebui.config.telemetry.otel.enabled }}
+    # OTLP to the collector in the observability namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.observability.namespace | default "observability" }}
+      ports:
+        - protocol: TCP
+          {{- $otlpHost := (urlParse .Values.openWebui.config.telemetry.otel.endpoint).host }}
+          port: {{ if contains ":" $otlpHost }}{{ splitList ":" $otlpHost | last }}{{ else }}4317{{ end }}
+    {{- end }}
+    {{- else }}
     # Allow to shared services namespace
     - to:
         - namespaceSelector:
@@ -46,6 +71,7 @@ spec:
     # Allow internal communication within namespace
     - to:
         - podSelector: {}
+    {{- end }}
     # Allow DNS
     - to:
         - namespaceSelector:
@@ -56,12 +82,8 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    # Allow external (for LLM APIs, embedding APIs, etc.)
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
+    {{- if not .Values.networkPolicy.egress.fqdn.enforce }}
+    # Public internet: OIDC, cloud sources, object storage, web fetch
+    {{- include "open-webui-tenant.publicEgress" . | nindent 4 }}
+    {{- end }}
 {{- end }}

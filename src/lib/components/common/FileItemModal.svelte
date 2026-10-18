@@ -1,14 +1,19 @@
 <script lang="ts">
 	import type { WorkBook } from 'xlsx';
 
-	import { getContext, onMount, tick } from 'svelte';
+	import { getContext, onDestroy, onMount, tick } from 'svelte';
 
 	import { formatFileSize, getLineCount } from '$lib/utils';
-	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
+	import { readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
-	import { getFileById, getFileContentById, getFileAttachments } from '$lib/apis/files';
+	import { getFileById, getFileContentById } from '$lib/apis/files';
+	import {
+		isPendingFileStatus,
+		isPreviewPending,
+		loadWithPreviewRetry
+	} from '$lib/utils/previewRetry';
 
 	import CodeBlock from '$lib/components/chat/Messages/CodeBlock.svelte';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
@@ -26,14 +31,20 @@
 	import Spinner from './Spinner.svelte';
 	import PDFViewer from './PDFViewer.svelte';
 	import PanzoomContainer from './PanzoomContainer.svelte';
+	import DocxPreview from './DocxPreview.svelte';
+	import PptxPreview from './PptxPreview.svelte';
 	import Reset from '../icons/Reset.svelte';
 
 	export let item;
 	export let show = false;
 	export let edit = false;
 
-	let enableFullContent = false;
 	let loading = false;
+	let fetchedFile: { id: string; file: Awaited<ReturnType<typeof getFileById>> } | null = null;
+	let contentRequest = 0;
+	$: contentId = item?.id;
+	// Streamed message snapshots replace item; keep fetched content owned by the modal.
+	$: previewFile = fetchedFile && fetchedFile.id === contentId ? fetchedFile.file : item?.file;
 
 	let isPDF = false;
 	let isAudio = false;
@@ -44,27 +55,6 @@
 
 	let selectedTab = '';
 
-	let attachments: Array<{
-		id: string;
-		kind: string;
-		storey: string | null;
-		index: number;
-		content_type: string;
-		caption: string;
-	}> = [];
-
-	$: hasAttachments = attachments.length > 0;
-	$: planAttachments = attachments
-		.filter((a) => a.kind === 'plan_png')
-		.sort(
-			(a, b) =>
-				(a.storey ?? '').localeCompare(b.storey ?? '') || a.index - b.index
-		);
-	$: axonAttachments = attachments.filter((a) => a.kind === 'axon_png');
-
-	const attachmentUrl = (fileId: string, attachmentId: string): string =>
-		`${WEBUI_API_BASE_URL}/files/${fileId}/attachments/${attachmentId}`;
-
 	let excelWorkbook: WorkBook | null = null;
 	let excelSheetNames: string[] = [];
 	let selectedSheet = '';
@@ -73,13 +63,47 @@
 	let rowCount = 0;
 
 	// DOCX state
-	let docxHtml = '';
+	let docxData: ArrayBuffer | null = null;
 	let docxError = '';
 
 	// PPTX state
 	let pptxSlides: string[] = [];
 	let pptxCurrentSlide = 0;
 	let pptxError = '';
+
+	// [Gradient] The original is still being prepared (processing reference attachment); retrying.
+	let previewPending = false;
+	type OriginalContent = Promise<ArrayBuffer | null | undefined>;
+
+	// [Gradient] Resolves undefined when the modal moved on; the first try reuses the prefetch.
+	const loadOriginal = async (
+		id: string,
+		request: number,
+		first?: ReturnType<typeof getFileContentById>
+	): OriginalContent => {
+		const result = await loadWithPreviewRetry(
+			(attempt) => (attempt === 0 && first ? first : getFileContentById(id)),
+			{
+				isCurrent: () => show && request === contentRequest && id === item?.id,
+				isPending: (error) =>
+					isPreviewPending(error) ||
+					isPendingFileStatus(
+						previewFile?.meta?.status ?? previewFile?.data?.status ?? item?.status
+					),
+				onPending: () => {
+					previewPending = true;
+					loading = false;
+				}
+			}
+		);
+		if (result.status === 'cancelled') return undefined;
+		previewPending = false;
+		if (result.status === 'failed') throw result.error;
+		return result.value;
+	};
+	onDestroy(() => {
+		contentRequest++;
+	});
 
 	let panzoomRef: PanzoomContainer;
 	const resetImageView = () => {
@@ -158,10 +182,11 @@
 			'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
 		(item?.name && item.name.toLowerCase().endsWith('.pptx'));
 
-	const loadExcelContent = async () => {
+	const loadExcelContent = async (content: OriginalContent) => {
 		try {
 			excelError = '';
-			const arrayBuffer = await getFileContentById(item.id);
+			const arrayBuffer = await content;
+			if (arrayBuffer === undefined) return; // [Gradient] superseded
 			if (!arrayBuffer) throw new Error('Empty file content');
 			excelWorkbook = await readWorkbook(arrayBuffer);
 			excelSheetNames = excelWorkbook.SheetNames;
@@ -187,25 +212,26 @@
 		renderExcelSheet();
 	}
 
-	const loadDocxContent = async () => {
+	const loadDocxContent = async (content: OriginalContent) => {
 		try {
 			docxError = '';
-			const arrayBuffer = await getFileContentById(item.id);
-			if (!arrayBuffer) throw new Error('Empty file content');
-			docxHtml = await renderDocxHtml(arrayBuffer);
+			const data = await content;
+			if (data === undefined) return; // [Gradient] superseded
+			docxData = data;
 		} catch (error) {
 			console.error('Error loading DOCX file:', error);
 			docxError = $i18n.t('Failed to load DOCX file. Please try downloading it instead.');
 		}
 	};
 
-	const loadPptxContent = async () => {
+	const loadPptxContent = async (content: OriginalContent) => {
 		try {
 			pptxError = '';
 			const [arrayBuffer, { pptxToImages }] = await Promise.all([
-				getFileContentById(item.id),
+				content,
 				import('$lib/utils/pptxToHtml')
 			]);
+			if (arrayBuffer === undefined) return; // [Gradient] superseded
 			const result = await pptxToImages(arrayBuffer);
 			pptxSlides = result.images;
 			pptxCurrentSlide = 0;
@@ -215,19 +241,23 @@
 		}
 	};
 
-	const loadContent = async () => {
+	const loadContent = async (id: string) => {
+		const request = ++contentRequest;
 		// Default to the Preview tab whenever a preview exists, regardless of how
 		// the viewer was opened; '' (Content) is the default only for files with
 		// no preview pane. (Images render without tabs.)
 		selectedTab = isPDF || isAudio || isExcel || isDocx || isPptx ? 'preview' : '';
 		expandedContent = false;
+		docxData = null;
+		previewPending = false;
 		if (item?.type === 'collection') {
 			loading = true;
 
-			const knowledge = await getKnowledgeById(localStorage.token, item.id).catch((e) => {
+			const knowledge = await getKnowledgeById(localStorage.token, id).catch((e) => {
 				console.error('Error fetching knowledge base:', e);
 				return null;
 			});
+			if (request !== contentRequest || id !== item?.id) return;
 
 			if (knowledge) {
 				item.files = knowledge.files || [];
@@ -236,60 +266,54 @@
 		} else if (item?.type === 'file') {
 			loading = true;
 
-			const file = await getFileById(localStorage.token, item.id).catch((e) => {
+			const content = isExcel || isDocx || isPptx ? getFileContentById(id) : undefined;
+			// Observe early rejection while metadata is pending; the preview loader still handles it.
+			void content?.catch(() => {});
+
+			const file = await getFileById(localStorage.token, id).catch((e) => {
 				console.error('Error fetching file:', e);
 				return null;
 			});
+			if (request !== contentRequest || id !== item?.id) return;
 
 			if (file) {
-				item.file = file || {};
+				fetchedFile = { id, file };
 			}
 
 			// Load Excel content if it's an Excel file
 			if (isExcel) {
-				await loadExcelContent();
+				await loadExcelContent(loadOriginal(id, request, content));
 			}
 			if (isDocx) {
-				await loadDocxContent();
+				await loadDocxContent(loadOriginal(id, request, content));
 			}
 			if (isPptx) {
-				await loadPptxContent();
+				await loadPptxContent(loadOriginal(id, request, content));
 			}
 
-			loading = false;
+			if (request === contentRequest && id === item?.id) loading = false;
 		}
 
 		await tick();
 	};
 
-	$: if (show) {
-		loadContent();
+	$: if (show && contentId) {
+		loadContent(contentId);
 	}
 
 	onMount(() => {
 		console.log(item);
 		if (item?.context === 'full') {
-			enableFullContent = true;
-		}
-
-		if (item?.id && item?.type === 'file') {
-			(async () => {
-				try {
-					attachments = await getFileAttachments(localStorage.token, item.id);
-				} catch (err) {
-					console.warn('Failed to load attachments for file', item.id, err);
-				}
-			})();
 		}
 	});
 </script>
 
 <Modal bind:show size="lg">
-	<div class="font-primary px-4.5 py-3.5 w-full flex flex-col justify-center dark:text-gray-400">
+	<div class=" px-4.5 py-3.5 w-full flex flex-col justify-center dark:text-gray-400">
 		<div class=" pb-2">
 			<div class="flex items-start justify-between">
 				<div>
-					<div class=" font-medium text-lg dark:text-gray-100">
+					<div class=" font-normal text-lg dark:text-gray-100">
 						<a
 							href="#"
 							class="hover:underline line-clamp-1"
@@ -328,7 +352,7 @@
 					<div class=" flex flex-wrap text-xs gap-1 text-gray-500">
 						{#if item?.type === 'collection'}
 							{#if item?.type}
-								<div class="capitalize shrink-0">{item.type}</div>
+								<div class="shrink-0">{$i18n.t('Collection')}</div>
 								•
 							{/if}
 
@@ -349,7 +373,7 @@
 							•
 						{/if}
 
-						{#if item?.file?.data?.content}
+						{#if previewFile?.data?.content}
 							<div class="capitalize shrink-0">
 								{#if isExcel && rowCount > 0 && selectedTab === 'preview'}
 									{$i18n.t('{{COUNT}} Rows', {
@@ -357,7 +381,7 @@
 									})}
 								{:else}
 									{$i18n.t('{{COUNT}} extracted lines', {
-										COUNT: getLineCount(item?.file?.data?.content ?? '')
+										COUNT: getLineCount(previewFile?.data?.content ?? '')
 									})}
 								{/if}
 							</div>
@@ -374,33 +398,8 @@
 						{/if}
 					</div>
 
-					{#if edit}
-						<div class=" self-end">
-							<Tooltip
-								content={enableFullContent
-									? $i18n.t(
-											'Inject the entire content as context for comprehensive processing, this is recommended for complex queries.'
-										)
-									: $i18n.t(
-											'Default to segmented retrieval for focused and relevant content extraction, this is recommended for most cases.'
-										)}
-							>
-								<div class="flex items-center gap-1.5 text-xs">
-									{#if enableFullContent}
-										{$i18n.t('Using Entire Document')}
-									{:else}
-										{$i18n.t('Using Focused Retrieval')}
-									{/if}
-									<Switch
-										bind:state={enableFullContent}
-										on:change={(e) => {
-											item.context = e.detail ? 'full' : undefined;
-										}}
-									/>
-								</div>
-							</Tooltip>
-						</div>
-					{/if}
+					<!-- [Gradient] The full-document / focused-retrieval choice is gone: retrieval
+					     strategy is decided agent-side, and every tenant runs the agent. -->
 				</div>
 			</div>
 		</div>
@@ -419,9 +418,9 @@
 					</div>
 				{/if}
 
-				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx || hasAttachments}
+				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx}
 					<div
-						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
+						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 					>
 						<button
 							class="min-w-fit py-1.5 px-4 border-b {selectedTab === 'preview'
@@ -442,18 +441,6 @@
 								selectedTab = '';
 							}}>{$i18n.t('Content')}</button
 						>
-
-						{#if hasAttachments}
-							<button
-								class="min-w-fit py-1.5 px-4 border-b {selectedTab === 'attachments'
-									? ' '
-									: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								type="button"
-								on:click={() => {
-									selectedTab = 'attachments';
-								}}>{$i18n.t('Renders')}</button
-							>
-						{/if}
 					</div>
 				{/if}
 
@@ -480,8 +467,8 @@
 						</PanzoomContainer>
 					</div>
 				{:else if selectedTab === ''}
-					{#if item?.file?.data}
-						{@const rawContent = (item?.file?.data?.content ?? '').trim() || 'No content'}
+					{#if previewFile?.data}
+						{@const rawContent = (previewFile?.data?.content ?? '').trim() || 'No content'}
 						{@const isTruncated =
 							($settings?.renderMarkdownInPreviews ?? true) &&
 							rawContent.length > CONTENT_PREVIEW_LIMIT &&
@@ -558,6 +545,12 @@
 							url={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
 							className="w-full h-[70vh] border-0 rounded-lg"
 						/>
+					{:else if (isExcel || isDocx || isPptx) && previewPending}
+						<!-- [Gradient] -->
+						<div class="flex flex-col items-center justify-center gap-2 py-6">
+							<Spinner className="size-5" />
+							<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+						</div>
 					{:else if isExcel}
 						{#if excelError}
 							<div class="text-red-500 text-sm p-4">
@@ -566,7 +559,7 @@
 						{:else}
 							{#if excelSheetNames.length > 1}
 								<div
-									class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
+									class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 								>
 									{#each excelSheetNames as sheetName}
 										<button
@@ -593,7 +586,7 @@
 					{:else if isCode}
 						<div class="max-h-[60vh] overflow-scroll scrollbar-hidden text-sm relative">
 							<CodeBlock
-								code={item.file.data.content}
+								code={previewFile?.data?.content ?? ''}
 								lang={item.name.split('.').pop()}
 								token={null}
 								edit={false}
@@ -605,17 +598,13 @@
 						<div
 							class="max-h-[60vh] overflow-scroll scrollbar-hidden text-sm prose dark:prose-invert max-w-full"
 						>
-							<Markdown content={item.file.data.content} id="markdown-viewer" />
+							<Markdown content={previewFile?.data?.content ?? ''} id="markdown-viewer" />
 						</div>
 					{:else if isDocx}
 						{#if docxError}
 							<div class="text-red-500 text-sm p-4">{docxError}</div>
-						{:else if docxHtml}
-							<div
-								class="office-preview max-h-[60vh] overflow-auto p-4 prose dark:prose-invert max-w-full text-sm"
-							>
-								{@html docxHtml}
-							</div>
+						{:else if docxData}
+							<DocxPreview data={docxData} className="h-[60vh]" />
 						{:else}
 							<div class="text-gray-500 text-sm p-4">No content available</div>
 						{/if}
@@ -623,102 +612,19 @@
 						{#if pptxError}
 							<div class="text-red-500 text-sm p-4">{pptxError}</div>
 						{:else if pptxSlides.length > 0}
-							<div class="max-h-[60vh] overflow-auto">
-								<div class="flex justify-center p-4">
-									<img
-										src={pptxSlides[pptxCurrentSlide]}
-										alt="Slide {pptxCurrentSlide + 1}"
-										class="max-w-full max-h-[50vh] object-contain rounded-md shadow-lg"
-										draggable="false"
-									/>
-								</div>
-								{#if pptxSlides.length > 1}
-									<div class="flex items-center justify-center gap-3 pb-3 text-sm text-gray-500">
-										<button
-											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
-											disabled={pptxCurrentSlide === 0}
-											on:click={() => (pptxCurrentSlide = Math.max(0, pptxCurrentSlide - 1))}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 20 20"
-												fill="currentColor"
-												class="size-5"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-										</button>
-										<span>{pptxCurrentSlide + 1} / {pptxSlides.length}</span>
-										<button
-											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
-											disabled={pptxCurrentSlide === pptxSlides.length - 1}
-											on:click={() =>
-												(pptxCurrentSlide = Math.min(pptxSlides.length - 1, pptxCurrentSlide + 1))}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 20 20"
-												fill="currentColor"
-												class="size-5"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-										</button>
-									</div>
-								{/if}
-							</div>
+							<PptxPreview
+								slides={pptxSlides}
+								bind:currentSlide={pptxCurrentSlide}
+								className="h-[60vh]"
+							/>
 						{:else}
 							<div class="text-gray-500 text-sm p-4">No content available</div>
 						{/if}
 					{:else}
 						<div class="max-h-96 overflow-scroll scrollbar-hidden text-xs whitespace-pre-wrap">
-							{(item?.file?.data?.content ?? '').trim() || 'No content'}
+							{(previewFile?.data?.content ?? '').trim() || 'No content'}
 						</div>
 					{/if}
-				{:else if selectedTab === 'attachments'}
-					<div class="flex flex-col gap-4 p-4">
-						{#if planAttachments.length > 0}
-							<section>
-								<h3 class="text-sm font-medium mb-2">{$i18n.t('Floor plans')}</h3>
-								<div class="grid grid-cols-2 gap-3">
-									{#each planAttachments as a (a.id)}
-										<figure class="flex flex-col gap-1">
-											<img
-												src={attachmentUrl(item.id, a.id)}
-												alt={a.caption || a.storey || a.kind}
-												class="rounded border border-gray-200 dark:border-gray-700"
-												loading="lazy"
-											/>
-											<figcaption class="text-xs text-gray-500">
-												{a.storey ?? a.caption ?? ''}
-											</figcaption>
-										</figure>
-									{/each}
-								</div>
-							</section>
-						{/if}
-						{#if axonAttachments.length > 0}
-							<section>
-								<h3 class="text-sm font-medium mb-2">{$i18n.t('Isometric')}</h3>
-								{#each axonAttachments as a (a.id)}
-									<img
-										src={attachmentUrl(item.id, a.id)}
-										alt={a.caption || a.kind}
-										class="rounded border border-gray-200 dark:border-gray-700 max-w-full"
-										loading="lazy"
-									/>
-								{/each}
-							</section>
-						{/if}
-					</div>
 				{/if}
 			{:else}
 				<div class="flex items-center justify-center py-6">

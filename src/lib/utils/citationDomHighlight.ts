@@ -53,20 +53,17 @@ export const clearDocxHighlights = (container: HTMLElement) => {
 	}
 };
 
-/**
- * Scroll the first citation `<mark>` into view within `container` (not the
- * window), centering it. Returns whether a mark was found.
- */
-export const scrollToFirstDocxHighlight = (container: HTMLElement): boolean => {
+// [Gradient] Initial positioning stays instant; passage switches honor reduced motion.
+export const scrollToFirstDocxHighlight = (
+	container: HTMLElement,
+	behavior: ScrollBehavior = 'auto'
+): boolean => {
 	const first = container.querySelector<HTMLElement>(`mark.${HIGHLIGHT_CLASS}`);
-	if (!first) {
-		return false;
-	}
-	const containerRect = container.getBoundingClientRect();
-	const targetRect = first.getBoundingClientRect();
-	const delta =
-		targetRect.top - containerRect.top - (container.clientHeight - targetRect.height) / 2;
-	container.scrollTop += delta;
+	if (!first) return false;
+	first.scrollIntoView({
+		block: 'start',
+		behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : behavior
+	});
 	return true;
 };
 

@@ -12,7 +12,8 @@ const RESERVED_FIELDS = new Set([
 	'items',
 	'queries',
 	'query',
-	'count'
+	'count',
+	'mail_options'
 ]);
 
 /**
@@ -22,7 +23,8 @@ const RESERVED_FIELDS = new Set([
  * translation-file entry.
  */
 export function statusI18nParams(
-	status: Record<string, unknown> | null | undefined
+	status: Record<string, unknown> | null | undefined,
+	translate: (key: string) => string = (key) => key
 ): Record<string, unknown> {
 	if (!status) return {};
 	const params: Record<string, unknown> = {};
@@ -30,6 +32,11 @@ export function statusI18nParams(
 		if (!RESERVED_FIELDS.has(key)) {
 			params[key] = value;
 		}
+	}
+	if (status.action === 'search_mail' && Array.isArray(status.mail_options)) {
+		params.options = status.mail_options
+			.map(({ label, value }) => translate(label) + (value ? `: ${value}` : ''))
+			.join('; ');
 	}
 	return params;
 }

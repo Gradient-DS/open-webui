@@ -1,0 +1,51 @@
+# Strict egress with the FQDN allowlist enforced, on a v2 tenant beside soev-platform.
+tenant:
+  name: strict
+  domain: strict.soev.ai
+soevApi:
+  url: http://soev-api:8020
+agentApi:
+  runtime: v2
+openWebui:
+  config:
+    vectorDb: pgvector
+    databaseUser: soev_strict
+    databaseName: soev_strict
+    openidProviderUrl: https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0/.well-known/openid-configuration
+    microsoftClientId: 00000000-0000-0000-0000-000000000001
+    enableOnedriveIntegration: "true"
+    storageProvider: s3
+    s3EndpointUrl: https://object.previder.nl
+    telemetry:
+      otel:
+        enabled: true
+        endpoint: http://alloy.observability.svc:4317
+postgres:
+  enabled: false
+  host: pg-strict-rw.database-strict.svc.cluster.local
+  user: soev_strict
+  database: soev_strict
+weaviate:
+  enabled: false
+redis:
+  enabled: true
+syncDaemon:
+  enabled: true
+networkPolicy:
+  scope: release
+  egress:
+    strict: true
+    publicPorts: [443]
+    allow:
+      - name: soev-api
+        namespace: ""
+        podLabels: {app.kubernetes.io/name: soev-platform, app.kubernetes.io/component: api}
+        ports: [8020]
+      - name: pg-strict
+        namespace: database-strict
+        podLabels: {cnpg.io/cluster: pg-strict}
+        ports: [5432]
+    fqdn:
+      enabled: true
+      enforce: true
+      extraNames: [hooks.slack.com]

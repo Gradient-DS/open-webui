@@ -1,8 +1,18 @@
 <script lang="ts">
+	import MailSearch from '$lib/components/icons/MailSearch.svelte';
+	import { overflowFade } from '$lib/utils/overflowFade'; // [Gradient]
+	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
+	// [Gradient] The composer reads effective capabilities; assistant identity has its own chip.
+	import { effectiveModels as models, activeAssistantId } from '$lib/stores/assistant';
+	import { selectAssistant } from '$lib/utils/assistantSelection';
+	import { isAssistant, isLLM } from '$lib/utils/assistants';
+	import AssistantChip from './AssistantChip.svelte';
 	import DOMPurify from 'dompurify';
 	import { toast } from 'svelte-sonner';
 
 	import { marked } from 'marked';
+	import { DOMParser } from 'prosemirror-model';
+	import { Selection, TextSelection } from 'prosemirror-state';
 	import { v4 as uuidv4 } from 'uuid';
 	import dayjs from '$lib/dayjs';
 	import duration from 'dayjs/plugin/duration';
@@ -12,9 +22,32 @@
 	dayjs.extend(relativeTime);
 
 	import { onMount, tick, getContext, createEventDispatcher } from 'svelte';
+	import type {
+		ChatAttachment,
+		ChatDraft,
+		ChatInputCallbacks,
+		AskUserPrompt
+	} from '$lib/types/chatAttachment';
 
-	import { createPicker, getAuthToken } from '$lib/utils/google-drive-picker';
-	import { pickAndDownloadFile, pickAndDownloadFilesModal } from '$lib/utils/onedrive-file-picker';
+	import {
+		createPicker,
+		initialize as initializeGooglePicker
+	} from '$lib/utils/google-drive-picker';
+	import {
+		connectLiveSource,
+		attachPickedDocument,
+		attachErrorMessage,
+		liveConnections,
+		matchingPickerConnection,
+		prefetchLiveConnections,
+		relinkPrompt
+	} from '$lib/utils/live-connections';
+	import { isPending } from '$lib/utils/messageQueue';
+	import { enableLiveFamily } from '$lib/apis/cloudSync';
+	import {
+		beginBusinessDocumentPicker,
+		prepareBusinessDocumentPicker
+	} from '$lib/utils/onedrive-file-picker';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 	const dispatch = createEventDispatcher();
@@ -23,15 +56,17 @@
 		type Model,
 		mobile,
 		settings,
-		models,
+		models as rawModels, // [Gradient] Pickers use the unmodified LLM registry.
 		config,
 		showCallOverlay,
 		tools,
+		skills,
 		toolServers,
 		terminalServers,
 		user as _user,
 		showControls,
 		showSettings,
+		showFileNavDir,
 		selectedTerminalId,
 		TTSWorker,
 		temporaryChatEnabled
@@ -48,29 +83,40 @@
 		getCurrentDateTime,
 		getFormattedDate,
 		getFormattedTime,
+		getUsageTokenCount,
 		getUserPosition,
 		getUserTimezone,
 		getWeekday
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { uploadFile, deleteFileById, getFileAttachments } from '$lib/apis/files';
+	import {
+		TOOL_OFF_DESCRIPTION,
+		TOOL_STATE_LABELS,
+		WEB_SEARCH_STATE_DESCRIPTIONS,
+		DOCUMENT_WRITER_STATE_DESCRIPTIONS,
+		documentWriterState,
+		webSearchState,
+		type ToolState
+	} from '$lib/utils/toolState';
+	import { uploadFile } from '$lib/apis/files';
+	import { getCwd, uploadToTerminal } from '$lib/apis/terminal';
 	import { generateAutoCompletion } from '$lib/apis';
 	import { getChatById } from '$lib/apis/chats';
+	import { getFolderById } from '$lib/apis/folders';
+	import { getNoteById } from '$lib/apis/notes';
 	import { getSessionUser } from '$lib/apis/auths';
-	import { getTools } from '$lib/apis/tools';
 
-	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
-	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
+	import { WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
+	import { matchKeybinding, Shortcut } from '$lib/shortcuts';
 
-	import { createNoteHandler } from '../notes/utils';
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
-	import ConfluencePickerModal from '../workspace/Knowledge/ConfluencePickerModal.svelte';
-	import { getConfluencePageContent, listPages as listConfluencePages } from '$lib/apis/confluence';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
+	import ModelSelector from './ModelSelector.svelte';
 
 	import ToolServersModal from './ToolServersModal.svelte';
+	import SkillsModal from './SkillsModal.svelte';
 
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -83,48 +129,68 @@
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	import Photo from '../icons/Photo.svelte';
 	import Wrench from '../icons/Wrench.svelte';
+	import Cube from '../icons/Cube.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
+	import Mic from '../icons/Mic.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
 	import Voice from '../icons/Voice.svelte';
-	import Cloud from '../icons/Cloud.svelte';
 	import TerminalMenu from './MessageInput/TerminalMenu.svelte';
 	import PlusAlt from '../icons/PlusAlt.svelte';
 	import Terminal from '../icons/Terminal.svelte';
 	import Document from '../icons/Document.svelte';
-	import Link from '../icons/Link.svelte';
-	import Camera from '../icons/Camera.svelte';
+	// [Gradient] Icons for items pinned from the "+" menu.
 	import Clip from '../icons/Clip.svelte';
+	import Camera from '../icons/Camera.svelte';
+	import Link from '../icons/Link.svelte';
+	import PageEdit from '../icons/PageEdit.svelte';
+	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
+	import { meetingsAvailable } from '$lib/components/meetings/availability';
+	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
+	import DocumentArrowUp from '../icons/DocumentArrowUp.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
-	import Confluence from '../icons/Confluence.svelte';
-	import Topdesk from '../icons/Topdesk.svelte';
-	import Dropdown from '../common/Dropdown.svelte';
+	import OneDriveSearch from '../icons/OneDriveSearch.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import Knobs from '../icons/Knobs.svelte';
 	import ValvesModal from '../workspace/common/ValvesModal.svelte';
-	import Note from '../icons/Note.svelte';
+	import AskUserCard from './AskUserCard.svelte';
 	import { goto } from '$app/navigation';
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
-	import Filter from '../icons/Filter.svelte';
-	import { showRagFilter } from '$lib/stores/rag-filter';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
-	export let onUpload: Function = (e) => {};
-	export let onChange: Function = () => {};
+	type UploadTerminal = {
+		id?: string;
+		url?: string;
+		key?: string;
+		enabled?: boolean;
+		config?: { chat_uploads?: string };
+		[key: string]: unknown;
+	};
+
+	export let onUpload: ChatInputCallbacks['onUpload'] = () => {};
+	export let onChange: (draft: ChatDraft) => void = () => {};
 	// When non-null, restricts the InputMenu (the `+` button menu) to
 	// only the listed item keys. Forwarded to InputMenu unchanged.
 	// Default null preserves upstream behavior.
 	export let inputMenuRestrictTo: string[] | null = null;
+	export let onWebSearchToggle: ChatInputCallbacks['onWebSearchToggle'] = () => {};
 
-	export let createMessagePair: Function;
-	export let stopResponse: Function;
+	export let createMessagePair: ChatInputCallbacks['createMessagePair'];
+	export let stopResponse: ChatInputCallbacks['stopResponse'];
+	export let compactHandler: () => void = () => {};
+	export let statusHandler: () => void = () => {};
+	export let forkHandler: () => void = () => {};
+	export let chatId = '';
+	export let contextUsage = null;
+	export let contextCompactionEnabled = false;
+	export let embedded = false;
 
 	export let autoScroll = false;
 	export let generating = false;
@@ -135,38 +201,90 @@
 
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
+	$: hasChatVariables = selectedModelIds.some(
+		(modelId) =>
+			($models.find((model) => model.id === modelId)?.info?.meta?.chat_variables_schema?.fields
+				?.length ?? 0) > 0
+	);
 
 	export let history;
 	export let taskIds = null;
+	export let askUser: AskUserPrompt = {
+		show: false,
+		questions: [],
+		allowOther: true,
+		timeoutMs: null,
+		onConfirm: () => {},
+		onCancel: () => {}
+	};
+
+	// [Gradient] True when this chat routes to the agent service, which owns
+	// retrieval — hides per-file retrieval controls that would be no-ops there.
+	export let agentRouted = false;
+
+	// [Gradient] The picker shows whenever there is anything to pick, including
+	// single-model tenants — it also hosts model info, set-as-default and the pin
+	// toggle. Assistants are excluded here exactly as they are in ModelSelector.
+	$: pickerModels = ($rawModels ?? []).filter(isLLM);
+	$: isActive =
+		!askUser?.show &&
+		((taskIds && taskIds.length > 0) ||
+			(history.currentId && history.messages[history.currentId]?.done != true) ||
+			generating);
+	$: canToggleTemporary =
+		!embedded &&
+		!chatId &&
+		($_user?.role === 'admin' ||
+			($_user?.role === 'user' &&
+				($_user?.permissions?.chat?.temporary ?? true) &&
+				!($_user?.permissions?.chat?.temporary_enforced ?? false)));
 
 	export let prompt = '';
-	export let files = [];
+	export let files: ChatAttachment[] = [];
 
-	export let selectedToolIds = [];
-	export let selectedFilterIds = [];
+	export let selectedToolIds: string[] = [];
+	export let selectedSkillIds: string[] = [];
+	export let selectedFilterIds: string[] = [];
 
 	export let imageGenerationEnabled = false;
+	export let liveDocumentsState: ToolState = 'off';
+	export let liveMailState: ToolState = 'off';
 	export let webSearchEnabled = false;
+	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
+	export let webSearchRequired = false;
 	export let codeInterpreterEnabled = false;
-	export let documentWriterEnabled = false;
+	export let documentWriterEnabled = true;
+	export let documentWriterRequired = false;
+	export let toolApprovalMode = 'full';
+	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 
-	export let pendingOAuthTools = [];
+	export let pendingOAuthTools: {
+		id: string;
+		name?: string;
+		serverId: string;
+		authType?: string | null;
+	}[] = [];
+	export let oauthRedirectHandler: ChatInputCallbacks['oauthRedirectHandler'] = () => {};
 
 	let showTerminalMenu = false;
 
-	export let messageQueue: { id: string; prompt: string; files: any[] }[] = [];
+	export let messageQueue: { id: string; prompt: string; files: ChatAttachment[] }[] = [];
 	export let onQueueSendNow: (id: string) => void = () => {};
 	export let onQueueEdit: (id: string) => void = () => {};
 	export let onQueueDelete: (id: string) => void = () => {};
+	export let onUpdate: (data?: { file?: ChatAttachment }) => void = () => {};
+	export let chatTasks = [];
 
 	let inputContent = null;
 
 	let showInputVariablesModal = false;
-	let inputVariablesModalCallback = (variableValues) => {};
+	let inputVariablesModalCallback: (variableValues: Record<string, unknown>) => void = () => {};
 	let inputVariables = {};
 	let inputVariableValues = {};
 
 	let showValvesModal = false;
+	let showStatusPanel = false;
+	let copiedStatusChatId = false;
 	let selectedValvesType = 'tool'; // 'tool' or 'function'
 	let selectedValvesItemId = null;
 	let integrationsMenuCloseOnOutsideClick = true;
@@ -175,7 +293,8 @@
 		integrationsMenuCloseOnOutsideClick = true;
 	}
 
-	$: onChange({
+	let chatInputDraft: ChatDraft;
+	$: chatInputDraft = {
 		prompt,
 		files: files
 			.filter((file) => file.type !== 'image')
@@ -187,12 +306,20 @@
 				};
 			}),
 		selectedToolIds,
+		selectedSkillIds,
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
+		webSearchRequired,
+		liveDocumentsState,
+		liveMailState,
 		codeInterpreterEnabled,
-		documentWriterEnabled
-	});
+		documentWriterEnabled,
+		documentWriterRequired,
+		toolApprovalMode
+	};
+
+	$: onChange(chatInputDraft);
 
 	const inputVariableHandler = async (text: string): Promise<string> => {
 		inputVariables = extractInputVariables(text);
@@ -216,7 +343,7 @@
 
 	const textVariableHandler = async (text: string) => {
 		if (text.includes('{{CLIPBOARD}}')) {
-			const clipboardText = await navigator.clipboard.readText().catch((err) => {
+			const clipboardText = await navigator.clipboard.readText().catch(() => {
 				toast.error($i18n.t('Failed to read clipboard contents'));
 				return '{{CLIPBOARD}}';
 			});
@@ -246,7 +373,7 @@
 			let location;
 			try {
 				location = await getUserPosition();
-			} catch (error) {
+			} catch {
 				toast.error($i18n.t('Location access not allowed'));
 				location = 'LOCATION_UNKNOWN';
 			}
@@ -335,15 +462,19 @@
 		return text;
 	};
 
-	const replaceVariables = (variables: Record<string, any>) => {
-		console.log('Replacing variables:', variables);
+	const replaceVariables = (variables: Record<string, unknown>) => {
+		// [Gradient] GRA-219: prompt variables can contain user or document content.
 
 		const chatInput = document.getElementById('chat-input');
 
 		if (chatInput) {
 			chatInputElement.replaceVariables(variables);
-			chatInputElement.focus();
+			focus();
 		}
+	};
+
+	export const focus = (options: { preventScroll?: boolean } = {}) => {
+		chatInputElement?.focus(options);
 	};
 
 	export const setText = async (text?: string, cb?: (text: string) => void) => {
@@ -356,7 +487,7 @@
 
 			chatInputElement?.setText(text);
 			if (!$showCallOverlay) {
-				chatInputElement?.focus();
+				focus();
 			}
 
 			if (text !== '') {
@@ -367,6 +498,115 @@
 			if (cb) await cb(text);
 		}
 	};
+
+	export const showStatus = async () => {
+		showStatusPanel = true;
+		await tick();
+		focus({ preventScroll: true });
+	};
+
+	const formatTokenCount = (value: number) => {
+		if (value >= 1_000_000) return `${trimNumber(value / 1_000_000)}m`;
+		if (value >= 1_000) return `${trimNumber(value / 1_000)}k`;
+		return String(value ?? 0);
+	};
+
+	const trimNumber = (value: number) =>
+		value >= 10 ? String(Math.round(value)) : value.toFixed(1).replace(/\.0$/, '');
+
+	const estimateTokens = (value) => {
+		if (value === null || value === undefined || value === '') {
+			return 0;
+		}
+		if (typeof value !== 'string') {
+			try {
+				value = JSON.stringify(value);
+			} catch {
+				value = String(value);
+			}
+		}
+		return Math.max(1, Math.floor(value.length / 4));
+	};
+
+	const estimateMessagesTokens = (messages) =>
+		messages.reduce((total, message) => {
+			let next = total + 4 + estimateTokens(message.content);
+			next += estimateTokens(message.output);
+			next += estimateTokens(message.tool_calls);
+			next += estimateTokens(message.files);
+			return next;
+		}, 0);
+
+	const getLocalContextUsage = () => {
+		if (!history?.currentId) {
+			return null;
+		}
+
+		const messages = createMessagesList(history, history.currentId);
+		if (!messages.length) {
+			return null;
+		}
+
+		let summary = '';
+		let startIdx = 0;
+		for (let idx = 0; idx < messages.length; idx += 1) {
+			const value = messages[idx]?.contextSummary ?? messages[idx]?.context_summary;
+			if (typeof value === 'string' && value.trim()) {
+				summary = value;
+				startIdx = idx;
+			}
+		}
+
+		const activeMessages = messages.slice(startIdx);
+		let estimatedTokens = estimateTokens($settings?.system ?? '');
+		let hasUsageCheckpoint = false;
+
+		for (let idx = activeMessages.length - 1; idx >= 0; idx -= 1) {
+			const usage = activeMessages[idx]?.usage ?? activeMessages[idx]?.info?.usage;
+			const usageTokens = getUsageTokenCount(usage);
+			if (usageTokens) {
+				hasUsageCheckpoint = true;
+				estimatedTokens = usageTokens + estimateMessagesTokens(activeMessages.slice(idx + 1));
+				break;
+			}
+		}
+
+		if (!hasUsageCheckpoint) {
+			estimatedTokens += estimateTokens(summary) + estimateMessagesTokens(activeMessages);
+		}
+
+		return {
+			tokens: estimatedTokens,
+			estimated_tokens: estimatedTokens,
+			threshold: null,
+			percent: null,
+			source: 'estimated'
+		};
+	};
+
+	const copyStatusChatId = async () => {
+		if (!chatId) return;
+		await navigator.clipboard.writeText(chatId);
+		copiedStatusChatId = true;
+		setTimeout(() => {
+			copiedStatusChatId = false;
+		}, 1600);
+	};
+
+	$: statusContextUsage = contextUsage ?? getLocalContextUsage();
+	$: contextHasThreshold = Number(statusContextUsage?.threshold) > 0;
+	$: contextPercent = contextHasThreshold
+		? Math.max(0, Math.round(statusContextUsage?.percent ?? 0))
+		: null;
+	$: contextTokens = formatTokenCount(
+		statusContextUsage?.estimated_tokens || statusContextUsage?.tokens || 0
+	);
+	$: contextValue = statusContextUsage
+		? contextHasThreshold
+			? `${contextPercent}% ${contextTokens}/${formatTokenCount(statusContextUsage.threshold)}`
+			: `${contextTokens} ${$i18n.t('tokens')}`
+		: $i18n.t('unknown');
+	$: contextBarPercent = contextHasThreshold ? Math.min(contextPercent, 100) : 0;
 
 	const getCommand = () => {
 		const chatInput = document.getElementById('chat-input');
@@ -384,6 +624,26 @@
 		if (!chatInput) return;
 
 		chatInputElement?.replaceCommandWithText(text);
+	};
+
+	const temporaryHandler = async () => {
+		if (!canToggleTemporary) return;
+
+		if (($settings?.temporaryChatByDefault ?? false) && $temporaryChatEnabled) {
+			await temporaryChatEnabled.set(null);
+		} else {
+			await temporaryChatEnabled.set(!$temporaryChatEnabled);
+		}
+
+		if (location.pathname !== '/') {
+			await goto('/');
+		}
+
+		if ($temporaryChatEnabled) {
+			window.history.replaceState(null, '', '?temporary-chat=true');
+		} else {
+			window.history.replaceState(null, '', location.pathname);
+		}
 	};
 
 	const insertTextAtCursor = async (text: string) => {
@@ -409,18 +669,74 @@
 
 		await tick();
 		if (chatInput) {
-			chatInput.focus();
+			focus({ preventScroll: true });
 			chatInput.dispatchEvent(new Event('input'));
 
 			const words = extractCurlyBraceWords(prompt);
 
 			if (words.length > 0) {
-				const word = words.at(0);
 				await tick();
 			} else {
 				chatInput.scrollTop = chatInput.scrollHeight;
 			}
 		}
+	};
+
+	const replaceSlashRangeWithPrompt = async (editor, range, text: string) => {
+		text = await textVariableHandler(text);
+
+		const { state, view } = editor;
+		let tr = state.tr;
+
+		if ($settings?.insertPromptAsRichText ?? false) {
+			const htmlContent = DOMPurify.sanitize(
+				marked
+					.parse(text, {
+						breaks: true,
+						gfm: true
+					})
+					.trim()
+			);
+			const tempDiv = document.createElement('div');
+			tempDiv.innerHTML = htmlContent;
+			const fragment = DOMParser.fromSchema(state.schema).parse(tempDiv);
+			const nodesToInsert = [];
+
+			fragment.content.forEach((node) => {
+				if (node.type.name === 'paragraph') {
+					nodesToInsert.push(...node.content.content);
+				} else {
+					nodesToInsert.push(node);
+				}
+			});
+
+			tr = tr.replaceWith(range.from, range.to, nodesToInsert);
+			const newPos = range.from + nodesToInsert.reduce((sum, node) => sum + node.nodeSize, 0);
+			tr = tr.setSelection(Selection.near(tr.doc.resolve(newPos)));
+		} else if (text.includes('\n')) {
+			const nodes = text
+				.split('\n')
+				.map((line, index) =>
+					index === 0
+						? state.schema.text(line ? line : [])
+						: state.schema.nodes.paragraph.create({}, line ? state.schema.text(line) : undefined)
+				);
+			tr = tr.replaceWith(range.from, range.to, nodes);
+			const newPos = nodes.reduce((pos, node) => pos + node.nodeSize, range.from);
+			tr = tr.setSelection(TextSelection.near(tr.doc.resolve(newPos)));
+		} else {
+			tr = tr.replaceWith(range.from, range.to, text !== '' ? state.schema.text(text) : []);
+			tr = tr.setSelection(
+				state.selection.constructor.near(tr.doc.resolve(range.from + text.length + 1))
+			);
+		}
+
+		view.dispatch(tr);
+
+		await tick();
+		await inputVariableHandler(text);
+		await tick();
+		focus({ preventScroll: true });
 	};
 
 	let command = '';
@@ -434,6 +750,7 @@
 	let suggestions = null;
 
 	let showTools = false;
+	let showSkills = false;
 
 	let loaded = false;
 	let recording = false;
@@ -464,57 +781,70 @@
 		return false;
 	}
 
-	let chatInputContainerElement;
 	let chatInputElement;
+	let modelSelector;
 
 	let filesInputElement;
-	let commandsElement;
 
 	let inputFiles;
 
 	let showInputModal = false;
 
 	export let dragged = false;
+	export let dropzoneId = 'chat-pane';
 	let shiftKey = false;
 
-	let user = null;
 	export let placeholder = '';
 
-	let visionCapableModels = [];
-	$: visionCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.vision ?? true
+	type ModelCapability =
+		| 'vision'
+		| 'file_upload'
+		| 'web_search'
+		| 'image_generation'
+		| 'code_interpreter'
+		| 'terminal';
+	type ModelCapabilitiesById = Record<string, Partial<Record<ModelCapability, boolean>>>;
+
+	let modelCapabilitiesById: ModelCapabilitiesById = {};
+	$: modelCapabilitiesById = Object.fromEntries(
+		($models ?? []).map((model) => [model.id, model.info?.meta?.capabilities ?? {}])
 	);
+
+	const getCapableModelIds = (
+		modelIds: string[],
+		capability: ModelCapability,
+		capabilitiesById: ModelCapabilitiesById
+	) => modelIds.filter((id) => capabilitiesById[id]?.[capability] ?? true);
+
+	let visionCapableModels = [];
+	$: visionCapableModels = getCapableModelIds(selectedModelIds, 'vision', modelCapabilitiesById);
 
 	let fileUploadCapableModels = [];
-	$: fileUploadCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.file_upload ?? true
+	$: fileUploadCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'file_upload',
+		modelCapabilitiesById
 	);
 
-	let fileUploadEnabled = true;
-	$: fileUploadEnabled =
-		fileUploadCapableModels.length ===
-			(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length &&
-		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
-
 	let webSearchCapableModels = [];
-	$: webSearchCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
+	$: webSearchCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'web_search',
+		modelCapabilitiesById
 	);
 
 	let imageGenerationCapableModels = [];
-	$: imageGenerationCapableModels = (
-		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
-	).filter(
-		(model) =>
-			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.image_generation ?? true
+	$: imageGenerationCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'image_generation',
+		modelCapabilitiesById
 	);
 
 	let codeInterpreterCapableModels = [];
-	$: codeInterpreterCapableModels = (
-		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
-	).filter(
-		(model) =>
-			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.code_interpreter ?? true
+	$: codeInterpreterCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'code_interpreter',
+		modelCapabilitiesById
 	);
 
 	let documentWriterCapableModels = [];
@@ -526,9 +856,19 @@
 	);
 
 	let terminalCapableModels = [];
-	$: terminalCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.terminal ?? true
+	$: terminalCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'terminal',
+		modelCapabilitiesById
 	);
+	$: hasDirectToolServerAccess =
+		$_user?.role === 'admin' || ($_user?.permissions?.features?.direct_tool_servers ?? true);
+	$: showTerminalSelector =
+		terminalCapableModels.length > 0 &&
+		(($terminalServers ?? []).some((t) => t.id) ||
+			(hasDirectToolServerAccess &&
+				(($terminalServers ?? []).some((t) => !t.id) ||
+					($settings?.terminalServers ?? []).some((s) => s.url))));
 
 	let toggleFilters = [];
 	$: toggleFilters = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels)
@@ -536,27 +876,29 @@
 		.reduce((acc, filters) => acc.filter((f1) => filters.some((f2) => f2.id === f1.id)));
 
 	let showToolsButton = false;
-	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
+	$: showToolsButton =
+		isFeatureEnabled('tools') && (($tools ?? []).length > 0 || ($toolServers ?? []).length > 0);
+
+	let showSkillsButton = false;
+	$: showSkillsButton =
+		isFeatureEnabled('skills') && ($skills ?? []).some((skill) => skill.is_active);
 
 	let showWebSearchButton = false;
 	$: showWebSearchButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			webSearchCapableModels.length &&
+		selectedModelIds.length === webSearchCapableModels.length &&
 		$config?.features?.enable_web_search &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.web_search);
 
 	let showImageGenerationButton = false;
 	$: showImageGenerationButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			imageGenerationCapableModels.length &&
+		selectedModelIds.length === imageGenerationCapableModels.length &&
 		$config?.features?.enable_image_generation &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.image_generation);
 
 	let showCodeInterpreterButton = false;
 	$: showCodeInterpreterButton =
 		!$selectedTerminalId &&
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			codeInterpreterCapableModels.length &&
+		selectedModelIds.length === codeInterpreterCapableModels.length &&
 		$config?.features?.enable_code_interpreter &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
 
@@ -566,31 +908,6 @@
 			documentWriterCapableModels.length &&
 		$config?.features?.enable_document_writer &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.document_writer);
-
-	// Disable code interpreter when terminal is active (mutually exclusive)
-	$: if ($selectedTerminalId && codeInterpreterEnabled) {
-		codeInterpreterEnabled = false;
-	}
-
-	// Auto-disable capability toggles when the selected model(s) no longer support them
-	// (e.g. switching from a web-search-capable model to one without). Mirrors the terminal
-	// guard above and keeps both the active-capability badge and the getFeatures() payload
-	// from carrying a stale capability. A feature stays on only if every selected model
-	// supports it; the `?? true` fallback in the *CapableModels derivations means models that
-	// are still loading (or omit the capability) are treated as capable, so we never flicker.
-	$: selectedModelCount = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length;
-	$: if (webSearchEnabled && webSearchCapableModels.length !== selectedModelCount) {
-		webSearchEnabled = false;
-	}
-	$: if (imageGenerationEnabled && imageGenerationCapableModels.length !== selectedModelCount) {
-		imageGenerationEnabled = false;
-	}
-	$: if (codeInterpreterEnabled && codeInterpreterCapableModels.length !== selectedModelCount) {
-		codeInterpreterEnabled = false;
-	}
-	$: if (documentWriterEnabled && documentWriterCapableModels.length !== selectedModelCount) {
-		documentWriterEnabled = false;
-	}
 
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
@@ -605,15 +922,19 @@
 		? getHistorySide(dataSeparationMessages)
 		: null;
 	$: dataSeparationSide = strictDataSeparation
-		? getActiveSide({ messages: dataSeparationMessages, files, webSearchEnabled })
+		? getActiveSide({
+				messages: dataSeparationMessages,
+				files,
+				webSearchEnabled: webSearchEnabled && showWebSearchButton
+			})
 		: null;
 	$: openInternetBlocked = strictDataSeparation && dataSeparationSide === 'internal';
 	$: internalBlocked = strictDataSeparation && dataSeparationSide === 'open_internet';
 	$: dataSeparationMessage = $i18n.t(
 		'Internal documents and the open internet cannot be used in the same conversation.'
 	);
-	// Pinned-bar quick buttons for the blocked side are hidden (the always-present "+" menu
-	// still shows them grayed out with the explanatory tooltip).
+	// [Gradient] Pinned-bar buttons for the blocked side are hidden; the "+" menu still
+	// shows them grayed out with the explanatory tooltip.
 	$: dataSeparationBlockedItems = new Set(
 		strictDataSeparation
 			? [
@@ -622,26 +943,97 @@
 						? [
 								'upload_files',
 								'capture',
+								'attach_files',
 								'attach_notes',
+								'attach_meetings',
 								'knowledge',
 								'reference_chats',
 								'google_drive',
-								'onedrive',
-								'confluence',
-								'topdesk'
+								'onedrive'
 							]
 						: [])
 				]
 			: []
 	);
 
-	// Defensive: a model's defaultFeatureIds could re-enable web search in a conversation already
-	// locked to internal documents. Keyed on the history-only side to avoid a reactive cycle.
-	$: if (dataSeparationHistorySide === 'internal' && webSearchEnabled) {
-		webSearchEnabled = false;
-	}
+	// [Gradient] "+" menu items shown as buttons in the composer bar: every pinned item and
+	// every item that is on or on Auto, in menu order (inputItems.ts). The "Attach Files"
+	// submenu shares the upload_files restriction key with the menu.
+	$: inputBarAllowed = (id: string) =>
+		(inputMenuRestrictTo === null ||
+			inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
+			(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
+		!dataSeparationBlockedItems.has(id);
+	$: inputItemStates = {
+		live_mail: itemState(liveMailState),
+		live_documents: itemState(liveDocumentsState),
+		web_search: itemState(webSearchToolState),
+		image_generation: itemState(imageGenerationEnabled),
+		code_interpreter: itemState(codeInterpreterEnabled),
+		document_writer: itemState(documentWriterToolState),
+		tools: itemState((selectedToolIds ?? []).length),
+		skills: itemState((selectedSkillIds ?? []).length),
+		...Object.fromEntries(
+			(selectedFilterIds ?? []).map((id: string) => [`filter:${id}`, itemState(true)])
+		)
+	};
+	$: inputBarItems = barItemIds({
+		order: inputItemOrder(toggleFilters.map((filter: { id: string }) => filter.id)),
+		pinned: normalizePins($settings?.pinnedInputItems),
+		states: inputItemStates,
+		allowed: inputBarAllowed
+	});
+	$: inputMenuFileUploadCapableModels = getFilesystemUploadTerminal(
+		$selectedTerminalId,
+		$terminalServers,
+		$settings
+	)
+		? selectedModelIds
+		: fileUploadCapableModels;
+	$: inputMenuFileUploadEnabled =
+		inputMenuFileUploadCapableModels.length === selectedModelIds.length &&
+		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
+	$: webUploadEnabled = $_user?.role === 'admin' || ($_user?.permissions?.chat?.web_upload ?? true);
 
-	let inputMenuRef;
+	// [Gradient] Altijd needs web search to be possible: every rule that turns web search
+	// off (data separation, model capability, image generation, Escape) lands on Uit.
+	$: if (!webSearchEnabled && webSearchRequired) {
+		webSearchRequired = false;
+	}
+	$: if (!documentWriterEnabled) documentWriterRequired = false;
+	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
+	$: documentWriterTooltip = pinnedStateTooltip(
+		$i18n.t('Document writer'),
+		documentWriterToolState,
+		$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
+	);
+	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
+
+	let inputMenuRef:
+		| {
+				openTab: (tab: string) => void;
+				openWebpageModal: () => void;
+				cycleWebSearch: () => void;
+				cycleLiveDocuments: () => Promise<void>;
+				cycleLiveMail: () => Promise<void>;
+				cycleTool: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
+		  }
+		| undefined;
+	const liveMailTooltipId = `mail-search-${uuidv4()}`;
+	const liveDocumentsTooltipId = `onedrive-search-${uuidv4()}`;
+	const pinnedStateTooltip = (label: string, state: ToolState, description: string) =>
+		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
+	const pinnedButtonClass =
+		'p-[0.375rem] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden shrink-0';
+	// Altijd (or an active toggle) gets the accent, Auto a subtle outline, Uit none.
+	const pinnedToggleClass = (active: boolean | ToolState) =>
+		`p-[0.375rem] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden shrink-0 ${
+			active === true || active === 'required'
+				? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
+				: active === 'auto'
+					? 'border-dashed border-gray-300 dark:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
+					: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+		}`;
 
 	const googleDriveHandler = async () => {
 		let tempItemId: string | null = null;
@@ -687,169 +1079,57 @@
 		}
 	};
 
-	const oneDriveHandler = async (authorityType) => {
-		const tempItemIds: string[] = [];
+	const oneDriveHandler = async () => {
 		try {
-			const filesData = await pickAndDownloadFilesModal(authorityType, {
-				onFilesSelected: (items) => {
-					for (const item of items) {
-						const tempItemId = uuidv4();
-						tempItemIds.push(tempItemId);
-						files = [
-							...files,
-							{
-								type: 'file',
-								file: '',
-								id: null,
-								url: '',
-								name: item.name,
-								collection_name: '',
-								status: 'uploading',
-								size: 0,
-								error: '',
-								itemId: tempItemId
-							}
-						];
+			const rows = liveConnections(localStorage.token);
+			if (!rows) throw new Error('Connection status is loading. Try again.');
+			if (
+				!rows.some((row) => row.connection.lifecycle === 'enabled' && !row.connection.last_error)
+			) {
+				await connectLiveSource(localStorage.token);
+				toast.info($i18n.t('OneDrive connected. Choose your files again.'));
+				return;
+			}
+			const { references, account } = await beginBusinessDocumentPicker();
+			if (!references.length) return;
+			const row = matchingPickerConnection(rows, account);
+			const grantId =
+				row.grantId ?? (await enableLiveFamily(localStorage.token, row.connection.id)).id;
+			for (const reference of references) {
+				const itemId = uuidv4();
+				files = [
+					...files,
+					{
+						type: 'file',
+						id: null,
+						itemId,
+						name: reference.name,
+						status: 'uploading',
+						size: reference.size
 					}
+				];
+				try {
+					const attached = await attachPickedDocument(
+						localStorage.token,
+						grantId,
+						reference,
+						itemId
+					);
+					files = files.map((file) =>
+						file.itemId === itemId ? { ...attached, itemId, size: reference.size } : file
+					);
+				} catch (error) {
+					files = files.filter((file) => file.itemId !== itemId);
+					toast.error($i18n.t(attachErrorMessage(error)));
 				}
-			});
-			if (filesData.length > 0) {
-				for (let i = 0; i < filesData.length; i++) {
-					const fileData = filesData[i];
-					const file = new File([fileData.blob], fileData.name, {
-						type: fileData.blob.type || 'application/octet-stream'
-					});
-					// Match placeholder by name since download order may differ
-					const matchingItemId = tempItemIds.find((id) => {
-						const item = files.find((f) => f.itemId === id);
-						return item && item.name === fileData.name;
-					});
-					await uploadFileHandler(file, true, {}, matchingItemId || null);
-				}
-				// Clean up any placeholders for files that failed to download
-				const downloadedNames = new Set(filesData.map((f) => f.name));
-				files = files.filter((f) => {
-					if (tempItemIds.includes(f.itemId) && !downloadedNames.has(f.name)) {
-						return false;
-					}
-					return true;
-				});
-			} else if (tempItemIds.length > 0) {
-				// All downloads failed
-				files = files.filter((f) => !tempItemIds.includes(f.itemId));
 			}
 		} catch (error) {
-			if (tempItemIds.length > 0) {
-				files = files.filter((f) => !tempItemIds.includes(f.itemId));
-			}
-			console.error('OneDrive Error:', error);
-		}
-	};
-
-	// Confluence — pick pages from the + menu and attach their rendered
-	// Markdown as one-off chat files (per-user mode; uses the user's OAuth).
-	let showConfluencePicker = false;
-	const confluenceHandler = () => {
-		showConfluencePicker = true;
-	};
-
-	// Recursive descendant walk — selecting a page in the picker implies its
-	// whole subtree (the picker greys out descendant checkboxes once an
-	// ancestor is checked). Mirror that here so the user gets every page in
-	// the chosen subtree as its own attachment.
-	const walkConfluenceDescendants = async (
-		cloudId: string,
-		parentId: string
-	): Promise<Array<{ id: string; title: string }>> => {
-		const collected: Array<{ id: string; title: string }> = [];
-		let cursor: string | null = null;
-		let pageCount = 0;
-		do {
-			const res = await listConfluencePages(localStorage.token, cloudId, {
-				parentId,
-				cursor: cursor ?? undefined
-			});
-			for (const child of res.pages) {
-				collected.push({ id: child.id, title: child.title });
-				const grandchildren = await walkConfluenceDescendants(cloudId, child.id);
-				collected.push(...grandchildren);
-			}
-			cursor = res.next_cursor;
-			pageCount++;
-			if (pageCount > 20) break; // safety cap — matches picker pagination
-		} while (cursor);
-		return collected;
-	};
-
-	const confluencePagesSelected = async (e) => {
-		const items = (e?.detail?.items ?? []) as Array<{
-			type: string;
-			cloud_id: string;
-			item_id: string;
-			name: string;
-		}>;
-		const pages = items.filter((it) => it.type === 'page');
-		if (items.some((it) => it.type === 'space')) {
 			toast.error(
-				$i18n.t('Only individual pages can be attached to a chat — pick pages, not spaces.')
+				$i18n.t(
+					relinkPrompt(error) ??
+						(error instanceof Error ? error.message : 'Could not attach OneDrive file')
+				)
 			);
-		}
-
-		// Resolve the full attachment set (selected pages + their descendants)
-		// before queuing uploads so the user sees an accurate count up front.
-		const flat: Array<{ cloud_id: string; page_id: string; title: string }> = [];
-		const seen = new Set<string>();
-		for (const pg of pages) {
-			const key = `${pg.cloud_id}:${pg.item_id}`;
-			if (seen.has(key)) continue;
-			seen.add(key);
-			flat.push({ cloud_id: pg.cloud_id, page_id: pg.item_id, title: pg.name });
-			try {
-				const descendants = await walkConfluenceDescendants(pg.cloud_id, pg.item_id);
-				for (const d of descendants) {
-					const dKey = `${pg.cloud_id}:${d.id}`;
-					if (seen.has(dKey)) continue;
-					seen.add(dKey);
-					flat.push({ cloud_id: pg.cloud_id, page_id: d.id, title: d.title });
-				}
-			} catch (error) {
-				toast.error(
-					$i18n.t('Error fetching Confluence page: {{error}}', {
-						error: error instanceof Error ? error.message : String(error)
-					})
-				);
-			}
-		}
-
-		for (const pg of flat) {
-			const tempItemId = uuidv4();
-			files = [
-				...files,
-				{
-					type: 'file',
-					file: '',
-					id: null,
-					url: '',
-					name: pg.title,
-					collection_name: '',
-					status: 'uploading',
-					size: 0,
-					error: '',
-					itemId: tempItemId
-				}
-			];
-			try {
-				const res = await getConfluencePageContent(localStorage.token, pg.cloud_id, pg.page_id);
-				const file = new File([res.content], `${res.title}.md`, { type: 'text/markdown' });
-				await uploadFileHandler(file, true, {}, tempItemId);
-			} catch (error) {
-				files = files.filter((f) => f.itemId !== tempItemId);
-				toast.error(
-					$i18n.t('Error fetching Confluence page: {{error}}', {
-						error: error instanceof Error ? error.message : String(error)
-					})
-				);
-			}
 		}
 	};
 
@@ -899,6 +1179,25 @@
 		}
 	};
 
+	const getFilesystemUploadTerminal = (
+		selectedId = $selectedTerminalId,
+		servers: UploadTerminal[] | null = $terminalServers,
+		settingsValue = $settings as typeof $settings & { terminalServers?: UploadTerminal[] }
+	) => {
+		if (!selectedId) return null;
+
+		const systemTerminal = (servers ?? []).find(
+			(t) => t.id && t.id === selectedId && t.config?.chat_uploads === 'filesystem'
+		);
+		if (systemTerminal) return systemTerminal;
+
+		return (
+			(settingsValue?.terminalServers ?? []).find(
+				(t) => t.url === selectedId && t.enabled && t.config?.chat_uploads === 'filesystem'
+			) ?? null
+		);
+	};
+
 	const uploadFileHandler = async (file, process = true, itemData = {}, existingItemId = null) => {
 		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
@@ -908,7 +1207,9 @@
 			return null;
 		}
 
-		if (fileUploadCapableModels.length !== selectedModels.length) {
+		const filesystemUploadTerminal = getFilesystemUploadTerminal();
+
+		if (!filesystemUploadTerminal && fileUploadCapableModels.length !== selectedModelIds.length) {
 			toast.error($i18n.t('Model(s) do not support file upload'));
 			if (existingItemId) {
 				files = files.filter((item) => item?.itemId !== existingItemId);
@@ -917,7 +1218,7 @@
 		}
 
 		let tempItemId;
-		let fileItem;
+		let fileItem: ChatAttachment | undefined;
 
 		if (existingItemId) {
 			// Reuse existing placeholder (created by cloud file picker)
@@ -953,6 +1254,51 @@
 			}
 
 			files = [...files, fileItem];
+		}
+
+		if (filesystemUploadTerminal?.url) {
+			try {
+				const cwd =
+					(
+						await getCwd(
+							filesystemUploadTerminal.url,
+							filesystemUploadTerminal.key ?? '',
+							chatId || undefined
+						)
+					)?.cwd || '/';
+				const uploadedFile = await uploadToTerminal(
+					filesystemUploadTerminal.url,
+					filesystemUploadTerminal.key ?? '',
+					cwd,
+					file,
+					chatId || undefined
+				);
+
+				if (uploadedFile) {
+					fileItem.type = 'filesystem';
+					fileItem.status = 'uploaded';
+					fileItem.id = uploadedFile.path;
+					fileItem.path = uploadedFile.path;
+					fileItem.url = uploadedFile.path;
+					fileItem.size = uploadedFile.size ?? file.size;
+					fileItem.file = uploadedFile;
+					files = files;
+					showFileNavDir.set(uploadedFile.path);
+				} else {
+					fileItem.status = 'error';
+					fileItem.error = $i18n.t('Failed to upload file.');
+					toast.error(fileItem.error ?? $i18n.t('Failed to upload file.'));
+					files = files.filter((item) => item?.itemId !== tempItemId);
+				}
+			} catch (e) {
+				fileItem.status = 'error';
+				fileItem.error = `${e}`;
+				toast.error(`${e}`);
+				files = files.filter((item) => item?.itemId !== tempItemId);
+			} finally {
+				onUpdate({ file: fileItem });
+			}
+			return;
 		}
 
 		// [Gradient] Temporary chat normally skips the upload and extracts the file
@@ -1008,25 +1354,18 @@
 					}
 
 					files = files;
-
-					// Pre-load render attachments (e.g. IFC plan PNGs) so the chat-side
-					// image-builder in Chat.svelte can inline them as first-turn vision
-					// for the BIM agent. Non-blocking; on error the file silently has
-					// no attachments.
-					getFileAttachments(localStorage.token, fileItem.id)
-						.then((manifest) => {
-							fileItem.attachments = manifest;
-							files = files; // trigger Svelte reactivity
-						})
-						.catch(() => {
-							fileItem.attachments = [];
-						});
 				} else {
+					fileItem.status = 'error';
+					fileItem.error = $i18n.t('Failed to upload file.');
 					files = files.filter((item) => item?.itemId !== tempItemId);
 				}
 			} catch (e) {
+				fileItem.status = 'error';
+				fileItem.error = `${e}`;
 				toast.error(`${e}`);
 				files = files.filter((item) => item?.itemId !== tempItemId);
+			} finally {
+				onUpdate({ file: fileItem });
 			}
 		} else {
 			// If temporary chat is enabled, we just add the file to the list without uploading it.
@@ -1038,16 +1377,15 @@
 				return null;
 			});
 
-			if (content === null) {
+			if (typeof content !== 'string') {
+				fileItem.status = 'error';
+				fileItem.error = $i18n.t('Failed to extract content from the file.');
 				toast.error($i18n.t('Failed to extract content from the file.'));
 				files = files.filter((item) => item?.itemId !== tempItemId);
+				onUpdate({ file: fileItem });
 				return null;
 			} else {
-				console.log('Extracted content from file:', {
-					name: file.name,
-					size: file.size,
-					content: content
-				});
+				// [Gradient] GRA-219: extracted document content must never enter logs.
 
 				fileItem.status = 'uploaded';
 				fileItem.type = 'text';
@@ -1055,6 +1393,7 @@
 				fileItem.id = uuidv4(); // Temporary ID for the file
 
 				files = files;
+				onUpdate({ file: fileItem });
 			}
 		}
 	};
@@ -1143,6 +1482,7 @@
 				let reader = new FileReader();
 
 				reader.onload = async (event) => {
+					if (typeof event.target?.result !== 'string') return;
 					let imageUrl = event.target.result;
 
 					// Compress the image if settings or config require it
@@ -1171,30 +1511,16 @@
 		});
 	};
 
-	const createNote = async () => {
-		if (inputContent?.md.trim() === '' && inputContent?.html.trim() === '') {
-			toast.error($i18n.t('Cannot create an empty note.'));
-			return;
-		}
-
-		const res = await createNoteHandler(
-			dayjs().format('YYYY-MM-DD'),
-			inputContent?.md,
-			inputContent?.html
-		);
-
-		if (res) {
-			// Clear the input content saved in session storage.
-			sessionStorage.removeItem('chat-input');
-			goto(`/notes/${res.id}`);
-		}
-	};
-
 	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
 
-		// Check if a file or a sidebar chat item is being dragged.
-		if (e.dataTransfer?.types?.includes('Files') || e.dataTransfer?.types?.includes('text/plain')) {
+		// Check if a file or a sidebar chat/folder item is being dragged.
+		// Use a custom MIME type to distinguish intentional drags from SortableJS reorder drags
+		// (e.g. Notes, Workspace, pinned Models), which also set 'text/plain'.
+		if (
+			e.dataTransfer?.types?.includes('Files') ||
+			e.dataTransfer?.types?.includes('application/x-open-webui-drag')
+		) {
 			dragged = true;
 		} else {
 			dragged = false;
@@ -1212,7 +1538,7 @@
 		e.preventDefault();
 		console.log(e);
 
-		// Check if the dropped data is a sidebar chat item
+		// Check if the dropped data is a sidebar chat, folder, note, or model item
 		const textData = e.dataTransfer?.getData('text/plain');
 		if (textData) {
 			try {
@@ -1235,8 +1561,52 @@
 					dragged = false;
 					e.stopPropagation();
 					return;
+				} else if (data.type === 'folder' && data.id) {
+					// Fetch the folder to get its name, then add as a reference folder
+					const folder = await getFolderById(localStorage.token, data.id);
+					if (folder) {
+						const folderItem = {
+							type: 'folder',
+							id: folder.id,
+							name: folder.name,
+							status: 'processed'
+						};
+						if (!files.find((f) => f.id === folderItem.id)) {
+							files = [...files, folderItem];
+						}
+					}
+					dragged = false;
+					e.stopPropagation();
+					return;
+				} else if (data.type === 'note' && data.id) {
+					// Fetch the note to get its title, then add as a reference note
+					const note = await getNoteById(localStorage.token, data.id);
+					if (note) {
+						const noteItem = {
+							type: 'note',
+							id: note.id,
+							name: note.title,
+							status: 'processed'
+						};
+						if (!files.find((f) => f.id === noteItem.id)) {
+							files = [...files, noteItem];
+						}
+					}
+					dragged = false;
+					e.stopPropagation();
+					return;
+				} else if (data.type === 'model' && data.id) {
+					// [Gradient] Drops can bind assistants; only the picker selects an LLM.
+					const model = $models.find((m) => m.id === data.id);
+					// [Gradient] Assistant drops only bind empty chats.
+					if (isAssistant(model)) {
+						if (!history?.currentId) activeAssistantId.set(data.id);
+					}
+					dragged = false;
+					e.stopPropagation();
+					return;
 				}
-			} catch (_) {
+			} catch {
 				// Not valid JSON — fall through to file handling
 			}
 		}
@@ -1257,8 +1627,10 @@
 			shiftKey = true;
 		}
 
-		// Cmd/Ctrl+Shift+L to toggle dictation
-		if (e.key.toLowerCase() === 'l' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+		if (
+			$settings?.keyboardShortcuts !== false &&
+			matchKeybinding(e) === Shortcut.TOGGLE_DICTATION
+		) {
 			e.preventDefault();
 			if (recording) {
 				// Confirm and stop recording
@@ -1289,6 +1661,14 @@
 	};
 
 	onMount(() => {
+		if ($config?.features?.enable_live_mail)
+			void prefetchLiveConnections(localStorage.token, 'outlook_mail', 'mail').catch(() => {});
+		if ($config?.features?.enable_onedrive_business) {
+			void prefetchLiveConnections(localStorage.token).catch(() => {});
+			void prepareBusinessDocumentPicker().catch(() => {});
+		}
+		if ($config?.features?.enable_google_drive_integration)
+			void initializeGooglePicker().catch(() => {});
 		suggestions = [
 			{
 				char: '@',
@@ -1298,10 +1678,11 @@
 						const { type, data } = e;
 
 						if (type === 'model') {
-							atSelectedModel = data;
+							// [Gradient] Mentions bind assistants only before the first message.
+							selectAssistant(data.id, !history?.currentId, $i18n);
 						}
 
-						document.getElementById('chat-input')?.focus();
+						focus({ preventScroll: true });
 					},
 
 					insertTextHandler: insertTextAtCursor,
@@ -1319,6 +1700,26 @@
 									status: 'processed'
 								}
 							];
+						} else if (type === 'filesystem') {
+							const path = data.path ?? data.url ?? data.id;
+							if (
+								!path ||
+								files.find((f) => f.type === 'filesystem' && (f.path ?? f.url ?? f.id) === path)
+							) {
+								return;
+							}
+							files = [
+								...files,
+								{
+									type: 'filesystem',
+									id: path,
+									path,
+									url: path,
+									name: data.name,
+									size: data.size,
+									status: 'processed'
+								}
+							];
 						} else {
 							if (files.find((f) => f.url === data || f.name === data)) {
 								return;
@@ -1330,16 +1731,59 @@
 			},
 			{
 				char: '/',
+				command: ({ editor, range, props }) => {
+					if (props?.type === 'prompt') {
+						void replaceSlashRangeWithPrompt(editor, range, props.content ?? '');
+						return;
+					}
+
+					if (
+						['compact', 'fork', 'status', 'assistant', 'settings', 'temporary'].includes(props?.id)
+					) {
+						editor.chain().focus().deleteRange(range).run();
+						return;
+					}
+
+					editor
+						.chain()
+						.focus()
+						.insertContentAt(range, [
+							{
+								type: 'mention',
+								attrs: props
+							},
+							{ type: 'text', text: ' ' }
+						])
+						.run();
+				},
 				render: getSuggestionRenderer(CommandSuggestionList, {
 					i18n,
+					canCompact: () => !!history?.currentId && contextCompactionEnabled,
+					compactDisabled: () => isActive,
+					canStatus: () => !!history?.currentId,
+					canFork: () =>
+						!!history?.currentId &&
+						($_user?.role === 'admin' || ($_user?.permissions?.chat?.import ?? true)),
+					forkDisabled: () => isActive,
+					canTemporary: () => canToggleTemporary,
+					temporaryEnabled: () => $temporaryChatEnabled === true,
+					contextUsage: () => statusContextUsage,
+					onCompact: compactHandler,
+					onStatus: statusHandler,
+					onFork: forkHandler,
+					// [Gradient] Choosing /assistant opens the assistant mention list.
+					onAssistant: () => insertTextAtCursor('@'),
+					onSettings: () => showSettings.set(true),
+					onTemporary: temporaryHandler,
 					onSelect: (e) => {
 						const { type, data } = e;
 
 						if (type === 'model') {
-							atSelectedModel = data;
+							// [Gradient] Mentions bind assistants only before the first message.
+							selectAssistant(data.id, !history?.currentId, $i18n);
 						}
 
-						document.getElementById('chat-input')?.focus();
+						focus({ preventScroll: true });
 					},
 
 					insertTextHandler: insertTextAtCursor,
@@ -1374,10 +1818,11 @@
 						const { type, data } = e;
 
 						if (type === 'model') {
-							atSelectedModel = data;
+							// [Gradient] Mentions bind assistants only before the first message.
+							selectAssistant(data.id, !history?.currentId, $i18n);
 						}
 
-						document.getElementById('chat-input')?.focus();
+						focus({ preventScroll: true });
 					},
 
 					insertTextHandler: insertTextAtCursor,
@@ -1408,8 +1853,27 @@
 				char: '$',
 				render: getSuggestionRenderer(CommandSuggestionList, {
 					i18n,
-					onSelect: (e) => {
-						document.getElementById('chat-input')?.focus();
+					onSelect: () => {
+						focus({ preventScroll: true });
+					},
+
+					insertTextHandler: insertTextAtCursor,
+					onUpload: () => {}
+				})
+			},
+			{
+				char: ':',
+				allowSpaces: false,
+				command: ({ editor, range, props }) => {
+					// Convert the Unicode hex codepoint (e.g. "1F44B") to the actual emoji character (👋)
+					const codepoint = props.id;
+					const emoji = String.fromCodePoint(parseInt(codepoint, 16));
+					editor.chain().focus().deleteRange(range).insertContent(emoji).run();
+				},
+				render: getSuggestionRenderer(CommandSuggestionList, {
+					i18n,
+					onSelect: () => {
+						focus({ preventScroll: true });
 					},
 
 					insertTextHandler: insertTextAtCursor,
@@ -1436,14 +1900,12 @@
 			await tick();
 			if (isDestroyed) return;
 
-			dropzoneElement = document.getElementById('chat-pane');
+			dropzoneElement = document.getElementById(dropzoneId);
 			if (dropzoneElement) {
 				dropzoneElement.addEventListener('dragover', onDragOver, true);
 				dropzoneElement.addEventListener('drop', onDrop, true);
 				dropzoneElement.addEventListener('dragleave', onDragLeave);
 			}
-
-			tools.set(await getTools(localStorage.token));
 		};
 		initialize();
 
@@ -1466,13 +1928,7 @@
 </script>
 
 <ToolServersModal bind:show={showTools} {selectedToolIds} />
-
-<ConfluencePickerModal
-	bind:show={showConfluencePicker}
-	confirmLabel={$i18n.t('Add to chat')}
-	pagesOnly={true}
-	on:select={confluencePagesSelected}
-/>
+<SkillsModal bind:show={showSkills} {selectedSkillIds} />
 
 <InputVariablesModal
 	bind:show={showInputVariablesModal}
@@ -1498,22 +1954,22 @@
 	bind:value={prompt}
 	bind:inputContent
 	onChange={(content) => {
-		console.log(content);
+		// [Gradient] GRA-219: confirmation content may include document text.
 		chatInputElement?.setContent(content?.json ?? null);
 	}}
 	onClose={async () => {
 		await tick();
-		chatInputElement?.focus();
+		focus();
 	}}
 />
 
 {#if loaded}
-	<div class="w-full font-primary">
+	<div class="w-full">
 		<div class=" mx-auto inset-x-0 bg-transparent flex justify-center">
 			<div
 				class="flex flex-col px-3 {($settings?.widescreenMode ?? null)
 					? 'max-w-full'
-					: 'max-w-6xl'} w-full"
+					: 'max-w-[58rem]'} w-full"
 			>
 				<div class="relative">
 					{#if autoScroll === false && history?.currentId}
@@ -1521,6 +1977,7 @@
 							class=" absolute -top-12 left-0 right-0 flex justify-center z-30 pointer-events-none"
 						>
 							<button
+								aria-label={$i18n.t('Scroll to bottom')}
 								class=" bg-white border border-gray-100 dark:border-none dark:bg-white/20 p-1.5 rounded-full pointer-events-auto"
 								on:click={() => {
 									autoScroll = true;
@@ -1550,9 +2007,10 @@
 			<div
 				class="{($settings?.widescreenMode ?? null)
 					? 'max-w-full'
-					: 'max-w-6xl'} px-2.5 mx-auto inset-x-0"
+					: 'max-w-[58rem]'} px-2 mx-auto inset-x-0"
 			>
 				<div class="">
+					<!-- [Gradient] -->
 					<input
 						bind:this={filesInputElement}
 						bind:files={inputFiles}
@@ -1578,17 +2036,17 @@
 								recording = false;
 
 								await tick();
-								document.getElementById('chat-input')?.focus();
+								focus({ preventScroll: true });
 							}}
 							onConfirm={async (data) => {
-								const { text, filename } = data;
+								const { text } = data;
 
 								recording = false;
 
 								await tick();
 								await insertTextAtCursor(`${text}`);
 								await tick();
-								document.getElementById('chat-input')?.focus();
+								focus({ preventScroll: true });
 
 								if ($settings?.speechAutoSend ?? false) {
 									dispatch('submit', prompt);
@@ -1599,15 +2057,39 @@
 					<form
 						class="w-full flex flex-col gap-1.5 {recording ? 'hidden' : ''}"
 						on:submit|preventDefault={() => {
-							// check if selectedModels support image input
 							dispatch('submit', prompt);
 						}}
 					>
 						<button
 							id="generate-message-pair-button"
+							aria-label={$i18n.t('Generate message pair')}
 							class="hidden"
 							on:click={() => createMessagePair(prompt)}
-						/>
+						></button>
+
+						{#if askUser?.show}
+							<div class="mx-1">
+								<AskUserCard
+									show={askUser.show}
+									questions={askUser.questions}
+									allowOther={askUser.allowOther}
+									timeoutMs={askUser.timeoutMs}
+									on:confirm={(e) => {
+										askUser.onConfirm(e.detail);
+									}}
+									on:cancel={() => {
+										askUser.onCancel();
+									}}
+								/>
+							</div>
+						{/if}
+
+						<!-- Task list display -->
+						{#if isActive && chatTasks.length > 0}
+							<div class="mx-1">
+								<TaskList tasks={chatTasks} />
+							</div>
+						{/if}
 
 						<!-- Queued messages display -->
 						{#if messageQueue.length > 0}
@@ -1627,20 +2109,101 @@
 							</div>
 						{/if}
 
+						{#if showStatusPanel}
+							<div class="mx-1 rounded-2xl bg-white text-xs dark:bg-gray-900">
+								<div class="flex items-center justify-between px-3 py-1.5">
+									<div class="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+										<span>Status</span>
+									</div>
+
+									<button
+										type="button"
+										class="text-xs text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300"
+										on:click={() => {
+											showStatusPanel = false;
+										}}
+									>
+										Close
+									</button>
+								</div>
+
+								<div class="space-y-0.5 px-3 pb-2">
+									<div class="rounded-xl py-0.5 text-gray-600 dark:text-gray-400">
+										<div class="flex min-h-4 items-center gap-3">
+											<span class="min-w-0 flex-1 truncate">Context usage</span>
+											<span
+												class="shrink-0 font-mono text-[0.625rem] text-gray-400 dark:text-gray-600"
+											>
+												{contextValue}
+											</span>
+										</div>
+										{#if contextHasThreshold}
+											<div
+												class="mt-1.5 h-0.5 overflow-hidden rounded-full bg-gray-100 dark:bg-white/8"
+											>
+												<div
+													class="h-full rounded-full bg-gray-300 dark:bg-white/20"
+													style={`width: ${contextBarPercent}%`}
+												></div>
+											</div>
+										{/if}
+									</div>
+
+									{#if messageQueue.length}
+										<div class="flex min-h-5 items-center gap-3 text-gray-600 dark:text-gray-400">
+											<span class="min-w-0 flex-1 truncate">Queued messages</span>
+											<span class="font-mono text-[0.625rem] text-gray-400 dark:text-gray-600">
+												{messageQueue.length}
+											</span>
+										</div>
+									{/if}
+
+									{#if chatTasks.length}
+										<div class="flex min-h-5 items-center gap-3 text-gray-600 dark:text-gray-400">
+											<span class="min-w-0 flex-1 truncate">Tasks</span>
+											<span class="font-mono text-[0.625rem] text-gray-400 dark:text-gray-600">
+												{chatTasks.length}
+											</span>
+										</div>
+									{/if}
+
+									<div class="flex min-h-5 items-center gap-3 text-gray-600 dark:text-gray-400">
+										<span class="min-w-0 flex-1 truncate">Chat ID</span>
+										{#if chatId}
+											<button
+												type="button"
+												class="min-w-0 max-w-[18rem] truncate font-mono text-[0.625rem] text-gray-400 underline-offset-2 transition-colors duration-75 hover:text-gray-700 hover:underline dark:text-gray-600 dark:hover:text-gray-200"
+												on:click={copyStatusChatId}
+											>
+												{copiedStatusChatId ? $i18n.t('Copied') : chatId}
+											</button>
+										{:else}
+											<span class="font-mono text-[0.625rem] text-gray-400 dark:text-gray-600">
+												none
+											</span>
+										{/if}
+									</div>
+								</div>
+							</div>
+						{/if}
+
 						<div
 							id="message-input-container"
 							class="flex-1 flex flex-col relative w-full shadow-lg rounded-3xl border {$temporaryChatEnabled
 								? 'border-dashed border-gray-100 dark:border-gray-800 hover:border-gray-200 focus-within:border-gray-200 hover:dark:border-gray-700 focus-within:dark:border-gray-700'
-								: ' border-gray-100/30 dark:border-gray-850/30 hover:border-gray-200 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800'}  transition px-1 bg-white/5 dark:bg-gray-500/5 backdrop-blur-sm dark:text-gray-100"
+								: ' border-gray-100/30 dark:border-gray-850/30 hover:border-gray-200 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800'} {($settings?.highContrastMode ??
+							false)
+								? 'focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-blue-500 [&_.ProseMirror:focus-visible]:outline-none!'
+								: ''}  transition px-0.5 bg-white/5 dark:bg-gray-500/5 backdrop-blur-sm dark:text-gray-100"
 							dir={$settings?.chatDirection ?? 'auto'}
 						>
 							{#if atSelectedModel !== undefined}
-								<div class="px-3 pt-3 text-left w-full flex flex-col z-10">
+								<div class="px-2.5 pt-2.5 text-left w-full flex flex-col z-10">
 									<div class="flex items-center justify-between w-full">
-										<div class="pl-[1px] flex items-center gap-2 text-sm dark:text-gray-500">
+										<div class="pl-[0.0625rem] flex items-center gap-2 text-sm dark:text-gray-500">
 											<img
 												alt="model profile"
-												class="size-3.5 max-w-[28px] object-cover rounded-full"
+												class="size-3.5 max-w-[1.75rem] object-cover rounded-full"
 												src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${$models.find((model) => model.id === atSelectedModel.id).id}&lang=${$i18n.language}`}
 											/>
 											<div class="translate-y-[0.5px]">
@@ -1663,13 +2226,13 @@
 
 							{#if files.length > 0}
 								<div
-									class="mx-2 mt-2.5 pb-1.5 flex items-center flex-wrap gap-2"
+									class="mx-2 mt-2 pb-1 flex items-center flex-wrap gap-1.5"
 									dir={$settings?.chatDirection ?? 'auto'}
 								>
 									{#each files as file, fileIdx}
 										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 											{@const fileUrl =
-												file.url.startsWith('data') || file.url.startsWith('http')
+												file.url?.startsWith('data') || file.url?.startsWith('http')
 													? file.url
 													: `${WEBUI_API_BASE_URL}/files/${file.url}${file?.content_type ? '/content' : ''}`}
 											<div class=" relative group">
@@ -1679,11 +2242,11 @@
 														alt=""
 														imageClassName=" size-10 rounded-xl object-cover"
 													/>
-													{#if atSelectedModel ? visionCapableModels.length === 0 : selectedModels.length !== visionCapableModels.length}
+													{#if selectedModelIds.length !== visionCapableModels.length}
 														<Tooltip
 															className=" absolute top-1 left-1"
 															content={$i18n.t('{{ models }}', {
-																models: [...(atSelectedModel ? [atSelectedModel] : selectedModels)]
+																models: selectedModelIds
 																	.filter((id) => !visionCapableModels.includes(id))
 																	.join(', ')
 															})}
@@ -1709,7 +2272,7 @@
 														class=" bg-white text-black border border-white rounded-full {($settings?.highContrastMode ??
 														false)
 															? ''
-															: 'outline-hidden focus:outline-hidden group-hover:visible invisible transition'}"
+															: 'hover-reveal transition'}"
 														type="button"
 														aria-label={$i18n.t('Remove file')}
 														on:click={() => {
@@ -1734,12 +2297,12 @@
 										{:else}
 											<FileItem
 												item={file}
-												name={file.name}
+												name={file.name ?? ''}
 												type={file.type}
-												size={file?.size}
-												loading={file.status === 'uploading'}
+												size={file?.size ?? 0}
+												loading={isPending(file)}
 												dismissible={true}
-												edit={true}
+												edit={!agentRouted}
 												small={true}
 												modal={['file', 'collection'].includes(file?.type)}
 												on:dismiss={async () => {
@@ -1756,33 +2319,29 @@
 								</div>
 							{/if}
 
-							<div class="px-2.5">
+							<div class="px-2 relative">
+								{#if prompt.split('\n').length > 2}
+									<button
+										type="button"
+										class="absolute top-2.5 right-3 z-20 p-1 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50"
+										aria-label="Expand input"
+										on:click={() => {
+											showInputModal = true;
+										}}
+									>
+										<Expand />
+									</button>
+								{/if}
+
 								<div
-									class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent dark:text-gray-100 outline-hidden w-full pb-1 px-1 resize-none h-fit max-h-96 overflow-auto {files.length ===
+									class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent dark:text-gray-100 outline-hidden w-full pb-0.5 px-1 resize-none h-fit max-h-96 overflow-auto {files.length ===
 									0
 										? atSelectedModel !== undefined
-											? 'pt-1.5'
-											: 'pt-2.5'
+											? 'pt-1'
+											: 'pt-2'
 										: ''}"
 									id="chat-input-container"
 								>
-									{#if prompt.split('\n').length > 2}
-										<div class="fixed top-0 right-0 z-20">
-											<div class="mt-2.5 mr-3">
-												<button
-													type="button"
-													class="p-1 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50"
-													aria-label="Expand input"
-													on:click={async () => {
-														showInputModal = true;
-													}}
-												>
-													<Expand />
-												</button>
-											</div>
-										</div>
-									{/if}
-
 									{#if suggestions}
 										{#key $settings?.richTextInput ?? true}
 											{#key $settings?.showFormattingToolbar ?? false}
@@ -1814,7 +2373,7 @@
 														($settings?.promptAutocomplete ?? false)}
 													generateAutoCompletion={async (text) => {
 														if (selectedModelIds.length === 0 || !selectedModelIds.at(0)) {
-															toast.error($i18n.t('Please select a model first.'));
+															return null;
 														}
 
 														const res = await generateAutoCompletion(
@@ -1901,13 +2460,6 @@
 														if (e.key === 'Escape') {
 															console.log('Escape');
 															atSelectedModel = undefined;
-															selectedToolIds = [];
-															selectedFilterIds = [];
-
-															webSearchEnabled = false;
-															imageGenerationEnabled = false;
-															codeInterpreterEnabled = false;
-															documentWriterEnabled = false;
 														}
 													}}
 													on:paste={async (e) => {
@@ -1953,14 +2505,23 @@
 								</div>
 							</div>
 
-							<div class=" flex justify-between mt-0.5 mb-2.5 mx-0.5 max-w-full" dir="ltr">
-								<div class="ml-1 self-end flex items-center flex-1 max-w-[80%]">
+							<div class=" flex justify-between mt-0.5 mb-2 mx-0.5 max-w-full" dir="ltr">
+								<div class="ml-1 self-end flex items-center flex-1 min-w-0">
+									<!-- [Gradient] One "+" menu holds context, knowledge and tools. -->
 									{#if isFeatureEnabled('input_menu')}
 										<InputMenu
 											bind:this={inputMenuRef}
+											bind:liveDocumentsState
+											bind:liveMailState
+											restrictTo={inputMenuRestrictTo}
+											{openInternetBlocked}
+											{internalBlocked}
+											{dataSeparationMessage}
 											bind:files
-											selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
-											{fileUploadCapableModels}
+											selectedModels={selectedModelIds}
+											fileUploadCapableModels={inputMenuFileUploadCapableModels}
+											{toolApprovalMode}
+											{onToolApprovalModeChange}
 											{screenCaptureHandler}
 											{inputFilesHandler}
 											uploadFilesHandler={() => {
@@ -1968,31 +2529,28 @@
 											}}
 											uploadGoogleDriveHandler={googleDriveHandler}
 											uploadOneDriveHandler={oneDriveHandler}
-											uploadConfluenceHandler={confluenceHandler}
 											{onUpload}
-											onClose={async () => {
-												await tick();
-
-												const chatInput = document.getElementById('chat-input');
-												chatInput?.focus();
-											}}
-											bind:selectedToolIds
-											bind:selectedFilterIds
-											bind:webSearchEnabled
-											bind:imageGenerationEnabled
-											bind:codeInterpreterEnabled
-											bind:documentWriterEnabled
 											{toggleFilters}
-											{showToolsButton}
 											{showWebSearchButton}
 											{showImageGenerationButton}
 											{showCodeInterpreterButton}
 											{showDocumentWriterButton}
+											bind:selectedToolIds
+											bind:selectedSkillIds
+											bind:selectedFilterIds
+											bind:webSearchEnabled
+											bind:webSearchRequired
+											bind:imageGenerationEnabled
+											bind:codeInterpreterEnabled
+											bind:documentWriterEnabled
+											bind:documentWriterRequired
+											oauthRedirectHandler={(tool: {
+												id: string;
+												serverId: string;
+												authType?: string | null;
+											}) => oauthRedirectHandler(tool, chatInputDraft)}
+											{onWebSearchToggle}
 											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-											{openInternetBlocked}
-											{internalBlocked}
-											{dataSeparationMessage}
-											restrictTo={inputMenuRestrictTo}
 											onShowValves={(e) => {
 												const { type, id } = e;
 												selectedValvesType = type;
@@ -2000,496 +2558,467 @@
 												showValvesModal = true;
 												integrationsMenuCloseOnOutsideClick = false;
 											}}
+											onClose={async () => {
+												await tick();
+
+												const chatInput = document.getElementById('chat-input');
+												chatInput?.focus();
+											}}
 										>
-											<div
+											<button
+												type="button"
 												id="input-menu-button"
-												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-[1.875rem] flex justify-center items-center outline-hidden focus:outline-hidden shrink-0"
+												aria-label={$i18n.t('More')}
 											>
-												<PlusAlt className="size-5.5" />
-											</div>
+												<PlusAlt className="size-5" />
+											</button>
 										</InputMenu>
 									{/if}
 
-									{#if $config?.features?.enable_rag_filter_ui ?? true}
-										<Tooltip content={$i18n.t('RAG Filters')} placement="top">
+									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
+										{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
+											<div class="ml-1 flex gap-1.5 shrink-0">
+												<Tooltip content={$i18n.t('Valves')} placement="top">
+													<button
+														type="button"
+														id="model-valves-button"
+														class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-[1.875rem] flex justify-center items-center outline-hidden focus:outline-hidden"
+														on:click={() => {
+															selectedValvesType = 'function';
+															selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
+															showValvesModal = true;
+														}}
+													>
+														<Knobs className="size-4" strokeWidth="1.5" />
+													</button>
+												</Tooltip>
+											</div>
+										{/if}
+
+										<!-- [Gradient] Scrolls sideways on narrow screens instead of overflowing. -->
+										<div
+											class="ml-1 flex gap-1.5 min-w-0 overflow-x-auto scrollbar-none"
+											use:overflowFade
+										>
+											<!-- [Gradient] Pinned or active "+" menu items, same gates as the menu. -->
+											{#each inputBarItems as itemId (itemId)}
+												{#if itemId === 'upload_files' && inputMenuFileUploadEnabled}
+													<Tooltip content={$i18n.t('Upload Files')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Upload Files')}
+															on:click={() => filesInputElement.click()}
+														>
+															<Clip className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'capture' && inputMenuFileUploadEnabled && isFeatureEnabled('capture')}
+													<Tooltip content={$i18n.t('Capture')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Capture')}
+															on:click={() => {
+																if (!$mobile) {
+																	screenCaptureHandler();
+																} else {
+																	document.getElementById('camera-input')?.click();
+																}
+															}}
+														>
+															<Camera className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_webpage' && webUploadEnabled && isFeatureEnabled('webpage_url')}
+													<Tooltip content={$i18n.t('Webpage URL')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Webpage URL')}
+															on:click={() => inputMenuRef?.openWebpageModal()}
+														>
+															<Link className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_files' && inputMenuFileUploadEnabled}
+													<Tooltip content={$i18n.t('Attach Files')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Attach Files')}
+															on:click={() => inputMenuRef?.openTab('files')}
+														>
+															<DocumentArrowUp className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_notes' && ($config?.features?.enable_notes ?? false)}
+													<Tooltip content={$i18n.t('Attach Notes')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Attach Notes')}
+															on:click={() => inputMenuRef?.openTab('notes')}
+														>
+															<PageEdit className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'attach_meetings' && $meetingsAvailable}
+													<Tooltip content={$i18n.t('Attach meetings')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Attach meetings')}
+															on:click={() => inputMenuRef?.openTab('meetings')}
+														>
+															<Mic className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'google_drive' && inputMenuFileUploadEnabled && $config?.features?.enable_google_drive_integration}
+													<Tooltip content={$i18n.t('Google Drive')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Google Drive')}
+															on:click={googleDriveHandler}
+														>
+															<GoogleDrive className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'onedrive' && inputMenuFileUploadEnabled && $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
+													<Tooltip content={$i18n.t('OneDrive files')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('OneDrive files')}
+															on:click={() => {
+																oneDriveHandler();
+															}}
+														>
+															<OneDrive className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'knowledge' && isFeatureEnabled('knowledge')}
+													<Tooltip content={$i18n.t('Knowledge database')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Knowledge database')}
+															on:click={() => inputMenuRef?.openTab('knowledge')}
+														>
+															<FolderOpen className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'reference_chats' && isFeatureEnabled('reference_chats')}
+													<Tooltip content={$i18n.t('Reference chats')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Reference chats')}
+															on:click={() => inputMenuRef?.openTab('chats')}
+														>
+															<ClockRotateRight className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'web_search' && showWebSearchButton}
+													<Tooltip
+														content={imageGenerationEnabled
+															? $i18n.t(
+																	'Web search and image generation cannot run in the same turn'
+																)
+															: pinnedStateTooltip(
+																	$i18n.t('Web Search'),
+																	webSearchToolState,
+																	$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+																)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={pinnedStateTooltip(
+																$i18n.t('Web Search'),
+																webSearchToolState,
+																$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+															)}
+															on:click|preventDefault={() => inputMenuRef?.cycleWebSearch()}
+															class={pinnedToggleClass(webSearchToolState)}
+														>
+															<GlobeAlt className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'image_generation' && showImageGenerationButton}
+													<Tooltip
+														content={webSearchEnabled
+															? $i18n.t(
+																	'Web search and image generation cannot run in the same turn'
+																)
+															: pinnedStateTooltip(
+																	$i18n.t('Image'),
+																	imageGenerationEnabled ? 'required' : 'off',
+																	imageGenerationEnabled
+																		? $i18n.t('Generate an image')
+																		: $i18n.t(TOOL_OFF_DESCRIPTION)
+																)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={$i18n.t('Image')}
+															aria-pressed={imageGenerationEnabled}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('image_generation')}
+															class={pinnedToggleClass(imageGenerationEnabled)}
+														>
+															<Photo className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'live_mail' && $config?.features?.enable_live_mail}
+													<Tooltip
+														elementId={liveMailTooltipId}
+														content={pinnedStateTooltip(
+															$i18n.t('Mail search'),
+															liveMailState,
+															liveMailState !== 'off'
+																? $i18n.t('The model decides whether to search your mail')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={`${$i18n.t('Mail search')}: ${$i18n.t(TOOL_STATE_LABELS[liveMailState])}`}
+															aria-pressed={liveMailState !== 'off'}
+															on:click|preventDefault={() => inputMenuRef?.cycleLiveMail()}
+															class={pinnedToggleClass(liveMailState)}
+														>
+															<MailSearch className="size-4" />
+														</button>
+														<div slot="tooltip" class="hidden">
+															<div id={liveMailTooltipId} class="flex items-center gap-2">
+																<MailSearch className="size-4 shrink-0" />
+																<span
+																	>{pinnedStateTooltip(
+																		$i18n.t('Mail search'),
+																		liveMailState,
+																		liveMailState !== 'off'
+																			? $i18n.t('The model decides whether to search your mail')
+																			: $i18n.t(TOOL_OFF_DESCRIPTION)
+																	)}</span
+																>
+															</div>
+														</div>
+													</Tooltip>
+												{:else if itemId === 'live_documents' && $config?.features?.enable_live_documents}
+													<Tooltip
+														elementId={liveDocumentsTooltipId}
+														content={pinnedStateTooltip(
+															$i18n.t('OneDrive search'),
+															liveDocumentsState,
+															liveDocumentsState !== 'off'
+																? $i18n.t('The model decides whether to search OneDrive')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={`${$i18n.t('OneDrive search')}: ${$i18n.t(TOOL_STATE_LABELS[liveDocumentsState])}`}
+															aria-pressed={liveDocumentsState !== 'off'}
+															on:click|preventDefault={() => inputMenuRef?.cycleLiveDocuments()}
+															class={pinnedToggleClass(liveDocumentsState)}
+														>
+															<OneDriveSearch className="size-4" />
+														</button>
+														<div slot="tooltip" class="hidden">
+															<div id={liveDocumentsTooltipId} class="flex items-center gap-2">
+																<OneDriveSearch className="size-4 shrink-0" />
+																<span
+																	>{pinnedStateTooltip(
+																		$i18n.t('OneDrive search'),
+																		liveDocumentsState,
+																		liveDocumentsState !== 'off'
+																			? $i18n.t('The model decides whether to search OneDrive')
+																			: $i18n.t(TOOL_OFF_DESCRIPTION)
+																	)}</span
+																>
+															</div>
+														</div>
+													</Tooltip>
+												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
+													<Tooltip
+														content={pinnedStateTooltip(
+															$i18n.t('Code Interpreter'),
+															codeInterpreterEnabled ? 'required' : 'off',
+															codeInterpreterEnabled
+																? $i18n.t('Execute code for analysis')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														placement="top"
+													>
+														<button
+															type="button"
+															aria-label={codeInterpreterEnabled
+																? $i18n.t('Disable Code Interpreter')
+																: $i18n.t('Enable Code Interpreter')}
+															aria-pressed={codeInterpreterEnabled}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('code_interpreter')}
+															class={pinnedToggleClass(codeInterpreterEnabled)}
+														>
+															<Terminal className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'document_writer' && showDocumentWriterButton}
+													<Tooltip content={documentWriterTooltip} placement="top">
+														<button
+															type="button"
+															aria-label={documentWriterTooltip}
+															aria-pressed={documentWriterEnabled}
+															on:click|preventDefault={() =>
+																inputMenuRef?.cycleTool('document_writer')}
+															class={pinnedToggleClass(documentWriterToolState)}
+														>
+															<Document className="size-4" strokeWidth="1.75" />
+														</button>
+													</Tooltip>
+												{:else if itemId === 'tools' && showToolsButton}
+													<Tooltip content={$i18n.t('Tools')} placement="top">
+														<button
+															type="button"
+															aria-label={$i18n.t('Tools')}
+															on:click|preventDefault={() => inputMenuRef?.openTab('tools')}
+															class={pinnedToggleClass((selectedToolIds ?? []).length > 0)}
+														>
+															<Wrench className="size-4" strokeWidth="1.75" />
+															{#if (selectedToolIds ?? []).length > 0}
+																<span class="text-sm">{selectedToolIds.length}</span>
+															{/if}
+														</button>
+													</Tooltip>
+												{:else if itemId === 'skills' && showSkillsButton}
+													<Tooltip content={$i18n.t('Skills')} placement="top">
+														<button
+															type="button"
+															aria-label={$i18n.t('Skills')}
+															on:click|preventDefault={() => inputMenuRef?.openTab('skills')}
+															class={pinnedToggleClass((selectedSkillIds ?? []).length > 0)}
+														>
+															<Cube className="size-4" strokeWidth="1.75" />
+															{#if (selectedSkillIds ?? []).length > 0}
+																<span class="text-sm">{selectedSkillIds.length}</span>
+															{/if}
+														</button>
+													</Tooltip>
+												{:else if itemId.startsWith('filter:')}
+													{@const pinnedFilterId = itemId.slice('filter:'.length)}
+													{@const pinnedFilter = toggleFilters.find(
+														(f: { id: string }) => f.id === pinnedFilterId
+													)}
+													{#if pinnedFilter}
+														<Tooltip content={pinnedFilter?.name} placement="top">
+															<button
+																type="button"
+																aria-label={pinnedFilter?.name}
+																aria-pressed={selectedFilterIds.includes(pinnedFilterId)}
+																on:click|preventDefault={() => {
+																	selectedFilterIds = selectedFilterIds.includes(pinnedFilterId)
+																		? selectedFilterIds.filter((id) => id !== pinnedFilterId)
+																		: [...selectedFilterIds, pinnedFilterId];
+																}}
+																class={pinnedToggleClass(
+																	selectedFilterIds.includes(pinnedFilterId)
+																)}
+															>
+																{#if pinnedFilter?.icon}
+																	<div class="size-4 items-center flex justify-center">
+																		<img
+																			src={pinnedFilter.icon}
+																			class="size-3.5 {pinnedFilter.icon.includes('data:image/svg')
+																				? 'dark:invert-[80%]'
+																				: ''}"
+																			style="fill: currentColor;"
+																			alt={pinnedFilter.name}
+																		/>
+																	</div>
+																{:else}
+																	<Sparkles className="size-4" strokeWidth="1.75" />
+																{/if}
+															</button>
+														</Tooltip>
+													{/if}
+												{/if}
+											{/each}
+
+											<!-- [Gradient] Active capabilities show in the bar above, pinned or not. -->
+
+											{#each pendingOAuthTools as pendingTool (pendingTool.id)}
+												<Tooltip content={$i18n.t('Click to connect')} placement="top">
+													<button
+														on:click|preventDefault={() => {
+															oauthRedirectHandler(pendingTool, chatInputDraft);
+														}}
+														type="button"
+														class="group px-2 py-[0.3125rem] flex gap-1.5 items-center text-xs rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden
+														text-amber-600 dark:text-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-400/10 dark:hover:bg-amber-600/10 border border-amber-200/40 dark:border-amber-500/20"
+													>
+														<Wrench className="size-3.5" strokeWidth="1.75" />
+														<span class="truncate">{pendingTool.name}</span>
+													</button>
+												</Tooltip>
+											{/each}
+
+											<!-- Terminal Server Selector -->
+											{#if showTerminalSelector}
+												<TerminalMenu
+													bind:show={showTerminalMenu}
+													disabled={generating ||
+														(!!history?.currentId &&
+															history.messages[history.currentId]?.done != true)}
+												/>
+											{/if}
+										</div>
+									</div>
+								</div>
+
+								<div class="self-end flex space-x-1 mr-1 min-w-0 gap-[0.03125rem]">
+									<!-- [Gradient] Assistant identity sits beside the independent LLM picker. -->
+									<AssistantChip editable={!history?.currentId} />
+									<div class="flex min-w-0 max-w-[10rem] items-center sm:max-w-[13rem]">
+										{#if pickerModels.length > 0}
+											<ModelSelector
+												bind:this={modelSelector}
+												bind:selectedModels
+												showSetDefault={!history?.currentId}
+												placement="auto"
+												align="end"
+												triggerClassName="items-center gap-1.5 rounded-lg pl-2 pr-1.5 py-1 text-[0.8125rem] font-normal text-gray-600 transition-colors duration-100 hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
+											/>
+										{/if}
+									</div>
+
+									{#if hasChatVariables}
+										<Tooltip content={$i18n.t('Chat Variables')} placement="top">
 											<button
 												type="button"
-												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-												on:click={() => showRagFilter.update((v) => !v)}
-												aria-label={$i18n.t('RAG Filters')}
+												id="chat-variables-button"
+												class="flex size-[1.875rem] shrink-0 items-center justify-center rounded-full bg-transparent text-gray-500 transition-colors hover:text-gray-800 focus:outline-hidden dark:text-gray-400 dark:hover:text-gray-100"
+												aria-label={$i18n.t('Chat Variables')}
+												on:click={() => {
+													dispatch('chatVariables');
+												}}
 											>
-												<Filter className="size-4.5" strokeWidth="1.5" />
+												<Knobs className="size-4" strokeWidth="1.5" />
 											</button>
 										</Tooltip>
 									{/if}
 
-									{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
-										<div class="ml-1 flex gap-1.5">
-											<Tooltip content={$i18n.t('Valves')} placement="top">
-												<button
-													type="button"
-													id="model-valves-button"
-													class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-													on:click={() => {
-														selectedValvesType = 'function';
-														selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
-														showValvesModal = true;
-													}}
-												>
-													<Knobs className="size-4" strokeWidth="1.5" />
-												</button>
-											</Tooltip>
-										</div>
-									{/if}
-
-									<div class="ml-1 flex gap-1.5">
-										<!-- Pinned items -->
-										{#each ($settings?.pinnedInputItems ?? []).filter((id) => (inputMenuRestrictTo === null || inputMenuRestrictTo.includes(id)) && !dataSeparationBlockedItems.has(id)) as itemId}
-											{#if itemId === 'upload_files' && fileUploadEnabled}
-												<Tooltip content={$i18n.t('Upload Files')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={() => filesInputElement.click()}
-													>
-														<Clip className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'capture' && fileUploadEnabled && isFeatureEnabled('capture')}
-												<Tooltip content={$i18n.t('Capture')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={() => {
-															if (!$mobile) {
-																screenCaptureHandler();
-															} else {
-																document.getElementById('camera-input')?.click();
-															}
-														}}
-													>
-														<Camera className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'attach_webpage' && fileUploadEnabled}
-												<Tooltip content={$i18n.t('Attach Webpage')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={() => inputMenuRef?.openWebpageModal()}
-													>
-														<Link className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'attach_notes' && ($config?.features?.enable_notes ?? false)}
-												<Tooltip content={$i18n.t('Attach Notes')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={() => inputMenuRef?.openTab('notes')}
-													>
-														<PageEdit className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'knowledge' && isFeatureEnabled('knowledge')}
-												<Tooltip content={$i18n.t('Attach Knowledge')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={() => inputMenuRef?.openTab('knowledge')}
-													>
-														<FolderOpen className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'reference_chats'}
-												<Tooltip content={$i18n.t('Reference Chats')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={() => inputMenuRef?.openTab('chats')}
-													>
-														<ClockRotateRight className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'google_drive' && fileUploadEnabled && $config?.features?.enable_google_drive_integration}
-												<Tooltip content={$i18n.t('Google Drive')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={googleDriveHandler}
-													>
-														<GoogleDrive className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'onedrive' && fileUploadEnabled && $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
-												<Tooltip content={$i18n.t('Microsoft OneDrive')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={() => oneDriveHandler('organizations')}
-													>
-														<OneDrive className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared' && $config?.features?.confluence_oauth_configured}
-												<Tooltip content={$i18n.t('Confluence')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={confluenceHandler}
-													>
-														<Confluence className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode === 'shared' && $config?.features?.confluence_shared_kb_id}
-												<Tooltip content={$i18n.t('Confluence')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={() => inputMenuRef?.attachSharedConfluenceKb()}
-													>
-														<Confluence className="size-4" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'topdesk' && fileUploadEnabled && $config?.features?.enable_topdesk_integration && $config?.features?.topdesk_shared_kb_id}
-												<Tooltip content={$i18n.t('TOPdesk knowledge base')} placement="top">
-													<button
-														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-														type="button"
-														on:click={() => inputMenuRef?.attachSharedTopdeskKb()}
-													>
-														<Topdesk className="size-4" />
-													</button>
-												</Tooltip>
-												<!-- Pinned capability items -->
-											{:else if itemId === 'web_search' && showWebSearchButton}
-												<Tooltip
-													content={imageGenerationEnabled
-														? $i18n.t('Web search and image generation cannot run in the same turn')
-														: $i18n.t('Web Search')}
-													placement="top"
-												>
-													<button
-														on:click|preventDefault={() => {
-															webSearchEnabled = !webSearchEnabled;
-															if (webSearchEnabled) {
-																imageGenerationEnabled = false;
-															}
-														}}
-														type="button"
-														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled
-															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
-															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-													>
-														<GlobeAlt className="size-4" strokeWidth="1.75" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'image_generation' && showImageGenerationButton}
-												<Tooltip
-													content={webSearchEnabled
-														? $i18n.t('Web search and image generation cannot run in the same turn')
-														: $i18n.t('Image')}
-													placement="top"
-												>
-													<button
-														on:click|preventDefault={() => {
-															imageGenerationEnabled = !imageGenerationEnabled;
-															if (imageGenerationEnabled) {
-																webSearchEnabled = false;
-															}
-														}}
-														type="button"
-														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
-															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border-sky-200/40 dark:border-sky-500/20'
-															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-													>
-														<Photo className="size-4" strokeWidth="1.75" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
-												<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
-													<button
-														aria-label={codeInterpreterEnabled
-															? $i18n.t('Disable Code Interpreter')
-															: $i18n.t('Enable Code Interpreter')}
-														aria-pressed={codeInterpreterEnabled}
-														on:click|preventDefault={() =>
-															(codeInterpreterEnabled = !codeInterpreterEnabled)}
-														type="button"
-														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {codeInterpreterEnabled
-															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border-sky-200/40 dark:border-sky-500/20'
-															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-													>
-														<Terminal className="size-3.5" strokeWidth="2" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'document_writer' && showDocumentWriterButton}
-												<Tooltip content={$i18n.t('Document Writer')} placement="top">
-													<button
-														aria-label={documentWriterEnabled
-															? $i18n.t('Disable Document Writer')
-															: $i18n.t('Enable Document Writer')}
-														aria-pressed={documentWriterEnabled}
-														on:click|preventDefault={() =>
-															(documentWriterEnabled = !documentWriterEnabled)}
-														type="button"
-														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {documentWriterEnabled
-															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border-sky-200/40 dark:border-sky-500/20'
-															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-													>
-														<Document className="size-3.5" strokeWidth="2" />
-													</button>
-												</Tooltip>
-											{:else if itemId === 'tools' && showToolsButton}
-												<Tooltip content={$i18n.t('Tools')} placement="top">
-													<button
-														on:click|preventDefault={() => inputMenuRef?.openTab('tools')}
-														type="button"
-														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {(
-															selectedToolIds ?? []
-														).length > 0
-															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
-															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-													>
-														<Wrench className="size-4" strokeWidth="1.75" />
-														{#if (selectedToolIds ?? []).length > 0}
-															<span class="text-sm">{selectedToolIds.length}</span>
-														{/if}
-													</button>
-												</Tooltip>
-											{:else if itemId.startsWith('filter:')}
-												{@const filterId = itemId.replace('filter:', '')}
-												{@const filter = toggleFilters.find((f) => f.id === filterId)}
-												{#if filter}
-													<Tooltip content={filter?.name} placement="top">
-														<button
-															on:click|preventDefault={() => {
-																if (selectedFilterIds.includes(filterId)) {
-																	selectedFilterIds = selectedFilterIds.filter(
-																		(id) => id !== filterId
-																	);
-																} else {
-																	selectedFilterIds = [...selectedFilterIds, filterId];
-																}
-															}}
-															type="button"
-															class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
-																filterId
-															)
-																? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
-																: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'} capitalize"
-														>
-															{#if filter?.icon}
-																<div class="size-4 items-center flex justify-center">
-																	<img
-																		src={filter.icon}
-																		class="size-3.5 {filter.icon.includes('svg')
-																			? 'dark:invert-[80%]'
-																			: ''}"
-																		style="fill: currentColor;"
-																		alt={filter.name}
-																	/>
-																</div>
-															{:else}
-																<Sparkles className="size-4" strokeWidth="1.75" />
-															{/if}
-														</button>
-													</Tooltip>
-												{/if}
-											{/if}
-										{/each}
-
-										<!-- Active capabilities NOT in pinned list -->
-										{#if (selectedToolIds ?? []).length > 0 && !($settings?.pinnedInputItems ?? []).includes('tools')}
-											<Tooltip
-												content={$i18n.t('{{COUNT}} Available Tools', {
-													COUNT: selectedToolIds.length
-												})}
-											>
-												<button
-													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
-													aria-label="Available Tools"
-													type="button"
-													on:click={() => {
-														showTools = !showTools;
-													}}
-												>
-													<Wrench className="size-4" strokeWidth="1.75" />
-
-													<span class="text-sm">
-														{selectedToolIds.length}
-													</span>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#each selectedFilterIds as filterId}
-											{#if !($settings?.pinnedInputItems ?? []).includes(`filter:${filterId}`)}
-												{@const filter = toggleFilters.find((f) => f.id === filterId)}
-												{#if filter}
-													<Tooltip content={filter?.name} placement="top">
-														<button
-															on:click|preventDefault={() => {
-																selectedFilterIds = selectedFilterIds.filter(
-																	(id) => id !== filterId
-																);
-															}}
-															type="button"
-															class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
-																filterId
-															)
-																? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-																: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} capitalize"
-														>
-															{#if filter?.icon}
-																<div class="size-4 items-center flex justify-center">
-																	<img
-																		src={filter.icon}
-																		class="size-3.5 {filter.icon.includes('data:image/svg')
-																			? 'dark:invert-[80%]'
-																			: ''}"
-																		style="fill: currentColor;"
-																		alt={filter.name}
-																	/>
-																</div>
-															{:else}
-																<Sparkles className="size-4" strokeWidth="1.75" />
-															{/if}
-															<div class="hidden group-hover:block">
-																<XMark className="size-4" strokeWidth="1.75" />
-															</div>
-														</button>
-													</Tooltip>
-												{/if}
-											{/if}
-										{/each}
-
-										{#if webSearchEnabled && !($settings?.pinnedInputItems ?? []).includes('web_search')}
-											<Tooltip content={$i18n.t('Web Search')} placement="top">
-												<button
-													on:click|preventDefault={() => {
-														webSearchEnabled = !webSearchEnabled;
-														if (webSearchEnabled) {
-															imageGenerationEnabled = false;
-														}
-													}}
-													type="button"
-													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
-													($settings?.webSearch ?? false) === 'always'
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
-												>
-													<GlobeAlt className="size-4" strokeWidth="1.75" />
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#if imageGenerationEnabled && !($settings?.pinnedInputItems ?? []).includes('image_generation')}
-											<Tooltip content={$i18n.t('Image')} placement="top">
-												<button
-													on:click|preventDefault={() => {
-														imageGenerationEnabled = !imageGenerationEnabled;
-														if (imageGenerationEnabled) {
-															webSearchEnabled = false;
-														}
-													}}
-													type="button"
-													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
-												>
-													<Photo className="size-4" strokeWidth="1.75" />
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#if codeInterpreterEnabled && !($settings?.pinnedInputItems ?? []).includes('code_interpreter')}
-											<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
-												<button
-													aria-label={codeInterpreterEnabled
-														? $i18n.t('Disable Code Interpreter')
-														: $i18n.t('Enable Code Interpreter')}
-													aria-pressed={codeInterpreterEnabled}
-													on:click|preventDefault={() =>
-														(codeInterpreterEnabled = !codeInterpreterEnabled)}
-													type="button"
-													class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
-													false)
-														? 'm-1'
-														: 'focus:outline-hidden rounded-full'}"
-												>
-													<Terminal className="size-3.5" strokeWidth="2" />
-
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#if documentWriterEnabled && !($settings?.pinnedInputItems ?? []).includes('document_writer')}
-											<Tooltip content={$i18n.t('Document Writer')} placement="top">
-												<button
-													aria-label={documentWriterEnabled
-														? $i18n.t('Disable Document Writer')
-														: $i18n.t('Enable Document Writer')}
-													aria-pressed={documentWriterEnabled}
-													on:click|preventDefault={() =>
-														(documentWriterEnabled = !documentWriterEnabled)}
-													type="button"
-													class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {documentWriterEnabled
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
-													false)
-														? 'm-1'
-														: 'focus:outline-hidden rounded-full'}"
-												>
-													<Document className="size-3.5" strokeWidth="2" />
-
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#each pendingOAuthTools as pendingTool (pendingTool.id)}
-											<Tooltip content={$i18n.t('Click to connect')} placement="top">
-												<button
-													on:click|preventDefault={() => {
-														sessionStorage.setItem('pendingOAuthToolId', pendingTool.id);
-														const authUrl = getOAuthClientAuthorizationUrl(
-															pendingTool.serverId,
-															pendingTool.authType ?? 'mcp'
-														);
-														window.open(authUrl, '_self', 'noopener');
-													}}
-													type="button"
-													class="group px-2 py-[5px] flex gap-1.5 items-center text-xs rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden
-														text-amber-600 dark:text-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-400/10 dark:hover:bg-amber-600/10 border border-amber-200/40 dark:border-amber-500/20"
-												>
-													<Wrench className="size-3.5" strokeWidth="1.75" />
-													<span class="truncate">{pendingTool.name}</span>
-												</button>
-											</Tooltip>
-										{/each}
-									</div>
-								</div>
-
-								<div class="self-end flex space-x-1 mr-1 shrink-0 gap-[0.5px]">
-									{#if (taskIds && taskIds.length > 0) || (history.currentId && history.messages[history.currentId]?.done != true) || generating}
+									{#if isActive && prompt === '' && files.length === 0}
 										<div class=" flex items-center">
 											<Tooltip content={$i18n.t('Stop')}>
 												<button
-													class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5"
+													aria-label={$i18n.t('Stop')}
+													class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-[0.3125rem]"
 													on:click={() => {
 														stopResponse();
 													}}
@@ -2510,32 +3039,8 @@
 											</Tooltip>
 										</div>
 									{:else}
-										{#if prompt !== '' && !history?.currentId && !$selectedTerminalId && ($config?.features?.enable_notes ?? false) && ($_user?.role === 'admin' || ($_user?.permissions?.features?.notes ?? true))}
-											<!-- {$i18n.t('Create Note')}  -->
-											<Tooltip content={$i18n.t('Create note')} className=" flex items-center">
-												<button
-													id="create-note-button"
-													class=" text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 -mr-1 self-center"
-													type="button"
-													disabled={prompt === '' && files.length === 0}
-													on:click={() => {
-														createNote();
-													}}
-												>
-													<Note className="size-4.5 translate-y-[0.5px]" />
-												</button>
-											</Tooltip>
-										{/if}
-
 										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
-											<!-- Terminal Server Selector -->
-											{@const hasDirectToolServerAccess =
-												$_user?.role === 'admin' ||
-												($_user?.permissions?.features?.direct_tool_servers ?? true)}
-											{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).some((t) => t.id) || (hasDirectToolServerAccess && (($terminalServers ?? []).some((t) => !t.id) || ($settings?.terminalServers ?? []).some((s) => s.url))))}
-												<TerminalMenu bind:show={showTerminalMenu} />
-											{/if}
-
+											<!-- [Gradient] Tenant voice gate includes dictation. -->
 											{#if isFeatureEnabled('voice') && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}
 												<!-- {$i18n.t('Record voice')} -->
 												<Tooltip content={$i18n.t('Dictate')}>
@@ -2571,28 +3076,18 @@
 														}}
 														aria-label="Voice Input"
 													>
-														<svg
-															xmlns="http://www.w3.org/2000/svg"
-															viewBox="0 0 20 20"
-															fill="currentColor"
-															class="size-5 translate-y-[0.5px]"
-														>
-															<path d="M7 4a3 3 0 016 0v6a3 3 0 11-6 0V4z" />
-															<path
-																d="M5.5 9.643a.75.75 0 00-1.5 0V10c0 3.06 2.29 5.585 5.25 5.954V17.5h-1.5a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-1.5v-1.546A6.001 6.001 0 0016 10v-.357a.75.75 0 00-1.5 0V10a4.5 4.5 0 01-9 0v-.357z"
-															/>
-														</svg>
+														<Mic className="size-[1.125rem]" />
 													</button>
 												</Tooltip>
 											{/if}
 										{/if}
 
-										{#if isFeatureEnabled('voice') && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
+										{#if isFeatureEnabled('voice_call') && !embedded && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
 											<div class=" flex items-center">
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>
 													<button
-														class=" bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full p-1.5 self-center"
+														class=" bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full p-[0.3125rem] self-center"
 														type="button"
 														on:click={async () => {
 															if (selectedModels.length > 1) {
@@ -2637,7 +3132,7 @@
 
 																showCallOverlay.set(true);
 																showControls.set(true);
-															} catch (err) {
+															} catch {
 																// If the user denies the permission or an error occurs, show an error message
 																toast.error(
 																	$i18n.t('Permission denied when accessing media devices')
@@ -2661,7 +3156,7 @@
 														id="send-message-button"
 														class="{!(prompt === '' && files.length === 0) || uploadPending
 															? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
-															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-1.5 self-center"
+															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-[0.3125rem] self-center"
 														type="submit"
 														disabled={(prompt === '' && files.length === 0) || uploadPending}
 													>
@@ -2692,10 +3187,11 @@
 
 						{#if $config?.license_metadata?.input_footer}
 							<div class=" text-xs text-gray-500 text-center line-clamp-1 marked">
+								<!-- eslint-disable-next-line svelte/no-at-html-tags -- DOMPurify sanitizes the configured footer. -->
 								{@html DOMPurify.sanitize(marked($config?.license_metadata?.input_footer))}
 							</div>
 						{:else}
-							<div class="mb-1" />
+							<div class="mb-0.5"></div>
 						{/if}
 					</form>
 				</div>

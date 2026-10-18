@@ -1,0 +1,215 @@
+"""Verified-user routes for soev-api connections, schedule state and popup completion."""
+
+import json
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
+from open_webui.config import CORS_ALLOW_ORIGIN
+from open_webui.soev import capabilities, identity, silent_connect
+from open_webui.soev.availability import SoevRoute, require_soev
+from open_webui.soev.client import SoevApiError
+from open_webui.soev.cloud_sync import CloudSync
+from open_webui.soev.request_cache import request_cache
+from open_webui.utils.auth import get_verified_user
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
+router = APIRouter(route_class=SoevRoute)
+
+
+async def cloud_sync(request: Request, user=Depends(get_verified_user)):
+    from open_webui.soev.availability import ensure_configured
+
+    ensure_configured()
+    if 'knowledge_id' in request.path_params or request.url.path.endswith('/usage'):
+        await capabilities.require(capabilities.CLOUD_SYNC)
+    elif 'family' in request.path_params:
+        family = request.path_params['family']
+        await capabilities.require(capabilities.LIVE_MAIL if family == 'mail' else capabilities.LIVE_DOCUMENTS)
+    elif not await capabilities.refresh() & {
+        capabilities.CLOUD_SYNC,
+        capabilities.LIVE_DOCUMENTS,
+        capabilities.LIVE_MAIL,
+    }:
+        await capabilities.require(capabilities.CLOUD_SYNC)
+    try:
+        client = identity.build_client()
+        with request_cache():
+            yield CloudSync(client, await identity.acting_ref(user, client))
+    except SoevApiError as error:
+        detail = {'code': error.code, 'detail': error.detail}
+        if error.constraint is not None:
+            detail['constraint'] = error.constraint
+        raise HTTPException(status_code=error.status, detail=detail) from None
+
+
+class SyncPolicy(BaseModel):
+    providers_enabled: list[str]
+    scope_shapes_allowed: dict[str, list[str]]
+    min_cadence_minutes: int | None
+    default_cadence_minutes: int | None
+
+
+@router.get('/policy', response_model=SyncPolicy)
+async def get_policy(user: object = Depends(get_verified_user)) -> SyncPolicy:
+    if not await capabilities.has(capabilities.CLOUD_SYNC):
+        return SyncPolicy(
+            providers_enabled=[],
+            scope_shapes_allowed={},
+            min_cadence_minutes=None,
+            default_cadence_minutes=None,
+        )
+    try:
+        policy = await identity.build_client().get('/v1/sync-policy')
+    except SoevApiError as error:
+        detail = {'code': error.code, 'detail': error.detail}
+        if error.constraint is not None:
+            detail['constraint'] = error.constraint
+        raise HTTPException(status_code=error.status, detail=detail) from None
+    return SyncPolicy.model_validate(policy)
+
+
+class ConnectionForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    provider: Literal['onedrive', 'outlook_mail', 'google_drive', 'confluence']
+
+
+class ScheduleForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    connection_id: str = Field(min_length=1, max_length=256)
+    kind: Literal['content', 'acl_refresh']
+    scope: dict[str, JsonValue]
+    label: str | None = Field(default=None, max_length=512)
+    path: str | None = Field(default=None, max_length=512)
+    cadence_minutes: int | None = Field(default=None, gt=0)
+
+
+@router.post('/connections')
+async def create_connection(body: ConnectionForm, sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+    return await sync.create_connection(body.provider, owner_email=user.email)
+
+
+@router.get('/connections')
+async def list_connections(sync=Depends(cloud_sync)):
+    return await sync.connections()
+
+
+@router.get('/connections/{connection_id}')
+async def get_connection(connection_id: str, sync=Depends(cloud_sync)):
+    return await sync.connection(connection_id)
+
+
+@router.get('/connections/{connection_id}/usage')
+async def connection_usage(connection_id: str, sync=Depends(cloud_sync)):
+    return await sync.connection_usage(connection_id)
+
+
+@router.delete('/connections/{connection_id}', status_code=204)
+async def revoke_connection(connection_id: str, sync=Depends(cloud_sync)):
+    await sync.revoke_connection(connection_id)
+    return Response(status_code=204)
+
+
+@router.post('/connections/{connection_id}/authorize')
+async def authorize_connection(connection_id: str, sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+    connection = await sync.connection(connection_id)
+    owner_email = user.email if connection['source_kind'] == 'google_drive' else None
+    return await sync.authorize(connection_id, owner_email=owner_email)
+
+
+@router.get('/connect/done', response_class=HTMLResponse)
+async def connect_done(
+    request: Request,
+    connection: str,
+    result: Literal['pending', 'error', 'invalid', 'interaction_required'],
+    user=Depends(get_verified_user),
+):
+    # A silent reconnect arrives here as a top-level page, not a popup: continue its chain.
+    if await silent_connect.returned(user, connection):
+        return RedirectResponse(
+            await silent_connect.continue_chain(request, user, connection, result),
+            status_code=302,
+            headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'},
+        )
+    # Not capability-gated: the page only relays the popup's result to its opener.
+    data = json.dumps({'type': 'soev_connect', 'connection': connection, 'result': result}).replace('<', '\\u003c')
+    # The opener may live on another configured origin than this page (a dev
+    # stack serves the frontend and the API on different ports); a message to
+    # an origin the opener is not on is dropped by the browser, never seen.
+    origins = json.dumps(sorted(origin for origin in CORS_ALLOW_ORIGIN if origin != '*')).replace('<', '\\u003c')
+    return HTMLResponse(
+        '<!DOCTYPE html><html><body><script>'
+        f'if (window.opener) {{ for (const origin of new Set([window.location.origin, ...{origins}])) '
+        f'window.opener.postMessage({data}, origin); }}'
+        'window.close();</script></body></html>',
+        headers={'Cache-Control': 'no-store'},
+    )
+
+
+@router.post('/knowledge/{knowledge_id}/schedules', dependencies=[Depends(require_soev)])
+async def create_schedule(knowledge_id: str, body: ScheduleForm, sync=Depends(cloud_sync)):
+    return await sync.create_schedule(knowledge_id, body.model_dump(exclude_none=True))
+
+
+@router.delete(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}', status_code=204, dependencies=[Depends(require_soev)]
+)
+async def delete_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    await sync.schedule_action(knowledge_id, schedule_id, 'delete')
+    return Response(status_code=204)
+
+
+@router.get('/knowledge/{knowledge_id}/sync', dependencies=[Depends(require_soev)])
+async def sync_status(knowledge_id: str, sync=Depends(cloud_sync)):
+    return await sync.sync_status(knowledge_id)
+
+
+@router.post('/knowledge/{knowledge_id}/sync', dependencies=[Depends(require_soev)])
+async def sync_all(knowledge_id: str, sync=Depends(cloud_sync)):
+    return await sync.sync_all(knowledge_id)
+
+
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/run', status_code=201, dependencies=[Depends(require_soev)]
+)
+async def run_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    return await sync.schedule_action(knowledge_id, schedule_id, 'run')
+
+
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/cancel', status_code=204, dependencies=[Depends(require_soev)]
+)
+async def cancel_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    await sync.schedule_action(knowledge_id, schedule_id, 'cancel')
+    return Response(status_code=204)
+
+
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/suspend', status_code=204, dependencies=[Depends(require_soev)]
+)
+async def suspend_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    await sync.schedule_action(knowledge_id, schedule_id, 'suspend')
+    return Response(status_code=204)
+
+
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/resume', status_code=204, dependencies=[Depends(require_soev)]
+)
+async def resume_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    await sync.schedule_action(knowledge_id, schedule_id, 'resume')
+    return Response(status_code=204)
+
+
+@router.get('/knowledge/{knowledge_id}/schedules/{schedule_id}/skipped', dependencies=[Depends(require_soev)])
+async def skipped_items(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    return await sync.skipped_items(knowledge_id, schedule_id)
+
+
+@router.get('/connections/{connection_id}/live/{family}')
+async def live_grants(connection_id: str, family: Literal['live_documents', 'mail'], sync=Depends(cloud_sync)):
+    return await sync.live_grants(connection_id, family)
+
+
+@router.post('/connections/{connection_id}/live/{family}')
+async def enable_live_family(connection_id: str, family: Literal['live_documents', 'mail'], sync=Depends(cloud_sync)):
+    return await sync.enable_live_family(connection_id, family)

@@ -1,0 +1,11 @@
+{{- if eq .Values.openWebui.config.vectorDb "pgvector" -}}
+{{- if .Values.weaviate.enabled -}}
+{{- fail "set weaviate.enabled=false when vectorDb is pgvector" -}}
+{{- end -}}
+{{- if ne .Values.openWebui.config.databaseUser .Values.postgres.user -}}
+{{- fail "when openWebui.config.vectorDb is pgvector, set openWebui.config.databaseUser to match postgres.user" -}}
+{{- end -}}
+{{- if ne .Values.openWebui.config.databaseName .Values.postgres.database -}}
+{{- fail "when openWebui.config.vectorDb is pgvector, set openWebui.config.databaseName to match postgres.database" -}}
+{{- end -}}
+{{- end -}}

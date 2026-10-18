@@ -7,6 +7,7 @@ If you discover a security vulnerability in soev.ai, please report it privately.
 **Email:** `security@soev.ai`
 
 Please include:
+
 - A description of the vulnerability and its impact.
 - Steps to reproduce (or a proof-of-concept).
 - The affected version, branch, or commit.

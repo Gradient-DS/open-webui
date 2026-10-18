@@ -1,30 +1,25 @@
 <script lang="ts">
+	import { enabledProviders, loadSourcePolicy } from '$lib/sources/policy';
 	import dayjs from 'dayjs';
 
 	import { onMount, onDestroy, getContext, createEventDispatcher } from 'svelte';
 	import { searchNotes } from '$lib/apis/notes';
 	import { searchKnowledgeBases, searchKnowledgeFiles } from '$lib/apis/knowledge';
 
-	import { config } from '$lib/stores';
 	import { decodeString } from '$lib/utils';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Database from '$lib/components/icons/Database.svelte';
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
-	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
-	import Confluence from '$lib/components/icons/Confluence.svelte';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
 
-	export let onClose: Function = () => {};
+	export let onClose: () => void = () => {};
 	// When true, show a "New Knowledge" footer that creates a KB in-flow,
 	// offering the same type/cloud-sync choices as the workspace flow.
 	export let allowCreate = false;
@@ -42,12 +37,12 @@
 
 	$: items = [...noteItems, ...knowledgeItems, ...fileItems];
 
-	$: if (query !== undefined) {
+	const handleSearchInput = () => {
 		clearTimeout(searchDebounceTimer);
 		searchDebounceTimer = setTimeout(() => {
 			getItems();
 		}, 300);
-	}
+	};
 
 	onDestroy(() => {
 		clearTimeout(searchDebounceTimer);
@@ -85,6 +80,7 @@
 			knowledgeItems = res.items.map((note) => {
 				return {
 					...note,
+					knowledge_type: note.type,
 					type: 'collection'
 				};
 			});
@@ -109,6 +105,7 @@
 	};
 
 	onMount(async () => {
+		void loadSourcePolicy(localStorage.token);
 		getItems();
 	});
 </script>
@@ -119,6 +116,7 @@
 		if (e.detail === false) {
 			onClose();
 			query = '';
+			handleSearchInput();
 		}
 	}}
 >
@@ -126,16 +124,17 @@
 
 	<div slot="content">
 		<div
-			class="z-[10000] text-black dark:text-white rounded-2xl shadow-lg border border-gray-200 dark:border-gray-800 flex flex-col bg-white dark:bg-gray-850 w-70 p-1.5"
+			class="z-[10000] text-black dark:text-white rounded-xl shadow-lg border border-gray-200 dark:border-gray-800 flex flex-col bg-white dark:bg-gray-850 w-64 p-0.5"
 		>
-			<div class=" flex w-full space-x-2 px-2 pb-0.5">
+			<div class=" flex w-full space-x-1.5 px-1.5 pb-0.5">
 				<div class="flex flex-1">
-					<div class=" self-center mr-2">
+					<div class=" self-center mr-1.5">
 						<Search className="size-3.5" />
 					</div>
 					<input
-						class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
+						class="w-full text-[0.8125rem] py-0.5 outline-hidden bg-transparent"
 						bind:value={query}
+						on:input={handleSearchInput}
 						placeholder={$i18n.t('Search')}
 					/>
 				</div>
@@ -149,7 +148,7 @@
 				{:else}
 					{#each items as item, i}
 						{#if i === 0 || item?.type !== items[i - 1]?.type}
-							<div class="px-2 text-xs text-gray-500 py-1">
+							<div class="px-1.5 text-[0.6875rem] text-gray-500 py-0.5">
 								{#if item?.type === 'note'}
 									{$i18n.t('Notes')}
 								{:else if item?.type === 'collection'}
@@ -161,7 +160,7 @@
 						{/if}
 
 						<div
-							class=" px-2.5 py-1 rounded-xl w-full text-left flex justify-between items-center text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100 selected-command-option-button"
+							class="min-h-[1.6875rem] px-2 rounded-xl w-full text-left flex justify-between items-center text-[0.8125rem] bg-transparent transition-colors hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100 selected-command-option-button"
 						>
 							<button
 								class="w-full flex-1"
@@ -178,7 +177,7 @@
 											placement="top"
 											tippyOptions={{ zIndex: 100000 }}
 										>
-											<PageEdit className="size-4" />
+											<PageEdit className="size-3.5" />
 										</Tooltip>
 									{:else if item.type === 'collection'}
 										<Tooltip
@@ -186,7 +185,11 @@
 											placement="top"
 											tippyOptions={{ zIndex: 100000 }}
 										>
-											<Database className="size-4" />
+											<SourceItemIcon
+												kind="folder"
+												icon={FolderOpen}
+												provider={item.knowledge_type}
+											/>
 										</Tooltip>
 									{:else if item.type === 'file'}
 										<Tooltip
@@ -194,7 +197,7 @@
 											placement="top"
 											tippyOptions={{ zIndex: 100000 }}
 										>
-											<DocumentPage className="size-4" />
+											<DocumentPage className="size-3.5" />
 										</Tooltip>
 									{/if}
 
@@ -203,7 +206,7 @@
 										placement="top-start"
 										tippyOptions={{ zIndex: 100000 }}
 									>
-										<div class="line-clamp-1 flex-1 text-sm text-left">
+										<div class="line-clamp-1 flex-1 text-[0.8125rem] text-left">
 											{decodeString(item?.name)}
 										</div>
 									</Tooltip>
@@ -229,47 +232,19 @@
 						<div class="line-clamp-1">{$i18n.t('Local Knowledge Base')}</div>
 					</button>
 
-					{#if $config?.features?.enable_onedrive_integration}
+					{#each $enabledProviders as provider}
 						<button
 							class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
 							type="button"
 							on:click={() => {
-								dispatch('create', 'onedrive');
+								dispatch('create', provider.kind);
 								show = false;
 							}}
 						>
-							<OneDrive className="size-4" />
-							<div class="line-clamp-1">{$i18n.t('From OneDrive')}</div>
+							<svelte:component this={provider.icon} className="size-4" />
+							<div class="line-clamp-1">{$i18n.t('From {{label}}', { label: provider.label })}</div>
 						</button>
-					{/if}
-
-					{#if $config?.features?.enable_google_drive_integration && $config?.features?.enable_google_drive_sync}
-						<button
-							class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
-							type="button"
-							on:click={() => {
-								dispatch('create', 'google_drive');
-								show = false;
-							}}
-						>
-							<GoogleDrive className="size-4" />
-							<div class="line-clamp-1">{$i18n.t('From Google Drive')}</div>
-						</button>
-					{/if}
-
-					{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode === 'per_user' && $config?.features?.confluence_oauth_configured}
-						<button
-							class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
-							type="button"
-							on:click={() => {
-								dispatch('create', 'confluence');
-								show = false;
-							}}
-						>
-							<Confluence className="size-4" />
-							<div class="line-clamp-1">{$i18n.t('From Confluence')}</div>
-						</button>
-					{/if}
+					{/each}
 				</div>
 			{/if}
 		</div>

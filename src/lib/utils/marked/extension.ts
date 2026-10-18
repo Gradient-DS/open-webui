@@ -1,3 +1,5 @@
+import { DOCUMENT_OPEN, readDocument } from '../agentDocument';
+
 // Helper function to find matching closing tag
 function findMatchingClosingTag(src: string, openTag: string, closeTag: string): number {
 	let depth = 1;
@@ -63,6 +65,31 @@ function detailsStart(src: string) {
 	return src.match(/^<details[\s>]/) ? 0 : -1;
 }
 
+function lheadingTokenizer(this: any, src: string): any {
+	const cap = this.rules.block.lheading.exec(src);
+	const documentIndex = cap?.[0]?.search(DOCUMENT_OPEN) ?? -1;
+	if (cap && documentIndex > 0) {
+		const raw = src.slice(0, documentIndex);
+		return {
+			type: 'paragraph',
+			raw,
+			text: raw.trimEnd(),
+			tokens: this.lexer.inline(raw.trimEnd())
+		};
+	}
+	const detailsIndex = cap?.[1]?.search(/\n<details[\s>]/) ?? -1;
+	if (!cap || detailsIndex === -1) return false;
+
+	const raw = cap[1].slice(0, detailsIndex + 1);
+	const text = raw.slice(0, -1);
+	return {
+		type: 'paragraph',
+		raw,
+		text,
+		tokens: this.lexer.inline(text)
+	};
+}
+
 function detailsRenderer(token: any) {
 	const attributesString = token.attributes
 		? Object.entries(token.attributes)
@@ -87,8 +114,48 @@ function detailsExtension() {
 	};
 }
 
+function documentExtension() {
+	return {
+		name: 'document',
+		level: 'block',
+		start: (src: string) => src.search(DOCUMENT_OPEN),
+		tokenizer(src: string) {
+			const result = readDocument(src);
+			if (result) return { type: 'document', ...result };
+		},
+		renderer: () => ''
+	};
+}
+
+function underlineRenderer(this: any, token: any) {
+	return `<u>${this.parser.parseInline(token.tokens)}</u>`;
+}
+
+function underlineExtension() {
+	return {
+		name: 'underline',
+		level: 'inline',
+		start: (src: string) => src.indexOf('<u>'),
+		tokenizer(this: any, src: string) {
+			const match = /^<u>([\s\S]+?)<\/u>/.exec(src);
+			if (!match) return;
+
+			return {
+				type: 'underline',
+				raw: match[0],
+				text: match[1],
+				tokens: this.lexer.inlineTokens(match[1])
+			};
+		},
+		renderer: underlineRenderer
+	};
+}
+
 export default function (options = {}) {
 	return {
-		extensions: [detailsExtension(options)]
+		tokenizer: {
+			lheading: lheadingTokenizer as any
+		},
+		extensions: [detailsExtension(), documentExtension(), underlineExtension()]
 	};
 }

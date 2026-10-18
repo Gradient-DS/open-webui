@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -7,26 +7,17 @@
 		isAdminSettingsTabEnabled,
 		getFirstAvailableAdminSettingsTab
 	} from '$lib/utils/features';
-	import Settings from '$lib/components/admin/Settings.svelte';
-
+	// [Gradient] Legacy admin routes open the gated settings modal.
 	onMount(() => {
-		// Check if admin settings is disabled entirely
 		if (!isAdminSettingsEnabled()) {
-			goto('/admin');
+			goto('/admin', { replaceState: true });
 			return;
 		}
-
-		// Check if the specific tab is disabled
-		const tab = $page.params.tab;
-		if (!isAdminSettingsTabEnabled(tab)) {
-			const firstTab = getFirstAvailableAdminSettingsTab();
-			if (firstTab) {
-				goto(`/admin/settings/${firstTab}`);
-			} else {
-				goto('/admin');
-			}
-		}
+		const requested = $page.params.tab;
+		const tab =
+			requested && isAdminSettingsTabEnabled(requested)
+				? requested
+				: getFirstAvailableAdminSettingsTab();
+		goto(tab ? '/?settings=admin:' + tab : '/admin', { replaceState: true });
 	});
 </script>
-
-<Settings />

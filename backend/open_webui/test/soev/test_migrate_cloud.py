@@ -1,0 +1,382 @@
+"""Migrate legacy cloud sources through owner-scoped, replayable HTTP requests."""
+
+import copy
+import hashlib
+import importlib
+import json
+from types import SimpleNamespace
+
+import httpx
+import pytest
+import pytest_asyncio
+from open_webui.soev import migrate
+from open_webui.test.soev.fake_api import FakeSoevApi, Problem
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+
+class CloudApi(FakeSoevApi):
+    def __init__(self):
+        super().__init__(page_size=1)
+        self.connections = {}
+        self.connection_owners = {}
+        self.min_cadence_minutes = 37
+
+    def _route(self, request, body, credential, subject):
+        path = request.url.path
+        if path == '/v1/sync-policy' and request.method == 'GET':
+            return httpx.Response(200, json={'min_cadence_minutes': self.min_cadence_minutes})
+        if path not in {'/v1/connections', '/v1/schedules'} or request.method != 'POST':
+            return super()._route(request, body, credential, subject)
+        self._require(credential, 'connect')
+        if subject is None:
+            raise Problem(403, 'subject_required')
+        if path == '/v1/connections':
+            assert set(body) == {'source_kind', 'credential_kind'}
+            assert body['credential_kind'] == 'user_oauth'
+            connection_id = f'connection-{len(self.connections)}'
+            row = {'id': connection_id, **body, 'lifecycle': 'pending'}
+            self.connections[connection_id] = row
+            self.connection_owners[connection_id] = subject
+        else:
+            assert {'connection_id', 'kind', 'scope', 'cadence_minutes', 'collection_key'} <= set(body)
+            assert set(body) <= {'connection_id', 'kind', 'scope', 'label', 'path', 'cadence_minutes', 'collection_key'}
+            connection_id = body['connection_id']
+            assert self.connection_owners[connection_id] == subject
+            self._collection(body['collection_key'], credential, subject, write=True)
+            assert body['cadence_minutes'] >= self.min_cadence_minutes
+            # Like soev-api: one schedule per connection, kind and scope, stored under its corpus key.
+            row = next(
+                (
+                    row
+                    for row in self.schedules.values()
+                    if (row['connection_id'], row['kind'], row['scope']) == (connection_id, body['kind'], body['scope'])
+                ),
+                None,
+            )
+            if row is None:
+                schedule_id = f'schedule-{len(self.schedules)}'
+                row = {
+                    'id': schedule_id,
+                    **body,
+                    'collection_key': f'corpus-{connection_id}-{len(self.schedules)}',
+                    'source_kind': self.connections[connection_id]['source_kind'],
+                    'lifecycle': 'enabled',
+                    'subscribers': [],
+                }
+                self.schedules[schedule_id] = row
+                self.schedule_owners[schedule_id] = subject
+            elif body['collection_key'] in row['subscribers']:
+                raise Problem(409, 'schedule_exists')
+            row['subscribers'].append(body['collection_key'])
+        return httpx.Response(201, json=row)
+
+
+@pytest_asyncio.fixture
+async def env(identity_config, fake_api, monkeypatch):
+    """Use real SQL reads and signed HTTP with no deployment credentials or SQL writes."""
+    identity, _ = identity_config
+    api = CloudApi()
+    api.signing_keys = fake_api.signing_keys
+    api.audience = fake_api.audience
+    api.capabilities['soev_test_cred-runtime_test-secret'] = {'connect', 'directory', 'read', 'write'}
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        'open_webui.soev.client.httpx.AsyncClient',
+        lambda **kwargs: original_client(transport=httpx.MockTransport(api.handle), **kwargs),
+    )
+    database = importlib.import_module('open_webui.internal.db')
+    knowledge = importlib.import_module('open_webui.models.knowledge')
+    users = importlib.import_module('open_webui.models.users')
+    groups = importlib.import_module('open_webui.models.groups')
+    access = importlib.import_module('open_webui.models.access_grants')
+    files = importlib.import_module('open_webui.models.files')
+    monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
+    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    tables = [
+        users.User,
+        groups.Group,
+        groups.GroupMember,
+        knowledge.Knowledge,
+        knowledge.KnowledgeFile,
+        knowledge.KnowledgeDirectory,
+        access.AccessGrant,
+        files.File,
+    ]
+    async with engine.begin() as connection:
+        await connection.run_sync(
+            lambda sync: database.Base.metadata.create_all(sync, tables=[table.__table__ for table in tables])
+        )
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        for user_id in ('alice', 'bob'):
+            await users.Users.insert_new_user(user_id, user_id, f'{user_id}@example.test', role='user', db=db)
+
+        async def seed(provider='onedrive', *, source_type='folder', owner='alice', sources=None, kb_id=None):
+            source = {'type': source_type, 'item_id': 'item-1', 'name': 'Source', 'item_path': '/Source'}
+            if provider == 'onedrive':
+                source['drive_id'] = 'drive-1'
+            kb = knowledge.Knowledge(
+                id=kb_id or f'{provider}-{owner}',
+                user_id=owner,
+                type=provider,
+                name='Cloud',
+                description='Cloud notes',
+                meta={
+                    f'{provider}_sync': {
+                        'sources': [source] if sources is None else sources,
+                        'delta_link': 'old-cursor',
+                    }
+                },
+                created_at=1,
+                updated_at=1,
+            )
+            db.add(kb)
+            await db.commit()
+            return kb
+
+        def read_only(_connection, _cursor, statement, _parameters, _context, _many):
+            assert statement.lstrip().upper().startswith('SELECT'), 'Migration attempted a SQL write'
+
+        async def run(*, dry_run=False):
+            event.listen(engine.sync_engine, 'before_cursor_execute', read_only)
+            try:
+                return await migrate.migrate(db=db, dry_run=dry_run)
+            finally:
+                event.remove(engine.sync_engine, 'before_cursor_execute', read_only)
+
+        async def link_file(kb, relative_path):
+            db.add(files.File(id=f'file-{kb.id}', user_id=kb.user_id, filename='a.pdf', created_at=1, updated_at=1))
+            db.add(
+                knowledge.KnowledgeFile(
+                    id=f'link-{kb.id}',
+                    knowledge_id=kb.id,
+                    file_id=f'file-{kb.id}',
+                    user_id=kb.user_id,
+                    relative_path=relative_path,
+                    created_at=1,
+                    updated_at=1,
+                )
+            )
+            await db.commit()
+
+        yield SimpleNamespace(api=api, identity=identity, seed=seed, run=run, db=db, link_file=link_file)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_onedrive_kb_becomes_a_pending_connection_and_two_schedules(env, capsys):
+    """A folder retains its owner, source and collection with both schedule kinds at the policy floor."""
+    kb = await env.seed()
+    assert await env.run() == 0
+    assert list(env.api.connections.values()) == [
+        {'id': 'connection-0', 'source_kind': 'onedrive', 'credential_kind': 'user_oauth', 'lifecycle': 'pending'}
+    ]
+    assert env.api.connection_owners == {'connection-0': 'owui:user:alice'}
+    schedules = list(env.api.schedules.values())
+    assert [row['kind'] for row in schedules] == ['content', 'acl_refresh']
+    for row in schedules:
+        assert row['connection_id'] == 'connection-0'
+        assert row['subscribers'] == [kb.id]
+        assert row['cadence_minutes'] == 37
+        assert (row['label'], row['path']) == ('Source', '/Source')
+        assert row['scope'] == {
+            'drive_id': 'drive-1',
+            'item_id': 'item-1',
+            'include_descendants': True,
+            'single_file': False,
+        }
+    writes = [r for r in env.api.requests if r.url.path in {'/v1/connections', '/v1/schedules'} and r.method == 'POST']
+    digest = hashlib.sha256(json.dumps(schedules[0]['scope'], sort_keys=True).encode()).hexdigest()
+    assert [r.headers['Idempotency-Key'] for r in writes] == [
+        'migrate:connection:owui:user:alice:onedrive',
+        f'migrate:schedule:{kb.id}:content:{digest}',
+        f'migrate:schedule:{kb.id}:acl_refresh:{digest}',
+    ]
+    paths = [r.url.path for r in env.api.requests]
+    assert paths.index('/v1/collections') < paths.index('/v1/connections')
+    assert 'KBs with a schedule: 1 | KBs of a cloud type: 1' in capsys.readouterr().out
+    env.api.schedules.clear()
+    await migrate.reconcile(
+        {kb.id: 0},
+        env.identity.build_client(),
+        conflicts=set(),
+        cloud_owners={kb.id: 'owui:user:alice'},
+    )
+    assert 'KBs with a schedule: 0 | KBs of a cloud type: 1' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'provider,source_type', [('onedrive', 'file'), ('google_drive', 'file'), ('google_drive', 'folder')]
+)
+async def test_a_single_file_source_maps_to_single_file_scope(env, provider, source_type):
+    """Legacy item ids map to provider scopes with recursion disabled for individual files."""
+    await env.seed(provider, source_type=source_type)
+    assert await env.run() == 0
+    expected = (
+        {'drive_id': 'drive-1', 'item_id': 'item-1', 'include_descendants': False, 'single_file': True}
+        if provider == 'onedrive'
+        else {'file_id': 'item-1', 'drive_id': None, 'include_descendants': source_type == 'folder'}
+    )
+    assert len(env.api.schedules) == 2
+    assert all(row['scope'] == expected for row in env.api.schedules.values())
+
+
+@pytest.mark.asyncio
+async def test_a_confluence_kb_is_reported_and_skipped(env, capsys):
+    """Confluence keeps collection migration but creates no connection or schedules."""
+    kb = await env.seed('confluence')
+    assert await env.run() == 0
+    output = capsys.readouterr().out
+    assert f'{kb.id}: Confluence cloud sync skipped (D10)' in output
+    assert 'KBs with a schedule: 0 | KBs of a cloud type: 1' in output
+    assert kb.id in env.api.collections
+    assert not env.api.connections and not env.api.schedules
+    assert not any(r.url.path == '/v1/sync-policy' for r in env.api.requests)
+
+
+@pytest.mark.asyncio
+async def test_dry_run_sends_nothing(env, capsys):
+    """Preview includes both providers and skipped Confluence without HTTP or minted assertions."""
+    for provider in ('onedrive', 'google_drive', 'confluence'):
+        await env.seed(provider)
+    assert await env.run(dry_run=True) == 0
+    output = capsys.readouterr().out
+    assert not env.api.requests and not env.identity._linked_refs
+    planned = [json.loads(line) for line in output.splitlines() if line.startswith('{')]
+    connections = [row for row in planned if row['path'] == '/v1/connections']
+    schedules = [row for row in planned if row['path'] == '/v1/schedules']
+    assert len(connections) == 2 and len(schedules) == 4
+    assert all(row['as_user'] == 'owui:user:alice' for row in connections + schedules)
+    assert all(row['body']['cadence_minutes'] == '<sync-policy.min_cadence_minutes>' for row in schedules)
+    assert all(row['body']['connection_id'].startswith('<connection:') for row in schedules)
+    assert all(row['body']['label'] == '<redacted>' for row in schedules)
+    assert 'Cloud notes' not in output and '"Source"' not in output and '/Source' not in output
+    assert 'KBs with a schedule: not read (dry-run) | KBs of a cloud type: 3' in output
+    assert 'soev_test_cred-runtime_test-secret' not in output and 'PRIVATE KEY' not in output and 'eyJ' not in output
+
+
+@pytest.mark.asyncio
+async def test_rerun_creates_nothing_new(env, capsys):
+    """Multiple owners and sources survive both cached-link and fresh-process idempotent reruns."""
+    await env.seed()
+    await env.seed(
+        'google_drive',
+        owner='bob',
+        sources=[
+            {'type': 'folder', 'item_id': 'folder', 'drive_id': 'shared-drive'},
+            {'type': 'file', 'item_id': 'file'},
+        ],
+    )
+    assert await env.run() == 0
+    before = copy.deepcopy((env.api.connections, env.api.schedules, env.api.collections))
+    assert len(env.api.connections) == 2 and len(env.api.schedules) == 6
+    assert env.api.connection_owners == {'connection-0': 'owui:user:bob', 'connection-1': 'owui:user:alice'}
+    assert [row['scope']['drive_id'] for row in list(env.api.schedules.values())[:4]] == [
+        'shared-drive',
+        'shared-drive',
+        None,
+        None,
+    ]
+    assert not any('label' in row or 'path' in row for row in list(env.api.schedules.values())[:4])
+    for clear_links in (False, True):
+        if clear_links:
+            env.identity._linked_refs.clear()
+        assert await env.run() == 0
+        assert (env.api.connections, env.api.schedules, env.api.collections) == before
+    assert capsys.readouterr().out.count('KBs with a schedule: 2 | KBs of a cloud type: 2') == 3
+    schedule_reads = [r for r in env.api.requests if r.url.path == '/v1/schedules' and r.method == 'GET']
+    assert all('X-Soev-Subject' in r.headers for r in schedule_reads)
+    assert any('cursor' in r.url.params for r in schedule_reads)
+
+
+@pytest.mark.asyncio
+async def test_coverage_counts_subscribers_not_the_corpus_key(env, capsys):
+    """Staging printed 0 schedules: soev-api stores the corpus key and lists the KB under subscribers."""
+    kb = await env.seed()
+    assert await env.run() == 0
+    assert all(row['collection_key'] != kb.id for row in env.api.schedules.values())
+    assert 'KBs with a schedule: 1 | KBs of a cloud type: 1' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_a_rerun_after_the_sources_change_keeps_old_schedules_and_adds_new(env, capsys):
+    """A source added in front of the old one must not reuse the old one's key for another scope."""
+    kb = await env.seed()
+    assert await env.run() == 0
+    before = copy.deepcopy(env.api.schedules)
+    added = {'type': 'folder', 'item_id': 'item-0', 'drive_id': 'drive-1', 'name': 'New', 'item_path': '/New'}
+    kb.meta = {'onedrive_sync': {'sources': [added, *kb.meta['onedrive_sync']['sources']]}}
+    await env.db.commit()
+    assert await env.run() == 0
+    assert {key: env.api.schedules[key] for key in before} == before
+    assert sorted(row['scope']['item_id'] for row in env.api.schedules.values()) == [
+        'item-0',
+        'item-0',
+        'item-1',
+        'item-1',
+    ]
+    assert 'KBs with a schedule: 1 | KBs of a cloud type: 1' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_a_scope_subscribed_under_another_key_is_kept(env, capsys):
+    """Schedules from a run with the old position keys answer schedule_exists; the run goes on."""
+    kb = await env.seed()
+    assert await env.run() == 0
+    before = copy.deepcopy(env.api.schedules)
+    for key in [key for key in env.api.replays if key[1].startswith('migrate:schedule:')]:
+        del env.api.replays[key]
+    assert await env.run() == 0
+    assert env.api.schedules == before
+    output = capsys.readouterr().out
+    assert f'{kb.id}: content schedule exists for this scope; kept' in output
+    assert f'{kb.id}: acl_refresh schedule exists for this scope; kept' in output
+
+
+@pytest.mark.asyncio
+async def test_an_owners_cloud_kbs_share_one_connection_and_no_legacy_folders(env):
+    """One reconnect restores every KB of an owner; sync, not legacy folders, shapes the tree."""
+    first = await env.seed()
+    second = await env.seed(
+        sources=[
+            {
+                'type': 'folder',
+                'item_id': 'item-2',
+                'drive_id': 'drive-1',
+                'name': 'Q3',
+                'item_path': '/drive/root:/Team/Q3/',
+            }
+        ],
+        kb_id='onedrive-second',
+    )
+    await env.link_file(first, 'Source/Sub/a.pdf')
+    assert await env.run() == 0
+    assert list(env.api.connection_owners.values()) == ['owui:user:alice']
+    labels = {row['subscribers'][0]: row['label'] for row in env.api.schedules.values()}
+    assert labels == {first.id: 'Source', second.id: 'Q3'}
+    assert not any(r.url.path.endswith('/folders') for r in env.api.requests)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
+async def test_cloud_collections_keep_their_kind_and_drop_legacy_grants(env, provider, capsys):
+    access = importlib.import_module('open_webui.models.access_grants')
+    kb = await env.seed(provider)
+    await access.AccessGrantsTable().set_access_grants(
+        'knowledge',
+        kb.id,
+        [{'principal_type': 'user', 'principal_id': 'bob', 'permission': 'write'}],
+        db=env.db,
+    )
+    assert await env.run() == 0
+    row = env.api.collections[kb.id]
+    assert row['source_kind'] == provider
+    assert row['principals'] == row['writers'] == ['owui:user:alice']
+    request = next(r for r in env.api.requests if r.method == 'POST' and r.url.path == '/v1/collections')
+    body = json.loads(request.content)
+    assert body['source_kind'] == provider
+    assert body['principals'] == body['writers'] == []
+    output = capsys.readouterr().out
+    assert f'{kb.id}: dropped cloud grant user:bob:write' in output
+    assert '4 directory: dropped cloud grants 1' in output

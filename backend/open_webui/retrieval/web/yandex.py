@@ -1,20 +1,17 @@
 import base64
 import io
-import json
 import logging
 import os
-from typing import Optional, List
-
-import requests
-
-from fastapi import Request
-
-from open_webui.retrieval.web.main import SearchResult, get_filtered_results
-from open_webui.utils.headers import include_user_info_headers
-from open_webui.env import FORWARD_SESSION_INFO_HEADER_CHAT_ID
-
+from typing import List, Optional
 from xml.etree import ElementTree as ET
 from xml.etree.ElementTree import Element
+
+import requests
+from fastapi import Request
+from open_webui.env import FORWARD_SESSION_INFO_HEADER_CHAT_ID
+from open_webui.retrieval.web.main import SearchResult, get_filtered_results
+from open_webui.utils.headers import include_user_info_headers
+from open_webui.utils.json_codec import JSONCodec
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +41,9 @@ def search_yandex(
 ) -> List[SearchResult]:
     try:
         headers = {
+            # LICENSE covers this Open WebUI user-agent identifier.
+            # Do not alter, remove, obscure, or replace it except as LICENSE permits:
+            # https://docs.openwebui.com/license.
             'User-Agent': 'Open WebUI (https://github.com/open-webui/open-webui) RAG Bot',
             'Authorization': f'Api-Key {yandex_search_api_key}',
         }
@@ -55,7 +55,7 @@ def search_yandex(
         if chat_id:
             headers[FORWARD_SESSION_INFO_HEADER_CHAT_ID] = str(chat_id)
 
-        payload = {} if yandex_search_config == '' else json.loads(yandex_search_config)
+        payload = {} if yandex_search_config == '' else JSONCodec.loads(yandex_search_config)
 
         if type(payload.get('query', None)) != dict:
             payload['query'] = {}
@@ -88,7 +88,11 @@ def search_yandex(
 
         search_result_body_bytes = base64.decodebytes(bytes(response_body['rawData'], 'utf-8'))
 
-        doc_root = ET.parse(io.BytesIO(search_result_body_bytes))
+        # nosec B314 - the document is the base64 payload of an
+        # authenticated HTTPS response from Yandex's own search API, not
+        # user-supplied input. stdlib ElementTree does not resolve external
+        # entities, so the remaining B314 concern (XXE) does not apply.
+        doc_root = ET.parse(io.BytesIO(search_result_body_bytes))  # nosec B314
 
         results = []
 
@@ -122,8 +126,8 @@ def search_yandex(
 
 
 if __name__ == '__main__':
-    from starlette.datastructures import Headers
     from fastapi import FastAPI
+    from starlette.datastructures import Headers
 
     result = search_yandex(
         Request(

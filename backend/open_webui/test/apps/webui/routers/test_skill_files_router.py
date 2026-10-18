@@ -81,7 +81,7 @@ def _make_skill_file_record(
 def _make_app(user: SimpleNamespace | None = None):
     """Build a minimal FastAPI app with the skill_files router mounted."""
     if user is None:
-        user = SimpleNamespace(id='user-1', role='user', email='lex@gradient-ds.com', name='Lex')
+        user = SimpleNamespace(id='user-1', role='user', email='jan@example.com', name='Jan Jansen')
 
     app = FastAPI()
     app.include_router(skill_files_router_module.router, prefix='/api/v1/skills')

@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { marked } from 'marked';
+	import { FEATURE_TOGGLES } from '$lib/utils/assistantCapabilities';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<i18nType> = getContext('i18n');
 
 	const featureLabels = {
 		web_search: {
@@ -20,43 +23,62 @@
 			description: $i18n.t('Model can execute code and perform calculations')
 		},
 		document_writer: {
-			label: $i18n.t('Document Writer'),
+			label: $i18n.t('Document writer'),
 			description: $i18n.t('Model can write and create downloadable documents')
+		},
+		live_documents: {
+			label: $i18n.t('OneDrive search'),
+			description: $i18n.t("Model can search the user's OneDrive files")
+		},
+		live_mail: {
+			label: $i18n.t('Mail search'),
+			description: $i18n.t("Model can search the user's mail")
 		}
 	};
 
-	export let availableFeatures = [
-		'web_search',
-		'image_generation',
-		'code_interpreter',
-		'document_writer'
-	];
-	export let featureIds = [];
+	type Feature = keyof typeof featureLabels;
+
+	export let availableFeatures: string[] = [...FEATURE_TOGGLES];
+	export let featureIds: string[] = [];
+
+	const getFeatureLabel = (feature: string) => featureLabels[feature as Feature];
+
+	const setFeature = (feature: string, checked: boolean) => {
+		if (checked) {
+			if (!featureIds.includes(feature)) {
+				featureIds = [...featureIds, feature];
+			}
+		} else {
+			featureIds = featureIds.filter((id) => id !== feature);
+		}
+	};
 </script>
 
 <div>
-	<div class="flex w-full justify-between mb-1">
-		<div class=" self-center text-xs font-medium text-gray-500">{$i18n.t('Default Features')}</div>
-	</div>
-	<div class="flex items-center mt-2 flex-wrap">
+	<div class="mb-1.5 text-xs text-gray-400 dark:text-gray-600">{$i18n.t('Default Features')}</div>
+	<div class="grid grid-cols-1 gap-x-5 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
 		{#each availableFeatures as feature}
-			<div class=" flex items-center gap-2 mr-3">
+			<div class="flex min-h-6 items-center gap-2.5">
 				<Checkbox
+					ariaLabel={$i18n.t(getFeatureLabel(feature).label)}
 					state={featureIds.includes(feature) ? 'checked' : 'unchecked'}
 					on:change={(e) => {
-						if (e.detail === 'checked') {
-							featureIds = [...featureIds, feature];
-						} else {
-							featureIds = featureIds.filter((id) => id !== feature);
-						}
+						setFeature(feature, e.detail === 'checked');
 					}}
 				/>
-
-				<div class=" py-0.5 text-sm capitalize">
-					<Tooltip content={marked.parse(featureLabels[feature].description)}>
-						{$i18n.t(featureLabels[feature].label)}
+				<button
+					type="button"
+					class="min-w-0 cursor-pointer text-left text-xs text-gray-600 dark:text-gray-400"
+					on:click={() => setFeature(feature, !featureIds.includes(feature))}
+				>
+					<Tooltip
+						as="span"
+						className="block min-w-0"
+						content={marked.parse(getFeatureLabel(feature).description)}
+					>
+						<span class="block truncate">{$i18n.t(getFeatureLabel(feature).label)}</span>
 					</Tooltip>
-				</div>
+				</button>
 			</div>
 		{/each}
 	</div>

@@ -1,56 +1,43 @@
 <script lang="ts">
+	import { enabledProviders } from '$lib/sources/policy';
+	import { providerFor, type SourceProvider } from '$lib/sources/registry';
 	import { getContext } from 'svelte';
-	const i18n = getContext('i18n');
+	import type { ComponentType } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
+	const i18n = getContext<Writable<I18n>>('i18n');
 
 	import ArrowUpCircle from '$lib/components/icons/ArrowUpCircle.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
-	import Confluence from '$lib/components/icons/Confluence.svelte';
 
 	export let knowledgeType: string = 'local';
-	export let integrationProviders: Record<string, any> = {};
+	export let integrationProviders: Record<string, unknown> = {};
 	export let onAction: (type: string) => void = () => {};
 
 	type UploadOption = {
 		type: string;
 		label: string;
-		icon: any;
+		icon: ComponentType;
 		description: string;
 	};
 
-	$: options = getOptions(knowledgeType);
+	$: options = getOptions(knowledgeType, $enabledProviders, $i18n);
 
-	function getOptions(type: string): UploadOption[] {
-		if (type === 'onedrive') {
+	// Literal keys, so the i18n parser finds them.
+	function getOptions(type: string, enabled: SourceProvider[], tr: I18n): UploadOption[] {
+		const provider = providerFor(type);
+		if (provider) {
+			if (!enabled.some((item) => item.kind === provider.kind)) return [];
 			return [
 				{
-					type: 'onedrive',
-					label: 'Sync from OneDrive',
-					icon: OneDrive,
-					description: 'Select files and folders to sync'
-				}
-			];
-		}
-		if (type === 'google_drive') {
-			return [
-				{
-					type: 'google_drive',
-					label: 'Sync from Google Drive',
-					icon: GoogleDrive,
-					description: 'Select files and folders to sync'
-				}
-			];
-		}
-		if (type === 'confluence') {
-			return [
-				{
-					type: 'confluence',
-					label: 'Sync from Confluence',
-					icon: Confluence,
-					description: 'Select spaces or pages to sync'
+					type: provider.kind,
+					label: tr.t('Sync from {{label}}', { label: provider.label }),
+					icon: provider.icon,
+					description: tr.t(
+						'Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.'
+					)
 				}
 			];
 		}
@@ -58,36 +45,36 @@
 			return [
 				{
 					type: 'integration',
-					label: 'Managed via integration API',
+					label: tr.t('Managed via integration API'),
 					icon: BarsArrowUp,
-					description: 'Documents are pushed to this knowledge base via the integration API'
+					description: tr.t('Documents are pushed to this knowledge base via the integration API')
 				}
 			];
 		}
 		return [
 			{
 				type: 'files',
-				label: 'Upload files',
+				label: tr.t('Upload files'),
 				icon: ArrowUpCircle,
-				description: 'Upload documents from your device'
+				description: tr.t('Upload documents from your device')
 			},
 			{
 				type: 'directory',
-				label: 'Upload directory',
+				label: tr.t('Upload directory'),
 				icon: FolderOpen,
-				description: 'Upload an entire folder'
+				description: tr.t('Upload an entire folder')
 			},
 			{
 				type: 'web',
-				label: 'Add webpage',
+				label: tr.t('Add webpage'),
 				icon: GlobeAlt,
-				description: 'Import content from a URL'
+				description: tr.t('Import content from a URL')
 			},
 			{
 				type: 'text',
-				label: 'Add text content',
+				label: tr.t('Add text content'),
 				icon: BarsArrowUp,
-				description: 'Paste or write text directly'
+				description: tr.t('Paste or write text directly')
 			}
 		];
 	}
@@ -124,10 +111,10 @@
 					<svelte:component this={option.icon} className="size-8" strokeWidth="1.5" />
 				</div>
 				<div class="text-sm font-medium text-gray-700 dark:text-gray-300">
-					{$i18n.t(option.label)}
+					{option.label}
 				</div>
 				<div class="text-xs text-gray-400 dark:text-gray-500">
-					{$i18n.t(option.description)}
+					{option.description}
 				</div>
 			</button>
 		{/each}

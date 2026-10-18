@@ -1,19 +1,16 @@
-import json
 import time
 import uuid
-from typing import Optional
 from functools import lru_cache
+from typing import Optional
 
-from sqlalchemy import Boolean, select, delete, update, or_, func, cast
-from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.internal.db import Base, get_async_db_context
-from open_webui.models.groups import Groups
-from open_webui.models.users import User, UserModel, Users, UserResponse
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants
-
-
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import BigInteger, Column, Text, JSON, ForeignKey
+from open_webui.models.groups import Groups
+from open_webui.models.users import User, UserModel, UserResponse, Users
+from open_webui.utils.json_codec import JSONCodec
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import JSON, BigInteger, Boolean, Column, ForeignKey, Text, delete, func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 ####################
 # Note DB Schema
@@ -34,6 +31,32 @@ class Note(Base):
     updated_at = Column(BigInteger)
 
 
+def sanitize_note_data(data: Optional[dict]) -> Optional[dict]:
+    """Sanitize malformed note.data so content.md is always markdown text."""
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        return {'content': {'md': str(data)}}
+
+    content = data.get('content')
+    if not isinstance(content, dict) or 'md' not in content or isinstance(content.get('md'), str):
+        return data
+
+    md = content.get('md') if content.get('md') is not None else ''
+    if isinstance(md, (dict, list)):
+        md = f'```json\n{JSONCodec.dumps(md, indent=2, ensure_ascii=False)}\n```'
+    else:
+        md = str(md)
+
+    return {
+        **data,
+        'content': {
+            **content,
+            'md': md,
+        },
+    }
+
+
 class NoteModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -49,6 +72,11 @@ class NoteModel(BaseModel):
 
     created_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
+
+    @field_validator('data', mode='before')
+    @classmethod
+    def sanitize_data(cls, data):
+        return sanitize_note_data(data)
 
 
 class PinnedNote(Base):
@@ -71,12 +99,22 @@ class NoteForm(BaseModel):
     meta: Optional[dict] = None
     access_grants: Optional[list[dict]] = None
 
+    @field_validator('data', mode='before')
+    @classmethod
+    def sanitize_data(cls, data):
+        return sanitize_note_data(data)
+
 
 class NoteUpdateForm(BaseModel):
     title: Optional[str] = None
     data: Optional[dict] = None
     meta: Optional[dict] = None
     access_grants: Optional[list[dict]] = None
+
+    @field_validator('data', mode='before')
+    @classmethod
+    def sanitize_data(cls, data):
+        return sanitize_note_data(data)
 
 
 class NoteUserResponse(NoteModel):
@@ -109,11 +147,12 @@ class NoteTable:
         db: Optional[AsyncSession] = None,
     ) -> NoteModel:
         # We exclude access_grants to inject them
-        note_data = NoteModel.model_validate(note).model_dump(exclude={'access_grants'})
-        note_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(note_data['id'], db=db)
+        note_model = NoteModel.model_validate(note)
+        note_model.data = note_model.data or {}
+        note_model.access_grants = (
+            access_grants if access_grants is not None else await self._get_access_grants(note_model.id, db=db)
         )
-        return NoteModel.model_validate(note_data)
+        return note_model
 
     def _has_permission(self, db, query, filter: dict, permission: str = 'read'):
         return AccessGrants.has_permission_filter(
@@ -183,7 +222,7 @@ class NoteTable:
                             or_(
                                 func.replace(func.replace(Note.title, '-', ''), ' ', '').ilike(f'%{word}%'),
                                 func.replace(
-                                    func.replace(cast(Note.data['content']['md'], Text), '-', ''),
+                                    func.replace(Note.data['content']['md'].as_string(), '-', ''),
                                     ' ',
                                     '',
                                 ).ilike(f'%{word}%'),
@@ -307,13 +346,17 @@ class NoteTable:
                 return None
 
             form_data = form_data.model_dump(exclude_unset=True)
+            note.data = sanitize_note_data(note.data) or {}
 
             if 'title' in form_data:
                 note.title = form_data['title']
             if 'data' in form_data:
-                note.data = {**note.data, **form_data['data']}
+                note.data = {**(note.data or {}), **(form_data['data'] or {})}
             if 'meta' in form_data:
-                note.meta = {**note.meta, **form_data['meta']}
+                note.meta = {**(note.meta or {}), **(form_data['meta'] or {})}
+
+            if not db.is_modified(note) and 'access_grants' not in form_data:
+                return await self._to_note_model(note, db=db)
 
             if 'access_grants' in form_data:
                 await AccessGrants.set_access_grants('note', id, form_data['access_grants'], db=db)

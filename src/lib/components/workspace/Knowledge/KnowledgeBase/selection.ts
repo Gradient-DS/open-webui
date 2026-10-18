@@ -2,16 +2,43 @@ import { writable, derived, get, type Readable } from 'svelte/store';
 
 export type SelectableItem =
 	| { key: string; label: string; kind: 'file'; fileId: string }
-	| { key: string; label: string; kind: 'source'; itemId: string; sourceName: string; fileCount: number };
+	| {
+			key: string;
+			label: string;
+			kind: 'source';
+			itemId: string;
+			sourceName: string;
+			fileCount: number;
+	  }
+	| { key: string; label: string; kind: 'directory'; dirId: string; fileCount: number };
 
-export const fileItem = (fileId: string, label: string): SelectableItem => ({
+export const fileItem = (
+	fileId: string,
+	label: string
+): Extract<SelectableItem, { kind: 'file' }> => ({
 	key: `file:${fileId}`,
 	label,
 	kind: 'file',
 	fileId
 });
 
-export const sourceItem = (itemId: string, label: string, fileCount = 1): SelectableItem => ({
+export const directoryItem = (
+	dirId: string,
+	label: string,
+	fileCount = 0
+): Extract<SelectableItem, { kind: 'directory' }> => ({
+	key: `dir:${dirId}`,
+	label,
+	kind: 'directory',
+	dirId,
+	fileCount
+});
+
+export const sourceItem = (
+	itemId: string,
+	label: string,
+	fileCount = 1
+): Extract<SelectableItem, { kind: 'source' }> => ({
 	key: `source:${itemId}`,
 	label,
 	kind: 'source',
@@ -25,7 +52,7 @@ type ClickModifiers = { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean
 export interface KbSelection {
 	selected: Readable<Map<string, SelectableItem>>;
 	count: Readable<number>;
-	breakdown: Readable<{ files: number; sources: number; totalFiles: number }>;
+	breakdown: Readable<{ files: number; sources: number; directories: number; totalFiles: number }>;
 	available: Readable<SelectableItem[]>;
 	allSelected: Readable<boolean>;
 	indeterminate: Readable<boolean>;
@@ -143,17 +170,21 @@ export function createKbSelection(): KbSelection {
 	const breakdown = derived(_selected, (m) => {
 		let files = 0;
 		let sources = 0;
+		let directories = 0;
 		let totalFiles = 0;
 		for (const it of m.values()) {
 			if (it.kind === 'file') {
 				files++;
 				totalFiles++;
+			} else if (it.kind === 'directory') {
+				directories++;
+				totalFiles += it.fileCount ?? 0;
 			} else {
 				sources++;
 				totalFiles += it.fileCount ?? 0;
 			}
 		}
-		return { files, sources, totalFiles };
+		return { files, sources, directories, totalFiles };
 	});
 	const allSelected = derived([_selected, _available], ([m, av]) => {
 		return av.length > 0 && av.every((it) => m.has(it.key));

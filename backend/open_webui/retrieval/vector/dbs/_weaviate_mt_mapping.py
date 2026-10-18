@@ -3,7 +3,7 @@
 Maps an OWUI logical collection_name to (mt_collection, tenant).
 
 WARNING: coupled to OWUI naming conventions (user-memory-/file-/web-search-/
-KB-UUID/hash). Changing OWUI naming without updating this AND the genai-utils
+KB-UUID/hash). Changing OWUI naming without updating this AND the soev-solutions
 copy risks routing data to the wrong tenant — data corruption.
 """
 

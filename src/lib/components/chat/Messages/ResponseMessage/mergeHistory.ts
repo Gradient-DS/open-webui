@@ -27,6 +27,10 @@ export type ReasoningItem = {
 export type TaggedStatus = StatusEntry & { kind: 'status' };
 export type MergedItem = TaggedStatus | ReasoningItem;
 
+// The turn's closing line: it heads the timeline and has no tool marker.
+const isSummary = (item: StatusEntry | MergedItem) =>
+	item.kind !== 'reasoning' && item.action === 'summary';
+
 // Which merge strategy applies to the current turn. The decision is the
 // single source of truth for "how do we render this": the dispatcher in
 // ``mergeStatusAndReasoning`` selects a strategy off this enum, and (after
@@ -98,9 +102,15 @@ function mergePositional(
 	// order).
 	const merged: MergedItem[] = [];
 	let reasoningIdx = 0;
+	let markerIdx = 0;
 	for (let i = 0; i < status.length; i++) {
-		const toolOffset = toolOffsets[i];
+		// A summary has no marker, so it never takes the next call's slot. One
+		// between calls holds its place; the closing one follows the last thought.
+		const summary = isSummary(status[i]);
+		const midTurn = summary && status.slice(i + 1).some((entry) => !isSummary(entry));
+		const toolOffset = summary ? undefined : toolOffsets[markerIdx++];
 		while (
+			!midTurn &&
 			reasoningIdx < reasoning.length &&
 			(toolOffset === undefined || reasoning[reasoningIdx].contentOffset < toolOffset)
 		) {
@@ -196,24 +206,35 @@ export function splitProseRuns(content: string): ContentBlock[] {
 
 export function buildResponseBlocks(
 	merged: MergedItem[],
-	content: string,
+	// A raw content string is cut into prose runs by character offset; the
+	// output path passes pre-positioned runs (``getOutputProseRuns``) whose
+	// offsets live on the ordinal anchor axis instead. Either way the prose
+	// MUST share ``toolOffsets``'s axis — mixing them is the bug this guards.
+	content: string | ContentBlock[],
 	toolOffsets: number[]
 ): ResponseBlock[] {
-	const prose = splitProseRuns(content);
+	const prose = typeof content === 'string' ? splitProseRuns(content) : content;
 	if (merged.length === 0) return prose;
 
 	// Position every timeline item on the same axis as the prose: a reasoning
 	// block already knows its offset, and the k-th status entry sits at the
 	// k-th tool marker. Status entries and markers are NOT guaranteed 1:1 (an
-	// entry can arrive while its marker is still in flight), so a surplus
-	// entry pins to the last known marker — that keeps it in the final tool
-	// group instead of stranding it after the answer.
+	// entry can arrive while its marker is still in flight, and the closing
+	// summary has none), so a surplus entry pins to the item before it in
+	// stream order. That keeps it in the final tool group instead of stranding
+	// it after the answer, and keeps a summary after the last thought, where it
+	// heads the group.
 	const lastToolOffset = toolOffsets.length > 0 ? toolOffsets[toolOffsets.length - 1] : 0;
 	let toolIdx = 0;
+	let previous = lastToolOffset;
 	const positioned = merged.map((item) => {
-		if (item.kind === 'reasoning') return { item, offset: item.contentOffset };
-		const offset = toolOffsets[toolIdx] ?? lastToolOffset;
-		toolIdx++;
+		const offset =
+			item.kind === 'reasoning'
+				? item.contentOffset
+				: isSummary(item)
+					? previous
+					: (toolOffsets[toolIdx++] ?? previous);
+		previous = offset;
 		return { item, offset };
 	});
 

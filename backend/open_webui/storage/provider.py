@@ -1,39 +1,39 @@
-import os
-import shutil
-import json
 import logging
+import os
 import re
+import shutil
 from abc import ABC, abstractmethod
-from typing import BinaryIO, Tuple, Dict
+from typing import BinaryIO, Dict, Tuple
 
 import boto3
+from azure.core.exceptions import ResourceNotFoundError
+from azure.identity import DefaultAzureCredential
+from azure.storage.blob import BlobServiceClient
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from google.cloud import storage
+from google.cloud.exceptions import GoogleCloudError, NotFound
 from open_webui.config import (
+    AZURE_STORAGE_CONTAINER_NAME,
+    AZURE_STORAGE_ENDPOINT,
+    AZURE_STORAGE_KEY,
+    GCS_BUCKET_NAME,
+    GOOGLE_APPLICATION_CREDENTIALS_JSON,
     S3_ACCESS_KEY_ID,
+    S3_ADDRESSING_STYLE,
     S3_BUCKET_NAME,
+    S3_ENABLE_TAGGING,
     S3_ENDPOINT_URL,
     S3_KEY_PREFIX,
     S3_REGION_NAME,
     S3_SECRET_ACCESS_KEY,
     S3_USE_ACCELERATE_ENDPOINT,
-    S3_ADDRESSING_STYLE,
-    S3_ENABLE_TAGGING,
     S3_VERIFY_SSL,
-    GCS_BUCKET_NAME,
-    GOOGLE_APPLICATION_CREDENTIALS_JSON,
-    AZURE_STORAGE_ENDPOINT,
-    AZURE_STORAGE_CONTAINER_NAME,
-    AZURE_STORAGE_KEY,
     STORAGE_PROVIDER,
     UPLOAD_DIR,
 )
-from google.cloud import storage
-from google.cloud.exceptions import GoogleCloudError, NotFound
 from open_webui.constants import ERROR_MESSAGES
-from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient
-from azure.core.exceptions import ResourceNotFoundError
+from open_webui.utils.json_codec import JSONCodec
 
 log = logging.getLogger(__name__)
 
@@ -232,6 +232,9 @@ class S3StorageProvider(StorageProvider):
             self.s3_client.download_file(self.bucket_name, s3_key, local_file_path)
             return local_file_path
         except ClientError as e:
+            # [Gradient] A missing object is a missing file, as on local storage, not a storage fault.
+            if e.response.get('Error', {}).get('Code') in ('404', 'NoSuchKey'):
+                raise FileNotFoundError(f'S3 object not found: {file_path}') from e
             raise RuntimeError(f'Error downloading file from S3: {e}')
 
     def get_presigned_url(self, file_path: str, expires_in: int) -> str:
@@ -341,7 +344,7 @@ class GCSStorageProvider(StorageProvider):
 
         if GOOGLE_APPLICATION_CREDENTIALS_JSON:
             self.gcs_client = storage.Client.from_service_account_info(
-                info=json.loads(GOOGLE_APPLICATION_CREDENTIALS_JSON)
+                info=JSONCodec.loads(GOOGLE_APPLICATION_CREDENTIALS_JSON)
             )
         else:
             # if no credentials json is provided, credentials will be picked up from the environment

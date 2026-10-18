@@ -10,7 +10,7 @@
 	dayjs.extend(isYesterday);
 	dayjs.extend(localizedFormat);
 
-	import { getContext, onMount } from 'svelte';
+	import { getContext } from 'svelte';
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	import { formatDate } from '$lib/utils';
@@ -20,6 +20,8 @@
 	import { getMessageData } from '$lib/apis/channels';
 
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
+	import StructuredOutputRenderer from '$lib/components/chat/Messages/StructuredOutputRenderer.svelte';
+	import { buildOutputDisplayItems } from '$lib/components/chat/Messages/structuredOutput';
 	import ProfileImage from '$lib/components/chat/Messages/ProfileImage.svelte';
 	import Name from '$lib/components/chat/Messages/Name.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -47,6 +49,7 @@
 
 	export let showUserProfile = true;
 	export let thread = false;
+	export let id: string | null = null;
 
 	export let replyToMessage = false;
 	export let disabled = false;
@@ -64,6 +67,12 @@
 	let edit = false;
 	let editedContent = null;
 	let showDeleteConfirmDialog = false;
+	$: renderedMessageId = message ? (id ? `${id}-${message.id}` : message.id) : null;
+	$: replyToMessageId = message?.reply_to_message
+		? id
+			? `${id}-${message.reply_to_message.id}`
+			: message.reply_to_message.id
+		: null;
 
 	// Swipe-to-reply state
 	let swipeStartX = 0;
@@ -137,11 +146,12 @@
 		}
 	};
 
-	onMount(async () => {
-		if (message && message?.data === true) {
-			await loadMessageData();
-		}
-	});
+	$: if (message?.data === true) {
+		loadMessageData();
+	}
+
+	$: messageOutput = Array.isArray(message?.data?.output) ? message.data.output : [];
+	$: hasStructuredOutput = buildOutputDisplayItems(messageOutput).length > 0;
 </script>
 
 <ConfirmDialog
@@ -177,7 +187,7 @@
 		{/if}
 
 		<div
-			id="message-{message.id}"
+			id="message-{renderedMessageId}"
 			class="flex flex-col justify-between w-full max-w-full mx-auto group hover:bg-gray-300/5 dark:hover:bg-gray-700/5 relative {className
 				? className
 				: `px-5 ${
@@ -197,9 +207,7 @@
 				: 'transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);'}"
 		>
 			{#if !edit && !disabled}
-				<div
-					class=" absolute {showButtons ? '' : 'invisible group-hover:visible'} right-1 -top-2 z-10"
-				>
+				<div class=" absolute {showButtons ? '' : 'hover-reveal'} right-1 -top-7 z-30">
 					<div
 						class="flex gap-1 rounded-lg bg-white dark:bg-gray-850 shadow-md p-0.5 border border-gray-100/30 dark:border-gray-850/30"
 					>
@@ -307,15 +315,13 @@
 			{#if message?.reply_to_message?.user}
 				<div class="relative text-xs mb-1">
 					<div
-						class="absolute h-3 w-7 left-[18px] top-2 rounded-tl-lg border-t-[1.5px] border-l-[1.5px] border-gray-200 dark:border-gray-700 z-0"
+						class="absolute h-3 w-7 left-[1.125rem] top-2 rounded-tl-lg border-t-[1.5px] border-l-[1.5px] border-gray-200 dark:border-gray-700 z-0"
 					></div>
 
 					<button
 						class="ml-12 flex items-center space-x-2 relative z-0"
 						on:click={() => {
-							const messageElement = document.getElementById(
-								`message-${message.reply_to_message.id}`
-							);
+							const messageElement = document.getElementById(`message-${replyToMessageId}`);
 							if (messageElement) {
 								messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
 								messageElement.classList.add('highlight');
@@ -333,6 +339,9 @@
 									message.reply_to_message.meta.model_id}
 								class="size-4 ml-0.5 rounded-full object-cover"
 								on:error={(e) => {
+									// LICENSE covers this Open WebUI fallback logo.
+									// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+									// https://docs.openwebui.com/license.
 									e.currentTarget.src = '/favicon.png';
 								}}
 							/>
@@ -354,7 +363,7 @@
 
 						<div class="italic text-sm text-gray-500 dark:text-gray-400 line-clamp-1 w-full flex-1">
 							<Markdown
-								id={`${message.id}-reply-to`}
+								id={`${renderedMessageId}-reply-to`}
 								content={message?.reply_to_message?.content}
 								allowEmbeds={false}
 							/>
@@ -365,7 +374,7 @@
 
 			<div
 				class=" flex w-full message-{message.id} "
-				id="message-{message.id}"
+				id="message-{renderedMessageId}"
 				dir={$settings.chatDirection}
 			>
 				<div class={`shrink-0 mr-1 w-9`}>
@@ -376,6 +385,9 @@
 								alt={message.meta.model_name ?? message.meta.model_id}
 								class="size-8 translate-y-1 ml-0.5 object-cover rounded-full"
 								on:error={(e) => {
+									// LICENSE covers this Open WebUI fallback logo.
+									// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+									// https://docs.openwebui.com/license.
 									e.currentTarget.src = '/favicon.png';
 								}}
 							/>
@@ -397,7 +409,7 @@
 
 						{#if message.created_at}
 							<div
-								class="mt-1.5 flex shrink-0 items-center text-xs self-center invisible group-hover:visible text-gray-500 font-medium first-letter:capitalize"
+								class="mt-1.5 flex shrink-0 items-center text-xs self-center hover-reveal text-gray-500 font-normal first-letter:capitalize"
 							>
 								<Tooltip content={dayjs(message.created_at / 1000000).format('LLLL')}>
 									{dayjs(message.created_at / 1000000).format('HH:mm')}
@@ -410,7 +422,7 @@
 				<div class="flex-auto w-0 pl-2">
 					{#if showUserProfile}
 						<Name>
-							<div class=" self-end text-base shrink-0 font-medium truncate">
+							<div class=" self-end text-base shrink-0 font-normal truncate">
 								{#if message?.meta?.model_id}
 									{message?.meta?.model_name ?? message?.meta?.model_id}
 								{:else}
@@ -420,7 +432,7 @@
 
 							{#if message.created_at}
 								<div
-									class=" self-center text-xs text-gray-400 font-medium first-letter:capitalize ml-0.5 translate-y-[1px]"
+									class=" self-center text-xs text-gray-400 font-normal first-letter:capitalize ml-0.5 translate-y-[1px]"
 								>
 									<Tooltip content={dayjs(message.created_at / 1000000).format('LLLL')}>
 										<span class="line-clamp-1">
@@ -440,7 +452,6 @@
 					{/if}
 
 					{#if message?.data === true}
-						<!-- loading indicator -->
 						<div class=" my-2">
 							<Skeleton />
 						</div>
@@ -492,7 +503,7 @@
 									}
 								}}
 							/>
-							<div class=" mt-2 mb-1 flex justify-end text-sm font-medium">
+							<div class=" mt-2 mb-1 flex justify-end text-sm font-normal">
 								<div class="flex space-x-1.5">
 									<button
 										id="close-edit-message-button"
@@ -520,17 +531,27 @@
 							</div>
 						</div>
 					{:else}
-						<div class=" min-w-full markdown-prose {pending ? 'opacity-50' : ''}">
-							{#if (message?.content ?? '').trim() === '' && message?.meta?.model_id}
+						<div class="min-w-full {pending ? 'opacity-50' : ''}">
+							{#if hasStructuredOutput}
+								<StructuredOutputRenderer
+									id={renderedMessageId}
+									output={messageOutput}
+									done={message?.meta?.done ?? false}
+									editCodeBlock={false}
+								/>
+							{:else if (message?.content ?? '').trim() === '' && message?.meta?.model_id}
 								<Skeleton />
 							{:else}
-								<Markdown
-									id={message.id}
-									content={message.content}
-									paragraphTag="span"
-									allowEmbeds={!!message?.meta?.model_id}
-								/>{#if message.created_at !== message.updated_at && (message?.meta?.model_id ?? null) === null}<span
-										class="text-gray-500 text-[10px] pl-1 self-center">({$i18n.t('edited')})</span
+								<span class="markdown-prose">
+									<Markdown
+										id={renderedMessageId}
+										content={message.content}
+										paragraphTag="span"
+										allowEmbeds={!!message?.meta?.model_id}
+									/>
+								</span>{#if message.created_at !== message.updated_at && (message?.meta?.model_id ?? null) === null}<span
+										class="text-gray-500 text-[0.625rem] pl-1 self-center"
+										>({$i18n.t('edited')})</span
 									>{/if}
 							{/if}
 						</div>
@@ -588,7 +609,7 @@
 												<Emoji shortCode={reaction.name} />
 
 												{#if reaction.users.length > 0}
-													<div class="text-xs font-medium text-gray-500 dark:text-gray-400">
+													<div class="text-xs font-normal text-gray-500 dark:text-gray-400">
 														{reaction.users?.length}
 													</div>
 												{/if}
@@ -623,7 +644,7 @@
 										onThread(message.id);
 									}}
 								>
-									<span class="font-medium mr-1">
+									<span class="font-normal mr-1">
 										{$i18n.t('{{COUNT}} Replies', { COUNT: message.reply_count })}</span
 									><span>
 										{' - '}{$i18n.t('Last reply')}
@@ -665,7 +686,7 @@
 
 	.swipe-reply-indicator {
 		position: absolute;
-		left: 8px;
+		left: 0.5rem;
 		top: 0;
 		bottom: 0;
 		display: flex;
@@ -679,8 +700,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 32px;
-		height: 32px;
+		width: 2rem;
+		height: 2rem;
 		border-radius: 50%;
 		background-color: rgba(128, 128, 128, 0.15);
 		color: rgba(128, 128, 128, 0.8);

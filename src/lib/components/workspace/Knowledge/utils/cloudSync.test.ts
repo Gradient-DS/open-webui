@@ -1,0 +1,358 @@
+import { describe, expect, it } from 'vitest';
+import type { Connection, Schedule } from '$lib/apis/cloudSync';
+import {
+	finishedRuns,
+	connectionOutcome,
+	shouldRefetchSyncItems,
+	pairSchedules,
+	queueRuns,
+	settleQueuedRuns,
+	QUEUED_RUN_MAX_MS,
+	connectResult,
+	trustedConnectOrigins,
+	reconnectConnections,
+	runCounts,
+	runIsLive,
+	runStatus,
+	syncableSources,
+	syncAllNotice
+} from './cloudSync';
+
+describe('connect popup messages', () => {
+	const popup = {} as Window;
+	const origin = 'https://owui.invalid';
+	const trustedOrigins = new Set([origin]);
+	const event = {
+		origin,
+		source: popup,
+		data: { type: 'soev_connect', connection: 'c', result: 'pending' }
+	};
+	it('accepts the expected callback without treating pending as enabled', () => {
+		expect(connectResult(event, trustedOrigins, popup, 'c')).toBe('pending');
+	});
+	it('accepts the API origin on a split-origin stack', () => {
+		const origins = trustedConnectOrigins('http://localhost:5173', 'http://localhost:8080/api/v1');
+		expect(connectResult({ ...event, origin: 'http://localhost:8080' }, origins, popup, 'c')).toBe(
+			'pending'
+		);
+	});
+	it('rejects foreign origins on a split-origin stack', () => {
+		const origins = trustedConnectOrigins('http://localhost:5173', 'http://localhost:8080/api/v1');
+		expect(
+			connectResult({ ...event, origin: 'https://other.invalid' }, origins, popup, 'c')
+		).toBeNull();
+	});
+	it('ignores other origins, windows, connections, message types and results', () => {
+		for (const invalid of [
+			{ ...event, origin: 'https://other.invalid' },
+			{ ...event, source: {} as Window },
+			{ ...event, data: { ...event.data, connection: 'other' } },
+			{ ...event, data: { ...event.data, type: 'onedrive_auth_callback' } },
+			{ ...event, data: { ...event.data, result: 'success' } }
+		])
+			expect(connectResult(invalid, trustedOrigins, popup, 'c')).toBeNull();
+		expect(connectResult(event, trustedOrigins, popup)).toBeNull();
+	});
+	it.each(['error', 'invalid'])('surfaces a %s callback', (result) => {
+		expect(
+			connectResult({ ...event, data: { ...event.data, result } }, trustedOrigins, popup, 'c')
+		).toBe(result);
+	});
+});
+
+describe('trusted connect origins', () => {
+	const location = 'https://owui.invalid';
+	it.each(['/api/v1', 'api/v1', '', '//api.invalid/api/v1'])(
+		'keeps only the page origin for a relative API base: %s',
+		(apiBase) => {
+			expect(trustedConnectOrigins(location, apiBase)).toEqual(new Set([location]));
+		}
+	);
+	it('adds only the origin of an absolute API base', () => {
+		expect(trustedConnectOrigins(location, 'https://api.invalid:8443/api/v1')).toEqual(
+			new Set([location, 'https://api.invalid:8443'])
+		);
+	});
+	it('does not trust opaque origins', () => {
+		expect(trustedConnectOrigins(location, 'data:text/plain,example')).toEqual(new Set([location]));
+	});
+});
+
+it('deduplicates reconnect banners and trusts polled lifecycle over a stale popup state', () => {
+	const connection: Connection = {
+		id: 'c',
+		source_kind: 'onedrive',
+		lifecycle: 'suspended:reauth'
+	};
+	const schedule = { connection } as Schedule;
+	expect(reconnectConnections([schedule, schedule], null)).toEqual([connection]);
+	const enabled = { ...connection, lifecycle: 'enabled' };
+	expect(reconnectConnections([{ connection: enabled } as Schedule], connection)).toEqual([]);
+	expect(reconnectConnections([], { ...connection, lifecycle: 'pending' })).toEqual([]);
+	expect(
+		reconnectConnections([], { ...connection, lifecycle: 'pending', last_error: 'owner_mismatch' })
+	).toHaveLength(1);
+	expect(reconnectConnections([], { ...connection, lifecycle: 'revoked' })).toEqual([]);
+});
+
+it('offers reconnect for a provider without a frontend adapter', () => {
+	const connection: Connection = {
+		id: 'c',
+		source_kind: 'confluence',
+		lifecycle: 'enabled',
+		last_error: 'owner_mismatch'
+	};
+	expect(reconnectConnections([{ connection } as Schedule], null)).toEqual([connection]);
+});
+
+// The payload below is a verbatim soev-api StoredRun, not an invented shape:
+// counts are nested, and `secret_days` rides in counts as an expiry warning.
+it('reads counters out of the nested counts map and leaves secret_days out', () => {
+	expect(
+		runCounts({
+			id: 'run',
+			started_at: '2026-09-17T12:30:46Z',
+			finished_at: '2026-09-17T12:30:56Z',
+			outcome: 'succeeded',
+			counts: {
+				fetched: 1,
+				submitted: 1,
+				landed: 1,
+				unchanged: 0,
+				deleted: 0,
+				failed: 0,
+				timed_out: 0,
+				secret_days: 90
+			}
+		})
+	).toEqual([
+		{ label: 'Synced', count: 1 },
+		{ label: 'Fetched', count: 1 },
+		{ label: 'Submitted', count: 1 },
+		{ label: 'Unchanged', count: 0 },
+		{ label: 'Deleted', count: 0 },
+		{ label: 'Failed', count: 0 },
+		{ label: 'Timed out', count: 0 }
+	]);
+	expect(runCounts({ id: 'run', started_at: '2026-09-17T12:30:46Z' })).toEqual([]);
+});
+
+it('derives a run status from outcome, because soev-api sends no status field', () => {
+	const started = { id: 'run', started_at: '2026-09-17T12:30:46Z' };
+	expect(runStatus(started)).toBe('running');
+	expect(runIsLive(started)).toBe(true);
+	expect(runStatus({ ...started, cancel_requested_at: '2026-09-17T12:30:50Z' })).toBe('cancelling');
+	expect(runStatus({ ...started, outcome: 'partial' })).toBe('partial');
+	// A cancel that landed is terminal: the outcome wins over the request stamp.
+	expect(
+		runStatus({ ...started, outcome: 'cancelled', cancel_requested_at: '2026-09-17T12:30:50Z' })
+	).toBe('cancelled');
+	expect(runIsLive({ ...started, outcome: 'succeeded' })).toBe(false);
+	expect(runIsLive(null)).toBe(false);
+});
+
+const scheduleFixture = (
+	id: string,
+	kind: Schedule['kind'],
+	scope = { item_id: 'folder' }
+): Schedule => ({
+	id,
+	kind,
+	scope,
+	connection_id: 'c',
+	subscribers: ['kb'],
+	subscriber_count: 1,
+	document_count: 0,
+	cadence_minutes: 60,
+	source_kind: 'onedrive',
+	lifecycle: 'enabled',
+	connection: { id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' }
+});
+
+it('pairs schedules by connection and deep-equal scope regardless of key or schedule order', () => {
+	const content = {
+		...scheduleFixture('content', 'content'),
+		scope: { item_id: 'folder', single_file: false }
+	};
+	const acl = {
+		...scheduleFixture('acl', 'acl_refresh'),
+		scope: { single_file: false, item_id: 'folder' }
+	};
+	const otherConnection = { ...acl, id: 'other', connection_id: 'other' };
+	const loneContent = scheduleFixture('lone', 'content', { item_id: 'different' });
+	expect(pairSchedules([otherConnection, acl, content, loneContent])).toEqual([
+		{ content, acl },
+		{ content: loneContent, acl: undefined },
+		{ acl: otherConnection }
+	]);
+	expect(pairSchedules([])).toEqual([]);
+	expect(
+		pairSchedules([content, { ...content, id: 'duplicate' }, acl]).filter((pair) => pair.acl)
+	).toHaveLength(1);
+});
+
+it('marks a pair queued while its requested run has no run row yet', () => {
+	const content = scheduleFixture('content', 'content');
+	expect(pairSchedules([content], new Map([['content', 1]]))).toEqual([
+		{ content, acl: undefined, queued: true }
+	]);
+});
+
+describe('queued runs', () => {
+	const finished = { id: 'r1', started_at: 't', finished_at: 't', outcome: 'succeeded' as const };
+	const idle = { ...scheduleFixture('s', 'content'), last_run: finished };
+	it('queues idle schedules, including ones not in the last status yet', () => {
+		const queued = queueRuns(new Map(), [idle], ['s', 'new'], 5);
+		expect([...queued]).toEqual([
+			['s', { runId: 'r1', since: 5 }],
+			['new', { runId: null, since: 5 }]
+		]);
+		const live = { ...idle, last_run: { ...finished, id: 'r2', outcome: null } };
+		expect(queueRuns(new Map(), [live], ['s']).size).toBe(0);
+	});
+	it('settles once the run changes, the schedule is gone, or the request is stale', () => {
+		const queued = queueRuns(new Map(), [idle], ['s'], 0);
+		expect(settleQueuedRuns(queued, [idle], 1).has('s')).toBe(true);
+		const claimed = { ...idle, last_run: { ...finished, id: 'r2', outcome: null } };
+		expect(settleQueuedRuns(queued, [claimed], 1).size).toBe(0);
+		expect(settleQueuedRuns(queued, [], 1).size).toBe(0);
+		expect(settleQueuedRuns(queued, [idle], QUEUED_RUN_MAX_MS).size).toBe(0);
+	});
+});
+
+it.each([
+	['enabled', null, 0, { status: 'done' }],
+	['enabled', 'invalid_grant', 0, { status: 'failed', reason: 'invalid_grant' }],
+	['pending', 'consent_denied', 0, { status: 'failed', reason: 'consent_denied' }],
+	['suspended:reauth', null, 0, { status: 'waiting' }],
+	['suspended:reauth', null, 120000, { status: 'gave_up' }],
+	['suspended:reauth', 'invalid_grant', 0, { status: 'failed', reason: 'invalid_grant' }],
+	['revoked', null, 6000, { status: 'failed', reason: 'revoked' }],
+	['pending', null, 0, { status: 'waiting' }],
+	['pending', null, 119999, { status: 'waiting' }],
+	['pending', null, 120000, { status: 'gave_up' }],
+	['enabled', null, 120000, { status: 'done' }]
+] as const)(
+	'resolves connection %s with error %s after %i ms',
+	(lifecycle, last_error, elapsed, expected) => {
+		expect(
+			connectionOutcome({ id: 'c', source_kind: 'onedrive', lifecycle, last_error }, elapsed)
+		).toEqual(expected);
+	}
+);
+
+it('continues pending polls after the popup closes until the exchange enables the connection', () => {
+	const connection = { id: 'c', source_kind: 'onedrive', lifecycle: 'pending' };
+	for (const elapsed of [3000, 6000, 21000, 90000, 117000]) {
+		expect(connectionOutcome(connection, elapsed)).toEqual({ status: 'waiting' });
+	}
+	expect(connectionOutcome({ ...connection, lifecycle: 'enabled' }, 117000)).toEqual({
+		status: 'done'
+	});
+});
+
+it('keeps an owner mismatch visible even when the connection lifecycle is enabled', () => {
+	const connection: Connection = {
+		id: 'c',
+		source_kind: 'google_drive',
+		lifecycle: 'enabled',
+		last_error: 'owner_mismatch'
+	};
+	expect(reconnectConnections([{ connection } as Schedule], null)).toEqual([connection]);
+});
+
+describe('sync file list refresh', () => {
+	const schedule = scheduleFixture('s', 'content');
+	const running = { ...schedule, last_run: { id: 'r', started_at: '2026-09-19T10:00:00Z' } };
+	const finished = {
+		...running,
+		last_run: {
+			...running.last_run,
+			outcome: 'succeeded' as const,
+			finished_at: '2026-09-19T10:01:00Z'
+		}
+	};
+	it('refreshes when a run finishes between idle polls', () => {
+		expect(shouldRefetchSyncItems([schedule], [finished])).toBe(true);
+		expect(
+			shouldRefetchSyncItems(
+				[finished],
+				[{ ...finished, last_run: { ...finished.last_run, id: 'r2' } }]
+			)
+		).toBe(true);
+		expect(
+			shouldRefetchSyncItems(
+				[finished],
+				[{ ...finished, last_run: { ...finished.last_run, finished_at: '2026-09-19T10:02:00Z' } }]
+			)
+		).toBe(true);
+	});
+	it('refreshes on live to idle and on every live poll', () => {
+		expect(shouldRefetchSyncItems([running], [finished])).toBe(true);
+		for (let poll = 1; poll <= 6; poll++)
+			expect(shouldRefetchSyncItems([running], [running])).toBe(true);
+	});
+	it('refreshes when any document count changes even without a live run', () => {
+		expect(shouldRefetchSyncItems([schedule], [{ ...schedule, document_count: 1 }])).toBe(true);
+		expect(shouldRefetchSyncItems([{ ...finished, document_count: 2 }], [finished])).toBe(true);
+	});
+	it('ignores order and unchanged idle snapshots but catches subscriptions changing', () => {
+		const other = scheduleFixture('other', 'acl_refresh');
+		expect(shouldRefetchSyncItems([finished, other], [other, finished])).toBe(false);
+		expect(shouldRefetchSyncItems([finished], [finished])).toBe(false);
+		expect(shouldRefetchSyncItems([finished, other], [finished])).toBe(true);
+		expect(shouldRefetchSyncItems([], [])).toBe(false);
+	});
+});
+
+describe('finished runs', () => {
+	const live = { id: 'r1', started_at: '2026-09-18T10:00:00Z', outcome: null };
+	const done = { ...live, finished_at: '2026-09-18T10:01:00Z', outcome: 'succeeded' as const };
+	it('are the content runs that were live before and have an outcome now', () => {
+		const before = [
+			{ ...scheduleFixture('folder', 'content'), last_run: live },
+			{ ...scheduleFixture('acl', 'acl_refresh'), last_run: live },
+			{ ...scheduleFixture('idle', 'content'), last_run: done }
+		];
+		const after = [
+			{ ...scheduleFixture('folder', 'content'), last_run: done },
+			{ ...scheduleFixture('acl', 'acl_refresh'), last_run: done },
+			{ ...scheduleFixture('idle', 'content'), last_run: done }
+		];
+		expect(finishedRuns(before, after).map((schedule) => schedule.id)).toEqual(['folder']);
+	});
+	it('ignore a newer run that replaced the live one', () => {
+		const before = [{ ...scheduleFixture('folder', 'content'), last_run: live }];
+		const after = [{ ...scheduleFixture('folder', 'content'), last_run: { ...done, id: 'r2' } }];
+		expect(finishedRuns(before, after)).toEqual([]);
+		expect(finishedRuns([], after)).toEqual([]);
+	});
+});
+
+describe('sync all now', () => {
+	const live = { id: 'r', started_at: '2026-10-12T11:00:00Z', outcome: null };
+	it('covers every live content source, including one already syncing', () => {
+		const syncing = { ...scheduleFixture('a', 'content'), last_run: live };
+		const revoked = { ...scheduleFixture('b', 'content'), lifecycle: 'revoked' };
+		const acl = scheduleFixture('c', 'acl_refresh');
+		expect(syncableSources([syncing, revoked, acl])).toEqual([syncing]);
+		expect(syncableSources([acl])).toEqual([]);
+	});
+	it('starts the idle sources and skips those refused as running', () => {
+		expect(
+			syncAllNotice([
+				{ schedule_id: 'a', job_id: null, code: 'run_active' },
+				{ schedule_id: 'b', job_id: 'j', code: null }
+			])
+		).toEqual({ kind: 'started', ids: ['b'] });
+	});
+	it('names why nothing started', () => {
+		const refused = (...codes: string[]) =>
+			syncAllNotice(codes.map((code, i) => ({ schedule_id: `${i}`, job_id: null, code }))).kind;
+		expect(refused()).toBe('not_owner');
+		expect(refused('run_active', 'connection_pending')).toBe('reconnect');
+		expect(refused('run_active', 'run_too_soon')).toBe('too_soon');
+		expect(refused('run_active', 'schedule_suspended')).toBe('running');
+		expect(refused('schedule_suspended')).toBe('paused');
+	});
+});

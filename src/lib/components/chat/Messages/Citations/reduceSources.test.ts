@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reduceSources, type RawSource, type DisplayCitation } from './reduceSources';
+import { citationAt, reduceSources, type RawSource, type DisplayCitation } from './reduceSources';
 
 const sourceA = (chunkText: string, page: number, fileId = 'doc-A'): RawSource => ({
 	source: { name: 'A.pdf', type: 'file', id: 'doc-A' },
@@ -115,32 +115,85 @@ describe('reduceSources', () => {
 		expect(out[0].source.url).toBe('https://example.com/page');
 	});
 
-	it('carries the agent provenance flags (n / current_turn / cited_this_turn) onto the merged entry', () => {
-		const tagged: RawSource = {
-			...sourceA('chunk1', 0),
-			n: 7,
-			current_turn: true,
-			cited_this_turn: false
-		};
-		const out = reduceSources([tagged]);
+	it("carries the agent's cumulative number `n` onto the merged entry", () => {
+		const out = reduceSources([{ ...sourceA('chunk1', 0), n: 7 }]);
 		expect(out[0].n).toBe(7);
-		expect(out[0].current_turn).toBe(true);
-		expect(out[0].cited_this_turn).toBe(false);
 	});
 
-	it("uses the latest dispatch's flags when the same source is re-sent (cited flips on the post-answer dispatch)", () => {
-		const before: RawSource = { ...sourceA('chunk1', 0), n: 3, current_turn: false, cited_this_turn: false };
-		const after: RawSource = { ...sourceA('chunk2', 1), n: 3, current_turn: false, cited_this_turn: true };
-		const out = reduceSources([before, after]);
+	it('numbers legacy sources without `n` by position', () => {
+		const b: RawSource = {
+			source: { id: 'doc-B' },
+			document: ['b'],
+			metadata: [{ source: 'B.pdf' }]
+		};
+		expect(reduceSources([sourceA('chunk1', 0), b]).map((entry) => entry.n)).toEqual([1, 2]);
+	});
+
+	it('resolves `[N]` by number, not position, when sources arrive out of order', () => {
+		const note: RawSource = {
+			source: { id: 'note:n1', name: 'Note' },
+			document: ['note body'],
+			metadata: [{ source: 'note:n1' }],
+			n: 1
+		};
+		const citations = reduceSources([{ ...sourceA('chunk1', 0), n: 2 }, note]);
+		expect(citationAt(citations, 1)?.id).toBe('note:n1');
+		expect(citationAt(citations, '2#p3')?.id).toBe('A.pdf');
+		expect(citationAt(citations, 3)).toBeUndefined();
+	});
+
+	it('stamps granularity=document onto each chunk of a document-level source', () => {
+		const readSource: RawSource = {
+			source: { name: 'A.pdf', type: 'file', id: 'doc-A' },
+			document: ['the full body'],
+			metadata: [{ source: 'A.pdf', file_id: 'doc-A', name: 'A.pdf' }],
+			granularity: 'document'
+		};
+		const out = reduceSources([readSource]);
+		expect(out[0].metadata[0].granularity).toBe('document');
+	});
+
+	it('preserves agent document granularity alongside search passages', () => {
+		const readSource: RawSource = {
+			source: { name: 'A.pdf', id: 'doc-A' },
+			document: ['the full body'],
+			metadata: [{ source: 'A.pdf', file_id: 'doc-A', granularity: 'document' }]
+		};
+		const out = reduceSources([readSource, sourceA('chunk1', 2)]);
 		expect(out).toHaveLength(1);
-		expect(out[0].cited_this_turn).toBe(true);
-		expect(out[0].current_turn).toBe(false);
+		expect(out[0].metadata[0].granularity).toBe('document');
+		expect(out[0].metadata[1].granularity).toBeUndefined();
+		expect(out[0].metadata[1].page).toBe(2);
 	});
 
-	it('leaves the flags undefined for legacy/untagged sources', () => {
-		const out = reduceSources([sourceA('chunk1', 0)]);
-		expect(out[0].n).toBeUndefined();
-		expect(out[0].current_turn).toBeUndefined();
-		expect(out[0].cited_this_turn).toBeUndefined();
+	it('keeps parallel arrays aligned when a document-level source merges into a searched doc (no metadata/distances desync)', () => {
+		const readSource: RawSource = {
+			source: { name: 'A.pdf', type: 'file', id: 'doc-A' },
+			document: ['the full body'],
+			metadata: [{ source: 'A.pdf', file_id: 'doc-A', name: 'A.pdf' }],
+			granularity: 'document'
+		};
+		const out = reduceSources([readSource, sourceA('chunk1', 2)]);
+		expect(out).toHaveLength(1);
+		expect(out[0].document).toEqual(['the full body', 'chunk1']);
+		expect(out[0].metadata).toHaveLength(2);
+		expect(out[0].distances).toHaveLength(2);
+		// index 0 = the read (no distance, document granularity); index 1 = the search chunk
+		expect(out[0].distances[0]).toBeUndefined();
+		expect(out[0].distances[1]).toBe(0.9);
+		expect(out[0].metadata[0].granularity).toBe('document');
+		expect(out[0].metadata[1].granularity).toBeUndefined();
+		expect(out[0].metadata[1].page).toBe(2);
+	});
+
+	it('keeps arrays aligned when a chunk arrives without metadata', () => {
+		const bare: RawSource = {
+			source: { name: 'A.pdf', type: 'file', id: 'A.pdf' },
+			document: ['orphan chunk']
+		};
+		const out = reduceSources([bare, sourceA('chunk1', 4)]);
+		expect(out[0].document).toEqual(['orphan chunk', 'chunk1']);
+		expect(out[0].metadata).toHaveLength(2);
+		expect(out[0].metadata[1].page).toBe(4);
 	});
 });

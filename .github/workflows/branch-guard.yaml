@@ -9,12 +9,15 @@ on:
 jobs:
   check-source-branch:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Validate PR source branch
+        # Branch names are attacker-controlled on fork PRs: pass them via env,
+        # never interpolate ${{ }} into the script.
+        env:
+          TARGET: ${{ github.base_ref }}
+          SOURCE: ${{ github.head_ref }}
         run: |
-          TARGET="${{ github.base_ref }}"
-          SOURCE="${{ github.head_ref }}"
-
           echo "PR: ${SOURCE} → ${TARGET}"
 
           if [ "$TARGET" = "main" ] && [ "$SOURCE" != "test" ]; then

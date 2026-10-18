@@ -1,7 +1,10 @@
 import type { Writable } from 'svelte/store';
 import { v4 as uuidv4 } from 'uuid';
 import sha256 from 'js-sha256';
+import DOMPurify from 'dompurify';
 import { WEBUI_BASE_URL } from '$lib/constants';
+import type { FileNavOpenRequest } from '$lib/stores';
+import { normalizeDocumentTargetPage } from '$lib/utils/documentPreview';
 
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -16,7 +19,7 @@ dayjs.extend(localizedFormat);
 
 import { TTS_RESPONSE_SPLIT } from '$lib/types';
 
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 
 import { marked } from 'marked';
 import markedExtension from '$lib/utils/marked/extension';
@@ -33,9 +36,9 @@ import { decode } from 'html-entities';
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const formatNumber = (num: number): string => {
-	return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(
-		num
-	);
+	return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
+		.format(num)
+		.toLowerCase();
 };
 
 function escapeRegExp(string: string): string {
@@ -218,27 +221,103 @@ export const convertMessagesToHistory = (messages) => {
 	let messageId = null;
 
 	for (const message of messages) {
-		messageId = uuidv4();
-
-		if (parentMessageId !== null) {
-			history.messages[parentMessageId].childrenIds = [
-				...history.messages[parentMessageId].childrenIds,
-				messageId
-			];
-		}
+		messageId = message?.id ?? uuidv4();
+		const parentId = message?.parentId ?? parentMessageId;
 
 		history.messages[messageId] = {
 			...message,
 			id: messageId,
-			parentId: parentMessageId,
+			parentId,
 			childrenIds: []
 		};
 
 		parentMessageId = messageId;
 	}
 
+	for (const message of Object.values(history.messages)) {
+		if (message.parentId && history.messages[message.parentId]) {
+			history.messages[message.parentId].childrenIds = [
+				...history.messages[message.parentId].childrenIds,
+				message.id
+			];
+		}
+	}
+
 	history.currentId = messageId;
 	return history;
+};
+
+// Repair structurally-malformed history nodes from failed regenerations.
+// A lost assistant placeholder may exist under its map key with only
+// completion fields (content/done/error), missing id/role/parentId.
+// Reconstruct graph fields so already-corrupted chats recover on open.
+export const sanitizeHistory = (history) => {
+	if (!history?.messages || typeof history.messages !== 'object') return;
+
+	// Purge entries that aren't usable objects
+	for (const [id, message] of Object.entries(history.messages)) {
+		if (!message || typeof message !== 'object') {
+			delete history.messages[id];
+		}
+	}
+
+	// Ensure every surviving node has its canonical id and a childrenIds array
+	for (const [id, message] of Object.entries(history.messages)) {
+		if (message.id !== id) message.id = id;
+		if (!Array.isArray(message.childrenIds)) message.childrenIds = [];
+	}
+
+	// Build reverse lookup: parent, indexed by child id
+	const parentByChildId = {};
+	for (const [id, message] of Object.entries(history.messages)) {
+		for (const childId of message.childrenIds) {
+			parentByChildId[childId] = id;
+		}
+	}
+
+	// Recover currentId before role reconstruction can make a malformed node
+	// look valid.
+	const currentMessage = history.messages?.[history.currentId];
+	if (!currentMessage?.id || !currentMessage?.role) {
+		let latestLeafId = null;
+		let latestTimestamp = -1;
+
+		for (const [id, message] of Object.entries(history.messages)) {
+			if (message.childrenIds.length === 0 && (message.timestamp ?? 0) > latestTimestamp) {
+				latestLeafId = id;
+				latestTimestamp = message.timestamp ?? 0;
+			}
+		}
+
+		history.currentId = latestLeafId ?? Object.keys(history.messages)[0] ?? null;
+	}
+
+	// Reconstruct missing parentId and role
+	for (const [id, message] of Object.entries(history.messages)) {
+		// Well-formed: has role and explicit parentId (null is valid for root)
+		if (message.role && message.parentId !== undefined) continue;
+
+		if (message.parentId === undefined) {
+			message.parentId = parentByChildId[id] ?? null;
+		}
+
+		if (!message.role) {
+			const parent = message.parentId ? history.messages[message.parentId] : null;
+			message.role =
+				parent?.role === 'user'
+					? 'assistant'
+					: parent?.role === 'assistant'
+						? 'user'
+						: message.model || message.usage || message.done !== undefined
+							? 'assistant'
+							: 'user';
+		}
+	}
+
+	// Prune childrenIds referencing deleted/missing nodes
+	for (const message of Object.values(history.messages)) {
+		message.childrenIds = message.childrenIds.filter((childId) => history.messages[childId]);
+	}
 };
 
 export const getGravatarURL = (email) => {
@@ -435,6 +514,29 @@ export const formatDate = (inputDate) => {
 	}
 };
 
+const messageTimestampDate = (inputDate) => {
+	const date = new Date(inputDate < 1_000_000_000_000 ? inputDate * 1000 : inputDate);
+	return Number.isNaN(date.getTime()) ? null : date;
+};
+
+export const formatMessageTimestamp = (inputDate) =>
+	messageTimestampDate(inputDate)?.toLocaleString(undefined, {
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	}) ?? '';
+
+export const formatMessageTimestampFull = (inputDate) =>
+	messageTimestampDate(inputDate)?.toLocaleString(undefined, {
+		weekday: 'long',
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	}) ?? '';
+
 export const copyToClipboard = async (
 	text,
 	html = null,
@@ -478,13 +580,13 @@ export const copyToClipboard = async (
 				<style>
 					pre {
 						background-color: #f6f8fa;
-						border-radius: 6px;
-						padding: 16px;
+						border-radius: 0.375rem;
+						padding: 1rem;
 						overflow: auto;
 					}
 					code {
 						font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-						font-size: 14px;
+						font-size: 0.875rem;
 					}
 					.hljs-keyword { color: #d73a49; }
 					.hljs-string { color: #032f62; }
@@ -498,7 +600,7 @@ export const copyToClipboard = async (
 					.hljs-built_in { color: #005cc5; }
 					blockquote {
 						border-left: 4px solid #dfe2e5;
-						padding-left: 16px;
+						padding-left: 1rem;
 						color: #6a737d;
 						margin-left: 0;
 						margin-right: 0;
@@ -506,13 +608,13 @@ export const copyToClipboard = async (
 					table {
 						border-collapse: collapse;
 						width: 100%;
-						margin-bottom: 16px;
+						margin-bottom: 1rem;
 					}
 					table, th, td {
 						border: 1px solid #dfe2e5;
 					}
 					th, td {
-						padding: 8px 12px;
+						padding: 0.5rem 0.75rem;
 					}
 					th {
 						background-color: #f6f8fa;
@@ -1371,6 +1473,31 @@ export const createMessagesList = (history, messageId) => {
 	return list.reverse();
 };
 
+const toTokenCount = (value: unknown) => {
+	const parsed = Number(value || 0);
+	return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+};
+
+export const getUsageTokenCount = (usage?: Record<string, unknown> | null) => {
+	if (!usage) {
+		return 0;
+	}
+
+	let promptTokens = toTokenCount(usage.prompt_tokens || usage.prompt_eval_count || 0);
+	if (!promptTokens && (usage.prompt_n != null || usage.cache_n != null)) {
+		promptTokens = toTokenCount(usage.prompt_n || 0) + toTokenCount(usage.cache_n || 0);
+	}
+	if (!promptTokens) {
+		promptTokens = toTokenCount(usage.input_tokens || 0);
+	}
+
+	const completionTokens = toTokenCount(
+		usage.completion_tokens || usage.output_tokens || usage.eval_count || usage.predicted_n || 0
+	);
+
+	return promptTokens + completionTokens;
+};
+
 export const formatFileSize = (size) => {
 	if (size == null) return 'Unknown size';
 	if (typeof size !== 'number' || size < 0) return 'Invalid size';
@@ -1742,9 +1869,44 @@ export const parseJsonValue = (value: string): any => {
 	return value;
 };
 
+type ReadableStreamWithAsyncIterator<T> = ReadableStream<T> & {
+	[Symbol.asyncIterator]?: () => AsyncIterableIterator<T>;
+};
+
+function ensureReadableStreamAsyncIterator() {
+	if (typeof ReadableStream === 'undefined') {
+		return;
+	}
+
+	const prototype = ReadableStream.prototype as ReadableStreamWithAsyncIterator<unknown>;
+	if (prototype[Symbol.asyncIterator]) {
+		return;
+	}
+
+	Object.defineProperty(prototype, Symbol.asyncIterator, {
+		value: async function* (this: ReadableStream<unknown>) {
+			const reader = this.getReader();
+			try {
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) {
+						return;
+					}
+					yield value;
+				}
+			} finally {
+				reader.releaseLock();
+			}
+		},
+		configurable: true,
+		writable: true
+	});
+}
+
 async function ensurePDFjsLoaded() {
+	ensureReadableStreamAsyncIterator();
 	if (!window.pdfjsLib) {
-		const pdfjs = await import('pdfjs-dist');
+		const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 		pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 		if (!window.pdfjsLib) {
 			throw new Error('pdfjsLib is required for PDF extraction');
@@ -1800,6 +1962,95 @@ export const extractContentFromFile = async (file: File) => {
 		});
 	}
 
+	async function extractOdsText(file: File) {
+		const [arrayBuffer, XLSX] = await Promise.all([file.arrayBuffer(), import('xlsx')]);
+		const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+		return workbook.SheetNames.map((name) =>
+			XLSX.utils.sheet_to_csv(workbook.Sheets[name], { FS: '\t' }).trim()
+		)
+			.filter(Boolean)
+			.join('\n\n');
+	}
+
+	async function extractOdfText(file: File) {
+		const [arrayBuffer, { default: JSZip }] = await Promise.all([
+			file.arrayBuffer(),
+			import('jszip')
+		]);
+
+		const content = await JSZip.loadAsync(arrayBuffer).then((zip) =>
+			zip.file('content.xml')?.async('string')
+		);
+		if (!content) {
+			throw new Error('content.xml not found');
+		}
+
+		const doc = new DOMParser().parseFromString(content, 'application/xml');
+		if (doc.getElementsByTagName('parsererror').length > 0) {
+			throw new Error('content.xml is not well-formed');
+		}
+
+		const TEXT_NS = 'urn:oasis:names:tc:opendocument:xmlns:text:1.0';
+		const TABLE_NS = 'urn:oasis:names:tc:opendocument:xmlns:table:1.0';
+		const textOf = (node: Node): string => {
+			if (node.nodeType === Node.TEXT_NODE) {
+				return node.textContent ?? '';
+			}
+			if (node.nodeType !== Node.ELEMENT_NODE) {
+				return '';
+			}
+
+			const element = node as Element;
+			if (element.namespaceURI === TEXT_NS) {
+				if (element.localName === 's') {
+					const count = Number(
+						element.getAttributeNS(TEXT_NS, 'c') ?? element.getAttribute('text:c')
+					);
+					return ' '.repeat(Number.isFinite(count) && count > 0 ? count : 1);
+				}
+				if (element.localName === 'tab') {
+					return '\t';
+				}
+				if (element.localName === 'line-break') {
+					return '\n';
+				}
+			}
+
+			return Array.from(element.childNodes).map(textOf).join('');
+		};
+
+		const blocks: string[] = [];
+		const walk = (node: Element) => {
+			if (node.namespaceURI === TABLE_NS && node.localName === 'table-row') {
+				const row = Array.from(node.getElementsByTagNameNS(TABLE_NS, 'table-cell'))
+					.map((cell) => textOf(cell).trim())
+					.join('\t')
+					.trimEnd();
+
+				if (row.length > 0) {
+					blocks.push(row);
+				}
+				return;
+			}
+
+			if (node.namespaceURI === TEXT_NS && (node.localName === 'p' || node.localName === 'h')) {
+				const text = textOf(node).trim();
+				if (text.length > 0) {
+					blocks.push(text);
+				}
+				return;
+			}
+
+			for (const child of Array.from(node.children)) {
+				walk(child);
+			}
+		};
+
+		walk(doc.documentElement);
+		return blocks.join('\n');
+	}
+
 	async function extractDocxText(file: File) {
 		const [arrayBuffer, { default: mammoth }] = await Promise.all([
 			file.arrayBuffer(),
@@ -1823,6 +2074,20 @@ export const extractContentFromFile = async (file: File) => {
 		ext === '.docx'
 	) {
 		return await extractDocxText(file);
+	}
+
+	// OpenDocument spreadsheet check
+	if (type === 'application/vnd.oasis.opendocument.spreadsheet' || ext === '.ods') {
+		return await extractOdsText(file);
+	}
+
+	// OpenDocument text/presentation check
+	if (
+		type === 'application/vnd.oasis.opendocument.text' ||
+		type === 'application/vnd.oasis.opendocument.presentation' ||
+		['.odt', '.odp'].includes(ext)
+	) {
+		return await extractOdfText(file);
 	}
 
 	// Text check (plain or common text-based)
@@ -1875,7 +2140,8 @@ export const initMermaid = async () => {
 	mermaid.initialize({
 		startOnLoad: false, // Should be false when using render API
 		theme: document.documentElement.classList.contains('dark') ? 'dark' : 'default',
-		securityLevel: 'loose'
+		securityLevel: 'loose',
+		htmlLabels: false
 	});
 	return mermaid;
 };
@@ -1890,6 +2156,44 @@ const cleanupMermaidTempElements = (id: string) => {
 	document.getElementById(`i${id}`)?.remove();
 };
 
+// Mermaid runs with securityLevel:'loose', which emits unsanitized SVG (raw javascript: hrefs,
+// HTML labels); strip active content before it reaches any innerHTML/{@html} sink.
+export const sanitizeSvg = (svg: string): string =>
+	DOMPurify.sanitize(svg, {
+		USE_PROFILES: { svg: true, svgFilters: true },
+		WHOLE_DOCUMENT: false,
+		ADD_TAGS: ['style', 'foreignObject'],
+		ADD_ATTR: [
+			'class',
+			'style',
+			'id',
+			'data-*',
+			'viewBox',
+			'preserveAspectRatio',
+			'markerWidth',
+			'markerHeight',
+			'markerUnits',
+			'refX',
+			'refY',
+			'orient',
+			'href',
+			'xlink:href',
+			'dominant-baseline',
+			'text-anchor',
+			'clipPathUnits',
+			'filterUnits',
+			'patternUnits',
+			'patternContentUnits',
+			'maskUnits',
+			'role',
+			'aria-label',
+			'aria-labelledby',
+			'aria-hidden',
+			'tabindex'
+		],
+		SANITIZE_DOM: true
+	});
+
 export const renderMermaidDiagram = async (
 	mermaid: typeof import('mermaid').default,
 	code: string,
@@ -1900,7 +2204,7 @@ export const renderMermaidDiagram = async (
 		const parseResult = await mermaid.parse(code, { suppressErrors: false });
 		if (parseResult) {
 			const { svg } = await mermaid.render(id, code);
-			return svg;
+			return sanitizeSvg(svg);
 		}
 		return '';
 	} finally {
@@ -1909,15 +2213,42 @@ export const renderMermaidDiagram = async (
 	}
 };
 
-export const renderVegaVisualization = async (spec: string, i18n?: any) => {
+export const renderVegaVisualization = async (spec: string, lang: string = '', i18n?: any) => {
 	const vega = await import('vega');
 	const parsedSpec = JSON.parse(spec);
+	const hasVegaLiteKeys =
+		'mark' in parsedSpec ||
+		'encoding' in parsedSpec ||
+		'layer' in parsedSpec ||
+		'hconcat' in parsedSpec ||
+		'vconcat' in parsedSpec ||
+		'repeat' in parsedSpec ||
+		'facet' in parsedSpec;
+	const isVegaLite =
+		lang === 'vega-lite' ||
+		(parsedSpec.$schema && parsedSpec.$schema.includes('vega-lite')) ||
+		hasVegaLiteKeys;
 	let vegaSpec = parsedSpec;
-	if (parsedSpec.$schema && parsedSpec.$schema.includes('vega-lite')) {
+	if (isVegaLite) {
 		const vegaLite = await import('vega-lite');
 		vegaSpec = vegaLite.compile(parsedSpec).spec;
 	}
-	const view = new vega.View(vega.parse(vegaSpec), { renderer: 'none' });
+	// Specs come from untrusted chat content: block external loads via data.url (loader.load)
+	// and image mark hrefs emitted into the SVG (loader.sanitize).
+	const loader = vega.loader();
+	loader.load = async () => {
+		throw new Error('External resource loading is disabled for rendered visualizations');
+	};
+	const sanitize = loader.sanitize.bind(loader);
+	loader.sanitize = async (uri: string, options: any) => {
+		// Resolve with the browser's URL parser so encoding tricks match what it would fetch
+		const resolved = new URL(uri, document.baseURI);
+		if (resolved.protocol !== 'data:' && resolved.origin !== location.origin) {
+			throw new Error('External resource loading is disabled for rendered visualizations');
+		}
+		return sanitize(uri, options);
+	};
+	const view = new vega.View(vega.parse(vegaSpec), { loader, renderer: 'none' });
 	const svg = await view.toSVG();
 	return svg;
 };
@@ -2046,10 +2377,12 @@ export const formatSkillName = (name) => {
  */
 export const displayFileHandler = (
 	path: string,
-	stores: { showControls: Writable<boolean>; showFileNavPath: Writable<string | null> }
+	stores: { showControls: Writable<boolean>; showFileNavPath: Writable<FileNavOpenRequest | null> },
+	options: { page?: unknown } = {}
 ) => {
 	if (path) {
 		stores.showControls.set(true);
-		stores.showFileNavPath.set(path);
+		const page = normalizeDocumentTargetPage(options.page);
+		stores.showFileNavPath.set(page ? { path, page } : path);
 	}
 };

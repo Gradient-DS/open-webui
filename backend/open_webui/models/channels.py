@@ -1,34 +1,36 @@
-import json
 import secrets
 import time
 import uuid
 from typing import Optional
 
-from open_webui.utils.validate import validate_profile_image_url
-
-from sqlalchemy import select, delete, update, func, case, or_, and_
-from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.internal.db import Base, JSONField, get_async_db_context
-from open_webui.models.groups import Groups
 from open_webui.models.access_grants import (
     AccessGrantModel,
     AccessGrants,
 )
-
+from open_webui.models.groups import Groups
+from open_webui.models.users import User
+from open_webui.utils.validate import validate_profile_image_url
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy.dialects.postgresql import JSONB
-
-
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Column,
     ForeignKey,
     String,
     Text,
-    JSON,
     UniqueConstraint,
+    and_,
+    case,
+    delete,
+    func,
+    or_,
+    select,
+    update,
 )
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 
 ####################
 # Channel DB Schema
@@ -264,11 +266,11 @@ class ChannelTable:
         access_grants: Optional[list[AccessGrantModel]] = None,
         db: Optional[AsyncSession] = None,
     ) -> ChannelModel:
-        channel_data = ChannelModel.model_validate(channel).model_dump(exclude={'access_grants'})
-        channel_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(channel_data['id'], db=db)
+        channel_model = ChannelModel.model_validate(channel)
+        channel_model.access_grants = (
+            access_grants if access_grants is not None else await self._get_access_grants(channel_model.id, db=db)
         )
-        return ChannelModel.model_validate(channel_data)
+        return channel_model
 
     async def _collect_unique_user_ids(
         self,
@@ -436,17 +438,17 @@ class ChannelTable:
 
             match_count = func.sum(
                 case(
-                    (ChannelMember.user_id.in_(unique_user_ids), 1),
+                    (User.id.in_(unique_user_ids), 1),
                     else_=0,
                 )
             )
 
             subquery = (
                 select(ChannelMember.channel_id)
+                .join(User, User.id == ChannelMember.user_id)
                 .group_by(ChannelMember.channel_id)
-                # 1. Channel must have exactly len(user_ids) members
-                .having(func.count(ChannelMember.user_id) == len(unique_user_ids))
-                # 2. All those members must be in unique_user_ids
+                # Match the exact set of accounts that still exist.
+                .having(func.count(User.id) == len(unique_user_ids))
                 .having(match_count == len(unique_user_ids))
                 .subquery()
             )
@@ -867,7 +869,6 @@ class ChannelTable:
                 result = ChannelFile(**channel_file.model_dump())
                 db.add(result)
                 await db.commit()
-                await db.refresh(result)
                 if result:
                     return ChannelFileModel.model_validate(result)
                 else:

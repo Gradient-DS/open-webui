@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { getContext, tick } from 'svelte';
+	import SourceIcon from './SourceIcon.svelte';
+	import SearchSnippetNote from './SearchSnippetNote.svelte';
+	import { getContext, onDestroy, tick } from 'svelte';
 	import type { WorkBook } from 'xlsx';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -10,7 +12,12 @@
 	import { settings, config } from '$lib/stores';
 	import { getFileContentById } from '$lib/apis/files';
 	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
+	import { loadWithPreviewRetry } from '$lib/utils/previewRetry';
 	import { highlightDocx, scrollToFirstDocxHighlight } from '$lib/utils/citationDomHighlight';
+	import { rectsFromMetadata } from '$lib/utils/citationRects';
+	import { injectCsp } from '$lib/utils/csp';
+	import { createPreviewProbe, mergeCitationDocuments } from './citationDocuments';
+	import { citationFileInfo, resolveExternalUrl } from './useCitationDocument';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import ArrowTopRightOnSquare from '$lib/components/icons/ArrowTopRightOnSquare.svelte';
@@ -46,6 +53,8 @@
 	let docxContainer: HTMLDivElement;
 	let officeLoading = false;
 	let officeError = false;
+	// [Gradient] The original is still being prepared (processing reference attachment); retrying.
+	let officePending = false;
 
 	// XLSX workbook state.
 	let xlsxWorkbook: WorkBook | null = null;
@@ -77,49 +86,22 @@
 		expandedDocs = new Set();
 		selectedTab = 'preview';
 		activeSnippetIdx = 0;
-		mergedDocuments = citation.document?.map((c, i) => {
-			return {
-				source: citation.source,
-				document: c,
-				metadata: citation.metadata?.[i],
-				distance: citation.distances?.[i]
-			};
-		});
-		if (mergedDocuments.every((doc) => doc.distance !== undefined)) {
-			mergedDocuments = mergedDocuments.sort(
-				(a, b) => (b.distance ?? Infinity) - (a.distance ?? Infinity)
-			);
-		}
+		mergedDocuments = mergeCitationDocuments(citation);
 	}
 
-	// File type detection from first document's metadata
-	$: fileName = mergedDocuments?.[0]?.metadata?.name ?? citation?.source?.name ?? '';
-	$: fileId = mergedDocuments?.[0]?.metadata?.file_id;
-
-	// External/source URL for the cited document. Prefers the agent-provided
-	// source.url (set by soev-agents from the generic source_url); falls back
-	// to the source_url the native RAG path leaves on the chunk (the agent
-	// path allow-lists chunk metadata, so there the URL only arrives as
-	// source.url). One generic key — every cloud-sync worker writes source_url.
-	// Drives the "open original page" affordance shown alongside the download.
-	$: externalUrl = (() => {
-		const u = citation?.source?.url;
-		if (typeof u === 'string' && u.includes('http')) return u;
-		const v = mergedDocuments?.[0]?.metadata?.source_url;
-		if (typeof v === 'string' && v.includes('http')) return v;
-		return null;
-	})();
-
-	$: isPDF = fileName?.toLowerCase().endsWith('.pdf');
-	$: isDocx = fileName?.toLowerCase().endsWith('.docx');
-	$: isXlsx = fileName?.toLowerCase().endsWith('.xlsx');
-	$: isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fileName);
-	$: isAudio = /\.(mp3|wav|ogg|m4a|webm)$/i.test(fileName);
-	$: isPreviewable = fileId && (isPDF || isDocx || isXlsx || isImage || isAudio);
-
-	// Split view = a document with cited snippets to highlight (PDF/DOCX).
-	// Image/audio/XLSX render single-pane; web/missing-file fall to content.
-	$: showSnippetRail = isPDF || isDocx;
+	// [Gradient] File type, id and original link come from the helper the side panel uses.
+	$: ({
+		fileName,
+		fileId,
+		isPDF,
+		isDocx,
+		isXlsx,
+		isImage,
+		isAudio,
+		isPreviewable,
+		showSnippetRail
+	} = citationFileInfo(citation, mergedDocuments));
+	$: externalUrl = resolveExternalUrl(citation, mergedDocuments);
 
 	// Active snippet drives the highlight in the viewer pane.
 	$: activeSnippet = mergedDocuments?.[activeSnippetIdx];
@@ -130,6 +112,22 @@
 	$: activePage = Number.isInteger(activeSnippet?.metadata?.page)
 		? activeSnippet.metadata.page
 		: undefined;
+
+	// Whole-document citations (agent read/summarize tools —
+	// `metadata.granularity === 'document'`) have no passage-level "where":
+	// any highlight attempt would light up the entire document, which reads
+	// as precision while conveying nothing. Skip rects AND text-match for
+	// them — the preview itself is the provenance.
+	const isDocumentSnippet = (snippet) => snippet?.metadata?.granularity === 'document';
+
+	// Coordinate highlights: chunks may carry `metadata.bboxes` (see
+	// `$lib/utils/citationRects`). When present, exact rects beat text
+	// matching and work regardless of the ENABLE_CITATION_TEXT_HIGHLIGHT flag.
+	const rectsFromSnippet = (snippet) =>
+		isDocumentSnippet(snippet) ? null : rectsFromMetadata(snippet?.metadata);
+
+	$: activeRects = rectsFromSnippet(activeSnippet);
+	$: activeIsDocument = isDocumentSnippet(activeSnippet);
 
 	// Compute minimum page number across all chunks for PDF navigation
 	$: minPage = (() => {
@@ -147,27 +145,15 @@
 	// Plain content URL without the #page hash — PDFViewer owns paging now.
 	$: previewUrlNoHash = fileId ? `${WEBUI_API_BASE_URL}/files/${fileId}/content` : '';
 
-	// Check if file is still available when modal opens
-	$: if (show && fileId) {
-		previewAvailable = true;
-		// Authenticate the availability probe with the Bearer token (same as the
-		// rest of the app). Cookie-only auth 401s when the cookie isn't sent,
-		// which would wrongly flag the file as unavailable and drop to the
-		// content fallback instead of the preview.
-		const headAuthToken = localStorage.getItem('token');
-		fetch(`${WEBUI_API_BASE_URL}/files/${fileId}/content`, {
-			method: 'HEAD',
-			headers: headAuthToken ? { authorization: `Bearer ${headAuthToken}` } : {}
-		})
-			.then((res) => {
-				if (!res.ok) {
-					previewAvailable = false;
-				}
-			})
-			.catch(() => {
-				previewAvailable = false;
-			});
+	// [Gradient] Probe on every open and every citation, even for the same file; only the latest
+	// probe reports, so a late failure for an earlier citation never hides this one's preview.
+	const availability = createPreviewProbe((available) => (previewAvailable = available));
+	$: checkAvailability(show, citation, fileId);
+	function checkAvailability(open: boolean, _citation: unknown, id: string | undefined) {
+		if (open) void availability.check(id);
+		else availability.cancel();
 	}
+	onDestroy(() => availability.cancel());
 
 	// Load DOCX/XLSX content once per file when the preview opens. Keyed on the
 	// file id so it does not re-fetch on every reactive tick (e.g. snippet click).
@@ -177,7 +163,13 @@
 	$: if (!show) {
 		loadedOfficeFileId = null;
 	}
-	$: if (show && previewAvailable && fileId && (isDocx || isXlsx) && fileId !== loadedOfficeFileId) {
+	$: if (
+		show &&
+		previewAvailable &&
+		fileId &&
+		(isDocx || isXlsx) &&
+		fileId !== loadedOfficeFileId
+	) {
 		loadedOfficeFileId = fileId;
 		loadOfficeContent(fileId, isDocx);
 	}
@@ -185,13 +177,22 @@
 	const loadOfficeContent = async (id: string, asDocx: boolean) => {
 		officeLoading = true;
 		officeError = false;
+		officePending = false;
 		docxHtml = '';
 		xlsxWorkbook = null;
 		xlsxSheetNames = [];
 		selectedSheet = '';
 		xlsxHtml = '';
 		try {
-			const buffer = await getFileContentById(id);
+			// [Gradient] Wait for an original that is still being prepared, then load it.
+			const result = await loadWithPreviewRetry(() => getFileContentById(id), {
+				isCurrent: () => id === loadedOfficeFileId,
+				onPending: () => (officePending = true)
+			});
+			if (result.status === 'cancelled') return;
+			officePending = false;
+			if (result.status === 'failed') throw result.error;
+			const buffer = result.value;
 			// Stale-load guard: the `citation` prop may switch files mid-flight.
 			// `loadedOfficeFileId` always holds the latest requested id, so if it no
 			// longer equals `id` a newer load has started — discard this one's results
@@ -248,7 +249,7 @@
 		scrollToFirstDocxHighlight(docxContainer);
 	};
 
-	const highlightActiveDocx = () => highlightDocxFor(activeSnippetText);
+	const highlightActiveDocx = () => highlightDocxFor(activeIsDocument ? '' : activeSnippetText);
 
 	const selectSnippet = (idx: number) => {
 		activeSnippetIdx = idx;
@@ -257,12 +258,17 @@
 		const snippet = mergedDocuments?.[idx];
 		const text = snippet?.document ?? '';
 		const page = Number.isInteger(snippet?.metadata?.page) ? snippet.metadata.page : undefined;
+		const documentLevel = isDocumentSnippet(snippet);
 		if (isPDF) {
-			pdfViewerRef?.setHighlight(citationTextHighlightEnabled ? text : null, (page ?? 0) + 1);
+			pdfViewerRef?.setHighlight(
+				citationTextHighlightEnabled && !documentLevel ? text : null,
+				(page ?? 0) + 1,
+				rectsFromSnippet(snippet)
+			);
 			return;
 		}
 		if (isDocx) {
-			highlightDocxFor(text);
+			highlightDocxFor(documentLevel ? '' : text);
 		}
 	};
 
@@ -312,6 +318,7 @@
 				{#if citation?.source?.name}
 					{@const document = mergedDocuments?.[0]}
 					{@const docFileId = document?.metadata?.file_id}
+					<SourceIcon source={citation.source} />
 					{#if docFileId || externalUrl}
 						{@const isFileMissing = !!docFileId && !previewAvailable}
 						{@const linksToFile = !!docFileId && !isFileMissing}
@@ -326,9 +333,7 @@
 							tippyOptions={{ duration: [500, 0] }}
 						>
 							{#if isFileMissing && !externalUrl}
-								<span
-									class="grow line-clamp-1 text-gray-500 dark:text-gray-400 cursor-not-allowed"
-								>
+								<span class="grow line-clamp-1 text-gray-500 dark:text-gray-400 cursor-not-allowed">
 									{decodeString(citation?.source?.name)}
 								</span>
 							{:else}
@@ -336,7 +341,7 @@
 									class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
 									href={linksToFile
 										? `${WEBUI_API_BASE_URL}/files/${docFileId}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
-										: externalUrl ?? `#`}
+										: (externalUrl ?? `#`)}
 									target="_blank"
 									rel="noreferrer"
 								>
@@ -374,13 +379,13 @@
 				{/if}
 			</div>
 			<button
-				class="self-center"
+				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				aria-label={$i18n.t('Close citation modal')}
 				on:click={() => {
 					show = false;
 				}}
 			>
-				<XMark className={'size-5'} />
+				<XMark className={'size-4'} />
 			</button>
 		</div>
 
@@ -431,7 +436,7 @@
 												{@const percentage = calculatePercentage(document.distance)}
 												{#if typeof percentage === 'number'}
 													<span
-														class={`px-1 rounded-sm text-xs font-medium ${getRelevanceColor(percentage)}`}
+														class={`px-1 rounded-sm text-xs font-normal ${getRelevanceColor(percentage)}`}
 													>
 														{percentage.toFixed(0)}%
 													</span>
@@ -442,7 +447,11 @@
 												</span>
 											{/if}
 										{/if}
-										{#if Number.isInteger(document?.metadata?.page)}
+										{#if isDocumentSnippet(document)}
+											<span class="text-xs text-gray-500 dark:text-gray-400">
+												{$i18n.t('Full document')}
+											</span>
+										{:else if Number.isInteger(document?.metadata?.page)}
 											<span class="text-xs text-gray-500 dark:text-gray-400">
 												({$i18n.t('page')}
 												{document.metadata.page + 1})
@@ -463,18 +472,23 @@
 									bind:this={pdfViewerRef}
 									url={previewUrlNoHash}
 									className="w-full h-full"
-									highlightText={citationTextHighlightEnabled ? activeSnippetText : null}
+									highlightText={citationTextHighlightEnabled && !activeIsDocument
+										? activeSnippetText
+										: null}
 									initialPage={(activePage ?? 0) + 1}
+									highlightRects={activeRects}
 								/>
 							{:else if isDocx}
 								{#if officeLoading}
-									<div class="flex items-center justify-center h-full">
+									<div class="flex flex-col items-center justify-center gap-2 h-full">
 										<Spinner className="size-5" />
+										<!-- [Gradient] -->
+										{#if officePending}
+											<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+										{/if}
 									</div>
 								{:else if officeError}
-									<div
-										class="flex items-center justify-center h-full text-sm text-gray-400"
-									>
+									<div class="flex items-center justify-center h-full text-sm text-gray-400">
 										{$i18n.t('Could not read file.')}
 									</div>
 								{:else}
@@ -492,8 +506,12 @@
 				{:else if isXlsx}
 					<!-- XLSX: view-only sheet grid with sheet tabs -->
 					{#if officeLoading}
-						<div class="flex items-center justify-center h-[70vh]">
+						<div class="flex flex-col items-center justify-center gap-2 h-[70vh]">
 							<Spinner className="size-5" />
+							<!-- [Gradient] -->
+							{#if officePending}
+								<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+							{/if}
 						</div>
 					{:else if officeError}
 						<div class="flex items-center justify-center h-[70vh] text-sm text-gray-400">
@@ -534,13 +552,14 @@
 					<audio src={previewUrl} class="w-full rounded-lg" controls playsinline />
 				{/if}
 			{:else}
-				<!-- Content tab (upstream text view with Markdown) -->
+				<!-- [Gradient] Content tab retains upstream text-fragment links beside the preview. -->
 				<div class="flex flex-col md:flex-row w-full md:space-x-4">
 					<div
 						class="flex flex-col w-full dark:text-gray-200 overflow-y-scroll max-h-[22rem] scrollbar-thin gap-1"
 					>
 						{#each mergedDocuments as document, documentIdx}
 							<div class="flex flex-col w-full gap-2">
+								<SearchSnippetNote {document} />
 								{#if document.metadata?.parameters}
 									<div>
 										<div class="text-sm font-medium dark:text-gray-300 mb-1">
@@ -610,15 +629,20 @@
 									{#if document.metadata?.html}
 										<iframe
 											class="w-full border-0 h-auto rounded-none"
-											sandbox="allow-scripts allow-forms{($settings?.iframeSandboxAllowSameOrigin ??
-											false)
+											sandbox="{($settings?.iframeSandboxAllowScripts ?? true)
+												? 'allow-scripts'
+												: ''}{($settings?.iframeSandboxAllowForms ?? true)
+												? ' allow-forms'
+												: ''}{($settings?.iframeSandboxAllowDownloads ?? true)
+												? ' allow-downloads'
+												: ''}{($settings?.iframeSandboxAllowSameOrigin ?? false)
 												? ' allow-same-origin'
 												: ''}"
-											srcdoc={document.document}
+											srcdoc={injectCsp(document.document ?? '', $config?.ui?.iframe_csp ?? '')}
 											title={$i18n.t('Content')}
 										></iframe>
 									{:else}
-										{@const rawContent = document.document.trim().replace(/\n\n+/g, '\n\n')}
+										{@const rawContent = (document.document ?? '').trim().replace(/\n\n+/g, '\n\n')}
 										{@const isTruncated =
 											($settings?.renderMarkdownInPreviews ?? true) &&
 											rawContent.length > CONTENT_PREVIEW_LIMIT &&

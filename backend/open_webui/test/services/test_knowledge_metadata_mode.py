@@ -14,6 +14,7 @@ Scenarios:
 
 Fixtures follow the same in-memory SQLite + monkeypatch pattern as
 ``test_knowledge_suspension.py`` and ``test_invites_model.py``.
+These tests cover the SQL class that soev-api replaced for the product.
 """
 
 from __future__ import annotations
@@ -28,16 +29,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from open_webui.models import knowledge as knowledge_module
-from open_webui.models.access_grants import AccessGrant
+from open_webui.models.access_grants import AccessGrant, AccessGrantsTable
 from open_webui.models.files import File
 from open_webui.models.knowledge import (
     Knowledge,
+    KnowledgeDirectory,
     KnowledgeFile,
     KnowledgeFileListResponse,
     Knowledges,
 )
 from open_webui.models.users import User
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -56,6 +57,7 @@ async def db_session(monkeypatch):
     )
     async with engine.begin() as conn:
         await conn.run_sync(Knowledge.__table__.create)
+        await conn.run_sync(KnowledgeDirectory.__table__.create)
         await conn.run_sync(KnowledgeFile.__table__.create)
         await conn.run_sync(File.__table__.create)
         await conn.run_sync(User.__table__.create)
@@ -72,6 +74,8 @@ async def db_session(monkeypatch):
                 yield s
 
     monkeypatch.setattr(knowledge_module, 'get_async_db_context', _get_async_db_context)
+    monkeypatch.setattr(knowledge_module, 'AccessGrants', AccessGrantsTable())
+    monkeypatch.setitem(globals(), 'Knowledges', knowledge_module.KnowledgeTable())
     yield Session
     await engine.dispose()
 
@@ -237,9 +241,9 @@ async def test_metadata_mode_excludes_data_includes_status(db_session):
 
 
 @pytest.mark.asyncio
-async def test_default_mode_includes_data_content(db_session):
-    """metadata_only=False (default): items still include ``data`` and
-    ``data.content`` — default path is unchanged."""
+async def test_default_mode_defers_data_content(db_session):
+    """metadata_only=False (default): ``data`` is deferred (upstream v0.10.2
+    perf trio) — the item shape carries no content blob."""
     user_id = 'user-1'
     await _insert_user(db_session, user_id=user_id)
     kb_id = await _insert_kb(db_session, user_id=user_id)
@@ -265,16 +269,17 @@ async def test_default_mode_includes_data_content(db_session):
     item = result.items[0]
     item_dict = item.model_dump()
 
-    # MUST have data dict with content
-    assert item_dict.get('data') is not None
-    assert item_dict['data'].get('content') == 'this is the full content'
-    assert item_dict['data'].get('status') == 'completed'
+    # Upstream v0.10.2 perf trio: the full path defers File.data — no consumer
+    # of this method reads it, so the heavy content blob is never de-TOASTed.
+    assert item_dict.get('data') is None
 
 
 @pytest.mark.asyncio
 async def test_content_query_filter_works_in_metadata_mode(db_session):
-    """The content-search ``query`` filter works in metadata mode (WHERE clause
-    on data['content'] does not require selecting data)."""
+    """Content search is opt-in post-v0.10.2 (P2-8 locked decision: the "File
+    content" toggle is off by default): a plain ``query`` matches filenames
+    only; ``include_content`` extends the match to ``data['content']`` without
+    selecting data."""
     user_id = 'user-1'
     await _insert_user(db_session, user_id=user_id)
     kb_id = await _insert_kb(db_session, user_id=user_id)
@@ -299,6 +304,7 @@ async def test_content_query_filter_works_in_metadata_mode(db_session):
     await _link_file_to_kb(db_session, kb_id=kb_id, file_id=matching_file_id, user_id=user_id)
     await _link_file_to_kb(db_session, kb_id=kb_id, file_id=no_match_file_id, user_id=user_id)
 
+    # Plain query: filename-only matching — content is NOT searched.
     result = await Knowledges.search_files_by_id(
         kb_id,
         user_id,
@@ -307,7 +313,17 @@ async def test_content_query_filter_works_in_metadata_mode(db_session):
         limit=30,
         metadata_only=True,
     )
+    assert result.total == 0
 
+    # include_content: the query now matches data['content'].
+    result = await Knowledges.search_files_by_id(
+        kb_id,
+        user_id,
+        filter={'query': 'unique_search_term', 'include_content': True},
+        skip=0,
+        limit=30,
+        metadata_only=True,
+    )
     assert result.total == 1
     assert len(result.items) == 1
     assert result.items[0].filename == 'match.pdf'
@@ -579,10 +595,11 @@ async def test_metadata_mode_total_correct_with_query_filter(db_session):
         await _link_file_to_kb(db_session, kb_id=kb_id, file_id=fid, user_id=user_id)
     await _link_file_to_kb(db_session, kb_id=kb_id, file_id=match_id, user_id=user_id)
 
+    # Content matching requires the opt-in include_content flag (post-v0.10.2).
     result = await Knowledges.search_files_by_id(
         kb_id,
         user_id,
-        filter={'query': 'needle'},
+        filter={'query': 'needle', 'include_content': True},
         skip=0,
         limit=30,
         metadata_only=True,
@@ -675,3 +692,57 @@ def test_knowledge_file_list_response_union_serialization():
     # Status and error must survive the round-trip.
     assert item_dict.get('status') == 'completed'
     assert item_dict.get('error') is None
+
+
+async def _insert_directory(Session, *, kb_id: str, name: str, created_at: int, updated_at: int) -> None:
+    async with Session() as s:
+        s.add(
+            KnowledgeDirectory(
+                id=f'dir-{name}',
+                knowledge_id=kb_id,
+                parent_id=None,
+                name=name,
+                user_id='user-1',
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+        )
+        await s.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('filter', 'folders', 'files'),
+    [
+        ({}, ['Belastingdienst', 'BTW aangifte', 'E-facturen'], ['alpha.pdf', 'Beta.pdf', 'gamma.pdf']),
+        (
+            {'order_by': 'name', 'direction': 'asc'},
+            ['Belastingdienst', 'BTW aangifte', 'E-facturen'],
+            ['alpha.pdf', 'Beta.pdf', 'gamma.pdf'],
+        ),
+        (
+            {'order_by': 'name'},
+            ['E-facturen', 'BTW aangifte', 'Belastingdienst'],
+            ['gamma.pdf', 'Beta.pdf', 'alpha.pdf'],
+        ),
+        ({'order_by': 'created_at', 'direction': 'asc'}, ['E-facturen', 'Belastingdienst', 'BTW aangifte'], None),
+        ({'order_by': 'updated_at'}, ['BTW aangifte', 'E-facturen', 'Belastingdienst'], None),
+    ],
+)
+async def test_root_listing_orders_folders_and_files_by_the_chosen_key(db_session, filter, folders, files):
+    """Folders follow the files' sort key and direction; names ignore case."""
+    await _insert_user(db_session)
+    kb_id = await _insert_kb(db_session)
+    for name, created_at, updated_at in [('BTW aangifte', 30, 90), ('Belastingdienst', 20, 10), ('E-facturen', 10, 50)]:
+        await _insert_directory(db_session, kb_id=kb_id, name=name, created_at=created_at, updated_at=updated_at)
+    for filename in ['gamma.pdf', 'Beta.pdf', 'alpha.pdf']:
+        file_id = await _insert_file(db_session, filename=filename)
+        await _link_file_to_kb(db_session, kb_id=kb_id, file_id=file_id)
+
+    result = await Knowledges.search_files_by_id(
+        kb_id, 'user-1', filter={**filter, 'directory_id': None}, metadata_only=True
+    )
+
+    assert [row.name for row in result.directories] == folders
+    if files is not None:
+        assert [row.filename for row in result.items] == files

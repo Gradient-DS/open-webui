@@ -2,6 +2,10 @@ import { get } from 'svelte/store';
 import { config } from '$lib/stores';
 
 export type Feature =
+	// [Gradient] Match the backend tenant gates used by chat settings.
+	| 'tool_servers'
+	| 'terminal_servers'
+	| 'user_demographics'
 	| 'chat_controls'
 	| 'capture'
 	| 'artifacts'
@@ -10,7 +14,10 @@ export type Feature =
 	| 'chat_overview'
 	| 'notes_ai_controls'
 	| 'voice'
+	| 'voice_call'
+	| 'read_aloud'
 	| 'changelog'
+	| 'meetings'
 	| 'system_prompt'
 	| 'models'
 	| 'knowledge'
@@ -25,7 +32,6 @@ export type Feature =
 	| 'input_menu'
 	| 'temporary_chat'
 	| 'builtin_tools'
-	| 'agent_picker'
 	| 'simple_assistant_builder';
 
 /**
@@ -93,6 +99,18 @@ export function hasFeatureAccess(
 }
 
 /**
+ * Whether chats are handled by the agent service: true whenever the agent
+ * API is enabled, as on the backend (`main.py`, `route_to_agent`).
+ *
+ * On the agent route the agent service owns retrieval, so per-file
+ * retrieval controls (e.g. the "Using Focused Retrieval" toggle) have
+ * no effect and should be hidden.
+ */
+export function isAgentRouted(): boolean {
+	return Boolean(get(config)?.features?.feature_agent_api_enabled);
+}
+
+/**
  * All valid admin settings tab IDs
  */
 export const ADMIN_SETTINGS_TABS = [
@@ -102,7 +120,6 @@ export const ADMIN_SETTINGS_TABS = [
 	'evaluations',
 	'integrations',
 	'documents',
-	'cloud-sync',
 	'web',
 	'code-execution',
 	'interface',
@@ -113,9 +130,11 @@ export const ADMIN_SETTINGS_TABS = [
 	'security',
 	'db',
 	'acceptance',
-	'external-agents',
-	'agents'
+	'external-agents'
 ] as const;
+
+// [Gradient] Analytics is a known modal tab, outside the tenant settings allowlist.
+const knownAdminSettingsTabs = new Set<string>([...ADMIN_SETTINGS_TABS, 'analytics']);
 
 export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];
 
@@ -140,13 +159,16 @@ export function isAdminSettingsEnabled(): boolean {
  * @param tab - The tab ID to check
  * @returns true if the tab should be visible
  */
-export function isAdminSettingsTabEnabled(tab: AdminSettingsTab): boolean {
+export function isAdminSettingsTabEnabled(tab: string): boolean {
+	// [Gradient] Reject unknown and intentionally hidden tabs, including deep links.
+	if (!knownAdminSettingsTabs.has(tab)) return false;
+	const $config = get(config);
+	if (tab === 'analytics') return $config?.features?.enable_admin_analytics ?? true;
 	// First check if admin settings is enabled at all
 	if (!isAdminSettingsEnabled()) {
 		return false;
 	}
 
-	const $config = get(config);
 	const allowedTabs = $config?.features?.feature_admin_settings_tabs ?? [];
 
 	// If no tabs specified, all tabs are allowed
@@ -158,25 +180,8 @@ export function isAdminSettingsTabEnabled(tab: AdminSettingsTab): boolean {
 	}
 
 	// External Agents tab requires AGENT_API_ENABLED on the backend.
-	// [Gradient] When the new per-chat agent picker is enabled, hide the
-	// legacy single-select tab to avoid confusion — admins should manage
-	// agents through the new Agents tab instead.
 	if (tab === 'external-agents') {
-		return (
-			tabAllowed &&
-			Boolean($config?.features?.feature_agent_api_enabled) &&
-			!isFeatureEnabled('agent_picker')
-		);
-	}
-
-	// [Gradient] New per-chat agent picker tab. Gated on the master flag.
-	// AGENT_API_ENABLED is also required so the agent service is reachable.
-	if (tab === 'agents') {
-		return (
-			tabAllowed &&
-			isFeatureEnabled('agent_picker') &&
-			Boolean($config?.features?.feature_agent_api_enabled)
-		);
+		return tabAllowed && Boolean($config?.features?.feature_agent_api_enabled);
 	}
 
 	return tabAllowed;
@@ -215,4 +220,16 @@ export function isChatControlSectionEnabled(section: ChatControlSection): boolea
 
 	// If no sections specified, all sections are allowed
 	return allowedSections.length === 0 || allowedSections.includes(section);
+}
+
+/**
+ * Whether Continue Response is offered. The agent route sends one new input per
+ * turn and cannot extend an earlier answer, so it never is there.
+ */
+export function canContinueResponse(
+	$config: { features?: { feature_agent_api_enabled?: boolean } } | undefined,
+	$user: { role?: string; permissions?: { chat?: { continue_response?: boolean } } } | undefined
+): boolean {
+	if ($config?.features?.feature_agent_api_enabled) return false;
+	return $user?.role === 'admin' || ($user?.permissions?.chat?.continue_response ?? true);
 }

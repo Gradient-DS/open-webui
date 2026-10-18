@@ -1,0 +1,153 @@
+"""Subject-scoped connection and schedule calls through the existing soev-api client."""
+
+import asyncio
+from urllib.parse import quote
+from uuid import uuid4
+
+from open_webui.soev.client import SoevApiError, SoevClient
+
+
+class CloudSync:
+    def __init__(self, client: SoevClient, user_ref: str):
+        self.client = client
+        self.user_ref = user_ref
+
+    async def _get(self, path: str) -> dict:
+        return await self.client.get(path, as_user=self.user_ref)
+
+    async def _send(self, method: str, path: str, body: dict | None = None) -> dict | None:
+        return await self.client.send(method, path, body, as_user=self.user_ref, idempotency_key=str(uuid4()))
+
+    async def connections(self) -> list[dict]:
+        return [row async for row in self.client.pages('/v1/connections', as_user=self.user_ref)]
+
+    async def connection(self, connection_id: str) -> dict:
+        return await self._get(f'/v1/connections/{quote(connection_id, safe="")}')
+
+    async def live_grants(self, connection_id: str, family: str) -> list[dict]:
+        await self.connection(connection_id)
+        result = await self._get(f'/v1/connections/{quote(connection_id, safe="")}/live-grants')
+        return [grant for grant in result['data'] if family in grant['families']]
+
+    async def enable_live_family(self, connection_id: str, family: str) -> dict:
+        grants = await self.live_grants(connection_id, family)
+        path = f'/v1/connections/{quote(connection_id, safe="")}/live-grants'
+        for grant in grants:
+            if grant['lifecycle'] == 'enabled':
+                return grant
+            if grant['lifecycle'] == 'suspended':
+                return await self._send('PATCH', f'{path}/{quote(grant["id"], safe="")}', {'enabled': True})
+        return await self.client.send(
+            'POST',
+            path,
+            {'families': [family]},
+            as_user=self.user_ref,
+            idempotency_key=f'live:{family}:{connection_id}',
+        )
+
+    async def connection_usage(self, connection_id: str) -> dict:
+        await self.connection(connection_id)
+        knowledge_ids: set[str] = set()
+        async for schedule in self.client.pages(
+            '/v1/schedules', as_user=self.user_ref, params={'connection_id': connection_id}
+        ):
+            knowledge_ids.update(schedule['subscribers'])
+        return {'knowledge_ids': sorted(knowledge_ids)}
+
+    async def authorize(self, connection_id: str, owner_email: str | None = None, *, silent: bool = False) -> dict:
+        body = {'owner_email': owner_email} if owner_email is not None else None
+        if silent:
+            body = {**(body or {}), 'silent': True}
+        return await self._send('POST', f'/v1/connections/{quote(connection_id, safe="")}/authorize', body)
+
+    async def create_connection(self, provider: str, owner_email: str | None = None) -> dict:
+        connection = await self._send(
+            'POST', '/v1/connections', {'source_kind': provider, 'credential_kind': 'user_oauth'}
+        )
+        authorization = await self.authorize(connection['id'], owner_email if provider == 'google_drive' else None)
+        return {'connection_id': connection['id'], 'authorize_url': authorization['authorize_url']}
+
+    async def revoke_connection(self, connection_id: str) -> None:
+        await self._send('DELETE', f'/v1/connections/{quote(connection_id, safe="")}')
+
+    async def create_schedule(self, collection_key: str, body: dict) -> dict:
+        return await self._send('POST', '/v1/schedules', {**body, 'collection_key': collection_key})
+
+    async def schedule_action(self, collection_key: str, schedule_id: str, action: str) -> dict | None:
+        path = f'/v1/schedules/{quote(schedule_id, safe="")}'
+        schedule = await self._get(path)
+        if collection_key not in schedule['subscribers']:
+            raise SoevApiError(404, 'connection_not_found', 'No such schedule in this collection')
+        if action == 'delete':
+            return await self._send('DELETE', f'{path}?collection_key={quote(collection_key, safe="")}')
+        return await self._send('POST', f'{path}/{action}')
+
+    async def sync_all(self, collection_key: str) -> dict:
+        """Run every content schedule the user owns in this KB; refusals come back per schedule."""
+        return await self._send('POST', f'/v1/collections/{quote(collection_key, safe="")}/sync')
+
+    async def skipped_items(self, collection_key: str, schedule_id: str) -> list[dict]:
+        await self._get(f'/v1/collections/{quote(collection_key, safe="")}')
+        schedule = await self._get(f'/v1/schedules/{quote(schedule_id, safe="")}')
+        if collection_key not in schedule['subscribers']:
+            raise SoevApiError(404, 'connection_not_found', 'No such schedule in this collection')
+        run = schedule.get('last_run')
+        if schedule['kind'] != 'content' or not run:
+            return []
+        job = await self._get(f'/v1/jobs/{quote(run["id"], safe="")}?include_items=true')
+        names = {
+            row['source_id']: row.get('title') or row.get('filename')
+            async for row in self.client.pages(
+                f'/v1/collections/{quote(collection_key, safe="")}/documents', as_user=self.user_ref
+            )
+        }
+        skipped = {}
+        for item in job.get('items', []):
+            if item['status'] == 'succeeded' or item['source_id'] in skipped:
+                continue
+            # soev-sync files most skips under the generic internal_error code
+            # and keeps the specific reason (item_too_large, timed_out, ...) in
+            # the detail, which is the one worth showing.
+            code = item.get('code')
+            skipped[item['source_id']] = {
+                'source_id': item['source_id'],
+                'name': item.get('title') or names.get(item['source_id']) or item['source_id'],
+                'code': (item.get('detail') if code in (None, 'internal_error') else code) or code or item['status'],
+            }
+        return list(skipped.values())
+
+    async def sync_status(self, collection_key: str) -> dict:
+        # W2 projects the collection key directly as the OWUI knowledge id.
+        # Kept: this is what makes an unreadable or absent KB a 404 rather
+        # than an empty schedule list.
+        async def list_schedules():
+            return [
+                row
+                async for row in self.client.pages(
+                    '/v1/schedules', as_user=self.user_ref, params={'collection_key': collection_key}
+                )
+            ]
+
+        _, schedules = await asyncio.gather(
+            self._get(f'/v1/collections/{quote(collection_key, safe="")}'), list_schedules()
+        )
+        # The listing carries each schedule's own detail, so the rest is one
+        # page plus one call per DISTINCT connection (usually exactly one).
+        # It used to also fetch every schedule individually, which made a
+        # status poll cost a round trip per schedule.
+        connection_ids = sorted({schedule['connection_id'] for schedule in schedules})
+        connections = dict(zip(connection_ids, await asyncio.gather(*(self.connection(key) for key in connection_ids))))
+        return {
+            'schedules': [{**schedule, 'connection': connections[schedule['connection_id']]} for schedule in schedules]
+        }
+
+
+async def revoke_cloud(user_id: str, *, client: SoevClient) -> None:
+    """Unsubscribe each owned schedule and revoke connections using the person's assertion."""
+    cloud = CloudSync(client, f'owui:user:{user_id}')
+    schedules = [row async for row in client.pages('/v1/schedules', as_user=cloud.user_ref)]
+    for schedule in schedules:
+        for key in schedule['subscribers']:
+            await cloud.schedule_action(key, schedule['id'], 'delete')
+    for connection in await cloud.connections():
+        await cloud.revoke_connection(connection['id'])

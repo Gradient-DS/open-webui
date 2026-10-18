@@ -20,6 +20,25 @@ data:
   # httpx.UnsupportedProtocol on POST /api/v1/integrations/ingest.
   OPENWEBUI_BASE_URL: "http://{{ include "open-webui-tenant.openWebui.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.openWebui.service.port | default 8080 }}"
 
+  {{- with .Values.soevApi.url }}
+  SOEV_API_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.soevApi.audience }}
+  SOEV_API_AUDIENCE: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.soevApi.servicePrincipal }}
+  SOEV_API_SERVICE_PRINCIPAL: {{ . | quote }}
+  {{- end }}
+  {{- if and (ne .Values.liveDocuments.enabled nil) (ne (toString .Values.liveDocuments.enabled) "") }}
+  ENABLE_LIVE_DOCUMENTS: {{ .Values.liveDocuments.enabled | quote }}
+  {{- end }}
+  {{- if and (ne .Values.liveMail.enabled nil) (ne (toString .Values.liveMail.enabled) "") }}
+  ENABLE_LIVE_MAIL: {{ .Values.liveMail.enabled | quote }}
+  {{- end }}
+  {{- with .Values.webuiUrl }}
+  WEBUI_URL: {{ . | quote }}
+  {{- end }}
+
   # Locale
   DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
 
@@ -60,20 +79,36 @@ data:
 
   # Vector Database (Weaviate) - local to tenant namespace
   VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}
-  WEAVIATE_HTTP_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
+  {{- if eq .Values.openWebui.config.vectorDb "pgvector" }}
+  PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH: {{ .Values.pgvector.maxVectorLength | quote }}
+  PGVECTOR_CREATE_EXTENSION: {{ .Values.pgvector.createExtension | quote }}
+  {{- end }}
+  {{- /*
+  Hosts default to this release's own Weaviate, rendering exactly the string the
+  hard-coded template produced before, so every existing tenant's ConfigMap —
+  and therefore its checksum/config annotation — is unchanged. Override both to
+  point Open WebUI at a Weaviate owned by something else: mkbot shares the agent
+  stack's instance because its own is retired (weaviate.enabled false), and Open
+  WebUI's client connects eagerly at boot, so VECTOR_DB must name a Service that
+  actually exists. A Helm comment, not a YAML one — a rendered comment would
+  change checksum/config and roll every tenant's pods on upgrade.
+  */}}
+  WEAVIATE_HTTP_HOST: {{ .Values.openWebui.config.weaviateHttpHost | default (include "open-webui-tenant.weaviate.fullname" .) }}
   WEAVIATE_HTTP_PORT: {{ .Values.openWebui.config.weaviateHttpPort | quote }}
-  WEAVIATE_GRPC_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
+  WEAVIATE_GRPC_HOST: {{ .Values.openWebui.config.weaviateGrpcHost | default (include "open-webui-tenant.weaviate.fullname" .) }}
   WEAVIATE_GRPC_PORT: {{ .Values.openWebui.config.weaviateGrpcPort | quote }}
   WEAVIATE_WEB_SEARCH_TTL_MINUTES: {{ .Values.openWebui.config.weaviateWebSearchTtlMinutes | quote }}
   ENABLE_WEAVIATE_BQ_QUANTIZATION: {{ .Values.openWebui.config.enableWeaviateBqQuantization | default "false" | quote }}
-  ENABLE_WEAVIATE_MULTITENANCY_MODE: {{ .Values.openWebui.config.enableWeaviateMultitenancyMode | default "false" | quote }}
-  WEAVIATE_MT_LEGACY_FALLBACK: {{ .Values.openWebui.config.weaviateMtLegacyFallback | default "true" | quote }}
+  # Hardcoded skew guard: images since the 2026-07 MT cleanup ignore this; older
+  # images default to the (removed) legacy connector without it. Drop this line
+  # once every track runs a cleanup-era image.
+  ENABLE_WEAVIATE_MULTITENANCY_MODE: "true"
 
   # Database (PostgreSQL) - local to tenant namespace
   DATABASE_TYPE: {{ .Values.openWebui.config.databaseType | quote }}
   DATABASE_USER: {{ .Values.openWebui.config.databaseUser | quote }}
-  DATABASE_HOST: {{ include "open-webui-tenant.postgres.fullname" . }}
-  DATABASE_PORT: {{ .Values.openWebui.config.databasePort | quote }}
+  DATABASE_HOST: {{ include "open-webui-tenant.postgres.host" . }}
+  DATABASE_PORT: {{ include "open-webui-tenant.postgres.port" . | quote }}
   DATABASE_NAME: {{ .Values.openWebui.config.databaseName | quote }}
 
   # RAG Embeddings
@@ -91,6 +126,11 @@ data:
   RAG_HYBRID_BM25_WEIGHT: {{ .Values.openWebui.config.ragHybridBm25Weight | quote }}
   ENABLE_RAG_HYBRID_SEARCH: {{ .Values.openWebui.config.enableRagHybridSearch | quote }}
   RAG_ALLOWED_FILE_EXTENSIONS: {{ .Values.openWebui.config.ragAllowedFileExtensions | quote }}
+
+  # Upload guard (Phase 2 hardening)
+  RAG_FILE_MAX_SIZE: {{ .Values.openWebui.config.ragFileMaxSize | quote }}
+  RAG_FILE_MAX_COUNT_PER_USER: {{ .Values.openWebui.config.ragFileMaxCountPerUser | quote }}
+  RAG_FILE_SNIFF_MODE: {{ .Values.openWebui.config.ragFileSniffMode | quote }}
 
   # File Processing
   FILE_PROCESSING_MAX_CONCURRENT: {{ .Values.openWebui.config.fileProcessingMaxConcurrent | quote }}
@@ -125,7 +165,10 @@ data:
   FEATURE_CHAT_OVERVIEW: {{ .Values.openWebui.config.featureChatOverview | quote }}
   FEATURE_NOTES_AI_CONTROLS: {{ .Values.openWebui.config.featureNotesAiControls | quote }}
   FEATURE_VOICE: {{ .Values.openWebui.config.featureVoice | quote }}
+  FEATURE_VOICE_CALL: {{ .Values.openWebui.config.featureVoiceCall | quote }}
+  FEATURE_READ_ALOUD: {{ .Values.openWebui.config.featureReadAloud | quote }}
   FEATURE_CHANGELOG: {{ .Values.openWebui.config.featureChangelog | quote }}
+  FEATURE_MEETINGS: {{ .Values.openWebui.config.featureMeetings | quote }}
   FEATURE_SYSTEM_PROMPT: {{ .Values.openWebui.config.featureSystemPrompt | quote }}
   FEATURE_MODELS: {{ .Values.openWebui.config.featureModels | quote }}
   FEATURE_MODEL_METERS: {{ .Values.openWebui.config.featureModelMeters | quote }}
@@ -158,6 +201,8 @@ data:
   ENABLE_FEEDBACK_REPORTING: {{ .Values.openWebui.config.enableFeedbackReporting | quote }}
   FEEDBACK_REPORT_INCLUDE_USER_IDENTITY: {{ .Values.openWebui.config.feedbackReportIncludeUserIdentity | quote }}
   FEEDBACK_REPORT_TRACE_URL_TEMPLATE: {{ .Values.openWebui.config.feedbackReportTraceUrlTemplate | quote }}
+  # Set -> wins over FEEDBACK_REPORT_SLACK_WEBHOOK_URL; the router decides Linear vs Slack.
+  FEEDBACK_REPORT_WEBHOOK_URL: {{ .Values.openWebui.config.feedbackReportWebhookUrl | quote }}
 
   # Welcome message (PersistentConfig: env seeds initial value; admin UI wins thereafter)
   ENABLE_WELCOME_MESSAGE: {{ .Values.openWebui.config.enableWelcomeMessage | quote }}
@@ -354,37 +399,30 @@ data:
   CONFLUENCE_SHARED_KB_OWNER_ID: {{ .Values.openWebui.config.confluenceSharedKbOwnerId | quote }}
   {{- end }}
 
-  # TOPdesk Integration (REST Knowledge Base API + basic auth)
-  # TOPDESK_APP_PASSWORD is set via the secrets template.
-  ENABLE_TOPDESK_INTEGRATION: {{ .Values.openWebui.config.enableTopdeskIntegration | quote }}
-  {{- if .Values.openWebui.config.topdeskUrl }}
-  TOPDESK_URL: {{ .Values.openWebui.config.topdeskUrl | quote }}
-  {{- end }}
-  {{- if .Values.openWebui.config.topdeskUsername }}
-  TOPDESK_USERNAME: {{ .Values.openWebui.config.topdeskUsername | quote }}
-  {{- end }}
-
-  # TOPdesk Sync
-  ENABLE_TOPDESK_SYNC: {{ .Values.openWebui.config.enableTopdeskSync | quote }}
-  TOPDESK_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.topdeskSyncIntervalMinutes | quote }}
-  TOPDESK_MAX_ITEMS_PER_SYNC: {{ .Values.openWebui.config.topdeskMaxItemsPerSync | quote }}
-  TOPDESK_MAX_ITEM_SIZE_MB: {{ .Values.openWebui.config.topdeskMaxItemSizeMb | quote }}
-  TOPDESK_SYNC_SCOPE: {{ .Values.openWebui.config.topdeskSyncScope | quote }}
-  TOPDESK_KB_API_PATH: {{ .Values.openWebui.config.topdeskKbApiPath | quote }}
-
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
   SYNC_MAX_JOB_WALL_CLOCK_SECONDS: {{ .Values.openWebui.config.syncMaxJobWallClockSeconds | quote }}
 
-  # Shared-services loader-worker (per-tenant). When useSharedLoader=true,
-  # cloud-source sync workers submit jobs to the loader-worker pod instead of
-  # downloading + embedding in-process. See helm/open-webui-tenant/templates/loader-worker/.
-  USE_SHARED_LOADER: {{ .Values.openWebui.config.useSharedLoader | default "false" | quote }}
+  # Shared-services loader-worker (per-tenant). Cloud-source sync workers
+  # submit jobs to the loader-worker pod.
+  # See helm/open-webui-tenant/templates/loader-worker/.
   {{- if .Values.loaderWorker.enabled }}
   LOADER_WORKER_URL: "http://{{ include "open-webui-tenant.loaderWorker.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.loaderWorker.service.port | default 8002 }}"
   {{- else if .Values.openWebui.config.loaderWorkerUrl }}
   LOADER_WORKER_URL: {{ .Values.openWebui.config.loaderWorkerUrl | quote }}
   {{- end }}
   TENANT_NAME: {{ .Values.tenant.name | default .Release.Namespace | quote }}
+
+  # Sync-daemon (stateless per-tenant cloud sync — replaces the loader-worker).
+  # SYNC_DAEMON_ENABLED is the per-tenant switch (D-2): false → OWUI's own sync
+  # schedulers run (loader path); true → OWUI accepts the daemon principal and
+  # the daemon owns scheduling. SYNC_API_KEY is a secret (see deployment.yaml).
+  # See helm/open-webui-tenant/templates/sync-daemon/.
+  SYNC_DAEMON_ENABLED: {{ .Values.syncDaemon.owuiFlagEnabled | quote }}
+  {{- if .Values.syncDaemon.enabled }}
+  SYNC_DAEMON_URL: "http://{{ include "open-webui-tenant.syncDaemon.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.syncDaemon.service.port | default 8010 }}"
+  {{- else if .Values.openWebui.config.syncDaemonUrl }}
+  SYNC_DAEMON_URL: {{ .Values.openWebui.config.syncDaemonUrl | quote }}
+  {{- end }}
 
   # Distributed document pipeline (warren). When enabled, KB ingestion (upload +
   # add-file + reindex + batch) is delegated to the external pipeline instead of
@@ -519,11 +557,8 @@ data:
   REDIS_URL: "redis://{{ include "open-webui-tenant.redis.fullname" . }}:6379/0"
   {{- end }}
 
-  # Alembic migrations — set to false when the pre-upgrade Job handles them
-  # (see templates/open-webui/migration-job.yaml). Default is true so the
-  # first pod of a single-replica tenant migrates on startup (import-time
-  # trigger in backend/open_webui/config.py:75-76).
-  ENABLE_DB_MIGRATIONS: {{ ternary "false" "true" .Values.openWebui.migrationJob.enabled | quote }}
+  # Migrations run in each pod's init container, serialized on PostgreSQL.
+  ENABLE_DB_MIGRATIONS: "false"
 
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}
@@ -556,39 +591,10 @@ data:
   {{- end }}
 
   # Agent API (internal: routes chat UI to agent service)
-  # AGENT_API_KEY is set via secrets (see .Values.secrets.agentApiKey)
   {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
   AGENT_API_ENABLED: "true"
-  AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
   AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
-  {{- with .Values.openWebui.config.agentApiAgentsConfig }}
-  AGENT_API_AGENTS_CONFIG: {{ . | quote }}
   {{- end }}
-  AGENT_API_AGENTS_CONFIG_OVERWRITE: {{ .Values.openWebui.config.agentApiAgentsConfigOverwrite | default "false" | quote }}
-  {{- with .Values.openWebui.config.agentApiPickerDefaultSlug }}
-  AGENT_API_PICKER_DEFAULT_SLUG: {{ . | quote }}
-  {{- end }}
-  {{- end }}
-
-  # [Gradient] Per-chat agent picker UI (Settings → Agents admin tab +
-  # new-chat empty-state cards). Layered on top of AGENT_API_ENABLED.
-  FEATURE_AGENT_PICKER: {{ .Values.openWebui.config.featureAgentPicker | default "false" | quote }}
-
-  # Agent Proxy (external: exposes agent API to external callers)
-  ENABLE_AGENT_PROXY: {{ .Values.openWebui.config.enableAgentProxy | default "false" | quote }}
-
-  # Search API (RAG discovery proxy at /api/v1/discovery/*).
-  # SEARCH_API_KEY is set via secrets (see .Values.secrets.searchApiKey).
-  # Empty baseUrl disables the discovery proxy at request time.
-  {{- if .Values.openWebui.config.searchApi.baseUrl }}
-  SEARCH_API_BASE_URL: {{ .Values.openWebui.config.searchApi.baseUrl | quote }}
-  {{- end }}
-
-  # Agent Search (machine-auth retrieval endpoint at /api/v1/internal/retrieval/query
-  # and /api/v1/internal/retrieval/accessible-kbs). Inbound bearer is validated
-  # against the same AGENT_API_KEY used for the open-webui → agent outbound
-  # call (single shared secret across the per-tenant trust boundary).
-  AGENT_SEARCH_ENABLED: {{ .Values.agentSearch.enabled | default false | quote }}
 
   # Two-Factor Authentication (TOTP)
   ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}

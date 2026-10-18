@@ -1,9 +1,0 @@
-{
-  "errors": [
-    {
-      "errorCode": "invalidQuery",
-      "appliesTo": "query",
-      "errorMessage": "Field 'modificationDate' is not a valid FIQL selector."
-    }
-  ]
-}

@@ -1,0 +1,17 @@
+{{- if .Values.syncDaemon.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "open-webui-tenant.syncDaemon.fullname" . }}
+  labels:
+    {{- include "open-webui-tenant.syncDaemon.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.syncDaemon.service.port | default 8010 }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "open-webui-tenant.syncDaemon.selectorLabels" . | nindent 4 }}
+{{- end }}

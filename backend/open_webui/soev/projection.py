@@ -1,0 +1,249 @@
+"""Pure translations between soev-api collection values and OWUI knowledge models."""
+
+import base64
+import datetime as dt
+import json
+from uuid import NAMESPACE_URL, uuid5
+
+from open_webui.models.access_grants import AccessGrantModel
+from open_webui.models.knowledge import (
+    FileUserMetadataResponse,
+    FileUserResponse,
+    KnowledgeDirectoryEntry,
+    KnowledgeDirectoryModel,
+    KnowledgeFileListResponse,
+    KnowledgeFileModel,
+    KnowledgeForm,
+    KnowledgeListResponse,
+    KnowledgeModel,
+    KnowledgeUserModel,
+)
+
+
+#: The key under the collection's client-owned ``meta`` that holds OWUI's knowledge meta; other clients own the rest.
+META_NAMESPACE = 'owui'
+
+
+def knowledge_of(collection: dict, *, service_principal: str) -> KnowledgeModel:
+    creator = collection.get('created_by') or ''
+    return KnowledgeModel(
+        id=collection['key'],
+        user_id=creator.removeprefix('owui:user:') if creator.startswith('owui:user:') else '',
+        type=collection['source_kind'],
+        name=collection['name'],
+        description=collection['description'] or '',
+        meta=collection['meta'].get(META_NAMESPACE, {}),
+        access_grants=grants_of(collection, service_principal=service_principal),
+        created_at=int(dt.datetime.fromisoformat(collection['created_at']).timestamp()),
+        updated_at=int(dt.datetime.fromisoformat(collection['updated_at']).timestamp()),
+        deleted_at=None,
+    )
+
+
+def meta_patch(current: dict, desired: dict) -> dict:
+    """The RFC 7396 merge patch that turns ``current`` into ``desired``.
+
+    Merge patch cannot store null, so a None in ``desired`` reads as an absent key."""
+    patch = {key: None for key in current if key not in desired}
+    for key, value in desired.items():
+        before = current.get(key)
+        if isinstance(value, dict) and isinstance(before, dict):
+            if nested := meta_patch(before, value):
+                patch[key] = nested
+        elif value != before:
+            patch[key] = value
+    return patch
+
+
+def collection_create_body(form: KnowledgeForm, *, service_principal: str) -> dict:
+    source_kind = 'local' if form.type is None else form.type
+    visibility, readers, writers = access_of(form.access_grants or [], service_principal=service_principal)
+    return {
+        'name': form.name,
+        'description': form.description,
+        'source_kind': source_kind,
+        'visibility': visibility,
+        'principals': readers if source_kind == 'local' else [ref for ref in readers if ref != service_principal],
+        'writers': writers,
+    }
+
+
+def access_of(grants: list[dict], *, service_principal: str) -> tuple[str, list[str], list[str]]:
+    readers, writers = {service_principal}, set()
+    for grant in grants:
+        principal_type = grant.get('principal_type')
+        principal_id = grant.get('principal_id')
+        permission = grant.get('permission')
+        if principal_type not in ('user', 'group') or not principal_id:
+            continue
+        if principal_id == '*' and principal_type != 'user':
+            continue
+        ref = 'platform:pseudo:owui' if principal_id == '*' else f'owui:{principal_type}:{principal_id}'
+        if permission in ('read', 'write'):
+            readers.add(ref)
+        if permission == 'write':
+            writers.add(ref)
+    return 'restricted', sorted(readers), sorted(writers)
+
+
+def grants_of(collection: dict, *, service_principal: str) -> list[AccessGrantModel]:
+    identities = set()
+    excluded = {service_principal, collection.get('created_by')}
+    for field, permission in (('principals', 'read'), ('writers', 'write')):
+        for ref in collection[field]:
+            if ref in excluded:
+                continue
+            if ref == 'platform:pseudo:owui':
+                identities.add(('user', '*', permission))
+                continue
+            source, _, rest = ref.partition(':')
+            principal_type, _, principal_id = rest.partition(':')
+            if source != 'owui' or principal_type not in ('user', 'group') or principal_id in ('', '*'):
+                continue
+            identities.add((principal_type, principal_id, permission))
+    if collection['visibility'] == 'public':
+        identities.add(('user', '*', 'read'))
+    key = collection['key']
+    created_at = int(dt.datetime.fromisoformat(collection['created_at']).timestamp())
+    return [
+        AccessGrantModel(
+            id=str(uuid5(NAMESPACE_URL, json.dumps(['knowledge', key, principal_type, principal_id, permission]))),
+            resource_type='knowledge',
+            resource_id=key,
+            principal_type=principal_type,
+            principal_id=principal_id,
+            permission=permission,
+            created_at=created_at,
+        )
+        for principal_type, principal_id, permission in sorted(identities)
+    ]
+
+
+def directory_id(key: str, path: tuple[str, ...]) -> str:
+    if not key or '\n' in key or any(not segment or '/' in segment for segment in path):
+        raise ValueError('Directory keys and path segments must have an unambiguous encoding')
+    value = (key + '\n' + '/'.join(path)).encode()
+    return 'd_' + base64.urlsafe_b64encode(value).decode().rstrip('=')
+
+
+def directory_of(directory_id: str) -> tuple[str, tuple[str, ...]]:
+    if not isinstance(directory_id, str) or not directory_id.startswith('d_'):
+        raise ValueError('Invalid directory id')
+    encoded = directory_id[2:]
+    value = base64.b64decode(encoded + '=' * (-len(encoded) % 4), altchars=b'-_', validate=True).decode()
+    key, separator, path = value.partition('\n')
+    segments = tuple(path.split('/')) if path else ()
+    canonical = base64.urlsafe_b64encode(value.encode()).decode().rstrip('=')
+    if not key or not separator or any(not segment for segment in segments) or encoded != canonical:
+        raise ValueError('Invalid directory id')
+    return key, segments
+
+
+SYNC_ROOT_PREFIX = '\0sync:'
+
+
+def sync_root_schedule_id(directory_id: str) -> str | None:
+    """The content schedule behind a synced folder's root row, else None."""
+    _, path = directory_of(directory_id)
+    if len(path) != 1 or not path[0].startswith(SYNC_ROOT_PREFIX):
+        return None
+    return path[0].removeprefix(SYNC_ROOT_PREFIX)
+
+
+def directory_model(key: str, path: tuple[str, ...], *, created_at: int, owner_id: str) -> KnowledgeDirectoryModel:
+    if not path:
+        raise ValueError('The collection root has no directory model')
+    return KnowledgeDirectoryModel(
+        id=directory_id(key, path),
+        knowledge_id=key,
+        parent_id=directory_id(key, path[:-1]) if len(path) > 1 else None,
+        name=path[-1],
+        user_id=owner_id,
+        created_at=created_at,
+        updated_at=created_at,
+        schedule_id=sync_root_schedule_id(directory_id(key, path)),
+    )
+
+
+def knowledge_user_of(collection: dict, *, service_principal: str, user: dict | None = None) -> KnowledgeUserModel:
+    return KnowledgeUserModel(
+        **knowledge_of(collection, service_principal=service_principal).model_dump(),
+        user=user,
+        file_count=collection['document_count'],
+    )
+
+
+def knowledge_list_of(items: list, total: int) -> KnowledgeListResponse:
+    return KnowledgeListResponse(items=items, total=total)
+
+
+def file_response_of(
+    file: dict, document: dict | None, *, metadata_only: bool, collection: dict | None = None
+) -> FileUserMetadataResponse | FileUserResponse:
+    fields = {key: file[key] for key in ('id', 'user_id', 'hash', 'filename', 'meta', 'created_at', 'updated_at')}
+    if collection is not None:
+        # Cross-KB search names the KB holding each file, so a picked file is attached as that KB's document.
+        fields['collection'] = {'id': collection['key'], 'name': collection['name']}
+    if document and document.get('schedule_ids'):
+        # A synced document belongs to its schedules: it leaves with its source, not on its own.
+        fields['meta'] = {**(fields['meta'] or {}), 'soev_schedule_ids': list(document['schedule_ids'])}
+    added_at = int(dt.datetime.fromisoformat(document['ingested_at']).timestamp()) if document else file['created_at']
+    fields.update(user=None, added_at=added_at)
+    if metadata_only:
+        meta = file['meta'] or {}
+        return FileUserMetadataResponse(**fields, status=meta.get('status'), error=meta.get('error'))
+    return FileUserResponse(**fields)
+
+
+def knowledge_link_of(collection: dict, document: dict, *, service_principal: str) -> KnowledgeFileModel:
+    key, source_id = collection['key'], document['source_id']
+    path = tuple(document['path'].split('/')) if document['path'] else ()
+    created_at = int(dt.datetime.fromisoformat(document['ingested_at']).timestamp())
+    return KnowledgeFileModel(
+        id=str(uuid5(NAMESPACE_URL, json.dumps(['knowledge_file', key, source_id]))),
+        knowledge_id=key,
+        file_id=source_id,
+        directory_id=directory_id(key, path) if path else None,
+        user_id=knowledge_of(collection, service_principal=service_principal).user_id,
+        relative_path=document['path'],
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+
+def knowledge_file_list_of(
+    items: list,
+    *,
+    total: int,
+    directories: list | None = None,
+    breadcrumbs: list | None = None,
+    rollups: dict | None = None,
+    collection_total: int | None = None,
+) -> KnowledgeFileListResponse:
+    return KnowledgeFileListResponse(
+        items=items,
+        total=total,
+        collection_total=collection_total,
+        directories=[
+            KnowledgeDirectoryEntry(
+                **directory.model_dump(),
+                **(rollups or {}).get(directory.id, {'child_count': 0, 'status_counts': status_counts()}),
+            )
+            for directory in directories or []
+        ],
+        breadcrumbs=breadcrumbs or [],
+    )
+
+
+def status_counts() -> dict[str, int]:
+    return {'pending': 0, 'completed': 0, 'failed': 0, 'unknown': 0}
+
+
+def status_bucket(status: str | None) -> str:
+    if status == 'completed':
+        return 'completed'
+    if status in ('failed', 'error'):
+        return 'failed'
+    if status in ('pending', 'processing', 'downloading', 'parsing', 'ingesting'):
+        return 'pending'
+    return 'unknown'

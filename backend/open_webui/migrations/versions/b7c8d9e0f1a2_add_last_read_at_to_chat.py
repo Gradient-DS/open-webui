@@ -10,9 +10,8 @@ to avoid a collision with our own d4e5f6a7b8c9 (add_soft_delete_columns).
 See thoughts/shared/plans/2026-05-24-open-webui-upstream-v0.9.5-merge.md.
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'b7c8d9e0f1a2'
@@ -22,9 +21,14 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column('chat', sa.Column('last_read_at', sa.BigInteger(), nullable=True))
-    # Set existing chats to be marked as read
-    op.execute('UPDATE chat SET last_read_at = updated_at')
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('chat')]
+
+    if 'last_read_at' not in columns:
+        op.add_column('chat', sa.Column('last_read_at', sa.BigInteger(), nullable=True))
+        # Set existing chats to be marked as read
+        op.execute('UPDATE chat SET last_read_at = updated_at')
 
 
 def downgrade():

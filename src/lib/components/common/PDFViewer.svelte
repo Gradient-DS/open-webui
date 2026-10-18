@@ -1,20 +1,93 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+	// [Gradient] Explicit scroll intent keeps initial positioning instant.
+	type ScrollBehavior = 'auto' | 'smooth';
+	import { getContext, onMount, onDestroy, tick } from 'svelte';
+	import type { Readable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
+	// [Gradient] The legacy build polyfills the newest JS APIs the modern build calls
+	// directly (Map.getOrInsertComputed, Math.sumPrecise, ...), which iOS WebKit lacks.
+	import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 	import panzoom, { type PanZoom } from 'panzoom';
+	import { clampDocumentTargetPage } from '$lib/utils/documentPreview';
 	import Spinner from './Spinner.svelte';
 	import { matchItemsToNeedle, type PageTextItem } from '$lib/utils/citationMatch';
+	import { pickAnchorRect, type HighlightRect } from '$lib/utils/citationRects';
+	import { PreviewPendingError, loadWithPreviewRetry } from '$lib/utils/previewRetry';
+
+	const i18n = getContext<Readable<I18n>>('i18n');
 
 	export let url: string | null = null;
 	export let data: ArrayBuffer | Uint8Array | null = null;
 	export let className = 'w-full h-[70vh]';
-	// `highlightText` / `initialPage` are read at render time, not watched
-	// reactively. To change the highlight after the PDF has loaded (e.g. on
-	// snippet switch) call setHighlight(...) rather than mutating these props.
+	// `highlightText` / `initialPage` / `highlightRects` seed the viewer's own
+	// highlight state (see below) and are re-read whenever the parent changes
+	// them. Inside a click handler the parent's values are still a tick stale,
+	// so a caller switching snippets should call setHighlight(...) for the
+	// immediate update and let the props follow.
 	// Cited passage to highlight in the text layer (null/empty = no highlight).
 	export let highlightText: string | null = null;
 	// 1-indexed page to jump to when nothing matches the highlight text.
 	export let initialPage: number | null = null;
+	// Coordinate-based highlight rectangles. Takes precedence over
+	// highlightText when non-empty — coordinates are exact, so no fuzzy text
+	// matching is needed. Units: PDF points at scale 1, origin TOP-LEFT of the
+	// page (i.e. y grows downward, matching pdf.js viewport space and most
+	// OCR/layout tools; native bottom-left PDF user space must be flipped by
+	// the caller: y_topleft = pageHeight - y_bottomleft). `page` is 1-indexed.
+	export let highlightRects: HighlightRect[] | null = null;
+
+	// --- Highlight state -------------------------------------------------------
+	//
+	// The props above only SEED this state; from then on setHighlight() owns it.
+	// A component cannot keep a value it assigns to its own prop: the parent's
+	// expression wins on the next flush, and inside a click handler that
+	// expression is still a tick stale (the caller's `activeSnippetIdx` has not
+	// propagated yet). Writing `initialPage` from setHighlight() therefore read
+	// back as the PREVIOUS snippet's page, which sent the scroll to the wrong
+	// place. Local state has no such owner conflict.
+	let hlText = highlightText;
+	let hlPage = initialPage;
+	let hlRects = highlightRects;
+
+	// True once page/text/bbox layers exist, i.e. once there is something to
+	// highlight. Before that, render() applies whatever state is current.
+	let layersRendered = false;
+
+	/**
+	 * Re-seed from the props when the parent supplies a new highlight (snippet
+	 * switch, or props that resolve after the viewer was created) and re-apply.
+	 */
+	const _seedFromProps = (
+		text: string | null,
+		page: number | null,
+		rects: HighlightRect[] | null
+	) => {
+		// [Gradient] Parent props follow setHighlight with newly allocated, equivalent rects.
+		// Do not interrupt its smooth scroll with a second instant positioning pass.
+		const sameRects =
+			rects === hlRects ||
+			((rects?.length ?? 0) === (hlRects?.length ?? 0) &&
+				(rects ?? []).every((rect, i) => {
+					const previous = hlRects?.[i];
+					return (
+						previous &&
+						rect.page === previous.page &&
+						rect.x0 === previous.x0 &&
+						rect.y0 === previous.y0 &&
+						rect.x1 === previous.x1 &&
+						rect.y1 === previous.y1
+					);
+				}));
+		if (text === hlText && page === hlPage && sameRects) return;
+		hlText = text;
+		hlPage = page;
+		hlRects = rects;
+		if (layersRendered && activeRenderToken === null) {
+			_applyBestMatchHighlight();
+		}
+	};
+
+	$: _seedFromProps(highlightText, initialPage, highlightRects);
 
 	const HIGHLIGHT_CLASS = 'citation-highlight';
 	// A page must accumulate at least this many matched characters to be
@@ -22,22 +95,61 @@
 	// coincidental phrase (e.g. a title) when the cited text isn't really in
 	// the PDF text layer (scanned pages) — in that case we page-jump instead.
 	const MIN_MATCH_CHARS = 25;
+	export let targetPage: number | null = null;
+	export let singlePage = false;
+	export let itemLabel = 'Page';
+	export let onPageChange: ((page: number) => void) | null = null;
+
+	type PdfDocument = import('pdfjs-dist').PDFDocumentProxy;
+	type PdfTextLayer = InstanceType<typeof import('pdfjs-dist').TextLayer>;
 
 	let outerContainer: HTMLDivElement;
 	let sceneElement: HTMLDivElement;
 	let loading = true;
 	let error = '';
-	let pdfDoc: any = null;
+	// [Gradient] The original is still being prepared (processing reference attachment); retrying.
+	let pending = false;
+	let pdfDoc: PdfDocument | null = null;
 	let pzInstance: PanZoom | null = null;
 	let zoomLevel = 1;
 	let rerenderTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastRenderedZoom = 1;
+	let pageCount = 0;
+	let renderedPage = 0;
+	// [Gradient] Last page scrollToTargetPage() actually scrolled to. Guards the
+	// post-load reactive scroll below from re-running for a page renderAllPages()
+	// has already scrolled to, which would undo the citation highlight scroll.
+	let scrolledPage = 0;
+	let activePage = 1;
+	let loadToken = 0;
+	let renderToken = 0;
+	// [Gradient] Track the active token separately: renderToken is a generation, not a busy flag.
+	let activeRenderToken: number | null = null;
+	let lastRenderedWidth = 0;
+	let resizeObserver: ResizeObserver | null = null;
+	let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+	let scrollFrame: number | null = null;
+	let mounted = false;
+	let loadedSource: ArrayBuffer | Uint8Array | string | null = null;
+	let wheelDelta = 0;
+	let lastWheelNavigationAt = 0;
+	const wheelNavigationThreshold = 80;
+	const wheelNavigationCooldown = 450;
+	const pageShortcutKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+
+	$: selectedPage = singlePage ? (clampDocumentTargetPage(targetPage, pageCount) ?? 1) : activePage;
 
 	// Keep a reference to TextLayer instances so we can update/cancel them
-	let textLayerInstances: any[] = [];
+
 	// Per-page text-layer container divs (index 0 == page 1). Lets us re-match
 	// highlights against already-rendered spans without re-rendering canvases.
 	let pageTextLayerDivs: HTMLElement[] = [];
+	// Per-page bbox overlay divs (index 0 == page 1) and base page dimensions
+	// in PDF points at scale 1. Rect highlights are positioned in percentages
+	// of the page, so they track the page wrapper through zoom re-renders
+	// without any recomputation.
+	let bboxLayerDivs: HTMLElement[] = [];
+	let pageBaseDims: { width: number; height: number }[] = [];
 
 	// --- Citation highlighting -------------------------------------------------
 	//
@@ -75,11 +187,18 @@
 
 	/** Remove every citation highlight from all rendered text layers. */
 	const _clearHighlights = () => {
+		let cleared = false;
 		for (const textLayerDiv of pageTextLayerDivs) {
+			if (!textLayerDiv) continue;
 			for (const span of textLayerDiv.querySelectorAll(`span.${HIGHLIGHT_CLASS}`)) {
 				span.classList.remove(HIGHLIGHT_CLASS);
+				cleared = true;
 			}
 		}
+		// Flush the class removal before the same spans are highlighted again, so
+		// re-selecting the snippet you are already on replays the pulse instead of
+		// leaving the animation mid-flight (nothing else marks the click as heard).
+		if (cleared) void sceneElement?.offsetHeight;
 	};
 
 	/**
@@ -91,7 +210,15 @@
 	// top with a small margin. Citations use 'top' so the START of the matched
 	// passage (or the cited page) is at the top and reads downward, instead of
 	// centering on the first matched line and pushing the rest below the fold.
-	const _scrollContainerTo = (target: HTMLElement, align: 'center' | 'top' = 'center') => {
+	// [Gradient] Only explicit user navigation animates; load and prop positioning stay instant.
+	const scrollBehavior = (behavior: ScrollBehavior): ScrollBehavior =>
+		window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : behavior;
+
+	const _scrollContainerTo = (
+		target: HTMLElement,
+		align: 'center' | 'top' = 'center',
+		behavior: ScrollBehavior = 'auto'
+	) => {
 		if (!outerContainer) return;
 		const containerRect = outerContainer.getBoundingClientRect();
 		const targetRect = target.getBoundingClientRect();
@@ -100,22 +227,73 @@
 				? Math.min(56, outerContainer.clientHeight * 0.12)
 				: (outerContainer.clientHeight - targetRect.height) / 2;
 		const delta = targetRect.top - containerRect.top - margin;
-		outerContainer.scrollTop += delta;
+		outerContainer.scrollTo({
+			top: outerContainer.scrollTop + delta,
+			behavior: scrollBehavior(behavior)
+		});
 	};
 
-	const _scrollToFirstHighlight = (): boolean => {
+	const _scrollToFirstHighlight = (behavior: ScrollBehavior): boolean => {
 		const first = sceneElement?.querySelector<HTMLElement>(`span.${HIGHLIGHT_CLASS}`);
 		if (!first) return false;
-		_scrollContainerTo(first, 'top');
+		_scrollContainerTo(first, 'top', behavior);
 		return true;
 	};
 
-	const _scrollToPage = (page: number) => {
+	const _scrollToPage = (page: number, behavior: ScrollBehavior) => {
 		if (!page || page < 1) return;
-		const wrapper = sceneElement?.querySelectorAll<HTMLElement>('.pdf-page-wrapper')[page - 1];
+		const wrapper = sceneElement?.querySelector<HTMLElement>(
+			`.pdf-page-wrapper[data-page-number="${page}"]`
+		);
 		if (wrapper) {
-			_scrollContainerTo(wrapper, 'top');
+			_scrollContainerTo(wrapper, 'top', behavior);
 		}
+	};
+
+	/**
+	 * Draw coordinate rectangles into the per-page bbox overlays and scroll to
+	 * the one that anchors the citation (see `pickAnchorRect` — the cited page
+	 * wins over the list's own order). Always clears previous rects (so
+	 * switching to a snippet without geometry removes stale boxes). Returns
+	 * whether anything was drawn.
+	 */
+	const _applyRectHighlights = (behavior: ScrollBehavior | null): boolean => {
+		for (const layer of bboxLayerDivs) {
+			if (!layer) continue;
+			layer.innerHTML = '';
+		}
+		const rects = hlRects ?? [];
+		// Only rects that actually landed on a rendered page can be scrolled to,
+		// so the anchor is chosen among these rather than among the input list.
+		const drawn: { rect: HighlightRect; el: HTMLElement }[] = [];
+		for (const rect of rects) {
+			const layer = bboxLayerDivs[rect.page - 1];
+			const dims = pageBaseDims[rect.page - 1];
+			if (!layer || !dims) continue;
+			// Clamp to the page box — geometry from OCR/layout tools can
+			// overshoot the media box by a point or two.
+			const x0 = Math.max(0, Math.min(rect.x0, dims.width));
+			const y0 = Math.max(0, Math.min(rect.y0, dims.height));
+			const x1 = Math.max(0, Math.min(rect.x1, dims.width));
+			const y1 = Math.max(0, Math.min(rect.y1, dims.height));
+			if (x1 <= x0 || y1 <= y0) continue;
+			const div = document.createElement('div');
+			div.className = 'bbox-highlight';
+			div.style.left = `${(x0 / dims.width) * 100}%`;
+			div.style.top = `${(y0 / dims.height) * 100}%`;
+			div.style.width = `${((x1 - x0) / dims.width) * 100}%`;
+			div.style.height = `${((y1 - y0) / dims.height) * 100}%`;
+			layer.appendChild(div);
+			drawn.push({ rect, el: div });
+		}
+		if (drawn.length === 0) return false;
+		const anchor = pickAnchorRect(
+			drawn.map((d) => d.rect),
+			hlPage
+		);
+		const target = drawn.find((d) => d.rect === anchor)?.el ?? drawn[0].el;
+		if (behavior !== null) _scrollContainerTo(target, 'top', behavior);
+		return true;
 	};
 
 	/**
@@ -124,15 +302,18 @@
 	 * pages; highlighting every match and scrolling to the first latched onto
 	 * coincidental matches on unrelated pages. Scoring by matched characters and
 	 * keeping only the best page lands on the cited passage's real location.
-	 * Fallback chain: best-page highlight+scroll -> cited-page jump -> nothing.
-	 * Clears prior highlights first.
+	 * Fallback chain: exact bbox rects -> best-page text highlight+scroll ->
+	 * cited-page jump -> nothing. Clears prior highlights first.
 	 */
-	const _applyBestMatchHighlight = () => {
+	// [Gradient] null redraws text/bbox highlights without changing the reading position.
+	const _applyBestMatchHighlight = (behavior: ScrollBehavior | null = 'auto') => {
 		_clearHighlights();
-		const needle = highlightText?.trim();
+		if (_applyRectHighlights(behavior)) return;
+		const needle = hlText?.trim();
 		if (needle) {
 			let best: PageMatch | null = null;
 			for (const textLayerDiv of pageTextLayerDivs) {
+				if (!textLayerDiv) continue;
 				const page = _scorePage(textLayerDiv, needle);
 				if (page.score > (best?.score ?? 0)) {
 					best = page;
@@ -142,26 +323,47 @@
 				for (const i of best.hits) {
 					best.spans[i]?.classList.add(HIGHLIGHT_CLASS);
 				}
-				_scrollToFirstHighlight();
+				if (behavior !== null) _scrollToFirstHighlight(behavior);
 				return;
 			}
 		}
-		if (initialPage) {
-			_scrollToPage(initialPage);
+		if (hlPage && behavior !== null) {
+			_scrollToPage(hlPage, behavior);
 		}
 	};
 
 	/**
 	 * Update the highlighted passage on the already-rendered text layers without
 	 * re-rendering the PDF canvases, then re-scroll. Cheap snippet switching.
-	 * Safe to call before the first render completes: the new values are stored
-	 * on the props and honored when render runs.
+	 * Safe to call before the first render completes: the values are held as
+	 * local state and honored when render runs.
 	 */
-	export function setHighlight(text: string | null, page: number | null) {
-		highlightText = text;
-		initialPage = page;
-		_applyBestMatchHighlight();
+	export function setHighlight(
+		text: string | null,
+		page: number | null,
+		rects: HighlightRect[] | null = null
+	) {
+		hlText = text;
+		hlPage = page;
+		hlRects = rects;
+		// [Gradient] Rendering applies pending state instantly on first load.
+		if (layersRendered && activeRenderToken === null) _applyBestMatchHighlight('smooth');
 	}
+	let textLayerInstances: PdfTextLayer[] = [];
+
+	const copyPdfData = (pdfData: ArrayBuffer | Uint8Array) =>
+		pdfData instanceof Uint8Array ? pdfData.slice() : pdfData.slice(0);
+
+	const cancelTextLayers = () => {
+		for (const tl of textLayerInstances) {
+			try {
+				tl.cancel();
+			} catch {
+				// Text layers can already be resolved or canceled during rerenders.
+			}
+		}
+		textLayerInstances = [];
+	};
 
 	const initPanzoom = () => {
 		if (pzInstance) {
@@ -181,6 +383,9 @@
 				},
 				beforeMouseDown: (e) => {
 					// Only allow drag-to-pan when zoomed in (not at default scale)
+					if ((e?.target as HTMLElement | null)?.closest?.('.textLayer')) {
+						return true;
+					}
 					const transform = pzInstance?.getTransform();
 					if (transform && Math.abs(transform.scale - 1) < 0.01) {
 						return true; // cancel panzoom mouse handling at 1x — allow text selection / normal interaction
@@ -226,43 +431,147 @@
 		}
 	};
 
+	export const scrollToPage = async (page: number | null) => {
+		targetPage = page;
+		if (singlePage) {
+			if (targetPage) onPageChange?.(targetPage);
+		} else {
+			await scrollToTargetPage('smooth');
+		}
+	};
+
+	const selectPage = async (page: number) => {
+		if (!pdfDoc) return;
+		const nextPage = clampDocumentTargetPage(page, pdfDoc.numPages);
+		if (!nextPage || nextPage === selectedPage) return;
+
+		targetPage = nextPage;
+		activePage = nextPage;
+		onPageChange?.(nextPage);
+		if (!singlePage) await scrollToTargetPage('smooth');
+	};
+
+	const scrollToTargetPage = async (behavior: ScrollBehavior = 'auto') => {
+		if (!outerContainer || !sceneElement || !pdfDoc) return;
+		const page = clampDocumentTargetPage(targetPage, pdfDoc.numPages);
+		if (!page) return;
+
+		if (singlePage) return;
+
+		// [Gradient] Claim this page before yielding so the prop effect cannot duplicate the scroll.
+		scrolledPage = page;
+		await tick();
+		const pageWrapper = sceneElement.querySelectorAll('.pdf-page-wrapper')[page - 1] as
+			| HTMLElement
+			| undefined;
+		pageWrapper?.scrollIntoView({ block: 'start', behavior: scrollBehavior(behavior) });
+		activePage = page;
+		onPageChange?.(page);
+	};
+
+	const syncVisiblePage = () => {
+		scrollFrame = null;
+		if (singlePage || !outerContainer || !sceneElement || !pdfDoc) return;
+
+		const marker = outerContainer.getBoundingClientRect().top + outerContainer.clientHeight * 0.35;
+		let bestPage = activePage;
+		let bestDistance = Number.POSITIVE_INFINITY;
+
+		for (const wrapper of sceneElement.querySelectorAll('.pdf-page-wrapper')) {
+			const el = wrapper as HTMLElement;
+			const page = Number(el.dataset.pageNumber);
+			if (!page) continue;
+
+			const rect = el.getBoundingClientRect();
+			const distance =
+				marker < rect.top ? rect.top - marker : marker > rect.bottom ? marker - rect.bottom : 0;
+			if (distance < bestDistance) {
+				bestDistance = distance;
+				bestPage = page;
+			}
+		}
+
+		if (bestPage !== activePage) {
+			activePage = bestPage;
+			onPageChange?.(bestPage);
+		}
+	};
+
+	const handleScroll = () => {
+		if (singlePage || scrollFrame !== null) return;
+		scrollFrame = requestAnimationFrame(syncVisiblePage);
+	};
+
 	// Re-render existing canvases at a new zoom level (preserves panzoom transform)
-	const rerenderPages = async (forZoom: number) => {
-		if (!pdfDoc || !sceneElement) return;
-		const pdfjs = await import('pdfjs-dist');
+	const rerenderPages = async (forZoom: number, preservePosition = false) => {
+		if (!pdfDoc || !sceneElement || activeRenderToken !== null) return;
+		// [Gradient] Resize shares the zoom renderer, preserving its panzoom transform.
+		const token = ++renderToken;
+		activeRenderToken = token;
+		const width = outerContainer.clientWidth;
+		const scrollRatio = outerContainer.scrollTop / (outerContainer.scrollHeight || 1);
+		let succeeded = false;
+		try {
+			succeeded =
+				(await rerenderPageContent(forZoom, preservePosition, token, width, scrollRatio)) === true;
+		} catch (error) {
+			if (token === renderToken) console.error('PDF rerender error:', error);
+		} finally {
+			finishRender(token, succeeded);
+		}
+	};
+
+	// [Gradient] Keep the render loop at its upstream indentation; the caller owns cleanup.
+	const rerenderPageContent = async (
+		forZoom: number,
+		preservePosition: boolean,
+		token: number,
+		width: number,
+		scrollRatio: number
+	) => {
+		const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+		if (token !== renderToken || !pdfDoc) return;
 		const dpr = window.devicePixelRatio || 1;
-		const containerWidth = outerContainer?.clientWidth || 800;
 
 		const pageWrappers = sceneElement.querySelectorAll('.pdf-page-wrapper');
 
-		// Cancel old text layers
-		for (const tl of textLayerInstances) {
-			try {
-				tl.cancel();
-			} catch (_) {}
-		}
-		textLayerInstances = [];
+		cancelTextLayers();
+		// [Gradient] Clear page-indexed citation layers on document replacement.
 		pageTextLayerDivs = [];
+		bboxLayerDivs = [];
+		pageBaseDims = [];
 
 		for (let i = 0; i < pageWrappers.length; i++) {
-			const page = await pdfDoc.getPage(i + 1);
+			// [Gradient] Zoom loops over rendered wrappers, not absolute PDF pages.
+			const pageNumber = singlePage ? selectedPage : i + 1;
+			const page = await pdfDoc.getPage(pageNumber);
+			if (token !== renderToken) return;
 			const viewport = page.getViewport({ scale: 1 });
-			const cssScale = containerWidth / viewport.width;
+			const cssScale = getCssScale(viewport, width);
 			const renderScale = cssScale * forZoom * dpr;
 			const scaledViewport = page.getViewport({ scale: renderScale });
 			const cssViewport = page.getViewport({ scale: cssScale });
 
 			const wrapper = pageWrappers[i] as HTMLElement;
+			// [Gradient] Fit both layout boxes and text layers to the new container width.
+			wrapper.style.width = `${Math.round(cssViewport.width)}px`;
+			wrapper.style.height = `${Math.round(cssViewport.height)}px`;
+			const bboxLayer = wrapper.querySelector('.bboxLayer') as HTMLElement | null;
+			if (bboxLayer) bboxLayerDivs[pageNumber - 1] = bboxLayer;
+			pageBaseDims[pageNumber - 1] = { width: viewport.width, height: viewport.height };
 			// Update the CSS custom property so textLayer dimensions resolve correctly
 			wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
 
 			const canvas = wrapper.querySelector('canvas')!;
+			canvas.style.width = wrapper.style.width;
+			canvas.style.height = wrapper.style.height;
 			canvas.width = scaledViewport.width;
 			canvas.height = scaledViewport.height;
 
 			const ctx = canvas.getContext('2d');
 			if (ctx) {
-				await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+				await page.render({ canvas, canvasContext: ctx, viewport: scaledViewport }).promise;
+				if (token !== renderToken) return;
 			}
 
 			// Rebuild text layer
@@ -271,44 +580,109 @@
 				textLayerDiv.innerHTML = '';
 
 				const textContent = await page.getTextContent();
+				if (token !== renderToken) return;
 				const textLayer = new pdfjs.TextLayer({
 					textContentSource: textContent,
 					container: textLayerDiv,
 					viewport: cssViewport
 				});
 				await textLayer.render();
+				if (token !== renderToken) return;
 				textLayerInstances.push(textLayer);
-				pageTextLayerDivs.push(textLayerDiv);
+				pageTextLayerDivs[pageNumber - 1] = textLayerDiv;
 			}
 		}
 		lastRenderedZoom = forZoom;
-		_applyBestMatchHighlight();
+		lastRenderedWidth = width;
+		_applyBestMatchHighlight(preservePosition ? null : 'auto');
+		if (preservePosition) {
+			outerContainer.scrollTo({
+				top: scrollRatio * outerContainer.scrollHeight,
+				behavior: 'auto'
+			});
+		}
+		return true;
+	};
+
+	const getCssScale = (viewport: { width: number; height: number }, width: number) => {
+		if (!singlePage) return (width || 800) / viewport.width;
+
+		const availableWidth = Math.max(320, (outerContainer?.clientWidth || 800) - 64);
+		const availableHeight = Math.max(220, (outerContainer?.clientHeight || 600) - 64);
+		return Math.min(1, availableWidth / viewport.width, availableHeight / viewport.height);
+	};
+
+	// [Gradient] Ignore observer notifications during rendering, then recheck once it finishes.
+	const scheduleResize = () => {
+		if (resizeTimer) clearTimeout(resizeTimer);
+		resizeTimer = null;
+		if (
+			!mounted ||
+			singlePage ||
+			!layersRendered ||
+			activeRenderToken !== null ||
+			!outerContainer?.clientWidth ||
+			Math.abs(outerContainer.clientWidth - lastRenderedWidth) <= 2
+		)
+			return;
+		resizeTimer = setTimeout(() => {
+			resizeTimer = null;
+			if (
+				!mounted ||
+				singlePage ||
+				activeRenderToken !== null ||
+				!outerContainer?.clientWidth ||
+				Math.abs(outerContainer.clientWidth - lastRenderedWidth) <= 2
+			)
+				return;
+			void rerenderPages(lastRenderedZoom, true);
+		}, 150);
+	};
+
+	const finishRender = (token: number, succeeded = true) => {
+		if (activeRenderToken !== token) return;
+		activeRenderToken = null;
+		if (succeeded) scheduleResize();
 	};
 
 	const renderAllPages = async () => {
 		if (!pdfDoc || !sceneElement) return;
+		const token = ++renderToken;
+		activeRenderToken = token;
+		layersRendered = false;
+		const width = outerContainer.clientWidth;
+		try {
+			await renderPageContent(token, width);
+		} finally {
+			finishRender(token);
+		}
+	};
 
+	// [Gradient] The caller releases the busy token even on cancellation or failure.
+	const renderPageContent = async (token: number, width: number) => {
 		// Clear previous content
 		sceneElement.innerHTML = '';
 
-		// Cancel old text layers
-		for (const tl of textLayerInstances) {
-			try {
-				tl.cancel();
-			} catch (_) {}
-		}
-		textLayerInstances = [];
+		cancelTextLayers();
+		// [Gradient] Citation arrays use absolute page indices in single-page mode too.
 		pageTextLayerDivs = [];
+		bboxLayerDivs = [];
+		pageBaseDims = [];
 
-		const pdfjs = await import('pdfjs-dist');
+		const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+		if (token !== renderToken || !pdfDoc) return;
 		const dpr = window.devicePixelRatio || 1;
-		for (let i = 1; i <= pdfDoc.numPages; i++) {
+		const wrappers: HTMLElement[] = [];
+		const firstPage = singlePage ? selectedPage : 1;
+		const lastPage = singlePage ? selectedPage : pdfDoc.numPages;
+
+		for (let i = firstPage; i <= lastPage; i++) {
 			const page = await pdfDoc.getPage(i);
+			if (token !== renderToken) return;
 			const viewport = page.getViewport({ scale: 1 });
 
 			// Scale to fit container width
-			const containerWidth = outerContainer?.clientWidth || 800;
-			const cssScale = containerWidth / viewport.width;
+			const cssScale = getCssScale(viewport, width);
 			const renderScale = cssScale * dpr;
 			const scaledViewport = page.getViewport({ scale: renderScale });
 			const cssViewport = page.getViewport({ scale: cssScale });
@@ -316,6 +690,7 @@
 			// Create page wrapper (positioned container for canvas + text layer)
 			const wrapper = document.createElement('div');
 			wrapper.className = 'pdf-page-wrapper';
+			wrapper.dataset.pageNumber = String(i);
 			wrapper.style.position = 'relative';
 			wrapper.style.width = `${Math.round(cssScale * viewport.width)}px`;
 			wrapper.style.height = `${Math.round(cssScale * viewport.height)}px`;
@@ -339,10 +714,14 @@
 			wrapper.appendChild(canvas);
 
 			const ctx = canvas.getContext('2d');
+			if (!ctx) continue;
+
 			await page.render({
+				canvas,
 				canvasContext: ctx,
 				viewport: scaledViewport
 			}).promise;
+			if (token !== renderToken) return;
 
 			// Create text layer overlay — pdfjs setLayerDimensions handles its sizing
 			const textLayerDiv = document.createElement('div');
@@ -350,36 +729,122 @@
 			wrapper.appendChild(textLayerDiv);
 
 			const textContent = await page.getTextContent();
+			if (token !== renderToken) return;
 			const textLayer = new pdfjs.TextLayer({
 				textContentSource: textContent,
 				container: textLayerDiv,
 				viewport: cssViewport
 			});
 			await textLayer.render();
+			if (token !== renderToken) return;
 			textLayerInstances.push(textLayer);
-			pageTextLayerDivs.push(textLayerDiv);
+			pageTextLayerDivs[i - 1] = textLayerDiv;
 
-			sceneElement.appendChild(wrapper);
+			// Bbox overlay — sits above the text layer but is click-transparent
+			// so selection/search still hit the text spans underneath.
+			const bboxLayerDiv = document.createElement('div');
+			bboxLayerDiv.className = 'bboxLayer';
+			wrapper.appendChild(bboxLayerDiv);
+			bboxLayerDivs[i - 1] = bboxLayerDiv;
+			pageBaseDims[i - 1] = { width: viewport.width, height: viewport.height };
+
+			wrappers.push(wrapper);
 		}
 
+		sceneElement.replaceChildren(...wrappers);
 		lastRenderedZoom = 1;
+		lastRenderedWidth = width;
+		layersRendered = true;
+		renderedPage = singlePage ? selectedPage : 0;
 		initPanzoom();
+		await scrollToTargetPage();
+		if (token !== renderToken) return;
+		syncVisiblePage();
+		// [Gradient] Citation scroll must follow the normal page scroll.
 		_applyBestMatchHighlight();
+	};
+
+	const handleWheel = (e: WheelEvent) => {
+		if (!singlePage) return;
+		if (e.ctrlKey || e.metaKey) return;
+
+		const transform = pzInstance?.getTransform();
+		if (transform && Math.abs(transform.scale - 1) >= 0.01) {
+			e.preventDefault();
+			pzInstance?.moveBy(-e.deltaX, -e.deltaY, false);
+			zoomLevel = pzInstance?.getTransform()?.scale ?? 1;
+			return;
+		}
+
+		e.preventDefault();
+		if (pageCount <= 1) return;
+
+		const multiplier = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? outerContainer.clientHeight : 1;
+		const dominantDelta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+		wheelDelta += dominantDelta * multiplier;
+
+		const now = Date.now();
+		if (Math.abs(wheelDelta) < wheelNavigationThreshold) return;
+		if (now - lastWheelNavigationAt < wheelNavigationCooldown) {
+			wheelDelta = 0;
+			return;
+		}
+
+		lastWheelNavigationAt = now;
+		void selectPage(selectedPage + (wheelDelta > 0 ? 1 : -1));
+		wheelDelta = 0;
+	};
+
+	const handleKeyDown = (e: KeyboardEvent) => {
+		if (
+			!singlePage ||
+			e.defaultPrevented ||
+			e.altKey ||
+			e.ctrlKey ||
+			e.metaKey ||
+			pageCount <= 1 ||
+			!pageShortcutKeys.includes(e.key)
+		) {
+			return;
+		}
+
+		e.preventDefault();
+		void selectPage(selectedPage + (e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 1));
+	};
+
+	const focusViewer = () => {
+		if (!outerContainer?.contains(document.activeElement)) outerContainer?.focus();
 	};
 
 	const loadPdf = async () => {
 		if (!url && !data) return;
 
+		const source = data ?? url;
+		if (source === loadedSource && pdfDoc) return;
+		const token = ++loadToken;
+		loadedSource = source;
 		loading = true;
+		// [Gradient] Invalidate resize/zoom work before replacing its document.
+		renderToken++;
+		activeRenderToken = null;
+		layersRendered = false;
 		error = '';
+		pending = false;
+		renderedPage = 0;
+		scrolledPage = 0;
+		pageCount = 0;
+		pzInstance?.dispose();
+		cancelTextLayers();
+		pdfDoc?.destroy();
+		pdfDoc = null;
 
 		try {
-			const pdfjs = await import('pdfjs-dist');
+			const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
 			pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 			let pdfData: ArrayBuffer | Uint8Array;
 			if (data) {
-				pdfData = data;
+				pdfData = copyPdfData(data);
 			} else {
 				// Authenticate like the rest of the app: send the Bearer token from
 				// localStorage. The /files/{id}/content endpoint needs auth; relying
@@ -387,36 +852,76 @@
 				// isn't sent (OAuth login, non-localhost host, SameSite/expiry) —
 				// which surfaces as "Failed to load PDF". credentials kept as a fallback.
 				const authToken = localStorage.getItem('token');
-				const res = await fetch(url!, {
-					credentials: 'include',
-					headers: authToken ? { authorization: `Bearer ${authToken}` } : {}
-				});
-				if (!res.ok) throw new Error(`HTTP ${res.status}`);
-				pdfData = await res.arrayBuffer();
+				// [Gradient] A 409 means the original is still being prepared: wait and retry.
+				const result = await loadWithPreviewRetry(
+					async () => {
+						const res = await fetch(url!, {
+							credentials: 'include',
+							headers: authToken ? { authorization: `Bearer ${authToken}` } : {}
+						});
+						if (res.status === 409) throw new PreviewPendingError();
+						if (!res.ok) throw new Error(`HTTP ${res.status}`);
+						return res.arrayBuffer();
+					},
+					{ isCurrent: () => token === loadToken, onPending: () => (pending = true) }
+				);
+				if (result.status === 'cancelled') return;
+				pending = false;
+				if (result.status === 'failed') throw result.error;
+				pdfData = result.value;
 			}
 			pdfDoc = await pdfjs.getDocument({ data: pdfData }).promise;
+			if (token !== loadToken) return;
+			pageCount = pdfDoc.numPages;
+			activePage = clampDocumentTargetPage(targetPage, pageCount) ?? 1;
+			targetPage = clampDocumentTargetPage(targetPage, pageCount) ?? 1;
 			await renderAllPages();
 		} catch (e) {
-			console.error('PDF render error:', e);
-			error = 'Failed to load PDF.';
+			if (token === loadToken) {
+				console.error('PDF render error:', e);
+				error = 'Failed to load PDF.';
+			}
 		} finally {
-			loading = false;
+			if (token === loadToken) loading = false;
 		}
 	};
 
 	onMount(() => {
+		mounted = true;
+		// [Gradient] Multi-page previews follow their host width without citation navigation.
+		resizeObserver = new ResizeObserver(scheduleResize);
+		resizeObserver.observe(outerContainer);
 		loadPdf();
 	});
 
+	$: if (mounted && (data || url)) {
+		void loadPdf();
+	}
+
+	$: if (!loading && pdfDoc && singlePage && targetPage && selectedPage !== renderedPage) {
+		void renderAllPages();
+	}
+
+	// [Gradient] Only scroll for a page the render pass has not already handled.
+	// renderAllPages() awaits scrollToTargetPage() and then applies the citation
+	// highlight scroll; without this guard the effect fires again when `loading`
+	// flips false and drags the viewer back to `targetPage` (coerced to 1 in
+	// loadPdf), losing both the bbox overlay position and the chunk jump.
+	$: if (!loading && pdfDoc && !singlePage && targetPage && targetPage !== scrolledPage) {
+		void scrollToTargetPage();
+	}
+
 	onDestroy(() => {
+		// [Gradient] Stop pending geometry work before disposing the PDF.
+		mounted = false;
+		resizeObserver?.disconnect();
+		if (resizeTimer) clearTimeout(resizeTimer);
+		loadToken++;
+		renderToken++;
+		if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
 		if (rerenderTimer) clearTimeout(rerenderTimer);
 		pzInstance?.dispose();
-		for (const tl of textLayerInstances) {
-			try {
-				tl.cancel();
-			} catch (_) {}
-		}
-		textLayerInstances = [];
+		cancelTextLayers();
 		if (pdfDoc) {
 			pdfDoc.destroy();
 			pdfDoc = null;
@@ -426,8 +931,12 @@
 
 <div class="relative {className}">
 	{#if loading}
-		<div class="absolute inset-0 flex items-center justify-center">
+		<div class="absolute inset-0 flex flex-col items-center justify-center gap-2">
 			<Spinner className="size-5" />
+			<!-- [Gradient] -->
+			{#if pending}
+				<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+			{/if}
 		</div>
 	{:else if error}
 		<div class="absolute inset-0 flex items-center justify-center text-sm text-red-500">
@@ -435,16 +944,76 @@
 		</div>
 	{/if}
 
-	<div class="overflow-y-auto h-full" bind:this={outerContainer}>
-		<div bind:this={sceneElement} class="w-full"></div>
+	<div
+		class={singlePage
+			? 'overflow-hidden h-full flex items-center justify-center overscroll-contain'
+			: 'overflow-y-auto h-full [scrollbar-gutter:stable]'}
+		bind:this={outerContainer}
+		role="application"
+		aria-label={`${itemLabel} viewer`}
+		tabindex="0"
+		on:scroll={handleScroll}
+		on:wheel|nonpassive={handleWheel}
+		on:pointerdown={focusViewer}
+		on:keydown={handleKeyDown}
+	>
+		<div bind:this={sceneElement} class={singlePage ? '' : 'w-full'}></div>
 	</div>
 
-	{#if !loading && !error && pdfDoc}
+	{#if !error && pdfDoc}
 		<div
 			class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-0.5 rounded-lg bg-white/90 dark:bg-gray-850/90 backdrop-blur-sm shadow-lg border border-gray-200/60 dark:border-gray-700/60 px-1 py-0.5"
 		>
+			{#if singlePage}
+				<button
+					type="button"
+					class="shrink-0 min-w-7 h-7 inline-flex items-center justify-center p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition text-gray-500 dark:text-gray-400 disabled:opacity-30"
+					disabled={selectedPage === 1}
+					on:click={() => selectPage(selectedPage - 1)}
+					aria-label={`Previous ${itemLabel.toLowerCase()}`}
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 20 20"
+						fill="currentColor"
+						class="size-3.5"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z"
+							clip-rule="evenodd"
+						/>
+					</svg>
+				</button>
+				<span
+					class="shrink-0 min-w-12 text-center text-[0.6875rem] text-gray-500 dark:text-gray-400 tabular-nums"
+					>{selectedPage} / {pageCount}</span
+				>
+				<button
+					type="button"
+					class="shrink-0 min-w-7 h-7 inline-flex items-center justify-center p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition text-gray-500 dark:text-gray-400 disabled:opacity-30"
+					disabled={selectedPage === pageCount}
+					on:click={() => selectPage(selectedPage + 1)}
+					aria-label={`Next ${itemLabel.toLowerCase()}`}
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 20 20"
+						fill="currentColor"
+						class="size-3.5"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z"
+							clip-rule="evenodd"
+						/>
+					</svg>
+				</button>
+			{/if}
+			<!-- Pinch covers in/out on coarse pointers; reset has no gesture, so it stays -->
 			<button
-				class="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition text-gray-500 dark:text-gray-400"
+				type="button"
+				class="shrink-0 min-w-7 h-7 inline-flex items-center justify-center p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition text-gray-500 dark:text-gray-400 pointer-coarse:hidden"
 				on:click={zoomOut}
 				aria-label="Zoom out"
 			>
@@ -462,14 +1031,16 @@
 				</svg>
 			</button>
 			<button
-				class="px-1.5 py-1 min-w-[3rem] text-center text-[11px] font-medium text-gray-500 dark:text-gray-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition tabular-nums"
+				type="button"
+				class="shrink-0 min-w-12 h-7 px-1.5 py-1 text-center text-[0.6875rem] font-normal text-gray-500 dark:text-gray-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition tabular-nums"
 				on:click={resetView}
 				aria-label="Reset zoom"
 			>
 				{Math.round(zoomLevel * 100)}%
 			</button>
 			<button
-				class="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition text-gray-500 dark:text-gray-400"
+				type="button"
+				class="shrink-0 min-w-7 h-7 inline-flex items-center justify-center p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition text-gray-500 dark:text-gray-400 pointer-coarse:hidden"
 				on:click={zoomIn}
 				aria-label="Zoom in"
 			>
@@ -588,9 +1159,54 @@
 		background: rgba(250, 204, 21, 0.45); /* amber-300 */
 		border-radius: 2px;
 		mix-blend-mode: multiply;
+		animation: citation-pulse 900ms ease-out 1;
 	}
 	:global(.dark .textLayer span.citation-highlight) {
 		mix-blend-mode: screen;
 		background: rgba(250, 204, 21, 0.35);
+	}
+
+	/* Coordinate (bbox) highlight overlay — divs created by
+	   _applyRectHighlights(), positioned in % of the page wrapper so they
+	   scale with zoom re-renders for free. :global because JS-created. */
+	:global(.pdf-page-wrapper .bboxLayer) {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		z-index: 2;
+	}
+	:global(.bboxLayer .bbox-highlight) {
+		position: absolute;
+		background: rgba(250, 204, 21, 0.3); /* amber-300, matches text highlight */
+		outline: 1.5px solid rgba(245, 158, 11, 0.85); /* amber-500 */
+		border-radius: 2px;
+		mix-blend-mode: multiply;
+		animation: citation-pulse 900ms ease-out 1;
+	}
+	:global(.dark .bboxLayer .bbox-highlight) {
+		mix-blend-mode: screen;
+		background: rgba(250, 204, 21, 0.25);
+	}
+
+	/* Highlights are redrawn on every selection, so this plays once each time a
+	   snippet is picked — including re-picking the snippet the viewer is already
+	   parked on, where there is no scrolling to show the click landed.
+	   `-global-` keeps the name unscoped for the :global rules above. */
+	@keyframes -global-citation-pulse {
+		0% {
+			background: rgba(250, 204, 21, 0.85);
+			outline-color: rgb(245, 158, 11);
+		}
+		60% {
+			background: rgba(250, 204, 21, 0.85);
+			outline-color: rgb(245, 158, 11);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		:global(.textLayer span.citation-highlight),
+		:global(.bboxLayer .bbox-highlight) {
+			animation: none;
+		}
 	}
 </style>
