@@ -2281,10 +2281,11 @@
 				// v0.10.2 — fall back to the output items, which getOutputText()
 				// serializes into the same <details type="document"> blocks.
 				// Content-baked documents (pre-refactor chats) still win.
-				const found = extractDocumentsFromMessage(message?.content ?? '');
+				const messageDone = message?.done !== false;
+				const found = extractDocumentsFromMessage(message?.content ?? '', messageDone);
 				const documents = found.length
 					? found
-					: extractDocumentsFromMessage(getOutputText(message?.output));
+					: extractDocumentsFromMessage(getOutputText(message?.output), messageDone);
 				if (documents.length > 0) {
 					const sources = message?.sources ?? [];
 					docs = [
