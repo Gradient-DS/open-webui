@@ -53,6 +53,7 @@ SOEV = {
     'get_file_ids_in_directory_subtree',
     'get_directory_by_id',
     'get_directory_breadcrumbs',
+    'get_files_by_id_and_directory_id',
     'rename_directory',
     'move_directory',
     'update_directory',
@@ -803,7 +804,8 @@ async def test_create_directory_is_a_folder_mkdir(env):
     assert [d.name for d in await env.store.get_directories('kb', first.id)] == ['b']
     assert {d.name for d in await env.store.get_all_directories('kb')} == {'a', 'b'}
     assert (await env.store.get_directory_by_id(second.id)).parent_id == first.id
-    assert [d.id for d in await env.store.get_directory_breadcrumbs(second.id)] == [first.id, second.id]
+    assert [d.id for d in await env.store.get_directory_breadcrumbs('kb', second.id)] == [first.id, second.id]
+    assert await env.store.get_directory_breadcrumbs('other', second.id) == []
     assert await env.store._find_or_create_directory(None, 'kb', first.id, 'b', 'alice') == second.id
 
 

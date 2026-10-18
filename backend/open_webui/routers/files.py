@@ -186,7 +186,7 @@ async def process_uploaded_file(
                             'Ignoring directory %s: not a directory of knowledge %s', directory_id, knowledge_id
                         )
                         directory_id = None
-                await derive_relative_path_from_directory(file_item.id, directory_id, db=db_session)
+                await derive_relative_path_from_directory(file_item.id, knowledge_id, directory_id, db=db_session)
                 knowledge_file = await Knowledges.add_file_to_knowledge_by_id(
                     knowledge_id=knowledge_id,
                     file_id=file_item.id,

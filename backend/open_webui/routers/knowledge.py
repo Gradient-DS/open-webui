@@ -163,6 +163,7 @@ def external_knowledge_error():
 
 async def derive_relative_path_from_directory(
     file_id: str,
+    knowledge_id: str,
     directory_id: Optional[str],
     db: Optional[AsyncSession] = None,
 ) -> None:
@@ -180,7 +181,7 @@ async def derive_relative_path_from_directory(
     """
     if not directory_id:
         return
-    breadcrumbs = await Knowledges.get_directory_breadcrumbs(directory_id, db=db)
+    breadcrumbs = await Knowledges.get_directory_breadcrumbs(knowledge_id, directory_id, db=db)
     if not breadcrumbs:
         return
     file = await Files.get_file_by_id(file_id, db=db)
@@ -1591,7 +1592,7 @@ async def add_file_to_knowledge_by_id(
         # D2 bridge: derive relative_path from the directory placement so the
         # file surfaces in the fork's path-based tree UI (add_file_to_knowledge_by_id
         # mirrors relative_path from file.meta onto the join row).
-        await derive_relative_path_from_directory(form_data.file_id, form_data.directory_id, db=db)
+        await derive_relative_path_from_directory(form_data.file_id, id, form_data.directory_id, db=db)
 
         # Add file to knowledge base
         await Knowledges.add_file_to_knowledge_by_id(
@@ -2208,7 +2209,7 @@ async def add_files_to_knowledge_batch(
     dir_map = {form.file_id: form.directory_id for form in new_entries}
     for file_id in successful_file_ids:
         # D2 bridge: derive relative_path from the directory placement.
-        await derive_relative_path_from_directory(file_id, dir_map.get(file_id), db=db)
+        await derive_relative_path_from_directory(file_id, id, dir_map.get(file_id), db=db)
         await Knowledges.add_file_to_knowledge_by_id(
             knowledge_id=id,
             file_id=file_id,

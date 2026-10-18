@@ -838,8 +838,17 @@ class SoevKnowledgeTable:
                 rows.append(directory)
         return rows
 
-    async def get_directory_breadcrumbs(self, directory_id, db=None):
+    async def get_directory_breadcrumbs(self, knowledge_id, directory_id, db=None):
+        # Scoped by collection like upstream, so a caller-supplied id cannot walk another one's tree.
+        if not directory_id or self._projection.directory_of(directory_id)[0] != knowledge_id:
+            return []
         return await self._breadcrumbs(directory_id)
+
+    async def get_files_by_id_and_directory_id(self, knowledge_id, directory_id, db=None):
+        from open_webui.models.files import Files
+
+        ids = await self.get_file_ids_in_directory_subtree(knowledge_id, directory_id)
+        return await Files.get_files_by_ids(list(ids)) if ids else []
 
     async def get_files_with_directory_ids(self, knowledge_id, db=None):
         from open_webui.models.files import Files
