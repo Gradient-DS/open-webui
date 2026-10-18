@@ -3758,9 +3758,6 @@
   "{{label}} sync started": "",
   "{{modelName}} profile image": "Image de profil de {{modelName}}",
   "{{model}} download has been canceled": "Le téléchargement de {{model}} a été annulé",
-  "{{percentage}}% of the context window used — older context will be summarized on your next message. For the best results on a new topic, start a new chat.": "",
-  "{{percentage}}% of the context window used.": "",
-  "{{percentage}}% of the context window used. Start a new chat for unrelated topics.": "",
   "{{user}}'s Chats": "Conversations de {{user}}",
   "{{webUIName}} Backend Required": "Backend {{webUIName}} requis"
 }

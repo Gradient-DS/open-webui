@@ -3758,9 +3758,6 @@
   "{{label}} sync started": "",
   "{{modelName}} profile image": "",
   "{{model}} download has been canceled": "",
-  "{{percentage}}% of the context window used — older context will be summarized on your next message. For the best results on a new topic, start a new chat.": "",
-  "{{percentage}}% of the context window used.": "",
-  "{{percentage}}% of the context window used. Start a new chat for unrelated topics.": "",
   "{{user}}'s Chats": "Conversațiile lui {{user}}",
   "{{webUIName}} Backend Required": "Este necesar backend-ul {{webUIName}}"
 }
