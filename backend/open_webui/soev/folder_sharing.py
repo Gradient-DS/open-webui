@@ -1,13 +1,15 @@
 """[Gradient] Sharing a folder shares its knowledge: everyone a folder is shared with gets a read grant on the local
 knowledge bases and notes in it that its owner owns, through the same access paths a direct share takes.
 
-The grants are derived per owner from all their folders. `FolderShareGrants` records the ones this added, so
+Files go to the folder's own collection instead (`soev/folder_files.py`). The grants are derived per owner from all
+their folders. `FolderShareGrants` records the ones this added, so
 unsharing removes only those and a grant the item already had stays. Narrowing runs before a folder change commits
 and refuses it when it fails; widening runs after (spec D7). Cloud knowledge bases are never shared (D5), and items
 of other owners are not shared either: only an item's owner may share it (D4).
 """
 
 import asyncio
+import copy
 import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -20,7 +22,7 @@ from open_webui.models.folders import Folders
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
-from open_webui.soev import acting
+from open_webui.soev import acting, folder_files
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
 from open_webui.utils.access_control import filter_allowed_access_grants
@@ -112,7 +114,7 @@ async def _grants(resource: Resource, owner_id: str) -> list[dict] | None:
     ]
 
 
-async def _permitted(owner, resource_type: str, principals: set[Principal]) -> set[Principal]:
+async def permitted(owner, resource_type: str, principals: set[Principal]) -> set[Principal]:
     """`principals` without everyone when the owner may not share this kind of item with everyone directly."""
     if ('user', '*') not in principals:
         return principals
@@ -139,7 +141,7 @@ async def reconcile(owner_id: str, folders: View, *, widen: bool) -> None:
             if current is None:
                 await FolderShareGrants.forget(*resource, mine)
                 continue
-            want = await _permitted(owner, resource[0], wanted.get(resource, set()))
+            want = await permitted(owner, resource[0], wanted.get(resource, set()))
             holders = {(grant['principal_type'], grant['principal_id']) for grant in current}
             writers = {
                 (grant['principal_type'], grant['principal_id']) for grant in current if grant['permission'] == 'write'
@@ -163,9 +165,23 @@ async def reconcile(owner_id: str, folders: View, *, widen: bool) -> None:
                 await FolderShareGrants.forget(*resource, mine - want)
 
 
-async def _widen(owner_id: str) -> None:
+def changed(before: View, after: View, owner_id: str) -> list[str]:
+    """The folders holding files on either side whose audience or files differ, gone and new ones included."""
+    folders = []
+    for folder_id in sorted(set(before.parents) | set(after.parents)):
+        files = folder_files.file_ids(before.files.get(folder_id)), folder_files.file_ids(after.files.get(folder_id))
+        audiences = audience(before, folder_id, owner_id), audience(after, folder_id, owner_id)
+        if any(files) and (files[0] != files[1] or audiences[0] != audiences[1]):
+            folders.append(folder_id)
+    return folders
+
+
+async def _widen(owner_id: str, before: View) -> None:
     try:
-        await reconcile(owner_id, await view(owner_id), widen=True)
+        after = await view(owner_id)
+        for folder_id in changed(before, after, owner_id):
+            folder_files.schedule(folder_id)
+        await reconcile(owner_id, after, widen=True)
     except Exception as error:
         code = error.code if isinstance(error, SoevApiError) else type(error).__name__
         log.warning('Folder knowledge of %s not shared (%s)', owner_id, code)
@@ -180,14 +196,19 @@ async def changing(owner_id: str, edit: Callable[[View], None] | None = None):
         yield
         return
     async with _locks.setdefault(owner_id, asyncio.Lock()):
+        before = await view(owner_id)
         if edit is not None:
-            planned = await view(owner_id)
+            planned = copy.deepcopy(before)
             edit(planned)
             await reconcile(owner_id, planned, widen=False)
+            for folder_id in changed(before, planned, owner_id):
+                principals = audience(planned, folder_id, owner_id)
+                files = folder_files.file_ids(planned.files.get(folder_id))
+                await folder_files.narrow(owner_id, folder_id, principals, files)
         try:
             yield
         finally:
-            await _widen(owner_id)
+            await _widen(owner_id, before)
 
 
 def adds_entries(before: list | None, after: list | None) -> bool:

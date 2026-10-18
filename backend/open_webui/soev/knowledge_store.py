@@ -145,6 +145,7 @@ class SoevKnowledgeTable:
             if row['key'] not in hidden
             and not ingest.is_attachments_collection(row['key'])
             and not ingest.is_assistant_collection(row['key'])
+            and not ingest.is_folder_collection(row['key'])
         ]
 
     def _knowledge(self, row):
