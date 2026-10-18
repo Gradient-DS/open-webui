@@ -1,56 +1,45 @@
-import time
+import asyncio
 import logging
+import random
 import sys
+import time
+import uuid
+from typing import Any, Optional
 
 from aiocache import cached
-from typing import Any, Optional
-import random
-import json
-
-import uuid
-import asyncio
-
 from fastapi import HTTPException, Request, status
-from starlette.responses import Response, StreamingResponse, JSONResponse
-
-
-from open_webui.models.users import UserModel
-
-from open_webui.socket.main import (
-    sio,
-    get_event_call,
-    get_event_emitter,
-)
+from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL
 from open_webui.functions import generate_function_chat_completion
-
-from open_webui.routers.openai import (
-    generate_chat_completion as generate_openai_chat_completion,
-)
-
+from open_webui.models.models import Models
+from open_webui.models.users import UserModel
 from open_webui.routers.ollama import (
     generate_chat_completion as generate_ollama_chat_completion,
 )
-
+from open_webui.routers.openai import (
+    generate_chat_completion as generate_openai_chat_completion,
+)
 from open_webui.routers.pipelines import (
     process_pipeline_inlet_filter,
     process_pipeline_outlet_filter,
 )
-
-from open_webui.models.functions import Functions
-from open_webui.models.models import Models
-
-from open_webui.utils.models import get_all_models, check_model_access
+from open_webui.socket.main import (
+    get_event_call,
+    get_event_emitter,
+    sio,
+)
+from open_webui.soev import model_catalog
+from open_webui.utils.filter import (
+    get_filter_functions,
+    process_filter_functions,
+)
+from open_webui.utils.json_codec import JSONCodec
+from open_webui.utils.models import check_model_access, get_all_models
 from open_webui.utils.payload import convert_payload_openai_to_ollama
 from open_webui.utils.response import (
     convert_response_ollama_to_openai,
     convert_streaming_response_ollama_to_openai,
 )
-from open_webui.utils.filter import (
-    get_sorted_filter_ids,
-    process_filter_functions,
-)
-
-from open_webui.env import GLOBAL_LOG_LEVEL, BYPASS_MODEL_ACCESS_CONTROL
+from starlette.responses import JSONResponse, Response, StreamingResponse
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -80,7 +69,7 @@ async def generate_direct_chat_completion(
         )
 
     channel = f'{user_id}:{session_id}:{request_id}'
-    logging.info(f'WebSocket channel: {channel}')
+    logging.info('WebSocket channel: %s', channel)
 
     if form_data.get('stream'):
         q = asyncio.Queue()
@@ -107,7 +96,7 @@ async def generate_direct_chat_completion(
             }
         )
 
-        log.info(f'res: {res}')
+        log.info('res: %s', res)
 
         if res.get('status', False):
             # Define a generator to stream responses
@@ -120,14 +109,14 @@ async def generate_direct_chat_completion(
                             if 'done' in data and data['done']:
                                 break  # Stop streaming when 'done' is received
 
-                            yield f'data: {json.dumps(data)}\n\n'
+                            yield f'data: {JSONCodec.dumps(data)}\n\n'
                         elif isinstance(data, str):
                             if 'data:' in data:
                                 yield f'{data}\n\n'
                             else:
                                 yield f'data: {data}\n\n'
                 except Exception as e:
-                    log.debug(f'Error in event generator: {e}')
+                    log.debug('Error in event generator: %s', e)
                     pass
 
             # Define a background task to run the event generator
@@ -167,13 +156,15 @@ async def generate_chat_completion(
     bypass_filter: bool = False,
     bypass_system_prompt: bool = False,
 ):
-    log.debug(f'generate_chat_completion: {form_data}')
+    log.debug('generate_chat_completion: %s', form_data)
     if BYPASS_MODEL_ACCESS_CONTROL:
         bypass_filter = True
 
-    # Propagate bypass_filter via request.state so that downstream route
-    # handlers (openai/ollama) can read it without exposing it as a query param.
+    # Propagate bypass_filter and bypass_system_prompt via request.state so that
+    # downstream route handlers (openai/ollama) can read them without exposing
+    # them as query parameters.
     request.state.bypass_filter = bypass_filter
+    request.state.bypass_system_prompt = bypass_system_prompt
 
     if hasattr(request.state, 'metadata'):
         if 'metadata' not in form_data:
@@ -188,19 +179,22 @@ async def generate_chat_completion(
         # Merge the direct connection model into server models so that
         # task functions (title, tags, etc.) can resolve a server-side
         # task model while still having the direct model available.
+        # dict(...items()) is one HGETALL on a Redis-backed pool; ``{**pool}``
+        # would issue HKEYS plus one HGET per model.
         models = {
-            **request.app.state.MODELS,
+            **dict(request.app.state.MODELS.items()),
             request.state.model['id']: request.state.model,
         }
-        log.debug(f'direct connection to model: {request.state.model["id"]}')
+        log.debug('direct connection to model: %s', request.state.model['id'])
     else:
         models = request.app.state.MODELS
 
     model_id = form_data['model']
-    if model_id not in models:
+    # Single lookup — membership check plus getitem would be two Redis
+    # round trips on a Redis-backed model pool.
+    model = models.get(model_id)
+    if model is None:
         raise Exception('Model not found')
-
-    model = models[model_id]
 
     if getattr(request.state, 'direct', False) and model_id == getattr(request.state, 'model', {}).get('id'):
         return await generate_direct_chat_completion(request, form_data, user=user, models=models)
@@ -246,11 +240,17 @@ async def generate_chat_completion(
 
             form_data['model'] = selected_model_id
 
+            # bypass_filter recursion below skips the line-200 check; gate the resolved model here.
+            if not bypass_filter and user.role == 'user':
+                selected_model = request.app.state.MODELS.get(selected_model_id)
+                if selected_model:
+                    await check_model_access(user, selected_model)
+
         if selected_model_id:
             if form_data.get('stream') == True:
 
                 async def stream_wrapper(stream):
-                    yield f'data: {json.dumps({"selected_model_id": selected_model_id})}\n\n'
+                    yield f'data: {JSONCodec.dumps({"selected_model_id": selected_model_id})}\n\n'
                     async for chunk in stream:
                         yield chunk
 
@@ -280,6 +280,9 @@ async def generate_chat_completion(
                     'selected_model_id': selected_model_id,
                 }
 
+        # [Gradient] Agent turns never reach here; in v2 mode every other completion is a task for soev-api.
+        if model_catalog.is_v2():
+            return await model_catalog.task_completion(form_data, user)
         if model.get('pipe'):
             # Below does not require bypass_filter because this is the only route the uses this function and it is already bypassing the filter
             return await generate_function_chat_completion(request, form_data, user=user, models=models)
@@ -290,7 +293,6 @@ async def generate_chat_completion(
                 request=request,
                 form_data=form_data,
                 user=user,
-                bypass_system_prompt=bypass_system_prompt,
             )
             if form_data.get('stream'):
                 response.headers['content-type'] = 'text/event-stream'
@@ -306,7 +308,6 @@ async def generate_chat_completion(
                 request=request,
                 form_data=form_data,
                 user=user,
-                bypass_system_prompt=bypass_system_prompt,
             )
 
 
@@ -319,7 +320,7 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
 
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
-            **request.app.state.MODELS,
+            **dict(request.app.state.MODELS.items()),
             request.state.model['id']: request.state.model,
         }
     else:
@@ -364,11 +365,11 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
     }
 
     try:
-        filter_ids = await get_sorted_filter_ids(request, model, metadata.get('filter_ids', []))
-        filter_functions = await Functions.get_functions_by_ids(filter_ids)
+        filter_functions = await get_filter_functions(request, model, metadata.get('filter_ids', []))
 
         result, _ = await process_filter_functions(
             request=request,
+            filter_context=None,
             filter_functions=filter_functions,
             filter_type='outlet',
             form_data=data,

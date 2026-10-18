@@ -1,13 +1,13 @@
-import time
 import logging
-from typing import Optional
+import time
+from typing import Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Column, Text, JSON, Boolean, BigInteger, Index, select, or_, func, cast, String, delete, update
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from open_webui.internal.db import Base, get_async_db_context
+from open_webui.utils.misc import json_text_variants
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import JSON, BigInteger, Boolean, Column, Index, String, Text, cast, delete, func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ class Automation(Base):
 
     id = Column(Text, primary_key=True)
     user_id = Column(Text, nullable=False)
+    folder_id = Column(Text, nullable=True)
     name = Column(Text, nullable=False)
     data = Column(JSON, nullable=False)  # {prompt, model_id, rrule}
     meta = Column(JSON, nullable=True)
@@ -32,7 +33,10 @@ class Automation(Base):
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
 
-    __table_args__ = (Index('ix_automation_next_run', 'next_run_at'),)
+    __table_args__ = (
+        Index('ix_automation_next_run', 'next_run_at'),
+        Index('ix_automation_user_folder', 'user_id', 'folder_id'),
+    )
 
 
 class AutomationRun(Base):
@@ -61,11 +65,17 @@ class AutomationTerminalConfig(BaseModel):
     cwd: Optional[str] = None
 
 
+class AutomationTarget(BaseModel):
+    type: Literal['chat', 'channel'] = 'chat'
+    channel_id: Optional[str] = None
+
+
 class AutomationData(BaseModel):
     prompt: str
     model_id: str
     rrule: str
     terminal: Optional[AutomationTerminalConfig] = None
+    target: Optional[AutomationTarget] = None
 
 
 class AutomationModel(BaseModel):
@@ -73,6 +83,7 @@ class AutomationModel(BaseModel):
 
     id: str
     user_id: str
+    folder_id: Optional[str] = None
     name: str
     data: dict
     meta: Optional[dict] = None
@@ -97,6 +108,7 @@ class AutomationRunModel(BaseModel):
 
 class AutomationForm(BaseModel):
     name: str
+    folder_id: Optional[str] = None
     data: AutomationData
     meta: Optional[dict] = None
     is_active: Optional[bool] = True
@@ -130,6 +142,7 @@ class AutomationTable:
             row = Automation(
                 id=str(uuid4()),
                 user_id=user_id,
+                folder_id=form.folder_id,
                 name=form.name,
                 data=form.data.model_dump(),
                 meta=form.meta,
@@ -140,7 +153,6 @@ class AutomationTable:
             )
             db.add(row)
             await db.commit()
-            await db.refresh(row)
             return AutomationModel.model_validate(row)
 
     async def count_by_user(self, user_id: str, db: Optional[AsyncSession] = None) -> int:
@@ -166,6 +178,7 @@ class AutomationTable:
         user_id: str,
         query: Optional[str] = None,
         status: Optional[str] = None,
+        folder_id: Optional[str] = None,
         skip: int = 0,
         limit: int = 30,
         db: Optional[AsyncSession] = None,
@@ -173,13 +186,16 @@ class AutomationTable:
         async with get_async_db_context(db) as db:
             stmt = select(Automation).filter_by(user_id=user_id)
 
+            if folder_id:
+                stmt = stmt.filter(Automation.folder_id == folder_id)
+
             if query:
-                search = f'%{query}%'
-                # Search in name and prompt inside JSON data
+                # Search the name column and the prompt inside the JSON data.
+                data_text = cast(Automation.data, String)
                 stmt = stmt.filter(
                     or_(
-                        Automation.name.ilike(search),
-                        cast(Automation.data, String).ilike(search),
+                        Automation.name.ilike(f'%{query}%'),
+                        *(data_text.ilike(f'%{variant}%') for variant in json_text_variants(query)),
                     )
                 )
 
@@ -218,6 +234,7 @@ class AutomationTable:
             if not row:
                 return None
             row.name = form.name
+            row.folder_id = form.folder_id
             row.data = form.data.model_dump()
             row.meta = form.meta
             if form.is_active is not None:
@@ -225,8 +242,24 @@ class AutomationTable:
             row.next_run_at = next_run_at
             row.updated_at = int(time.time_ns())
             await db.commit()
-            await db.refresh(row)
             return AutomationModel.model_validate(row)
+
+    async def clear_folder_ids(
+        self,
+        user_id: str,
+        folder_ids: list[str],
+        db: Optional[AsyncSession] = None,
+    ) -> int:
+        if not folder_ids:
+            return 0
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(Automation)
+                .where(Automation.user_id == user_id, Automation.folder_id.in_(folder_ids))
+                .values(folder_id=None, updated_at=int(time.time_ns()))
+            )
+            await db.commit()
+            return result.rowcount or 0
 
     async def toggle(
         self,
@@ -242,7 +275,6 @@ class AutomationTable:
             row.next_run_at = next_run_at if row.is_active else None
             row.updated_at = int(time.time_ns())
             await db.commit()
-            await db.refresh(row)
             return AutomationModel.model_validate(row)
 
     async def delete(self, id: str, db: Optional[AsyncSession] = None) -> bool:
@@ -325,7 +357,6 @@ class AutomationRunTable:
             )
             db.add(row)
             await db.commit()
-            await db.refresh(row)
             return AutomationRunModel.model_validate(row)
 
     async def get_latest(self, automation_id: str, db: Optional[AsyncSession] = None) -> Optional[AutomationRunModel]:

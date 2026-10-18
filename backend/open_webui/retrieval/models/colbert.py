@@ -1,11 +1,10 @@
-import os
 import logging
-import torch
+import os
+
 import numpy as np
+import torch
 from colbert.infra import ColBERTConfig
 from colbert.modeling.checkpoint import Checkpoint
-
-
 from open_webui.retrieval.models.base_reranker import BaseReranker
 
 log = logging.getLogger(__name__)
@@ -13,7 +12,7 @@ log = logging.getLogger(__name__)
 
 class ColBERT(BaseReranker):
     def __init__(self, name, **kwargs) -> None:
-        log.info('ColBERT: Loading model', name)
+        log.info('ColBERT: Loading model %s', name)
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         DOCKER = kwargs.get('env') == 'docker'

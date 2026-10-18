@@ -37,10 +37,10 @@
 
 			if (res) {
 				pinnedMessages = [...(pinnedMessages ?? []), ...res];
-			}
 
-			if (res.length === 0) {
-				allItemsLoaded = true;
+				if (res.length === 0) {
+					allItemsLoaded = true;
+				}
 			}
 		} catch (error) {
 			console.error('Error fetching pinned messages:', error);
@@ -69,19 +69,19 @@
 {#if channel}
 	<Modal size="sm" bind:show>
 		<div>
-			<div class=" flex justify-between dark:text-gray-100 px-5 pt-4 mb-1.5">
+			<div class=" flex justify-between dark:text-gray-100 px-4 pt-3 mb-1">
 				<div class="self-center text-base">
 					<div class="flex items-center gap-0.5 shrink-0">
 						{$i18n.t('Pinned Messages')}
 					</div>
 				</div>
 				<button
-					class="self-center"
+					class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 					on:click={() => {
 						show = false;
 					}}
 				>
-					<XMark className={'size-5'} />
+					<XMark className={'size-4'} />
 				</button>
 			</div>
 
@@ -94,7 +94,7 @@
 							</div>
 						{:else}
 							<div
-								class="flex flex-col gap-2 max-h-[60vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700 scrollbar-track-transparent py-2"
+								class="flex flex-col gap-2 max-h-[60vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700 scrollbar-track-transparent pt-7 pb-2"
 							>
 								{#if pinnedMessages.length === 0}
 									<div class=" text-center text-xs text-gray-500 dark:text-gray-400 py-6">
@@ -103,6 +103,7 @@
 								{:else}
 									{#each pinnedMessages as message, messageIdx (message.id)}
 										<Message
+											id="pinned"
 											className="rounded-xl px-2"
 											{message}
 											{channel}

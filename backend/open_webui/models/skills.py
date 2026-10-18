@@ -2,15 +2,13 @@ import logging
 import time
 from typing import Optional
 
-from sqlalchemy import select, delete, update, or_
-from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.internal.db import Base, get_async_db_context
-from open_webui.models.users import Users, User, UserModel, UserResponse
-from open_webui.models.groups import Groups
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants
-
+from open_webui.models.groups import Groups
+from open_webui.models.users import User, UserModel, UserResponse, Users
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import JSON, BigInteger, Boolean, Column, String, Text, func
+from sqlalchemy import JSON, BigInteger, Boolean, Column, String, Text, delete, func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -115,11 +113,11 @@ class SkillsTable:
         access_grants: Optional[list[AccessGrantModel]] = None,
         db: Optional[AsyncSession] = None,
     ) -> SkillModel:
-        skill_data = SkillModel.model_validate(skill).model_dump(exclude={'access_grants'})
-        skill_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(skill_data['id'], db=db)
+        skill_model = SkillModel.model_validate(skill)
+        skill_model.access_grants = (
+            access_grants if access_grants is not None else await self._get_access_grants(skill_model.id, db=db)
         )
-        return SkillModel.model_validate(skill_data)
+        return skill_model
 
     async def insert_new_skill(
         self,
@@ -139,7 +137,6 @@ class SkillsTable:
                 )
                 db.add(result)
                 await db.commit()
-                await db.refresh(result)
                 await AccessGrants.set_access_grants('skill', result.id, form_data.access_grants, db=db)
                 if result:
                     return await self._to_skill_model(result, db=db)
@@ -166,9 +163,30 @@ class SkillsTable:
         except Exception:
             return None
 
-    async def get_skills(self, db: Optional[AsyncSession] = None) -> list[SkillUserModel]:
+    async def get_skills(
+        self,
+        user_id: str | None = None,
+        ids: list[str] | None = None,
+        db: AsyncSession | None = None,
+    ) -> list[SkillUserModel]:
         async with get_async_db_context(db) as db:
-            result = await db.execute(select(Skill).order_by(Skill.updated_at.desc()))
+            stmt = select(Skill).order_by(Skill.updated_at.desc())
+
+            if ids is not None:
+                stmt = stmt.filter(Skill.id.in_(ids))
+
+            if user_id is not None:
+                user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user_id, db=db)}
+                stmt = AccessGrants.has_permission_filter(
+                    db=db,
+                    query=stmt,
+                    DocumentModel=Skill,
+                    filter={'user_id': user_id, 'group_ids': user_group_ids},
+                    resource_type='skill',
+                    permission='read',
+                )
+
+            result = await db.execute(stmt)
             all_skills = result.scalars().all()
 
             user_ids = list(set(skill.user_id for skill in all_skills))
@@ -196,28 +214,6 @@ class SkillsTable:
                     )
                 )
             return skills
-
-    async def get_skills_by_user_id(
-        self, user_id: str, permission: str = 'write', db: Optional[AsyncSession] = None
-    ) -> list[SkillUserModel]:
-        skills = await self.get_skills(db=db)
-        user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
-        user_group_ids = {group.id for group in user_groups}
-
-        result = []
-        for skill in skills:
-            if skill.user_id == user_id:
-                result.append(skill)
-            elif await AccessGrants.has_access(
-                user_id=user_id,
-                resource_type='skill',
-                resource_id=skill.id,
-                permission=permission,
-                user_group_ids=user_group_ids,
-                db=db,
-            ):
-                result.append(skill)
-        return result
 
     async def search_skills(
         self,
@@ -261,7 +257,26 @@ class SkillsTable:
                         permission='read',
                     )
 
-                stmt = stmt.order_by(Skill.updated_at.desc())
+                order_by = filter.get('order_by')
+                direction = filter.get('direction')
+
+                if order_by == 'name':
+                    if direction == 'asc':
+                        stmt = stmt.order_by(Skill.name.asc())
+                    else:
+                        stmt = stmt.order_by(Skill.name.desc())
+                elif order_by == 'created_at':
+                    if direction == 'asc':
+                        stmt = stmt.order_by(Skill.created_at.asc())
+                    else:
+                        stmt = stmt.order_by(Skill.created_at.desc())
+                elif order_by == 'updated_at':
+                    if direction == 'asc':
+                        stmt = stmt.order_by(Skill.updated_at.asc())
+                    else:
+                        stmt = stmt.order_by(Skill.updated_at.desc())
+                else:
+                    stmt = stmt.order_by(Skill.updated_at.desc())
 
                 # Count BEFORE pagination
                 count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
@@ -309,8 +324,8 @@ class SkillsTable:
                 if access_grants is not None:
                     await AccessGrants.set_access_grants('skill', id, access_grants, db=db)
 
-                skill = await db.get(Skill, id)
-                await db.refresh(skill)
+                # populate_existing: the Core update above bypasses any identity-map copy
+                skill = await db.get(Skill, id, populate_existing=True)
                 return await self._to_skill_model(skill, db=db)
         except Exception:
             return None
@@ -326,7 +341,6 @@ class SkillsTable:
                 skill.is_active = not skill.is_active
                 skill.updated_at = int(time.time())
                 await db.commit()
-                await db.refresh(skill)
 
                 return await self._to_skill_model(skill, db=db)
             except Exception:

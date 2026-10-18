@@ -56,52 +56,8 @@ async def _run_cleanup_loop():
 
 
 async def _process_pending_deletions():
-    """Process all pending KB and chat deletions."""
-    await _process_pending_kb_deletions()
+    """Process pending chat deletions."""
     await _process_pending_chat_deletions()
-    await _process_expired_suspensions()
-
-
-async def _process_pending_kb_deletions():
-    """Process knowledge bases marked for deletion."""
-    from open_webui.models.knowledge import Knowledges
-    from open_webui.services.deletion import DeletionService
-
-    pending_kbs = await Knowledges.get_pending_deletions(limit=50)
-    if not pending_kbs:
-        return
-
-    log.info('Processing %d pending KB deletions', len(pending_kbs))
-
-    for kb in pending_kbs:
-        try:
-            # Collect file IDs before deletion (junction rows cascade on KB delete)
-            kb_files = await Knowledges.get_files_by_id(kb.id)
-            kb_file_ids = [f.id for f in kb_files]
-
-            # Full cascade: vector collection, model updates, hard-delete KB row
-            report = await DeletionService.delete_knowledge(kb.id, delete_files=False)
-
-            if report.has_errors:
-                log.warning('KB %s cleanup had errors: %s', kb.id, report.errors)
-
-            # Clean up orphaned files (checks KB and chat references)
-            if kb_file_ids:
-                file_report = await DeletionService.delete_orphaned_files_batch(kb_file_ids)
-                if file_report.has_errors:
-                    log.warning('KB %s file cleanup errors: %s', kb.id, file_report.errors)
-                log.info(
-                    'KB %s file cleanup: %d storage, %d vectors, %d DB records',
-                    kb.id,
-                    file_report.storage_files,
-                    file_report.vector_collections,
-                    file_report.total_db_records,
-                )
-
-            log.info('KB %s (%s) cleanup complete', kb.id, kb.name)
-
-        except Exception:
-            log.exception('Failed to cleanup KB %s', kb.id)
 
 
 async def _process_pending_chat_deletions():
@@ -109,6 +65,7 @@ async def _process_pending_chat_deletions():
     from open_webui.models.chats import Chats
     from open_webui.models.tags import Tags
     from open_webui.services.deletion import DeletionService
+    from open_webui.soev.agent_threads import delete_chat_threads
 
     pending_chats = await Chats.get_pending_deletions(limit=100)
     if not pending_chats:
@@ -121,6 +78,10 @@ async def _process_pending_chat_deletions():
 
     for chat in pending_chats:
         try:
+            # [Gradient] Its agent threads first: while one is kept, the chat stays pending and is retried.
+            if await delete_chat_threads(chat.user_id, chat.id):
+                continue
+
             # Collect file IDs from this chat
             chat_files = await Chats.get_files_by_chat_id(chat.id)
             all_file_ids.extend(cf.file_id for cf in chat_files)
@@ -152,47 +113,3 @@ async def _process_pending_chat_deletions():
             file_report.vector_collections,
             file_report.total_db_records,
         )
-
-
-async def _process_expired_suspensions():
-    """Hard-delete cloud KBs that have been suspended for 30+ days."""
-    from open_webui.models.knowledge import Knowledges
-    from open_webui.services.deletion import DeletionService
-    from open_webui.services.sync.shared_kb import is_managed_shared_kb
-
-    expired_kbs = await Knowledges.get_suspended_expired_knowledge(limit=10)
-    if not expired_kbs:
-        return
-
-    log.info('Processing %d expired suspended KBs for hard-deletion', len(expired_kbs))
-
-    for kb in expired_kbs:
-        # A managed shared KB (Confluence, TOPdesk, …) must never self-delete —
-        # a lost service credential should raise an admin alert, not silently
-        # destroy the whole corpus. Suspension still hides it from retrieval.
-        if is_managed_shared_kb(kb):
-            log.warning(
-                'Shared KB %s is suspended past the 30-day grace period '
-                'but protected from hard-deletion — restore the credential in the '
-                'Cloud Sync admin tab.',
-                kb.id,
-            )
-            continue
-        try:
-            kb_files = await Knowledges.get_files_by_id(kb.id)
-            kb_file_ids = [f.id for f in kb_files]
-
-            report = await DeletionService.delete_knowledge(kb.id, delete_files=False)
-
-            if report.has_errors:
-                log.warning('Suspended KB %s cleanup had errors: %s', kb.id, report.errors)
-
-            if kb_file_ids:
-                file_report = await DeletionService.delete_orphaned_files_batch(kb_file_ids)
-                if file_report.has_errors:
-                    log.warning('Suspended KB %s file cleanup errors: %s', kb.id, file_report.errors)
-
-            log.info('Suspended KB %s (%s) hard-deleted after 30-day grace period', kb.id, kb.name)
-
-        except Exception:
-            log.exception('Failed to cleanup suspended KB %s', kb.id)

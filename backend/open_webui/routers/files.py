@@ -1,34 +1,33 @@
+import asyncio
+import errno
+import hashlib
 import logging
 import os
 import uuid
-import json
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
-import asyncio
 
 from fastapi import (
-    BackgroundTasks,
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     UploadFile,
     status,
-    Query,
 )
-
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.internal.db import get_async_session, get_async_db_context
-
+from open_webui.config import STORAGE_LOCAL_CACHE, STORAGE_PROVIDER, UPLOAD_DIR
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-
+from open_webui.events import EVENTS, publish_event
+from open_webui.internal.db import get_async_db_context, get_async_session
+from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
-from open_webui.models.users import Users
+from open_webui.models.config import Config
 from open_webui.models.files import (
     FileForm,
     FileListResponse,
@@ -36,31 +35,34 @@ from open_webui.models.files import (
     FileModelResponse,
     Files,
 )
-from open_webui.models.chats import Chats
 from open_webui.models.knowledge import Knowledges
-from open_webui.models.groups import Groups
-from open_webui.models.access_grants import AccessGrants
-
-
-from open_webui.routers.retrieval import ProcessFileForm, process_file
+from open_webui.models.users import Users
+from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.audio import transcribe
+from open_webui.routers.live_documents import router as live_documents_router
+from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
-
+from open_webui.soev import ingest
+from open_webui.soev.availability import SoevNotConfigured, configured
+from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
+from open_webui.soev.live_documents import stream_original
 from open_webui.storage.provider import Storage
-
-
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STORAGE_LOCAL_CACHE, STORAGE_PROVIDER, UPLOAD_DIR
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.content_types import content_type_for  # [Gradient]
 from open_webui.utils.misc import strict_match_mime_type
-from pydantic import BaseModel, ConfigDict
-from open_webui.models.file_attachments import FileAttachments
+from open_webui.utils.upload_guard import check_upload
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+router.include_router(live_documents_router)
 
 
 from open_webui.utils.access_control.files import has_access_to_file
+from open_webui.utils.json_codec import JSONCodec
 
 ############################
 # Upload File
@@ -68,9 +70,19 @@ from open_webui.utils.access_control.files import has_access_to_file
 # be returned the same way, whole and undiminished.
 ############################
 
+# Multipart framing (boundary markers, per-part headers) adds a small amount
+# of overhead on top of the raw file bytes the client declares. Tolerate it
+# so a file that's genuinely right at the configured cap isn't rejected by
+# the pre-read check for the multipart envelope alone.
+_MULTIPART_OVERHEAD = 16 * 1024
+
 
 def _is_text_file(file_path: str, chunk_size: int = 8192) -> bool:
-    """Check if a file is likely a text file by reading a chunk and validating UTF-8.
+    """Check if a file is likely a text file by reading a chunk and decoding it.
+
+    Tries UTF-8 first, then falls back to Latin-1 (which accepts every byte
+    in 0x00–0xFF) so that legacy-encoded files from Windows environments are
+    not misclassified as binary.
 
     This catches files whose extensions are mis-mapped by mimetypes/browsers
     (e.g. TypeScript .ts → video/mp2t) without maintaining an extension whitelist.
@@ -84,9 +96,15 @@ def _is_text_file(file_path: str, chunk_size: int = 8192) -> bool:
         # Null bytes are a strong indicator of binary content
         if b'\x00' in chunk:
             return False
-        chunk.decode('utf-8')
+        try:
+            chunk.decode('utf-8')
+        except UnicodeDecodeError:
+            # Latin-1 always succeeds (every byte is valid), so this
+            # effectively just means "the file has no null bytes and is
+            # therefore likely text, even if not valid UTF-8".
+            chunk.decode('latin-1')
         return True
-    except (UnicodeDecodeError, Exception):
+    except Exception:
         return False
 
 
@@ -99,9 +117,26 @@ def _cleanup_local_cache(file_path: str) -> None:
         local_path = os.path.join(UPLOAD_DIR, local_filename)
         if os.path.isfile(local_path):
             os.remove(local_path)
-            log.debug(f'Cleaned up local cache: {local_path}')
+            log.debug('Cleaned up local cache: %s', local_path)
     except OSError as e:
         log.warning(f'Failed to clean up local cache for {file_path}: {e}')
+
+
+def _matches_configured_mime_type(supported: list[str] | str, content_type: str) -> bool:
+    if isinstance(supported, str):
+        supported = supported.split(',')
+    supported = [item.strip() for item in (supported or []) if item.strip()]
+    if not supported:
+        return False
+    return bool(strict_match_mime_type(supported, content_type))
+
+
+def _media_supported_for_extraction(
+    content_extraction_engine: str | None, supported: list[str] | str | None, content_type: str
+) -> bool:
+    if supported is None:
+        return content_extraction_engine == 'external'
+    return bool(content_extraction_engine and _matches_configured_mime_type(supported, content_type))
 
 
 async def process_uploaded_file(
@@ -116,56 +151,98 @@ async def process_uploaded_file(
 ):
     async def _process_handler(db_session):
         try:
-            content_type = file.content_type
+            # [Gradient]
+            content_type = content_type_for(file.filename, file.content_type)
 
             # Detect mis-labeled text files (e.g. .ts → video/mp2t)
             if content_type and content_type.startswith(('image/', 'video/')):
                 if _is_text_file(file_path):
-                    content_type = 'text/plain'
+                    # [Gradient]
+                    content_type = content_type_for(file.filename, 'text/plain')
+                    await Files.update_file_metadata_by_id(file_item.id, {'content_type': content_type}, db=db_session)
 
             # If destined for a KB, embed directly into the KB collection so
             # we never create a redundant `file-<id>` collection.
             collection_name = knowledge_id
 
-            if content_type:
-                stt_supported_content_types = getattr(request.app.state.config, 'STT_SUPPORTED_CONTENT_TYPES', [])
+            # Link the file → KB *before* process_file, so the very first
+            # knowledge_file row already carries its directory placement. The
+            # frontend also avoids a separate /knowledge/{id}/file/add
+            # round-trip. Write access is verified up-front in
+            # upload_file_handler, so a client-supplied metadata.knowledge_id
+            # can never let a non-writer attach files (CWE-862/863).
+            if knowledge_id:
+                # D2 bridge: a file placed via the upstream directory model
+                # carries only a directory_id — derive a relative_path from the
+                # directory's breadcrumb chain so the file surfaces in the fork's
+                # path-based tree UI. Lazy import breaks the routers import cycle.
+                from open_webui.routers.knowledge import derive_relative_path_from_directory
 
-                if strict_match_mime_type(stt_supported_content_types, content_type):
-                    file_path_processed = await asyncio.to_thread(Storage.get_file, file_path)
-                    result = await asyncio.to_thread(
-                        transcribe,
-                        request,
-                        file_path_processed,
-                        file_metadata,
-                        user,
-                    )
+                directory_id = file_metadata.get('directory_id') if isinstance(file_metadata, dict) else None
+                await derive_relative_path_from_directory(file_item.id, directory_id, db=db_session)
+                knowledge_file = await Knowledges.add_file_to_knowledge_by_id(
+                    knowledge_id=knowledge_id,
+                    file_id=file_item.id,
+                    user_id=user.id,
+                    directory_id=directory_id,
+                    db=db_session,
+                )
 
-                    await process_file(
-                        request,
-                        ProcessFileForm(
-                            file_id=file_item.id,
-                            content=result.get('text', ''),
-                            collection_name=collection_name,
-                        ),
-                        user=user,
-                        db=db_session,
-                    )
-                elif (not content_type.startswith(('image/', 'video/'))) or (
-                    request.app.state.config.CONTENT_EXTRACTION_ENGINE == 'external'
-                ):
-                    await process_file(
-                        request,
-                        ProcessFileForm(
-                            file_id=file_item.id,
-                            collection_name=collection_name,
-                        ),
-                        user=user,
+                if not knowledge_file:
+                    raise Exception(f'Failed to link file {file_item.id} to knowledge {knowledge_id}')
+
+            stt_supported = await Config.get('audio.stt.supported_content_types', [])
+            content_extraction_engine = await Config.get('rag.content_extraction_engine')
+            content_extraction_supported_media_mime_types = await Config.get(
+                'rag.content_extraction.supported_media_mime_types'
+            )
+
+            if content_type and strict_match_mime_type(stt_supported, content_type):
+                # Audio / STT-supported files → transcribe then index
+                file_path_processed = await asyncio.to_thread(Storage.get_file, file_path)
+                result = await transcribe(
+                    request,
+                    file_path_processed,
+                    file_metadata,
+                    user,
+                )
+                await process_file(
+                    request,
+                    ProcessFileForm(
+                        file_id=file_item.id,
+                        content=result.get('text', ''),
+                        collection_name=collection_name,
+                    ),
+                    user=user,
+                    db=db_session,
+                )
+
+            elif (
+                content_type
+                and content_type.startswith(('image/', 'video/'))
+                and not _media_supported_for_extraction(
+                    content_extraction_engine, content_extraction_supported_media_mime_types, content_type
+                )
+            ):
+                if content_type.startswith('video/'):
+                    # Videos are stored as-is for downstream multimodal
+                    # processing (Tools, vision models). Attempting text
+                    # extraction causes "Timeout reached while detecting
+                    # encoding" errors.
+                    log.info('Video file detected (%s), skipping text extraction', content_type)
+                    await Files.update_file_data_by_id(
+                        file_item.id,
+                        {'status': 'completed'},
                         db=db_session,
                     )
                 else:
                     raise Exception(f'File type {content_type} is not supported for processing')
+
             else:
-                log.info(f'File type {file.content_type} is not provided, but trying to process anyway')
+                # Documents, or media files explicitly enabled for the
+                # configured content extraction engine.
+                if not content_type:
+                    log.info('File type %s is not provided, but trying to process anyway', file.content_type)
                 await process_file(
                     request,
                     ProcessFileForm(
@@ -176,32 +253,12 @@ async def process_uploaded_file(
                     db=db_session,
                 )
 
-            # If this upload was for a KB, link the file → KB so the frontend
-            # doesn't need a separate /knowledge/{id}/file/add round-trip.
-            if knowledge_id:
-                await Knowledges.add_file_to_knowledge_by_id(
-                    knowledge_id=knowledge_id,
-                    file_id=file_item.id,
-                    user_id=user.id,
-                    db=db_session,
-                )
+            # (KB link moved above process_file — see the ordering note there.)
 
-            # Notify frontend via Socket.IO of the file's ACTUAL persisted
-            # status. For the native path process_file has already embedded +
-            # set 'completed' synchronously, so this stays 'completed'. For a
-            # warren-routed file process_file returns right after submitting the
-            # job (status still 'processing', vectors not yet in Weaviate);
-            # emitting 'completed' here would be premature — the real 'completed'
-            # is emitted from /ingest once the vectors land. Both file:status
-            # listeners (Chat.svelte, KnowledgeBase.svelte) act only on
-            # completed/failed and ignore 'processing', so the spinner persists.
-            #
-            # _process_handler is async — we're already on the main loop, so
-            # await the emit directly. (The earlier `run_on_main_loop(...)`
-            # call here deadlocked: that helper schedules a coroutine on the
-            # main loop then blocks the current thread on the result, which
-            # works from a sync worker thread but freezes the loop when the
-            # caller already IS the main loop.)
+            # Emit the persisted status: native processing has already completed,
+            # while a submitted soev-api job is still processing. Both UI listeners
+            # ignore processing, keeping the spinner until the soev-api poller
+            # emits the terminal event. Await directly on the running event loop.
             file_data = await Files.get_file_by_id(file_item.id)
             meta = (file_data.meta or {}) if file_data else {}
             current_status = meta.get('status') or 'completed'
@@ -213,6 +270,8 @@ async def process_uploaded_file(
                 collection_name=collection_name,
             )
 
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.error(f'Error processing file: {file_item.id}')
             error_msg = str(e.detail) if hasattr(e, 'detail') else str(e)
@@ -245,7 +304,24 @@ async def upload_file(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    return await upload_file_handler(
+    # FastAPI already buffered the multipart body during form parsing by the
+    # time this runs; it skips the second read, the Storage write, and the
+    # rest of the handler for declared-oversize uploads. Content-Length can
+    # lie, so the post-read check remains authoritative.
+    max_size_mb = await Config.get('rag.file.max_size')
+    declared_content_length = request.headers.get('content-length')
+    if max_size_mb and declared_content_length:
+        try:
+            declared_bytes = int(declared_content_length)
+        except (TypeError, ValueError):
+            declared_bytes = None
+        if declared_bytes is not None and declared_bytes > int(max_size_mb) * 1024 * 1024 + _MULTIPART_OVERHEAD:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size_mb} MB'),
+            )
+
+    result = await upload_file_handler(
         request,
         file=file,
         metadata=metadata,
@@ -255,6 +331,27 @@ async def upload_file(
         background_tasks=background_tasks,
         db=db,
     )
+
+    if isinstance(result, dict):
+        result_id = result.get('id')
+        result_filename = result.get('filename')
+        result_meta = result.get('meta') or {}
+    else:
+        result_id = result.id
+        result_filename = result.filename
+        result_meta = result.meta or {}
+
+    result_content_type = (
+        result_meta.get('content_type') if isinstance(result_meta, dict) else getattr(result_meta, 'content_type', None)
+    )
+    await publish_event(
+        request,
+        EVENTS.FILE_UPLOADED,
+        actor=user,
+        subject_id=result_id,
+        data={'filename': result_filename, 'content_type': result_content_type},
+    )
+    return result
 
 
 async def upload_file_handler(
@@ -266,13 +363,46 @@ async def upload_file_handler(
     user=Depends(get_verified_user),
     background_tasks: Optional[BackgroundTasks] = None,
     db: Optional[AsyncSession] = None,
+    sniff_guard: bool = True,
+    count_cap_guard: bool = True,
 ):
-    log.info(f'file.content_type: {file.content_type} {process}')
+    log.info('file.content_type: %s %s', file.content_type, process)
+
+    # Backend-enforced cap on a user's total stored file count. Mirrors
+    # routers/automations.py's check_automation_limits max_count pattern:
+    # admins bypass entirely, 403, count >= cap (not >), config coerced
+    # through int() and skipped when falsy (unset/0). Unlike rag.file.max_count
+    # (frontend per-message advisory only), this is authoritative and checked
+    # before any work is done -- no bytes read, nothing stored yet.
+    #
+    # Admins bypass for the same reason knowledge_id write-access does a few
+    # lines down (existing `user.role != 'admin'` convention in this same
+    # handler): the key is env-authoritative (see models/config.py's
+    # rag.file.* carve-out), so an admin who hits the cap has no admin-UI
+    # escape hatch to raise it -- only a deploy-config change would unblock
+    # them.
+    #
+    # count_cap_guard defaults True so the user route is always covered;
+    # server-generated upload paths (image/audio generation, agent-internal
+    # blobs — see images.py/utils/files.py) pass
+    # count_cap_guard=False since they aren't a user-initiated upload the
+    # cap is meant to bound, mirroring the sniff_guard opt-out precedent.
+    if count_cap_guard and user.role != 'admin':
+        max_count_per_user = await Config.get('rag.file.max_count_per_user')
+        if max_count_per_user:
+            max_count_per_user = int(max_count_per_user)
+            if max_count_per_user > 0:
+                current_count = await Files.count_files_by_user_id(user_id=user.id, db=db)
+                if current_count >= max_count_per_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=ERROR_MESSAGES.FILE_LIMIT_EXCEEDED(max_count_per_user),
+                    )
 
     if isinstance(metadata, str):
         try:
-            metadata = json.loads(metadata)
-        except json.JSONDecodeError:
+            metadata = JSONCodec.loads(metadata)
+        except JSONCodec.JSONDecodeError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT('Invalid metadata format'),
@@ -300,7 +430,7 @@ async def upload_file_handler(
                 permission='write',
                 db=db,
             )
-            and user.role != 'admin'
+            and not can_bypass_access_control(user)
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -310,32 +440,45 @@ async def upload_file_handler(
     try:
         unsanitized_filename = file.filename
         filename = os.path.basename(unsanitized_filename)
+        # [Gradient]
+        content_type = content_type_for(filename, file.content_type)
 
         file_extension = os.path.splitext(filename)[1]
         # Remove the leading dot from the file extension and lowercase it
         file_extension = file_extension[1:].lower() if file_extension else ''
 
-        # If no extension in filename, try to derive from content_type
-        # (e.g. Google Drive exported files have no extension in their name)
+        # If no extension in filename, try to derive one from content_type
+        # (e.g. Google Drive exported files have no extension in their name).
+        # application/octet-stream is the generic "unknown bytes" type clients
+        # send for extensionless files; mimetypes maps it to ".bin", which would
+        # trip the allow-list and pre-empt sniffing. Skip derivation in that case
+        # so the file stays extensionless and the magic-byte guard (branch 2)
+        # decides from the real content instead.
         if not file_extension and file.content_type:
             import mimetypes
 
-            ext = mimetypes.guess_extension(file.content_type)
-            if ext:
-                file_extension = ext[1:]  # Remove leading dot
+            base_content_type = file.content_type.split(';', 1)[0].strip().lower()
+            if base_content_type != 'application/octet-stream':
+                ext = mimetypes.guess_extension(file.content_type)
+                if ext:
+                    file_extension = ext[1:]  # Remove leading dot
 
-        if process and request.app.state.config.ALLOWED_FILE_EXTENSIONS:
-            request.app.state.config.ALLOWED_FILE_EXTENSIONS = [
-                ext for ext in request.app.state.config.ALLOWED_FILE_EXTENSIONS if ext
-            ]
+        allowed_file_extensions = await Config.get('rag.file.allowed_extensions')
+        if process and allowed_file_extensions:
+            allowed_file_extensions = [ext for ext in allowed_file_extensions if ext]
 
-            # An empty extension always passes: legitimate documents can arrive
-            # without a filename extension and with an unknown/octet-stream
-            # content type (e.g. "ASB - Microsoft Entra admin center", exported
-            # pages). We want those ingested — the native/external loader handles
-            # them. Junk types (svg/png/zip/dmg) resolve to a real, non-allowed
-            # extension and still fast-reject here.
-            if file_extension and file_extension not in request.app.state.config.ALLOWED_FILE_EXTENSIONS:
+            # A file with no usable extension passes the allow-list here —
+            # legitimate documents can arrive without one (exported pages, Drive
+            # files) or carrying only a generic application/octet-stream content
+            # type (the derivation above deliberately leaves those extensionless
+            # rather than mapping them to ".bin"). It no longer gets an
+            # unconditional free pass: once the bytes are in hand the magic-byte
+            # guard below (branch 2 in utils/upload_guard.py) sniffs the real
+            # content and, in enforce mode, only admits it when the sniffed type
+            # maps to an allowed extension. A file that DOES resolve to a real,
+            # non-allowed extension still fast-rejects right here (and files with
+            # a usable extension skip branch 2 entirely).
+            if file_extension and file_extension not in allowed_file_extensions:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=ERROR_MESSAGES.DEFAULT(f'File type {file_extension} is not allowed'),
@@ -347,32 +490,86 @@ async def upload_file_handler(
         # only signal to the frontend is a single Socket.IO 'file:status'
         # emit — which is exactly the path that drops on a stuck loop and
         # leaves an infinite spinner (see 2026-04-30 sync follow-ups).
-        if process and file.content_type and file.content_type.startswith(('image/', 'video/')):
-            engine = request.app.state.config.CONTENT_EXTRACTION_ENGINE
-            stt = getattr(request.app.state.config, 'STT_SUPPORTED_CONTENT_TYPES', []) or []
+        # [Gradient]
+        if process and content_type.startswith(('image/', 'video/')):
+            engine = await Config.get('rag.content_extraction_engine')
+            stt = await Config.get('audio.stt.supported_content_types', []) or []
             image_engines = {'external', 'datalab_marker', 'mistral_ocr'}
             handles_image = engine in image_engines
-            handles_stt = strict_match_mime_type(stt, file.content_type)
+            handles_stt = strict_match_mime_type(stt, content_type)  # [Gradient]
             if not handles_image and not handles_stt:
                 raise HTTPException(
                     status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                    detail=f'File type {file.content_type} is not supported by the configured extraction engine.',
+                    # [Gradient]
+                    detail=f'File type {content_type} is not supported by the configured extraction engine.',
                 )
 
-        # replace filename with uuid
+        # replace filename with uuid (prefer readable storage names for admins,
+        # but fall back to <uuid>.<ext> below if the filesystem rejects it).
         id = str(uuid.uuid4())
         name = filename
         filename = f'{id}_{filename}'
-        contents, file_path = await asyncio.to_thread(
-            Storage.upload_file,
-            file.file,
-            filename,
-            {
-                'OpenWebUI-User-Email': user.email,
-                'OpenWebUI-User-Id': user.id,
-                'OpenWebUI-User-Name': user.name,
-                'OpenWebUI-File-Id': id,
-            },
+        tags = {
+            'OpenWebUI-User-Email': user.email,
+            'OpenWebUI-User-Id': user.id,
+            'OpenWebUI-User-Name': user.name,
+            'OpenWebUI-File-Id': id,
+        }
+        try:
+            contents, file_path = await asyncio.to_thread(Storage.upload_file, file.file, filename, tags)
+        except OSError as e:
+            if e.errno != errno.ENAMETOOLONG:
+                log.exception(e)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT(e.strerror or 'Error uploading file'),
+                )
+
+            file.file.seek(0)
+            filename = f'{id}.{file_extension}' if file_extension else id
+            try:
+                contents, file_path = await asyncio.to_thread(Storage.upload_file, file.file, filename, tags)
+            except OSError as e:
+                log.exception(e)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT(e.strerror or 'Error uploading file'),
+                )
+        max_size = await Config.get('rag.file.max_size')
+        if max_size and len(contents) > int(max_size) * 1024 * 1024:
+            await asyncio.to_thread(Storage.delete_file, file_path)
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size} MB'),
+            )
+
+        # Magic-byte sniffing complements the extension allow-list: it blocks
+        # executables outright and — in enforce mode — catches files whose real
+        # content contradicts their name, or extensionless uploads whose sniff
+        # doesn't map to an allowed type. Policy, modes (RAG_FILE_SNIFF_MODE:
+        # off | log | enforce) and the MIME tables live in utils/upload_guard.py.
+        # A rejection deletes the just-stored object — same cleanup contract as
+        # the size check above.
+        #
+        # Guarding is decoupled from ``process`` on purpose: the executable
+        # hard-stop must hold for EVERY user-route upload, including
+        # ``process=false`` (otherwise a client could store a binary by opting
+        # out of parsing). ``sniff_guard`` defaults to True so the user route is
+        # always covered; the internal server-side generators (image/audio/agent
+        # blobs) pass ``sniff_guard=False`` to keep their behaviour unchanged.
+        if sniff_guard:
+            guard_result = check_upload(contents, name, file_extension, allowed_file_extensions or [])
+            if not guard_result.allowed:
+                await asyncio.to_thread(Storage.delete_file, file_path)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT(guard_result.reason),
+                )
+
+        # SHA-256 of raw uploaded bytes for incremental sync diffing.
+        # If the client pre-computed and sent file_hash, use that.
+        file_hash = file_metadata.get('file_hash') or await asyncio.to_thread(
+            lambda: hashlib.sha256(contents).hexdigest()
         )
 
         file_item = await Files.insert_new_file(
@@ -387,8 +584,9 @@ async def upload_file_handler(
                     },
                     'meta': {
                         'name': name,
-                        'content_type': (file.content_type if isinstance(file.content_type, str) else None),
+                        'content_type': content_type,  # [Gradient]
                         'size': len(contents),
+                        'file_hash': file_hash,
                         'data': file_metadata,
                         **({'status': 'pending'} if process else {}),
                     },
@@ -463,7 +661,7 @@ async def list_files(
     db: AsyncSession = Depends(get_async_session),
 ):
     skip = (page - 1) * PAGE_SIZE
-    user_id = None if (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
+    user_id = None if can_bypass_access_control(user) else user.id
 
     result = await Files.get_file_list(user_id=user_id, skip=skip, limit=PAGE_SIZE, db=db)
 
@@ -497,7 +695,7 @@ async def search_files(
     Uses SQL-based filtering with pagination for better performance.
     """
     # Determine user_id: null for admin with bypass (search all), user.id otherwise
-    user_id = None if (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
+    user_id = None if can_bypass_access_control(user) else user.id
 
     # Use optimized database query with pagination
     files = await Files.search_files(
@@ -523,12 +721,31 @@ async def search_files(
 
 
 ############################
+# Count Files
+############################
+
+
+@router.get('/count', response_model=int)
+async def count_files(
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    user_id = None if can_bypass_access_control(user) else user.id
+    return await Files.count_files_by_user_id(user_id=user_id, db=db)
+
+
+############################
 # Delete All Files
 ############################
 
 
 @router.delete('/all')
-async def delete_all_files(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def delete_all_files(
+    request: Request, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
+    if not can_bypass_access_control(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
     result = await Files.delete_all_files(db=db)
     if result:
         try:
@@ -541,6 +758,7 @@ async def delete_all_files(user=Depends(get_admin_user), db: AsyncSession = Depe
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT('Error deleting files'),
             )
+        await publish_event(request, EVENTS.FILE_DELETED_ALL, actor=user, subject_type='file')
         return {'message': 'All files deleted successfully'}
     else:
         raise HTTPException(
@@ -558,13 +776,24 @@ async def delete_all_files(user=Depends(get_admin_user), db: AsyncSession = Depe
 async def get_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     file = await Files.get_file_by_id(id, db=db)
 
+    # [Gradient] Cloud documents have catalog membership without a local upload row.
+    if not file:
+        file = await catalog_file(id, user)
+        if file:
+            return file
+
     if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
+        # [Gradient] soev-api holds the extracted text; serve it on the row without persisting it.
+        if not (file.data or {}).get('content'):
+            rendition = await ingest.rendition_of(file, user.id)
+            if rendition:
+                return file.model_copy(update={'data': {**(file.data or {}), 'content': rendition}})
         return file
     else:
         raise HTTPException(
@@ -578,9 +807,12 @@ async def get_file_process_status(
     id: str,
     stream: bool = Query(False),
     user=Depends(get_verified_user),
-    db: AsyncSession = Depends(get_async_session),
 ):
-    file = await Files.get_file_by_id(id, db=db)
+    # NOTE: We intentionally do NOT use Depends(get_async_session) here.
+    # Database operations manage their own short-lived sessions internally.
+    # Holding a session here would keep a connection for the entire stream
+    # (up to two hours) and exhaust the connection pool under concurrent load.
+    file = await Files.get_file_by_id(id)
 
     if not file:
         raise HTTPException(
@@ -588,16 +820,13 @@ async def get_file_process_status(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user):
         if stream:
             MAX_FILE_PROCESSING_DURATION = 3600 * 2
 
             async def event_stream(file_id):
-                # NOTE: We intentionally do NOT capture the request's db session here.
-                # Each poll creates its own short-lived session to avoid holding a
-                # connection for hours. A WebSocket push would be more efficient.
                 for _ in range(MAX_FILE_PROCESSING_DURATION):
-                    file_item = await Files.get_file_by_id(file_id)  # Creates own session
+                    file_item = await Files.get_file_by_id(file_id)
                     if file_item:
                         data = file_item.model_dump().get('data', {})
                         status = data.get('status')
@@ -607,14 +836,14 @@ async def get_file_process_status(
                             if status == 'failed':
                                 event['error'] = data.get('error')
 
-                            yield f'data: {json.dumps(event)}\n\n'
+                            yield f'data: {JSONCodec.dumps(event)}\n\n'
                             if status in ('completed', 'failed'):
                                 break
                         else:
                             # Legacy
                             break
                     else:
-                        yield f'data: {json.dumps({"status": "not_found"})}\n\n'
+                        yield f'data: {JSONCodec.dumps({"status": "not_found"})}\n\n'
                         break
 
                     await asyncio.sleep(1)
@@ -649,8 +878,8 @@ async def get_file_data_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
-        return {'content': file.data.get('content', '')}
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
+        return {'content': await ingest.rendition_of(file, user.id) or ''}
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -665,18 +894,6 @@ async def get_file_data_content_by_id(
 
 class ContentForm(BaseModel):
     content: str
-
-
-class FileAttachmentManifestResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: str
-    file_id: str
-    kind: str
-    storey: Optional[str] = None
-    index: int
-    content_type: str
-    caption: str
-    created_at: int
 
 
 @router.post('/{id}/data/content/update')
@@ -695,7 +912,13 @@ async def update_file_data_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'write', user, db=db):
+        max_size = await Config.get('rag.file.max_size')
+        if max_size and len(form_data.content.encode('utf-8')) > int(max_size) * 1024 * 1024:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size} MB'),
+            )
         try:
             await process_file(
                 request,
@@ -704,6 +927,8 @@ async def update_file_data_content_by_id(
                 db=db,
             )
             file = await Files.get_file_by_id(id=id, db=db)
+        except SoevNotConfigured:
+            raise
         except Exception as e:
             log.exception(e)
             log.error(f'Error processing file: {file.id}')
@@ -711,21 +936,27 @@ async def update_file_data_content_by_id(
         # Propagate content change to all knowledge collections referencing
         # this file.  Without this the old embeddings remain in the knowledge
         # collection and RAG returns both stale and current data (#20558).
-        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
+        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db) if configured() else []
         for knowledge in knowledges:
             try:
-                # Remove old embeddings for this file from the KB collection
-                await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'file_id': id})
-                # Re-add from the now-updated file-{file_id} collection
                 await process_file(
                     request,
                     ProcessFileForm(file_id=id, collection_name=knowledge.id),
                     user=user,
                     db=db,
                 )
+            except SoevNotConfigured:
+                raise
             except Exception as e:
                 log.warning(f'Failed to update knowledge {knowledge.id} after content change for file {id}: {e}')
 
+        await publish_event(
+            request,
+            EVENTS.FILE_CONTENT_UPDATED,
+            actor=user,
+            subject_id=id,
+            data={'content_preview': form_data.content[:300]},
+        )
         return {'content': file.data.get('content', '')}
     else:
         raise HTTPException(
@@ -739,8 +970,11 @@ async def update_file_data_content_by_id(
 ############################
 
 
-@router.get('/{id}/content')
-async def get_file_content_by_id(
+# [Gradient] Preserve reverse-route names and the later images.py export without redefining this handler.
+# HEAD is what the sources panel probes before offering the document viewer (Starlette answers it
+# from the GET handler with an empty body).
+@router.api_route('/{id}/content', methods=['GET', 'HEAD'], name='get_file_content_by_id')
+async def get_file_content_by_id_inline(
     id: str,
     user=Depends(get_verified_user),
     attachment: bool = Query(False),
@@ -748,13 +982,21 @@ async def get_file_content_by_id(
 ):
     file = await Files.get_file_by_id(id, db=db)
 
+    # [Gradient] Cloud catalog documents have no local file row.
+    if file is None:
+        content = await stream_catalog_content(id, user, attachment=attachment)
+        if content is not None:
+            return content
+
     if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
+        if (file.meta or {}).get('source'):
+            return await stream_original(file, user, attachment=attachment)
         try:
             file_path = await asyncio.to_thread(Storage.get_file, file.path)
             file_path = Path(file_path)
@@ -802,68 +1044,6 @@ async def get_file_content_by_id(
         )
 
 
-############################
-# List File Attachments (manifest — path not exposed)
-############################
-
-
-@router.get('/{id}/attachments', response_model=list[FileAttachmentManifestResponse])
-async def list_file_attachments(
-    id: str,
-    user=Depends(get_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    file = await Files.get_file_by_id(id, db=db)
-    if not file:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    if not (file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db)):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    return await asyncio.to_thread(FileAttachments.get_attachments_by_file_id, id)
-
-
-############################
-# Get File Attachment Bytes
-############################
-
-
-@router.get('/{id}/attachments/{attachment_id}')
-async def get_file_attachment_bytes(
-    id: str,
-    attachment_id: str,
-    user=Depends(get_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    file = await Files.get_file_by_id(id, db=db)
-    if not file:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    if not (file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db)):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-    attachment = await asyncio.to_thread(FileAttachments.get_attachment_by_id, attachment_id)
-    if attachment is None or attachment.file_id != id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-    try:
-        storage_path = Path(Storage.get_file(attachment.path))
-    except Exception:
-        log.exception(
-            'Storage.get_file raised for attachment %s (path=%s)',
-            attachment_id,
-            attachment.path,
-        )
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-    if not storage_path.is_file():
-        log.error(
-            'attachment row %s points at missing Storage path %s',
-            attachment_id,
-            attachment.path,
-        )
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-    return FileResponse(storage_path, media_type=attachment.content_type)
-
-
 @router.get('/{id}/content/html')
 async def get_html_file_content_by_id(
     id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
@@ -883,14 +1063,14 @@ async def get_html_file_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
         try:
             file_path = await asyncio.to_thread(Storage.get_file, file.path)
             file_path = Path(file_path)
 
             # Check if the file already exists in the cache
             if file_path.is_file():
-                log.info(f'file_path: {file_path}')
+                log.info('file_path: %s', file_path)
                 return FileResponse(file_path)
             else:
                 raise HTTPException(
@@ -915,9 +1095,18 @@ async def get_html_file_content_by_id(
 
 @router.get('/{id}/content/{file_name}')
 async def get_file_content_by_id(
-    id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+    id: str,
+    file_name: str,  # [Gradient] Bound from the path; kept for catalog downloads.
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
 ):
     file = await Files.get_file_by_id(id, db=db)
+
+    # [Gradient] Cloud catalog documents have no local file row.
+    if file is None:
+        content = await stream_catalog_content(id, user, attachment=True, file_name=file_name)
+        if content is not None:
+            return content
 
     if not file:
         raise HTTPException(
@@ -925,7 +1114,9 @@ async def get_file_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
+        if (file.meta or {}).get('source'):
+            return await stream_original(file, user, attachment=True)
         file_path = file.path
 
         # Handle Unicode filenames
@@ -967,12 +1158,22 @@ async def get_file_content_by_id(
 
 
 ############################
-# Delete File By Id
+# Rename File By Id
 ############################
 
 
-@router.delete('/{id}')
-async def delete_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+class FileRenameForm(BaseModel):
+    filename: str
+
+
+@router.post('/{id}/rename')
+async def rename_file_by_id(
+    request: Request,
+    id: str,
+    form_data: FileRenameForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
     file = await Files.get_file_by_id(id, db=db)
 
     if not file:
@@ -981,25 +1182,60 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncS
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
-        # Clean up KB associations and embeddings before deleting
-        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'write', user, db=db):
+        result = await Files.update_file_name_by_id(id, form_data.filename, db=db)
+        if result:
+            await publish_event(
+                request,
+                EVENTS.FILE_RENAMED,
+                actor=user,
+                subject_id=id,
+                data={'filename': form_data.filename},
+            )
+            return result
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT('Error renaming file'),
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+
+############################
+# Delete File By Id
+############################
+
+
+@router.delete('/{id}')
+async def delete_file_by_id(
+    request: Request, id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    file = await Files.get_file_by_id(id, db=db)
+
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'write', user, db=db):
+        if configured() and (file.meta or {}).get('soev_job') is not None:
+            await ingest.cancel(file)
+
+        # Remove knowledge memberships before deleting the file.
+        knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db) if configured() else []
         for knowledge in knowledges:
             # Remove KB-file relationship
             await Knowledges.remove_file_from_knowledge_by_id(knowledge.id, id, db=db)
-            # Clean KB embeddings (same logic as /knowledge/{id}/file/remove)
-            try:
-                await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'file_id': id})
-                if file.hash:
-                    await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'hash': file.hash})
-            except Exception as e:
-                log.debug(f'KB embedding cleanup for {knowledge.id}: {e}')
-
         result = await Files.delete_file_by_id(id, db=db)
         if result:
             try:
-                await asyncio.to_thread(Storage.delete_file, file.path)
-                await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=f'file-{id}')
+                if file.path:
+                    await asyncio.to_thread(Storage.delete_file, file.path)
             except Exception as e:
                 log.exception(e)
                 log.error('Error deleting files')
@@ -1007,6 +1243,13 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncS
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=ERROR_MESSAGES.DEFAULT('Error deleting files'),
                 )
+            await publish_event(
+                request,
+                EVENTS.FILE_DELETED,
+                actor=user,
+                subject_id=id,
+                data={'filename': file.filename},
+            )
             return {'message': 'File deleted successfully'}
         else:
             raise HTTPException(

@@ -58,7 +58,7 @@ def search_exa(
                 )
             )
 
-        log.info(f'Found {len(results)} results')
+        log.info('Found %s results', len(results))
         return [
             SearchResult(
                 link=result.url,

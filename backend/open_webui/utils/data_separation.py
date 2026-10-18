@@ -29,6 +29,11 @@ def classify_file(item: Optional[dict]) -> Optional[str]:
     file_type = item.get('type')
     if file_type == 'web_search':
         return OPEN_INTERNET
+    # ``url`` — a web page attached for the agent to fetch live (GRA-222).
+    # Same side as an ingested page: the content comes off the open internet
+    # either way, only the moment of fetching differs.
+    if file_type == 'url':
+        return OPEN_INTERNET
     if file_type == 'text' and item.get('url'):
         return OPEN_INTERNET
     if file_type in INTERNAL_FILE_TYPES:

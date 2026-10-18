@@ -1,0 +1,516 @@
+import re
+from contextlib import contextmanager
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+from . import crossuser, plane, seeds, test_shapes
+from .authorization_inventory import admin_gated_operations, platform_operations, source_operations
+from .test_shapes import reply
+
+offline = test_shapes.offline
+
+
+def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
+    inventory = source_operations()
+    assert set(plane.operations()) <= inventory.keys()
+    assert len(admin_gated_operations()) == 203
+    assert 'GET /api/v1/functions/' in inventory
+    assert 'GET /api/v1/files/{id}/content' in inventory
+    assert 'POST /api/v1/files/onedrive/attach' in inventory
+    assert 'PATCH /api/v1/terminals/{server_id}/{path}' in inventory
+    routes, admins = crossuser.targets()
+    # Operations whose id the surface records as unseedable are out of scope: an
+    # ownership check needs a resource that exists, and counting them would make the
+    # pass look as though it left ownership unverified rather than unseedable.
+    expected = admins | {r for r in plane.operations() if '{' in r} | set(platform_operations())
+    unseedable = {r for r in expected if not crossuser._is_seedable(r, seeds.SURFACE)}
+    assert unseedable, 'expected at least one unseedable operation to be excluded'
+    assert set(routes) == expected - unseedable
+
+
+def test_offboarding_inventory_is_an_admin_read_of_another_users_resources():
+    route = 'GET /api/v1/users/{user_id}/shared-data'
+    routes, admins = crossuser.targets()
+    assert route in routes and route in admins
+    assert route in seeds.ordinary_targets()
+    assert route not in crossuser._shared()
+    assert route not in seeds.SOEV_BACKED
+    assert route not in seeds.DESTRUCTIVE
+    assert crossuser._owner_key(route.split(' ', 1)[1], seeds.SURFACE) == 'admin'
+
+
+@pytest.mark.parametrize('status', [200, 400, 401, 403, 404, 500])
+def test_marker_in_even_a_refusal_or_long_body_is_disclosure(status):
+    result = crossuser.Authorization(plane.Seeding())
+    stranger = plane.Outcome(status, False, 'x' * 4000 + 'unique-owner-marker')
+    crossuser._check(
+        result, 'GET /private/{id}', stranger, None, ['unique-owner-marker'], admin_only=False, control=True
+    )
+    assert result.violations
+    assert result.tally.body_failures
+
+
+def test_same_nonempty_object_without_marker_is_disclosure_but_empty_list_is_not():
+    for body, exposed in [('[]', False), ('{"id":"private-row"}', True), ('private bytes', True), ('true', False)]:
+        result = crossuser.Authorization(plane.Seeding())
+        outcome = plane.Outcome(200, True, body)
+        crossuser._check(result, 'GET /r/{id}', outcome, outcome, ['marker'], admin_only=False, control=True)
+        assert bool(result.violations) is exposed
+
+
+def test_partial_object_disclosure_does_not_need_the_marker_or_identical_owner_body():
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        'GET /r/{id}',
+        plane.Outcome(200, True, '{"items":[{"id":"owner-row","title":"redacted"}]}'),
+        plane.Outcome(200, True, '{"id":"owner-row","title":"private marker"}'),
+        ['private marker'],
+        admin_only=False,
+        control=True,
+        resource_ids=['owner-row'],
+    )
+    assert result.violations
+
+
+def test_head_success_discloses_access_even_without_a_response_body():
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        'HEAD /api/v1/files/{id}/content',
+        plane.Outcome(200, True, ''),
+        plane.Outcome(200, True, ''),
+        [],
+        admin_only=False,
+        control=True,
+    )
+    assert result.violations[0]['reason'].endswith('through HEAD')
+
+
+def test_picker_control_satisfies_the_real_body_and_required_header_contract():
+    from uuid import UUID
+
+    from open_webui.routers.live_documents import PickerAttachment
+
+    request = crossuser._benign('POST /api/v1/files/onedrive/attach', {}, seeds.SPEC)
+    PickerAttachment.model_validate(request['json'])
+    UUID(request['headers']['Idempotency-Key'])
+
+
+def test_schedule_control_keeps_the_declared_provider_scope():
+    route = 'POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules'
+    scope = {'drive_id': 'ci-drive', 'item_id': 'root', 'include_descendants': True, 'single_file': False}
+    parameters = seeds.Resolved(fields={route: {'json': {'connection_id': 'owned', 'scope': scope}}})
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    assert request['json']['scope'] == scope
+    assert request['json']['connection_id'] == 'owned'
+    assert plane._body_for(['scope'], 'hostile', {'scope': scope}) == {'scope': scope}
+
+
+def test_meeting_audio_control_sends_a_valid_wav_body(monkeypatch):
+    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
+    import io
+    import wave
+
+    route = 'POST /api/v1/meetings/audio'
+    entry = next(item for item in seeds.SURFACE['field'] if item['route'] == route)
+    context = seeds.SeedContext(None, None, seeds.SURFACE, token='audio')
+    parameters = seeds.Resolved(fields=seeds.resolve_fields(context, entries=[entry]))
+    request = crossuser._benign(route, parameters, seeds.SPEC)
+    with wave.open(io.BytesIO(request['data']), 'rb') as audio:
+        assert audio.getnchannels() == 1
+        assert audio.getframerate() == 16000
+        assert audio.readframes(1) == b'\x00\x00'
+    assert request['params']['name'] == 'attack-audio.wav'
+
+
+def test_reset_control_uses_the_actual_owner(offline, monkeypatch):
+    spec = {'paths': {'/api/v1/knowledge/{id}/reset': {'post': {}}}}
+    identities, order = setup_pass(monkeypatch, spec, {'intruder': (403, {'detail': 'refused'})})
+    flags = []
+
+    @contextmanager
+    def actor(admin, owner, disposable):
+        flags.append(disposable)
+        yield owner
+
+    monkeypatch.setattr(crossuser, '_actor', actor)
+    crossuser.drive_crossuser(identities, spec=spec, payloads=['one'])
+    assert flags == [False, False]
+    assert [entry[0] for entry in order] == ['intruder', 'admin']
+
+
+def test_both_404_cannot_pass_the_positive_control_gate():
+    from .test_live_crossuser import test_live_crossuser_owner_controls_are_positive
+
+    result = crossuser.Authorization(plane.Seeding())
+    missing = plane.Outcome(404, False, '{}')
+    crossuser._check(result, 'DELETE /r/{id}', missing, missing, ['marker'], admin_only=False, control=True)
+    with pytest.raises(AssertionError, match='404'):
+        test_live_crossuser_owner_controls_are_positive(result)
+
+
+@pytest.mark.parametrize('status', [200, 302, 400, 404, 422, 429, 500])
+def test_admin_gate_requires_an_authorization_refusal(status):
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result, 'POST /admin', plane.Outcome(status, False, '{}'), None, ['marker'], admin_only=True, control=True
+    )
+    assert result.violations
+
+
+def setup_pass(monkeypatch, spec, replies=None):
+    order = []
+    identities = SimpleNamespace(admin=Mock(), user=Mock(), intruder=Mock())
+    for name in ('admin', 'user', 'intruder'):
+        actor = getattr(identities, name)
+        actor.identity = {'role': 'admin' if name == 'admin' else 'user'}
+        actor.request.side_effect = lambda method, path, name=name, **kw: (
+            order.append((name, method, path, kw)) or reply(*(replies or {}).get(name, (200, {'ok': True})))
+        )
+
+    @contextmanager
+    def fixtures(*a, **kw):
+        parameters = {(path, name): 'owned' for path in spec['paths'] for name in re.findall(r'\{([^}]+)\}', path)}
+        yield parameters, ['marker'], {}, {'admin': identities.admin}
+
+    monkeypatch.setattr(crossuser, 'own_fixtures', fixtures)
+    monkeypatch.setattr(crossuser, '_owner_key', lambda *a: 'admin')
+    monkeypatch.setattr(plane, '_target', lambda route, *a: route.split(' ', 1)[1].replace('{id}', 'owned'))
+    monkeypatch.setattr(crossuser, 'targets', lambda spec: (plane.operations(spec), {'POST /admin'}))
+    return identities, order
+
+
+def test_second_account_first_reads_writes_child_deletes_then_parent_and_destructive_last(offline, monkeypatch):
+    spec = {
+        'paths': {
+            '/r/{id}': {'delete': {}, 'post': {}, 'get': {}},
+            '/r/{id}/child': {'delete': {}},
+            '/api/v1/users/{user_id}': {'delete': {}},
+            '/admin': {'post': {}},
+        }
+    }
+    identities, order = setup_pass(monkeypatch, spec, {'intruder': (403, {'detail': 'refused'})})
+    actors = []
+
+    @contextmanager
+    def disposable(admin, actor, destructive):
+        actors.append((actor, destructive))
+        yield actor
+
+    monkeypatch.setattr(crossuser, '_actor', disposable)
+    result = crossuser.drive_crossuser(identities, spec=spec, payloads=['one'])
+    pairs = [entry for entry in order if entry[2] != '/admin']
+    assert [entry[0] for entry in pairs] == ['intruder', 'admin'] * 5
+    assert [(entry[1], entry[2]) for entry in pairs[::2]] == [
+        ('GET', '/r/owned'),
+        ('POST', '/r/owned'),
+        ('DELETE', '/r/owned/child'),
+        ('DELETE', '/r/owned'),
+        ('DELETE', '/api/v1/users/{user_id}'),
+    ]
+    assert [flag for _, flag in actors][-2:] == [True, True]
+    assert not result.violations
+    assert result.tally.config_restore_verified
+
+
+@pytest.mark.parametrize('full', [False, True])
+def test_corpus_uses_shared_sampling_and_resets_module_tallies(offline, monkeypatch, full):
+    schema = {'type': 'object', 'properties': {'name': {'type': 'string'}}}
+    spec = {'paths': {'/r/{id}': {'post': {'requestBody': {'content': {'application/json': {'schema': schema}}}}}}}
+    identities, order = setup_pass(monkeypatch, spec, {'intruder': (403, {'detail': 'refused'})})
+    monkeypatch.setenv('ATTACK_FULL_CORPUS', '1' if full else '0')
+    result = crossuser.drive_crossuser(identities, spec=spec, payloads=['one', 'two'])
+    assert len(order) == 2 * (1 + (2 if full else 1))
+    first = list(order)
+    order.clear()
+    again = crossuser.drive_crossuser(identities, spec=spec, payloads=['one', 'two'])
+    assert order == first
+    assert result.tally is not again.tally
+    assert result.tally.statuses == again.tally.statuses
+
+
+def test_fixture_resolution_is_private_and_tracks_both_seed_markers(offline, monkeypatch):
+    identities = SimpleNamespace(admin=Mock(), user=Mock())
+    maps = []
+
+    def resolve(client, *, admin, surface, spec, collect_failures):
+        assert collect_failures
+        assert client is identities.user and admin is identities.admin
+        maps.append(surface)
+        return {('/api/v1/configs/namespace/{namespace}', 'namespace'): 'attack_procedural-token'}
+
+    monkeypatch.setattr(seeds, 'resolve_parameters', resolve)
+    monkeypatch.setattr(crossuser, 'login', Mock(return_value=Mock()))
+    for _ in range(2):
+        with crossuser.own_fixtures(identities) as (_, markers, surface, owners):
+            assert markers[1] == 'procedural-token'
+            assert markers[0] in str(surface)
+            assert owners['user'] is identities.user
+    assert maps[0] != maps[1] and maps[0] is not seeds.SURFACE
+    assert '{token}' in str(seeds.SURFACE)
+
+
+def test_owner_mapping_includes_aliases_integrations_task_and_disposable_export():
+    for path, expected in [
+        ('/api/v1/chats/folder/{folder_id}', 'admin'),
+        ('/api/tasks/stop/{task_id}', 'admin'),
+    ]:
+        assert crossuser._owner_key(path, seeds.SURFACE) == expected
+
+
+def test_destructive_ordinary_probe_never_acquires_admin_role(offline, monkeypatch):
+    admin, ordinary, disposable = Mock(), Mock(), Mock()
+    ordinary.identity = {'role': 'user'}
+    admin.request.return_value = reply(200, {})
+    factory = Mock(return_value=disposable)
+    monkeypatch.setattr(crossuser, 'AttackClient', factory)
+    for _ in range(2):
+        with crossuser._actor(admin, ordinary, True) as actor:
+            assert actor is disposable
+    assert factory.call_count == disposable.close.call_count == 2
+    assert all(call.kwargs['json']['role'] == 'user' for call in admin.request.call_args_list)
+    assert all(call.kwargs['role'] == 'user' for call in disposable.authenticate.call_args_list)
+    emails = [call.kwargs['json']['email'] for call in admin.request.call_args_list]
+    assert emails[0] != emails[1]
+
+
+def test_ordinary_writes_restore_configuration_using_admin_even_when_request_fails(offline, monkeypatch):
+    admin, ordinary = Mock(), Mock()
+    ordinary.request.side_effect = RuntimeError('request failed')
+    events = []
+
+    @contextmanager
+    def guard(actor, **kw):
+        assert actor is admin
+        events.append('snapshot')
+        try:
+            yield
+        finally:
+            events.append('restore')
+
+    monkeypatch.setattr(plane, 'preserve_configuration', guard)
+    with pytest.raises(RuntimeError, match='request failed'):
+        crossuser._request(admin, ordinary, 'POST /r', '/r', plane.Seeding(), {})
+    assert events == ['snapshot', 'restore']
+
+
+def test_crossuser_5xx_and_entries_are_independent(offline, monkeypatch):
+    from .test_live_crossuser import test_live_crossuser_has_its_own_5xx_assertion
+
+    spec = {'paths': {'/r/{id}': {'get': {}}}}
+    identities, _ = setup_pass(monkeypatch, spec, {'intruder': (404, {}), 'admin': (404, {})})
+    plane.record('GET /r/{id}', 200, {}, pass_name='drive')
+    result = crossuser.drive_crossuser(identities, spec=spec, payloads=['one'])
+    assert not result.tally.entered
+    plane.record('GET /r/{id}', 500, 'authorization crash', pass_name='crossuser')
+    plane.record('GET /r/{id}', 200, {}, pass_name='crossuser')
+    with pytest.raises(AssertionError, match='authorization crash'):
+        test_live_crossuser_has_its_own_5xx_assertion(result)
+
+
+def test_a_route_that_never_answers_is_not_an_authorization_violation():
+    # Status 0 with admin_only would otherwise read as "not refused" and report
+    # an authorization finding for a route that simply did not answer.
+    result = crossuser.Authorization(tally=plane.Seeding())
+    silence = plane.Outcome(0, False, '', timed_out=True)
+    crossuser._check(result, 'DELETE /api/v1/users/{user_id}', silence, silence, (), admin_only=True, control=True)
+    assert result.violations == []
+    assert result.tally.body_failures == []
+
+
+def _answer(status, body):
+    return plane.Outcome(status, 200 <= status < 300, body)
+
+
+def test_a_declared_sharing_kind_is_allowed_and_only_that_kind():
+    result = crossuser.Authorization(tally=plane.Seeding(), shared={'GET /x/{id}': frozenset({'same-object'})})
+    body = '{"id": "r1", "name": "owner marker-1"}'
+    crossuser._check(
+        result,
+        'GET /x/{id}',
+        _answer(200, body),
+        _answer(200, body),
+        ('marker-1',),
+        admin_only=False,
+        control=True,
+        resource_ids=('r1',),
+    )
+    reasons = {violation['reason'] for violation in result.violations}
+    assert 'second account received the same nonempty object as the owner' not in reasons
+    assert 'second account received an object containing the seeded resource id' in reasons
+    assert 'seeded owner marker in second-account response (including refusals)' in reasons
+
+
+@pytest.mark.parametrize(
+    'body, accepted', [('false', False), ('null', False), ('true', True), ('{"id": "r1"}', True), ('', True)]
+)
+def test_a_2xx_that_reports_nothing_happened_is_not_an_accepted_write(body, accepted):
+    # folders/{id}/update/expanded answers 200 null and memories DELETE 200 false
+    # for a folder or memory the caller does not own: nothing was written.
+    result = crossuser.Authorization(tally=plane.Seeding())
+    crossuser._check(
+        result,
+        'POST /x/{id}/update',
+        _answer(200, body),
+        _answer(200, '{"ok": 1}'),
+        (),
+        admin_only=False,
+        control=False,
+    )
+    wrote = any(v['reason'] == 'second account accepted a write to the owner resource' for v in result.violations)
+    assert wrote is accepted
+
+
+def test_every_sharing_declaration_names_a_route_allowed_kinds_and_a_reason():
+    operations = set(plane.operations(seeds.SPEC))
+    for entry in seeds.SURFACE.get('shared', []):
+        assert entry['route'] in operations, entry['route']
+        assert entry['reason'].strip(), entry['route']
+        assert entry['allow'] and set(entry['allow']) <= crossuser.SHAREABLE, entry
+
+
+def test_the_owner_control_carries_declared_fields():
+    # prompts/.../history/diff and chats/.../resolve 404 without the ids [[field]]
+    # declares, so without them the owner control never succeeded and isolation
+    # on those routes stayed unproven.
+    schema = {'type': 'object', 'properties': {'file_id': {'type': 'string'}, 'directory_id': {'type': 'string'}}}
+    spec = {
+        'paths': {
+            '/x': {'get': {}},
+            '/y': {'post': {'requestBody': {'content': {'application/json': {'schema': schema}}}}},
+        }
+    }
+    parameters = seeds.Resolved(
+        fields={'GET /x': {'params': {'from_id': 'h1'}}, 'POST /y': {'json': {'file_id': 'f1'}}}
+    )
+    [(control, get)] = list(crossuser._requests('GET /x', parameters, spec, {}, (), False))
+    assert control and get['params'] == {'from_id': 'h1'}
+    [(_, post)] = list(crossuser._requests('POST /y', parameters, spec, {}, (), False))
+    assert post['json']['file_id'] == 'f1'
+
+
+def test_sharing_declarations_on_token_routes_stay_matchable():
+    # own_fixtures fills {token} throughout its copy of the surface, which
+    # rewrote routes like invites/{token}/validate so no declaration matched.
+    from copy import deepcopy
+
+    route = 'GET /api/v1/invites/{token}/validate'
+    assert route in crossuser._shared()
+    assert route not in crossuser._shared(seeds._fill_token(deepcopy(seeds.SURFACE), 'marker'))
+
+
+def test_a_service_route_is_driven_as_the_service_acting_for_each_side(monkeypatch):
+    # The agents-api and the sync daemon call in with a service key and an acting
+    # user. Isolation there means: acting for the intruder must not reach the
+    # owner's resource, and acting for the owner must.
+    from types import SimpleNamespace
+
+    import requests
+
+    sent = []
+
+    def fake(self, method, url, **kwargs):
+        sent.append((method, url, kwargs['headers']))
+        answer = requests.Response()
+        answer.status_code = 200
+        answer._content = b'{}'
+        return answer
+
+    monkeypatch.setattr(crossuser.requests.Session, 'request', fake)
+    declaration = {'prefix': '/svc', 'token': 'k', 'headers': {'X-Acting-Provider': 'p'}}
+    users = [SimpleNamespace(identity={'id': 'intruder-id'}), SimpleNamespace(identity={'id': 'owner-id'})]
+    with crossuser._as_service(declaration, 'http://app', *users) as (intruder, owner):
+        intruder.request('GET', '/svc/x')
+        owner.request('GET', '/svc/x')
+    assert [headers['X-Acting-User-Id'] for _, _, headers in sent] == ['intruder-id', 'owner-id']
+    assert all(h['Authorization'] == 'Bearer k' and h['X-Acting-Provider'] == 'p' for _, _, h in sent)
+    assert sent[0][1] == 'http://app/svc/x'
+
+
+def test_an_ordinary_route_keeps_its_users():
+    with crossuser._as_service(None, 'http://app', 'intruder', 'owner') as actors:
+        assert actors == ('intruder', 'owner')
+    assert crossuser._service('/api/v1/chats/x') is None
+
+
+def test_every_service_declaration_covers_a_route_and_names_its_key():
+    paths = {route.split(' ', 1)[1] for route in plane.operations(seeds.SPEC)}
+    declarations = seeds.SURFACE.get('service', [])
+    for entry in declarations:
+        assert any(p == entry['prefix'] or p.startswith(entry['prefix'] + '/') for p in paths), entry['prefix']
+        assert entry['token'] and entry['reason'].strip(), entry
+
+
+def test_a_failed_owner_control_keeps_the_reason():
+    # 59 owner controls failed with a bare status; the body says why, so a live
+    # run explains every gap at once instead of one replay per route.
+    result = crossuser.Authorization(tally=plane.Seeding())
+    crossuser._check(
+        result,
+        'POST /x/{id}',
+        _answer(403, '{"detail": "not a member"}'),
+        _answer(403, '{"detail": "not a member"}'),
+        (),
+        admin_only=False,
+        control=True,
+    )
+    assert result.controls['POST /x/{id}'] == 403
+    assert 'not a member' in result.control_bodies['POST /x/{id}']
+
+
+def test_a_marker_the_request_carried_is_not_a_disclosure():
+    # chat/actions refused with "Action not available: attack_function_<marker>": the
+    # id is in the path the second account sent, not something the owner disclosed.
+    assert crossuser._markers_outside('/api/chat/actions/attack_function_m1', ('m1', 'ns1')) == ('ns1',)
+
+
+def test_a_declared_refusal_matches_only_its_status_and_detail():
+    declaration = {'route': 'DELETE /x', 'status': 400, 'detail': 'in use', 'reason': 'guard'}
+    assert crossuser.refused_as_expected(declaration, 400, '{"detail": "still in use"}')
+    assert not crossuser.refused_as_expected(declaration, 403, '{"detail": "still in use"}')
+    assert not crossuser.refused_as_expected(declaration, 400, '{"detail": "other"}')
+    assert not crossuser.refused_as_expected(None, 400, 'in use')
+
+
+def test_every_declared_refusal_names_a_route_a_4xx_a_detail_and_a_reason():
+    operations = set(plane.operations(seeds.SPEC))
+    declarations = seeds.SURFACE.get('control', [])
+    assert declarations
+    for entry in declarations:
+        assert entry['route'] in operations, entry['route']
+        assert 400 <= entry['status'] < 500, entry
+        assert entry['detail'].strip() and entry['reason'].strip(), entry
+
+
+@pytest.mark.parametrize('method', ['GET', 'POST'])
+def test_subject_scoped_results_allow_independent_objects_but_still_catch_disclosure(method):
+    route = f'{method} /api/v1/meetings'
+    result = crossuser.Authorization(plane.Seeding())
+    own_response = plane.Outcome(200, True, '{"data": []}')
+    crossuser._check(
+        result,
+        route,
+        own_response,
+        own_response,
+        ['owner-marker'],
+        admin_only=False,
+        control=True,
+        subject_scoped=True,
+    )
+    assert not result.violations
+    leaked = plane.Outcome(200, True, '{"id": "owner-resource", "title": "owner-marker"}')
+    crossuser._check(
+        result,
+        route,
+        leaked,
+        own_response,
+        ['owner-marker'],
+        admin_only=False,
+        control=True,
+        subject_scoped=True,
+        resource_ids=['owner-resource'],
+    )
+    assert len(result.violations) == 2

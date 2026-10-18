@@ -1,8 +1,8 @@
 """Product-feedback router — POST /api/v1/feedback/report.
 
 Thin HTTP layer: authentication, request validation (with a strict context
-allowlist), and the runtime enable check. All enrichment, logging, and Slack
-delivery live in utils/feedback_report.py.
+allowlist), and the runtime enable check. All enrichment, logging, and delivery
+(notification router or Slack) live in utils/feedback_report.py.
 
 Mounted unconditionally in main.py and gated in-handler on the
 ENABLE_FEEDBACK_REPORTING PersistentConfig flag — the fork's preference for
@@ -15,10 +15,12 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from open_webui.models.config import Config
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.feedback_report import (
     build_feedback_event,
     emit_feedback_log,
+    post_feedback_to_router,
     post_feedback_to_slack,
 )
 
@@ -46,8 +48,14 @@ class FeedbackReportForm(BaseModel):
 
 @router.post('/report')
 async def submit_feedback_report(request: Request, form: FeedbackReportForm, user=Depends(get_verified_user)):
-    config = request.app.state.config
-    if not config.ENABLE_FEEDBACK_REPORTING:
+    config = await Config.get_many(
+        'feedback_report.enable',
+        'feedback_report.include_user_identity',
+        'feedback_report.slack_webhook_url',
+        'feedback_report.webhook_url',
+        'feedback_report.trace_url_template',
+    )
+    if not config.get('feedback_report.enable'):
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={'detail': 'Feedback reporting is disabled.'},
@@ -58,12 +66,21 @@ async def submit_feedback_report(request: Request, form: FeedbackReportForm, use
         description=form.description,
         context=form.context.model_dump(),
         user=user,
-        include_identity=config.FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
+        include_identity=config.get('feedback_report.include_user_identity'),
     )
     emit_feedback_log(event)  # the record — always happens
-    await post_feedback_to_slack(  # best-effort notification
-        event,
-        config.FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
-        getattr(config, 'FEEDBACK_REPORT_TRACE_URL_TEMPLATE', ''),
-    )
+
+    # Either/or, not a fallback chain: slack_webhook_url stays persisted in the
+    # config DB after its env var and vault field are removed, so only skipping
+    # it here stops a migrated tenant delivering twice.
+    trace_url_template = config.get('feedback_report.trace_url_template', '')
+    router_url = config.get('feedback_report.webhook_url')
+    if router_url:
+        await post_feedback_to_router(event, router_url, trace_url_template)
+    else:
+        await post_feedback_to_slack(
+            event,
+            config.get('feedback_report.slack_webhook_url'),
+            trace_url_template,
+        )
     return {'status': True}

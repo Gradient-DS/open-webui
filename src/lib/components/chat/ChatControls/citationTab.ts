@@ -1,0 +1,95 @@
+import {
+	reduceSources,
+	type DisplayCitation,
+	type RawSource
+} from '../Messages/Citations/reduceSources';
+import { answerText, citedCitations } from '../Messages/Citations/citedSources';
+import type { OutputItem } from '../Messages/structuredOutput';
+import {
+	calculateShowRelevance,
+	shouldShowPercentage
+} from '../Messages/Citations/relevanceDisplay';
+
+export interface CitationMessage {
+	id: string;
+	role: string;
+	parentId?: string | null;
+	content?: string;
+	output?: OutputItem[] | null;
+	sources?: RawSource[];
+}
+
+// [Gradient] Keep cumulative citations for inline references and the cited sources for each question.
+export interface SourceGroup {
+	messageId: string;
+	question: string;
+	citations: DisplayCitation[];
+	used: DisplayCitation[];
+	showPercentage: boolean;
+	showRelevance: boolean;
+}
+
+export function sourceGroups(history: CitationHistory | null | undefined): SourceGroup[] {
+	const groups: SourceGroup[] = [];
+	let id = history?.currentId;
+	const visited = new Set<string>();
+	while (id && !visited.has(id)) {
+		visited.add(id);
+		const message = history?.messages?.[id];
+		if (!message) break;
+		if (message.role === 'assistant' && message.sources?.length) {
+			const citations = reduceSources(message.sources);
+			const used = citedCitations(citations, answerText(message));
+			const parent = message.parentId ? history?.messages?.[message.parentId] : undefined;
+			// [Gradient] An answer that cites nothing gets no group.
+			if (used.length > 0) {
+				groups.push({
+					messageId: message.id,
+					question:
+						parent?.role === 'user' ? (parent.content ?? '').replace(/\s+/g, ' ').trim() : '',
+					citations,
+					used,
+					showPercentage: shouldShowPercentage(used),
+					showRelevance: calculateShowRelevance(used)
+				});
+			}
+		}
+		id = message.parentId;
+	}
+	return groups.reverse();
+}
+
+export interface CitationHistory {
+	currentId?: string | null;
+	messages?: Record<string, CitationMessage>;
+}
+
+// [Gradient] Follow the selected branch, ignoring sibling answers and insertion order.
+export function latestMessageWithSources(
+	history: CitationHistory | null | undefined
+): CitationMessage | null {
+	let id = history?.currentId;
+	const visited = new Set<string>();
+	while (id && !visited.has(id)) {
+		visited.add(id);
+		const message = history?.messages?.[id];
+		if (!message) return null;
+		if (message.role === 'assistant' && message.sources?.length) return message;
+		id = message.parentId;
+	}
+	return null;
+}
+
+// [Gradient] The latest answer's citation of a chat file, matched by file id, for a chip click.
+export function findFileCitation(
+	groups: SourceGroup[],
+	fileId: string
+): { group: SourceGroup; citation: DisplayCitation } | null {
+	for (const group of [...groups].reverse()) {
+		const citation = group.used.find((item) =>
+			item.metadata.some((meta) => meta?.file_id === fileId)
+		);
+		if (citation) return { group, citation };
+	}
+	return null;
+}

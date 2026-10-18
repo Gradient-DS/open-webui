@@ -51,3 +51,13 @@ def test_s3_get_presigned_put_url(monkeypatch):
     assert url == 'https://s3/put?sig=1'
     assert called['op'] == 'put_object'
     assert called['Params']['Key'].endswith('key.pdf')
+
+
+@mock_aws
+def test_s3_get_file_of_a_missing_object_is_file_not_found(monkeypatch, tmp_path):
+    monkeypatch.setattr(provider, 'UPLOAD_DIR', str(tmp_path))
+    storage = provider.S3StorageProvider()
+    storage.bucket_name = 'my-bucket'
+    boto3.client('s3', region_name='us-east-1').create_bucket(Bucket='my-bucket')
+    with pytest.raises(FileNotFoundError):
+        storage.get_file('s3://my-bucket/gone.pdf')

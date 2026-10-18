@@ -1,17 +1,13 @@
 """[Gradient] Agent-routing contract — isolated from upstream main.py/middleware.
 
-Keeps our delta against upstream Open WebUI small and obvious. Two pure
-decisions live here so the agent contract is in one unit-tested place
-and the call sites stay one-liners:
+Keeps our delta against upstream Open WebUI small and obvious.
 
-1. :func:`agent_owns_tool_execution` — whether this turn is handled by
-   the agent service. The agent is a complete orchestrator: it executes
-   its own tools server-side and emits ``delta.tool_calls`` only for
-   display. OWUI's native-tool-calling resolution loop must therefore be
-   skipped for agent responses, or it re-invokes the model after the
-   agent's turn (the post-summary "extra reasoning + answer" loop).
-2. :func:`resolve_agent_route` — the boolean routing matrix deciding
-   whether a chat is handled by the agent service.
+:func:`agent_owns_tool_execution` decides whether this turn is handled by
+the agent service. The agent is a complete orchestrator: it executes its
+own tools server-side and emits ``delta.tool_calls`` only for display.
+OWUI's native-tool-calling resolution loop must therefore be skipped for
+agent responses, or it re-invokes the model after the agent's turn (the
+post-summary "extra reasoning + answer" loop).
 """
 
 from __future__ import annotations
@@ -33,30 +29,14 @@ def agent_owns_tool_execution(metadata: dict[str, Any] | None) -> bool:
     return bool((metadata or {}).get('route_to_agent'))
 
 
-def resolve_agent_route(
-    *,
-    chat_agent_id: str | None,
-    agent_api_enabled: bool,
-    feature_agent_picker: bool,
-) -> bool:
-    """Decide whether a chat is handled by the agent service.
+class AssistantBindingConflict(ValueError):
+    """An existing conversation cannot switch assistants after an assistant message."""
 
-    Routing matrix:
 
-    - chat bound to an agent (``chat_agent_id`` set)      → agent route
-    - no agent_id, picker off, ``AGENT_API_ENABLED``      → agent route (legacy bypass)
-    - otherwise                                           → standard route
-
-    Access-control / DB lookups (verifying the user may still use
-    ``chat_agent_id``) stay at the call site; this only encodes the
-    decision matrix.
-
-    :param chat_agent_id: Per-chat bound agent id, or ``None``.
-    :param agent_api_enabled: The ``AGENT_API_ENABLED`` bypass flag.
-    :param feature_agent_picker: The ``FEATURE_AGENT_PICKER`` master flag.
-    """
-    if chat_agent_id:
-        return True
-    if agent_api_enabled and not feature_agent_picker:
-        return True
-    return False
+def resolve_assistant_binding(row_value: str | None, body_value: str | None, has_assistant_message: bool) -> str:
+    """Return bind or keep, or refuse a switch in an established conversation."""
+    if not body_value or body_value == row_value:
+        return 'keep'
+    if row_value and has_assistant_message:
+        raise AssistantBindingConflict('The assistant is fixed once a chat has an assistant message.')
+    return 'bind'

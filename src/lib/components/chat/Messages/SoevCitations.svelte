@@ -1,0 +1,107 @@
+<script lang="ts">
+	import SourceIcon from './Citations/SourceIcon.svelte';
+	import type { i18n as I18n } from 'i18next';
+	import type { Readable } from 'svelte/store';
+	import { getContext } from 'svelte';
+	import { config } from '$lib/stores';
+	import { citationPanel, openSourcesTabSignal } from '$lib/stores/citations';
+
+	import Citations from './Citations.svelte';
+	import {
+		citationAt,
+		reduceSources,
+		type DisplayCitation,
+		type RawSource
+	} from './Citations/reduceSources';
+	// [Gradient] Share the cited-marker scope with the grouped Sources tab.
+	import { citedCitations } from './Citations/citedSources';
+	import { calculateShowRelevance, shouldShowPercentage } from './Citations/relevanceDisplay';
+
+	// [Gradient] Type the shared translation store for citation controls.
+	const i18n = getContext<Readable<I18n>>('i18n');
+
+	export let id = '';
+	export let chatId = '';
+
+	export let sources: RawSource[] = [];
+	export let readOnly = false;
+	// [Gradient] False keeps only pill clicks: the document panel shows sources in the sources panel.
+	export let listed = true;
+	// [Gradient] The answer text whose `[N]` markers pick the sources the pill lists; it grows while streaming.
+	export let text = '';
+
+	let citations: DisplayCitation[] = [];
+	let visibleCitations: DisplayCitation[] = [];
+	let showPercentage = false;
+	let showRelevance = true;
+
+	$: citationRelevanceEnabled = $config?.features?.enable_citation_relevance ?? true;
+
+	let inner: Citations;
+
+	// [Gradient] Navigator's pill opens the message list without selecting a source.
+	const openPanel = (citation: DisplayCitation | null, level: 'list' | 'detail') => {
+		citationPanel.set({
+			citation,
+			level,
+			citations,
+			showPercentage: citationRelevanceEnabled && showPercentage,
+			showRelevance: citationRelevanceEnabled && showRelevance,
+			messageId: id,
+			chatId
+		});
+		openSourcesTabSignal.update((value) => value + 1);
+	};
+	export const showSourceModal = (sourceId: string | number) => {
+		if (readOnly) return inner?.showSourceModal(sourceId);
+		const citation = citationAt(citations, sourceId);
+		if (citation) openPanel(citation, 'detail');
+	};
+
+	// [Gradient] Inline [N] retains cumulative numbering; the pill lists only the sources the text cites.
+	$: citations = reduceSources(sources);
+	$: visibleCitations = citedCitations(citations, text);
+	$: showRelevance = calculateShowRelevance(visibleCitations);
+	$: showPercentage = shouldShowPercentage(visibleCitations);
+</script>
+
+{#if readOnly}
+	<Citations {id} {chatId} {sources} {text} {readOnly} {listed} bind:this={inner} />
+{:else if listed && visibleCitations.length > 0}
+	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
+		<button
+			class="text-xs font-normal text-gray-600 dark:text-gray-300 px-3.5 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-1 border border-gray-50 dark:border-gray-850/30"
+			aria-label={$i18n.t('Sources')}
+			on:click={() => openPanel(null, 'list')}
+		>
+			{#if visibleCitations.length > 0}
+				<div class="flex -space-x-1 items-center">
+					{#each visibleCitations.slice(0, 3) as citation}
+						<SourceIcon
+							source={citation.source}
+							className="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-white dark:bg-gray-900"
+						/>
+					{/each}
+					<!-- [Gradient] The favicon overflow counts this answer's used sources too. -->
+					{#if visibleCitations.length > 3}
+						<div
+							class="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[0.5rem] font-normal text-gray-500 dark:text-gray-400 whitespace-nowrap tracking-tighter"
+							aria-hidden="true"
+						>
+							+{visibleCitations.length - 3}
+						</div>
+					{/if}
+				</div>
+			{/if}
+			<div>
+				{#if visibleCitations.length === 1}
+					{$i18n.t('1 Source')}
+				{:else}
+					{$i18n.t('{{COUNT}} Sources', {
+						COUNT: visibleCitations.length
+					})}
+				{/if}
+			</div>
+		</button>
+	</div>
+{/if}

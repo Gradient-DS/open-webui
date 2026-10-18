@@ -1,85 +1,89 @@
-fastapi==0.135.1
-uvicorn[standard]==0.41.0
-pydantic==2.12.5
-python-multipart==0.0.31 # security: CVE-2026-53538/53539/53540 (form-parsing DoS + param smuggling) fixed in 0.0.31
+fastapi==0.136.3
+uvicorn[standard]==0.51.0
+pydantic==2.13.4
+python-multipart==0.0.32 # security: CVE-2026-53538/53539/53540 (form-parsing DoS + param smuggling) fixed in 0.0.31
 itsdangerous==2.2.0
 
 python-socketio==5.16.2 # security: CVE-2026-48804 (binary attachment accumulation memory exhaustion) fixed in 5.16.2
-python-jose==3.5.0
-cryptography==50.0.0 # security: CVE-2026-69247/69249 (PKCS#7 confusion / duplicate); was 48.0.1 GHSA-537c-gmf6-5ccf
+cryptography==50.0.0 # security: CVE-2026-69248/69249 (X.509 wildcard name-constraint escape, chain-building DoS) fixed in 49.0.0; CVE-2026-69247 (PKCS7 Bleichenbacher oracle) fixed in 50.0.0
+orjson==3.11.9
 bcrypt==5.0.0
 argon2-cffi==25.1.0
-PyJWT[crypto]==2.13.0
-authlib==1.6.12
+PyJWT[crypto]==2.15.0 # security: CVE-2026-101917, CVE-2026-101918, CVE-2026-102265..102274 fixed by 2.15.0
+authlib==1.7.2
+joserfc==1.7.4
 
-requests==2.33.1
-aiohttp==3.14.3 # security: CVE-2026-69244 (DoS via malformed HTTP); do not downgrade to 3.13.3 (broken)
+requests==2.34.2
+aiohttp==3.14.3 # do not update to 3.13.3 - broken; security: CVE-2026-59881/69243 (ws decompress, request smuggling) fixed in 3.14.2; CVE-2026-69244 (OOB heap read in C response parser) fixed in 3.14.3
+regex==2026.5.9 # supports a per-search timeout, which `re` does not
+aiodns==3.6.1 # keep pinned: 4.x pulls pycares 5 (c-ares 1.34.6) which breaks DNS on some hosts (#28013, #28215); opt-in via AIOHTTP_CLIENT_ASYNC_DNS_RESOLVER
 async-timeout==5.0.1
 aiocache==0.12.3
 aiofiles==25.1.0
-starlette-compress==1.7.0
+starlette-compress==1.7.1
 Brotli==1.2.0
 brotlicffi==1.2.0.1
 httpx[socks,http2,zstd,cli,brotli]==0.28.1
 starsessions[redis]==2.2.1
 python-mimeparse==2.0.0
 
-sqlalchemy[asyncio]==2.0.48
-aiosqlite==0.21.0
-psycopg[binary]==3.2.9
+sqlalchemy[asyncio]==2.0.50
+aiosqlite==0.22.1
+psycopg[binary]==3.3.4
 alembic==1.18.4
-peewee==3.19.0
-peewee-migrate==1.14.3
 
-pycrdt==0.12.47
-redis==7.4.0
+pycrdt==0.13.1
+redis==8.0.1
+hiredis==3.4.0
 
 APScheduler==3.11.2
-RestrictedPython==8.3 # security: CVE-2026-55830 (guard hooks can be shadowed)
-pytz==2026.1.post1
+RestrictedPython==8.4 # security: CVE-2026-55830, CVE-2026-76825 (sandbox escape via string.Formatter)
+pytz==2026.2
 
 loguru==0.7.3
 asgiref==3.11.1
 
 # AI libraries
-tiktoken==0.12.0
-mcp==1.28.1 # security: CVE-2026-52869/52870/59950 (session isolation, task handlers, ws transport)
+tiktoken==0.13.0
+mcp==1.30.0 # security: CVE-2026-59951 (Streamable HTTP server never reclaimed session state) fixed in 1.30.0
 
 openai==2.29.0
 anthropic==0.87.0
 google-genai==1.66.0
 
 langchain==1.3.9 # security: GHSA-gr75-jv2w-4656 (path traversal in file-search middleware, unused by us) fixed in 1.3.9
-langchain-community==0.4.1
+langchain-community==0.4.2
 langchain-classic==1.0.7
 langchain-text-splitters==1.1.2
 
 fake-useragent==2.2.0
-chromadb==1.5.2
 weaviate-client==4.20.3
-opensearch-py==3.1.0
+opensearch-py==3.2.0
 
-transformers==5.10.0 # security: CVE-2026-9856 (save_pretrained path traversal); was 5.5.4
-sentence-transformers==5.4.0
-accelerate==1.13.0
+transformers==5.11.0 # security: CVE-2026-9856 (GHSA-xrqw-3rrv-vx5w, save_pretrained path traversal via chat template names) fixed in 5.10.0, which was yanked upstream — 5.11.0 is the first usable fixed release
+sentence-transformers==5.6.0 # security: CVE-2026-68770 fixed in 5.6.0
+accelerate==1.15.0
 pyarrow==23.0.1 # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fixed in 23.0.1; was pinned to 20 for rpi #15897 — verify rpi build before backporting
 einops==0.8.2
 
 ftfy==6.3.1
-chardet==5.2.0
-pypdf==6.16.1 # security: CVE-2026-84309..84311 (DoS via crafted PDF); was 6.15.0
+chardet==7.4.3
+pypdf==6.19.0 # security: CVE-2026-102993..103000 / PYSEC-2026-4153..4160 (DoS via crafted PDFs) fixed in 6.17.0-6.19.0; earlier fixes (CVE-2026-84309/84310/84311 and prior) stay fixed
 fpdf2==2.8.7
-pymdown-extensions==11.0.1 # security: PYSEC-2026-3609/3654; was 10.21.3
+pymdown-extensions==11.0.1 # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
 docx2txt==0.9
+python-docx==1.2.0
 python-pptx==1.0.2
 msoffcrypto-tool==6.0.0
-unstructured==0.18.31
+unstructured==0.24.1 # security: CVE-2026-71428 (SSRF via the url= argument of partition()/partition_html()/partition_md()) fixed in 0.24.0; was 0.22.31
+python-magic==0.4.27 # magic-byte upload sniffing (utils/upload_guard.py); needs libmagic1
 
 nltk==3.10.3 # security: PYSEC-2026-3582..3741 (ReDoS/DoS)
 Markdown==3.10.2
 beautifulsoup4==4.14.3
-pypandoc==1.16.2
-pandas==3.0.1
+lxml==6.1.1
+pypandoc==1.17
+pandas==3.0.3
 openpyxl==3.1.5
 pyxlsb==1.0.10
 xlrd==2.0.2
@@ -89,47 +93,48 @@ psutil==7.2.2
 sentencepiece==0.2.1
 soundfile==0.13.1
 
-pillow==12.3.0 # security: PYSEC-2026-2253..3496 (multiple)
+pillow==12.3.0 # security: CVE-2026-54058/59197/59199/59200/59204/59205 + 4 more (DoS/heap OOB via crafted images) fixed in 12.3.0
 opencv-python-headless==4.13.0.92
-rapidocr-onnxruntime==1.4.4
+rapidocr==3.9.2
 rank-bm25==0.2.2
 
-onnxruntime==1.24.3
+onnxruntime==1.26.0
 faster-whisper==1.2.1
 
-black==26.3.1
+black==26.5.1
 youtube-transcript-api==1.2.4
 pytube==15.0.0
 
 pydub==0.25.1
-ddgs==9.11.3
+ddgs==9.14.4
 
 azure-ai-documentintelligence==1.0.2
-azure-identity==1.25.2
-azure-storage-blob==12.28.0
-azure-search-documents==11.6.0
+azure-identity==1.25.3
+azure-storage-blob==12.29.0
+azure-search-documents==12.0.0
 
 ## Google Drive
-google-api-python-client==2.193.0
-google-auth-httplib2==0.3.0
-google-auth-oauthlib==1.3.0
+google-api-python-client==2.197.0
+google-auth-httplib2==0.4.0
+google-auth-oauthlib==1.4.0
 
-googleapis-common-protos==1.72.0
+googleapis-common-protos==1.75.0
 google-cloud-storage==3.9.0
 
 ## Databases
-pymongo==4.16.0
-psycopg2-binary==2.9.11
+pymongo==4.18.2 # security: GHSA-v4x9-3549-crwv / GHSA-vp6j-j7w5-5xjj / GHSA-qx36-8mw2-4r3x fixed in 4.18.2
+psycopg2-binary==2.9.12
 pgvector==0.4.2
 
-PyMySQL==1.1.2
+PyMySQL==1.2.0
 boto3==1.42.62
 # mariadb==1.1.14 should be added if you want to support MariaDB
+# valkey-glide-sync==2.3.1 # optional: install manually if VECTOR_DB=valkey
 
-pymilvus==2.6.9
-qdrant-client==1.17.0
-playwright==1.58.0 # Caution: version must match docker-compose.playwright.yaml - Update the docker-compose.yaml if necessary
-elasticsearch==9.3.0
+pymilvus==2.6.14
+qdrant-client==1.18.0
+playwright==1.60.0 # Caution: version must match docker-compose.playwright.yaml - Update the docker-compose.yaml if necessary
+elasticsearch==9.4.1
 pinecone==6.0.2
 oracledb==3.4.2
 
@@ -139,8 +144,7 @@ colbert-ai==0.2.22
 
 
 ## Chat export (PDF/Word)
-weasyprint==68.0
-python-docx==1.1.2
+weasyprint==70.0 # security: CVE-2026-55073 (GHSA-jf6q-chmf-3h3v, write_pdf xmp_metadata/stylesheets ignore the document url_fetcher — local file read + SSRF) fixed in 70.0 (prior CVE-2026-49452 CSS-injection fix stays fixed)
 htmldocx==0.0.6
 jinja2==3.1.6
 
@@ -149,28 +153,31 @@ pyotp==2.9.0
 qrcode[pil]==8.0
 
 ## Tests
-docker~=7.1.0
 pytest>=9.0.3,<10
-pytest-docker~=3.2.5
+pytest-asyncio>=1.0.0
+pytest-xdist==3.8.0
 fakeredis>=2.35.0
+moto[s3]==5.2.3
 
 ## LDAP
 ldap3==2.9.1
 
 ## Trace
-opentelemetry-api==1.40.0
-opentelemetry-sdk==1.40.0
-opentelemetry-exporter-otlp==1.40.0
-opentelemetry-instrumentation==0.61b0
-opentelemetry-instrumentation-fastapi==0.61b0
-opentelemetry-instrumentation-sqlalchemy==0.61b0
-opentelemetry-instrumentation-redis==0.61b0
-opentelemetry-instrumentation-requests==0.61b0
-opentelemetry-instrumentation-logging==0.61b0
-opentelemetry-instrumentation-httpx==0.61b0
-opentelemetry-instrumentation-aiohttp-client==0.61b0
-opentelemetry-instrumentation-system-metrics==0.61b0
+opentelemetry-api==1.42.1
+opentelemetry-sdk==1.42.1
+opentelemetry-exporter-otlp==1.42.1
+opentelemetry-instrumentation==0.63b1
+opentelemetry-instrumentation-fastapi==0.63b1
+opentelemetry-instrumentation-sqlalchemy==0.63b1
+opentelemetry-instrumentation-redis==0.63b1
+opentelemetry-instrumentation-requests==0.63b1
+opentelemetry-instrumentation-logging==0.63b1
+opentelemetry-instrumentation-httpx==0.63b1
+opentelemetry-instrumentation-aiohttp-client==0.63b1
+opentelemetry-instrumentation-system-metrics==0.63b1
 
 # security: explicit pins for transitive deps flagged by pip-audit/Trivy
 msgpack==1.2.1 # security: GHSA-6v7p-g79w-8964 (OOB read/crash)
 setuptools>=83.0.0 # security: PYSEC-2026-3447 (image had 70.3.0)
+oauthlib==4.0.0 # security: GHSA-hj66-6f7g-4r5v / GHSA-xpv3-w29h-x7cv fixed in 4.0.0
+werkzeug==3.1.9 # security: GHSA-g6x2-hccm-hh4m fixed in 3.1.9

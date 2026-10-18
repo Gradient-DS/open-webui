@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { FolderProgress } from '../utils/sourceState';
 	import dayjs from '$lib/dayjs';
 	import duration from 'dayjs/plugin/duration';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -10,24 +11,98 @@
 	const i18n = getContext('i18n');
 
 	import { capitalizeFirstLetter, formatFileSize } from '$lib/utils';
-
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
+	import Folder from '$lib/components/icons/Folder.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import VirtualList from '@sveltejs/svelte-virtual-list';
+	import DirectoryRow from './DirectoryRow.svelte';
+	import PlaceholderRow from './PlaceholderRow.svelte';
+	import type { DirectoryItem } from './directory';
+	import SourceRow from './SourceRow.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
-	import { fileItem, type KbSelection, type SelectableItem } from './selection';
+	import { isSynced, withoutLooseSourceFiles } from './syncedFiles';
+	import { directoryItem, fileItem, type KbSelection, type SelectableItem } from './selection';
+	import { sourcePairItem } from './sources';
+	import { breadcrumbSegments, fileBadge } from '../utils/treeStatus';
+	import type { Connection, Schedule, ScheduleAction, SkippedItem } from '$lib/apis/cloudSync';
+	import type { SchedulePair } from '../utils/cloudSync';
+	import { skippedExplainer, skippedReason } from '../utils/sourceState';
+
+	type KnowledgeFile = {
+		id?: string;
+		tempId?: string;
+		itemId?: string;
+		name?: string;
+		status?: string;
+		meta?: {
+			name?: string;
+			size?: number;
+			warning?: string;
+			relative_path?: string;
+			soev_schedule_ids?: string[];
+		};
+		updated_at?: number;
+		added_at?: number;
+		error?: string;
+		warning?: string;
+		user?: {
+			email?: string;
+			name?: string;
+		};
+	};
 
 	export let knowledge = null;
 	export let selectedFileId = null;
-	export let files = [];
+	export let files: KnowledgeFile[] = [];
+	export let directories: DirectoryItem[] = [];
 
-	export let onClick = (fileId) => {};
-	export let onDelete = (fileId) => {};
+	// [Gradient] Cloud sources live in the listing: a folder source is the
+	// directory row its schedule writes (keyed by the row's schedule_id), a
+	// single-file source gets its own row below the directories.
+	export let sourcePairs: Map<string, SchedulePair> = new Map();
+	export let looseSources: SchedulePair[] = [];
+	export let syncAccess = false;
+	export let syncBusy = false;
+	export let isAdmin = false;
+	export let onSourceAction: (
+		schedules: Schedule[],
+		action: ScheduleAction | 'delete'
+	) => void = () => {};
+	export let onReconnect: (connection: Connection) => void = () => {};
+	// [Gradient] Inside a synced folder: the files the last sync could not
+	// bring in, listed greyed out under the synced ones with the reason.
+	export let skippedItems: SkippedItem[] = [];
+	export let skippedProvider = '';
+	// [Gradient] Set inside a cloud source whose run is live: files show up
+	// as they land, so the listing says more is coming.
+	export let syncing: FolderProgress | true | null = null;
+	// [Gradient] The provider of the cloud source this listing sits in, if any:
+	// its folders and files carry that provider's badge.
+	export let enclosingProvider: string | null = null;
+	// [Gradient] Local folder upload in flight, keyed by top-level directory id.
+	export let uploadProgress: Map<string, FolderProgress> = new Map();
+
+	// Search mode: flat KB-wide hits — directory rows hidden, each file row
+	// shows its folder path (derived from meta.relative_path) instead.
+	export let searchMode = false;
+	// Gates every structure-write affordance: directory rename/delete menus
+	// and drag-move of files/directories. See utils/structure.ts.
+	export let structureEditable = false;
+
+	export let onClick: (fileId: string | null) => void = () => {};
+	export let onDelete: (fileId: string | undefined) => void = () => {};
+	export let onNavigateDirectory: (directoryId: string) => void = () => {};
+	export let onRenameDirectory: (id: string, name: string) => void = () => {};
+	export let onDeleteDirectory: (id: string) => void = () => {};
+	export let onMoveFilesToDirectory: (fileIds: string[], directoryId: string) => void = () => {};
+	export let onMoveDirectoryToDirectory: (
+		dirId: string,
+		targetDirectoryId: string
+	) => void = () => {};
 
 	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
 	export let selection: KbSelection | null = null;
@@ -35,16 +110,58 @@
 	$: selectedStore = selection?.selected;
 	$: selectionModeStore = selection?.selectionMode;
 
-	const isSelectable = (file: any) => !!file?.id && file?.status !== 'uploading';
-	const buildItem = (file: any): SelectableItem =>
-		fileItem(file.id, file?.name ?? file?.meta?.name ?? '');
+	// [Gradient] Synced files leave with their source: no delete, no checkbox.
+	$: shownFiles = searchMode ? files : withoutLooseSourceFiles(files ?? [], looseSources);
 
-	$: orderedItems = (files ?? []).filter(isSelectable).map(buildItem);
+	const isSelectable = (file: KnowledgeFile) =>
+		!!file?.id && file?.status !== 'uploading' && !isSynced(file);
+	const buildItem = (file: KnowledgeFile): SelectableItem =>
+		fileItem(file.id!, file?.name ?? file?.meta?.name ?? '');
+
+	// [Gradient] A folder source's root row selects as its source, so bulk
+	// remove unsubscribes it the way the row's ⋯ menu does.
+	const dirPair = (dir: DirectoryItem) =>
+		dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null;
+	const buildDirItem = (dir: DirectoryItem): SelectableItem => {
+		const pair = dirPair(dir);
+		return pair ? sourcePairItem(pair) : directoryItem(dir.id, dir.name, dir.child_count ?? 0);
+	};
+	// Sources are removable where their menu offers Remove (KB writers, who
+	// alone get a selection); other folders only where the structure is
+	// editable. Files inside a synced folder stay read-only.
+	const isDirSelectable = (dir: DirectoryItem) =>
+		!dir.placeholder && (dir.schedule_id ? !!dirPair(dir) : structureEditable);
+	const isSourceSelectable = () => !!selection;
+
+	// Selection order mirrors render order (folders, single-file sources,
+	// files) so Shift-range and drag-paint spans behave predictably.
+	let orderedItems: SelectableItem[] = [];
+	$: {
+		// Rebuild when any selectability gate changes, not just the rows.
+		void [structureEditable, sourcePairs, selection];
+		orderedItems = searchMode
+			? shownFiles.filter(isSelectable).map(buildItem)
+			: [
+					...(directories ?? []).filter(isDirSelectable).map(buildDirItem),
+					...(isSourceSelectable() ? looseSources.map(sourcePairItem) : []),
+					...shownFiles.filter(isSelectable).map(buildItem)
+				];
+	}
+
+	// Modifier clicks select; once a selection exists a plain click on a
+	// row without its own action (a single-file source) toggles it too.
+	const onSourceRowClick = (pair: SchedulePair, e: MouseEvent) => {
+		if (!selection || !isSourceSelectable()) return;
+		if (e.metaKey || e.ctrlKey || e.shiftKey || $selectionModeStore) {
+			e.preventDefault();
+			selection.select(sourcePairItem(pair), orderedItems, e);
+		}
+	};
 	// Register this view's selectable rows so the header's select-all works.
 	$: if (selection) selection.setAvailable(orderedItems);
 	onDestroy(() => selection?.setAvailable([]));
 
-	const onRowClick = (file: any, e: MouseEvent) => {
+	const onRowClick = (file: KnowledgeFile, e: MouseEvent) => {
 		if (selection && selection.consumeDidDrag()) return; // a drag just ended on this row
 		if (selection && isSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
 			e.preventDefault();
@@ -56,28 +173,95 @@
 			selection.select(buildItem(file), orderedItems, e);
 			return;
 		}
-		onClick(file?.id ?? file?.tempId);
+		onClick(file?.id ?? file?.tempId ?? null);
 	};
 
-	const onRowPointerDown = (file: any) => {
+	const onRowPointerDown = (file: KnowledgeFile) => {
 		if (selection && isSelectable(file)) selection.pointerDown(buildItem(file), orderedItems);
 	};
-	const onRowPointerEnter = (file: any) => {
+	const onRowPointerEnter = (file: KnowledgeFile) => {
 		if (selection && isSelectable(file)) selection.pointerEnter(buildItem(file));
+	};
+
+	// Native drag-to-move (files into directories / breadcrumbs): with no
+	// selection, any row drags itself; once a selection exists, only SELECTED
+	// rows are draggable and carry the whole selection — unselected rows stay
+	// paint-select targets, so drag-paint multi-select keeps working.
+	const dragPayloadIds = (file: KnowledgeFile, isSel: boolean): string[] => {
+		if (isSel && $selectedStore) {
+			return [...$selectedStore.values()].filter((it) => it.kind === 'file').map((it) => it.fileId);
+		}
+		return file?.id ? [file.id] : [];
 	};
 </script>
 
-<!--
-	VirtualList fills the height of the parent scroll container (KnowledgeBase.svelte provides
-	overflow-y-auto h-full). For short lists every row is visible so it behaves identically to a
-	plain {#each}; for large lists only on-screen rows mount.
--->
-<div class="h-full w-full">
-	<VirtualList items={files} height="100%" let:item>
-		{@const file = item}
+<div class=" max-h-full flex flex-col w-full gap-[0.03125rem]" role="list">
+	<!-- Folders (incl. folder sources) first, then single-file sources, then files -->
+	{#if !searchMode}
+		{#each directories as dir (dir.id)}
+			{#if dir.placeholder}
+				<PlaceholderRow
+					name={dir.name}
+					uploading={uploadProgress.get(dir.id) ?? null}
+					selectionActive={!!selection}
+				/>
+			{:else}
+				{@const dirSel = (selection && $selectedStore?.has(buildDirItem(dir).key)) ?? false}
+				<DirectoryRow
+					directory={dir}
+					writeAccess={structureEditable}
+					pair={dir.schedule_id ? (sourcePairs.get(dir.schedule_id) ?? null) : null}
+					provider={enclosingProvider}
+					uploading={uploadProgress.get(dir.id) ?? null}
+					knowledgeId={knowledge?.id ?? ''}
+					{syncAccess}
+					{syncBusy}
+					{isAdmin}
+					on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
+					on:reconnect={(event) => onReconnect(event.detail)}
+					selectionActive={!!selection}
+					selectable={!!(selection && isDirSelectable(dir))}
+					selected={dirSel}
+					checkboxVisible={!!$selectionModeStore}
+					onToggleSelect={() => {
+						if (selection && isDirSelectable(dir)) selection.toggle(buildDirItem(dir));
+					}}
+					onSelectClick={(e) => {
+						if (selection && isDirSelectable(dir))
+							selection.select(buildDirItem(dir), orderedItems, e);
+					}}
+					onNavigate={(id) => onNavigateDirectory(id)}
+					onRename={(id, name) => onRenameDirectory(id, name)}
+					onDelete={(id) => onDeleteDirectory(id)}
+					onFileDrop={(fileIds, directoryId) => onMoveFilesToDirectory(fileIds, directoryId)}
+					onDirDrop={(dirId, targetId) => onMoveDirectoryToDirectory(dirId, targetId)}
+				/>
+			{/if}
+		{/each}
+		{#each looseSources as pair ((pair.content ?? pair.acl)?.id)}
+			<SourceRow
+				knowledgeId={knowledge?.id ?? ''}
+				{pair}
+				writeAccess={syncAccess}
+				busy={syncBusy}
+				{isAdmin}
+				selectionActive={!!selection}
+				selectable={!!selection}
+				selected={(selection && $selectedStore?.has(sourcePairItem(pair).key)) ?? false}
+				checkboxVisible={!!$selectionModeStore}
+				onToggleSelect={() => selection?.toggle(sourcePairItem(pair))}
+				onRowClick={(e) => onSourceRowClick(pair, e)}
+				on:action={(event) => onSourceAction(event.detail.schedules, event.detail.action)}
+				on:reconnect={(event) => onReconnect(event.detail)}
+			/>
+		{/each}
+	{/if}
+
+	<!-- Files -->
+	{#each shownFiles as file (file?.id ?? file?.itemId ?? file?.tempId)}
 		{@const selKey = `file:${file?.id}`}
 		{@const isSel = (selection && isSelectable(file) && $selectedStore?.has(selKey)) ?? false}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		{@const crumbs = searchMode ? breadcrumbSegments(file?.meta?.relative_path) : []}
 		<div
 			class=" group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selection
 				? 'select-none'
@@ -86,6 +270,15 @@
 				: selectedFileId
 					? ''
 					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+			role="listitem"
+			draggable={structureEditable && !!file?.id && (!($selectionModeStore ?? false) || isSel)}
+			on:dragstart={(e) => {
+				if (!structureEditable) return;
+				const ids = dragPayloadIds(file, isSel);
+				if (ids.length) {
+					e.dataTransfer?.setData('application/x-kb-file-move', JSON.stringify({ fileIds: ids }));
+				}
+			}}
 			on:pointerdown={() => onRowPointerDown(file)}
 			on:pointerenter={() => onRowPointerEnter(file)}
 		>
@@ -98,7 +291,13 @@
 				/>
 			{/if}
 			<div class="flex items-center">
-				{#if file?.status !== 'uploading'}
+				{#if fileBadge(file?.status) === 'spinner'}
+					<Spinner className="size-3.5" />
+				{:else if fileBadge(file?.status) === 'error'}
+					<Tooltip content={file?.error || $i18n.t('Processing error')}>
+						<ExclamationTriangle className="size-3.5 text-red-500" />
+					</Tooltip>
+				{:else}
 					<Tooltip content={$i18n.t('Download')}>
 						<button
 							class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
@@ -108,11 +307,9 @@
 								window.open(`${WEBUI_BASE_URL}/api/v1/files/${fileId}/content`, '_blank');
 							}}
 						>
-							<DocumentPage className="size-3.5" />
+							<SourceItemIcon kind="file" provider={enclosingProvider} />
 						</button>
 					</Tooltip>
-				{:else}
-					<Spinner className="size-3.5" />
 				{/if}
 			</div>
 
@@ -121,12 +318,10 @@
 				type="button"
 				on:click={(e) => onRowClick(file, e)}
 			>
-				<div class="">
+				<div class="min-w-0">
 					<div class="flex gap-2 items-center line-clamp-1">
 						{#if file?.status !== 'uploading' && (file?.warning ?? file?.meta?.warning)}
-							<Tooltip
-								content={$i18n.t('No searchable content could be extracted.')}
-							>
+							<Tooltip content={$i18n.t('No searchable content could be extracted.')}>
 								<ExclamationTriangle className="size-3.5 text-red-500 shrink-0" />
 							</Tooltip>
 						{/if}
@@ -137,6 +332,12 @@
 							{/if}
 						</div>
 					</div>
+					{#if crumbs.length}
+						<div class="flex items-center gap-1 text-xs text-gray-400 mt-0.5 line-clamp-1">
+							<Folder className="size-3 shrink-0" strokeWidth="2" />
+							<span class="line-clamp-1">{crumbs.join(' / ')}</span>
+						</div>
+					{/if}
 				</div>
 
 				<div class="flex items-center gap-2 shrink-0">
@@ -166,7 +367,7 @@
 				</div>
 			</button>
 
-			{#if knowledge?.write_access}
+			{#if knowledge?.write_access && !isSynced(file)}
 				<div class="flex items-center">
 					<Tooltip content={$i18n.t('Delete')}>
 						<button
@@ -182,5 +383,72 @@
 				</div>
 			{/if}
 		</div>
-	</VirtualList>
+	{/each}
+
+	{#if !searchMode && syncing}
+		<div
+			class="mx-2 mt-3 mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+			role="status"
+			aria-live="polite"
+		>
+			<Spinner className="size-3.5 shrink-0" />
+			<span
+				>{syncing === true
+					? $i18n.t('Syncing · files show up as they land')
+					: $i18n.t('Syncing · {{done}}/{{total}} processed · files show up as they land', {
+							done: syncing.processed,
+							total: syncing.total
+						})}</span
+			>
+		</div>
+	{/if}
+
+	<!-- Skipped files: in the source, not in the knowledge base -->
+	{#if !searchMode && skippedItems.length > 0}
+		<div
+			class="mx-2 mt-3 mb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+			role="status"
+		>
+			<ExclamationTriangle className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+			<span
+				>{$i18n.t('{{count}} files in this folder could not be synced', {
+					count: skippedItems.length
+				})}</span
+			>
+			<Tooltip
+				content={$i18n.t(
+					'These files exist in {{provider}} but are not searchable here. Hover a reason to see what you can do about it. The next sync retries anything that was not permanently skipped.',
+					{ provider: skippedProvider }
+				)}
+			>
+				<span class="cursor-help underline decoration-dotted">{$i18n.t('Why?')}</span>
+			</Tooltip>
+		</div>
+		{#each skippedItems as item (item.source_id)}
+			<div class="flex w-full items-center rounded-xl px-1.5 py-0.5 opacity-60" role="listitem">
+				{#if selection}<SelectCheckbox selectable={false} />{/if}
+				<div class="flex items-center p-1">
+					<SourceItemIcon
+						kind="file"
+						provider={enclosingProvider}
+						className="size-3.5 text-gray-400"
+					/>
+				</div>
+				<div class="flex min-w-0 flex-1 items-center gap-2 p-2 text-left">
+					<div class="line-clamp-1 text-sm text-gray-500 dark:text-gray-400">
+						{item.name || item.source_id}
+					</div>
+					<Tooltip
+						content={$i18n.t(skippedExplainer(item.code), { provider: skippedProvider })}
+						className="shrink-0"
+					>
+						<span
+							class="cursor-help rounded-lg bg-amber-500/15 px-1.5 text-xs text-amber-700 dark:text-amber-300"
+							>{$i18n.t(skippedReason(item.code))}</span
+						>
+					</Tooltip>
+				</div>
+			</div>
+		{/each}
+	{/if}
 </div>

@@ -20,6 +20,8 @@ jobs:
     # the image that prod tenants pull via ImagePolicy.
     if: "!startsWith(github.ref, 'refs/tags/chart-v')"
     runs-on: ${{ matrix.runner }}
+    # Observed max 8.5 min with a warm registry cache; a cold build is ~25.
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -53,6 +55,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -112,11 +116,15 @@ jobs:
           outputs: type=image,"name=${{ env.BUILD_OUTPUT_NAMES }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=registry,ref=${{ steps.cache-meta.outputs.tags }}
           cache-to: type=registry,ref=${{ steps.cache-meta.outputs.tags }},mode=max
+          # [Gradient] APT_UPGRADE_EPOCH is per run: the Dockerfile's apt upgrade
+          # layer never comes from the registry cache, so every image ships today's
+          # Debian fixes.
           build-args: |
             BUILD_HASH=${{ github.sha }}
             USE_SLIM=true
             UID=1000
             GID=1000
+            APT_UPGRADE_EPOCH=${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Export digest
         run: |
@@ -135,10 +143,13 @@ jobs:
   merge-slim-images:
     if: "!startsWith(github.ref, 'refs/tags/chart-v')"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [build-slim-image]
     permissions:
       contents: read
       packages: write
+    outputs:
+      scan-ref: ${{ steps.scan-ref.outputs.ref }}
     steps:
       - name: Set repository and image name to lowercase
         run: |
@@ -208,10 +219,40 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}
 
+      # The linux/amd64 manifest of the index just pushed: the platform the
+      # tenants run and the one security.yml used to rebuild and scan.
+      - name: Resolve the amd64 digest to scan
+        id: scan-ref
+        env:
+          INDEX: ${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          digest=$(docker buildx imagetools inspect --raw "$INDEX" | jq -r '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest')
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no linux/amd64 manifest in $INDEX"; exit 1; }
+          echo "ref=${FULL_IMAGE_NAME}@${digest}" >> "$GITHUB_OUTPUT"
+          echo "Scanning ${FULL_IMAGE_NAME}@${digest}"
+
+  # The push-time image scan, of the bytes that were just published, instead
+  # of security.yml rebuilding the image. PRs still build and scan in
+  # security.yml; tags are not scanned here, as before (their commit was
+  # scanned when it was pushed to its branch).
+  scan-image:
+    if: startsWith(github.ref, 'refs/heads/')
+    needs: [merge-slim-images]
+    uses: Gradient-DS/security-ci/.github/workflows/security-image.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
+    with:
+      image-name: open-webui
+      image-ref: ${{ needs.merge-slim-images.outputs.scan-ref }}
+
   publish-helm-chart:
     # Run after image jobs succeed OR when they were skipped (chart-only tag).
     if: ${{ !cancelled() && (needs.merge-slim-images.result == 'success' || needs.merge-slim-images.result == 'skipped') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [merge-slim-images]
     permissions:
       contents: read
@@ -219,6 +260,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up Helm
         uses: azure/setup-helm@v5

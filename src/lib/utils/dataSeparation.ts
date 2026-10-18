@@ -32,6 +32,12 @@ export function classifyFileItem(item: FileItem | null | undefined): DataSide | 
 	if (item.type === 'web_search') {
 		return 'open_internet';
 	}
+	// `url` — a web page attached for the agent to fetch live (GRA-222). Same
+	// side as an ingested page: the content comes off the open internet either
+	// way, only the moment of fetching differs.
+	if (item.type === 'url') {
+		return 'open_internet';
+	}
 	if (item.type === 'text' && item.url) {
 		return 'open_internet';
 	}
@@ -41,7 +47,12 @@ export function classifyFileItem(item: FileItem | null | undefined): DataSide | 
 	return null;
 }
 
-/** The side selected in the message currently being composed (or null). */
+/**
+ * The side selected in the message currently being composed (or null).
+ *
+ * `webSearchEnabled` is true for web search Auto as well as Altijd: on Auto the model
+ * may search the open internet, so the open-internet side is already in use.
+ */
 export function getLiveSide(
 	files: FileItem[] | null | undefined,
 	webSearchEnabled: boolean

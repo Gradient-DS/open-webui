@@ -92,7 +92,12 @@ def verify_totp(secret: str, code: str, last_used_at: int | None) -> tuple[bool,
     if last_used_at is not None and current_timecode <= last_used_at + VALID_WINDOW:
         return False, None
 
-    if totp.verify(code, valid_window=VALID_WINDOW):
+    try:
+        verified = totp.verify(code, valid_window=VALID_WINDOW)
+    except ValueError:
+        # A secret that is not base32 (binascii.Error) verifies nothing (PLANE-014).
+        return False, None
+    if verified:
         return True, current_timecode
 
     return False, None

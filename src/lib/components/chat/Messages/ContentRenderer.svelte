@@ -3,9 +3,13 @@
 	const i18n = getContext('i18n');
 
 	import Markdown from './Markdown.svelte';
+	import StructuredOutputRenderer from './StructuredOutputRenderer.svelte';
+	import { maskInFlightTag } from '$lib/utils/streamMarkup';
+	import { DOCUMENT_OPEN } from '$lib/utils/agentDocument';
+	import { getOutputText, hasDocumentOutput } from './structuredOutput';
 	import {
 		artifactCode,
-		chatId,
+		chatId as currentChatId,
 		mobile,
 		settings,
 		showArtifacts,
@@ -15,7 +19,8 @@
 	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
-	import { createMessagesList } from '$lib/utils';
+	import { createMessagesList, replaceOutsideCode } from '$lib/utils';
+	import { sourceLabels } from './Markdown/sourceLabels'; // [Gradient]
 
 	/**
 	 * Extracts all top-level <details>...</details> blocks from content,
@@ -69,7 +74,10 @@
 	};
 
 	export let id;
+	export let chatId = '';
 	export let content;
+	/** @type {import('./structuredOutput').OutputItem[]} */
+	export let output = [];
 
 	export let history;
 	export let messageId;
@@ -78,10 +86,12 @@
 
 	export let done = true;
 	export let model = null;
+	/** @type {import('./Citations/reduceSources').RawSource[] | null} */
 	export let sources = null;
 
 	export let save = false;
 	export let preview = false;
+	export let compactPreview = false;
 	export let floatingButtons = true;
 
 	export let editCodeBlock = true;
@@ -90,6 +100,7 @@
 	export let onSave = (e) => {};
 	export let onSourceClick = (e) => {};
 	export let onTaskClick = (e) => {};
+	export let onToolCallResolved = (e) => {};
 	export let onSetInputText = (text) => {};
 
 	let contentContainerElement;
@@ -100,10 +111,16 @@
 
 	let documentDetected = false;
 	$: {
+		// [Gradient] Document Writer: content is persisted empty since v0.10.2,
+		// so documents are detected from the output items too — otherwise the
+		// side panel never auto-opens for a reloaded chat.
 		const hasDocument =
-			typeof content === 'string' &&
-			(/<details\b[^>]*\btype="document"/.test(content) ||
-				/<details\b[^>]*\btype="tool_calls"[^>]*\bname="write_document"/.test(content));
+			hasDocumentOutput(output) ||
+			DOCUMENT_OPEN.test(getOutputText(output)) ||
+			(typeof content === 'string' &&
+				(DOCUMENT_OPEN.test(content) ||
+					/<details\b[^>]*\btype="document"/.test(content) ||
+					/<details\b[^>]*\btype="tool_calls"[^>]*\bname="write_document"/.test(content)));
 
 		if (
 			hasDocument &&
@@ -111,7 +128,7 @@
 			isFeatureEnabled('document_writer') &&
 			($settings?.detectDocuments ?? true) &&
 			!$mobile &&
-			$chatId
+			$currentChatId
 		) {
 			documentDetected = true;
 			tick().then(() => {
@@ -125,27 +142,63 @@
 		}
 	}
 
+	// [Gradient] One label per document, as the agent numbers them: a name shared by two documents no longer
+	// shifts the later chips onto the wrong (or no) source.
 	const getSourceIds = (sources) => {
-		const result = [];
-		for (const source of sources ?? []) {
-			for (let index = 0; index < (source.document ?? []).length; index++) {
-				if (model?.info?.meta?.capabilities?.citations == false) {
-					result.push('N/A');
-					continue;
-				}
-				const metadata = source.metadata?.[index];
-				const id = metadata?.source ?? 'N/A';
-				if (metadata?.name) {
-					result.push(metadata.name);
-				} else if (id.startsWith('http://') || id.startsWith('https://')) {
-					result.push(id);
-				} else {
-					result.push(source?.source?.name ?? id);
-				}
+		sourceIds = sourceLabels(sources, model?.info?.meta?.capabilities?.citations == false);
+	};
+
+	/** @param {string} messageContent */
+	const formatMessageContent = (messageContent) =>
+		model?.info?.meta?.capabilities?.citations == false
+			? replaceOutsideCode(messageContent, (segment) =>
+					segment.replace(/\s*(\[(?:\d+(?:#[^,\]\s]+)?(?:,\s*\d+(?:#[^,\]\s]+)?)*)\])+/g, '')
+				)
+			: messageContent;
+
+	let autoOpenedArtifactIds = new Set();
+
+	const hasClosingCodeFence = (raw = '') => /(?:^|\n)```[ \t]*$/.test(raw.trimEnd());
+
+	const markdownUpdateHandler = /** @type {any} */ (
+		async (
+			/** @type {{ lang?: string; raw?: string; text?: string }} */ token,
+			codeBlockId = ''
+		) => {
+			const { lang = '', raw = '', text: code = '' } = token;
+			const normalizedLang = lang.toLowerCase();
+			const isArtifact =
+				['html', 'svg'].includes(normalizedLang) ||
+				(normalizedLang === 'xml' && code.toLowerCase().includes('<svg'));
+			const artifactId = codeBlockId || `${normalizedLang}:${raw}`;
+
+			if (
+				isFeatureEnabled('artifacts') &&
+				($settings?.detectArtifacts ?? false) &&
+				!compactPreview &&
+				isArtifact &&
+				hasClosingCodeFence(raw) &&
+				!autoOpenedArtifactIds.has(artifactId) &&
+				!$mobile &&
+				$currentChatId
+			) {
+				autoOpenedArtifactIds.add(artifactId);
+				await tick();
+				showArtifacts.set(true);
+				showControls.set(true);
 			}
 		}
-		sourceIds = [...new Set(result)];
-	};
+	);
+
+	const previewHandler = /** @type {any} */ (
+		async (/** @type {string} */ value) => {
+			console.log('Preview', value);
+			await artifactCode.set(/** @type {any} */ (value));
+			await showControls.set(true);
+			await showArtifacts.set(true);
+			await showEmbeds.set(false);
+		}
+	);
 
 	const updateButtonPosition = (event) => {
 		const buttonsContainerElement = document.getElementById(`floating-buttons-${id}`);
@@ -254,54 +307,75 @@
 </script>
 
 <div bind:this={contentContainerElement}>
-	{#if $settings?.renderMarkdownInAssistantMessages ?? true}
-		<Markdown
+	{#if output?.length}
+		<StructuredOutputRenderer
 			{id}
-			content={model?.info?.meta?.capabilities?.citations == false
-				? content.replace(/\s*(\[(?:\d+(?:#[^,\]\s]+)?(?:,\s*\d+(?:#[^,\]\s]+)?)*)\])+/g, '')
-				: content}
+			{chatId}
+			{messageId}
+			{output}
 			{model}
 			{save}
 			{preview}
+			{compactPreview}
 			{done}
 			{editCodeBlock}
 			{topPadding}
 			{sourceIds}
+			renderMarkdown={$settings?.renderMarkdownInAssistantMessages ?? true}
+			{formatMessageContent}
 			{onSourceClick}
 			{onTaskClick}
+			{onToolCallResolved}
 			{onSave}
-			onUpdate={async (token) => {
-				const { lang, text: code } = token;
-
-				if (
-					isFeatureEnabled('artifacts') &&
-					($settings?.detectArtifacts ?? true) &&
-					(['html', 'svg'].includes(lang) || (lang === 'xml' && code.includes('svg'))) &&
-					!$mobile &&
-					$chatId
-				) {
-					await tick();
-					showArtifacts.set(true);
-					showControls.set(true);
-				}
-			}}
-			onPreview={async (value) => {
-				console.log('Preview', value);
-				await artifactCode.set(value);
-				await showControls.set(true);
-				await showArtifacts.set(true);
-				await showEmbeds.set(false);
-			}}
+			onUpdate={markdownUpdateHandler}
+			onPreview={previewHandler}
 		/>
+	{:else if ($settings?.renderMarkdownInAssistantMessages ?? true) || DOCUMENT_OPEN.test(content)}
+		<div class="markdown-prose">
+			<Markdown
+				{id}
+				{chatId}
+				{messageId}
+				content={formatMessageContent(content)}
+				{model}
+				{save}
+				{preview}
+				{compactPreview}
+				{done}
+				{editCodeBlock}
+				{topPadding}
+				{sourceIds}
+				{onSourceClick}
+				{onTaskClick}
+				{onToolCallResolved}
+				{onSave}
+				onUpdate={markdownUpdateHandler}
+				onPreview={previewHandler}
+			/>
+		</div>
 	{:else}
 		{@const extracted = extractDetailsBlocks(content)}
 
 		{#if extracted.detailsContent}
 			<!-- Render structural blocks (tool calls, reasoning, etc.) through Markdown -->
-			<Markdown {id} content={extracted.detailsContent} {done} />
+			<div class="markdown-prose">
+				<Markdown
+					{id}
+					{chatId}
+					{messageId}
+					content={extracted.detailsContent}
+					{save}
+					{preview}
+					{compactPreview}
+					{done}
+					{onToolCallResolved}
+				/>
+			</div>
 		{/if}
 		{#if extracted.plainContent}
-			<div class="whitespace-pre-wrap">{extracted.plainContent}</div>
+			<div class="whitespace-pre-wrap text-[0.9375rem]">
+				{maskInFlightTag(extracted.plainContent)}
+			</div>
 		{/if}
 	{/if}
 </div>

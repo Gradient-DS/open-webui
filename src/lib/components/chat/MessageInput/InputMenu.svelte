@@ -1,226 +1,346 @@
 <script lang="ts">
-	import { getContext, tick } from 'svelte';
+	// [Gradient] One "+" menu for the composer: context, knowledge and tools sections, each
+	// item pinnable to the composer bar ($settings.pinnedInputItems). It absorbs upstream's
+	// separate integrations menu; tenant gates apply to every item.
+	import { isFeatureEnabled } from '$lib/utils/features';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
+	import { getContext, onDestroy, tick } from 'svelte';
+	import type { ChatInputCallbacks } from '$lib/types/chatAttachment';
 	import { fly } from 'svelte/transition';
+	import {
+		BINARY_TOOL_STATES,
+		DOCUMENT_WRITER_STATES,
+		documentWriterFlags,
+		TOOL_OFF_DESCRIPTION,
+		TOOL_STATE_LABELS,
+		WEB_SEARCH_STATE_DESCRIPTIONS,
+		DOCUMENT_WRITER_STATE_DESCRIPTIONS,
+		documentWriterState,
+		WEB_SEARCH_STATES,
+		nextToolState,
+		webSearchFlags,
+		webSearchState,
+		type ToolState
+	} from '$lib/utils/toolState';
+	import { prepareBusinessDocumentPicker } from '$lib/utils/onedrive-file-picker';
+	import {
+		connectLiveSource,
+		prefetchLiveConnections,
+		relinkPrompt
+	} from '$lib/utils/live-connections';
+	import { LIVE_DOCUMENT_STATES } from '$lib/utils/toolState';
 	import { toast } from 'svelte-sonner';
 
-	import {
-		config,
-		user,
-		tools as _tools,
-		mobile,
-		knowledge,
-		chats,
-		settings,
-		toolServers
-	} from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import { config, user, tools as _tools, skills as _skills, toolServers } from '$lib/stores';
 
-	import { updateUserSettings } from '$lib/apis/users';
+	import { deleteOAuthSession } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
-	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
-	import { getKnowledgeById } from '$lib/apis/knowledge';
+	import { getSkills } from '$lib/apis/skills';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
-
+	import Spinner from '$lib/components/common/Spinner.svelte';
+	import DocumentArrowUp from '$lib/components/icons/DocumentArrowUp.svelte';
 	import Camera from '$lib/components/icons/Camera.svelte';
 	import Clip from '$lib/components/icons/Clip.svelte';
 	import ClockRotateRight from '$lib/components/icons/ClockRotateRight.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
-	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import Link from '$lib/components/icons/Link.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
-	import Pin from '$lib/components/icons/Pin.svelte';
-	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
+	import Cube from '$lib/components/icons/Cube.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import Knobs from '$lib/components/icons/Knobs.svelte';
+	import LinkSlash from '$lib/components/icons/LinkSlash.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import Confluence from '$lib/components/icons/Confluence.svelte';
-	import Topdesk from '$lib/components/icons/Topdesk.svelte';
-
+	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
+	import MailSearch from '$lib/components/icons/MailSearch.svelte';
 	import Chats from './InputMenu/Chats.svelte';
+	import Files from './InputMenu/Files.svelte';
 	import Notes from './InputMenu/Notes.svelte';
+	// [Gradient] Vergadering as chat context, gated like the sidebar entry.
+	import Meetings from './InputMenu/Meetings.svelte';
+	import Mic from '$lib/components/icons/Mic.svelte';
+	import { meetingsAvailable } from '$lib/components/meetings/availability';
 	import Knowledge from './InputMenu/Knowledge.svelte';
+	import MenuItem from './InputMenu/MenuItem.svelte';
+	import SearchInput from './InputMenu/SearchInput.svelte';
 	import AttachWebpageModal from './AttachWebpageModal.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
+
+	type IntegrationItem = {
+		id: string;
+		name: string;
+		description?: string;
+		meta?: { description?: string };
+		is_active?: boolean;
+		authenticated?: boolean;
+		has_user_valves?: boolean;
+		[key: string]: unknown;
+	};
+
+	type ToggleFilter = {
+		id: string;
+		name: string;
+		description?: string;
+		icon?: string;
+		has_user_valves?: boolean;
+	};
 
 	export let files = [];
 
 	export let selectedModels: string[] = [];
 	export let fileUploadCapableModels: string[] = [];
 
-	export let screenCaptureHandler: Function;
-	export let uploadFilesHandler: Function;
-	export let inputFilesHandler: Function;
+	export let screenCaptureHandler: () => void;
+	export let uploadFilesHandler: () => void;
+	export let inputFilesHandler: (files: File[]) => void;
 
-	export let uploadGoogleDriveHandler: Function;
-	export let uploadOneDriveHandler: Function;
-	export let uploadConfluenceHandler: Function = () => {};
-
-	export let onUpload: Function;
-	export let onClose: Function;
-
-	// Capability toggle states (two-way binding from parent)
-	export let selectedToolIds: string[] = [];
-	export let selectedFilterIds: string[] = [];
-	export let webSearchEnabled = false;
-	export let imageGenerationEnabled = false;
-	export let codeInterpreterEnabled = false;
-	export let documentWriterEnabled = false;
-
-	// Visibility flags
-	export let showToolsButton = false;
-	export let showWebSearchButton = false;
-	export let showImageGenerationButton = false;
-	export let showCodeInterpreterButton = false;
-	export let showDocumentWriterButton = false;
-	export let toggleFilters: {
-		id: string;
-		name: string;
-		description?: string;
-		icon?: string;
-		has_user_valves?: boolean;
-	}[] = [];
-
-	// Valve handling
-	export let onShowValves: Function = (e) => {};
-	export let closeOnOutsideClick = true;
-	// When non-null, restricts the menu to only the listed item keys.
-	// Item keys match the strings passed to ``pinItemHandler`` —
-	// 'upload_files', 'capture', 'attach_webpage', 'attach_notes',
-	// 'google_drive', 'onedrive', 'confluence', 'topdesk', 'knowledge',
-	// 'reference_chats', 'tools', 'filters'. Default null = upstream
-	// behavior, every globally-enabled item shows.
+	export let uploadGoogleDriveHandler: () => void;
+	export let uploadOneDriveHandler: () => void;
+	// [Gradient] Assistant-builder restrictions and strict data-separation state. Item keys
+	// match the pin ids (see MessageInput/inputItems.ts): 'upload_files', 'capture', 'attach_webpage', 'attach_notes',
+	// 'google_drive', 'onedrive', 'knowledge', 'reference_chats', 'tools', 'skills',
+	// 'filters', 'web_search', 'image_generation', 'code_interpreter', 'document_writer'.
+	// Null shows every globally enabled item.
 	export let restrictTo: string[] | null = null;
 	$: itemAllowed = (key: string) => restrictTo === null || restrictTo.includes(key);
-
-	// Strict data separation (data-sovereignty): gray out + tooltip the items on the side
-	// the conversation cannot use. All false/no-op unless the feature flag is enabled.
 	export let openInternetBlocked = false;
 	export let internalBlocked = false;
 	export let dataSeparationMessage = '';
-	const OPEN_INTERNET_ITEMS = new Set(['attach_webpage']);
-	const INTERNAL_ITEMS = new Set([
-		'upload_files',
-		'capture',
-		'attach_notes',
-		'google_drive',
-		'onedrive',
-		'confluence',
-		'topdesk',
-		'knowledge',
-		'reference_chats'
-	]);
-	$: isStrictBlocked = (key: string) =>
-		(OPEN_INTERNET_ITEMS.has(key) && openInternetBlocked) ||
-		(INTERNAL_ITEMS.has(key) && internalBlocked);
-	// Section visibility — hide the header when no items in the section
-	// are allowed (otherwise the menu shows a lonely caption).
-	$: anyContextAllowed = [
-		'upload_files',
-		'capture',
-		'attach_webpage',
-		'attach_notes',
-		'google_drive',
-		'onedrive',
-		'confluence',
-		'topdesk'
-	].some((k) => itemAllowed(k));
-	$: anyDatabaseAllowed = ['knowledge', 'reference_chats'].some((k) => itemAllowed(k));
-	$: anyCapabilityAllowed = ['tools', 'filters'].some((k) => itemAllowed(k));
+
+	export let onUpload: ChatInputCallbacks['onUpload'];
+	export let onClose: () => void;
+	export let toolApprovalMode = 'full';
+	export let onToolApprovalModeChange: (mode: string) => void = () => {};
+
+	// Tools section state (two-way bound by MessageInput).
+	export let selectedToolIds: string[] = [];
+	export let selectedSkillIds: string[] = [];
+	export let selectedFilterIds: string[] = [];
+	export let toggleFilters: ToggleFilter[] = [];
+	export let showWebSearchButton = false;
+	export let webSearchEnabled = false;
+	export let liveDocumentsState: ToolState = 'off';
+	export let liveMailState: ToolState = 'off';
+	let connectingDocuments = false;
+	let connectingMail = false;
+	async function cycleLive(family: 'live_documents' | 'mail') {
+		const mail = family === 'mail';
+		if (!(mail ? $config?.features?.enable_live_mail : $config?.features?.enable_live_documents))
+			return;
+		if (mail ? connectingMail : connectingDocuments) return;
+		const state = mail ? liveMailState : liveDocumentsState;
+		const next = nextToolState(state, LIVE_DOCUMENT_STATES);
+		if (mail) connectingMail = true;
+		else connectingDocuments = true;
+		const provider = mail ? 'Outlook' : 'OneDrive';
+		let consentToast: string | number | undefined;
+		try {
+			if (next !== 'off' && state === 'off')
+				await connectLiveSource(
+					localStorage.token,
+					mail ? 'outlook_mail' : 'onedrive',
+					family,
+					() => (consentToast = toast.loading($i18n.t('Connecting to {{provider}}…', { provider })))
+				);
+			if (consentToast !== undefined)
+				toast.success($i18n.t('{{provider}} connected', { provider }), { id: consentToast });
+			if (mail) liveMailState = next;
+			else liveDocumentsState = next;
+		} catch (error) {
+			if (consentToast !== undefined) toast.dismiss(consentToast);
+			const prompt = relinkPrompt(error);
+			toast.error(prompt ? $i18n.t(prompt) : String(error));
+		} finally {
+			if (mail) connectingMail = false;
+			else connectingDocuments = false;
+		}
+	}
+	export const cycleLiveDocuments = () => cycleLive('live_documents');
+	export const cycleLiveMail = () => cycleLive('mail');
+	// [Gradient] Altijd; webSearchEnabled alone is Auto.
+	export let webSearchRequired = false;
+	export let showImageGenerationButton = false;
+	export let imageGenerationEnabled = false;
+	export let showCodeInterpreterButton = false;
+	export let codeInterpreterEnabled = false;
+	export let showDocumentWriterButton = false;
+	export let documentWriterEnabled = true;
+	export let documentWriterRequired = false;
+	export let oauthRedirectHandler: (tool: {
+		id: string;
+		serverId: string;
+		authType?: string | null;
+	}) => void = () => {};
+	export let onShowValves: (e: { type: string; id: string }) => void = () => {};
+	export let onWebSearchToggle: (enabled: boolean) => void = () => {};
+	export let closeOnOutsideClick = true;
 
 	let show = false;
+	$: if (
+		show &&
+		($config?.features?.enable_live_documents || $config?.features?.enable_onedrive_business)
+	) {
+		void prefetchLiveConnections(localStorage.token).catch(() => {});
+	}
+	$: if (show && $config?.features?.enable_live_mail) {
+		void prefetchLiveConnections(localStorage.token, 'outlook_mail', 'mail').catch(() => {});
+	}
+	$: if (show && $config?.features?.enable_onedrive_business) {
+		void prepareBusinessDocumentPicker().catch(() => {});
+	}
 	let tab = '';
+	// Opened straight into a submenu from a pinned composer button: no back row.
 	let directTab = false;
 
 	let showAttachWebpageModal = false;
+	// [Gradient] Programmatic Webpage URL entry point (GRA-222).
+	export const openWebpageModal = () => (showAttachWebpageModal = true);
+	// Opens the menu on a submenu, for pinned composer buttons.
+	export const openTab = (tabName: string) => {
+		tab = tabName;
+		directTab = true;
+		show = true;
+	};
+
+	const toolApprovalModes = [
+		{
+			value: 'full',
+			label: 'Full access',
+			description: 'Run tools without asking for approval.'
+		},
+		{
+			value: 'ask',
+			label: 'Ask for approval',
+			description: 'Stop before each tool call until you allow or deny it.'
+		}
+	];
 
 	let fileUploadEnabled = true;
 	$: fileUploadEnabled =
 		fileUploadCapableModels.length === selectedModels.length &&
 		($user?.role === 'admin' || $user?.permissions?.chat?.file_upload);
 
+	let webUploadEnabled = true;
+	$: webUploadEnabled = $user?.role === 'admin' || ($user?.permissions?.chat?.web_upload ?? true);
+	$: toolPermissionsEnabled = $config?.features?.enable_tool_permissions ?? false;
+	$: valvesAllowed = $user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true);
+
 	$: if (!fileUploadEnabled && files.length > 0) {
 		files = [];
 	}
 
-	// Tools state
-	let tools = null;
+	$: uploadTooltip = internalBlocked
+		? dataSeparationMessage
+		: fileUploadCapableModels.length !== selectedModels.length
+			? $i18n.t('Model(s) do not support file upload')
+			: !fileUploadEnabled
+				? $i18n.t('You do not have permission to upload files.')
+				: '';
 
-	$: if (show) {
-		initTools();
-	}
+	$: oneDriveBusiness = !!$config?.features?.enable_onedrive_business;
 
-	const initTools = async () => {
-		if ($_tools === null) {
-			await _tools.set(await getTools(localStorage.token));
-		}
+	// Item visibility, also used to hide empty section headers.
+	$: showUploadFiles = itemAllowed('upload_files');
+	$: showCapture = itemAllowed('capture') && isFeatureEnabled('capture');
+	$: showWebpage = itemAllowed('attach_webpage') && isFeatureEnabled('webpage_url');
+	$: showNotes = itemAllowed('attach_notes') && ($config?.features?.enable_notes ?? false);
+	$: showMeetings = itemAllowed('attach_meetings') && $meetingsAvailable;
+	$: showGoogleDrive =
+		fileUploadEnabled &&
+		itemAllowed('google_drive') &&
+		!!$config?.features?.enable_google_drive_integration;
+	$: showOneDrive =
+		fileUploadEnabled &&
+		itemAllowed('onedrive') &&
+		!!$config?.features?.enable_onedrive_integration &&
+		oneDriveBusiness;
+	$: showKnowledge = itemAllowed('knowledge') && isFeatureEnabled('knowledge');
+	$: showReferenceChats = itemAllowed('reference_chats') && isFeatureEnabled('reference_chats');
 
-		if ($_tools) {
-			tools = $_tools.reduce((a, tool, i, arr) => {
-				a[tool.id] = {
-					name: tool.name,
-					description: tool.meta.description,
-					enabled: selectedToolIds.includes(tool.id),
-					...tool
-				};
-				return a;
-			}, {});
-		}
+	$: showTools =
+		itemAllowed('tools') && isFeatureEnabled('tools') && Object.keys(tools ?? {}).length > 0;
+	$: showSkills =
+		itemAllowed('skills') && isFeatureEnabled('skills') && Object.keys(skills ?? {}).length > 0;
+	$: showFilters = itemAllowed('filters') && (toggleFilters ?? []).length > 0;
+	$: showLiveMail =
+		itemAllowed('live_mail') && (!!$config?.features?.enable_live_mail || liveMailState !== 'off');
+	$: showLiveDocuments =
+		itemAllowed('live_documents') &&
+		(!!$config?.features?.enable_live_documents || liveDocumentsState !== 'off');
+	$: showWebSearch = itemAllowed('web_search') && (showWebSearchButton || webSearchEnabled);
+	$: showImageGeneration =
+		itemAllowed('image_generation') && (showImageGenerationButton || imageGenerationEnabled);
+	$: showCodeInterpreter =
+		itemAllowed('code_interpreter') && (showCodeInterpreterButton || codeInterpreterEnabled);
+	$: showDocumentWriter =
+		itemAllowed('document_writer') && (showDocumentWriterButton || documentWriterEnabled);
+	$: showToolPermissions =
+		toolPermissionsEnabled && itemAllowed('tools') && isFeatureEnabled('tools');
 
-		if ($toolServers) {
-			for (const serverIdx in $toolServers) {
-				const server = $toolServers[serverIdx];
-				if (server.info) {
-					tools[`direct_server:${serverIdx}`] = {
-						name: server?.info?.title ?? server.url,
-						description: server.info.description ?? '',
-						enabled: selectedToolIds.includes(`direct_server:${serverIdx}`)
-					};
-				}
-			}
-		}
+	$: anyContext =
+		showUploadFiles ||
+		showCapture ||
+		showWebpage ||
+		showNotes ||
+		showMeetings ||
+		showGoogleDrive ||
+		showOneDrive;
+	$: anyKnowledge = showKnowledge || showReferenceChats;
+	$: anyTools =
+		showLiveMail ||
+		showLiveDocuments ||
+		showTools ||
+		showSkills ||
+		showFilters ||
+		showWebSearch ||
+		showImageGeneration ||
+		showCodeInterpreter ||
+		showDocumentWriter ||
+		showToolPermissions;
+	// Tools and skills load when the menu opens; keep the section visible meanwhile.
+	$: toolsLoading =
+		tools === null &&
+		itemAllowed('tools') &&
+		(isFeatureEnabled('tools') || isFeatureEnabled('skills'));
 
-		selectedToolIds = selectedToolIds.filter((id) => Object.keys(tools).includes(id));
-	};
-
-	// Pin handler
-	const pinItemHandler = async (itemId) => {
-		let pinnedItems = $settings?.pinnedInputItems ?? [];
-		if (pinnedItems.includes(itemId)) {
-			pinnedItems = pinnedItems.filter((id) => id !== itemId);
-		} else {
-			pinnedItems = [...new Set([...pinnedItems, itemId])];
-		}
-		settings.set({ ...$settings, pinnedInputItems: pinnedItems });
-		await updateUserSettings(localStorage.token, { ui: $settings });
-	};
-
-	$: pinnedInputItems = $settings?.pinnedInputItems ?? [];
+	$: sortedToggleFilters = [...(toggleFilters ?? [])].sort((a, b) =>
+		a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+	);
 
 	const detectMobile = () => {
-		const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+		const userAgent = navigator.userAgent || navigator.vendor;
 		return /android|iphone|ipad|ipod|windows phone/i.test(userAgent);
 	};
 
-	const handleFileChange = (event) => {
-		const inputFiles = Array.from(event.target?.files);
+	const handleFileChange = (event: Event) => {
+		const inputFiles = Array.from((event.currentTarget as HTMLInputElement).files ?? []);
 		if (inputFiles && inputFiles.length > 0) {
 			console.log(inputFiles);
 			inputFilesHandler(inputFiles);
 		}
 	};
 
+	const closeMenu = () => {
+		// Dropdown's onOpenChange only fires from its own close paths.
+		tab = '';
+		directTab = false;
+		show = false;
+	};
+
 	const onSelect = (item) => {
+		if (internalBlocked) return;
 		if (files.find((f) => f.id === item.id)) {
 			return;
 		}
@@ -232,78 +352,247 @@
 			}
 		];
 
-		// Dropdown's onOpenChange only fires from its own close paths, so we
-		// must reset tab state here when closing via bind:show.
-		tab = '';
-		directTab = false;
-		show = false;
+		closeMenu();
 	};
 
-	// One-click attach of the shared, read-only Confluence KB (shared mode).
-	// The KB carries a user:*:read grant, so getKnowledgeById works for any
-	// user; the resulting collection is identical to picking it from the
-	// Knowledge submenu. Exported so the pinned bottom-bar Confluence button
-	// in MessageInput can reuse the same attach flow without duplicating it.
-	export const attachSharedConfluenceKb = async () => {
-		const kbId = $config?.features?.confluence_shared_kb_id;
-		if (!kbId) {
+	// Tools and skills (ported from upstream's IntegrationsMenu).
+	let tools: Record<string, IntegrationItem> | null = null;
+	let skills: Record<string, IntegrationItem> | null = null;
+	let toolQuery = '';
+	let skillQuery = '';
+	let searchedToolQuery = '';
+	let searchedSkillQuery = '';
+	let toolSearchDebounceTimer: ReturnType<typeof setTimeout>;
+	let skillSearchDebounceTimer: ReturnType<typeof setTimeout>;
+	let toolRequestId = 0;
+	let skillRequestId = 0;
+
+	$: toolIds = Object.keys(tools ?? {});
+	$: skillIds = Object.keys(skills ?? {});
+
+	$: if (show && toolQuery !== searchedToolQuery) {
+		scheduleToolSearch();
+	}
+
+	$: if (show && skillQuery !== searchedSkillQuery) {
+		scheduleSkillSearch();
+	}
+
+	$: if (show) {
+		initIntegrations();
+	}
+
+	const initIntegrations = async () => {
+		await Promise.all([loadTools(), loadSkills()]);
+	};
+
+	const setTools = (toolItems: IntegrationItem[] | null, query = '') => {
+		const q = query.trim().toLowerCase();
+		const items = (toolItems ?? []).reduce<Record<string, IntegrationItem>>((a, tool) => {
+			a[tool.id] = {
+				...tool,
+				name: tool.name,
+				description: tool.meta?.description
+			};
+			return a;
+		}, {});
+
+		const servers = ($toolServers ?? []) as {
+			url: string;
+			info?: { title?: string; description?: string };
+		}[];
+		for (const serverIdx in servers) {
+			const server = servers[serverIdx];
+			if (server.info) {
+				const name = server?.info?.title ?? server.url;
+				if (q && !name.toLowerCase().includes(q)) {
+					continue;
+				}
+
+				items[`direct_server:${serverIdx}`] = {
+					id: `direct_server:${serverIdx}`,
+					name,
+					description: server.info.description ?? ''
+				};
+			}
+		}
+
+		tools = items;
+	};
+
+	const setSkills = (skillItems: IntegrationItem[] | null, query = '') => {
+		skills = (skillItems ?? [])
+			.filter((skill) => skill.is_active)
+			.reduce<Record<string, IntegrationItem>>((a, skill) => {
+				a[skill.id] = {
+					...skill,
+					name: skill.name,
+					description: skill.description
+				};
+				return a;
+			}, {});
+	};
+
+	const loadTools = async (query = toolQuery) => {
+		const requestId = ++toolRequestId;
+		const q = query.trim();
+		searchedToolQuery = query;
+
+		if (q) {
+			const toolItems = await getTools(localStorage.token, q).catch(() => []);
+			if (requestId !== toolRequestId) return;
+			setTools(toolItems, q);
 			return;
 		}
-		show = false;
 
-		const kb = await getKnowledgeById(localStorage.token, kbId).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		if (!kb) {
+		if ($_tools === null) {
+			await _tools.set(await getTools(localStorage.token));
+		}
+		if (requestId !== toolRequestId) return;
+		setTools($_tools, q);
+	};
+
+	const loadSkills = async (query = skillQuery) => {
+		const requestId = ++skillRequestId;
+		const q = query.trim();
+		searchedSkillQuery = query;
+
+		if (q) {
+			const skillItems = await getSkills(localStorage.token, q).catch(() => []);
+			if (requestId !== skillRequestId) return;
+			setSkills(skillItems, q);
 			return;
 		}
 
-		onSelect({
-			...kb,
-			knowledge_type: kb.type,
-			type: 'collection'
-		});
+		if ($_skills === null) {
+			await _skills.set(await getSkills(localStorage.token));
+		}
+		if (requestId !== skillRequestId) return;
+		setSkills($_skills, q);
 	};
 
-	// One-click attach of the shared, read-only TOPdesk KB. TOPdesk has only this
-	// shared surface (no per-user picker), so the entry is gated purely on the
-	// integration flag + a provisioned shared-KB id. Mirrors the Confluence
-	// shared-mode attach: the KB carries a user:*:read grant, so getKnowledgeById
-	// resolves for any user and the resulting collection matches picking it from
-	// the Knowledge submenu.
-	export const attachSharedTopdeskKb = async () => {
-		const kbId = $config?.features?.topdesk_shared_kb_id;
-		if (!kbId) {
+	const scheduleToolSearch = () => {
+		clearTimeout(toolSearchDebounceTimer);
+		toolSearchDebounceTimer = setTimeout(() => {
+			loadTools();
+		}, 200);
+	};
+
+	const scheduleSkillSearch = () => {
+		clearTimeout(skillSearchDebounceTimer);
+		skillSearchDebounceTimer = setTimeout(() => {
+			loadSkills();
+		}, 200);
+	};
+
+	const toggleTool = async (toolId: string, e: MouseEvent) => {
+		const tool = tools?.[toolId];
+		if (!tool) return;
+
+		if (!(tool.authenticated ?? true)) {
+			e.preventDefault();
+
+			const parts = toolId.split(':');
+			oauthRedirectHandler({
+				id: toolId,
+				serverId: parts.at(-1) ?? toolId,
+				authType: parts.length > 1 ? (parts[0] === 'server' ? parts[1] : parts[0]) : null
+			});
 			return;
 		}
-		show = false;
 
-		const kb = await getKnowledgeById(localStorage.token, kbId).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		if (!kb) {
-			return;
+		const state = !selectedToolIds.includes(toolId);
+		await tick();
+
+		if (state) {
+			selectedToolIds = [...selectedToolIds, toolId];
+		} else {
+			selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
 		}
-
-		onSelect({
-			...kb,
-			knowledge_type: kb.type,
-			type: 'collection'
-		});
 	};
 
-	// Expose openTab for external use (pinned items in bottom bar)
-	export const openTab = (tabName) => {
-		tab = tabName;
-		directTab = true;
-		show = true;
+	const toggleSkill = async (skillId: string) => {
+		if (!skills?.[skillId]) return;
+
+		const state = !selectedSkillIds.includes(skillId);
+		await tick();
+
+		if (state) {
+			selectedSkillIds = [...selectedSkillIds, skillId];
+		} else {
+			selectedSkillIds = selectedSkillIds.filter((id) => id !== skillId);
+		}
 	};
 
-	export const openWebpageModal = () => {
-		showAttachWebpageModal = true;
+	const toggleFilter = (filterId: string) => {
+		if (selectedFilterIds.includes(filterId)) {
+			selectedFilterIds = selectedFilterIds.filter((id) => id !== filterId);
+		} else {
+			selectedFilterIds = [...selectedFilterIds, filterId];
+		}
 	};
+
+	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
+	$: imageGenerationState = (imageGenerationEnabled ? 'required' : 'off') as ToolState;
+	$: codeInterpreterState = (codeInterpreterEnabled ? 'required' : 'off') as ToolState;
+	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
+
+	const stateAriaLabel = (label: string, state: ToolState, description: string) =>
+		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
+
+	// [Gradient] Web search cycles Auto, Altijd, Uit. Exported for the pinned composer button.
+	export const cycleWebSearch = () => {
+		// Strict data separation and #171 capability exclusion.
+		if (openInternetBlocked) return;
+		const wasOff = !webSearchEnabled;
+		const { enabled, required } = webSearchFlags(
+			nextToolState(webSearchToolState, WEB_SEARCH_STATES)
+		);
+		webSearchEnabled = enabled;
+		webSearchRequired = required;
+		if (webSearchEnabled && imageGenerationEnabled) {
+			toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
+			imageGenerationEnabled = false;
+		}
+		// The confirmation flow cares about web search becoming possible, not about Altijd.
+		if (wasOff !== !webSearchEnabled) onWebSearchToggle(webSearchEnabled);
+	};
+
+	// [Gradient] Document writer cycles Auto, Altijd, Uit; the other tools use Uit and Altijd. Exported for the pinned composer buttons.
+	export const cycleTool = (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => {
+		if (tool === 'image_generation') {
+			imageGenerationEnabled =
+				nextToolState(imageGenerationState, BINARY_TOOL_STATES) === 'required';
+			// #171: image generation takes over from web search, which must then be Uit.
+			if (imageGenerationEnabled && webSearchEnabled) {
+				toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
+				webSearchEnabled = false;
+				webSearchRequired = false;
+				onWebSearchToggle(false);
+			}
+		} else if (tool === 'code_interpreter') {
+			codeInterpreterEnabled =
+				nextToolState(codeInterpreterState, BINARY_TOOL_STATES) === 'required';
+		} else {
+			const { enabled, required } = documentWriterFlags(
+				nextToolState(documentWriterToolState, DOCUMENT_WRITER_STATES)
+			);
+			documentWriterEnabled = enabled;
+			documentWriterRequired = required;
+		}
+	};
+
+	onDestroy(() => {
+		clearTimeout(toolSearchDebounceTimer);
+		clearTimeout(skillSearchDebounceTimer);
+	});
+
+	const sectionHeaderClass =
+		'px-2 pt-1.5 pb-1 text-[0.6875rem] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500 select-none';
+	const backRowClass =
+		'flex w-full shrink-0 justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal select-none cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/60';
+	const subRowClass =
+		'relative flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/60';
 </script>
 
 <AttachWebpageModal
@@ -320,16 +609,20 @@
 	accept="image/*"
 	capture="environment"
 	on:change={handleFileChange}
-	style="display: none;"
+	class="hidden"
 />
 
 <Dropdown
 	bind:show
 	{closeOnOutsideClick}
+	visualViewportAware
 	onOpenChange={(state) => {
-		if (!state) {
+		// [Gradient] Dropdown exposes a callback, not a change event.
+		if (state === false) {
 			tab = '';
 			directTab = false;
+			toolQuery = '';
+			skillQuery = '';
 			onClose();
 		}
 	}}
@@ -339,593 +632,645 @@
 	</Tooltip>
 
 	<div slot="content">
-		<div
-			class="w-84 rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-96 overflow-y-auto overflow-x-hidden scrollbar-thin transition"
+		<!-- [Gradient] Capped to the room the dropdown has, so the menu and its submenus
+		     scroll inside it on short windows and mobile. -->
+		<DropdownMenu
+			className="w-84 max-w-[calc(100vw-2rem)] flex flex-col overflow-hidden"
+			style="max-height: min(24rem, var(--dropdown-available-height, 24rem));"
 		>
 			{#if tab === ''}
-				<div in:fly={{ x: -20, duration: 150 }}>
-					<!-- ═══ ATTACH CONTEXT ═══ -->
-					{#if anyContextAllowed}
-						<div
-							class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
-						>
-							{$i18n.t('Attach context')}
-						</div>
+				<div
+					class="min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin"
+					in:fly={{ x: -20, duration: 150 }}
+				>
+					<!-- ═══ Context ═══ -->
+					{#if anyContext}
+						<div class={sectionHeaderClass}>{$i18n.t('Attach context')}</div>
 					{/if}
 
-					<!-- Upload Files -->
-					{#if itemAllowed('upload_files')}
-						<Tooltip
-							content={isStrictBlocked('upload_files')
-								? dataSeparationMessage
-								: fileUploadCapableModels.length !== selectedModels.length
-									? $i18n.t('Model(s) do not support file upload')
-									: !fileUploadEnabled
-										? $i18n.t('You do not have permission to upload files.')
-										: ''}
-							className="w-full"
+					{#if showUploadFiles}
+						<MenuItem
+							label={$i18n.t('Files')}
+							pinId="upload_files"
+							tooltip={uploadTooltip}
+							disabled={internalBlocked || !fileUploadEnabled}
+							onClick={() => {
+								if (internalBlocked) return;
+								if (fileUploadEnabled) {
+									uploadFilesHandler();
+									closeMenu();
+								}
+							}}
 						>
-							<button
-								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled ||
-								isStrictBlocked('upload_files')
-									? 'opacity-50'
-									: ''}"
-								type="button"
-								on:click={() => {
-									if (fileUploadEnabled && !isStrictBlocked('upload_files')) {
-										show = false;
-										uploadFilesHandler();
+							<Clip slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
+					{#if showCapture}
+						<MenuItem
+							label={$i18n.t('Capture')}
+							pinId="capture"
+							tooltip={uploadTooltip}
+							disabled={internalBlocked || !fileUploadEnabled}
+							onClick={() => {
+								if (internalBlocked) return;
+								if (fileUploadEnabled) {
+									if (!detectMobile()) {
+										screenCaptureHandler();
+									} else {
+										document.getElementById('camera-input')?.click();
 									}
-								}}
-							>
-								<Clip />
-								<div class="flex-1 line-clamp-1">{$i18n.t('Files')}</div>
-								<Tooltip
-									content={pinnedInputItems.includes('upload_files')
-										? $i18n.t('Unpin')
-										: $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('upload_files')}
-									>
-										{#if pinnedInputItems.includes('upload_files')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						</Tooltip>
+									closeMenu();
+								}
+							}}
+						>
+							<Camera slot="icon" className="size-3.5" />
+						</MenuItem>
 					{/if}
 
-					<!-- Capture -->
-					{#if isFeatureEnabled('capture') && itemAllowed('capture')}
-						<Tooltip
-							content={isStrictBlocked('capture')
+					{#if showWebpage}
+						<MenuItem
+							label={$i18n.t('Webpage URL')}
+							pinId="attach_webpage"
+							tooltip={openInternetBlocked
 								? dataSeparationMessage
-								: fileUploadCapableModels.length !== selectedModels.length
-									? $i18n.t('Model(s) do not support file upload')
-									: !fileUploadEnabled
-										? $i18n.t('You do not have permission to upload files.')
-										: ''}
-							className="w-full"
+								: !webUploadEnabled
+									? $i18n.t('You do not have permission to upload web content.')
+									: ''}
+							disabled={openInternetBlocked || !webUploadEnabled}
+							onClick={() => {
+								if (openInternetBlocked) return;
+								if (webUploadEnabled) {
+									showAttachWebpageModal = true;
+									closeMenu();
+								}
+							}}
 						>
-							<button
-								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled ||
-								isStrictBlocked('capture')
-									? 'opacity-50'
-									: ''}"
-								type="button"
-								on:click={() => {
-									if (fileUploadEnabled && !isStrictBlocked('capture')) {
-										show = false;
-										if (!detectMobile()) {
-											screenCaptureHandler();
-										} else {
-											const cameraInputElement = document.getElementById('camera-input');
-											if (cameraInputElement) {
-												cameraInputElement.click();
-											}
-										}
-									}
-								}}
-							>
-								<Camera />
-								<div class="flex-1 line-clamp-1">{$i18n.t('Capture')}</div>
-								<Tooltip
-									content={pinnedInputItems.includes('capture') ? $i18n.t('Unpin') : $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('capture')}
-									>
-										{#if pinnedInputItems.includes('capture')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						</Tooltip>
+							<Link slot="icon" className="size-3.5" />
+						</MenuItem>
 					{/if}
 
-					<!-- Attach Webpage (Link icon) -->
-					{#if isFeatureEnabled('webpage_url') && itemAllowed('attach_webpage')}
-						<Tooltip
-							content={isStrictBlocked('attach_webpage')
-								? dataSeparationMessage
-								: fileUploadCapableModels.length !== selectedModels.length
-									? $i18n.t('Model(s) do not support file upload')
-									: !fileUploadEnabled
-										? $i18n.t('You do not have permission to upload files.')
-										: ''}
-							className="w-full"
+					{#if showUploadFiles}
+						<MenuItem
+							label={$i18n.t('Attach Files')}
+							pinId="attach_files"
+							submenu
+							tooltip={uploadTooltip}
+							disabled={internalBlocked || !fileUploadEnabled}
+							onClick={() => {
+								if (internalBlocked) return;
+								if (fileUploadEnabled) {
+									tab = 'files';
+								}
+							}}
 						>
-							<button
-								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled ||
-								isStrictBlocked('attach_webpage')
-									? 'opacity-50'
-									: ''}"
-								type="button"
-								on:click={() => {
-									if (fileUploadEnabled && !isStrictBlocked('attach_webpage')) {
-										show = false;
-										showAttachWebpageModal = true;
-									}
-								}}
-							>
-								<Link />
-								<div class="flex-1 line-clamp-1">{$i18n.t('Webpage URL')}</div>
-								<Tooltip
-									content={pinnedInputItems.includes('attach_webpage')
-										? $i18n.t('Unpin')
-										: $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('attach_webpage')}
-									>
-										{#if pinnedInputItems.includes('attach_webpage')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						</Tooltip>
+							<DocumentArrowUp slot="icon" className="size-3.5" />
+						</MenuItem>
 					{/if}
 
-					<!-- Attach Notes -->
-					{#if ($config?.features?.enable_notes ?? false) && itemAllowed('attach_notes')}
-						<Tooltip
-							content={isStrictBlocked('attach_notes')
-								? dataSeparationMessage
-								: fileUploadCapableModels.length !== selectedModels.length
-									? $i18n.t('Model(s) do not support file upload')
-									: !fileUploadEnabled
-										? $i18n.t('You do not have permission to upload files.')
-										: ''}
-							className="w-full"
+					{#if showNotes}
+						<MenuItem
+							label={$i18n.t('Attach Notes')}
+							pinId="attach_notes"
+							submenu
+							tooltip={uploadTooltip}
+							disabled={internalBlocked || !fileUploadEnabled}
+							onClick={() => {
+								if (internalBlocked) return;
+								tab = 'notes';
+							}}
 						>
-							<button
-								class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled ||
-								isStrictBlocked('attach_notes')
-									? 'opacity-50'
-									: ''}"
-								on:click={() => {
-									if (isStrictBlocked('attach_notes')) return;
-									tab = 'notes';
-								}}
-							>
-								<PageEdit />
-								<div class="flex-1 flex items-center justify-between">
-									<div class="line-clamp-1">{$i18n.t('Attach Notes')}</div>
-									<div class="text-gray-500">
-										<ChevronRight />
-									</div>
-								</div>
-								<Tooltip
-									content={pinnedInputItems.includes('attach_notes')
-										? $i18n.t('Unpin')
-										: $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('attach_notes')}
-									>
-										{#if pinnedInputItems.includes('attach_notes')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						</Tooltip>
+							<PageEdit slot="icon" className="size-3.5" />
+						</MenuItem>
 					{/if}
 
-					<!-- Google Drive -->
-					{#if fileUploadEnabled && !internalBlocked}
-						{#if $config?.features?.enable_google_drive_integration && itemAllowed('google_drive')}
-							<button
-								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
-								type="button"
-								on:click={() => {
-									show = false;
-									uploadGoogleDriveHandler();
-								}}
-							>
-								<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 87.3 78" class="w-4">
-									<path
-										d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z"
-										fill="#0066da"
-									/>
-									<path
-										d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z"
-										fill="#00ac47"
-									/>
-									<path
-										d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z"
-										fill="#ea4335"
-									/>
-									<path
-										d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z"
-										fill="#00832d"
-									/>
-									<path
-										d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z"
-										fill="#2684fc"
-									/>
-									<path
-										d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z"
-										fill="#ffba00"
-									/>
-								</svg>
-								<div class="flex-1 line-clamp-1">{$i18n.t('Google Drive')}</div>
-								<Tooltip
-									content={pinnedInputItems.includes('google_drive')
-										? $i18n.t('Unpin')
-										: $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('google_drive')}
-									>
-										{#if pinnedInputItems.includes('google_drive')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						{/if}
-
-						<!-- Microsoft OneDrive (simplified — work only) -->
-						{#if $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business && itemAllowed('onedrive')}
-							<button
-								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
-								type="button"
-								on:click={() => {
-									show = false;
-									uploadOneDriveHandler('organizations');
-								}}
-							>
-								<OneDrive className="size-4" />
-								<div class="flex-1 line-clamp-1">{$i18n.t('OneDrive Files')}</div>
-								<Tooltip
-									content={pinnedInputItems.includes('onedrive')
-										? $i18n.t('Unpin')
-										: $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('onedrive')}
-									>
-										{#if pinnedInputItems.includes('onedrive')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						{/if}
-
-						<!-- Confluence — per-user page picker. Hidden in company-wide
-						     mode, where the shared KB is the only Confluence surface. -->
-						{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared' && $config?.features?.confluence_oauth_configured && itemAllowed('confluence')}
-							<button
-								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
-								type="button"
-								on:click={() => {
-									show = false;
-									uploadConfluenceHandler();
-								}}
-							>
-								<Confluence className="size-4" />
-								<div class="flex-1 line-clamp-1">{$i18n.t('Confluence')}</div>
-								<Tooltip
-									content={pinnedInputItems.includes('confluence')
-										? $i18n.t('Unpin')
-										: $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('confluence')}
-									>
-										{#if pinnedInputItems.includes('confluence')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						{/if}
-
-						<!-- Confluence (shared mode) — one-click attach of the shared,
-						     read-only KB. Mutually exclusive with the per-user picker
-						     above via the confluence_kb_mode check. -->
-						{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode === 'shared' && $config?.features?.confluence_shared_kb_id && itemAllowed('confluence')}
-							<button
-								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
-								type="button"
-								on:click={attachSharedConfluenceKb}
-							>
-								<Confluence className="size-4" />
-								<div class="flex-1 line-clamp-1">{$i18n.t('Confluence')}</div>
-								<Tooltip
-									content={pinnedInputItems.includes('confluence')
-										? $i18n.t('Unpin')
-										: $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('confluence')}
-									>
-										{#if pinnedInputItems.includes('confluence')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						{/if}
-
-						<!-- TOPdesk — one-click attach of the shared, read-only KB.
-						     TOPdesk has no per-user picker, so the only surface is this
-						     shared shortcut, gated on the integration flag + a
-						     provisioned shared-KB id. -->
-						{#if $config?.features?.enable_topdesk_integration && $config?.features?.topdesk_shared_kb_id && itemAllowed('topdesk')}
-							<button
-								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
-								type="button"
-								on:click={attachSharedTopdeskKb}
-							>
-								<Topdesk className="size-4" />
-								<div class="flex-1 line-clamp-1">{$i18n.t('TOPdesk knowledge base')}</div>
-								<Tooltip
-									content={pinnedInputItems.includes('topdesk') ? $i18n.t('Unpin') : $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('topdesk')}
-									>
-										{#if pinnedInputItems.includes('topdesk')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						{/if}
+					{#if showMeetings}
+						<MenuItem
+							label={$i18n.t('Attach meetings')}
+							pinId="attach_meetings"
+							submenu
+							tooltip={internalBlocked ? dataSeparationMessage : ''}
+							disabled={internalBlocked}
+							onClick={() => {
+								if (internalBlocked) return;
+								tab = 'meetings';
+							}}
+						>
+							<Mic slot="icon" className="size-3.5" />
+						</MenuItem>
 					{/if}
 
-					<!-- ═══ ATTACH DATABASE ═══ -->
-					{#if isFeatureEnabled('knowledge') && anyDatabaseAllowed && itemAllowed('knowledge')}
-						<div class="my-1 border-t border-gray-100 dark:border-gray-800" />
-						<div
-							class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
+					{#if showGoogleDrive}
+						<MenuItem
+							label={$i18n.t('Google Drive')}
+							pinId="google_drive"
+							tooltip={internalBlocked ? dataSeparationMessage : ''}
+							disabled={internalBlocked}
+							onClick={() => {
+								if (internalBlocked) return;
+								uploadGoogleDriveHandler();
+								closeMenu();
+							}}
 						>
-							{$i18n.t('Attach databases')}
-						</div>
+							<GoogleDrive slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
 
-						<Tooltip
-							content={isStrictBlocked('knowledge')
-								? dataSeparationMessage
-								: fileUploadCapableModels.length !== selectedModels.length
-									? $i18n.t('Model(s) do not support file upload')
-									: !fileUploadEnabled
-										? $i18n.t('You do not have permission to upload files.')
-										: ''}
-							className="w-full"
+					{#if showOneDrive}
+						<MenuItem
+							label={$i18n.t('OneDrive Files')}
+							pinId="onedrive"
+							tooltip={internalBlocked ? dataSeparationMessage : ''}
+							disabled={internalBlocked}
+							onClick={() => {
+								if (internalBlocked) return;
+								uploadOneDriveHandler();
+								closeMenu();
+							}}
 						>
-							<button
-								class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled ||
-								isStrictBlocked('knowledge')
-									? 'opacity-50'
-									: ''}"
-								on:click={() => {
-									if (isStrictBlocked('knowledge')) return;
-									tab = 'knowledge';
-								}}
-							>
-								<FolderOpen />
-								<div class="flex-1 flex items-center justify-between">
-									<div class="line-clamp-1">{$i18n.t('Knowledge database')}</div>
-									<div class="text-gray-500">
-										<ChevronRight />
-									</div>
-								</div>
-								<Tooltip
-									content={pinnedInputItems.includes('knowledge')
-										? $i18n.t('Unpin')
-										: $i18n.t('Pin')}
-								>
-									<button
-										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-										on:click|stopPropagation={() => pinItemHandler('knowledge')}
-									>
-										{#if pinnedInputItems.includes('knowledge')}
-											<PinSlash className="size-3.5" />
-										{:else}
-											<Pin className="size-3.5" />
-										{/if}
-									</button>
-								</Tooltip>
-							</button>
-						</Tooltip>
+							<OneDrive slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
 
-						<!-- Reference Chats -->
-						{#if isFeatureEnabled('reference_chats') && ($chats ?? []).length > 0 && itemAllowed('reference_chats')}
-							<Tooltip
-								content={isStrictBlocked('reference_chats')
+					<!-- ═══ Knowledge ═══ -->
+					{#if anyKnowledge}
+						{#if anyContext}
+							<div class="h-px mx-1 my-1 bg-gray-100 dark:bg-gray-800"></div>
+						{/if}
+						<div class={sectionHeaderClass}>{$i18n.t('Attach databases')}</div>
+					{/if}
+
+					{#if showKnowledge}
+						<MenuItem
+							label={$i18n.t('Knowledge database')}
+							pinId="knowledge"
+							submenu
+							tooltip={uploadTooltip}
+							disabled={internalBlocked || !fileUploadEnabled}
+							onClick={() => {
+								if (internalBlocked) return;
+								tab = 'knowledge';
+							}}
+						>
+							<FolderOpen slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
+					{#if showReferenceChats}
+						<MenuItem
+							label={$i18n.t('Reference chats')}
+							pinId="reference_chats"
+							submenu
+							tooltip={uploadTooltip}
+							disabled={internalBlocked || !fileUploadEnabled}
+							onClick={() => {
+								if (internalBlocked) return;
+								tab = 'chats';
+							}}
+						>
+							<ClockRotateRight slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
+					<!-- ═══ Tools ═══ -->
+					{#if anyTools || toolsLoading}
+						{#if anyContext || anyKnowledge}
+							<div class="h-px mx-1 my-1 bg-gray-100 dark:bg-gray-800"></div>
+						{/if}
+						<div class={sectionHeaderClass}>{$i18n.t('Attach tools')}</div>
+					{/if}
+
+					{#if showLiveMail}
+						<MenuItem
+							label={$i18n.t('Mail search')}
+							pinId="live_mail"
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Mail search'),
+								liveMailState,
+								liveMailState === 'off'
+									? $i18n.t(TOOL_OFF_DESCRIPTION)
+									: $i18n.t('The model decides whether to search your mail')
+							)}
+							tooltip={!$config?.features?.enable_live_mail
+								? $i18n.t('Unavailable')
+								: stateAriaLabel(
+										$i18n.t('Mail search'),
+										liveMailState,
+										liveMailState === 'off'
+											? $i18n.t(TOOL_OFF_DESCRIPTION)
+											: $i18n.t('The model decides whether to search your mail')
+									)}
+							toolState={liveMailState}
+							disabled={connectingMail || !$config?.features?.enable_live_mail}
+							onClick={cycleLiveMail}
+						>
+							<MailSearch slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
+					{#if showLiveDocuments}
+						<MenuItem
+							label={$i18n.t('OneDrive search')}
+							pinId="live_documents"
+							ariaLabel={stateAriaLabel(
+								$i18n.t('OneDrive search'),
+								liveDocumentsState,
+								liveDocumentsState === 'off'
+									? $i18n.t(TOOL_OFF_DESCRIPTION)
+									: $i18n.t('The model decides whether to search OneDrive')
+							)}
+							tooltip={!$config?.features?.enable_live_documents
+								? $i18n.t('Unavailable')
+								: stateAriaLabel(
+										$i18n.t('OneDrive search'),
+										liveDocumentsState,
+										liveDocumentsState === 'off'
+											? $i18n.t(TOOL_OFF_DESCRIPTION)
+											: $i18n.t('The model decides whether to search OneDrive')
+									)}
+							toolState={liveDocumentsState}
+							disabled={connectingDocuments || !$config?.features?.enable_live_documents}
+							onClick={cycleLiveDocuments}
+						>
+							<OneDriveSearch slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
+					{#if showWebSearch}
+						<MenuItem
+							label={$i18n.t('Search the web')}
+							pinId="web_search"
+							toolState={webSearchToolState}
+							tooltipPlacement="top-start"
+							tooltip={!showWebSearchButton
+								? $i18n.t('Unavailable')
+								: openInternetBlocked
 									? dataSeparationMessage
-									: fileUploadCapableModels.length !== selectedModels.length
-										? $i18n.t('Model(s) do not support file upload')
-										: !fileUploadEnabled
-											? $i18n.t('You do not have permission to upload files.')
-											: ''}
-								className="w-full"
-							>
-								<button
-									class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled ||
-									isStrictBlocked('reference_chats')
-										? 'opacity-50'
-										: ''}"
-									on:click={() => {
-										if (isStrictBlocked('reference_chats')) return;
-										tab = 'chats';
-									}}
-								>
-									<ClockRotateRight />
-									<div class="flex-1 flex items-center justify-between">
-										<div class="line-clamp-1">{$i18n.t('Reference chats')}</div>
-										<div class="text-gray-500">
-											<ChevronRight />
-										</div>
-									</div>
-									<Tooltip
-										content={pinnedInputItems.includes('reference_chats')
-											? $i18n.t('Unpin')
-											: $i18n.t('Pin')}
-									>
-										<button
-											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-											on:click|stopPropagation={() => pinItemHandler('reference_chats')}
-										>
-											{#if pinnedInputItems.includes('reference_chats')}
-												<PinSlash className="size-3.5" />
-											{:else}
-												<Pin className="size-3.5" />
-											{/if}
-										</button>
-									</Tooltip>
-								</button>
-							</Tooltip>
-						{/if}
+									: imageGenerationEnabled
+										? $i18n.t('Web search and image generation cannot run in the same turn')
+										: $i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Search the web'),
+								webSearchToolState,
+								$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+							)}
+							disabled={!showWebSearchButton || openInternetBlocked}
+							onClick={() => showWebSearchButton && cycleWebSearch()}
+						>
+							<GlobeAlt slot="icon" className="size-3.5" />
+						</MenuItem>
 					{/if}
 
-					<!-- ═══ ATTACH CAPABILITY ═══ -->
-					{#if anyCapabilityAllowed}
-						{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showDocumentWriterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
-							<div class="my-1 border-t border-gray-100 dark:border-gray-800" />
-							<div
-								class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
+					{#if showImageGeneration}
+						<!-- [Gradient] #171: explain the reciprocal web search exclusion. -->
+						<MenuItem
+							label={$i18n.t('Image')}
+							pinId="image_generation"
+							toolState={imageGenerationState}
+							tooltipPlacement="top-start"
+							tooltip={!showImageGenerationButton
+								? $i18n.t('Unavailable')
+								: webSearchEnabled
+									? $i18n.t('Web search and image generation cannot run in the same turn')
+									: imageGenerationEnabled
+										? $i18n.t('Generate an image')
+										: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Image'),
+								imageGenerationState,
+								imageGenerationEnabled
+									? $i18n.t('Generate an image')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)
+							)}
+							disabled={!showImageGenerationButton}
+							onClick={() => showImageGenerationButton && cycleTool('image_generation')}
+						>
+							<Photo slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
+					{#if showCodeInterpreter}
+						<MenuItem
+							label={$i18n.t('Code Interpreter')}
+							pinId="code_interpreter"
+							toolState={codeInterpreterState}
+							tooltipPlacement="top-start"
+							tooltip={!showCodeInterpreterButton
+								? $i18n.t('Unavailable')
+								: codeInterpreterEnabled
+									? $i18n.t('Execute code for analysis')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Code Interpreter'),
+								codeInterpreterState,
+								codeInterpreterEnabled
+									? $i18n.t('Execute code for analysis')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)
+							)}
+							disabled={!showCodeInterpreterButton}
+							onClick={() => showCodeInterpreterButton && cycleTool('code_interpreter')}
+						>
+							<Terminal slot="icon" className="size-3.5" strokeWidth="1.75" />
+						</MenuItem>
+					{/if}
+
+					{#if showDocumentWriter}
+						<MenuItem
+							label={$i18n.t('Document writer')}
+							pinId="document_writer"
+							toolState={documentWriterToolState}
+							tooltipPlacement="top-start"
+							tooltip={!showDocumentWriterButton
+								? $i18n.t('Unavailable')
+								: $i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])}
+							ariaLabel={stateAriaLabel(
+								$i18n.t('Document writer'),
+								documentWriterToolState,
+								$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
+							)}
+							disabled={!showDocumentWriterButton}
+							onClick={() => showDocumentWriterButton && cycleTool('document_writer')}
+						>
+							<Document slot="icon" className="size-3.5" strokeWidth="1.75" />
+						</MenuItem>
+					{/if}
+
+					{#if showFilters}
+						{#each sortedToggleFilters as filter (filter.id)}
+							<MenuItem
+								label={filter.name}
+								pinId={`filter:${filter.id}`}
+								toggle={selectedFilterIds.includes(filter.id)}
+								tooltipPlacement="top-start"
+								tooltip={filter?.description ?? ''}
+								onClick={() => toggleFilter(filter.id)}
 							>
-								{$i18n.t('Attach tools')}
-							</div>
-
-							<!-- Tools -->
-							{#if isFeatureEnabled('tools') && itemAllowed('tools')}
-								{#if tools}
-									{#if Object.keys(tools).length > 0}
-										<button
-											class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-											on:click={() => {
-												tab = 'tools';
-											}}
-										>
-											<Wrench />
-											<div class="flex-1 flex items-center justify-between">
-												<div class="line-clamp-1">
-													{$i18n.t('Tools')}
-													<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
-												</div>
-												<div class="text-gray-500">
-													<ChevronRight />
-												</div>
-											</div>
-											<Tooltip
-												content={pinnedInputItems.includes('tools')
-													? $i18n.t('Unpin')
-													: $i18n.t('Pin')}
-											>
-												<button
-													class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-													on:click|stopPropagation={() => pinItemHandler('tools')}
-												>
-													{#if pinnedInputItems.includes('tools')}
-														<PinSlash className="size-3.5" />
-													{:else}
-														<Pin className="size-3.5" />
-													{/if}
-												</button>
-											</Tooltip>
-										</button>
+								<svelte:fragment slot="icon">
+									{#if filter?.icon}
+										<img
+											src={filter.icon}
+											class="size-3.5 {filter.icon.includes('data:image/svg')
+												? 'dark:invert-[80%]'
+												: ''}"
+											style="fill: currentColor;"
+											alt={filter.name}
+										/>
+									{:else}
+										<Sparkles className="size-3.5" strokeWidth="1.75" />
 									{/if}
-								{:else}
-									<div class="py-4">
-										<Spinner />
-									</div>
-								{/if}
-							{/if}
+								</svelte:fragment>
 
-							<!-- Filters -->
-							{#if toggleFilters && toggleFilters.length > 0 && itemAllowed('filters')}
-								{#each toggleFilters.sort( (a, b) => a.name.localeCompare( b.name, undefined, { sensitivity: 'base' } ) ) as filter, filterIdx (filter.id)}
-									<Tooltip content={filter?.description} placement="top-start">
+								<svelte:fragment slot="actions">
+									{#if filter?.has_user_valves && valvesAllowed}
+										<Tooltip content={$i18n.t('Valves')} className="flex shrink-0">
+											<button
+												class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
+												type="button"
+												aria-label={$i18n.t('Valves')}
+												on:click={(e) => {
+													e.stopPropagation();
+													e.preventDefault();
+													onShowValves({ type: 'function', id: filter.id });
+												}}
+											>
+												<Knobs />
+											</button>
+										</Tooltip>
+									{/if}
+								</svelte:fragment>
+							</MenuItem>
+						{/each}
+					{/if}
+
+					{#if showTools}
+						<MenuItem
+							label={$i18n.t('Tools')}
+							count={toolIds.length}
+							pinId="tools"
+							submenu
+							onClick={() => {
+								tab = 'tools';
+							}}
+						>
+							<Wrench slot="icon" className="size-3.5" />
+						</MenuItem>
+					{/if}
+
+					{#if showSkills}
+						<MenuItem
+							label={$i18n.t('Skills')}
+							count={skillIds.length}
+							pinId="skills"
+							submenu
+							onClick={() => {
+								tab = 'skills';
+							}}
+						>
+							<Cube slot="icon" className="size-3.5" strokeWidth="1.75" />
+						</MenuItem>
+					{/if}
+
+					{#if toolsLoading}
+						<div class="py-2">
+							<Spinner className="size-4" />
+						</div>
+					{/if}
+
+					{#if showToolPermissions}
+						<MenuItem
+							label={$i18n.t('Tool Permissions')}
+							submenu
+							onClick={() => {
+								tab = 'tool_permissions';
+							}}
+						>
+							<svg
+								slot="icon"
+								class="size-3.5 shrink-0"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.5"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<path d="M12 22C12 22 20 18 20 12V5L12 2L4 5V12C4 18 12 22 12 22Z" />
+							</svg>
+							<div slot="actions" class="shrink-0 text-xs text-gray-500 truncate max-w-24">
+								{$i18n.t(
+									toolApprovalModes.find((mode) => mode.value === toolApprovalMode)?.label ??
+										'Full access'
+								)}
+							</div>
+						</MenuItem>
+					{/if}
+				</div>
+			{:else}
+				<div
+					class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden"
+					in:fly={{ x: directTab ? 0 : 20, duration: directTab ? 0 : 150 }}
+				>
+					{#if !directTab}
+						<button
+							class={backRowClass}
+							on:click={() => {
+								tab = '';
+								toolQuery = '';
+								skillQuery = '';
+							}}
+						>
+							<ChevronLeft />
+
+							<div class="flex items-center w-full justify-between">
+								<div>
+									{#if tab === 'knowledge'}
+										{$i18n.t('Knowledge database')}
+									{:else if tab === 'notes'}
+										{$i18n.t('Notes')}
+									{:else if tab === 'meetings'}
+										{$i18n.t('Meetings')}
+									{:else if tab === 'files'}
+										{$i18n.t('Files')}
+									{:else if tab === 'chats'}
+										{$i18n.t('Reference chats')}
+									{:else if tab === 'tool_permissions'}
+										{$i18n.t('Tool Permissions')}
+									{:else if tab === 'tools'}
+										{$i18n.t('Tools')}
+										<span class="ml-0.5 text-gray-500">{toolIds.length}</span>
+									{:else if tab === 'skills'}
+										{$i18n.t('Skills')}
+										<span class="ml-0.5 text-gray-500">{skillIds.length}</span>
+									{/if}
+								</div>
+							</div>
+						</button>
+					{/if}
+
+					{#if tab === 'knowledge'}
+						<Knowledge {onSelect} />
+					{:else if tab === 'notes'}
+						<Notes {onSelect} />
+					{:else if tab === 'meetings'}
+						<Meetings {onSelect} />
+					{:else if tab === 'files'}
+						<Files {onSelect} />
+					{:else if tab === 'chats'}
+						<Chats {onSelect} />
+					{:else if tab === 'tool_permissions'}
+						<div class="space-y-1">
+							{#each toolApprovalModes as mode}
+								<Tooltip content={$i18n.t(mode.description)} className="w-full">
+									<button
+										class={subRowClass}
+										on:click={() => {
+											toolApprovalMode = mode.value;
+											onToolApprovalModeChange(mode.value);
+											tab = '';
+											directTab = false;
+										}}
+									>
+										<div class="flex items-center w-full justify-between min-w-0">
+											<div class="line-clamp-1">{$i18n.t(mode.label)}</div>
+											{#if toolApprovalMode === mode.value}
+												<svg
+													class="size-3 shrink-0 text-gray-500"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2.5"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+												>
+													<polyline points="20 6 9 17 4 12" />
+												</svg>
+											{/if}
+										</div>
+									</button>
+								</Tooltip>
+							{/each}
+						</div>
+					{:else if tab === 'tools'}
+						<SearchInput bind:value={toolQuery} placeholder={$i18n.t('Search tools')} />
+
+						<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
+							{#if tools === null}
+								<div class="py-4">
+									<Spinner />
+								</div>
+							{:else if toolIds.length === 0}
+								<div class="text-center text-xs text-gray-500 py-3">
+									{$i18n.t('No tools found')}
+								</div>
+							{:else}
+								<div class="flex flex-col gap-0.5">
+									{#each toolIds as toolId}
 										<button
-											class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-											on:click={() => {
-												if (selectedFilterIds.includes(filter.id)) {
-													selectedFilterIds = selectedFilterIds.filter((id) => id !== filter.id);
-												} else {
-													selectedFilterIds = [...selectedFilterIds, filter.id];
-												}
+											class={subRowClass}
+											aria-pressed={(tools?.[toolId]?.authenticated ?? true)
+												? selectedToolIds.includes(toolId)
+												: undefined}
+											on:click={async (e) => {
+												await toggleTool(toolId, e);
 											}}
 										>
+											{#if !(tools?.[toolId]?.authenticated ?? true)}
+												<!-- make it slighly darker and not clickable -->
+												<div
+													class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10"
+												></div>
+											{/if}
 											<div class="flex-1 truncate">
 												<div class="flex flex-1 gap-2 items-center">
-													<div class="shrink-0">
-														{#if filter?.icon}
-															<div class="size-4 items-center flex justify-center">
-																<img
-																	src={filter.icon}
-																	class="size-3.5 {filter.icon.includes('svg')
-																		? 'dark:invert-[80%]'
-																		: ''}"
-																	style="fill: currentColor;"
-																	alt={filter.name}
-																/>
-															</div>
-														{:else}
-															<Sparkles className="size-4" strokeWidth="1.75" />
-														{/if}
-													</div>
-													<div class="truncate">{filter?.name}</div>
+													<Tooltip content={tools?.[toolId]?.name ?? ''} placement="top">
+														<div class="shrink-0">
+															<Wrench className="size-3.5" />
+														</div>
+													</Tooltip>
+													<Tooltip
+														content={tools?.[toolId]?.description ?? ''}
+														placement="top-start"
+													>
+														<div class=" truncate">{tools?.[toolId]?.name}</div>
+													</Tooltip>
 												</div>
 											</div>
 
-											{#if filter?.has_user_valves}
+											{#if tools?.[toolId]?.authenticated === true && toolId.startsWith('server:mcp:')}
 												<div class="shrink-0">
+													<Tooltip content={$i18n.t('Disconnect OAuth')}>
+														<button
+															class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
+															type="button"
+															on:click={async (e) => {
+																e.stopPropagation();
+																e.preventDefault();
+
+																const parts = toolId.split(':');
+																const serverId = parts.at(-1) ?? toolId;
+																const provider = `mcp:${serverId}`;
+
+																try {
+																	await deleteOAuthSession(localStorage.token, provider);
+																	toast.success($i18n.t('OAuth session disconnected'));
+
+																	// Refresh tools to update authenticated state
+																	_tools.set(await getTools(localStorage.token));
+																	selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
+																	await initIntegrations();
+																} catch (err) {
+																	toast.error(`${err ?? $i18n.t('Failed to disconnect')}`);
+																}
+															}}
+														>
+															<LinkSlash className="size-3.5" />
+														</button>
+													</Tooltip>
+												</div>
+											{/if}
+
+											{#if tools?.[toolId]?.has_user_valves && valvesAllowed}
+												<div class=" shrink-0">
 													<Tooltip content={$i18n.t('Valves')}>
 														<button
 															class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
@@ -934,8 +1279,8 @@
 																e.stopPropagation();
 																e.preventDefault();
 																onShowValves({
-																	type: 'function',
-																	id: filter.id
+																	type: 'tool',
+																	id: toolId
 																});
 															}}
 														>
@@ -945,407 +1290,63 @@
 												</div>
 											{/if}
 
-											<Tooltip
-												content={pinnedInputItems.includes(`filter:${filter.id}`)
-													? $i18n.t('Unpin')
-													: $i18n.t('Pin')}
-											>
-												<button
-													class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-													on:click|stopPropagation={() => pinItemHandler(`filter:${filter.id}`)}
-												>
-													{#if pinnedInputItems.includes(`filter:${filter.id}`)}
-														<PinSlash className="size-3.5" />
-													{:else}
-														<Pin className="size-3.5" />
-													{/if}
-												</button>
-											</Tooltip>
-
-											<div class="shrink-0">
-												<Switch
-													state={selectedFilterIds.includes(filter.id)}
-													on:change={async (e) => {
-														const state = e.detail;
-														await tick();
-													}}
-												/>
+											<div class=" shrink-0" inert>
+												<Switch state={selectedToolIds.includes(toolId)} />
 											</div>
 										</button>
-									</Tooltip>
-								{/each}
-							{/if}
-
-							<!-- Web Search -->
-							{#if showWebSearchButton}
-								<Tooltip
-									content={openInternetBlocked
-										? dataSeparationMessage
-										: imageGenerationEnabled
-											? $i18n.t('Web search and image generation cannot run in the same turn')
-											: $i18n.t('Search the internet')}
-									placement="top-start"
-								>
-									<button
-										class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50 {openInternetBlocked
-											? 'opacity-50'
-											: ''}"
-										on:click={() => {
-											if (openInternetBlocked) return;
-											webSearchEnabled = !webSearchEnabled;
-											if (webSearchEnabled) {
-												imageGenerationEnabled = false;
-											}
-										}}
-									>
-										<div class="flex-1 truncate">
-											<div class="flex flex-1 gap-2 items-center">
-												<div class="shrink-0">
-													<GlobeAlt />
-												</div>
-												<div class="truncate">{$i18n.t('Search the web')}</div>
-											</div>
-										</div>
-
-										<Tooltip
-											content={pinnedInputItems.includes('web_search')
-												? $i18n.t('Unpin')
-												: $i18n.t('Pin')}
-										>
-											<button
-												class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-												on:click|stopPropagation={() => pinItemHandler('web_search')}
-											>
-												{#if pinnedInputItems.includes('web_search')}
-													<PinSlash className="size-3.5" />
-												{:else}
-													<Pin className="size-3.5" />
-												{/if}
-											</button>
-										</Tooltip>
-
-										<div class="shrink-0">
-											<Switch
-												state={webSearchEnabled}
-												on:change={async (e) => {
-													const state = e.detail;
-													await tick();
-												}}
-											/>
-										</div>
-									</button>
-								</Tooltip>
-							{/if}
-
-							<!-- Image Generation -->
-							{#if showImageGenerationButton}
-								<Tooltip
-									content={webSearchEnabled
-										? $i18n.t('Web search and image generation cannot run in the same turn')
-										: $i18n.t('Generate an image')}
-									placement="top-start"
-								>
-									<button
-										class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-										on:click={() => {
-											imageGenerationEnabled = !imageGenerationEnabled;
-											if (imageGenerationEnabled) {
-												webSearchEnabled = false;
-											}
-										}}
-									>
-										<div class="flex-1 truncate">
-											<div class="flex flex-1 gap-2 items-center">
-												<div class="shrink-0">
-													<Photo className="size-4" strokeWidth="1.5" />
-												</div>
-												<div class="truncate">{$i18n.t('Image')}</div>
-											</div>
-										</div>
-
-										<Tooltip
-											content={pinnedInputItems.includes('image_generation')
-												? $i18n.t('Unpin')
-												: $i18n.t('Pin')}
-										>
-											<button
-												class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-												on:click|stopPropagation={() => pinItemHandler('image_generation')}
-											>
-												{#if pinnedInputItems.includes('image_generation')}
-													<PinSlash className="size-3.5" />
-												{:else}
-													<Pin className="size-3.5" />
-												{/if}
-											</button>
-										</Tooltip>
-
-										<div class="shrink-0">
-											<Switch
-												state={imageGenerationEnabled}
-												on:change={async (e) => {
-													const state = e.detail;
-													await tick();
-												}}
-											/>
-										</div>
-									</button>
-								</Tooltip>
-							{/if}
-
-							<!-- Document Writer -->
-							{#if showDocumentWriterButton}
-								<Tooltip content={$i18n.t('Write a downloadable document')} placement="top-start">
-									<button
-										class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-										aria-pressed={documentWriterEnabled}
-										aria-label={documentWriterEnabled
-											? $i18n.t('Disable Document Writer')
-											: $i18n.t('Enable Document Writer')}
-										on:click={() => {
-											documentWriterEnabled = !documentWriterEnabled;
-										}}
-									>
-										<div class="flex-1 truncate">
-											<div class="flex flex-1 gap-2 items-center">
-												<div class="shrink-0">
-													<Document className="size-3.5" strokeWidth="1.75" />
-												</div>
-												<div class="truncate">{$i18n.t('Document Writer')}</div>
-											</div>
-										</div>
-
-										<Tooltip
-											content={pinnedInputItems.includes('document_writer')
-												? $i18n.t('Unpin')
-												: $i18n.t('Pin')}
-										>
-											<button
-												class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-												on:click|stopPropagation={() => pinItemHandler('document_writer')}
-											>
-												{#if pinnedInputItems.includes('document_writer')}
-													<PinSlash className="size-3.5" />
-												{:else}
-													<Pin className="size-3.5" />
-												{/if}
-											</button>
-										</Tooltip>
-
-										<div class="shrink-0">
-											<Switch
-												state={documentWriterEnabled}
-												on:change={async (e) => {
-													const state = e.detail;
-													await tick();
-												}}
-											/>
-										</div>
-									</button>
-								</Tooltip>
-							{/if}
-
-							<!-- Code Interpreter -->
-							{#if showCodeInterpreterButton}
-								<Tooltip content={$i18n.t('Execute code for analysis')} placement="top-start">
-									<button
-										class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-										aria-pressed={codeInterpreterEnabled}
-										aria-label={codeInterpreterEnabled
-											? $i18n.t('Disable Code Interpreter')
-											: $i18n.t('Enable Code Interpreter')}
-										on:click={() => {
-											codeInterpreterEnabled = !codeInterpreterEnabled;
-										}}
-									>
-										<div class="flex-1 truncate">
-											<div class="flex flex-1 gap-2 items-center">
-												<div class="shrink-0">
-													<Terminal className="size-3.5" strokeWidth="1.75" />
-												</div>
-												<div class="truncate">{$i18n.t('Code Interpreter')}</div>
-											</div>
-										</div>
-
-										<Tooltip
-											content={pinnedInputItems.includes('code_interpreter')
-												? $i18n.t('Unpin')
-												: $i18n.t('Pin')}
-										>
-											<button
-												class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-												on:click|stopPropagation={() => pinItemHandler('code_interpreter')}
-											>
-												{#if pinnedInputItems.includes('code_interpreter')}
-													<PinSlash className="size-3.5" />
-												{:else}
-													<Pin className="size-3.5" />
-												{/if}
-											</button>
-										</Tooltip>
-
-										<div class="shrink-0">
-											<Switch
-												state={codeInterpreterEnabled}
-												on:change={async (e) => {
-													const state = e.detail;
-													await tick();
-												}}
-											/>
-										</div>
-									</button>
-								</Tooltip>
-							{/if}
-						{/if}
-					{/if}
-				</div>
-			{:else if tab === 'knowledge' && isFeatureEnabled('knowledge')}
-				<div in:fly={{ x: directTab ? 0 : 20, duration: directTab ? 0 : 150 }}>
-					{#if !directTab}
-						<button
-							class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-							on:click={() => {
-								tab = '';
-							}}
-						>
-							<ChevronLeft />
-
-							<div class="flex items-center w-full justify-between">
-								<div>
-									{$i18n.t('Knowledge')}
+									{/each}
 								</div>
-							</div>
-						</button>
-					{/if}
-
-					<Knowledge {onSelect} />
-				</div>
-			{:else if tab === 'notes'}
-				<div in:fly={{ x: 20, duration: 150 }}>
-					<button
-						class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-						on:click={() => {
-							tab = '';
-						}}
-					>
-						<ChevronLeft />
-
-						<div class="flex items-center w-full justify-between">
-							<div>
-								{$i18n.t('Notes')}
-							</div>
-						</div>
-					</button>
-
-					<Notes {onSelect} />
-				</div>
-			{:else if tab === 'chats'}
-				<div in:fly={{ x: 20, duration: 150 }}>
-					<button
-						class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-						on:click={() => {
-							tab = '';
-						}}
-					>
-						<ChevronLeft />
-
-						<div class="flex items-center w-full justify-between">
-							<div>
-								{$i18n.t('Chats')}
-							</div>
-						</div>
-					</button>
-
-					<Chats {onSelect} />
-				</div>
-			{:else if tab === 'tools' && tools && isFeatureEnabled('tools')}
-				<div in:fly={{ x: 20, duration: 150 }}>
-					<button
-						class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-						on:click={() => {
-							tab = '';
-						}}
-					>
-						<ChevronLeft />
-
-						<div class="flex items-center w-full justify-between">
-							<div>
-								{$i18n.t('Tools')}
-								<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
-							</div>
-						</div>
-					</button>
-
-					{#each Object.keys(tools) as toolId}
-						<button
-							class="relative flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-							on:click={async (e) => {
-								if (!(tools[toolId]?.authenticated ?? true)) {
-									e.preventDefault();
-
-									let parts = toolId.split(':');
-									let serverId = parts?.at(-1) ?? toolId;
-
-									const authUrl = getOAuthClientAuthorizationUrl(serverId, 'mcp');
-									window.open(authUrl, '_self', 'noopener');
-								} else {
-									tools[toolId].enabled = !tools[toolId].enabled;
-
-									const state = tools[toolId].enabled;
-									await tick();
-
-									if (state) {
-										selectedToolIds = [...selectedToolIds, toolId];
-									} else {
-										selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
-									}
-								}
-							}}
-						>
-							{#if !(tools[toolId]?.authenticated ?? true)}
-								<div class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10" />
 							{/if}
-							<div class="flex-1 truncate">
-								<div class="flex flex-1 gap-2 items-center">
-									<Tooltip content={tools[toolId]?.name ?? ''} placement="top">
-										<div class="shrink-0">
-											<Wrench />
-										</div>
-									</Tooltip>
-									<Tooltip content={tools[toolId]?.description ?? ''} placement="top-start">
-										<div class="truncate">{tools[toolId].name}</div>
-									</Tooltip>
-								</div>
-							</div>
+						</div>
+					{:else if tab === 'skills'}
+						<SearchInput bind:value={skillQuery} placeholder={$i18n.t('Search skills')} />
 
-							{#if tools[toolId]?.has_user_valves}
-								<div class="shrink-0">
-									<Tooltip content={$i18n.t('Valves')}>
+						<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
+							{#if skills === null}
+								<div class="py-4">
+									<Spinner />
+								</div>
+							{:else if skillIds.length === 0}
+								<div class="text-center text-xs text-gray-500 py-3">
+									{$i18n.t('No skills found')}
+								</div>
+							{:else}
+								<div class="flex flex-col gap-0.5">
+									{#each skillIds as skillId}
 										<button
-											class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
-											type="button"
-											on:click={(e) => {
-												e.stopPropagation();
-												e.preventDefault();
-												onShowValves({
-													type: 'tool',
-													id: toolId
-												});
+											class={subRowClass}
+											aria-pressed={selectedSkillIds.includes(skillId)}
+											on:click={async () => {
+												await toggleSkill(skillId);
 											}}
 										>
-											<Knobs />
+											<div class="flex-1 truncate">
+												<div class="flex flex-1 gap-2 items-center">
+													<Tooltip content={skills?.[skillId]?.name ?? ''} placement="top">
+														<div class="shrink-0">
+															<Cube className="size-3.5" strokeWidth="1.75" />
+														</div>
+													</Tooltip>
+													<Tooltip
+														content={skills?.[skillId]?.description ?? ''}
+														placement="top-start"
+													>
+														<div class=" truncate">{skills?.[skillId]?.name}</div>
+													</Tooltip>
+												</div>
+											</div>
+
+											<div class=" shrink-0" inert>
+												<Switch state={selectedSkillIds.includes(skillId)} />
+											</div>
 										</button>
-									</Tooltip>
+									{/each}
 								</div>
 							{/if}
-
-							<div class="shrink-0">
-								<Switch state={tools[toolId].enabled} />
-							</div>
-						</button>
-					{/each}
+						</div>
+					{/if}
 				</div>
 			{/if}
-		</div>
+		</DropdownMenu>
 	</div>
 </Dropdown>

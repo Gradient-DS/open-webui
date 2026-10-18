@@ -1,0 +1,141 @@
+name: Runtime Security
+
+# RUNTIME_SOEV_BACKED=waive (default) skips private-service seeds and routes.
+# The private full-stack runner sets drive to seed them and require their hits.
+#
+# Layer 2 of the security gates: the application is driven over real HTTP inside
+# a stack with no route off-host, while Falco watches syscalls. The static suite
+# in security.yml cannot catch what this catches -- four of the findings this
+# plane has produced are stored values reaching a sink on a LATER request, a
+# shape stock SAST rules structurally do not follow.
+#
+# There is deliberately no workflow-level `paths:` filter. `runtime-gate` is
+# meant to become a required status check, and a workflow-level filter would
+# leave GitHub waiting forever for a check that never reports on an irrelevant
+# pull request. The `changes` job decides relevance internally instead.
+
+on:
+  pull_request:
+    branches: [dev, test, main]
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+# Same rule as security.yml: cancel only a superseded pull-request run.
+# Scheduled and dispatched runs both have ref = the default branch, so a shared
+# group let a manual dispatch cancel the nightly audit (or the other way round).
+concurrency:
+  group: runtime-security-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Decide whether runtime paths changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'backend/open_webui/**'
+              - 'cicd/**'
+              - 'security/**'
+              - 'scripts/security/**'
+              - 'docker-compose.ci.yaml'
+              - '.github/workflows/runtime-security.yml'
+
+  runtime-audit:
+    needs: changes
+    # A manual run is always meant, so it is never filtered out. On a dispatch
+    # there is no pull request to ask about, so whatever paths-filter reports
+    # describes the last commit rather than the reason someone asked for the
+    # run. A filtered dispatch would skip the audit and hand `runtime-gate` a
+    # skipped dependency, which the shared gate script rightly refuses to read
+    # as a pass -- the run would report red without having tested anything.
+    if: >-
+      needs.changes.outputs.relevant == 'true'
+      || github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+    uses: Gradient-DS/security-ci/.github/workflows/runtime-security.yml@e18c245d84975f79da5c97d1987b83039c13292e # v8
+    # The tooling repository is private, so the workflow needs the org App
+    # credentials to check itself out; without them it fails at that checkout.
+    secrets: inherit
+    with:
+      compose-file: 'docker-compose.ci.yaml'
+      guarded-containers: 'open-webui-ci'
+      health-url: 'http://127.0.0.1:8080/health'
+      # Paths are relative to the container's workdir, /app/backend, not to the
+      # repository root: the image copies ./backend to /app/backend.
+      # Keep the live pass order: authorization destroys owner state, and the
+      # coverage gate consumes hits from all passes in this same invocation.
+      # Offline checks and helper unit tests run in Backend Unit Tests.
+      test-command: >-
+        docker compose -f docker-compose.ci.yaml exec -T
+        -e ATTACK_BASE_URL=http://localhost:8080
+        -e ATTACK_CONFIG_STATE_DIR=/tmp/attack-config
+        open-webui python -m pytest
+        open_webui/test/security/attack/test_live_client.py
+        open_webui/test/security/attack/test_live_seeds.py
+        open_webui/test/security/attack/test_live_plane.py
+        open_webui/test/security/attack/test_live_shapes.py
+        open_webui/test/security/attack/test_live_query.py
+        open_webui/test/security/attack/test_live_model_path.py
+        open_webui/test/security/attack/test_live_crossuser.py
+        open_webui/test/security/test_live_route_coverage.py
+        -v
+      # Fail the audit on runtime findings; runtime-gate propagates that result.
+      enforce: true
+      # No cache-scope: INSTALL_SECURITY_CI_DEPS installs private security-ci
+      # packages in the image. The reusable workflow exports all built services
+      # with mode=max, and this public repository's GHA cache is fork-readable.
+      # A BuildKit secret protects the token, not the installed private code.
+
+  runtime-gate:
+    name: runtime-gate
+    needs: [changes, runtime-audit]
+    # Always runs, so the check always reports something. A workflow that dies at
+    # startup publishes NO check, and a ruleset treats an absent check as
+    # satisfied. Note the name: security.yml publishes `gate`, and a ruleset
+    # requiring `gate` would be satisfied by whatever reports under that name --
+    # so a dead runtime workflow would leave the static gate alone to satisfy the
+    # rule, and a dead gate reads exactly like a passing one.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - id: tooling-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v4.2.0
+        with:
+          app-id: ${{ secrets.SECURITY_CI_APP_ID }}
+          private-key: ${{ secrets.SECURITY_CI_APP_PRIVATE_KEY }}
+          owner: Gradient-DS
+          repositories: security-ci
+
+      - uses: actions/checkout@v6
+        with:
+          repository: Gradient-DS/security-ci
+          ref: e18c245d84975f79da5c97d1987b83039c13292e # v8
+          token: ${{ steps.tooling-token.outputs.token }}
+          path: .security-tooling
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Decide
+        working-directory: .security-tooling
+        run: |
+          python scripts/runtime_gate.py \
+            --relevant '${{ needs.changes.outputs.relevant }}' \
+            --event '${{ github.event_name }}' \
+            --audit-result '${{ needs.runtime-audit.result }}'

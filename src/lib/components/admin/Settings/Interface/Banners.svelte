@@ -8,6 +8,7 @@
 	import { getContext, onMount } from 'svelte';
 	import { getLanguages } from '$lib/i18n';
 	import { toLocalizedObject } from '$lib/utils/localized';
+	import SettingsSelect from '$lib/components/common/SettingsSelect.svelte';
 	const i18n = getContext('i18n');
 
 	export let banners = [];
@@ -104,21 +105,17 @@
 			<EllipsisVertical className="size-4 cursor-move item-handle" />
 
 			<div class="flex flex-row flex-1 gap-2 items-start">
-				<select
-					class="w-fit capitalize rounded-xl text-xs bg-transparent outline-hidden pl-1 pr-5"
-					bind:value={banner.type}
-					required
-				>
+				<SettingsSelect bind:value={banner.type} required selectClassName="capitalize">
 					<option value="" disabled hidden class="text-gray-900">{$i18n.t('Type')}</option>
 					<option value="info" class="text-gray-900">{$i18n.t('Info')}</option>
 					<option value="warning" class="text-gray-900">{$i18n.t('Warning')}</option>
 					<option value="error" class="text-gray-900">{$i18n.t('Error')}</option>
 					<option value="success" class="text-gray-900">{$i18n.t('Success')}</option>
-				</select>
+				</SettingsSelect>
 
 				<div class="flex flex-col flex-1 mr-2">
 					<Textarea
-						className="text-xs w-full bg-transparent outline-hidden resize-none"
+						className="text-xs w-full border border-gray-100/50 !bg-gray-50/40 outline-hidden dark:border-white/[0.04] dark:!bg-white/[0.03] dark:text-gray-300 resize-none"
 						placeholder={$i18n.t('Content ({{lang}})', { lang: editLang })}
 						value={toLocalizedObject(banner.content, editLang)[editLang] ?? ''}
 						onInput={(e) => setBannerContent(bannerIdx, e.target.value)}

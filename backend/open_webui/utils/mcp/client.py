@@ -1,30 +1,35 @@
 import asyncio
 import logging
-from typing import Optional
 from contextlib import AsyncExitStack
+from functools import partial
+from ssl import SSLContext
+from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
 import anyio
-
+import httpx
 from mcp import ClientSession
 from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
-import httpx
-from open_webui.env import AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL, AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER
+from open_webui.env import (
+    AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL,
+    AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER,
+    MCP_INITIALIZE_TIMEOUT,
+)
+from open_webui.utils.outbound import GuardedAsyncClient
 
 
-def _build_httpx_client(headers=None, timeout=None, auth=None, verify=True):
-    """Create an httpx AsyncClient for MCP transport.
-
-    Falls back to AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER when the caller
-    (i.e. the MCP SDK) does not supply an explicit timeout.
-
-    Note: verify must be passed at construction time because httpx
-    configures the SSL context during __init__. Setting client.verify = False
-    after construction does not affect the underlying transport's SSL context.
-    """
+def _build_httpx_client(
+    headers: httpx.Headers | dict[str, str] | None = None,
+    timeout: httpx.Timeout | float | None = None,
+    auth: Any = None,
+    verify: bool | str | SSLContext = True,
+    *,
+    trusted_url: str | None = None,
+) -> GuardedAsyncClient:
+    """Build the MCP transport with the configured TLS verification and default timeout."""
     kwargs = {
         'follow_redirects': True,
         'verify': verify,
@@ -37,15 +42,32 @@ def _build_httpx_client(headers=None, timeout=None, auth=None, verify=True):
         kwargs['headers'] = headers
     if auth is not None:
         kwargs['auth'] = auth
-    return httpx.AsyncClient(**kwargs)
+    return GuardedAsyncClient(trusted_url=trusted_url, **kwargs)
 
 
-def create_httpx_client(headers=None, timeout=None, auth=None):
-    return _build_httpx_client(headers=headers, timeout=timeout, auth=auth, verify=True)
+def create_httpx_client(
+    headers: httpx.Headers | dict[str, str] | None = None,
+    timeout: httpx.Timeout | float | None = None,
+    auth: Any = None,
+    *,
+    trusted_url: str | None = None,
+) -> GuardedAsyncClient:
+    # AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL may be True, False, or an
+    # ssl.SSLContext (when a custom CA bundle path is configured).
+    # httpx's verify= accepts bool | str | ssl.SSLContext, so all three work.
+    ssl_setting = AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL
+    verify = ssl_setting if ssl_setting is not True else True
+    return _build_httpx_client(headers=headers, timeout=timeout, auth=auth, verify=verify, trusted_url=trusted_url)
 
 
-def create_insecure_httpx_client(headers=None, timeout=None, auth=None):
-    return _build_httpx_client(headers=headers, timeout=timeout, auth=auth, verify=False)
+def create_insecure_httpx_client(
+    headers: httpx.Headers | dict[str, str] | None = None,
+    timeout: httpx.Timeout | float | None = None,
+    auth: Any = None,
+    *,
+    trusted_url: str | None = None,
+) -> GuardedAsyncClient:
+    return _build_httpx_client(headers=headers, timeout=timeout, auth=auth, verify=False, trusted_url=trusted_url)
 
 
 class MCPClient:
@@ -59,9 +81,10 @@ class MCPClient:
                 self._streams_context = streamablehttp_client(
                     url,
                     headers=headers,
-                    httpx_client_factory=create_httpx_client
-                    if AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL
-                    else create_insecure_httpx_client,
+                    httpx_client_factory=partial(
+                        create_httpx_client if AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL else create_insecure_httpx_client,
+                        trusted_url=url,
+                    ),
                 )
 
                 transport = await exit_stack.enter_async_context(self._streams_context)
@@ -70,11 +93,11 @@ class MCPClient:
                 self._session_context = ClientSession(read_stream, write_stream)  # pylint: disable=W0201
 
                 self.session = await exit_stack.enter_async_context(self._session_context)
-                with anyio.fail_after(10):
+                with anyio.fail_after(MCP_INITIALIZE_TIMEOUT):
                     await self.session.initialize()
                 self.exit_stack = exit_stack.pop_all()
             except Exception as e:
-                await asyncio.shield(self.disconnect())
+                await self.disconnect()
                 raise e
 
     async def list_tool_specs(self) -> Optional[dict]:
@@ -142,9 +165,7 @@ class MCPClient:
         """Clean up and close the session.
 
         This method is idempotent — calling it multiple times or on a
-        client that was never connected is safe.  It shields the close
-        operation from CancelledError and adds a timeout so a hung MCP
-        server cannot block the event loop indefinitely.
+        client that was never connected is safe.
         """
         exit_stack = self.exit_stack
         if exit_stack is None:
@@ -164,8 +185,11 @@ class MCPClient:
             # We simply call aclose() directly. If the task is cancelled, the
             # sockets will eventually be cleaned up by garbage collection.
             await exit_stack.aclose()
-        except TimeoutError:
-            log.warning('MCPClient.disconnect() timed out after 5 s')
+        except asyncio.CancelledError as exc:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise
+            log.debug('MCPClient.disconnect() suppressed internal cancellation: %s', exc)
         except RuntimeError as exc:
             log.debug('MCPClient.disconnect() suppressed RuntimeError: %s', exc)
         except Exception as exc:

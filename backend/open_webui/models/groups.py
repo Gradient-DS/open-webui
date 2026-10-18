@@ -1,25 +1,29 @@
-import json
 import logging
 import time
-from typing import Optional
 import uuid
+from typing import Optional
 
-from sqlalchemy import select, delete, update, func, and_, or_, cast, String
-from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.env import DEFAULT_GROUP_SHARE_PERMISSION
-
+from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.files import FileMetadataResponse
-
-
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Column,
-    Text,
-    JSON,
     ForeignKey,
+    Index,
+    String,
+    Text,
+    and_,
+    cast,
+    delete,
+    func,
+    or_,
+    select,
+    update,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +72,8 @@ class GroupModel(BaseModel):
 
 class GroupMember(Base):
     __tablename__ = 'group_member'
+    # The table's (group_id, user_id) unique constraint cannot serve user_id lookups.
+    __table_args__ = (Index('ix_group_member_user_id_group_id', 'user_id', 'group_id'),)
 
     id = Column(Text, unique=True, primary_key=True)
     group_id = Column(
@@ -304,7 +310,10 @@ class GroupTable:
                 .filter(GroupMember.user_id == user_id)
                 .order_by(Group.updated_at.desc())
             )
-            return [GroupModel.model_validate(group) for group in result.scalars().all()]
+            groups = [GroupModel.model_validate(group) for group in result.scalars().all()]
+            from open_webui.soev.group_sync import archive_groups_for_users
+
+            return groups + (await archive_groups_for_users([user_id], db=db)).get(user_id, [])
 
     async def get_groups_by_member_ids(
         self, user_ids: list[str], db: Optional[AsyncSession] = None
@@ -325,6 +334,10 @@ class GroupTable:
             for user_id, group in rows:
                 user_groups[user_id].append(GroupModel.model_validate(group))
 
+            from open_webui.soev.group_sync import archive_groups_for_users
+
+            for user_id, groups in (await archive_groups_for_users(user_ids, db=db)).items():
+                user_groups[user_id].extend(groups)
             return user_groups
 
     async def get_group_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[GroupModel]:
@@ -649,4 +662,6 @@ class GroupTable:
             return False
 
 
-Groups = GroupTable()
+from open_webui.soev.groups import SoevGroupTable  # noqa: E402
+
+Groups = SoevGroupTable()

@@ -12,6 +12,18 @@
 	export let asHeader = false;
 	let state = false;
 
+	// [Gradient] Favicons come from a remote service and land a few hundred
+	// milliseconds after their row, so fade each in once it loaded instead of
+	// letting it pop; a cached one shows at once.
+	const fadeInOnLoad = (image: HTMLImageElement) => {
+		if (image.complete && image.naturalWidth) return;
+		image.style.opacity = '0';
+		image.style.transition = 'opacity 200ms ease-out';
+		const show = () => (image.style.opacity = '1');
+		image.addEventListener('load', show, { once: true });
+		image.addEventListener('error', show, { once: true });
+	};
+
 	// Favicon stack preview in the collapsed header. Show up to 5 stacked,
 	// then a "+N" badge for the rest. Source list mirrors the expanded
 	// list: `items[].link` for web_search results, `urls[]` for fetch_url.
@@ -32,6 +44,7 @@
 				<div class="flex items-center -space-x-2 shrink-0" aria-hidden="true">
 					{#each previewVisible as link (link)}
 						<img
+							use:fadeInOnLoad
 							src="https://www.google.com/s2/favicons?sz=32&domain={link}"
 							alt=""
 							class="size-5 rounded-full ring-1 ring-white dark:ring-gray-900 bg-white dark:bg-gray-900 object-contain"
@@ -57,6 +70,7 @@
 			<div class="flex items-center -space-x-2 shrink-0" aria-hidden="true">
 				{#each previewVisible as link (link)}
 					<img
+						use:fadeInOnLoad
 						src="https://www.google.com/s2/favicons?sz=32&domain={link}"
 						alt=""
 						class="size-5 rounded-full ring-1 ring-white dark:ring-gray-900 bg-white dark:bg-gray-900 object-contain"
@@ -128,6 +142,7 @@
 					<div class=" flex justify-center items-center gap-3">
 						<div class="w-fit">
 							<img
+								use:fadeInOnLoad
 								src="https://www.google.com/s2/favicons?sz=32&domain={item.link}"
 								alt="{item?.title ?? item.link} favicon"
 								class="size-3.5"
@@ -168,6 +183,7 @@
 					<div class=" flex justify-center items-center gap-3">
 						<div class="w-fit">
 							<img
+								use:fadeInOnLoad
 								src="https://www.google.com/s2/favicons?sz=32&domain={url}"
 								alt="{url} favicon"
 								class="size-3.5"

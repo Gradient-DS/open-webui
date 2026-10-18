@@ -21,6 +21,7 @@ from open_webui.models.tags import Tags
 from open_webui.models.tools import Tools
 from open_webui.models.users import Users
 from open_webui.services.export.events import emit_export_status
+from open_webui.soev.availability import configured
 from open_webui.storage.provider import Storage
 
 log = logging.getLogger(__name__)
@@ -107,7 +108,9 @@ class ExportService:
         data['tools'] = [ExportService._serialize(t) for t in tools]
 
         # Custom models
-        models = await Models.get_models_by_user_id(user_id)
+        # Upstream #28795 dropped get_models_by_user_id and folded the same
+        # owner-or-writable filter into get_models, in SQL. Same set, one query.
+        models = await Models.get_models(writable_by_user_id=user_id)
         data['models'] = [ExportService._serialize(m) for m in models]
 
         # Feedbacks
@@ -127,7 +130,7 @@ class ExportService:
         data['files'] = [ExportService._serialize(f) for f in files]
 
         # Knowledge bases metadata
-        knowledge_bases = await Knowledges.get_knowledge_bases_by_user_id(user_id)
+        knowledge_bases = await Knowledges.get_knowledge_bases_by_user_id(user_id) if configured() else []
         data['knowledge_bases'] = [ExportService._serialize(kb) for kb in knowledge_bases]
 
         return data
@@ -142,7 +145,7 @@ class ExportService:
         cloud_kb_ids = set()
         for kb in data.get('knowledge_bases', []):
             kb_type = kb.get('type', 'local')
-            if kb_type in ('onedrive', 'google_drive', 'confluence', 'topdesk'):
+            if kb_type in ('onedrive', 'google_drive', 'confluence'):
                 cloud_kb_ids.add(kb.get('id'))
 
         # Build set of file IDs that belong to cloud KBs

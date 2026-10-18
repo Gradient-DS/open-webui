@@ -12,6 +12,8 @@
 	export let count: number = 0;
 	export let allSelected: boolean = false;
 	export let indeterminate: boolean = false;
+	// Nothing on this level can be bulk-removed (e.g. only synced sources).
+	export let selectable: boolean = true;
 	export let onToggleSelectAll: () => void = () => {};
 	export let onDelete: () => void = () => {};
 </script>
@@ -26,6 +28,7 @@
 			type="button"
 			class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition flex items-center"
 			on:click={onToggleSelectAll}
+			disabled={count === 0 && !selectable}
 			aria-label={count > 0 ? $i18n.t('Deselect') : $i18n.t('Select All')}
 		>
 			<div
@@ -70,7 +73,11 @@
 			</button>
 		</Tooltip>
 	{:else}
-		<span class="text-xs text-gray-400 dark:text-gray-500 flex-1 truncate select-none">
+		<span
+			class="text-xs flex-1 truncate select-none {selectable
+				? 'text-gray-400 dark:text-gray-500'
+				: 'text-gray-300 dark:text-gray-600'}"
+		>
 			{$i18n.t('Select All')}
 		</span>
 	{/if}

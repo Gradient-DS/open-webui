@@ -1,17 +1,28 @@
 <script lang="ts">
+	import type { Readable } from 'svelte/store';
+	import type { i18n as I18n } from 'i18next';
 	import { createEventDispatcher, getContext } from 'svelte';
+	import type { ChatAttachment } from '$lib/types/chatAttachment';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import { formatFileSize } from '$lib/utils';
-	import { settings } from '$lib/stores';
+	import { settings, showFileNavPath } from '$lib/stores';
 
 	import FileItemModal from './FileItemModal.svelte';
-	import GarbageBin from '../icons/GarbageBin.svelte';
 	import Spinner from './Spinner.svelte';
 	import Tooltip from './Tooltip.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import {
+		CHAT_FILE_PANEL,
+		opensInPanel,
+		type OpenFileInPanel
+	} from '$lib/components/chat/Messages/Citations/fileCitation'; // [Gradient]
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Readable<I18n>>('i18n');
+	// [Gradient] Inside a chat, files open in the sources panel instead of the modal.
+	const openInPanel = getContext<OpenFileInPanel | undefined>(CHAT_FILE_PANEL);
+	$: originalUrl =
+		typeof item?.web_url === 'string' && item.web_url.startsWith('https://') ? item.web_url : null;
 	const dispatch = createEventDispatcher();
 
 	export let className = 'w-60';
@@ -23,7 +34,7 @@
 	export let modal = false;
 	export let loading = false;
 
-	export let item = null;
+	export let item: ChatAttachment | null = null;
 	export let edit = false;
 	export let small = false;
 
@@ -32,19 +43,21 @@
 	export let size: number;
 
 	import DocumentPage from '../icons/DocumentPage.svelte';
-	import OneDrive from '../icons/OneDrive.svelte';
-	import GoogleDrive from '../icons/GoogleDrive.svelte';
-	import Confluence from '../icons/Confluence.svelte';
+	// [Gradient] Cloud collections show the folder icon with a provider badge.
+	import SourceItemIcon from './SourceItemIcon.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
 	import ChatBubble from '../icons/ChatBubble.svelte';
+	// [Gradient] Vergadering attached as chat context.
+	import Mic from '../icons/Mic.svelte';
 	import Folder from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
+	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	let showModal = false;
 
 	const decodeString = (str: string) => {
 		try {
 			return decodeURIComponent(str);
-		} catch (e) {
+		} catch {
 			return str;
 		}
 	};
@@ -54,137 +67,165 @@
 	<FileItemModal bind:show={showModal} bind:item {edit} />
 {/if}
 
-<button
-	class="relative group p-1.5 {className} flex items-center gap-1 {colorClassName} {small
-		? 'rounded-xl p-2'
-		: 'rounded-2xl'} text-left"
-	type="button"
-	on:click={async () => {
-		if (item?.file?.data?.content || item?.type === 'file' || item?.content || modal) {
-			showModal = !showModal;
-		} else {
-			if (url) {
-				if (type === 'file') {
-					if (url.startsWith('http')) {
-						window.open(`${url}/content`, '_blank').focus();
+<div class="relative group {className}">
+	<button
+		class="w-full flex items-center {colorClassName} {small
+			? 'h-8 gap-1.5 rounded-xl px-2.5 text-[0.8125rem] leading-5'
+			: 'gap-1 rounded-2xl p-1.5'} text-left"
+		type="button"
+		on:click={async () => {
+			const filesystemPath =
+				item?.type === 'filesystem' ? (item.path ?? item.url ?? item.id) : null;
+
+			if (filesystemPath) {
+				showFileNavPath.set(filesystemPath);
+			} else if (openInPanel && opensInPanel(item) && openInPanel(item)) {
+				// [Gradient] Opened in the chat's sources panel.
+			} else if (
+				(typeof item?.file === 'object' && item.file?.data?.content) ||
+				item?.type === 'file' ||
+				item?.content ||
+				modal
+			) {
+				showModal = !showModal;
+			} else {
+				if (url) {
+					if (type === 'file') {
+						if (url.startsWith('http')) {
+							window.open(`${url}/content`, '_blank').focus();
+						} else {
+							window.open(`${WEBUI_API_BASE_URL}/files/${url}/content`, '_blank').focus();
+						}
 					} else {
-						window.open(`${WEBUI_API_BASE_URL}/files/${url}/content`, '_blank').focus();
+						window.open(`${url}`, '_blank').focus();
 					}
-				} else {
-					window.open(`${url}`, '_blank').focus();
 				}
 			}
-		}
 
-		dispatch('click');
-	}}
->
-	{#if !small}
-		<div
-			class="size-10 shrink-0 flex justify-center items-center bg-black/20 dark:bg-white/10 text-white rounded-xl"
-		>
-			{#if !loading}
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 24 24"
-					fill="currentColor"
-					aria-hidden="true"
-					class=" size-4.5"
-				>
-					<path
-						fill-rule="evenodd"
-						d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0 0 16.5 9h-1.875a1.875 1.875 0 0 1-1.875-1.875V5.25A3.75 3.75 0 0 0 9 1.5H5.625ZM7.5 15a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5A.75.75 0 0 1 7.5 15Zm.75 2.25a.75.75 0 0 0 0 1.5H12a.75.75 0 0 0 0-1.5H8.25Z"
-						clip-rule="evenodd"
-					/>
-					<path
-						d="M12.971 1.816A5.23 5.23 0 0 1 14.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 0 1 3.434 1.279 9.768 9.768 0 0 0-6.963-6.963Z"
-					/>
-				</svg>
-			{:else}
-				<Spinner />
-			{/if}
-		</div>
-	{:else}
-		<div class="pl-1.5">
-			{#if !loading}
-				<Tooltip
-					content={type === 'collection'
-						? $i18n.t('Collection')
-						: type === 'note'
-							? $i18n.t('Note')
-							: type === 'chat'
-								? $i18n.t('Chat')
-								: type === 'file'
-									? $i18n.t('File')
-									: $i18n.t('Document')}
-					placement="top"
-				>
-					{#if type === 'collection' && item?.knowledge_type === 'onedrive'}
-						<OneDrive />
-					{:else if type === 'collection' && item?.knowledge_type === 'google_drive'}
-						<GoogleDrive />
-					{:else if type === 'collection' && item?.knowledge_type === 'confluence'}
-						<Confluence />
-					{:else if type === 'collection'}
-						<FolderOpen />
-					{:else if type === 'note'}
-						<PageEdit />
-					{:else if type === 'chat'}
-						<ChatBubble />
-					{:else if type === 'folder'}
-						<Folder />
-					{:else}
-						<DocumentPage />
-					{/if}
-				</Tooltip>
-			{:else}
-				<Spinner />
-			{/if}
-		</div>
-	{/if}
-
-	{#if !small}
-		<div class="flex flex-col justify-center -space-y-0.5 px-2.5 w-full">
-			<div class=" dark:text-gray-100 text-sm font-medium line-clamp-1 mb-1">
-				{decodeString(name)}
-			</div>
-
+			dispatch('click');
+		}}
+	>
+		{#if !small}
 			<div
-				class=" flex justify-between text-xs line-clamp-1 {($settings?.highContrastMode ?? false)
-					? 'text-gray-800 dark:text-gray-100'
-					: 'text-gray-500'}"
+				class="size-10 shrink-0 flex justify-center items-center bg-black/20 dark:bg-white/10 text-white rounded-xl"
 			>
-				{#if type === 'file'}
-					{$i18n.t('File')}
-				{:else if type === 'note'}
-					{$i18n.t('Note')}
-				{:else if type === 'doc'}
-					{$i18n.t('Document')}
-				{:else if type === 'collection'}
-					{$i18n.t('Collection')}
+				{#if !loading}
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 24 24"
+						fill="currentColor"
+						aria-hidden="true"
+						class=" size-4.5"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0 0 16.5 9h-1.875a1.875 1.875 0 0 1-1.875-1.875V5.25A3.75 3.75 0 0 0 9 1.5H5.625ZM7.5 15a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5A.75.75 0 0 1 7.5 15Zm.75 2.25a.75.75 0 0 0 0 1.5H12a.75.75 0 0 0 0-1.5H8.25Z"
+							clip-rule="evenodd"
+						/>
+						<path
+							d="M12.971 1.816A5.23 5.23 0 0 1 14.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 0 1 3.434 1.279 9.768 9.768 0 0 0-6.963-6.963Z"
+						/>
+					</svg>
 				{:else}
-					<span class=" capitalize line-clamp-1">{type}</span>
-				{/if}
-				{#if size}
-					<span class="capitalize">{formatFileSize(size)}</span>
+					<Spinner />
 				{/if}
 			</div>
-		</div>
-	{:else}
-		<Tooltip content={decodeString(name)} className="flex flex-col w-full" placement="top-start">
-			<div class="flex flex-col justify-center -space-y-0.5 px-1 w-full">
-				<div class=" dark:text-gray-100 text-sm flex justify-between items-center">
-					<div class="font-medium line-clamp-1 flex-1 pr-1">{decodeString(name)}</div>
-					{#if size}
-						<div class="text-gray-500 text-xs capitalize shrink-0">{formatFileSize(size)}</div>
+		{:else}
+			<div class="shrink-0 text-gray-500 dark:text-gray-400">
+				{#if !loading}
+					<Tooltip
+						content={type === 'collection'
+							? $i18n.t('Collection')
+							: type === 'note'
+								? $i18n.t('Note')
+								: type === 'meeting'
+									? $i18n.t('Meeting')
+									: type === 'chat'
+										? $i18n.t('Chat')
+										: type === 'file' || type === 'filesystem'
+											? $i18n.t('File')
+											: type === 'url'
+												? $i18n.t('Web page')
+												: $i18n.t('Document')}
+						placement="top"
+					>
+						{#if type === 'collection'}
+							<SourceItemIcon kind="folder" icon={FolderOpen} provider={item?.knowledge_type} />
+						{:else if type === 'note'}
+							<PageEdit className="size-3.5" />
+						{:else if type === 'meeting'}
+							<Mic className="size-3.5" />
+						{:else if type === 'chat'}
+							<ChatBubble className="size-3.5" />
+						{:else if type === 'folder'}
+							<Folder className="size-3.5" />
+						{:else if type === 'url'}
+							<!-- [Gradient] A web page the agent reads live (GRA-222). -->
+							<GlobeAlt className="size-3.5" />
+						{:else}
+							<DocumentPage className="size-3.5" />
+						{/if}
+					</Tooltip>
+				{:else}
+					<Spinner className="size-3.5" />
+				{/if}
+			</div>
+		{/if}
+
+		{#if !small}
+			<div class="flex flex-col justify-center -space-y-0.5 px-2.5 w-full">
+				<div class=" dark:text-gray-100 text-sm font-normal line-clamp-1 mb-1">
+					{decodeString(name)}
+				</div>
+
+				<div
+					class=" flex justify-between text-xs line-clamp-1 {($settings?.highContrastMode ?? false)
+						? 'text-gray-800 dark:text-gray-100'
+						: 'text-gray-500'}"
+				>
+					{#if type === 'file' || type === 'filesystem'}
+						{$i18n.t('File')}
+					{:else if type === 'note'}
+						{$i18n.t('Note')}
+					{:else if type === 'meeting'}
+						{$i18n.t('Meeting')}
+					{:else if type === 'doc'}
+						{$i18n.t('Document')}
+					{:else if type === 'collection'}
+						{$i18n.t('Collection')}
+					{:else if type === 'url'}
+						{$i18n.t('Web page')}
 					{:else}
-						<div class="text-gray-500 text-xs capitalize shrink-0">{type}</div>
+						<span class=" capitalize line-clamp-1">{type}</span>
+					{/if}
+					{#if size}
+						<span class="capitalize">{formatFileSize(size)}</span>
 					{/if}
 				</div>
 			</div>
-		</Tooltip>
-	{/if}
-
+		{:else}
+			<Tooltip
+				content={decodeString(name)}
+				className="flex min-w-0 flex-1 overflow-hidden"
+				placement="top-start"
+			>
+				<div class="flex min-w-0 flex-1 items-center overflow-hidden">
+					<div class="flex min-w-0 flex-1 items-center justify-between dark:text-gray-100">
+						<div class="min-w-0 flex-1 truncate pr-1 font-normal">{decodeString(name)}</div>
+						{#if size}
+							<div class="max-w-[35%] shrink-0 truncate text-[0.6875rem] capitalize text-gray-500">
+								{formatFileSize(size)}
+							</div>
+						{:else}
+							<div class="max-w-[35%] shrink-0 truncate text-[0.6875rem] capitalize text-gray-500">
+								{type}
+							</div>
+						{/if}
+					</div>
+				</div>
+			</Tooltip>
+		{/if}
+	</button>
 	{#if dismissible}
 		<div class=" absolute -top-1 -right-1">
 			<button
@@ -192,7 +233,7 @@
 				class=" bg-white text-black border border-gray-50 rounded-full {($settings?.highContrastMode ??
 				false)
 					? ''
-					: 'outline-hidden focus:outline-hidden group-hover:visible invisible transition'}"
+					: 'hover-reveal transition'}"
 				type="button"
 				on:click|stopPropagation={() => {
 					dispatch('dismiss');
@@ -200,15 +241,16 @@
 			>
 				<XMark className={'size-4'} />
 			</button>
-
-			<!-- <button
-				class=" p-1 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-full group-hover:visible invisible transition"
-				type="button"
-				on:click={() => {
-				}}
-			>
-				<GarbageBin />
-			</button> -->
 		</div>
 	{/if}
-</button>
+	{#if item?.attached_by === 'agent' && originalUrl}
+		<a
+			href={originalUrl}
+			target="_blank"
+			rel="noopener noreferrer"
+			class="block px-2 py-1 text-xs text-blue-600 dark:text-blue-400"
+		>
+			{$i18n.t('Opened by the assistant from OneDrive')}
+		</a>
+	{/if}
+</div>

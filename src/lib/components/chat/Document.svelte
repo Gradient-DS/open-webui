@@ -1,44 +1,65 @@
 <script lang="ts">
+	import type { AgentDocument } from '$lib/utils/agentDocument';
+	import type { RawSource } from './Messages/Citations/reduceSources';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
-	import { chatId, config, showControls, showDocument, documentContents } from '$lib/stores';
+	import {
+		chatId,
+		config,
+		showControls,
+		showDocument,
+		documentContents,
+		selectedDocumentIndex
+	} from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
-	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
+	import { printDocument } from '$lib/utils/documentPrint';
+	import { documentPdf } from '$lib/utils/documentPdf';
 
 	import ContentRenderer from './Messages/ContentRenderer.svelte';
-	import Citations from './Messages/Citations.svelte';
-	import {
-		normalizeCitations,
-		buildFullSourceList,
-		formatSourcesAsMarkdown
-	} from '$lib/utils/citations';
+	import HtmlDocumentFrame from './Messages/HtmlDocumentFrame.svelte';
+	import Citations from './Messages/SoevCitations.svelte';
+	import { getExportMarkdown as exportMarkdown } from '$lib/utils/documentCitations';
 	import Download from '../icons/Download.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
+	import ChevronDown from '../icons/ChevronDown.svelte';
+	import { groupDocuments } from '$lib/utils/documentGroups';
 
 	export let overlay = false;
 
-	let contents: Array<{
-		title: string;
-		markdown: string;
-		sources?: any[];
-	}> = [];
-	let selectedContentIdx = 0;
+	let contents: Array<AgentDocument & { sources?: RawSource[]; messageId?: string }> = [];
 	let copied = false;
 	let downloadOpen = false;
-	let citationsElement: any = null;
+	let citationsElement: Citations | null = null;
 
-	$: current = contents[selectedContentIdx];
+	let documentMenuOpen = false;
+
+	$: current = contents[$selectedDocumentIndex];
+	// Different documents are picked from the title menu; the arrows page through one document's versions.
+	$: groups = groupDocuments(contents);
+	$: currentGroup = groups.find((group) => group.indices.includes($selectedDocumentIndex));
+	$: versions = currentGroup?.indices ?? [];
+	$: versionPosition = versions.indexOf($selectedDocumentIndex);
+	// [Gradient] A version switch closes the download menu; its options depend on the format.
+	$: ($selectedDocumentIndex, (downloadOpen = false), (documentMenuOpen = false));
 
 	function navigateContent(direction: 'prev' | 'next') {
-		selectedContentIdx =
+		const position =
 			direction === 'prev'
-				? Math.max(selectedContentIdx - 1, 0)
-				: Math.min(selectedContentIdx + 1, contents.length - 1);
+				? Math.max(versionPosition - 1, 0)
+				: Math.min(versionPosition + 1, versions.length - 1);
+		$selectedDocumentIndex = versions[position] ?? $selectedDocumentIndex;
+	}
+
+	function selectDocument(indices: number[]) {
+		$selectedDocumentIndex = indices[indices.length - 1];
+		documentMenuOpen = false;
 	}
 
 	const sanitizeFilename = (name: string) => {
@@ -46,17 +67,11 @@
 		return cleaned.length > 0 ? cleaned : 'document';
 	};
 
-	// Build the content to export: normalize [N] citations in the markdown and append a
-	// source appendix. When the body has no [N] markers, fall back to the full source
-	// list so the downloaded file matches what the Citations footer shows on screen.
 	const getExportMarkdown = () => {
 		if (!current) return '';
-		const sources = current.sources ?? [];
-		if (sources.length === 0) return current.markdown;
-		const { content, sourceList } = normalizeCitations(current.markdown, sources);
-		const appendix = sourceList.length > 0 ? sourceList : buildFullSourceList(sources);
-		if (appendix.length === 0) return current.markdown;
-		return `${content}\n\n---\n\n${formatSourcesAsMarkdown(appendix)}\n`;
+		return current.format === 'html'
+			? current.content
+			: exportMarkdown(current.content, current.sources ?? [], $i18n.t('Sources'));
 	};
 
 	const downloadMd = () => {
@@ -79,29 +94,39 @@
 
 	const downloadPdf = async () => {
 		if (!current) return;
+		downloadOpen = false;
 		try {
-			const blob = await exportDocumentAsPdf(
-				localStorage.token,
-				current.title,
-				getExportMarkdown()
-			);
-			if (blob) saveAs(blob, `${sanitizeFilename(current.title)}.pdf`);
+			const blob = await documentPdf(current, current.sources ?? [], $i18n.t('Sources'));
+			saveAs(blob, `${sanitizeFilename(current.title)}.pdf`);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export PDF'));
 		}
+	};
+
+	const print = async () => {
+		if (!current) return;
+		// Close first: the print dialog blocks the page, and the menu must not outlive it.
 		downloadOpen = false;
+		try {
+			await printDocument(current.title, getExportMarkdown(), current.format, current.page);
+		} catch (e) {
+			console.error(e);
+			toast.error($i18n.t('Failed to export PDF'));
+		}
 	};
 
 	const downloadDocx = async () => {
 		if (!current) return;
 		try {
-			const blob = await exportDocumentAsDocx(
-				localStorage.token,
+			const { buildDocumentDocx } = await import('$lib/utils/documentDocx');
+			const blob = await buildDocumentDocx(
 				current.title,
-				getExportMarkdown()
+				current.content,
+				current.sources ?? [],
+				$i18n.t('Sources')
 			);
-			if (blob) saveAs(blob, `${sanitizeFilename(current.title)}.docx`);
+			saveAs(blob, `${sanitizeFilename(current.title)}.docx`);
 		} catch (e) {
 			console.error(e);
 			toast.error($i18n.t('Failed to export Word document'));
@@ -118,14 +143,14 @@
 				if (hadContents) {
 					showControls.set(false);
 					showDocument.set(false);
-					selectedContentIdx = 0;
+					$selectedDocumentIndex = 0;
 				}
 			} else {
 				hadContents = true;
 				if (newContents.length > contents.length) {
-					selectedContentIdx = newContents.length - 1;
-				} else if (selectedContentIdx >= newContents.length) {
-					selectedContentIdx = Math.max(newContents.length - 1, 0);
+					$selectedDocumentIndex = newContents.length - 1;
+				} else if ($selectedDocumentIndex >= newContents.length) {
+					$selectedDocumentIndex = Math.max(newContents.length - 1, 0);
 				}
 			}
 
@@ -146,60 +171,95 @@
 			>
 				<div class="flex-1 flex items-center justify-between pr-1 min-w-0">
 					<div class="flex items-center space-x-2 min-w-0">
-						<div class="flex items-center gap-0.5 self-center min-w-fit" dir="ltr">
-							<button
-								class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition disabled:cursor-not-allowed"
-								on:click={() => navigateContent('prev')}
-								disabled={contents.length <= 1}
-								aria-label={$i18n.t('Previous')}
-							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-									stroke-width="2.5"
-									class="size-3.5"
+						{#if versions.length > 1}
+							<div class="flex items-center gap-0.5 self-center min-w-fit" dir="ltr">
+								<button
+									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition disabled:cursor-not-allowed"
+									on:click={() => navigateContent('prev')}
+									disabled={versionPosition <= 0}
+									aria-label={$i18n.t('Previous')}
 								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										d="M15.75 19.5 8.25 12l7.5-7.5"
-									/>
-								</svg>
-							</button>
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+										stroke-width="2.5"
+										class="size-3.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M15.75 19.5 8.25 12l7.5-7.5"
+										/>
+									</svg>
+								</button>
 
-							<div class="text-xs self-center dark:text-gray-100 min-w-fit">
-								{$i18n.t('Version {{selectedVersion}} of {{totalVersions}}', {
-									selectedVersion: selectedContentIdx + 1,
-									totalVersions: contents.length
-								})}
+								<div class="text-xs self-center dark:text-gray-100 min-w-fit">
+									{$i18n.t('Version {{selectedVersion}} of {{totalVersions}}', {
+										selectedVersion: versionPosition + 1,
+										totalVersions: versions.length
+									})}
+								</div>
+
+								<button
+									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition disabled:cursor-not-allowed"
+									on:click={() => navigateContent('next')}
+									disabled={versionPosition >= versions.length - 1}
+									aria-label={$i18n.t('Next')}
+								>
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+										stroke-width="2.5"
+										class="size-3.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="m8.25 4.5 7.5 7.5-7.5 7.5"
+										/>
+									</svg>
+								</button>
 							</div>
+						{/if}
 
-							<button
-								class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition disabled:cursor-not-allowed"
-								on:click={() => navigateContent('next')}
-								disabled={contents.length <= 1}
-								aria-label={$i18n.t('Next')}
+						{#if groups.length > 1}
+							<Dropdown
+								bind:show={documentMenuOpen}
+								contentClass="select-none min-w-[240px] max-w-[min(28rem,90vw)] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-									stroke-width="2.5"
-									class="size-3.5"
+								<button
+									class="flex items-center gap-1 min-w-0 px-1.5 py-0.5 -mx-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition"
+									aria-label={$i18n.t('Switch document')}
+									title={current.title}
 								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										d="m8.25 4.5 7.5 7.5-7.5 7.5"
-									/>
-								</svg>
-							</button>
-						</div>
+									<span class="text-sm font-medium truncate text-gray-900 dark:text-white">
+										{current.title || $i18n.t('Document')}
+									</span>
+									<ChevronDown className="size-3 shrink-0" strokeWidth="2.5" />
+								</button>
 
-						{#if current.title}
+								<div slot="content">
+									{#each groups as group}
+										<button
+											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full text-left"
+											class:font-medium={group === currentGroup}
+											on:click={() => selectDocument(group.indices)}
+										>
+											<span class="flex-1 truncate">{group.title || $i18n.t('Document')}</span>
+											{#if group.indices.length > 1}
+												<span class="shrink-0 text-xs text-gray-500">
+													{$i18n.t('{{count}} versions', { count: group.indices.length })}
+												</span>
+											{/if}
+										</button>
+									{/each}
+								</div>
+							</Dropdown>
+						{:else if current.title}
 							<div
 								class="text-sm font-medium truncate text-gray-900 dark:text-white"
 								title={current.title}
@@ -221,57 +281,69 @@
 							}}>{copied ? $i18n.t('Copied') : $i18n.t('Copy')}</button
 						>
 
-						<Dropdown
-							bind:show={downloadOpen}
-							align="end"
-							contentClass="select-none min-w-[180px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-						>
-							<Tooltip content={$i18n.t('Download')}>
-								<button
-									class="bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md p-0.5"
-									aria-label={$i18n.t('Download')}
-								>
-									<Download className="size-3.5" />
-								</button>
-							</Tooltip>
+						{#key `${$selectedDocumentIndex}-${current.format}`}
+							<Dropdown
+								bind:show={downloadOpen}
+								align="end"
+								contentClass="select-none min-w-[180px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+							>
+								<Tooltip content={$i18n.t('Download')}>
+									<button
+										class="bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md p-0.5"
+										aria-label={$i18n.t('Download')}
+									>
+										<Download className="size-3.5" />
+									</button>
+								</Tooltip>
 
-							<div slot="content">
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadMd}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('Markdown (.md)')}
-									</div>
-								</button>
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadTxt}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('Plain text (.txt)')}
-									</div>
-								</button>
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadPdf}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('PDF document (.pdf)')}
-									</div>
-								</button>
-							{#if $config?.features?.enable_docx_export ?? true}
+								<div slot="content">
+									{#if current.format === 'markdown'}
+										<button
+											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+											on:click={downloadMd}
+										>
+											<div class="flex items-center line-clamp-1">
+												{$i18n.t('Markdown (.md)')}
+											</div>
+										</button>
+										<button
+											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+											on:click={downloadTxt}
+										>
+											<div class="flex items-center line-clamp-1">
+												{$i18n.t('Plain text (.txt)')}
+											</div>
+										</button>
+									{/if}
 									<button
 										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-										on:click={downloadDocx}
+										on:click={downloadPdf}
 									>
 										<div class="flex items-center line-clamp-1">
-											{$i18n.t('Word document (.docx)')}
+											{$i18n.t('PDF document (.pdf)')}
 										</div>
 									</button>
-							{/if}
-							</div>
-						</Dropdown>
+									<button
+										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+										on:click={print}
+									>
+										<div class="flex items-center line-clamp-1">
+											{$i18n.t('Print')}
+										</div>
+									</button>
+									{#if current.format === 'markdown' && ($config?.features?.enable_docx_export ?? true)}
+										<button
+											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+											on:click={downloadDocx}
+										>
+											<div class="flex items-center line-clamp-1">
+												{$i18n.t('Word document (.docx)')}
+											</div>
+										</button>
+									{/if}
+								</div>
+							</Dropdown>
+						{/key}
 					</div>
 				</div>
 			</div>
@@ -284,26 +356,39 @@
 		<div class="flex-1 w-full h-full overflow-y-auto">
 			<div class="h-full flex flex-col">
 				{#if contents.length > 0 && current}
-					<div class="max-w-3xl w-full mx-auto px-6 py-6 prose dark:prose-invert">
-						<ContentRenderer
-							id={`document-${$chatId ?? 'preview'}-${selectedContentIdx}`}
-							content={current.markdown}
-							done={true}
-							editCodeBlock={false}
-							sources={current.sources}
-							floatingButtons={false}
-							onSourceClick={((id: any) => citationsElement?.showSourceModal(id)) as any}
-						/>
-					</div>
-					{#if (current.sources ?? []).length > 0}
-						<div class="max-w-3xl w-full mx-auto px-6 pb-6">
-							<Citations
-								bind:this={citationsElement}
-								id={`document-${$chatId ?? 'preview'}-${selectedContentIdx}`}
-								chatId={$chatId ?? ''}
+					{#if current.format === 'html'}
+						{#key $selectedDocumentIndex}
+							<HtmlDocumentFrame
+								content={current.content}
+								title={current.title}
+								page={current.page}
+								done={current.done}
+							/>
+						{/key}
+					{:else}
+						<div class="max-w-3xl w-full mx-auto px-6 py-6 prose dark:prose-invert">
+							<ContentRenderer
+								id={`document-${$chatId ?? 'preview'}-${$selectedDocumentIndex}`}
+								messageId={`document-${$selectedDocumentIndex}`}
+								history={undefined}
+								content={current.content}
+								done={current.done}
+								editCodeBlock={false}
 								sources={current.sources}
+								floatingButtons={false}
+								onSourceClick={(id: string | number) => citationsElement?.showSourceModal(id)}
 							/>
 						</div>
+					{/if}
+					{#if current.format === 'markdown' && (current.sources ?? []).length > 0}
+						<!-- The message's own id lets the sources panel open that question's group. -->
+						<Citations
+							bind:this={citationsElement}
+							id={current.messageId ?? ''}
+							chatId={$chatId ?? ''}
+							sources={current.sources}
+							listed={false}
+						/>
 					{/if}
 				{:else}
 					<div class="m-auto font-medium text-xs text-gray-900 dark:text-white">

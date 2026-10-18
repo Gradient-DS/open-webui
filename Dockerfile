@@ -133,32 +133,45 @@ RUN chown -R $UID:$GID /app $HOME
 # krb5 packages (libgssapi-krb5-2/libk5crypto3/libkrb5-3/libkrb5support0) added
 # for CVE-2026-40356 (HIGH krb5 DoS via integer underflow), fixed in
 # 1.20.1-2+deb12u5.
+# mariadb packages (libmariadb3/libmariadb-dev/mariadb-common) added for
+# CVE-2026-44172, CVE-2026-49261 (both CRITICAL), fixed in
+# 1:10.11.18-0+deb12u1.
+# mesa packages (libgl1-mesa-dri/libglx-mesa0/libglapi-mesa/libgbm1) added for
+# CVE-2026-40393 (CRITICAL), fixed in 22.3.6-1+deb12u2.
+# linux-libc-dev added for CVE-2026-53215 (CRITICAL), fixed in 6.1.176-1.
+# libpcre2-8-0 added for CVE-2026-86145 and CVE-2026-89161 (both HIGH), fixed
+# in 10.42-1+deb12u1.
+# libexpat1/libexpat1-dev added for CVE-2024-28757 and related expat CVEs
+# (HIGH), fixed in 2.5.0-1+deb12u4; the cached layer still held deb12u3.
 RUN apt-get update && \
     apt-get install --only-upgrade -y libcap2 libsystemd0 libudev1 libgnutls30 \
-    libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 && \
+    libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 \
+    libmariadb3 libmariadb-dev mariadb-common \
+    libgl1-mesa-dri libglx-mesa0 libglapi-mesa libgbm1 linux-libc-dev \
+    libpcre2-8-0 libexpat1 libexpat1-dev && \
     apt-get install -y --no-install-recommends \
-    git build-essential pandoc gcc netcat-openbsd curl jq \
+    git build-essential pandoc gcc curl jq ca-certificates \
     libmariadb-dev \
     python3-dev linux-libc-dev \
-    ffmpeg libsm6 libxext6 zstd \
+    ffmpeg libsm6 libxext6 zstd libmagic1 \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # install python dependencies
 COPY --chown=$UID:$GID ./backend/requirements.txt ./requirements.txt
 COPY --chown=$UID:$GID ./backend/requirements-slim.txt ./requirements-slim.txt
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Set UV_LINK_MODE to copy to prevent 0-byte file corruption in QEMU arm64 cross-builds
 ENV UV_LINK_MODE=copy
 
 RUN set -e; \
-    pip3 install --no-cache-dir uv; \
     pip3 install --no-cache-dir --upgrade pip "setuptools>=83.0.0" wheel; \
     if [ "$USE_SLIM" = "true" ]; then \
     # Slim build: no torch, no local ML models — uses external APIs only
     uv pip install --system -r requirements-slim.txt --no-cache-dir; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    python -c "import nltk; nltk.download('punkt_tab')"; \
+    python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     elif [ "$USE_CUDA" = "true" ]; then \
     # CUDA build: torch with GPU support + pre-download models
     # fix: pin torch<=2.9.1 - torch 2.10.0 aarch64 wheels cause SIGILL on ARM devices (RPi 4 Cortex-A72) #21349
@@ -168,7 +181,7 @@ RUN set -e; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
     python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    python -c "import nltk; nltk.download('punkt_tab')"; \
+    python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     else \
     # CPU build: torch CPU + pre-download models
     pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir; \
@@ -177,10 +190,52 @@ RUN set -e; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
     python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    python -c "import nltk; nltk.download('punkt_tab')"; \
+    python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     fi; \
     mkdir -p /app/backend/data; chown -R $UID:$GID /app/backend/data/; \
+    if [ -d /app/backend/data/cache ]; then chmod -R a+rX /app/backend/data/cache; fi; \
+    # Drop pip from the final image. pip ships a vendored SBOM
+    # (pip/_vendor/bom.cdx.json) that image scanners read as real installed
+    # packages, so every build reports permanent HIGHs against pip's bundled
+    # msgpack and setuptools copies that no requirement pin can fix. uv does
+    # the installing here, so pip is only needed while building.
+    python3 -m pip uninstall -y pip; \
+    # Derive the stdlib path instead of hard-coding 3.11: a base-image Python
+    # bump would silently turn a hard-coded path into a no-op.
+    rm -rf "$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])')/ensurepip"; \
+    # Fail the build rather than ship an image that still carries the manifest.
+    if python3 -c "import pip" 2>/dev/null; then echo "ERROR: pip survived the strip"; exit 1; fi; \
     rm -rf /var/lib/apt/lists/*;
+
+# Consequence of removing pip above: Tool/Function frontmatter `requirements:`
+# cannot be installed at runtime. Default the feature off so it logs a skip
+# instead of failing on a missing pip.
+ENV ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS=False
+
+# CI-only: the runtime security gate's test tooling, from the private
+# Gradient-DS/security-ci. Off by default, so no production image carries the
+# hostile corpus; docker-compose.ci.yaml turns it on for the gate's own stack.
+#
+# The credential is a BuildKit secret and reaches git through GIT_CONFIG_*
+# environment variables only -- no ARG (an ARG persists in image history and
+# would surface in the scanned image), no netrc, no file, and nothing recorded
+# in the installed package's own metadata, since the rewrite happens inside git.
+ARG INSTALL_SECURITY_CI_DEPS=false
+COPY --chown=$UID:$GID ./backend/requirements-security-ci.txt ./requirements-security-ci.txt
+RUN --mount=type=secret,id=gh_token \
+    if [ "$INSTALL_SECURITY_CI_DEPS" = "true" ]; then \
+    if [ ! -s /run/secrets/gh_token ]; then echo "INSTALL_SECURITY_CI_DEPS=true needs the gh_token build secret (GH_TOKEN in the environment)"; exit 1; fi; \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/gh_token)@github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_0="https://github.com/" \
+    uv pip install --system -r requirements-security-ci.txt --no-cache-dir; \
+    python -c "import hostile_corpus, openapi_surface"; \
+    fi
+
+# Optional: PPTX parsing through unstructured may need spaCy's English model.
+# Keep this out of the default image to avoid the extra image bloat; deployments
+# with read-only site-packages can uncomment it and bake the model in.
+# RUN python -m spacy download en_core_web_sm
 
 # Install Ollama if requested
 RUN if [ "$USE_OLLAMA" = "true" ]; then \
@@ -189,6 +244,15 @@ RUN if [ "$USE_OLLAMA" = "true" ]; then \
     curl -fsSL https://ollama.com/install.sh | sh && \
     rm -rf /var/lib/apt/lists/*; \
     fi
+
+# [Gradient] Debian security fixes published since the layers above were
+# cached. The registry cache (mode=max) otherwise serves the apt layer above
+# until the base image tag moves, so shipped images stop picking up fixes. CI
+# passes a per-run APT_UPGRADE_EPOCH, so this layer and those below always
+# rebuild while the dependency installs above stay cached. See
+# docs/fork-delta.md, "Fresh OS security fixes on every image build".
+ARG APT_UPGRADE_EPOCH=unset
+RUN echo "apt upgrade epoch: ${APT_UPGRADE_EPOCH}" && apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 # copy embedding weight from build
 # RUN mkdir -p /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2
@@ -201,6 +265,17 @@ COPY --chown=$UID:$GID --from=build /app/package.json /app/package.json
 
 # copy backend files
 COPY --chown=$UID:$GID ./backend .
+
+# The backend rewrites its bundled static assets (favicons, splash, manifest,
+# loader.js, ...) under open_webui/static at startup. Make that directory
+# writable by an arbitrary UID -- which under OpenShift's restricted SCC is
+# always a member of GID 0 -- so those writes don't fail with EACCES and crash
+# the boot log with "[Errno 13] Permission denied". `chmod -R g=u` mirrors the
+# owner bits onto the group (the Red Hat arbitrary-UID idiom). This is applied
+# unconditionally because it targets a directory the app writes on every start;
+# the broader, opt-in USE_PERMISSION_HARDENING below covers the rest of /app.
+RUN chgrp -R 0 /app/backend/open_webui/static && \
+    chmod -R g=u /app/backend/open_webui/static
 
 EXPOSE 8080
 

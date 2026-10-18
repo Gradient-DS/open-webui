@@ -1,20 +1,51 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
-import { viteStaticCopy } from 'vite-plugin-static-copy';
+import { createReadStream, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+// [Gradient] Serves and emits onnxruntime-web's JSEP runtime under /wasm/
+// (kokoro.worker.ts sets wasmPaths to it). Replaces vite-plugin-static-copy,
+// whose chokidar 3 -> braces chain has no fixed release (GHSA-vfj7-8cjw-p6xm).
+const ortDist = 'node_modules/onnxruntime-web/dist';
+const ortJsepFiles = () => readdirSync(ortDist).filter((name) => name.includes('.jsep.'));
+
+function ortWasm(): Plugin {
+	return {
+		name: 'gradient:ort-wasm',
+		configureServer(server) {
+			server.middlewares.use('/wasm', (req, res, next) => {
+				const name = (req.url ?? '').split('?')[0].slice(1);
+				if (!ortJsepFiles().includes(name)) return next();
+				res.setHeader(
+					'Content-Type',
+					name.endsWith('.wasm') ? 'application/wasm' : 'text/javascript'
+				);
+				createReadStream(join(ortDist, name)).pipe(res);
+			});
+		},
+		generateBundle() {
+			if (this.environment.config.consumer !== 'client') return;
+			for (const name of ortJsepFiles()) {
+				this.emitFile({
+					type: 'asset',
+					fileName: `wasm/${name}`,
+					source: readFileSync(join(ortDist, name))
+				});
+			}
+		}
+	};
+}
+
+// [Gradient] An allocated dev-stack port takes precedence over the upstream URL override.
+const backendTarget = process.env.OWUI_BE_PORT
+	? `http://localhost:${process.env.OWUI_BE_PORT}`
+	: process.env.WEBUI_BACKEND_URL || 'http://localhost:8080';
 
 export default defineConfig({
 	plugins: [
 		sveltekit(),
-		viteStaticCopy({
-			targets: [
-				{
-					src: 'node_modules/onnxruntime-web/dist/*.jsep.*',
-
-					dest: 'wasm'
-				}
-			]
-		})
+		ortWasm() // [Gradient]
 	],
 	define: {
 		APP_VERSION: JSON.stringify(process.env.npm_package_version),
@@ -26,7 +57,7 @@ export default defineConfig({
 		// without a config fork. Defaults to 8080 — the standard
 		// `open-webui dev` port — for non-multi-stack invocations.
 		proxy: (() => {
-			const target = `http://localhost:${process.env.OWUI_BE_PORT || '8080'}`;
+			const target = backendTarget;
 			return {
 				'/api': target,
 				'/ollama': target,
@@ -35,17 +66,18 @@ export default defineConfig({
 				'/static': target,
 				// Socket.IO is mounted at /ws/socket.io on the BE
 				// (`backend/open_webui/main.py` app.mount('/ws', socket_app)).
-				// Since `constants.ts` routes WEBUI_BASE_URL through
-				// location.host (Vite, :5173) to avoid CORS, the WS upgrade
-				// must be proxied too — otherwise $socket never gets an id,
-				// chat completion requests arrive at the BE without
-				// session_id, and the middleware falls back to inline SSE
-				// (which `generateOpenAIChatCompletion`'s `res.json()` can't
-				// parse → "Unexpected token 'd', \"data: ..."). `ws: true`
-				// makes Vite forward the HTTP-101 upgrade handshake.
+				// [Gradient] constants.ts uses relative URLs. Vite proxies HTTP and
+				// WebSocket traffic to OWUI_BE_PORT (or the backend URL/default above).
+				// ws: true forwards the Socket.IO HTTP-101 upgrade handshake.
 				'/ws': { target, ws: true }
 			};
 		})(),
+		// [Gradient] The backend writes every upload under backend/data; each
+		// new file there made the dev server full-reload the page, which threw
+		// a folder upload in progress back to the empty state. This subtree is
+		// never a source, so ignoring it cannot starve HMR (unlike the case
+		// described below).
+		watch: { ignored: ['**/backend/data/**'] }
 		// NOTE: a previous `watch.ignored: ['**/.worktrees/**']` was removed
 		// here. The intent was to suppress HMR for sibling worktrees when a
 		// dev server runs from the repo root, but chokidar matches the

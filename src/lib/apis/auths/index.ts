@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { partStore } from '$lib/components/meetings/parts';
 
 export const getAdminDetails = async (token: string) => {
 	let error = null;
@@ -254,6 +255,61 @@ export const updateLdapServer = async (token: string = '', body: object) => {
 	return res;
 };
 
+export const getOAuthConfig = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/oauth`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const updateOAuthConfig = async (token: string, body: object) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/admin/config/oauth`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(body)
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const userSignIn = async (email: string, password: string) => {
 	let error = null;
 
@@ -349,7 +405,39 @@ export const userSignOut = async () => {
 	}
 
 	sessionStorage.clear();
+	// [Gradient] Vergadering: recovery copies of recordings are per device, not per account.
+	await partStore().clear();
 	return res;
+};
+
+export const getLogoutRedirectUrl = (redirectUrl?: string | null) => {
+	const logoutUrl = new URL('/auth?state=logout', window.location.origin);
+	const postLogoutUrl = new URL('/auth', window.location.origin);
+	if (!redirectUrl) {
+		return logoutUrl.href;
+	}
+
+	const url = new URL(redirectUrl, window.location.origin);
+	if (url.origin === window.location.origin && url.pathname === '/auth') {
+		url.searchParams.set('state', 'logout');
+		return url.href;
+	}
+
+	const postLogoutRedirectUri = url.searchParams.get('post_logout_redirect_uri');
+	if (postLogoutRedirectUri) {
+		const configuredPostLogoutUrl = new URL(postLogoutRedirectUri, window.location.origin);
+		if (
+			configuredPostLogoutUrl.origin === window.location.origin &&
+			configuredPostLogoutUrl.pathname === '/auth'
+		) {
+			url.searchParams.set('state', 'logout');
+		}
+		return url.href;
+	}
+
+	url.searchParams.set('post_logout_redirect_uri', postLogoutUrl.href);
+	url.searchParams.set('state', 'logout');
+	return url.href;
 };
 
 export const addUser = async (
@@ -451,174 +539,6 @@ export const updateUserPassword = async (token: string, password: string, newPas
 		body: JSON.stringify({
 			password: password,
 			new_password: newPassword
-		})
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err.detail;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const getSignUpEnabledStatus = async (token: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signup/enabled`, {
-		method: 'GET',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err.detail;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const getDefaultUserRole = async (token: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signup/user/role`, {
-		method: 'GET',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err.detail;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const updateDefaultUserRole = async (token: string, role: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signup/user/role`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify({
-			role: role
-		})
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err.detail;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const toggleSignUpEnabledStatus = async (token: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signup/enabled/toggle`, {
-		method: 'GET',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err.detail;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const getJWTExpiresDuration = async (token: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/token/expires`, {
-		method: 'GET',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			error = err.detail;
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const updateJWTExpiresDuration = async (token: string, duration: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/token/expires/update`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify({
-			duration: duration
 		})
 	})
 		.then(async (res) => {

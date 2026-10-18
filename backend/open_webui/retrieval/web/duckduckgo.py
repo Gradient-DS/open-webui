@@ -1,10 +1,10 @@
+from __future__ import annotations
+
 import logging
 import urllib.request
-from typing import Optional
 
-from open_webui.retrieval.web.main import SearchResult, get_filtered_results
 from ddgs import DDGS
-from ddgs.exceptions import RatelimitException
+from open_webui.retrieval.web.main import SearchResult, get_filtered_results
 
 log = logging.getLogger(__name__)
 
@@ -12,9 +12,9 @@ log = logging.getLogger(__name__)
 def search_duckduckgo(
     query: str,
     count: int,
-    filter_list: Optional[list[str]] = None,
-    concurrent_requests: Optional[int] = None,
-    backend: Optional[str] = 'auto',
+    filter_list: list[str] | None = None,
+    concurrent_requests: int | None = None,
+    backend: str | None = 'auto',
 ) -> list[SearchResult]:
     """
     Search using DuckDuckGo's Search API and return the results as a list of SearchResult objects.
@@ -30,21 +30,11 @@ def search_duckduckgo(
     # Resolve via stdlib getproxies() — same pattern as the other loaders.
     env_proxies = urllib.request.getproxies()
     proxy = env_proxies.get('https') or env_proxies.get('http')
-    search_results = []
     with DDGS(proxy=proxy) as ddgs:
         if concurrent_requests:
             ddgs.threads = concurrent_requests
 
-        # Use the ddgs.text() method to perform the search
-        try:
-            kwargs = {'safesearch': 'moderate', 'max_results': count}
-            if backend and backend != 'auto':
-                kwargs['backend'] = backend
-            results = ddgs.text(query, **kwargs)
-            search_results = results if results is not None else []
-        except RatelimitException as e:
-            log.error(f'RatelimitException: {e}')
-            search_results = []
+        search_results = ddgs.text(query, safesearch='moderate', max_results=count, backend=backend or 'auto')
     if filter_list:
         search_results = get_filtered_results(search_results, filter_list)
 

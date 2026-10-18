@@ -3,28 +3,30 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-
+from open_webui.constants import ERROR_MESSAGES
+from open_webui.events import EVENTS, publish_event
+from open_webui.models.access_grants import AccessGrants
 from open_webui.models.calendar import (
-    Calendars,
-    CalendarEvents,
     CalendarEventAttendees,
-    CalendarForm,
-    CalendarUpdateForm,
     CalendarEventForm,
-    CalendarEventUpdateForm,
-    CalendarModel,
-    CalendarEventModel,
-    CalendarEventUserResponse,
     CalendarEventListResponse,
+    CalendarEventModel,
+    CalendarEvents,
+    CalendarEventUpdateForm,
+    CalendarEventUserResponse,
+    CalendarForm,
+    CalendarModel,
+    Calendars,
+    CalendarUpdateForm,
     RSVPForm,
 )
-from open_webui.models.access_grants import AccessGrants
+from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.users import UserModel
+from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
 from open_webui.utils.auth import get_verified_user
-from open_webui.utils.access_control import has_permission, filter_allowed_access_grants
 from open_webui.utils.calendar import expand_recurring_event
-from open_webui.constants import ERROR_MESSAGES
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -35,14 +37,13 @@ SCHEDULED_TASKS_CALENDAR_ID = '__scheduled_tasks__'
 
 async def check_calendar_permission(request: Request, user):
     """Check global feature flag AND per-user permission for calendar access."""
-    if not request.app.state.config.ENABLE_CALENDAR:
+    config = await Config.get_many('calendar.enable', 'user.permissions')
+    if not config.get('calendar.enable'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
-    if user.role != 'admin' and not await has_permission(
-        user.id, 'features.calendar', request.app.state.config.USER_PERMISSIONS
-    ):
+    if user.role != 'admin' and not await has_permission(user.id, 'features.calendar', config.get('user.permissions')):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
@@ -51,11 +52,12 @@ async def check_calendar_permission(request: Request, user):
 
 async def _user_has_automations(request: Request, user) -> bool:
     """Check if automations feature is available to this user."""
-    if not getattr(request.app.state.config, 'ENABLE_AUTOMATIONS', False):
+    config = await Config.get_many('automations.enable', 'user.permissions')
+    if not config.get('automations.enable', False):
         return False
     if user.role == 'admin':
         return True
-    return await has_permission(user.id, 'features.automations', request.app.state.config.USER_PERMISSIONS)
+    return await has_permission(user.id, 'features.automations', config.get('user.permissions'))
 
 
 async def _check_calendar_access(calendar_id: str, user: UserModel, permission: str = 'write') -> CalendarModel:
@@ -63,7 +65,7 @@ async def _check_calendar_access(calendar_id: str, user: UserModel, permission: 
     cal = await Calendars.get_calendar_by_id(calendar_id)
     if not cal:
         raise HTTPException(status_code=404, detail='Calendar not found')
-    if cal.user_id == user.id or user.role == 'admin':
+    if cal.user_id == user.id or can_bypass_access_control(user):
         return cal
     user_groups = await Groups.get_groups_by_member_id(user.id)
     user_group_ids = [g.id for g in user_groups]
@@ -117,13 +119,21 @@ async def create_calendar(request: Request, form_data: CalendarForm, user: UserM
     # could create a calendar with `principal_id='*' permission='read'|'write'`,
     # making their events readable or writable by any other verified user.
     form_data.access_grants = await filter_allowed_access_grants(
-        request.app.state.config.USER_PERMISSIONS,
+        await Config.get('user.permissions'),
         user.id,
         user.role,
         form_data.access_grants,
         'sharing.public_calendars',
     )
-    return await Calendars.insert_new_calendar(user.id, form_data)
+    calendar = await Calendars.insert_new_calendar(user.id, form_data)
+    await publish_event(
+        request,
+        EVENTS.CALENDAR_CREATED,
+        actor=user,
+        subject_id=calendar.id,
+        data={'name': calendar.name},
+    )
+    return calendar
 
 
 ####################
@@ -188,7 +198,7 @@ async def get_events(
         cal_id_list is None or SCHEDULED_TASKS_CALENDAR_ID in cal_id_list
     ):
         try:
-            from open_webui.models.automations import Automations, AutomationRuns
+            from open_webui.models.automations import AutomationRuns, Automations
 
             # Future runs: expand RRULEs for active automations only
             active_automations = await Automations.get_active_by_user(user.id)
@@ -264,7 +274,15 @@ async def get_events(
 async def create_event(request: Request, form_data: CalendarEventForm, user: UserModel = Depends(get_verified_user)):
     await check_calendar_permission(request, user)
     await _check_calendar_access(form_data.calendar_id, user, 'write')
-    return await CalendarEvents.insert_new_event(user.id, form_data)
+    event = await CalendarEvents.insert_new_event(user.id, form_data)
+    await publish_event(
+        request,
+        EVENTS.CALENDAR_EVENT_CREATED,
+        actor=user,
+        subject_id=event.id,
+        data={'calendar_id': event.calendar_id, 'title': event.title},
+    )
+    return event
 
 
 @router.get('/events/search', response_model=CalendarEventListResponse)
@@ -302,9 +320,22 @@ async def update_event(
 
     await _check_calendar_access(event.calendar_id, user, 'write')
 
+    # A new calendar_id in the form moves the event; require write access on the
+    # destination too, mirroring create_event. Without this, write on the source
+    # calendar alone is enough to inject an event into any other calendar.
+    if form_data.calendar_id is not None and form_data.calendar_id != event.calendar_id:
+        await _check_calendar_access(form_data.calendar_id, user, 'write')
+
     updated = await CalendarEvents.update_event_by_id(event_id, form_data)
     if not updated:
         raise HTTPException(status_code=500, detail='Failed to update')
+    await publish_event(
+        request,
+        EVENTS.CALENDAR_EVENT_UPDATED,
+        actor=user,
+        subject_id=updated.id,
+        data={'calendar_id': updated.calendar_id, 'title': updated.title},
+    )
     return updated
 
 
@@ -320,6 +351,13 @@ async def delete_event(request: Request, event_id: str, user: UserModel = Depend
     result = await CalendarEvents.delete_event_by_id(event_id)
     if not result:
         raise HTTPException(status_code=500, detail='Failed to delete')
+    await publish_event(
+        request,
+        EVENTS.CALENDAR_EVENT_DELETED,
+        actor=user,
+        subject_id=event_id,
+        data={'calendar_id': event.calendar_id, 'title': event.title},
+    )
     return {'status': True}
 
 
@@ -335,6 +373,13 @@ async def rsvp_event(
     result = await CalendarEventAttendees.update_rsvp(event_id, user.id, form_data.status)
     if not result:
         raise HTTPException(status_code=404, detail='Not an attendee of this event')
+    await publish_event(
+        request,
+        EVENTS.CALENDAR_EVENT_RSVP_UPDATED,
+        actor=user,
+        subject_id=event_id,
+        data={'status': result.status},
+    )
     return {'status': True, 'rsvp': result.status}
 
 
@@ -358,7 +403,7 @@ async def update_calendar(
     cal = await _check_calendar_access(calendar_id, user, 'write')
 
     # Only owner/admin can change access grants
-    if form_data.access_grants is not None and cal.user_id != user.id and user.role != 'admin':
+    if form_data.access_grants is not None and cal.user_id != user.id and not can_bypass_access_control(user):
         raise HTTPException(status_code=403, detail='Only owner can manage sharing')
 
     # Strip public/user grants the requesting user is not permitted to assign
@@ -368,7 +413,7 @@ async def update_calendar(
     # publicly readable/writable without the corresponding sharing permission.
     if form_data.access_grants is not None:
         form_data.access_grants = await filter_allowed_access_grants(
-            request.app.state.config.USER_PERMISSIONS,
+            await Config.get('user.permissions'),
             user.id,
             user.role,
             form_data.access_grants,
@@ -378,6 +423,13 @@ async def update_calendar(
     updated = await Calendars.update_calendar_by_id(calendar_id, form_data)
     if not updated:
         raise HTTPException(status_code=500, detail='Failed to update')
+    await publish_event(
+        request,
+        EVENTS.CALENDAR_UPDATED,
+        actor=user,
+        subject_id=updated.id,
+        data={'name': updated.name},
+    )
     return updated
 
 
@@ -392,7 +444,7 @@ async def delete_calendar(request: Request, calendar_id: str, user: UserModel = 
     cal = await _check_calendar_access(calendar_id, user, 'write')
 
     # Only owner/admin can delete
-    if cal.user_id != user.id and user.role != 'admin':
+    if cal.user_id != user.id and not can_bypass_access_control(user):
         raise HTTPException(status_code=403, detail='Only owner can delete calendar')
 
     # Block deletion of default calendar
@@ -402,6 +454,13 @@ async def delete_calendar(request: Request, calendar_id: str, user: UserModel = 
     result = await Calendars.delete_calendar_by_id(calendar_id)
     if not result:
         raise HTTPException(status_code=500, detail='Failed to delete')
+    await publish_event(
+        request,
+        EVENTS.CALENDAR_DELETED,
+        actor=user,
+        subject_id=calendar_id,
+        data={'name': cal.name},
+    )
     return {'status': True}
 
 
@@ -411,4 +470,11 @@ async def set_default_calendar(request: Request, calendar_id: str, user: UserMod
     cal = await Calendars.set_default_calendar(user.id, calendar_id)
     if not cal:
         raise HTTPException(status_code=404, detail='Calendar not found')
+    await publish_event(
+        request,
+        EVENTS.CALENDAR_DEFAULT_UPDATED,
+        actor=user,
+        subject_id=cal.id,
+        data={'name': cal.name},
+    )
     return cal

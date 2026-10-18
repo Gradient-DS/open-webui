@@ -1,21 +1,28 @@
 <script lang="ts">
-	import { getContext, createEventDispatcher } from 'svelte';
-	const dispatch = createEventDispatcher();
+	import { getContext } from 'svelte';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ArrowUpCircle from '$lib/components/icons/ArrowUpCircle.svelte';
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
+	import NewFolderAlt from '$lib/components/icons/NewFolderAlt.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
-	import CloudArrowUp from '$lib/components/icons/CloudArrowUp.svelte';
+	import ArrowUturnLeft from '$lib/components/icons/ArrowUturnLeft.svelte';
 
 	const i18n = getContext('i18n');
 
-	export let onClose: Function = () => {};
+	export let onClose: () => void = () => {};
 
-	export let onOneDriveSync: Function | null = null;
-	export let onUpload: Function = (data) => {};
+	export let onUpload: (data: {
+		type: 'new_directory' | 'files' | 'directory' | 'web' | 'text';
+	}) => void = () => {};
+	// Structure-write items (New directory / Reset) only
+	// render when the parent passes the affordance — i.e. structureEditable
+	// local KBs. Cloud / push KBs never get them.
+	export let structureEditable = false;
+	export let onReset: (() => void) | null = null;
 
 	let show = false;
 </script>
@@ -31,7 +38,8 @@
 >
 	<Tooltip content={$i18n.t('Add Content')}>
 		<button
-			class=" p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1"
+			class="p-1.5 rounded-xl bg-transparent transition text-xs flex items-center space-x-1 hover:text-gray-900 dark:hover:text-gray-100"
+			aria-label={$i18n.t('Add Content')}
 			on:click={(e) => {
 				e.stopPropagation();
 				show = true;
@@ -51,11 +59,25 @@
 	</Tooltip>
 
 	<div slot="content">
-		<div
-			class="min-w-[200px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg transition"
-		>
+		<DropdownMenu className="min-w-[12.5rem] transition">
+			<!-- [Gradient] Cloud and push KBs are browse-only. -->
+			{#if structureEditable}
+				<button
+					class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
+					on:click={() => {
+						onUpload({ type: 'new_directory' });
+						show = false;
+					}}
+				>
+					<NewFolderAlt />
+					<div class="flex items-center">{$i18n.t('New directory')}</div>
+				</button>
+
+				<hr class="my-1 border-gray-100 dark:border-gray-800" />
+			{/if}
+
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
 				on:click={() => {
 					onUpload({ type: 'files' });
 				}}
@@ -65,7 +87,7 @@
 			</button>
 
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
 				on:click={() => {
 					onUpload({ type: 'directory' });
 				}}
@@ -74,21 +96,8 @@
 				<div class="flex items-center">{$i18n.t('Upload directory')}</div>
 			</button>
 
-			{#if onOneDriveSync}
-				<button
-					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-					type="button"
-					on:click={() => {
-						onOneDriveSync();
-					}}
-				>
-					<CloudArrowUp strokeWidth="2" />
-					<div class="flex items-center">{$i18n.t('Sync from OneDrive')}</div>
-				</button>
-			{/if}
-
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
 				on:click={() => {
 					onUpload({ type: 'web' });
 				}}
@@ -98,7 +107,7 @@
 			</button>
 
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
 				on:click={() => {
 					onUpload({ type: 'text' });
 				}}
@@ -106,6 +115,21 @@
 				<BarsArrowUp strokeWidth="2" />
 				<div class="flex items-center">{$i18n.t('Add text content')}</div>
 			</button>
-		</div>
+
+			{#if onReset}
+				<hr class="my-1 border-gray-100 dark:border-gray-800" />
+
+				<button
+					class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
+					on:click={() => {
+						onReset();
+						show = false;
+					}}
+				>
+					<ArrowUturnLeft strokeWidth="2" />
+					<div class="flex items-center">{$i18n.t('Reset')}</div>
+				</button>
+			{/if}
+		</DropdownMenu>
 	</div>
 </Dropdown>

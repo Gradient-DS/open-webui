@@ -5,7 +5,7 @@ Revises: c5d6e7f8a9b0
 Create Date: 2026-04-29
 
 [Gradient] Aligns the persisted ``agent_config`` rows with the new pair
-of ``ChatAgent`` siblings declared in the genai-utils deployment YAML
+of ``ChatAgent`` siblings declared in the soev-solutions deployment YAML
 (``soev_chat_autonomous`` + ``soev_chat_manual``). Existing tenants
 have a single row keyed by the legacy slug ``soev_chat`` (or, on much
 older installs, ``soev_agent`` / ``default``) — that row is renamed

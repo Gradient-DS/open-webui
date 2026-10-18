@@ -18,8 +18,18 @@ node_modules
 /package
 .env
 .env.*
+.env-*
 !.env.example
 !.env.neo.example
+
+# Runtime state minted when the backend is started from the repo root
+# (backend/.gitignore only covers backend/-relative paths)
+/data/
+.webui_secret_key
+
+# Retired vendored asset (removed in 162a570aa) that local tooling keeps
+# regenerating — zero source references; never re-commit it
+backend/open_webui/static/vis-network-*.min.js
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 # Byte-compiled / optimized / DLL files
@@ -27,7 +37,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 .nvmrc
-CLAUDE.md
 # C extensions
 *.so
 
@@ -324,3 +333,17 @@ cypress/screenshots
 .vscode/settings.json
 .claude/worktrees/
 .worktrees/
+.cptr
+
+# Claude Code scratch + personal tooling — never committed (see soev-docs/claude-code.md)
+thoughts/
+# The superpowers plugin writes its plans here by default; they belong in thoughts/.
+docs/superpowers/
+.reviews/
+CLAUDE.local.md
+.claude/commands/*
+!.claude/commands/validate-owui.md
+.claude/agents/*
+!.claude/agents/owui-e2e.md
+.claude/hooks/
+.claude/scheduled_tasks.lock

@@ -1,5 +1,7 @@
+import type { AgentDocument } from '$lib/utils/agentDocument';
 import { APP_NAME } from '$lib/constants';
-import { type Writable, writable } from 'svelte/store';
+import { type Writable, derived, writable } from 'svelte/store';
+import type { ComponentType, SvelteComponent } from 'svelte';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
@@ -32,7 +34,6 @@ export const mobile = writable(false);
 export const socket: Writable<null | Socket> = writable(null);
 export const socketConnected: Writable<boolean> = writable(true);
 export const activeUserIds: Writable<null | string[]> = writable(null);
-export const activeChatIds: Writable<Set<string>> = writable(new Set());
 export const USAGE_POOL: Writable<null | string[]> = writable(null);
 
 export const theme = writable('system');
@@ -59,8 +60,7 @@ export const chatTitle = writable('');
 export const channels = writable([]);
 export const channelId = writable(null);
 
-export const chats = writable(null);
-export const pinnedChats = writable([]);
+export { chats, pinnedChats } from './chatList';
 export const pinnedNotes = writable([]);
 export const tags = writable([]);
 export const folders = writable([]);
@@ -75,8 +75,26 @@ export const tools = writable(null);
 export const skills = writable(null);
 export const functions = writable(null);
 
+export type WorkspaceAction = {
+	id: string;
+	label: string;
+	href?: string;
+	onClick?: () => void | Promise<void>;
+	visible?: boolean;
+	// [Gradient] Optional per-entry icon; falls back to SplitCreateButton's
+	// id-derived default. Cloud-KB entries need their provider logo, which the
+	// `<section>-<verb>` id convention cannot express.
+	icon?: ComponentType<SvelteComponent<{ className?: string }>>;
+};
+
+export const workspaceActions: Writable<WorkspaceAction[]> = writable([]);
+export const adminUserCount: Writable<number | null> = writable(null);
+export const adminGroupCount: Writable<number | null> = writable(null);
+export const adminLeaderboardCount: Writable<number | null> = writable(null);
+export const adminFeedbackCount: Writable<number | null> = writable(null);
+
 export const toolServers = writable([]);
-export const terminalServers = writable([]);
+export const terminalServers: Writable<any[] | null> = writable(null);
 
 // Persistent Pyodide worker for code interpreter FS
 export const pyodideWorker: Writable<Worker | null> = writable(null);
@@ -85,18 +103,44 @@ export const banners: Writable<Banner[]> = writable([]);
 
 export const settings: Writable<Settings> = writable({});
 
+// Users who never pinned a model follow the admin default, so changes to it keep reaching them
+export const pinnedModels = derived([settings, config], ([$settings, $config]) =>
+	$settings?.pinnedModels === undefined
+		? ($config?.default_pinned_models ?? '').split(',').filter((id) => id)
+		: $settings.pinnedModels
+);
+
+// Pins for models the user cannot see are kept in their settings but left out of the sidebar
+export const visiblePinnedModels = derived([pinnedModels, models], ([$pinnedModels, $models]) =>
+	$pinnedModels.filter((id) =>
+		$models.some((model) => model.id === id && !model.info?.meta?.hidden)
+	)
+);
+
+// [Gradient] The upstream visible-pin store contains IDs; expose only custom agents.
+export const visiblePinnedAgents = derived(
+	[visiblePinnedModels, models],
+	([$visiblePinnedModels, $models]) =>
+		$visiblePinnedModels.filter((id) =>
+			$models.some((model) => model.id === id && model?.info?.base_model_id)
+		)
+);
+
 export const audioQueue = writable<AudioQueue | null>(null);
 export const chatRequestQueues: Writable<
 	Record<string, { id: string; prompt: string; files: any[] }[]>
 > = writable({});
 
-export const sidebarWidth = writable(260);
+export const sidebarWidth = writable(245);
+
+export type SettingsModalRequest = {
+	tab: string;
+	state?: Record<string, unknown> | null;
+};
 
 export const showSidebar = writable(false);
 export const showSearch = writable(false);
-export const showSettings = writable(false);
-export const showShortcuts = writable(false);
-export const showArchivedChats = writable(false);
+export const showSettings: Writable<boolean | string | SettingsModalRequest> = writable(false);
 export const showChangelog = writable(false);
 
 // Product feedback modal — `showFeedbackModal` toggles the dialog;
@@ -110,7 +154,8 @@ export const showOverview = writable(false);
 export const showArtifacts = writable(false);
 export const showCallOverlay = writable(false);
 export const showFileNav = writable(false);
-export const showFileNavPath: Writable<string | null> = writable(null);
+export type FileNavOpenRequest = string | { path: string; page?: number | null };
+export const showFileNavPath: Writable<FileNavOpenRequest | null> = writable(null);
 export const showFileNavDir: Writable<string | null> = writable(null);
 export const selectedTerminalId: Writable<string | null> = writable(null);
 
@@ -130,11 +175,10 @@ export type ChoiceRegistration = {
 };
 export const choiceBlockRegistry: Writable<Record<string, Record<string, ChoiceRegistration>>> =
 	writable({});
-export const documentContents: Writable<Array<{
-	title: string;
-	markdown: string;
-	sources?: any[];
-}> | null> = writable(null);
+export const selectedDocumentIndex = writable(0);
+export const documentContents: Writable<Array<
+	AgentDocument & { sources?: any[]; messageId?: string }
+> | null> = writable(null);
 
 export const embed = writable(null);
 
@@ -148,42 +192,6 @@ export type DesktopEvent = {
 	data?: any;
 };
 export const desktopEvent: Writable<DesktopEvent | null> = writable(null);
-export const scrollPaginationEnabled = writable(false);
-export const currentChatPage = writable(1);
-
-// [Gradient] Sticky agent pick for new chats. Set by AgentCards.svelte when
-// the user clicks an agent card; read by Chat.svelte when the first message
-// is sent so the new chat is created with chat.meta.agent_id pre-set. The
-// pick is sticky — it survives chat creation and page reloads (persisted to
-// localStorage) so subsequent "New Chat" clicks default to the same agent
-// until the user explicitly clears it (clicks the same card again or the
-// "Clear" button) or picks a different one.
-const PENDING_AGENT_ID_STORAGE_KEY = 'pendingAgentId';
-
-const readPendingAgentId = (): string | null => {
-	if (typeof window === 'undefined') return null;
-	try {
-		return window.localStorage.getItem(PENDING_AGENT_ID_STORAGE_KEY) || null;
-	} catch {
-		return null;
-	}
-};
-
-export const pendingAgentId: Writable<string | null> = writable(readPendingAgentId());
-
-if (typeof window !== 'undefined') {
-	pendingAgentId.subscribe((value) => {
-		try {
-			if (value) {
-				window.localStorage.setItem(PENDING_AGENT_ID_STORAGE_KEY, value);
-			} else {
-				window.localStorage.removeItem(PENDING_AGENT_ID_STORAGE_KEY);
-			}
-		} catch {
-			// localStorage may be unavailable (quota, privacy mode) — ignore
-		}
-	});
-}
 
 export const isLastActiveTab = writable(true);
 export const playingNotificationSound = writable(false);
@@ -239,7 +247,8 @@ type OllamaModelDetails = {
 };
 
 type Settings = {
-	pinnedModels?: never[];
+	composerTools?: import('$lib/utils/composerPreferences').ComposerPreferences;
+	pinnedModels?: string[];
 	pinnedInputItems?: string[];
 	toolServers?: never[];
 	detectArtifacts?: boolean;
@@ -256,6 +265,7 @@ type Settings = {
 	imageCompression?: boolean;
 	imageCompressionSize?: any;
 	textScale?: number;
+	fontFamily?: string | null;
 	widescreenMode?: null;
 	largeTextAsFile?: boolean;
 	promptAutocomplete?: boolean;
@@ -271,9 +281,15 @@ type Settings = {
 	splitLargeChunks?(body: any, splitLargeChunks: any): unknown;
 	backgroundImageUrl?: null;
 	landingPageMode?: string;
+	iframeSandboxAllowScripts?: boolean;
 	iframeSandboxAllowForms?: boolean;
 	iframeSandboxAllowSameOrigin?: boolean;
+	iframeSandboxAllowDownloads?: boolean;
+	terminalPreviewAllowSameOrigin?: boolean;
 	scrollOnBranchChange?: boolean;
+	scrollOnResponseGeneration?: boolean;
+	showFilesOnTerminalSelect?: boolean;
+	terminalFileDisplay?: 'sidebar' | 'inline';
 	directConnections?: null;
 	chatBubble?: boolean;
 	copyFormatted?: boolean;
@@ -290,9 +306,16 @@ type Settings = {
 	splitLargeDeltas?: boolean;
 	chatDirection?: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
+	keyboardShortcuts?: boolean;
+	chatHoverPreview?: boolean;
 	renderMarkdownInPreviews?: boolean;
+	renderMarkdownInUserMessages?: boolean;
+	renderMarkdownInAssistantMessages?: boolean;
 	recentEmojis?: string[];
 	pinnedMenuItems?: string[];
+	pinnedNotesOrder?: string[];
+
+	defaultUploadContext?: 'full' | 'focused';
 
 	system?: string;
 	seed?: number;
@@ -343,6 +366,12 @@ type Document = {
 };
 
 type Config = {
+	// [Gradient]
+	file?: {
+		allowed_extensions?: string[];
+		max_size?: number | null;
+		max_count?: number | null;
+	};
 	license_metadata: any;
 	status: boolean;
 	name: string;
@@ -350,6 +379,7 @@ type Config = {
 	default_locale: string;
 	invite_heading?: string;
 	default_models: string;
+	default_pinned_models?: string | null;
 	default_prompt_suggestions: PromptSuggestion[];
 	// Per-deployment model → datacenter/hosting mapping (Helm MODEL_HOSTING env).
 	// Same matching convention as model_profiles; see hostingFromDeployment in
@@ -366,28 +396,35 @@ type Config = {
 		enable_signup: boolean;
 		enable_login_form: boolean;
 		enable_web_search?: boolean;
+		enable_web_search_confirmation?: boolean;
+		web_search_confirmation_content?: string;
 		enable_google_drive_integration: boolean;
 		enable_google_drive_sync?: boolean;
 		enable_onedrive_integration: boolean;
+		enable_onedrive_personal?: boolean;
+		enable_onedrive_business?: boolean;
 		enable_confluence_integration?: boolean;
 		enable_confluence_sync?: boolean;
 		confluence_kb_mode?: string;
 		confluence_shared_kb_id?: string;
 		confluence_oauth_configured?: boolean;
-		enable_topdesk_integration?: boolean;
-		enable_topdesk_sync?: boolean;
-		topdesk_shared_kb_id?: string;
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
 		enable_data_export: boolean;
 		enable_admin_chat_access: boolean;
 		enable_admin_analytics: boolean;
+		enable_context_compaction?: boolean;
+		enable_tool_permissions?: boolean;
 		enable_community_sharing: boolean;
 		enable_citation_relevance: boolean;
+		// [Gradient] Existing server flag consumed by the shared citation viewer.
+		enable_citation_text_highlight?: boolean;
 		enable_memories: boolean;
+		enable_plugins?: boolean;
 		enable_autocomplete_generation: boolean;
 		enable_direct_connections: boolean;
 		enable_version_update_check: boolean;
+		enable_pyodide_file_persistence?: boolean;
 		folder_max_file_count?: number;
 		knowledge_max_file_count?: number;
 		// Feature Flags (SaaS Tier Control)
@@ -410,6 +447,8 @@ type Config = {
 		feature_admin_settings?: boolean;
 		feature_admin_settings_tabs?: string[];
 		feature_agent_api_enabled?: boolean;
+		enable_live_documents?: boolean;
+		enable_live_mail?: boolean;
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
 		feature_skill_files?: boolean;
@@ -421,20 +460,26 @@ type Config = {
 		enable_channels?: boolean;
 		enable_notes?: boolean;
 		enable_code_interpreter?: boolean;
+		enable_document_writer?: boolean;
+		enable_docx_export?: boolean;
 		enable_code_execution?: boolean;
 		enable_data_warnings?: boolean;
 		enable_feedback_report?: boolean;
+		websocket_heartbeat_interval?: number | null;
 	};
 	oauth: {
 		providers: {
 			[key: string]: string;
 		};
+		auto_redirect?: boolean;
 	};
 	ui?: {
+		default_interface_settings?: Record<string, unknown>;
 		pending_user_overlay_title?: string;
 		pending_user_overlay_content?: string;
 		pending_user_overlay_description?: string;
 		greeting_template?: string | Record<string, string>;
+		response_watermark?: string;
 		iframe_csp?: string;
 	};
 };
