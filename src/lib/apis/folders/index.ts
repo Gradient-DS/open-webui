@@ -97,6 +97,35 @@ export const getFolderById = async (token: string, id: string) => {
 	return res;
 };
 
+// [Gradient] What sharing the folder shares: on v2 its knowledge too, except the items listed with why.
+export const getFolderSharingById = async (token: string, id: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/folders/${id}/sharing`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const updateFolderById = async (token: string, id: string, folderForm: FolderForm) => {
 	let error = null;
 

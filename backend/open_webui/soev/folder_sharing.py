@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
+from open_webui.models.files import Files
 from open_webui.models.folder_share_grants import FolderShareGrants
 from open_webui.models.folders import Folders
 from open_webui.models.knowledge import Knowledges
@@ -209,6 +210,32 @@ async def changing(owner_id: str, edit: Callable[[View], None] | None = None):
             yield
         finally:
             await _widen(owner_id, before)
+
+
+async def left_out(owner_id: str, entries: list | None) -> list[dict]:
+    """The folder's items a share does not share, each with why: `cloud` (a synced knowledge base, never shared) or
+    `owner` (another person's item, theirs to share). Read as the owner; items gone are skipped."""
+    items = []
+    for entry in entries or []:
+        if not isinstance(entry, dict) or not isinstance(entry.get('id'), str):
+            continue
+        kind, item_id, name, reason = entry.get('type'), entry['id'], entry.get('name'), None
+        if kind == 'collection':
+            knowledge = await Knowledges.get_knowledge_by_id(item_id)
+            if knowledge is not None:
+                reason = 'cloud' if knowledge.type != 'local' else 'owner' if knowledge.user_id != owner_id else None
+                name = knowledge.name
+        elif kind == 'note':
+            note = await Notes.get_note_by_id(item_id)
+            if note is not None:
+                reason, name = ('owner' if note.user_id != owner_id else None), note.title
+        elif kind == 'file':
+            file = await Files.get_file_by_id(item_id)
+            if file is not None:
+                reason, name = ('owner' if file.user_id != owner_id else None), name or file.filename
+        if reason:
+            items.append({'type': kind, 'id': item_id, 'name': name or item_id, 'reason': reason})
+    return items
 
 
 def adds_entries(before: list | None, after: list | None) -> bool:

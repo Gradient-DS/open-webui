@@ -117,11 +117,14 @@ def world(monkeypatch):
     monkeypatch.setattr(folder_sharing.folder_files, 'schedule', state.scheduled.append)
 
     state.knowledge = {
-        'kb-local': {'user_id': 'dana', 'type': 'local'},
-        'kb-cloud': {'user_id': 'dana', 'type': 'onedrive'},
-        'kb-other': {'user_id': 'erik', 'type': 'local'},
+        'kb-local': {'user_id': 'dana', 'type': 'local', 'name': 'Beleid'},
+        'kb-cloud': {'user_id': 'dana', 'type': 'onedrive', 'name': 'OneDrive Projecten'},
+        'kb-other': {'user_id': 'erik', 'type': 'local', 'name': 'Contracten'},
     }
-    state.notes = {'note-1': SimpleNamespace(user_id='dana'), 'note-erik': SimpleNamespace(user_id='erik')}
+    state.notes = {
+        'note-1': SimpleNamespace(user_id='dana', title='Afspraken'),
+        'note-erik': SimpleNamespace(user_id='erik', title='Notulen'),
+    }
     entries = [
         {'type': 'collection', 'id': 'kb-local'},
         {'type': 'collection', 'id': 'kb-cloud'},
@@ -310,7 +313,7 @@ async def test_the_ledger_records_each_principal_once_and_forgets_only_the_named
     assert [(row.principal_type, row.principal_id) for row in rows] == [('group', 'team')]
 
 
-def _route(monkeypatch, path, folder):
+def _route(monkeypatch, path, folder, method='POST'):
     from open_webui.routers import folders
     from open_webui.utils.auth import get_verified_user
 
@@ -331,8 +334,8 @@ def _route(monkeypatch, path, folder):
     monkeypatch.setattr(folders, '_has_folder_access', write_access)
     monkeypatch.setattr(folders, 'can_read_all_folder_files', write_access)
     app = FastAPI()
-    endpoint = next(route.endpoint for route in folders.router.routes if route.path == path)
-    app.add_api_route(path, endpoint, methods=['POST'], response_model=None)
+    endpoint = next(route.endpoint for route in folders.router.routes if route.path == path and method in route.methods)
+    app.add_api_route(path, endpoint, methods=[method], response_model=None)
     member = SimpleNamespace(id='frank', role='user', email='frank@example.invalid', name='Frank')
     app.dependency_overrides[get_verified_user] = lambda: member
     return TestClient(app, raise_server_exceptions=False)
@@ -353,3 +356,24 @@ def test_a_write_member_cannot_add_knowledge_to_a_shared_folder(monkeypatch):
     added = {'data': {'files': [{'type': 'collection', 'id': 'kb-local'}, {'type': 'collection', 'id': 'kb-x'}]}}
     response = client.post('/project/update', json=added)
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_the_share_dialog_lists_cloud_knowledge_and_other_peoples_items_as_left_out(world, monkeypatch):
+    async def file_by_id(file_id, db=None):
+        return SimpleNamespace(id=file_id, user_id='erik', filename='offerte.pdf')
+
+    monkeypatch.setattr(folder_sharing.Files, 'get_file_by_id', file_by_id)
+    left_out = await folder_sharing.left_out('dana', world.folders['project'].data['files'])
+    assert left_out == [
+        {'type': 'collection', 'id': 'kb-cloud', 'name': 'OneDrive Projecten', 'reason': 'cloud'},
+        {'type': 'collection', 'id': 'kb-other', 'name': 'Contracten', 'reason': 'owner'},
+        {'type': 'note', 'id': 'note-erik', 'name': 'Notulen', 'reason': 'owner'},
+        {'type': 'file', 'id': 'file-1', 'name': 'offerte.pdf', 'reason': 'owner'},
+    ]
+
+
+def test_only_the_owner_reads_what_a_folder_share_leaves_out(monkeypatch):
+    folder = SimpleNamespace(id='project', user_id='dana', parent_id=None, data={})
+    client = _route(monkeypatch, '/{id}/sharing', folder, method='GET')
+    assert client.get('/project/sharing').status_code == 404

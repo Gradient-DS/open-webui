@@ -35180,6 +35180,52 @@
         ]
       }
     },
+    "/api/v1/folders/{id}/sharing": {
+      "get": {
+        "description": "[Gradient] The folder's items a share leaves out (cloud knowledge bases, other people's items), for the\nowner's share dialog.",
+        "operationId": "get_folder_sharing_by_id_api_v1_folders__id__sharing_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Folder Sharing By Id",
+        "tags": [
+          "folders"
+        ]
+      }
+    },
     "/api/v1/folders/{id}/update": {
       "post": {
         "operationId": "update_folder_name_by_id_api_v1_folders__id__update_post",
