@@ -168,6 +168,11 @@ async def proxy_terminal(
         if terminal_context_config(connection, 'chat').get('context_id') == 'chat_id' and not context_id:
             return JSONResponse({'error': 'A saved chat is required for this terminal'}, status_code=409)
         if context_id:
+            # [Gradient] The chat id selects a per-chat workspace, so the caller must be able to write that chat.
+            from open_webui.models.chats import Chats
+
+            if not await Chats.get_accessible_chat_by_id(session_id, user, permission='write'):
+                return JSONResponse({'error': 'Chat not found'}, status_code=404)
             headers[TERMINAL_CONTEXT_HEADER] = context_id
     cookies = getattr(request, 'cookies', {}) if connection.get('forward_cookies', False) else {}
     auth_type = connection.get('auth_type', 'bearer')
