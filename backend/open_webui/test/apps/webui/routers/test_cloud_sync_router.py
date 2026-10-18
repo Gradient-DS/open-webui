@@ -600,7 +600,7 @@ def test_connections_remain_available_for_each_connection_family(api, platform_c
 @pytest.mark.parametrize(
     'path,capability',
     [
-        ('knowledge/kb/sync', 'cloud_sync'),
+        ('knowledge/kb/schedules/s/skipped', 'cloud_sync'),
         ('connections/c/live/live_documents', 'live_documents'),
         ('connections/c/live/mail', 'live_mail'),
         ('connections/c/usage', 'cloud_sync'),
@@ -613,6 +613,34 @@ def test_missing_capability_refuses_before_platform_calls(api, platform_capabili
     assert result.json()['detail']['code'] == 'feature_unavailable'
     assert not api.requests
     api.link.assert_not_awaited()
+
+
+def test_sync_status_without_cloud_sync_is_empty(api, platform_capabilities):
+    """A tenant without cloud sync answers status with no schedules and no platform call."""
+    platform_capabilities.discard('cloud_sync')
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-local/sync')
+    assert result.status_code == 200
+    assert result.json() == {'schedules': []}
+    assert not api.requests
+    api.link.assert_not_awaited()
+
+
+def test_sync_status_with_unknown_capabilities_still_refuses(api, platform_capabilities, monkeypatch):
+    """An unread capability set is not taken as no cloud sync."""
+    platform_capabilities.clear()
+    monkeypatch.setattr(cloud_sync.capabilities, 'known', lambda: False)
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-cloud/sync')
+    assert result.status_code == 503
+    assert result.json()['detail']['code'] == 'feature_unavailable'
+    assert not api.requests
+
+
+def test_sync_status_maps_a_platform_failure(api):
+    """A platform error on a status read still reaches the browser as an error."""
+    api.responses.extend([response({'code': 'internal_error', 'detail': 'boom'}, 500)] * 2)
+    result = api.browser.get('/api/v1/cloud-sync/knowledge/kb-cloud/sync')
+    assert result.status_code == 500
+    assert result.json()['detail']['code'] == 'upstream_error'
 
 
 def test_no_connection_capabilities_refuses_connection_routes(api, platform_capabilities):
