@@ -19,25 +19,25 @@
 	type UploadOption = {
 		type: string;
 		label: string;
-		labelValues?: { label: string };
 		icon: ComponentType;
 		description: string;
 	};
 
-	$: options = getOptions(knowledgeType, $enabledProviders);
+	$: options = getOptions(knowledgeType, $enabledProviders, $i18n);
 
-	function getOptions(type: string, enabled: SourceProvider[]): UploadOption[] {
+	// Literal keys, so the i18n parser finds them.
+	function getOptions(type: string, enabled: SourceProvider[], tr: I18n): UploadOption[] {
 		const provider = providerFor(type);
 		if (provider) {
 			if (!enabled.some((item) => item.kind === provider.kind)) return [];
 			return [
 				{
 					type: provider.kind,
-					label: 'Sync from {{label}}',
-					labelValues: { label: provider.label },
+					label: tr.t('Sync from {{label}}', { label: provider.label }),
 					icon: provider.icon,
-					description:
+					description: tr.t(
 						'Pick a folder to sync. The first sync takes a few minutes; large folders can take longer. Files show up as they land.'
+					)
 				}
 			];
 		}
@@ -45,36 +45,36 @@
 			return [
 				{
 					type: 'integration',
-					label: 'Managed via integration API',
+					label: tr.t('Managed via integration API'),
 					icon: BarsArrowUp,
-					description: 'Documents are pushed to this knowledge base via the integration API'
+					description: tr.t('Documents are pushed to this knowledge base via the integration API')
 				}
 			];
 		}
 		return [
 			{
 				type: 'files',
-				label: 'Upload files',
+				label: tr.t('Upload files'),
 				icon: ArrowUpCircle,
-				description: 'Upload documents from your device'
+				description: tr.t('Upload documents from your device')
 			},
 			{
 				type: 'directory',
-				label: 'Upload directory',
+				label: tr.t('Upload directory'),
 				icon: FolderOpen,
-				description: 'Upload an entire folder'
+				description: tr.t('Upload an entire folder')
 			},
 			{
 				type: 'web',
-				label: 'Add webpage',
+				label: tr.t('Add webpage'),
 				icon: GlobeAlt,
-				description: 'Import content from a URL'
+				description: tr.t('Import content from a URL')
 			},
 			{
 				type: 'text',
-				label: 'Add text content',
+				label: tr.t('Add text content'),
 				icon: BarsArrowUp,
-				description: 'Paste or write text directly'
+				description: tr.t('Paste or write text directly')
 			}
 		];
 	}
@@ -111,10 +111,10 @@
 					<svelte:component this={option.icon} className="size-8" strokeWidth="1.5" />
 				</div>
 				<div class="text-sm font-medium text-gray-700 dark:text-gray-300">
-					{$i18n.t(option.label, option.labelValues)}
+					{option.label}
 				</div>
 				<div class="text-xs text-gray-400 dark:text-gray-500">
-					{$i18n.t(option.description)}
+					{option.description}
 				</div>
 			</button>
 		{/each}

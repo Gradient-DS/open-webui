@@ -11,7 +11,7 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Database from '$lib/components/icons/Database.svelte';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
@@ -80,6 +80,7 @@
 			knowledgeItems = res.items.map((note) => {
 				return {
 					...note,
+					knowledge_type: note.type,
 					type: 'collection'
 				};
 			});
@@ -184,7 +185,11 @@
 											placement="top"
 											tippyOptions={{ zIndex: 100000 }}
 										>
-											<Database className="size-3.5" />
+											<SourceItemIcon
+												kind="folder"
+												icon={FolderOpen}
+												provider={item.knowledge_type}
+											/>
 										</Tooltip>
 									{:else if item.type === 'file'}
 										<Tooltip
