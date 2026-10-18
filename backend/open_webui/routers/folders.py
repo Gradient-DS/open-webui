@@ -546,20 +546,11 @@ async def update_folder_access_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    # [Gradient] A folder share shares its owner's knowledge, so on v2 only the owner changes it.
-    if configured() and user.id != folder.user_id:
+    if not await _may_share(user, folder, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
-
-    # Only owner, admin, or write-granted user can update access
-    if not can_bypass_access_control(user) and user.id != folder.user_id:
-        if not await _has_folder_access(user.id, folder, 'write', db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-            )
 
     form_data.access_grants = await filter_allowed_access_grants(
         await Config.get('user.permissions'),
@@ -590,6 +581,16 @@ async def update_folder_access_by_id(
     }
 
 
+async def _may_share(user, folder: FolderModel, db: AsyncSession) -> bool:
+    """[Gradient] Whether the user may change who the folder is shared with. On v2 only its owner: a folder share
+    shares the owner's knowledge. Otherwise also an admin or a write-granted user."""
+    if user.id == folder.user_id:
+        return True
+    if configured():
+        return False
+    return can_bypass_access_control(user) or await _has_folder_access(user.id, folder, 'write', db)
+
+
 @router.get('/{id}/sharing')
 async def get_folder_sharing_by_id(
     request: Request,
@@ -597,19 +598,23 @@ async def get_folder_sharing_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """[Gradient] The folder's items a share leaves out (cloud knowledge bases, other people's items), for the
-    owner's share dialog."""
+    """[Gradient] For the share dialog of anyone who reads the folder: whether they may change its access, and (for
+    the owner) the items a share leaves out (cloud knowledge bases, other people's items)."""
     await check_folders_permission(request, user, db=db)
-    folder = await Folders.get_folder_by_id_and_user_id(id, user.id, db=db)
-    if not folder:
+    folder = await Folders.get_folder_by_id(id, db=db)
+    if not folder or not (
+        folder.user_id == user.id
+        or can_bypass_access_control(user)
+        or await _has_folder_access(user.id, folder, 'read', db)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if not configured():
-        return {'shares_knowledge': False, 'left_out': []}
-    left_out = await folder_sharing.left_out(folder.user_id, (folder.data or {}).get('files'))
-    return {'shares_knowledge': True, 'left_out': left_out}
+    sharing = {'shares_knowledge': configured(), 'may_share': await _may_share(user, folder, db), 'left_out': []}
+    if configured() and folder.user_id == user.id:
+        sharing['left_out'] = await folder_sharing.left_out(folder.user_id, (folder.data or {}).get('files'))
+    return sharing
 
 
 ############################

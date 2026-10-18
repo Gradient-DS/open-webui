@@ -233,7 +233,8 @@ KB list/detail `write_access` uses the platform's caller write decision through 
 Knowledge sharing changes are owner-only. Writers can save content with omitted or unchanged grants;
 unchanged grants are stripped before persistence. The local KB access dialog is read-only for other users.
 The folder share modal lists the items a folder share leaves out with why (`cloud`, `owner`) from
-`GET /folders/{id}/sharing` (owner only), nl/en.
+`GET /folders/{id}/sharing` (owner only), nl/en. That route also says whether the reader may change the folder's
+access (`may_share`, owner-only on v2); the modal is read-only otherwise.
 
 `soev/groups.py` narrows platform membership before local writes and publishes widening afterward.
 `soev/group_sync.py` serializes these operations, retries widening with backoff, and reconciles at startup

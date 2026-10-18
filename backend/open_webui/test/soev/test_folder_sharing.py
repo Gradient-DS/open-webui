@@ -355,7 +355,32 @@ async def test_the_share_dialog_lists_cloud_knowledge_and_other_peoples_items_as
     ]
 
 
-def test_only_the_owner_reads_what_a_folder_share_leaves_out(monkeypatch):
+def test_a_write_member_sees_the_share_dialog_read_only_and_not_what_it_leaves_out(monkeypatch):
+    folder = SimpleNamespace(
+        id='project', user_id='dana', parent_id=None, data={'files': [{'type': 'collection', 'id': 'kb-cloud'}]}
+    )
+    client = _route(monkeypatch, '/{id}/sharing', folder, method='GET')
+    response = client.get('/project/sharing')
+    assert response.status_code == 200
+    assert response.json() == {'shares_knowledge': True, 'may_share': False, 'left_out': []}
+
+
+def test_someone_who_cannot_read_the_folder_gets_no_sharing_view(monkeypatch):
+    from open_webui.routers import folders
+
+    async def denied(*args, **kwargs):
+        return False
+
     folder = SimpleNamespace(id='project', user_id='dana', parent_id=None, data={})
     client = _route(monkeypatch, '/{id}/sharing', folder, method='GET')
+    monkeypatch.setattr(folders, '_has_folder_access', denied)
     assert client.get('/project/sharing').status_code == 404
+
+
+def test_without_soev_api_a_write_member_may_still_share(monkeypatch):
+    from open_webui.routers import folders
+
+    folder = SimpleNamespace(id='project', user_id='dana', parent_id=None, data={})
+    client = _route(monkeypatch, '/{id}/sharing', folder, method='GET')
+    monkeypatch.setattr(folders, 'configured', lambda: False)
+    assert client.get('/project/sharing').json() == {'shares_knowledge': False, 'may_share': True, 'left_out': []}

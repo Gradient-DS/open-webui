@@ -2411,6 +2411,7 @@
   "Only the first {{count}} of {{total}} files were exported._one": "",
   "Only the first {{count}} of {{total}} files were exported._other": "",
   "Only the owner can change access to this knowledge base.": "Alleen de eigenaar kan de toegang tot deze kennisbank wijzigen.",
+  "Only the owner can change who this folder is shared with.": "Alleen de eigenaar kan wijzigen met wie deze map wordt gedeeld.",
   "Only the person who added a source can sync it.": "Alleen degene die een bron heeft toegevoegd, kan deze synchroniseren.",
   "Only when away": "",
   "Oops! Looks like the URL is invalid. Please double-check and try again.": "Oeps! Het lijkt erop dat de URL ongeldig is. Controleer het nogmaals en probeer opnieuw.",
