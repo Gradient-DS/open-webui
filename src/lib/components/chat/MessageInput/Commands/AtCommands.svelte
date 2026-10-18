@@ -20,9 +20,10 @@
 	import { isTemporaryChatId } from '$lib/utils/chatId';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Database from '$lib/components/icons/Database.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
+	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Youtube from '$lib/components/icons/Youtube.svelte';
 	import { toast } from 'svelte-sonner';
@@ -173,6 +174,7 @@
 		if (res) {
 			knowledgeItems = res.items.map((item: any) => ({
 				...item,
+				knowledge_type: item.type,
 				type: 'collection'
 			}));
 		}
@@ -293,7 +295,7 @@
 					placement="top"
 				>
 					{#if item?.type === 'collection'}
-						<Database className="size-3.5" />
+						<SourceItemIcon kind="folder" icon={FolderOpen} provider={item.knowledge_type} />
 					{:else if item?.type === 'folder' || item?.filesystem_type === 'directory'}
 						<Folder className="size-3.5" />
 					{:else if item?.type === 'youtube'}

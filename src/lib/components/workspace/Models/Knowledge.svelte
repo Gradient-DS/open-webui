@@ -7,11 +7,12 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ChatBubble from '$lib/components/icons/ChatBubble.svelte';
-	import Database from '$lib/components/icons/Database.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
+	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import SourceItemIcon from '$lib/components/common/SourceItemIcon.svelte';
 
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
 	import { uploadFile } from '$lib/apis/files';
@@ -248,7 +249,11 @@
 									{#if file.status === 'uploading'}
 										<Spinner className="size-3.5" />
 									{:else if file.type === 'collection'}
-										<Database className="size-3.5" />
+										<SourceItemIcon
+											kind="folder"
+											icon={FolderOpen}
+											provider={file.knowledge_type}
+										/>
 									{:else if file.type === 'note'}
 										<PageEdit className="size-3.5" />
 									{:else if file.type === 'chat'}

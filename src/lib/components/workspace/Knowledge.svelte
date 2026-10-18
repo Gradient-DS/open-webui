@@ -491,7 +491,12 @@
 							>
 								<div class="flex w-5 shrink-0 items-center justify-center">
 									<!-- [Gradient] Folder icon with the provider badge for cloud KBs. -->
-									<SourceItemIcon kind="folder" provider={item?.type} className="size-4" />
+									<SourceItemIcon
+										kind="folder"
+										icon={FolderOpen}
+										provider={item?.type}
+										className="size-4"
+									/>
 								</div>
 								<div class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
 									<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
