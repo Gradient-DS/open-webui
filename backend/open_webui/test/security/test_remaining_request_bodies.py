@@ -79,7 +79,7 @@ def test_access_grants_keep_nested_extras_and_missing_keys(module_name, mount, m
             id='resource-1', user_id='control-user', title='Research', chat={}, created_at=1, updated_at=2
         )
     elif module_name == 'notes':
-        resource = SimpleNamespace(id='resource-1', user_id='control-user', is_pinned=False)
+        resource = SimpleNamespace(id='resource-1', user_id='control-user', is_pinned=False, access_grants=[])
     table_name, getter = {
         'chats': ('Chats', 'get_chat_by_id'),
         'folders': ('Folders', 'get_folder_by_id'),
@@ -109,6 +109,11 @@ def test_access_grants_keep_nested_extras_and_missing_keys(module_name, mount, m
         monkeypatch.setattr(table, 'get_file_metadatas_by_id', AsyncMock(return_value=[]))
     if module_name == 'notes':
         monkeypatch.setattr(table, 'get_pinned_note_ids', AsyncMock(return_value=[]))
+        monkeypatch.setattr(module, 'leave_note_rooms_for_revoked_users', AsyncMock())
+        # Upstream gates every note route on notes.enable.
+        monkeypatch.setattr(
+            module.Config, 'get', AsyncMock(side_effect=lambda key, *args: True if key == 'notes.enable' else {})
+        )
     path = ACCESS_PATHS[module_name]
     payload = {'access_grants': copy.deepcopy(GRANTS), **EXTRA}
     with mount(path) as client:

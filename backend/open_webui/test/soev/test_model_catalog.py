@@ -96,7 +96,7 @@ def app_request(**state) -> SimpleNamespace:
 def all_models(monkeypatch: pytest.MonkeyPatch, connections: AsyncMock):
     """get_all_models with the model table and plugins stubbed out."""
     rows: list[ModelModel] = []
-    monkeypatch.setattr(models_utils, 'ENABLE_PLUGINS', False)
+    monkeypatch.setattr(models_utils, 'ENABLE_FUNCTIONS', False)
     monkeypatch.setattr(models_utils.Models, 'get_all_models', AsyncMock(side_effect=lambda: rows))
     monkeypatch.setattr(models_utils.Functions, 'get_functions_by_ids', AsyncMock(return_value=[]))
     monkeypatch.setattr(models_utils.Functions, 'get_function_valves_by_ids', AsyncMock(return_value={}))

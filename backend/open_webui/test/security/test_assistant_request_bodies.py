@@ -76,8 +76,23 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     async def insert(chat_id, user_id, form):
         chats[chat_id] = SimpleNamespace(meta={}, chat=copy.deepcopy(form.chat), variables=form.variables)
 
-    async def upsert(chat_id, message_id, data):
+    async def upsert(chat_id, message_id, data, touch=True):
         writes.append((chat_id, message_id, copy.deepcopy(data)))
+
+    async def get_accessible_chat(id, user, permission='read'):
+        await get_chat(id)
+        return await get_owned_chat(id, user.id)
+
+    async def insert_turn(chat_id, user, user_message, message_ids):
+        # Upstream writes the turn's placeholders in one call; record each as a message write.
+        if not await get_accessible_chat(chat_id, user, permission='write'):
+            raise AssertionError('Turn inserted into a chat the caller cannot write')
+        turn = {}
+        for entry in message_ids:
+            message = {'id': entry['message_id'], 'role': 'assistant', 'model': entry['model_id'], 'user_id': user.id}
+            writes.append((chat_id, entry['message_id'], copy.deepcopy(message)))
+            turn[entry['message_id']] = message
+        return {'messages': turn, 'currentId': message_ids[0]['message_id'] if message_ids else None}
 
     async def owned(*args, **kwargs):
         return True
@@ -86,7 +101,10 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
         return None
 
     async def get_chat(id):
-        return chats.get(id)
+        chat = chats.get(id)
+        if chat is not None and not hasattr(chat, 'user_id'):
+            chat.user_id = user.id  # Chats seeded without an owner belong to the caller.
+        return chat
 
     async def get_owned_chat(id, user_id):
         chat = chats.get(id)
@@ -136,6 +154,8 @@ def split_harness(application, monkeypatch):  # noqa: C901 - Hand-written I/O do
     monkeypatch.setattr(application, 'process_chat_response', response)
     monkeypatch.setattr(application.Chats, 'get_chat_by_id', get_chat)
     monkeypatch.setattr(application.Chats, 'get_chat_by_id_and_user_id', get_owned_chat)
+    monkeypatch.setattr(application.Chats, 'get_accessible_chat_by_id', get_accessible_chat)
+    monkeypatch.setattr(application.Chats, 'insert_chat_turn', insert_turn)
     monkeypatch.setattr(application.Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert)
     monkeypatch.setattr(application.Chats, 'insert_new_chat', insert)
     monkeypatch.setattr(application, 'emit_chat_list_event', noop)
@@ -373,11 +393,12 @@ def test_saved_chat_fanout_keeps_composition_and_message_identity(split_harness,
     assert h.processed[-1]['assistant_id'] == 'assistant'
     assert h.processed[-1]['info']['base_model_id'] is None
     assert h.bindings == [('chat', 'assistant')]
-    assert len(h.writes) == 2
-    for chat_id, message_id, data in h.writes:
-        assert (chat_id, message_id) == ('chat', 'reply')
-        assert data['assistant_id'] == 'assistant'
-        assert data['model'] == 'llm'
+    assert {(chat_id, message_id) for chat_id, message_id, _ in h.writes} == {('chat', 'reply')}
+    stored = {}
+    for _, _, data in h.writes:
+        stored.update(data)
+    assert stored['assistant_id'] == 'assistant'
+    assert stored['model'] == 'llm'
 
 
 def test_new_chat_placeholder_persists_assistant(split_harness):
