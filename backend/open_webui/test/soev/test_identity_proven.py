@@ -72,8 +72,11 @@ def login(identity_config, monkeypatch):
     monkeypatch.setattr(oauth, 'publish_event', AsyncMock())
     monkeypatch.setattr(oauth.OAuthSessions, 'get_sessions_by_user_id', AsyncMock(return_value=[]))
     monkeypatch.setattr(oauth.OAuthSessions, 'create_session', AsyncMock(return_value=SimpleNamespace(id='session')))
-    mint = Mock(wraps=oauth.create_token)
-    monkeypatch.setattr(oauth, 'create_token', mint)
+    from open_webui.utils import auth
+
+    # Upstream mints the session in utils.auth (Auth row, session_stamp, MFA gate); that path has its own tests.
+    mint = AsyncMock(return_value={'token': 'test-session-token'})
+    monkeypatch.setattr(auth, 'create_signin_response', mint)
     # The silent reconnect hop has its own tests; here it keeps the login's own destination.
     silent = AsyncMock(side_effect=lambda user, provider, url: url)
     monkeypatch.setattr(oauth.silent_connect, 'after_login', silent)
@@ -88,7 +91,8 @@ def assert_logged_in(response, login):
     assert response.status_code == 307
     assert response.headers['location'] == 'https://owui.invalid/auth'
     assert any(cookie.startswith('token=') for cookie in response.headers.getlist('set-cookie'))
-    assert login.mint.call_args.kwargs['data'] == {'id': login.user.id}
+    assert login.mint.call_args.args[1].id == login.user.id
+    assert login.mint.call_args.kwargs['source'] == 'oauth'
 
 
 @pytest.mark.asyncio
@@ -140,8 +144,14 @@ async def test_a_local_login_links_nothing(identity_config, login, identity_http
         monkeypatch.setattr(auths, 'ENABLE_PASSWORD_AUTH', True)
         monkeypatch.setattr(auths, 'WEBUI_AUTH', True)
         monkeypatch.setattr(auths, 'WEBUI_AUTH_TRUSTED_EMAIL_HEADER', None)
-        monkeypatch.setattr(auths.signin_rate_limiter, 'is_limited', Mock(return_value=False))
-        monkeypatch.setattr(auths.Auths, 'authenticate_user', AsyncMock(return_value=login.user))
+        from open_webui.models.auths import AuthModel
+
+        credential = AuthModel(id=login.user.id, email=login.user.email, password='hash', session_stamp='stamp')
+        monkeypatch.setattr(auths.signin_rate_limiter, 'is_limited', AsyncMock(return_value=False))
+        monkeypatch.setattr(auths, 'get_mfa_config', AsyncMock(return_value=SimpleNamespace(ENABLE_MFA=False)))
+        # Upstream returns the credential snapshot with the user and re-reads it before minting.
+        monkeypatch.setattr(auths.Auths, 'authenticate_user', AsyncMock(return_value=(login.user, credential)))
+        monkeypatch.setattr(auths.Auths, 'get_auth_by_id', AsyncMock(return_value=credential))
         monkeypatch.setattr(
             auths.Config, 'get', AsyncMock(side_effect=lambda key: '1h' if key == 'auth.jwt_expiry' else None)
         )
@@ -149,7 +159,7 @@ async def test_a_local_login_links_nothing(identity_config, login, identity_http
         monkeypatch.setattr(auths, 'publish_event', AsyncMock())
         response = Response()
         result = await auths.signin(
-            SimpleNamespace(),
+            SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(redis=None))),
             response,
             auths.SigninForm(email=login.user.email, password='invalid-test-password'),
             db=None,

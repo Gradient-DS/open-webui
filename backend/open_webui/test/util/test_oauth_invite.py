@@ -184,7 +184,10 @@ def oauth_manager_with_mocks(monkeypatch):
     monkeypatch.setattr(oauth_module.Users, 'get_num_users', AsyncMock(return_value=2))
     monkeypatch.setattr(oauth_module.Auths, 'insert_new_auth', AsyncMock(side_effect=fake_insert_new_auth))
     monkeypatch.setattr(oauth_module, 'apply_default_group_assignment', AsyncMock())
-    monkeypatch.setattr(oauth_module, 'create_token', MagicMock(return_value='jwt-token'))
+    from open_webui.utils import auth
+
+    # Upstream mints the session in utils.auth; this test covers provisioning only.
+    monkeypatch.setattr(auth, 'create_signin_response', AsyncMock(return_value={'token': 'jwt-token'}))
     monkeypatch.setattr(oauth_module.OAuthSessions, 'get_sessions_by_user_id', AsyncMock(return_value=[]))
     monkeypatch.setattr(oauth_module.OAuthSessions, 'create_session', AsyncMock(return_value=None))
     monkeypatch.setattr(oauth_module.OAuthSessions, 'delete_session_by_id', AsyncMock())
