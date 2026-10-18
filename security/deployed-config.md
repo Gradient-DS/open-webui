@@ -50,8 +50,8 @@ Every production tenant sets agentApiEnabled=true.
 The table above is the source snapshot, not an assertion of full integration
 coverage. `TestCiMatchesDeployedConfig` checks every row, including the three
 Helm rows whose env names are supplied by the chart configmap. Boolean feature
-flags must match except telemetry and the explicitly absent private soev services.
-CI runs no soev server.
+flags must match except telemetry, the explicitly absent private soev services and
+the Weaviate-only flag of a vector store CI does not run. CI runs no soev server.
 
 | Setting | CI value | Reason / coverage limit |
 |---|---|---|
@@ -60,6 +60,7 @@ CI runs no soev server.
 | RAG_EXTERNAL_RERANKER_URL | http://stub:8000/v1/rerank | Replace the production reranker hostname with the sealed stub. |
 | S3_ENDPOINT_URL | http://s3:9000 | The endpoint hostname remains a divergence: the in-network S3 gateway replaces object.previder.nl. CI drives the same S3 provider code path, but does not cover production TLS or Previder-specific behavior. |
 | S3_BUCKET_NAME | ci-uploads | Disposable bucket replaces the tenant bucket; the gateway creates it before it listens and its health check verifies it before the app starts. |
+| ENABLE_WEAVIATE_MULTITENANCY_MODE, VECTOR_DB | absent, pgvector | The slim image serves pgvector only (USE_SLIM), the fleet's target store. The Weaviate flag has no effect there; tenants still on Weaviate multitenancy are not covered by the sealed stack. |
 | ENABLE_OTEL | empty | No Alloy OTLP collector exists in the sealed stack. Disable telemetry exports; they do not decide application request coverage. |
 | Upstream API keys, database password, signing key, S3 credentials | disposable CI values | Production secrets are neither available nor needed by the sealed stack. |
 | OAuth / OneDrive / Google Drive / Graph mail credentials and stored tokens | empty | Provider authentication uses public Microsoft/Google endpoints, including hard-coded URLs. No real provider credentials or tokens are available. Integration, Google sync, email invite and OAuth signup flags remain enabled, but successful cloud authentication, sync and mail delivery are not covered. |

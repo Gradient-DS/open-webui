@@ -28,7 +28,7 @@ def test_app_and_gateway_share_credentials_and_bucket(compose):
     assert app['S3_BUCKET_NAME'] == s3['S3_BUCKET_NAME'] == 'ci-uploads'
     assert app['S3_ACCESS_KEY_ID'] and len(app['S3_SECRET_ACCESS_KEY']) >= 8
     assert app['DATABASE_ENABLE_IAM_TOKEN_AUTH'] == 'false'
-    assert app['VECTOR_DB'] == 'weaviate'
+    assert app['VECTOR_DB'] == 'pgvector'
 
 
 def test_bucket_exists_before_the_gateway_listens_and_before_app_start(compose):

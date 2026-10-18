@@ -31,7 +31,7 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'retrieval/loaders/tavily.py': 'Tavily web loader is not selected; WEB_LOADER_ENGINE selects the external stub loader.',
     'retrieval/models/external.py': 'External reranking uses RAG_EXTERNAL_RERANKER_URL at stub (POST /v1/rerank).',
     'retrieval/utils.py': 'Embeddings use RAG_OPENAI_API_BASE_URL at stub; supplied download URLs are findings.',
-    'retrieval/vector/dbs/s3vector.py': 'S3 Vectors is not selected; VECTOR_DB selects the in-network Weaviate service.',
+    'retrieval/vector/dbs/s3vector.py': 'S3 Vectors is not selected; VECTOR_DB selects pgvector in the in-network PostgreSQL service.',
     'retrieval/web/bing.py': 'bing search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/bocha.py': 'bocha search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/brave.py': 'brave search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
@@ -56,13 +56,15 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'retrieval/web/serper.py': 'serper search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/serphouse.py': 'serphouse search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/serply.py': 'serply search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/staan.py': 'staan search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/serpstack.py': 'serpstack search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/tavily.py': 'tavily search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/utils.py': 'Native web fetches consume supplied URLs; public destinations are findings, CI documents use stub.',
     'retrieval/web/yacy.py': 'yacy search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/yandex.py': 'yandex search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/ydc.py': 'ydc search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
-    'routers/audio.py': 'OpenAI audio URLs explicitly point to stub; other speech engines remain unselected.',
+    'routers/audio/__init__.py': 'OpenAI audio URLs explicitly point to stub; other speech engines remain unselected.',
+    'routers/audio/realtime.py': 'Realtime calls are off (AUDIO_REALTIME_ENABLED unset) and AUDIO_REALTIME_OPENAI_API_BASE_URL points at stub, which serves no Realtime socket, so a call enabled at runtime fails closed.',
     'routers/auths.py': 'OAuth avatar fetch requires a completed provider login; no OAuth provider is configured.',
     'routers/configs.py': 'Admin connection verification consumes supplied URLs; off-network destinations are findings.',
     'routers/functions.py': 'Admin URL imports consume supplied URLs; off-network destinations are findings.',
@@ -78,12 +80,15 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'storage/provider.py': 'S3 uploads/downloads use S3_ENDPOINT_URL at the in-network S3 gateway with disposable credentials; STORAGE_PROVIDER=s3 leaves Azure Blob and GCS unselected.',
     'utils/anthropic.py': 'Provider passthrough uses configured OpenAI connections at stub; no Anthropic connection is seeded.',
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
+    'utils/apps.py': 'No apps are registered; app endpoints must be public HTTPS (APP_ALLOWED_PRIVATE_ORIGINS is empty), so request-supplied public endpoints are findings.',
     'utils/automations.py': 'No automation webhook is seeded; request-supplied public webhooks are findings.',
     'utils/code_interpreter.py': 'Code flags enabled; pyodide selected, with Jupyter coverage gap documented in security/deployed-config.md.',
     'utils/feedback_report.py': 'Feedback Slack and notification-router URLs both point at stub.',
     'utils/files.py': 'Remote file download consumes supplied URLs; off-network destinations are findings.',
     'utils/images/comfyui.py': 'ComfyUI is not the selected image engine and its base URL is empty.',
     'utils/oauth.py': 'All OAuth providers unconfigured; no IdP credentials, sessions, or external tools seeded.',
+    'utils/skill_files.py': 'Skill URL imports fetch supplied GitHub URLs through get_ssrf_safe_session(); off-network destinations are findings.',
+    'utils/terminals.py': 'No terminal connections configured; supplied connection destinations are findings.',
     'utils/tools.py': 'No external tool servers configured; request-supplied public server URLs are findings.',
     'utils/webhook.py': 'Configured signup/chat webhook points at stub; supplied public webhook URLs are findings.',
 }
@@ -475,15 +480,16 @@ class TestCiStubsEveryDeclaredSink:
         env = compose['services']['open-webui']['environment']
         assert urlsplit(env['DATABASE_URL']).hostname == 'postgres'
         assert env['DATABASE_HOST'] == 'postgres'
-        assert env['VECTOR_DB'] == 'weaviate'
-        assert env['WEAVIATE_HTTP_HOST'] == env['WEAVIATE_GRPC_HOST'] == 'weaviate'
-        assert compose['services']['weaviate']['environment']['DISABLE_TELEMETRY'] == 'true'
+        # The slim image serves pgvector only (USE_SLIM): vectors live in the internal PostgreSQL.
+        assert env['VECTOR_DB'] == 'pgvector'
+        assert compose['services']['postgres']['image'].startswith('pgvector/pgvector:')
+        assert not any(name.startswith('WEAVIATE_') for name in env)
 
     def test_only_entry_has_an_external_network(self, compose):
         assert compose['networks']['internal']['internal'] is True
         assert set(compose['networks']) == {'internal', 'edge'}
         services = compose['services']
-        assert set(services) == {'entry', 'open-webui', 'postgres', 'weaviate', 'redis', 'stub', 's3'}
+        assert set(services) == {'entry', 'open-webui', 'postgres', 'redis', 'stub', 's3'}
         for name, service in services.items():
             assert set(service['networks']) == ({'internal', 'edge'} if name == 'entry' else {'internal'})
             assert not service.get('network_mode')
@@ -502,7 +508,7 @@ class TestCiStubsEveryDeclaredSink:
         assert app['container_name'] == 'open-webui-ci'
         assert app['build']['context'] == '.'
         assert app['build']['dockerfile'] == 'Dockerfile'
-        for dependency in ('postgres', 'weaviate', 'redis', 'stub', 's3'):
+        for dependency in ('postgres', 'redis', 'stub', 's3'):
             assert app['depends_on'][dependency]['condition'] == 'service_healthy'
 
     def test_deployed_search_engine_reaches_provider_dispatch(self, compose):
@@ -547,7 +553,8 @@ class TestCiStubsEveryDeclaredSink:
         assert len(conditions) == 1
         key = compose['services']['open-webui']['environment']['DATALAB_MARKER_API_KEY']
         scope = {
-            'self': SimpleNamespace(engine='datalab_marker', kwargs={'DATALAB_MARKER_API_KEY': key}),
+            # Upstream's loader reads dotted retrieval config instead of constructor kwargs.
+            'self': SimpleNamespace(engine='datalab_marker', config={'rag.datalab_marker_api_key': key}),
             'file_ext': 'pdf',
         }
         # nosec B307 - evaluates one `if` condition lifted from this repo's own source
@@ -570,4 +577,4 @@ def test_no_private_upstream_is_configured_or_run(compose):
         'PIPELINE_API_KEY',
     }
     assert not absent & env.keys()
-    assert set(compose['services']) == {'postgres', 'weaviate', 'redis', 'stub', 's3', 'open-webui', 'entry'}
+    assert set(compose['services']) == {'postgres', 'redis', 'stub', 's3', 'open-webui', 'entry'}

@@ -146,6 +146,8 @@ services:
       AUDIO_STT_OPENAI_API_KEY: "ci-stub-key"
       AUDIO_TTS_OPENAI_API_BASE_URL: "http://stub:8000/v1"
       AUDIO_TTS_OPENAI_API_KEY: "ci-stub-key"
+      # The Realtime default is real api.openai.com; stub serves no Realtime socket, so calls fail closed.
+      AUDIO_REALTIME_OPENAI_API_BASE_URL: "http://stub:8000/v1"
       IMAGES_OPENAI_API_BASE_URL: "http://stub:8000/v1"
       IMAGES_OPENAI_API_KEY: "ci-stub-key"
       ENABLE_IMAGE_GENERATION: "true"

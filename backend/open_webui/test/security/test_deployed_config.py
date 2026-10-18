@@ -30,6 +30,11 @@ DIVERGENCES = {
         'Production object.previder.nl endpoint replaced by the in-network S3 gateway.',
     ),
     'S3_BUCKET_NAME': ('ci-uploads', 'Production bucket replaced by a disposable CI bucket.'),
+    'ENABLE_WEAVIATE_MULTITENANCY_MODE': (
+        None,
+        'CI runs the slim image, which serves pgvector only (USE_SLIM); this Weaviate-only flag has no '
+        'effect there, so tenants still on Weaviate multitenancy are not covered by the sealed stack.',
+    ),
     'ENABLE_OTEL': (
         '',
         'Telemetry is disabled: the sealed stack has no Alloy OTLP collector '
