@@ -148,10 +148,12 @@
 					<!-- $i18n.t("Listing accessible knowledge bases...") -->
 					<!-- $i18n.t("Searching knowledge bases for \"{{query}}\"...") -->
 					<!-- $i18n.t("Searching all knowledge bases for \"{{query}}\"...") -->
+					<!-- $i18n.t("Searching for \"{{query}}\"...") -->
 					<!-- $i18n.t("Reading {{doc_title}}...") -->
 					<!-- $i18n.t("Read {{doc_title}}") -->
 					<!-- $i18n.t("Searched {{collection_name}} for \"{{query}}\": {{passages}} passages in {{documents}} documents") -->
 					<!-- $i18n.t("Searched all knowledge bases for \"{{query}}\": {{passages}} passages in {{documents}} documents") -->
+					<!-- $i18n.t("Searched for \"{{query}}\": {{passages}} passages in {{documents}} documents") -->
 					<!-- $i18n.t("Found {{documents}} documents in {{collection_name}} for \"{{query}}\"") -->
 					<!-- $i18n.t("Found {{documents}} documents for \"{{query}}\"") -->
 					<!-- $i18n.t("Listed {{documents}} documents in {{collection_name}}") -->
