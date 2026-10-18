@@ -232,6 +232,8 @@ KB list/detail `write_access` uses the platform's caller write decision through 
 
 Knowledge sharing changes are owner-only. Writers can save content with omitted or unchanged grants;
 unchanged grants are stripped before persistence. The local KB access dialog is read-only for other users.
+The folder share modal lists the items a folder share leaves out with why (`cloud`, `owner`) from
+`GET /folders/{id}/sharing` (owner only), nl/en.
 
 `soev/groups.py` narrows platform membership before local writes and publishes widening afterward.
 `soev/group_sync.py` serializes these operations, retries widening with backoff, and reconciles at startup
@@ -253,8 +255,6 @@ owners' items are never shared. `folder_share_grant` records only the grants thi
 item or moving a folder out revokes those and keeps grants the item already had. The folder routes remove grants
 before committing (a failure refuses the change) and add them after. On v2 only the owner changes a folder's grants
 or adds items to it; write members may remove items.
-`GET /folders/{id}/sharing` (owner only) lists the items a share leaves out with why (`cloud`, `owner`); the share
-modal shows them, nl/en.
 
 Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
 OWUI's init container owns schema upgrades. A timeout exits with a clear retry message.
