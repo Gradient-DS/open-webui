@@ -16,6 +16,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 OVERRIDDEN = {
     'insert_new_group',
@@ -31,6 +32,7 @@ OVERRIDDEN = {
     'delete_groups_by_user_id',
 }
 READ_ONLY = {
+    'get_ancestor_ids',
     'get_all_groups',
     'get_group_by_name',
     'get_groups',
@@ -126,7 +128,7 @@ def directory_http(monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def group_store(identity_config, directory_http, monkeypatch, platform_capabilities):
+async def group_store(identity_config, directory_http, monkeypatch, platform_capabilities, tmp_path):
     """Exercise the real upstream group methods against isolated SQLite tables."""
     from open_webui.soev import group_sync
 
@@ -135,11 +137,21 @@ async def group_store(identity_config, directory_http, monkeypatch, platform_cap
     users = importlib.import_module('open_webui.models.users')
     database = importlib.import_module('open_webui.internal.db')
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
-    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+    # Upstream's hierarchy writes open their own session, so every session must reach the same file.
+    engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path}/groups.db', poolclass=NullPool)
+    monkeypatch.setattr(database, 'AsyncSessionLocal', async_sessionmaker(engine, expire_on_commit=False))
+    grants = importlib.import_module('open_webui.models.access_grants')
     async with engine.begin() as connection:
         await connection.run_sync(
             lambda sync: database.Base.metadata.create_all(
-                sync, tables=[models.Group.__table__, models.GroupMember.__table__, users.User.__table__]
+                sync,
+                tables=[
+                    models.Group.__table__,
+                    models.GroupMember.__table__,
+                    users.User.__table__,
+                    # Upstream's group delete also revokes the group's access grants.
+                    grants.AccessGrant.__table__,
+                ],
             )
         )
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
