@@ -1079,7 +1079,7 @@ async def require_tool_history_access(id, user, db):
     if not resource:
         raise HTTPException(404, 'Not found')
     if not (
-        (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+        can_bypass_access_control(user)
         or resource.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id, resource_type='tool', resource_id=id, permission='write', db=db

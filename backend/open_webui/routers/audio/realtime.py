@@ -8,12 +8,12 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import aiohttp
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, DEFAULT_REALTIME_CALL_PROMPT_TEMPLATE
+from open_webui.config import DEFAULT_REALTIME_CALL_PROMPT_TEMPLATE
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, BYPASS_MODEL_ACCESS_CONTROL
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
 from open_webui.models.models import Models, ModelVoice
-from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control import can_bypass_access_control, has_permission
 from open_webui.utils.auth import get_verified_user_by_token
 from open_webui.utils.headers import get_microsoft_entra_id_access_token
 from open_webui.utils.json_codec import JSONCodec
@@ -408,7 +408,7 @@ async def realtime_call(ws: WebSocket):
         if not model or model.get('direct'):
             raise ValueError('Bridge requires a server-configured chat model')
         model_info = await Models.get_model_by_id(model_id)
-        if not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
+        if not BYPASS_MODEL_ACCESS_CONTROL and not can_bypass_access_control(user):
             try:
                 await check_model_access(user, model, model_info=model_info)
             except Exception:
