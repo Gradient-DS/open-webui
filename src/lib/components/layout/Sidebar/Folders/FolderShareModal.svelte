@@ -26,6 +26,8 @@
 	let loading = false;
 	let sharesKnowledge = false;
 	let leftOut: LeftOut[] = [];
+	// [Gradient] Read-only until the server says otherwise: on v2 only the owner changes a folder's access.
+	let mayShare = false;
 
 	// Fetch fresh folder data (with access_grants) when modal opens
 	$: if (show && folder?.id) {
@@ -39,11 +41,10 @@
 			if (freshFolder) {
 				accessGrants = freshFolder.access_grants ?? [];
 			}
-			if (freshFolder?.user_id === $user?.id) {
-				const sharing = await getFolderSharingById(localStorage.token, folder.id);
-				sharesKnowledge = sharing?.shares_knowledge ?? false;
-				leftOut = sharing?.left_out ?? [];
-			}
+			const sharing = await getFolderSharingById(localStorage.token, folder.id);
+			sharesKnowledge = sharing?.shares_knowledge ?? false;
+			mayShare = sharing?.may_share ?? false;
+			leftOut = sharing?.left_out ?? [];
 		} catch (e) {
 			console.error('Failed to load folder access grants', e);
 			accessGrants = folder?.access_grants ?? [];
@@ -53,7 +54,7 @@
 	};
 
 	const handleAccessChange = async () => {
-		if (!folder) return;
+		if (!folder || !mayShare) return;
 		try {
 			const res = await updateFolderAccessById(localStorage.token, folder.id, accessGrants);
 			if (res) {
@@ -82,6 +83,11 @@
 		</div>
 
 		<div class="w-full px-5 pb-4 dark:text-white">
+			{#if !loading && !mayShare}
+				<div class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+					{$i18n.t('Only the owner can change who this folder is shared with.')}
+				</div>
+			{/if}
 			{#if sharesKnowledge}
 				<div class="mb-3 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t('Sharing this folder also shares the knowledge bases, files and notes in it.')}
@@ -110,6 +116,7 @@
 			<AccessControl
 				bind:accessGrants
 				onChange={handleAccessChange}
+				readOnly={!mayShare}
 				accessRoles={['read', 'write']}
 				defaultPermission="write"
 				share={$user?.role === 'admin' || $user?.permissions?.sharing?.folders}

@@ -35182,7 +35182,7 @@
     },
     "/api/v1/folders/{id}/sharing": {
       "get": {
-        "description": "[Gradient] The folder's items a share leaves out (cloud knowledge bases, other people's items), for the\nowner's share dialog.",
+        "description": "[Gradient] For the share dialog of anyone who reads the folder: whether they may change its access, and (for\nthe owner) the items a share leaves out (cloud knowledge bases, other people's items).",
         "operationId": "get_folder_sharing_by_id_api_v1_folders__id__sharing_get",
         "parameters": [
           {

@@ -2411,6 +2411,7 @@
   "Only the first {{count}} of {{total}} files were exported._one": "",
   "Only the first {{count}} of {{total}} files were exported._other": "",
   "Only the owner can change access to this knowledge base.": "",
+  "Only the owner can change who this folder is shared with.": "",
   "Only the person who added a source can sync it.": "Only the person who added a source can sync it.",
   "Only when away": "",
   "Oops! Looks like the URL is invalid. Please double-check and try again.": "",
