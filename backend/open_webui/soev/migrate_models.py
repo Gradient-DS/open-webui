@@ -3,6 +3,9 @@
 The mapping is an explicit input, SOEV_V2_MODEL_MAP: a JSON object of old id to catalog id,
 either LiteLLM model names (the v2 apply) or renamed catalog ids (a --models run). Any other id
 that is neither a catalog id nor an assistant becomes the catalog's default model.
+
+The v2 apply clears each user's default model selection (settings.ui.models), so every user starts
+on the platform default; a --models run maps it instead, since users chose it after the migration.
 """
 
 import copy
@@ -26,6 +29,7 @@ from open_webui.soev.migrate_state import MigrationError, state
 
 BATCH = 200
 USER_SETTING_LISTS = (('ui', 'models'), ('ui', 'pinnedModels'))
+CLEARED_SELECTION = 'user.settings.cleared'
 
 
 def parse_model_map(raw: str | None) -> dict[str, str]:
@@ -66,13 +70,23 @@ class Report:
     defaulted_ids: Counter = field(default_factory=Counter)
     skipped: list[str] = field(default_factory=list)
     merged: list[str] = field(default_factory=list)
+    # Users whose default model selection was cleared.
+    cleared: int = 0
 
 
 class _Rewrite:
     def __init__(
-        self, db: AsyncSession, mapping: dict[str, str], migration_id: str, dry_run: bool, known: set[str], default: str
+        self,
+        db: AsyncSession,
+        mapping: dict[str, str],
+        migration_id: str,
+        dry_run: bool,
+        known: set[str],
+        default: str,
+        clear_selection: bool,
     ):
         self.db, self.mapping, self.migration_id, self.dry_run = db, mapping, migration_id, dry_run
+        self.clear_selection = clear_selection
         # Assistant ids and catalog ids are already v2 references, not unmapped names.
         self.known = known | set(mapping.values())
         self.default = default
@@ -232,6 +246,22 @@ class _Rewrite:
         if not isinstance(value, dict):
             return value
         result = copy.deepcopy(value)
+        ui = result.get('ui')
+        if self.clear_selection and isinstance(ui, dict) and 'models' in ui:
+            self.report.cleared += 1
+            if not self.dry_run:
+                self.records.append(
+                    {
+                        'migration_id': self.migration_id,
+                        'site': CLEARED_SELECTION,
+                        'row_id': row_id,
+                        'path': json.dumps(['ui', 'models']),
+                        'old_value': json.dumps(ui['models']),
+                        'new_value': 'null',
+                        'created_at': self.now,
+                    }
+                )
+            del ui['models']
         for path in USER_SETTING_LISTS:
             parent = result.get(path[0])
             if isinstance(parent, dict) and isinstance(parent.get(path[1]), list):
@@ -289,10 +319,14 @@ async def rewrite(
     *,
     default: str,
     catalog: set[str],
+    clear_selection: bool,
     dry_run: bool = False,
 ) -> Report:
-    """Map every stored model reference, unmapped ones to the default; catalog ids and assistants are left alone."""
-    run = _Rewrite(db, mapping, migration_id, dry_run, await _assistant_ids(db) | catalog, default)
+    """Map every stored model reference, unmapped ones to the default; catalog ids and assistants are left alone.
+
+    clear_selection drops each user's settings.ui.models instead of mapping it."""
+    known = await _assistant_ids(db) | catalog
+    run = _Rewrite(db, mapping, migration_id, dry_run, known, default, clear_selection)
     await run.column('chat_message.model_id', ChatMessage, 'model_id')
     await run.column('model.base_model_id', Model, 'base_model_id')
     await run.rename_models()
@@ -366,6 +400,19 @@ async def _restore_column(db: AsyncSession, site: str, row_id: str, entries, rep
         report.skipped.append(f'{site} {row_id}: changed since')
 
 
+async def _restore_cleared(db: AsyncSession, row_id: str, entries, report: Report) -> None:
+    """Put back a cleared selection unless the user has chosen one since."""
+    (entry,) = entries
+    value = copy.deepcopy((await db.execute(sa.select(User.settings).where(User.id == row_id))).scalar())
+    ui = value.get('ui') if isinstance(value, dict) else None
+    if not isinstance(ui, dict) or 'models' in ui:
+        report.skipped.append(f'{CLEARED_SELECTION} {row_id}: changed since')
+        return
+    ui['models'] = json.loads(entry.old_value)
+    await db.execute(sa.update(User).where(User.id == row_id).values(settings=value))
+    report.changed[CLEARED_SELECTION] += 1
+
+
 async def _restore_json(db: AsyncSession, site: str, row_id: str, entries, report: Report) -> None:
     table, column = _JSON_SITES[site]
     value = (await db.execute(sa.select(getattr(table, column)).where(table.id == row_id))).scalar()
@@ -397,6 +444,8 @@ async def restore(db: AsyncSession, migration_id: str) -> Report:
             await _restore_rename(db, row_id, entries, report)
         elif site == 'model.is_active':
             await _restore_active(db, row_id, entries, report)
+        elif site == CLEARED_SELECTION:
+            await _restore_cleared(db, row_id, entries, report)
         elif site in _COLUMN_SITES:
             await _restore_column(db, site, row_id, entries, report)
         else:
