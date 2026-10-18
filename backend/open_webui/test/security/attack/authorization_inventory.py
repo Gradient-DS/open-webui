@@ -50,6 +50,9 @@ def _mounts():
             else:
                 continue
             path = ROOT / 'backend' / (module.replace('.', '/') + '.py')
+            if not path.exists():
+                # A router module can be a package (routers/audio/__init__.py).
+                path = ROOT / 'backend' / module.replace('.', '/') / '__init__.py'
             child_prefix = prefix + _router_prefix(tree, router)
             child_prefix += next((ast.literal_eval(k.value) for k in call.keywords if k.arg == 'prefix'), '')
             if path.exists():

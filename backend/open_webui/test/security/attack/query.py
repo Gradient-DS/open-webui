@@ -2,7 +2,7 @@
 
 RUN-TAG: owui-phase7b-remaining-passes
 
-The committed surface derives 49 operations / 105 string query parameters.
+The committed surface derives 63 operations / 131 string query parameters.
 User offboarding adds mode and transfer_to; confirm_shared_deletion is an array
 of strings, outside this pass's scalar string derivation.
 Pair-dependent handlers need the all-at-once request; individual requests

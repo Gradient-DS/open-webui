@@ -1,6 +1,6 @@
 # Derivation gaps measured from committed security/openapi.json using openapi-surface.
 # Phase 4b audited all 27 previously labelled untyped JSON write bodies.
-# 27 blind body operations remain: 20 JSON writes, 1 JSON read, 6 multipart.
+# 28 blind body operations remain: 20 JSON writes, 1 JSON read, 7 multipart.
 # The writes include typed boolean/integer-only bodies, author-defined
 # valve bodies, an arbitrary config-import blob, and typed maps whose
 # dynamic keys the derivation deliberately does not traverse.
@@ -18,6 +18,10 @@ reason = "LdapConfigForm already declares only enable_ldap (boolean). There are 
 [[waived]]
 id = "POST /api/v1/channels/{id}/members/active"
 reason = "UpdateActiveMemberForm already declares only is_active (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
+
+[[waived]]
+id = "POST /api/v1/channels/{id}/members/mute"
+reason = "UpdateMutedMemberForm already declares only is_channel_muted (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/channels/{id}/messages/{message_id}/pin"
@@ -94,6 +98,14 @@ reason = "Multipart file upload: file contents are a different surface that the 
 [[waived]]
 id = "POST /ollama/models/upload/{url_idx}"
 reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
+
+[[waived]]
+id = "POST /api/v1/skills/import"
+reason = "Multipart skill package upload (files) with a JSON-encoded decisions form part: file contents are a different surface that the hostile corpus does not model, and the derivation models JSON bodies only. The drive pass sends a declared SKILL.md and decisions part (attack-surface.toml [[field]])."
+
+[[waived]]
+id = "POST /api/v1/skills/import/preview"
+reason = "Multipart skill package upload (files): file contents are a different surface that the hostile corpus does not model. The drive pass sends a declared SKILL.md part (attack-surface.toml [[field]])."
 
 [[waived]]
 id = "POST /api/v1/users/user/variables/update"

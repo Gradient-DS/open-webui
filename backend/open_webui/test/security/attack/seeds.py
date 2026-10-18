@@ -570,6 +570,25 @@ def seed_external_source(ctx, parameter):
     return _extract(body, 'id', name=parameter['key'], via='POST external/knowledge/create')
 
 
+def seed_superseded_version(ctx, parameter):
+    # History handlers refuse to delete the current version, so the fixture is the
+    # version an update has just replaced. `create` makes a resource of its own first.
+    def call(step, **kwargs):
+        method, path = parameter[step].split(' ', 1)
+        return ctx.request(method, _fill_field(path, ctx, path=True), actor=ctx.admin, **kwargs)
+
+    if 'create' in parameter:
+        created = call('create', json=_fill_field(parameter['create_body'], ctx))
+        (provided,) = parameter['provides']
+        ctx.provide(parameter, provided, _extract(created, 'id', name=parameter['key'], via=parameter['create']))
+    query = {'params': _fill_field(parameter['query'], ctx)} if 'query' in parameter else {}
+    previous = _extract(call('read', **query), 'version_id', name=parameter['key'], via=parameter['read'])
+    updated = call('update', json=_fill_field(parameter['body'], ctx))
+    if _extract(updated, 'version_id', name=parameter['key'], via=parameter['update']) == previous:
+        raise RuntimeError(f'{parameter["key"]}: the update did not supersede version {previous}')
+    return previous
+
+
 _SEEDERS = {
     function.__name__: function
     for function in (
@@ -586,6 +605,7 @@ _SEEDERS = {
         seed_cloud_family,
         seed_knowledge_file,
         seed_external_source,
+        seed_superseded_version,
     )
 }
 

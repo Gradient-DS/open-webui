@@ -250,6 +250,61 @@
         "title": "AddUserForm",
         "type": "object"
       },
+      "AddUserResponse": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "profile_image_url": {
+            "title": "Profile Image Url",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
+          },
+          "token_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Type"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role",
+          "email",
+          "profile_image_url"
+        ],
+        "title": "AddUserResponse",
+        "type": "object"
+      },
       "AdminConfig": {
         "properties": {
           "ACCEPTANCE_MODAL_BUTTON_TEXT": {
@@ -366,6 +421,11 @@
             "title": "Enable Api Keys Endpoint Restrictions",
             "type": "boolean"
           },
+          "ENABLE_APPS": {
+            "default": false,
+            "title": "Enable Apps",
+            "type": "boolean"
+          },
           "ENABLE_AUTOMATIONS": {
             "title": "Enable Automations",
             "type": "boolean"
@@ -386,8 +446,18 @@
             "title": "Enable Community Sharing",
             "type": "boolean"
           },
+          "ENABLE_ENCRYPTED_CHANNELS": {
+            "default": false,
+            "title": "Enable Encrypted Channels",
+            "type": "boolean"
+          },
           "ENABLE_FOLDERS": {
             "title": "Enable Folders",
+            "type": "boolean"
+          },
+          "ENABLE_LOGIN_FORM": {
+            "default": true,
+            "title": "Enable Login Form",
             "type": "boolean"
           },
           "ENABLE_MEMORIES": {
@@ -400,6 +470,11 @@
           },
           "ENABLE_MESSAGE_RATING": {
             "title": "Enable Message Rating",
+            "type": "boolean"
+          },
+          "ENABLE_MFA": {
+            "default": false,
+            "title": "Enable Mfa",
             "type": "boolean"
           },
           "ENABLE_NOTES": {
@@ -437,9 +512,36 @@
             ],
             "title": "Folder Max File Count"
           },
+          "I18N": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "I18N"
+          },
           "JWT_EXPIRES_IN": {
             "title": "Jwt Expires In",
             "type": "string"
+          },
+          "MFA_ALLOW_OAUTH_BYPASS": {
+            "default": false,
+            "title": "Mfa Allow Oauth Bypass",
+            "type": "boolean"
+          },
+          "MFA_ALLOW_TRUSTED_HEADER_BYPASS": {
+            "default": false,
+            "title": "Mfa Allow Trusted Header Bypass",
+            "type": "boolean"
           },
           "PENDING_USER_OVERLAY_CONTENT": {
             "anyOf": [
@@ -477,6 +579,30 @@
           "SHOW_ADMIN_DETAILS": {
             "title": "Show Admin Details",
             "type": "boolean"
+          },
+          "SKILL_CONTENT_MAX_CHARS": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Content Max Chars"
+          },
+          "SKILL_PREVIEW_MAX_CHARS": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Preview Max Chars"
           },
           "WEBUI_URL": {
             "title": "Webui Url",
@@ -585,6 +711,374 @@
         "title": "ApiKey",
         "type": "object"
       },
+      "AppAccessResponse": {
+        "properties": {
+          "access_grants": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Access Grants",
+            "type": "array"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "connection_status": {
+            "default": "disconnected",
+            "enum": [
+              "connecting",
+              "connected",
+              "disconnected"
+            ],
+            "title": "Connection Status",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "is_active",
+          "configured",
+          "data",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AppAccessResponse",
+        "type": "object"
+      },
+      "AppConnectionForm": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          }
+        },
+        "title": "AppConnectionForm",
+        "type": "object"
+      },
+      "AppForm": {
+        "additionalProperties": false,
+        "properties": {
+          "access_grants": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Access Grants",
+            "type": "array"
+          },
+          "api_key": {
+            "format": "password",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string",
+            "writeOnly": true
+          },
+          "granted_scopes": {
+            "items": {
+              "enum": [
+                "channels:mentions:read",
+                "channels:messages:read",
+                "channels:messages:write",
+                "channels:read"
+              ],
+              "type": "string"
+            },
+            "title": "Granted Scopes",
+            "type": "array"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/Manifest"
+          },
+          "slug": {
+            "pattern": "^[a-z][a-z0-9-]{0,39}$",
+            "title": "Slug",
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2048,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "manifest",
+          "url",
+          "api_key",
+          "slug",
+          "granted_scopes"
+        ],
+        "title": "AppForm",
+        "type": "object"
+      },
+      "AppInteractionForm": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Action Id",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "action_id"
+        ],
+        "title": "AppInteractionForm",
+        "type": "object"
+      },
+      "AppInvitation": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "title": "App Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_id"
+        ],
+        "title": "AppInvitation",
+        "type": "object"
+      },
+      "AppManifestForm": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "format": "password",
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
+          },
+          "url": {
+            "maxLength": 2048,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "AppManifestForm",
+        "type": "object"
+      },
+      "AppResponse": {
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "connection_status": {
+            "default": "disconnected",
+            "enum": [
+              "connecting",
+              "connected",
+              "disconnected"
+            ],
+            "title": "Connection Status",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "is_active",
+          "configured",
+          "data",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AppResponse",
+        "type": "object"
+      },
+      "AppUpdateForm": {
+        "additionalProperties": false,
+        "properties": {
+          "access_grants": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Grants"
+          },
+          "granted_scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "channels:mentions:read",
+                    "channels:messages:read",
+                    "channels:messages:write",
+                    "channels:read"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Granted Scopes"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Manifest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings"
+          }
+        },
+        "title": "AppUpdateForm",
+        "type": "object"
+      },
       "ArchiveConfigForm": {
         "properties": {
           "auto_archive_retention_days": {
@@ -686,6 +1180,16 @@
       },
       "AudioConfigUpdateForm": {
         "properties": {
+          "realtime": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RealtimeConfigForm"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "stt": {
             "$ref": "#/components/schemas/STTConfigForm"
           },
@@ -1057,6 +1561,23 @@
             "title": "Dismissible",
             "type": "boolean"
           },
+          "i18n": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "I18N"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -1163,6 +1684,45 @@
           "status"
         ],
         "title": "BatchProcessFilesResult",
+        "type": "object"
+      },
+      "Body_import_skills_api_v1_skills_import_post": {
+        "properties": {
+          "decisions": {
+            "title": "Decisions",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files",
+          "decisions"
+        ],
+        "title": "Body_import_skills_api_v1_skills_import_post",
+        "type": "object"
+      },
+      "Body_preview_skill_import_api_v1_skills_import_preview_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_preview_skill_import_api_v1_skills_import_preview_post",
         "type": "object"
       },
       "Body_transcription_api_v1_audio_transcriptions_post": {
@@ -2303,6 +2863,11 @@
             "title": "Id",
             "type": "string"
           },
+          "is_channel_muted": {
+            "default": false,
+            "title": "Is Channel Muted",
+            "type": "boolean"
+          },
           "is_manager": {
             "default": false,
             "title": "Is Manager",
@@ -2519,6 +3084,11 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "is_channel_muted": {
+            "default": false,
+            "title": "Is Channel Muted",
+            "type": "boolean"
           },
           "is_private": {
             "anyOf": [
@@ -3158,9 +3728,15 @@
             "type": "string"
           },
           "CONTEXT_COMPACTION_RETENTION_PERCENTAGE": {
-            "default": 40,
-            "title": "Context Compaction Retention Percentage",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Compaction Retention Percentage"
           },
           "CONTEXT_COMPACTION_TOKEN_CAP": {
             "anyOf": [
@@ -3174,8 +3750,15 @@
             "title": "Context Compaction Token Cap"
           },
           "CONTEXT_COMPACTION_TOKEN_THRESHOLD": {
-            "title": "Context Compaction Token Threshold",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Compaction Token Threshold"
           },
           "ENABLE_CONTEXT_COMPACTION": {
             "title": "Enable Context Compaction",
@@ -3185,11 +3768,33 @@
             "default": false,
             "title": "Enable Tool Permissions",
             "type": "boolean"
+          },
+          "ENABLE_TOOL_SEARCH": {
+            "default": false,
+            "title": "Enable Tool Search",
+            "type": "boolean"
+          },
+          "TOOL_SEARCH_ALWAYS_LOADED": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tool Search Always Loaded",
+            "type": "array"
+          },
+          "TOOL_SEARCH_DEFER_BUILTIN_TOOLS": {
+            "default": true,
+            "title": "Tool Search Defer Builtin Tools",
+            "type": "boolean"
+          },
+          "TOOL_SEARCH_DEFER_THRESHOLD": {
+            "default": 400,
+            "title": "Tool Search Defer Threshold",
+            "type": "integer"
           }
         },
         "required": [
           "ENABLE_CONTEXT_COMPACTION",
-          "CONTEXT_COMPACTION_TOKEN_THRESHOLD",
           "CONTEXT_COMPACTION_PROMPT_TEMPLATE"
         ],
         "title": "ChatConfigForm",
@@ -3317,6 +3922,18 @@
       },
       "ChatImportForm": {
         "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Archived"
+          },
           "chat": {
             "additionalProperties": true,
             "title": "Chat",
@@ -4088,6 +4705,11 @@
             "title": "Active",
             "type": "boolean"
           },
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
           "created_at": {
             "title": "Created At",
             "type": "integer"
@@ -4134,28 +4756,6 @@
           "created_at"
         ],
         "title": "ChatTitleIdResponse",
-        "type": "object"
-      },
-      "ChatTitleMessagesForm": {
-        "properties": {
-          "messages": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Messages",
-            "type": "array"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "messages"
-        ],
-        "title": "ChatTitleMessagesForm",
         "type": "object"
       },
       "ChatUsageStatsListResponse": {
@@ -4295,6 +4895,35 @@
           }
         },
         "title": "CloneForm",
+        "type": "object"
+      },
+      "CloneSkillForm": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CloneSkillForm",
         "type": "object"
       },
       "CodeForm": {
@@ -5018,7 +5647,7 @@
           "MINERU_API_TIMEOUT": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
@@ -5347,6 +5976,11 @@
           },
           "ENABLE_DIRECT_CONNECTIONS": {
             "title": "Enable Direct Connections",
+            "type": "boolean"
+          },
+          "ENABLE_DIRECT_INTEGRATIONS": {
+            "default": false,
+            "title": "Enable Direct Integrations",
             "type": "boolean"
           }
         },
@@ -6872,6 +7506,11 @@
             "title": "Document Writer",
             "type": "boolean"
           },
+          "encrypted_channels": {
+            "default": false,
+            "title": "Encrypted Channels",
+            "type": "boolean"
+          },
           "folders": {
             "default": true,
             "title": "Folders",
@@ -7704,9 +8343,30 @@
             ],
             "title": "Data"
           },
+          "directory_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Directory Id"
+          },
+          "directory_path": {
+            "default": "",
+            "title": "Directory Path",
+            "type": "string"
+          },
           "filename": {
             "title": "Filename",
             "type": "string"
+          },
+          "has_original": {
+            "default": true,
+            "title": "Has Original",
+            "type": "boolean"
           },
           "hash": {
             "anyOf": [
@@ -7923,6 +8583,105 @@
         "title": "FolderParentIdForm",
         "type": "object"
       },
+      "FolderResponse": {
+        "properties": {
+          "access_grants": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Access Grants",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_expanded": {
+            "default": false,
+            "title": "Is Expanded",
+            "type": "boolean"
+          },
+          "items": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "write_access": {
+            "default": false,
+            "title": "Write Access",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "name",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "FolderResponse",
+        "type": "object"
+      },
       "FolderUpdateForm": {
         "additionalProperties": false,
         "properties": {
@@ -7997,6 +8756,17 @@
       },
       "FunctionForm": {
         "properties": {
+          "commit_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Message"
+          },
           "content": {
             "title": "Content",
             "type": "string"
@@ -8102,6 +8872,17 @@
               }
             ],
             "title": "User Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -8159,6 +8940,17 @@
               }
             ],
             "title": "User Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -8227,6 +9019,17 @@
               }
             ],
             "title": "User Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -8240,6 +9043,19 @@
           "created_at"
         ],
         "title": "FunctionUserResponse",
+        "type": "object"
+      },
+      "FunctionVersionForm": {
+        "properties": {
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id"
+        ],
+        "title": "FunctionVersionForm",
         "type": "object"
       },
       "FunctionWithValvesModel": {
@@ -8303,6 +9119,17 @@
               }
             ],
             "title": "Valves"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -8632,6 +9459,17 @@
             "title": "Name",
             "type": "string"
           },
+          "parent_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Group Id"
+          },
           "permissions": {
             "anyOf": [
               {
@@ -8694,6 +9532,17 @@
             "title": "Name",
             "type": "string"
           },
+          "parent_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Group Id"
+          },
           "permissions": {
             "anyOf": [
               {
@@ -8743,6 +9592,17 @@
             "title": "Name",
             "type": "string"
           },
+          "parent_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Group Id"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "integer"
@@ -8761,6 +9621,164 @@
           "updated_at"
         ],
         "title": "GroupInfoResponse",
+        "type": "object"
+      },
+      "GroupMemberInfo": {
+        "properties": {
+          "bio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bio"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "groups": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": [],
+            "title": "Groups"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "default": false,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "last_active_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Active At"
+          },
+          "membership_type": {
+            "enum": [
+              "direct",
+              "inherited"
+            ],
+            "title": "Membership Type",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status_emoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Emoji"
+          },
+          "status_expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Expires At"
+          },
+          "status_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Message"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "via_group_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Via Group Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "role",
+          "membership_type"
+        ],
+        "title": "GroupMemberInfo",
+        "type": "object"
+      },
+      "GroupMembersResponse": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberInfo"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "counts"
+        ],
+        "title": "GroupMembersResponse",
         "type": "object"
       },
       "GroupResponse": {
@@ -8816,6 +9834,17 @@
             "title": "Name",
             "type": "string"
           },
+          "parent_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Group Id"
+          },
           "permissions": {
             "anyOf": [
               {
@@ -8869,6 +9898,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "parent_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Group Id"
           },
           "permissions": {
             "anyOf": [
@@ -10580,6 +11620,67 @@
         "title": "LoadUrlForm",
         "type": "object"
       },
+      "Manifest": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "profile_image_url": {
+            "anyOf": [
+              {
+                "maxLength": 196608,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Image Url"
+          },
+          "public_key": {
+            "maxLength": 2000,
+            "title": "Public Key",
+            "type": "string"
+          },
+          "requested_scopes": {
+            "items": {
+              "enum": [
+                "channels:mentions:read",
+                "channels:messages:read",
+                "channels:messages:write",
+                "channels:read"
+              ],
+              "type": "string"
+            },
+            "title": "Requested Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "public_key",
+          "requested_scopes"
+        ],
+        "title": "Manifest",
+        "type": "object"
+      },
       "MeetingInput": {
         "additionalProperties": false,
         "properties": {
@@ -10775,6 +11876,17 @@
       },
       "MessageModel": {
         "properties": {
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
+          },
           "channel_id": {
             "anyOf": [
               {
@@ -10805,6 +11917,11 @@
               }
             ],
             "title": "Data"
+          },
+          "etag": {
+            "readOnly": true,
+            "title": "Etag",
+            "type": "string"
           },
           "id": {
             "title": "Id",
@@ -10876,22 +11993,40 @@
             "type": "integer"
           },
           "user_id": {
-            "title": "User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "required": [
           "id",
-          "user_id",
           "content",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "etag"
         ],
         "title": "MessageModel",
         "type": "object"
       },
       "MessageResponse": {
         "properties": {
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
+          },
           "channel_id": {
             "anyOf": [
               {
@@ -10922,6 +12057,11 @@
               }
             ],
             "title": "Data"
+          },
+          "etag": {
+            "readOnly": true,
+            "title": "Etag",
+            "type": "string"
           },
           "id": {
             "title": "Id",
@@ -11035,19 +12175,26 @@
             ]
           },
           "user_id": {
-            "title": "User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "required": [
           "id",
-          "user_id",
           "content",
           "created_at",
           "updated_at",
           "latest_reply_at",
           "reply_count",
-          "reactions"
+          "reactions",
+          "etag"
         ],
         "title": "MessageResponse",
         "type": "object"
@@ -11135,6 +12282,17 @@
       },
       "MessageUserResponse": {
         "properties": {
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
+          },
           "channel_id": {
             "anyOf": [
               {
@@ -11157,6 +12315,10 @@
           "data": {
             "anyOf": [
               {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
                 "type": "boolean"
               },
               {
@@ -11164,6 +12326,11 @@
               }
             ],
             "title": "Data"
+          },
+          "etag": {
+            "readOnly": true,
+            "title": "Etag",
+            "type": "string"
           },
           "id": {
             "title": "Id",
@@ -11277,25 +12444,43 @@
             ]
           },
           "user_id": {
-            "title": "User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "required": [
           "id",
-          "user_id",
           "content",
           "created_at",
           "updated_at",
           "latest_reply_at",
           "reply_count",
-          "reactions"
+          "reactions",
+          "etag"
         ],
         "title": "MessageUserResponse",
         "type": "object"
       },
       "MessageUserSlimResponse": {
         "properties": {
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
+          },
           "channel_id": {
             "anyOf": [
               {
@@ -11318,6 +12503,10 @@
           "data": {
             "anyOf": [
               {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
                 "type": "boolean"
               },
               {
@@ -11325,6 +12514,11 @@
               }
             ],
             "title": "Data"
+          },
+          "etag": {
+            "readOnly": true,
+            "title": "Etag",
+            "type": "string"
           },
           "id": {
             "title": "Id",
@@ -11406,22 +12600,40 @@
             ]
           },
           "user_id": {
-            "title": "User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "required": [
           "id",
-          "user_id",
           "content",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "etag"
         ],
         "title": "MessageUserSlimResponse",
         "type": "object"
       },
       "MessageWithReactionsResponse": {
         "properties": {
+          "app_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Id"
+          },
           "channel_id": {
             "anyOf": [
               {
@@ -11444,6 +12656,10 @@
           "data": {
             "anyOf": [
               {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
                 "type": "boolean"
               },
               {
@@ -11451,6 +12667,11 @@
               }
             ],
             "title": "Data"
+          },
+          "etag": {
+            "readOnly": true,
+            "title": "Etag",
+            "type": "string"
           },
           "id": {
             "title": "Id",
@@ -11539,17 +12760,24 @@
             ]
           },
           "user_id": {
-            "title": "User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "required": [
           "id",
-          "user_id",
           "content",
           "created_at",
           "updated_at",
-          "reactions"
+          "reactions",
+          "etag"
         ],
         "title": "MessageWithReactionsResponse",
         "type": "object"
@@ -11631,6 +12859,265 @@
         "title": "MessagesBody",
         "type": "object"
       },
+      "MfaChallengeForm": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge_token": {
+            "format": "password",
+            "maxLength": 160,
+            "minLength": 20,
+            "title": "Challenge Token",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "challenge_token"
+        ],
+        "title": "MfaChallengeForm",
+        "type": "object"
+      },
+      "MfaChallengeResponse": {
+        "properties": {
+          "challenge_token": {
+            "title": "Challenge Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "next_step": {
+            "enum": [
+              "enroll",
+              "verify",
+              "recover"
+            ],
+            "title": "Next Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "next_step",
+          "challenge_token",
+          "expires_in"
+        ],
+        "title": "MfaChallengeResponse",
+        "type": "object"
+      },
+      "MfaEnrollmentResponse": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "permissions": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permissions"
+          },
+          "profile_image_url": {
+            "title": "Profile Image Url",
+            "type": "string"
+          },
+          "recovery_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recovery Codes",
+            "type": "array"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "token_type": {
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role",
+          "email",
+          "profile_image_url",
+          "token",
+          "token_type",
+          "recovery_codes"
+        ],
+        "title": "MfaEnrollmentResponse",
+        "type": "object"
+      },
+      "MfaFactorForm": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string",
+            "writeOnly": true
+          },
+          "recovery": {
+            "default": false,
+            "title": "Recovery",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "MfaFactorForm",
+        "type": "object"
+      },
+      "MfaRecoveryCodesResponse": {
+        "properties": {
+          "recovery_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recovery Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recovery_codes"
+        ],
+        "title": "MfaRecoveryCodesResponse",
+        "type": "object"
+      },
+      "MfaRecoveryForm": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge_token": {
+            "format": "password",
+            "maxLength": 160,
+            "minLength": 20,
+            "title": "Challenge Token",
+            "type": "string",
+            "writeOnly": true
+          },
+          "reset_token": {
+            "format": "password",
+            "maxLength": 160,
+            "minLength": 20,
+            "title": "Reset Token",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "challenge_token",
+          "reset_token"
+        ],
+        "title": "MfaRecoveryForm",
+        "type": "object"
+      },
+      "MfaSetupResponse": {
+        "properties": {
+          "manual_key": {
+            "title": "Manual Key",
+            "type": "string"
+          },
+          "qr_code": {
+            "title": "Qr Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "manual_key",
+          "qr_code"
+        ],
+        "title": "MfaSetupResponse",
+        "type": "object"
+      },
+      "MfaStatusResponse": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "recovery_codes_remaining": {
+            "title": "Recovery Codes Remaining",
+            "type": "integer"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "required",
+          "recovery_codes_remaining"
+        ],
+        "title": "MfaStatusResponse",
+        "type": "object"
+      },
+      "MfaVerifyForm": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge_token": {
+            "format": "password",
+            "maxLength": 160,
+            "minLength": 20,
+            "title": "Challenge Token",
+            "type": "string",
+            "writeOnly": true
+          },
+          "code": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string",
+            "writeOnly": true
+          },
+          "recovery": {
+            "default": false,
+            "title": "Recovery",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "challenge_token",
+          "code"
+        ],
+        "title": "MfaVerifyForm",
+        "type": "object"
+      },
       "ModelAccessGrantsForm": {
         "properties": {
           "access_grants": {
@@ -11642,6 +13129,7 @@
             "type": "array"
           },
           "id": {
+            "pattern": "^\\S+$",
             "title": "Id",
             "type": "string"
           },
@@ -11745,6 +13233,17 @@
             "title": "User Id",
             "type": "string"
           },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
           "write_access": {
             "anyOf": [
               {
@@ -11813,6 +13312,49 @@
           "models"
         ],
         "title": "ModelAnalyticsResponse",
+        "type": "object"
+      },
+      "ModelAvatarAnimation": {
+        "additionalProperties": false,
+        "properties": {
+          "file_id": {
+            "pattern": "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$",
+            "title": "File Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "title": "ModelAvatarAnimation",
+        "type": "object"
+      },
+      "ModelAvatarGesture": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "file_id": {
+            "pattern": "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$",
+            "title": "File Id",
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_]{0,47}$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id",
+          "name",
+          "description"
+        ],
+        "title": "ModelAvatarGesture",
         "type": "object"
       },
       "ModelChatEntry": {
@@ -11887,6 +13429,170 @@
         "title": "ModelChatsResponse",
         "type": "object"
       },
+      "ModelControl": {
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "display": {
+            "default": "menu",
+            "enum": [
+              "menu",
+              "slider"
+            ],
+            "title": "Display",
+            "type": "string"
+          },
+          "label": {
+            "pattern": "\\S",
+            "title": "Label",
+            "type": "string"
+          },
+          "options": {
+            "minProperties": 1,
+            "patternProperties": {
+              "^(?!(?:constructor|prototype)\\Z)[a-zA-Z][a-zA-Z0-9_-]*\\Z": {
+                "$ref": "#/components/schemas/ModelControlOption"
+              }
+            },
+            "title": "Options",
+            "type": "object"
+          }
+        },
+        "required": [
+          "label",
+          "options"
+        ],
+        "title": "ModelControl",
+        "type": "object"
+      },
+      "ModelControlOption": {
+        "properties": {
+          "label": {
+            "pattern": "\\S",
+            "title": "Label",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "label",
+          "params"
+        ],
+        "title": "ModelControlOption",
+        "type": "object"
+      },
+      "ModelExportResponse": {
+        "properties": {
+          "access_grants": {
+            "items": {
+              "$ref": "#/components/schemas/AccessGrantModel"
+            },
+            "title": "Access Grants",
+            "type": "array"
+          },
+          "background_image_data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background Image Data"
+          },
+          "base_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Model Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ModelMeta"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/ModelParams"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "name",
+          "params",
+          "meta",
+          "is_active",
+          "updated_at",
+          "created_at"
+        ],
+        "title": "ModelExportResponse",
+        "type": "object"
+      },
       "ModelForm": {
         "properties": {
           "access_grants": {
@@ -11915,7 +13621,19 @@
             ],
             "title": "Base Model Id"
           },
+          "commit_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Message"
+          },
           "id": {
+            "pattern": "^\\S+$",
             "title": "Id",
             "type": "string"
           },
@@ -11967,25 +13685,72 @@
         "title": "ModelHistoryEntry",
         "type": "object"
       },
-      "ModelHistoryResponse": {
+      "ModelHistoryModel": {
         "properties": {
-          "history": {
-            "items": {
-              "$ref": "#/components/schemas/ModelHistoryEntry"
-            },
-            "title": "History",
-            "type": "array"
+          "commit_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Message"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
           },
           "model_id": {
             "title": "Model Id",
             "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "snapshot": {
+            "additionalProperties": true,
+            "title": "Snapshot",
+            "type": "object"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
           }
         },
         "required": [
+          "id",
           "model_id",
-          "history"
+          "user_id",
+          "created_at",
+          "snapshot"
         ],
-        "title": "ModelHistoryResponse",
+        "title": "ModelHistoryModel",
         "type": "object"
       },
       "ModelIdForm": {
@@ -12005,6 +13770,17 @@
         "additionalProperties": true,
         "description": "Metadata for a workspace model entry (profile, description, tags, capabilities).",
         "properties": {
+          "background_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background Image Url"
+          },
           "capabilities": {
             "anyOf": [
               {
@@ -12029,6 +13805,18 @@
             "description": "User-facing description of the model.",
             "title": "Description"
           },
+          "i18n": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "I18N"
+          },
           "knowledge": {
             "anyOf": [
               {
@@ -12051,6 +13839,26 @@
               }
             ],
             "title": "Profile Image Url"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelVoice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "voice_avatar": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelVoiceAvatar"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "ModelMeta",
@@ -12105,6 +13913,17 @@
           "user_id": {
             "title": "User Id",
             "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -12166,7 +13985,17 @@
       "ModelParams": {
         "additionalProperties": true,
         "description": "Parameters for model inference (temperature, top_p, etc.).",
-        "properties": {},
+        "properties": {
+          "model_controls": {
+            "patternProperties": {
+              "^(?!(?:constructor|prototype)\\Z)[a-zA-Z][a-zA-Z0-9_-]*\\Z": {
+                "$ref": "#/components/schemas/ModelControl"
+              }
+            },
+            "title": "Model Controls",
+            "type": "object"
+          }
+        },
         "title": "ModelParams",
         "type": "object"
       },
@@ -12219,6 +14048,17 @@
           "user_id": {
             "title": "User Id",
             "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -12245,6 +14085,76 @@
           "model"
         ],
         "title": "ModelUnloadForm",
+        "type": "object"
+      },
+      "ModelVersionForm": {
+        "properties": {
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id"
+        ],
+        "title": "ModelVersionForm",
+        "type": "object"
+      },
+      "ModelVoice": {
+        "properties": {
+          "voice": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice"
+          }
+        },
+        "title": "ModelVoice",
+        "type": "object"
+      },
+      "ModelVoiceAvatar": {
+        "additionalProperties": false,
+        "properties": {
+          "file_id": {
+            "pattern": "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$",
+            "title": "File Id",
+            "type": "string"
+          },
+          "gestures": {
+            "items": {
+              "$ref": "#/components/schemas/ModelAvatarGesture"
+            },
+            "maxItems": 16,
+            "title": "Gestures",
+            "type": "array"
+          },
+          "states": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelAvatarAnimation"
+            },
+            "propertyNames": {
+              "enum": [
+                "idle",
+                "listening",
+                "speaking"
+              ]
+            },
+            "title": "States",
+            "type": "object"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "title": "ModelVoiceAvatar",
         "type": "object"
       },
       "ModelsConfigForm": {
@@ -13656,6 +15566,18 @@
         "title": "OAuthConfigResponse",
         "type": "object"
       },
+      "PendingUserResponse": {
+        "properties": {
+          "next_step": {
+            "const": "pending",
+            "default": "pending",
+            "title": "Next Step",
+            "type": "string"
+          }
+        },
+        "title": "PendingUserResponse",
+        "type": "object"
+      },
       "PickerAttachment": {
         "additionalProperties": false,
         "properties": {
@@ -14677,6 +16599,17 @@
             ],
             "title": "Hybrid"
           },
+          "hybrid_bm25_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hybrid Bm25 Weight"
+          },
           "k": {
             "anyOf": [
               {
@@ -14899,6 +16832,89 @@
           "path"
         ],
         "title": "ReadMemoryPathForm",
+        "type": "object"
+      },
+      "RealtimeConfigForm": {
+        "properties": {
+          "AUTH_TYPE": {
+            "default": "api_key",
+            "enum": [
+              "api_key",
+              "microsoft_entra_id"
+            ],
+            "title": "Auth Type",
+            "type": "string"
+          },
+          "ENABLED": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "INPUT_PARAMS": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Params"
+          },
+          "MODEL": {
+            "default": "gpt-realtime-2.1-mini",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "OPENAI_API_BASE_URL": {
+            "default": "https://api.openai.com/v1",
+            "title": "Openai Api Base Url",
+            "type": "string"
+          },
+          "OPENAI_API_KEY": {
+            "default": "",
+            "title": "Openai Api Key",
+            "type": "string"
+          },
+          "PROVIDER": {
+            "default": "openai",
+            "enum": [
+              "openai",
+              "azure"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "REALTIME_CALL_PROMPT_TEMPLATE": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realtime Call Prompt Template"
+          },
+          "TRANSCRIPTION_MODEL": {
+            "default": "gpt-transcribe",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Transcription Model",
+            "type": "string"
+          },
+          "VOICE": {
+            "default": "marin",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Voice",
+            "type": "string"
+          }
+        },
+        "title": "RealtimeConfigForm",
         "type": "object"
       },
       "RegenerateRecoveryCodesForm": {
@@ -15221,6 +17237,133 @@
         "title": "SearchMemoriesForm",
         "type": "object"
       },
+      "SearchResponse": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/SearchScope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "has_more",
+          "scopes",
+          "kinds"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SearchResult": {
+        "properties": {
+          "context": {
+            "title": "Context",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "chat",
+              "message",
+              "note"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "pinned": {
+            "default": false,
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "preview": {
+            "title": "Preview",
+            "type": "string"
+          },
+          "shared": {
+            "default": false,
+            "title": "Shared",
+            "type": "boolean"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "context",
+          "snippet",
+          "preview",
+          "url",
+          "updated_at"
+        ],
+        "title": "SearchResult",
+        "type": "object"
+      },
+      "SearchScope": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "folder",
+              "channel"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind"
+        ],
+        "title": "SearchScope",
+        "type": "object"
+      },
       "SessionUserInfoResponse": {
         "properties": {
           "bio": {
@@ -15438,12 +17581,31 @@
       },
       "SetDefaultSuggestionsForm": {
         "properties": {
+          "i18n": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "I18N"
+          },
           "suggestions": {
-            "items": {
-              "$ref": "#/components/schemas/PromptSuggestion"
-            },
-            "title": "Suggestions",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PromptSuggestion"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestions"
           }
         },
         "required": [
@@ -15484,6 +17646,24 @@
           }
         },
         "title": "SettingsPermissions",
+        "type": "object"
+      },
+      "ShareChatForm": {
+        "properties": {
+          "share_mode": {
+            "anyOf": [
+              {
+                "const": "continue",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Mode"
+          }
+        },
+        "title": "ShareChatForm",
         "type": "object"
       },
       "SharedChatResponse": {
@@ -15634,49 +17814,6 @@
         "title": "SigninForm",
         "type": "object"
       },
-      "SigninResponse": {
-        "properties": {
-          "email": {
-            "title": "Email",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "profile_image_url": {
-            "title": "Profile Image Url",
-            "type": "string"
-          },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          },
-          "token": {
-            "title": "Token",
-            "type": "string"
-          },
-          "token_type": {
-            "title": "Token Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "role",
-          "email",
-          "profile_image_url",
-          "token",
-          "token_type"
-        ],
-        "title": "SigninResponse",
-        "type": "object"
-      },
       "SignupForm": {
         "properties": {
           "email": {
@@ -15732,7 +17869,6 @@
         "type": "object"
       },
       "SkillAccessResponse": {
-        "additionalProperties": true,
         "properties": {
           "access_grants": {
             "items": {
@@ -15790,6 +17926,17 @@
             "title": "User Id",
             "type": "string"
           },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
           "write_access": {
             "anyOf": [
               {
@@ -15814,88 +17961,24 @@
         "title": "SkillAccessResponse",
         "type": "object"
       },
-      "SkillForm": {
+      "SkillData": {
+        "additionalProperties": false,
         "properties": {
-          "access_grants": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Access Grants"
-          },
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "default": true,
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/SkillMeta",
-            "default": {
-              "tags": []
-            }
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SkillFile"
+            },
+            "title": "Files",
+            "type": "array"
           }
         },
         "required": [
-          "id",
-          "name",
-          "content"
+          "files"
         ],
-        "title": "SkillForm",
+        "title": "SkillData",
         "type": "object"
       },
-      "SkillMeta": {
-        "properties": {
-          "tags": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": [],
-            "title": "Tags"
-          }
-        },
-        "title": "SkillMeta",
-        "type": "object"
-      },
-      "SkillModel": {
+      "SkillDetailResponse": {
         "properties": {
           "access_grants": {
             "items": {
@@ -15943,9 +18026,372 @@
             "title": "Updated At",
             "type": "integer"
           },
+          "user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/open_webui__models__users__UserResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "user_id": {
             "title": "User Id",
             "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "write_access": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Write Access"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "name",
+          "meta",
+          "updated_at",
+          "created_at",
+          "content"
+        ],
+        "title": "SkillDetailResponse",
+        "type": "object"
+      },
+      "SkillFile": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "encoding": {
+            "anyOf": [
+              {
+                "const": "base64",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoding"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "title": "SkillFile",
+        "type": "object"
+      },
+      "SkillFileOperation": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination"
+          },
+          "encoding": {
+            "anyOf": [
+              {
+                "const": "base64",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoding"
+          },
+          "op": {
+            "enum": [
+              "put",
+              "move",
+              "delete"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "path"
+        ],
+        "title": "SkillFileOperation",
+        "type": "object"
+      },
+      "SkillForm": {
+        "properties": {
+          "access_grants": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Grants"
+          },
+          "commit_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Message"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "expected_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version Id"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SkillFile"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/SkillMeta"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "operations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SkillFileOperation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operations"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "SkillForm",
+        "type": "object"
+      },
+      "SkillMeta": {
+        "properties": {
+          "i18n": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "I18N"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": [],
+            "title": "Tags"
+          }
+        },
+        "title": "SkillMeta",
+        "type": "object"
+      },
+      "SkillModel": {
+        "properties": {
+          "access_grants": {
+            "items": {
+              "$ref": "#/components/schemas/AccessGrantModel"
+            },
+            "title": "Access Grants",
+            "type": "array"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/SkillMeta"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -15953,6 +18399,7 @@
           "user_id",
           "name",
           "content",
+          "data",
           "meta",
           "updated_at",
           "created_at"
@@ -16007,6 +18454,17 @@
           "user_id": {
             "title": "User Id",
             "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -16021,7 +18479,6 @@
         "type": "object"
       },
       "SkillUserResponse": {
-        "additionalProperties": true,
         "properties": {
           "access_grants": {
             "items": {
@@ -16078,6 +18535,17 @@
           "user_id": {
             "title": "User Id",
             "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -16089,6 +18557,24 @@
           "created_at"
         ],
         "title": "SkillUserResponse",
+        "type": "object"
+      },
+      "SkillVersionUpdateForm": {
+        "properties": {
+          "expected_version_id": {
+            "title": "Expected Version Id",
+            "type": "string"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "expected_version_id"
+        ],
+        "title": "SkillVersionUpdateForm",
         "type": "object"
       },
       "SnapshotData": {
@@ -16314,6 +18800,17 @@
             ],
             "title": "Openai Params"
           },
+          "REALTIME_TTS_PROMPT_TEMPLATE": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realtime Tts Prompt Template"
+          },
           "SPLIT_ON": {
             "title": "Split On",
             "type": "string"
@@ -16525,8 +19022,15 @@
       "TaskConfigForm": {
         "properties": {
           "AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH": {
-            "title": "Autocomplete Generation Input Max Length",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autocomplete Generation Input Max Length"
           },
           "AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE": {
             "title": "Autocomplete Generation Prompt Template",
@@ -16637,7 +19141,6 @@
           "TITLE_GENERATION_PROMPT_TEMPLATE",
           "IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE",
           "ENABLE_AUTOCOMPLETE_GENERATION",
-          "AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH",
           "AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE",
           "TAGS_GENERATION_PROMPT_TEMPLATE",
           "FOLLOW_UP_GENERATION_PROMPT_TEMPLATE",
@@ -16691,6 +19194,11 @@
             ],
             "default": true,
             "title": "Enabled"
+          },
+          "forward_cookies": {
+            "default": false,
+            "title": "Forward Cookies",
+            "type": "boolean"
           },
           "id": {
             "anyOf": [
@@ -17093,6 +19601,17 @@
             ],
             "title": "User Id"
           },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
           "write_access": {
             "anyOf": [
               {
@@ -17222,6 +19741,17 @@
             ],
             "title": "Access Grants"
           },
+          "commit_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Message"
+          },
           "content": {
             "title": "Content",
             "type": "string"
@@ -17292,6 +19822,7 @@
         "type": "object"
       },
       "ToolMeta": {
+        "additionalProperties": true,
         "properties": {
           "description": {
             "anyOf": [
@@ -17308,6 +19839,23 @@
             "default": false,
             "title": "Has User Valves",
             "type": "boolean"
+          },
+          "i18n": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "I18N"
           },
           "manifest": {
             "anyOf": [
@@ -17383,6 +19931,17 @@
               }
             ],
             "title": "User Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -17434,6 +19993,17 @@
               }
             ],
             "title": "User Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -17471,6 +20041,11 @@
               }
             ],
             "title": "Config"
+          },
+          "forward_cookies": {
+            "default": false,
+            "title": "Forward Cookies",
+            "type": "boolean"
           },
           "headers": {
             "anyOf": [
@@ -17606,6 +20181,17 @@
               }
             ],
             "title": "User Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
           }
         },
         "required": [
@@ -17616,6 +20202,19 @@
           "created_at"
         ],
         "title": "ToolUserResponse",
+        "type": "object"
+      },
+      "ToolVersionForm": {
+        "properties": {
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id"
+        ],
+        "title": "ToolVersionForm",
         "type": "object"
       },
       "TotpDisableForm": {
@@ -17954,6 +20553,19 @@
           "operations"
         ],
         "title": "UpdateMemoriesForm",
+        "type": "object"
+      },
+      "UpdateMutedMemberForm": {
+        "properties": {
+          "is_channel_muted": {
+            "title": "Is Channel Muted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_channel_muted"
+        ],
+        "title": "UpdateMutedMemberForm",
         "type": "object"
       },
       "UpdatePasswordForm": {
@@ -18873,6 +21485,17 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "last_active_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Active At"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -18913,6 +21536,17 @@
               }
             ],
             "title": "Status Message"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
           }
         },
         "required": [
@@ -20202,6 +22836,18 @@
             ],
             "title": "Exa Api Key"
           },
+          "EXA_MAX_CONTENT_LENGTH": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exa Max Content Length"
+          },
           "EXTERNAL_WEB_LOADER_API_KEY": {
             "anyOf": [
               {
@@ -20643,6 +23289,39 @@
             ],
             "title": "Sougou Api Sk"
           },
+          "STAAN_API_KEY": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staan Api Key"
+          },
+          "STAAN_MARKET": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staan Market"
+          },
+          "STAAN_MAX_SNIPPETS": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staan Max Snippets"
+          },
           "TAVILY_API_KEY": {
             "anyOf": [
               {
@@ -20664,6 +23343,17 @@
               }
             ],
             "title": "Tavily Extract Depth"
+          },
+          "TAVILY_SEARCH_DEPTH": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tavily Search Depth"
           },
           "WEB_FETCH_MAX_CONTENT_LENGTH": {
             "anyOf": [
@@ -20980,6 +23670,27 @@
         "title": "WorkspacePermissions",
         "type": "object"
       },
+      "open_webui__models__feedbacks__ModelHistoryResponse": {
+        "properties": {
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ModelHistoryEntry"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "history"
+        ],
+        "title": "ModelHistoryResponse",
+        "type": "object"
+      },
       "open_webui__models__feedbacks__UserResponse": {
         "properties": {
           "created_at": {
@@ -21093,6 +23804,68 @@
         "title": "MessageForm",
         "type": "object"
       },
+      "open_webui__models__model_history__ModelHistoryResponse": {
+        "properties": {
+          "commit_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Message"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model_id",
+          "user_id",
+          "created_at"
+        ],
+        "title": "ModelHistoryResponse",
+        "type": "object"
+      },
       "open_webui__models__users__UserResponse": {
         "properties": {
           "email": {
@@ -21124,18 +23897,75 @@
       "open_webui__routers__chats__MessageForm": {
         "properties": {
           "content": {
-            "title": "Content",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice"
+          }
+        },
+        "title": "MessageForm",
+        "type": "object"
+      },
+      "open_webui__routers__images__ConnectionVerificationForm": {
+        "properties": {
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "url": {
+            "title": "Url",
             "type": "string"
           }
         },
         "required": [
-          "content"
+          "engine",
+          "url"
         ],
-        "title": "MessageForm",
+        "title": "ConnectionVerificationForm",
         "type": "object"
       },
       "open_webui__routers__ollama__ConnectionVerificationForm": {
         "properties": {
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
           "key": {
             "anyOf": [
               {
@@ -23087,6 +25917,385 @@
         ]
       }
     },
+    "/api/v1/apps": {
+      "get": {
+        "operationId": "get_apps_api_v1_apps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppResponse"
+                  },
+                  "title": "Response Get Apps Api V1 Apps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Apps",
+        "tags": [
+          "apps"
+        ]
+      },
+      "post": {
+        "operationId": "create_new_app_api_v1_apps_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create New App",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/api/v1/apps/manifest/preview": {
+      "post": {
+        "operationId": "preview_app_manifest_api_v1_apps_manifest_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppManifestForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Manifest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview App Manifest",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/api/v1/apps/{app_id}": {
+      "delete": {
+        "operationId": "uninstall_app_by_id_api_v1_apps__app_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Uninstall App By Id",
+        "tags": [
+          "apps"
+        ]
+      },
+      "get": {
+        "operationId": "get_app_details_by_id_api_v1_apps__app_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppAccessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get App Details By Id",
+        "tags": [
+          "apps"
+        ]
+      },
+      "patch": {
+        "operationId": "update_app_by_id_api_v1_apps__app_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppUpdateForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update App By Id",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/api/v1/apps/{app_id}/connect": {
+      "post": {
+        "operationId": "connect_app_by_id_api_v1_apps__app_id__connect_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppConnectionForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connect App By Id",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
+    "/api/v1/apps/{app_id}/interactions": {
+      "post": {
+        "operationId": "create_app_interaction_api_v1_apps__app_id__interactions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppInteractionForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create App Interaction",
+        "tags": [
+          "apps"
+        ]
+      }
+    },
     "/api/v1/archives/": {
       "get": {
         "description": "List all user archives.\n\n- Requires admin role\n- Requires ENABLE_USER_ARCHIVAL to be enabled",
@@ -23932,7 +27141,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SigninResponse"
+                  "$ref": "#/components/schemas/AddUserResponse"
                 }
               }
             },
@@ -24347,7 +27556,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionUserResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SessionUserResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MfaChallengeResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PendingUserResponse"
+                    }
+                  ],
+                  "title": "Response Ldap Auth Api V1 Auths Ldap Post"
                 }
               }
             },
@@ -24365,6 +27585,317 @@
           }
         },
         "summary": "Ldap Auth",
+        "tags": [
+          "auths"
+        ]
+      }
+    },
+    "/api/v1/auths/mfa/challenge": {
+      "post": {
+        "operationId": "get_mfa_challenge_api_v1_auths_mfa_challenge_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaChallengeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Mfa Challenge",
+        "tags": [
+          "auths"
+        ]
+      }
+    },
+    "/api/v1/auths/mfa/enroll/confirm": {
+      "post": {
+        "operationId": "confirm_mfa_enrollment_api_v1_auths_mfa_enroll_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MfaEnrollmentResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MfaRecoveryCodesResponse"
+                    }
+                  ],
+                  "title": "Response Confirm Mfa Enrollment Api V1 Auths Mfa Enroll Confirm Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Mfa Enrollment",
+        "tags": [
+          "auths"
+        ]
+      }
+    },
+    "/api/v1/auths/mfa/enroll/start": {
+      "post": {
+        "operationId": "start_mfa_enrollment_api_v1_auths_mfa_enroll_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaChallengeForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaSetupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Mfa Enrollment",
+        "tags": [
+          "auths"
+        ]
+      }
+    },
+    "/api/v1/auths/mfa/recover": {
+      "post": {
+        "operationId": "redeem_mfa_reset_token_api_v1_auths_mfa_recover_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaRecoveryForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaChallengeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Redeem Mfa Reset Token",
+        "tags": [
+          "auths"
+        ]
+      }
+    },
+    "/api/v1/auths/mfa/recovery/codes": {
+      "post": {
+        "operationId": "regenerate_mfa_recovery_codes_api_v1_auths_mfa_recovery_codes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaFactorForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaRecoveryCodesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Regenerate Mfa Recovery Codes",
+        "tags": [
+          "auths"
+        ]
+      }
+    },
+    "/api/v1/auths/mfa/replace": {
+      "post": {
+        "operationId": "start_mfa_replacement_api_v1_auths_mfa_replace_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaFactorForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaChallengeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Mfa Replacement",
+        "tags": [
+          "auths"
+        ]
+      }
+    },
+    "/api/v1/auths/mfa/status": {
+      "get": {
+        "operationId": "get_mfa_status_api_v1_auths_mfa_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Mfa Status",
+        "tags": [
+          "auths"
+        ]
+      }
+    },
+    "/api/v1/auths/mfa/verify": {
+      "post": {
+        "operationId": "verify_mfa_challenge_api_v1_auths_mfa_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionUserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Mfa Challenge",
         "tags": [
           "auths"
         ]
@@ -24449,7 +27980,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionUserResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SessionUserResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MfaChallengeResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PendingUserResponse"
+                    }
+                  ],
+                  "title": "Response Token Exchange Api V1 Auths Oauth  Provider  Token Exchange Post"
                 }
               }
             },
@@ -24612,7 +28154,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionUserResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SessionUserResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MfaChallengeResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PendingUserResponse"
+                    }
+                  ],
+                  "title": "Response Signin Api V1 Auths Signin Post"
                 }
               }
             },
@@ -24672,7 +28225,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionUserResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SessionUserResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MfaChallengeResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PendingUserResponse"
+                    }
+                  ],
+                  "title": "Response Signup Api V1 Auths Signup Post"
                 }
               }
             },
@@ -26238,6 +29802,158 @@
         ]
       }
     },
+    "/api/v1/channels/{channel_id}/apps": {
+      "get": {
+        "operationId": "get_channel_apps_api_v1_channels__channel_id__apps_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Channel Apps",
+        "tags": [
+          "channels"
+        ]
+      },
+      "post": {
+        "operationId": "invite_app_api_v1_channels__channel_id__apps_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppInvitation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Invite App",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/api/v1/channels/{channel_id}/apps/{app_id}": {
+      "delete": {
+        "operationId": "remove_app_api_v1_channels__channel_id__apps__app_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove App",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
     "/api/v1/channels/{id}": {
       "get": {
         "operationId": "get_channel_by_id_api_v1_channels__id__get",
@@ -26506,6 +30222,63 @@
           }
         ],
         "summary": "Update Is Active Member By Id And User Id",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/api/v1/channels/{id}/members/mute": {
+      "post": {
+        "operationId": "update_member_mute_status_api_v1_channels__id__members_mute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMutedMemberForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMutedMemberForm"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Member Mute Status",
         "tags": [
           "channels"
         ]
@@ -27142,6 +30915,38 @@
               "default": 50,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "around",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Around"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
             }
           }
         ],
@@ -30350,6 +34155,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ShareChatForm"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Form Data"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -32596,11 +36418,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PromptSuggestion"
-                  },
+                  "additionalProperties": true,
                   "title": "Response Set Default Suggestions Api V1 Configs Suggestions Post",
-                  "type": "array"
+                  "type": "object"
                 }
               }
             },
@@ -33808,7 +37628,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ModelHistoryResponse"
+                  "$ref": "#/components/schemas/open_webui__models__feedbacks__ModelHistoryResponse"
                 }
               }
             },
@@ -34869,7 +38689,7 @@
     },
     "/api/v1/folders/shared": {
       "get": {
-        "description": "Get all folders shared with the current user (not owned by them).",
+        "description": "Get folders shared with or by the current user.",
         "operationId": "get_shared_folders_api_v1_folders_shared_get",
         "responses": {
           "200": {
@@ -34970,7 +38790,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FolderResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -35637,6 +39459,230 @@
         ]
       }
     },
+    "/api/v1/functions/id/{id}/history": {
+      "get": {
+        "operationId": "get_function_history_api_v1_functions_id__id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Function History",
+        "tags": [
+          "functions"
+        ]
+      }
+    },
+    "/api/v1/functions/id/{id}/history/diff": {
+      "get": {
+        "operationId": "get_function_history_diff_api_v1_functions_id__id__history_diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_id",
+            "required": true,
+            "schema": {
+              "title": "From Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to_id",
+            "required": true,
+            "schema": {
+              "title": "To Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Function History Diff",
+        "tags": [
+          "functions"
+        ]
+      }
+    },
+    "/api/v1/functions/id/{id}/history/{history_id}": {
+      "delete": {
+        "operationId": "delete_function_history_entry_api_v1_functions_id__id__history__history_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "history_id",
+            "required": true,
+            "schema": {
+              "title": "History Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Function History Entry",
+        "tags": [
+          "functions"
+        ]
+      },
+      "get": {
+        "operationId": "get_function_history_entry_api_v1_functions_id__id__history__history_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "history_id",
+            "required": true,
+            "schema": {
+              "title": "History Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Function History Entry",
+        "tags": [
+          "functions"
+        ]
+      }
+    },
     "/api/v1/functions/id/{id}/toggle": {
       "post": {
         "operationId": "toggle_function_by_id_api_v1_functions_id__id__toggle_post",
@@ -35807,6 +39853,63 @@
           }
         ],
         "summary": "Update Function By Id",
+        "tags": [
+          "functions"
+        ]
+      }
+    },
+    "/api/v1/functions/id/{id}/update/version": {
+      "post": {
+        "operationId": "set_function_production_api_v1_functions_id__id__update_version_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FunctionVersionForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FunctionModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Function Production",
         "tags": [
           "functions"
         ]
@@ -36632,6 +40735,89 @@
         ]
       }
     },
+    "/api/v1/groups/id/{id}/members": {
+      "get": {
+        "operationId": "inspect_group_members_api_v1_groups_id__id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "membership",
+            "required": false,
+            "schema": {
+              "default": "effective",
+              "enum": [
+                "direct",
+                "inherited",
+                "effective"
+              ],
+              "title": "Membership",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMembersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Inspect Group Members",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
     "/api/v1/groups/id/{id}/preview": {
       "get": {
         "description": "Show what resources a group can access (preview audit).",
@@ -36994,30 +41180,6 @@
         ]
       }
     },
-    "/api/v1/images/config/url/verify": {
-      "get": {
-        "operationId": "verify_url_api_v1_images_config_url_verify_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Verify Url",
-        "tags": [
-          "images"
-        ]
-      }
-    },
     "/api/v1/images/edit": {
       "post": {
         "operationId": "edit_images_api_v1_images_edit_post",
@@ -37125,6 +41287,50 @@
           }
         ],
         "summary": "Get Models",
+        "tags": [
+          "images"
+        ]
+      }
+    },
+    "/api/v1/images/verify": {
+      "post": {
+        "operationId": "verify_connection_api_v1_images_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/open_webui__routers__images__ConnectionVerificationForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Verify Connection",
         "tags": [
           "images"
         ]
@@ -40086,7 +44292,7 @@
     },
     "/api/v1/memories/reset": {
       "post": {
-        "description": "Reset user's memory vector embeddings.\n\nCRITICAL: We intentionally do NOT use Depends(get_async_session) here.\nThis endpoint generates embeddings for ALL user memories in parallel using\nasyncio.gather(). A user with 100 memories would trigger 100 embedding API\ncalls simultaneously. With a session held, this could block a connection\nfor MINUTES, completely exhausting the connection pool.",
+        "description": "Reset user's memory vector embeddings.\n\nCRITICAL: We intentionally do NOT use Depends(get_async_session) here.\nThis endpoint generates embeddings for ALL user memories. With a session\nheld, this could block a connection for MINUTES, completely exhausting the\nconnection pool.",
         "operationId": "reset_memory_from_vector_db_api_v1_memories_reset_post",
         "responses": {
           "200": {
@@ -40452,6 +44658,36 @@
         "summary": "Get Models"
       }
     },
+    "/api/v1/models/all": {
+      "get": {
+        "operationId": "get_all_model_records_api_v1_models_all_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelResponse"
+                  },
+                  "title": "Response Get All Model Records Api V1 Models All Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get All Model Records",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/base": {
       "get": {
         "operationId": "get_base_models_api_v1_models_base_get",
@@ -40625,13 +44861,34 @@
     "/api/v1/models/export": {
       "get": {
         "operationId": "export_models_api_v1_models_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ids"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/ModelModel"
+                    "$ref": "#/components/schemas/ModelExportResponse"
                   },
                   "title": "Response Export Models Api V1 Models Export Get",
                   "type": "array"
@@ -40639,6 +44896,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -40990,6 +45257,178 @@
         ]
       }
     },
+    "/api/v1/models/model/history": {
+      "get": {
+        "operationId": "get_model_history_api_v1_models_model_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/open_webui__models__model_history__ModelHistoryResponse"
+                  },
+                  "title": "Response Get Model History Api V1 Models Model History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Model History",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/model/history/{history_id}": {
+      "delete": {
+        "operationId": "delete_model_history_entry_api_v1_models_model_history__history_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "history_id",
+            "required": true,
+            "schema": {
+              "title": "History Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Delete Model History Entry Api V1 Models Model History  History Id  Delete",
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Model History Entry",
+        "tags": [
+          "models"
+        ]
+      },
+      "get": {
+        "operationId": "get_model_history_entry_api_v1_models_model_history__history_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "history_id",
+            "required": true,
+            "schema": {
+              "title": "History Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelHistoryModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Model History Entry",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/model/profile/image": {
       "get": {
         "operationId": "get_model_profile_image_api_v1_models_model_profile_image_get",
@@ -41140,6 +45579,63 @@
           }
         ],
         "summary": "Update Model By Id",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/model/update/version": {
+      "post": {
+        "operationId": "set_model_version_api_v1_models_model_update_version_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelVersionForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Model Version",
         "tags": [
           "models"
         ]
@@ -44231,6 +48727,109 @@
         ]
       }
     },
+    "/api/v1/search": {
+      "get": {
+        "operationId": "search_api_v1_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 500,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "chat",
+                "message",
+                "note"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sharing",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "mine",
+                "shared"
+              ],
+              "title": "Sharing",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
     "/api/v1/skills/": {
       "get": {
         "operationId": "get_skills_api_v1_skills__get",
@@ -44346,20 +48945,71 @@
     "/api/v1/skills/export": {
       "get": {
         "operationId": "export_skills_api_v1_skills_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "title": "Format",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/SkillModel"
-                  },
-                  "title": "Response Export Skills Api V1 Skills Export Get",
-                  "type": "array"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -44394,7 +49044,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/SkillAccessResponse"
+                      "$ref": "#/components/schemas/SkillDetailResponse"
                     },
                     {
                       "type": "null"
@@ -44493,6 +49143,61 @@
         ]
       }
     },
+    "/api/v1/skills/id/{id}/clone": {
+      "post": {
+        "operationId": "clone_skill_api_v1_skills_id__id__clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloneSkillForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Clone Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
     "/api/v1/skills/id/{id}/delete": {
       "delete": {
         "operationId": "delete_skill_by_id_api_v1_skills_id__id__delete_delete",
@@ -44536,6 +49241,429 @@
           }
         ],
         "summary": "Delete Skill By Id",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/v1/skills/id/{id}/files": {
+      "get": {
+        "operationId": "get_skill_files_api_v1_skills_id__id__files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Skill Files",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/v1/skills/id/{id}/files/content": {
+      "get": {
+        "operationId": "get_skill_file_api_v1_skills_id__id__files_content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Skill File",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/v1/skills/id/{id}/history": {
+      "get": {
+        "operationId": "get_skill_history_api_v1_skills_id__id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Skill History",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/v1/skills/id/{id}/history/diff": {
+      "get": {
+        "operationId": "diff_skill_history_api_v1_skills_id__id__history_diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_id",
+            "required": true,
+            "schema": {
+              "title": "From Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to_id",
+            "required": true,
+            "schema": {
+              "title": "To Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Diff Skill History",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/v1/skills/id/{id}/history/diff/file": {
+      "get": {
+        "operationId": "diff_skill_file_api_v1_skills_id__id__history_diff_file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_id",
+            "required": true,
+            "schema": {
+              "title": "From Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to_id",
+            "required": true,
+            "schema": {
+              "title": "To Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Diff Skill File",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/v1/skills/id/{id}/history/{history_id}": {
+      "delete": {
+        "operationId": "delete_skill_history_entry_api_v1_skills_id__id__history__history_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "history_id",
+            "required": true,
+            "schema": {
+              "title": "History Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Delete Skill History Entry Api V1 Skills Id  Id  History  History Id  Delete",
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Skill History Entry",
+        "tags": [
+          "skills"
+        ]
+      },
+      "get": {
+        "operationId": "get_skill_history_entry_api_v1_skills_id__id__history__history_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "history_id",
+            "required": true,
+            "schema": {
+              "title": "History Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Skill History Entry",
         "tags": [
           "skills"
         ]
@@ -44661,6 +49789,159 @@
         ]
       }
     },
+    "/api/v1/skills/id/{id}/update/version": {
+      "post": {
+        "operationId": "set_skill_version_api_v1_skills_id__id__update_version_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillVersionUpdateForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SkillModel"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Set Skill Version Api V1 Skills Id  Id  Update Version Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Skill Version",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/v1/skills/import": {
+      "post": {
+        "operationId": "import_skills_api_v1_skills_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_skills_api_v1_skills_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Skills",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/v1/skills/import/preview": {
+      "post": {
+        "operationId": "preview_skill_import_api_v1_skills_import_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_preview_skill_import_api_v1_skills_import_preview_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Skill Import",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
     "/api/v1/skills/list": {
       "get": {
         "operationId": "get_skill_list_api_v1_skills_list_get",
@@ -44775,6 +50056,50 @@
           }
         ],
         "summary": "Get Skill List",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/v1/skills/load/url": {
+      "post": {
+        "operationId": "load_skill_by_url_api_v1_skills_load_url_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoadUrlForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Load Skill By Url",
         "tags": [
           "skills"
         ]
@@ -45220,6 +50545,379 @@
           }
         ],
         "summary": "List Terminal Servers",
+        "tags": [
+          "terminals"
+        ]
+      }
+    },
+    "/api/v1/terminals/{server_id}/chats/{chat_id}/{path}": {
+      "delete": {
+        "description": "Proxy a request to the admin terminal server identified by *server_id*.",
+        "operationId": "proxy_terminal_api_v1_terminals__server_id__chats__chat_id___path__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Proxy Terminal",
+        "tags": [
+          "terminals"
+        ]
+      },
+      "get": {
+        "description": "Proxy a request to the admin terminal server identified by *server_id*.",
+        "operationId": "proxy_terminal_api_v1_terminals__server_id__chats__chat_id___path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Proxy Terminal",
+        "tags": [
+          "terminals"
+        ]
+      },
+      "head": {
+        "description": "Proxy a request to the admin terminal server identified by *server_id*.",
+        "operationId": "proxy_terminal_api_v1_terminals__server_id__chats__chat_id___path__head",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Proxy Terminal",
+        "tags": [
+          "terminals"
+        ]
+      },
+      "options": {
+        "description": "Proxy a request to the admin terminal server identified by *server_id*.",
+        "operationId": "proxy_terminal_api_v1_terminals__server_id__chats__chat_id___path__options",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Proxy Terminal",
+        "tags": [
+          "terminals"
+        ]
+      },
+      "patch": {
+        "description": "Proxy a request to the admin terminal server identified by *server_id*.",
+        "operationId": "proxy_terminal_api_v1_terminals__server_id__chats__chat_id___path__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Proxy Terminal",
+        "tags": [
+          "terminals"
+        ]
+      },
+      "post": {
+        "description": "Proxy a request to the admin terminal server identified by *server_id*.",
+        "operationId": "proxy_terminal_api_v1_terminals__server_id__chats__chat_id___path__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Proxy Terminal",
+        "tags": [
+          "terminals"
+        ]
+      },
+      "put": {
+        "description": "Proxy a request to the admin terminal server identified by *server_id*.",
+        "operationId": "proxy_terminal_api_v1_terminals__server_id__chats__chat_id___path__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Proxy Terminal",
         "tags": [
           "terminals"
         ]
@@ -45909,9 +51607,278 @@
         ]
       }
     },
+    "/api/v1/tools/id/{id}/history": {
+      "get": {
+        "operationId": "get_tool_history_api_v1_tools_id__id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Tool History",
+        "tags": [
+          "tools"
+        ]
+      }
+    },
+    "/api/v1/tools/id/{id}/history/diff": {
+      "get": {
+        "operationId": "get_tool_history_diff_api_v1_tools_id__id__history_diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_id",
+            "required": true,
+            "schema": {
+              "title": "From Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to_id",
+            "required": true,
+            "schema": {
+              "title": "To Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Tool History Diff",
+        "tags": [
+          "tools"
+        ]
+      }
+    },
+    "/api/v1/tools/id/{id}/history/{history_id}": {
+      "delete": {
+        "operationId": "delete_tool_history_entry_api_v1_tools_id__id__history__history_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "history_id",
+            "required": true,
+            "schema": {
+              "title": "History Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Tool History Entry",
+        "tags": [
+          "tools"
+        ]
+      },
+      "get": {
+        "operationId": "get_tool_history_entry_api_v1_tools_id__id__history__history_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "history_id",
+            "required": true,
+            "schema": {
+              "title": "History Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Tool History Entry",
+        "tags": [
+          "tools"
+        ]
+      }
+    },
+    "/api/v1/tools/id/{id}/specs": {
+      "get": {
+        "description": "Discover tools for an accessible connection. Currently supports MCP.",
+        "operationId": "get_tool_specs_api_v1_tools_id__id__specs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Tool Specs",
+        "tags": [
+          "tools"
+        ]
+      }
+    },
     "/api/v1/tools/id/{id}/update": {
       "post": {
-        "description": "Update an existing tool's source code and metadata.",
         "operationId": "update_tools_by_id_api_v1_tools_id__id__update_post",
         "parameters": [
           {
@@ -45970,6 +51937,63 @@
           }
         ],
         "summary": "Update Tools By Id",
+        "tags": [
+          "tools"
+        ]
+      }
+    },
+    "/api/v1/tools/id/{id}/update/version": {
+      "post": {
+        "operationId": "set_tool_production_api_v1_tools_id__id__update_version_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolVersionForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Tool Production",
         "tags": [
           "tools"
         ]
@@ -46646,6 +52670,18 @@
     "/api/v1/users/groups": {
       "get": {
         "operationId": "get_user_groups_api_v1_users_groups_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_inherited",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inherited",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -46654,6 +52690,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -47559,6 +53605,16 @@
               "title": "User Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_inherited",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inherited",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -47770,6 +53826,54 @@
           }
         ],
         "summary": "Get User Profile Image By Id",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}/sessions/revoke": {
+      "post": {
+        "operationId": "revoke_user_sessions_api_v1_users__user_id__sessions_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Revoke User Sessions Api V1 Users  User Id  Sessions Revoke Post",
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke User Sessions",
         "tags": [
           "users"
         ]
@@ -48154,50 +54258,6 @@
           }
         ],
         "summary": "Get Gravatar",
-        "tags": [
-          "utils"
-        ]
-      }
-    },
-    "/api/v1/utils/pdf": {
-      "post": {
-        "operationId": "download_chat_as_pdf_api_v1_utils_pdf_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChatTitleMessagesForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Download Chat As Pdf",
         "tags": [
           "utils"
         ]

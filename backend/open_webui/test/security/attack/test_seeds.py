@@ -526,6 +526,7 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
         ('automation', 'automations.enable'),
         ('memory', 'memories.enable'),
         ('archive', 'admin.enable_user_archival'),
+        ('app', 'apps.enable'),
     ]:
         assert entries['namespace']['config'][gate] is True
         assert order['namespace'] < order[key]
@@ -574,6 +575,38 @@ def test_active_function_seeder_turns_its_own_function_on():
     ctx.request = Mock(side_effect=[{'id': 'attack_active_fixture'}, {'is_active': True}, {'is_global': False}])
     with pytest.raises(RuntimeError, match='not made global'):
         seeds.seed_active_function(ctx, parameter)
+
+
+@pytest.mark.parametrize('key', ['function_history', 'tool_history', 'skill_history'])
+def test_history_seed_is_the_version_its_update_superseded(key):
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == key)
+    (resource,) = parameter['depends_on']
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture', values={resource: 'owned'})
+    ctx.request = Mock(side_effect=[{'version_id': 'v1'}, {'version_id': 'v2'}])
+    assert seeds.seed_superseded_version(ctx, parameter) == 'v1'
+    read, update = ctx.request.call_args_list
+    assert read.args[0] == 'GET' and read.args[1].endswith('/owned')
+    assert update.args[0] == 'POST' and update.args[1].endswith('/owned/update')
+    assert update.kwargs['json']['id'] == 'owned' and 'fixture' in update.kwargs['json']['name']
+    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list)
+    # The current version cannot be deleted, so an update that wrote nothing fails the seed.
+    ctx.request = Mock(side_effect=[{'version_id': 'v1'}, {'version_id': 'v1'}])
+    with pytest.raises(RuntimeError, match='did not supersede'):
+        seeds.seed_superseded_version(ctx, parameter)
+
+
+def test_model_history_seed_uses_a_model_of_its_own_and_provides_it():
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'model_history')
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture', values={'model': 'base'})
+    ctx.request = Mock(side_effect=[{'id': 'attack-history-fixture'}, {'version_id': 'v1'}, {'version_id': 'v2'}])
+    assert seeds.seed_superseded_version(ctx, parameter) == 'v1'
+    assert ctx.values['history_model'] == 'attack-history-fixture'
+    create, read, update = ctx.request.call_args_list
+    assert create.args == ('POST', '/api/v1/models/create')
+    assert create.kwargs['json']['base_model_id'] == 'base'
+    assert read.args == ('GET', '/api/v1/models/model')
+    assert read.kwargs['params'] == {'id': 'attack-history-fixture'}
+    assert update.kwargs['json']['id'] == 'attack-history-fixture'
 
 
 def test_active_function_serves_chat_actions_and_user_valves():

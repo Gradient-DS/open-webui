@@ -51,7 +51,7 @@ description = "routers/configs.py:import_config/get_config_namespace. Enable cre
 seeded_by = "prepare_configuration"
 depends_on = []
 actor = "admin"
-config = { "folders.enable" = true, "memories.enable" = true, "channels.enable" = true, "calendar.enable" = true, "automations.enable" = true, "admin.enable_user_archival" = true }
+config = { "folders.enable" = true, "memories.enable" = true, "channels.enable" = true, "calendar.enable" = true, "automations.enable" = true, "admin.enable_user_archival" = true, "apps.enable" = true }
 
 [[parameter]]
 key = "user"
@@ -804,6 +804,103 @@ name = "job_id"
 prefix = "/openai/models/{url_idx}/download/status/{job_id}"
 unseedable = "routers/openai.py:get_provider_model_download_status reads a job created by an actual provider model download. The CI stub serves model metadata but cannot produce a real download job, and the sealed network has no provider to download from. Arrived with the v0.11.3 upstream merge; revisit only if the stub grows a download-job lifecycle."
 
+# --- v0.12.3 upstream merge --------------------------------------------------
+
+[[parameter]]
+key = "app"
+name = "app_id"
+prefix = "/api/v1/apps/{app_id}"
+description = "routers/apps.py:create_new_app stores an inactive App row without contacting the app server: it only checks the URL shape (utils/apps.py:validate_app_url, HTTPS) and the Ed25519 public key in the manifest (a fixed public key; its private half was never kept). apps.enable gates every app route; namespace turns it on. Admin-only creation. Activation needs POST /connect to reach a live app server, which the sealed stack lacks, so channel invitation and interactions answer 'App is inactive' (403) for the owner too."
+via = "POST /api/v1/apps"
+body = { "url" = "https://attack-app.example.invalid/app", "api_key" = "attack-app-key-{token}", "slug" = "attack-{token}", "granted_scopes" = ["channels:read"], "manifest" = { "id" = "attack-app-{token}", "name" = "Attack app {token}", "public_key" = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAViv5wEwb0ZposUwFkadnSXShLQBI599PSOhfZeZHAcc=\n-----END PUBLIC KEY-----\n", "requested_scopes" = ["channels:read"] } }
+extract = "id"
+depends_on = ["namespace"]
+actor = "admin"
+
+[[parameter]]
+key = "app_channel"
+name = "channel_id"
+prefix = "/api/v1/channels/{channel_id}"
+description = "routers/channels.py channel app routes name the channel channel_id, not id; utils/apps.py:check_app_channel_access reads the same group channel row, which needs both apps.enable and channels.enable."
+same_as = "channel"
+
+[[parameter]]
+key = "channel_app"
+name = "app_id"
+prefix = "/api/v1/channels/{channel_id}/apps/{app_id}"
+description = "routers/channels.py:remove_app deactivates the ChannelMember row of this App in the channel; the seeded app is the one a member row would name."
+same_as = "app"
+
+[[parameter]]
+key = "function_history"
+name = "history_id"
+prefix = "/api/v1/functions/id/{id}/history/{history_id}"
+description = "models/function_history.py:delete_history_entry refuses the current version ('Cannot delete the current version'), so the history fixture is a superseded one: read the function's version_id, then rename it through /update so a new current version is written. Admin-only, like every function route."
+seeded_by = "seed_superseded_version"
+depends_on = ["function"]
+actor = "admin"
+read = "GET /api/v1/functions/id/{function}"
+update = "POST /api/v1/functions/id/{function}/update"
+body = { "id" = "{function}", "name" = "Attack action superseded {token}", "content" = "from pydantic import BaseModel\n\nclass Action:\n    class Valves(BaseModel):\n        label: str = \"seed\"\n    class UserValves(BaseModel):\n        label: str = \"seed\"\n    def __init__(self):\n        self.valves = self.Valves()\n    async def action(self, body: dict) -> dict:\n        return body\n", "meta" = {  } }
+
+[[parameter]]
+key = "tool_history"
+name = "history_id"
+prefix = "/api/v1/tools/id/{id}/history/{history_id}"
+description = "models/tool_history.py:delete_history_entry refuses the current version, so this is a superseded one: read the tool's version_id, then rename it through /update (same Tools class) so a new current version is written. Admin owns the tool fixture."
+seeded_by = "seed_superseded_version"
+depends_on = ["tool"]
+actor = "admin"
+read = "GET /api/v1/tools/id/{tool}"
+update = "POST /api/v1/tools/id/{tool}/update"
+body = { "id" = "{tool}", "name" = "Attack tool superseded {token}", "content" = "from pydantic import BaseModel\n\nclass Tools:\n    class Valves(BaseModel):\n        label: str = \"seed\"\n    class UserValves(BaseModel):\n        label: str = \"seed\"\n    def __init__(self):\n        self.valves = self.Valves()\n    def echo(self, text: str) -> str:\n        return text\n", "meta" = {  } }
+
+[[parameter]]
+key = "skill_history"
+name = "history_id"
+prefix = "/api/v1/skills/id/{id}/history/{history_id}"
+description = "models/skill_history.py:delete_history_entry refuses the current version, so this is a superseded one: read the skill's version_id, then rename it through /update so a new current version is written. Skill names are unique, so the new name carries the pass token. Admin owns the skill fixture."
+seeded_by = "seed_superseded_version"
+depends_on = ["skill"]
+actor = "admin"
+read = "GET /api/v1/skills/id/{skill}"
+update = "POST /api/v1/skills/id/{skill}/update"
+body = { "id" = "{skill}", "name" = "Attack skill superseded {token}", "content" = "Attack skill content" }
+
+[[parameter]]
+key = "model_history"
+name = "history_id"
+prefix = "/api/v1/models/model/history/{history_id}"
+description = "The model is the id query parameter here, not a path segment. A workspace model of its own (provided as history_model, on top of {model}) keeps the shared registry row untouched: models/create writes its first version, a rename through models/model/update supersedes it, and models/model_history.py:delete_history_entry refuses only the current version."
+seeded_by = "seed_superseded_version"
+depends_on = ["model"]
+provides = ["history_model"]
+actor = "admin"
+create = "POST /api/v1/models/create"
+create_body = { "id" = "attack-history-{token}", "name" = "Attack history model {token}", "base_model_id" = "{model}", "meta" = {  }, "params" = {  } }
+read = "GET /api/v1/models/model"
+query = { "id" = "{history_model}" }
+update = "POST /api/v1/models/model/update"
+body = { "id" = "{history_model}", "name" = "Attack history model superseded {token}", "base_model_id" = "{model}", "meta" = {  }, "params" = {  } }
+
+[[parameter]]
+key = "terminal_chat"
+name = "chat_id"
+prefix = "/api/v1/terminals/{server_id}/chats/{chat_id}"
+description = "routers/terminals.py:proxy_terminal forwards chat_id as X-Session-Id (and, on an orchestrator with chat contexts, as the chat context header). The admin's own seeded chat is the realistic value; the terminal fixture is admin-registered too."
+same_as = "chat"
+
+[[parameter]]
+key = "terminal_chat_path"
+name = "path"
+prefix = "/api/v1/terminals/{server_id}/chats/{chat_id}/{path}"
+description = "The chat-scoped proxy route has the same relative-path contract as terminal_path; openapi.json exists on the CI stub and is checked through this chat route."
+seeded_by = "upstream_path"
+depends_on = ["terminal", "terminal_chat"]
+probe = "/api/v1/terminals/{terminal}/chats/{terminal_chat}/openapi.json"
+value = "openapi.json"
+fresh = false
+
 
 # Request fields -- body or query -- that must carry a real id for the handler to
 # get past its lookup. A random string reads 404 ("not found") and the route is
@@ -905,6 +1002,36 @@ params = { "urlIdx" = "{openai_index}" }
 route = "GET /api/v1/prompts/id/{prompt_id}/history/diff"
 description = "models/prompt_history.py:compute_diff returns None unless both ids are history rows of this prompt. The same row on both sides is a valid, empty diff. Reachable since PLANE-017: history/{history_id} was registered first and answered for diff."
 params = { "from_id" = "{prompt_history}", "to_id" = "{prompt_history}" }
+
+[[field]]
+route = "GET /api/v1/functions/id/{id}/history/diff"
+description = "routers/functions.py:get_function_history_diff answers 404 'Version not found' unless both ids are history rows of this function. The same seeded row on both sides is a valid, empty diff."
+params = { "from_id" = "{function_history}", "to_id" = "{function_history}" }
+
+[[field]]
+route = "GET /api/v1/tools/id/{id}/history/diff"
+description = "routers/tools.py history diff answers 404 unless both ids are history rows of this tool. The same seeded row on both sides is a valid, empty diff."
+params = { "from_id" = "{tool_history}", "to_id" = "{tool_history}" }
+
+[[field]]
+route = "GET /api/v1/skills/id/{id}/history/diff"
+description = "routers/skills.py:diff_skill_history resolves both ids as history rows of this skill. The same seeded row on both sides is a valid, empty diff."
+params = { "from_id" = "{skill_history}", "to_id" = "{skill_history}" }
+
+[[field]]
+route = "GET /api/v1/models/model/history"
+description = "routers/models.py:get_model_history requires the model as the id query parameter; the history model is the seeder's own workspace model."
+params = { "id" = "{history_model}" }
+
+[[field]]
+route = "GET /api/v1/models/model/history/{history_id}"
+description = "The model history entry is bound to the id query parameter; history_id is a row of that same history model."
+params = { "id" = "{history_model}" }
+
+[[field]]
+route = "DELETE /api/v1/models/model/history/{history_id}"
+description = "The model history entry is bound to the id query parameter; history_id is a superseded row of that same history model, so the delete is not refused as the current version."
+params = { "id" = "{history_model}" }
 
 [[field]]
 route = "POST /api/models/unload"
@@ -1140,6 +1267,17 @@ files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack m
 route = "POST /ollama/models/upload/{url_idx}"
 description = "The indexed upload has the same multipart contract as the default upstream route."
 files = [{ field = "file", filename = "attack-{token}.gguf", content = "attack model {token}", content_type = "application/octet-stream" }]
+
+[[field]]
+route = "POST /api/v1/skills/import/preview"
+description = "Multipart: routers/skills.py:preview_skill_import reads a list of UploadFile parts named files; utils/skill_files.py:parse_import takes a Markdown file as one SKILL.md package. Preview writes nothing."
+files = [{ field = "files", filename = "attack-{token}.md", content = "---\nname: attack-import-{token}\ndescription: Attack import\n---\nAttack imported skill {token}\n", content_type = "text/markdown" }]
+
+[[field]]
+route = "POST /api/v1/skills/import"
+description = "Multipart: the same SKILL.md package as the preview, plus the required decisions form part, a JSON list with one decision per package. skip enters the handler without creating a skill."
+files = [{ field = "files", filename = "attack-{token}.md", content = "---\nname: attack-import-{token}\ndescription: Attack import\n---\nAttack imported skill {token}\n", content_type = "text/markdown" }]
+form = { "decisions" = "[{\"action\": \"skip\"}]" }
 
 # ---------------------------------------------------------------------------
 # Sharing by design
