@@ -154,7 +154,7 @@ def harness(application, monkeypatch):
         return form_data
 
     async def process_payload(request, form_data, user, metadata, model):
-        return form_data, metadata, []
+        return form_data, metadata, [], False
 
     async def process_response(response, context):
         return response

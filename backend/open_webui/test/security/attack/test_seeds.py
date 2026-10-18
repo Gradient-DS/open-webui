@@ -2,6 +2,7 @@ import ast
 import asyncio
 import base64
 import json
+import logging
 import re
 import sqlite3
 import tomllib
@@ -762,6 +763,7 @@ def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
         'MODEL_WHITELIST': [],
         'can_bypass_access_control': lambda user: False,
         'BYPASS_MODEL_ACCESS_CONTROL': False,
+        'log': logging.getLogger('utils.models'),
     }
     tree = ast.parse((ROOT / 'backend/open_webui/utils/models.py').read_text())
     checks = ast.Module(
