@@ -142,6 +142,31 @@ async def test_original_proxy_rechecks_subject_without_storage(env, monkeypatch,
 
 
 @pytest.mark.asyncio
+async def test_missing_original_while_processing_is_a_conflict(env, monkeypatch):  # noqa: F811
+    """A processing reference answers 409 for a missing original; once completed, 404 passes through."""
+    from open_webui.routers import files
+    from open_webui.soev import live_documents
+    from open_webui.soev.client import SoevApiError
+
+    file = await live_documents.register_attachment('alice', attachment())
+
+    async def stream(path, *, as_user):
+        raise SoevApiError(404, 'not_found', 'Document not found')
+        yield b''
+
+    monkeypatch.setattr(live_documents.identity, 'build_client', lambda: SimpleNamespace(stream=stream))
+    monkeypatch.setattr(live_documents.identity, 'acting_ref', AsyncMock(return_value='owui:user:alice'))
+    user = SimpleNamespace(id='alice', role='user')
+    with pytest.raises(HTTPException) as error:
+        await files.get_file_content_by_id_inline(file.id, user=user, attachment=False, db=None)
+    assert (error.value.status_code, error.value.detail) == (409, live_documents.ORIGINAL_PROCESSING)
+    await env.files.Files.set_status(file.id, 'completed')
+    with pytest.raises(HTTPException) as error:
+        await files.get_file_content_by_id_inline(file.id, user=user, attachment=False, db=None)
+    assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_every_turn_supplies_collection_and_separate_tool_states(env, monkeypatch):  # noqa: F811
     """The collection is created through the consumer and both document tools require the toggle."""
     from open_webui.utils import agent_v2

@@ -30,7 +30,8 @@ export async function probeFileAvailable(fileId: string): Promise<boolean> {
 			method: 'HEAD',
 			headers: token ? { authorization: `Bearer ${token}` } : {}
 		});
-		return response.ok;
+		// [Gradient] 409: the original is still being prepared; the viewer waits for it.
+		return response.ok || response.status === 409;
 	} catch {
 		return false;
 	}
