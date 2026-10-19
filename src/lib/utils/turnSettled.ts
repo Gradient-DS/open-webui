@@ -19,3 +19,22 @@ export const expectSettled = (messageId: string, timeoutMs: number): Promise<boo
 export const markSettled = (messageId: string | null | undefined) => {
 	if (messageId) waiters.get(messageId)?.();
 };
+
+type TurnHistory = {
+	currentId: string | null;
+	messages: Record<
+		string,
+		{ role?: string; done?: boolean; parentId?: string | null; childrenIds?: string[] }
+	>;
+};
+
+/** Every answer of the current turn is done. The chat task then runs only post-turn work (follow-ups, title, tags,
+ * memory), which must not hold the composer's stop button. */
+export const turnAnswered = (history: TurnHistory): boolean => {
+	const current = history.currentId ? history.messages[history.currentId] : null;
+	if (current?.role !== 'assistant' || current.done !== true) return false;
+	const parent = current.parentId ? history.messages[current.parentId] : null;
+	return (parent?.childrenIds ?? [])
+		.map((id) => history.messages[id])
+		.every((message) => message?.role !== 'assistant' || message.done === true);
+};

@@ -156,7 +156,8 @@ database backup taken before the cutover; see `docs/agent-api-deployment.md`.
 `modelMap` (old catalog id to new) under its own `id`, with no config switch,
 directory copy, re-ingest, memories or sign-out, and needs no `config`. It
 snapshots just the two model-id config rows, so `mode: restore` with the same
-`id` undoes it.
+`id` undoes it. Unlike `apply`, which clears each user's default model
+selection so everyone starts on the platform default, it maps that selection.
 
 In both `apply` and `models`, a stored model id that `modelMap` leaves out and
 that is no catalog id becomes the catalog's default model, read from soev-api

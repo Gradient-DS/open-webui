@@ -1,6 +1,7 @@
 """Verified-user routes for soev-api connections, schedule state and popup completion."""
 
 import json
+from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -160,8 +161,13 @@ async def delete_schedule(knowledge_id: str, schedule_id: str, sync=Depends(clou
 
 
 @router.get('/knowledge/{knowledge_id}/sync', dependencies=[Depends(require_soev)])
-async def sync_status(knowledge_id: str, sync=Depends(cloud_sync)):
-    return await sync.sync_status(knowledge_id)
+async def sync_status(knowledge_id: str, request: Request, user=Depends(get_verified_user)):
+    # A platform without cloud sync has no schedules on any knowledge base; an
+    # unknown capability set still refuses, so an outage is not shown as empty.
+    if not await capabilities.has(capabilities.CLOUD_SYNC) and capabilities.known():
+        return {'schedules': []}
+    async with asynccontextmanager(cloud_sync)(request, user) as sync:
+        return await sync.sync_status(knowledge_id)
 
 
 @router.post('/knowledge/{knowledge_id}/sync', dependencies=[Depends(require_soev)])

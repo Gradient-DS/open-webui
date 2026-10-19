@@ -11,7 +11,25 @@ export interface AgentDocument {
 	page?: string;
 }
 
-export const DOCUMENT_OPEN = /<document\b((?:[^>"']|"[^"]*"|'[^']*')*)>/;
+// The opening tag of a document the model writes: `<document` then whitespace or `>`, never self-closing. Like
+// agent_v2's scanner, this leaves the context tags a model can echo (`<document id="1" filename="a.txt"/>`,
+// `<document-text cite="[1]">`) as plain text.
+export const DOCUMENT_OPEN = /<document(?=[\s>])((?:[^>"'/]|\/(?!\s*>)|"[^"]*"|'[^']*')*)>/;
+
+// Whether text that follows `<document` can still be a document's opening tag: a name char continues another tag.
+const nameEnds = (char: string | undefined) => char === undefined || /[\s>]/.test(char);
+
+// A body with nothing but whitespace and punctuation is no document: the model echoed a tag or wrote none.
+const blank = (content: string) => /^[\s\p{P}]*$/u.test(content);
+
+// A document as shown once its message is done: an unclosed one is finished, a blank one is none.
+export function settleDocument(
+	document: AgentDocument,
+	messageDone: boolean
+): AgentDocument | undefined {
+	if ((document.done || messageDone) && blank(document.content)) return;
+	return document.done || !messageDone ? document : { ...document, done: true };
+}
 
 function attributes(text: string): Record<string, string> {
 	return Object.fromEntries(
@@ -31,6 +49,7 @@ export function readDocument(
 	const attrs = attributes(open[1]);
 	const close = content.indexOf('</document>', open[0].length);
 	const done = close !== -1;
+	if (done && blank(content.slice(open[0].length, close))) return;
 	return {
 		raw: done ? content.slice(0, close + '</document>'.length) : content,
 		document: {
@@ -45,7 +64,7 @@ export function readDocument(
 
 // Where the opening tag that starts at `from` ends (its `>`), skipping quoted attribute values; -1 when it does
 // not end. One pass, unlike a regular expression, which takes quadratic time on many unclosed tags.
-function tagEnd(text: string, from: number): number {
+export function tagEnd(text: string, from: number): number {
 	let quote = '';
 	for (let index = from; index < text.length; index++) {
 		const char = text[index];
@@ -66,13 +85,18 @@ export function labelDocuments(text: string, label: (title: string) => string): 
 	let start: number;
 	while ((start = rest.indexOf('<document', position)) !== -1) {
 		const after = start + '<document'.length;
-		if (/[\w-]/.test(rest[after] ?? '')) {
+		if (!nameEnds(rest[after])) {
 			labelled += rest.slice(position, after);
 			position = after;
 			continue;
 		}
 		const end = tagEnd(rest, after);
 		if (end === -1) break;
+		if (rest.slice(after, end).trimEnd().endsWith('/')) {
+			labelled += rest.slice(position, end + 1);
+			position = end + 1;
+			continue;
+		}
 		const title = decode(attributes(rest.slice(after, end)).title ?? '');
 		const close = rest.indexOf('</document>', end);
 		labelled += `${rest.slice(position, start)}\n\n_${label(title)}_\n\n`;
@@ -81,15 +105,17 @@ export function labelDocuments(text: string, label: (title: string) => string): 
 	return labelled + rest.slice(position);
 }
 
-export function extractDocumentsFromMessage(content: string): AgentDocument[] {
+export function extractDocumentsFromMessage(content: string, messageDone = false): AgentDocument[] {
 	const documents: AgentDocument[] = [];
-	const markers = /<document\b|<details\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/details>/g;
+	const markers =
+		/<document(?=[\s>])|<details\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/details>/g;
 	let match: RegExpExecArray | null;
 	while ((match = markers.exec(content ?? ''))) {
 		if (match[0].startsWith('<document')) {
 			const result = readDocument(content.slice(match.index));
 			if (result) {
-				documents.push(result.document);
+				const document = settleDocument(result.document, messageDone);
+				if (document) documents.push(document);
 				// Skip nested markup inside the raw document body.
 				markers.lastIndex = match.index + result.raw.length;
 			}
