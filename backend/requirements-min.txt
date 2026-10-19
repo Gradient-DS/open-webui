@@ -17,7 +17,7 @@ authlib==1.7.2
 joserfc==1.7.4
 
 requests==2.34.2
-aiohttp==3.14.3 # do not update to 3.13.3 - broken; security: CVE-2026-59881/69243 (ws decompress, request smuggling) fixed in 3.14.2; CVE-2026-69244 (OOB heap read in C response parser) fixed in 3.14.3
+aiohttp==3.14.4 # do not update to 3.13.3 - broken; security: CVE-2026-59881/69243 (ws decompress, request smuggling) fixed in 3.14.2; CVE-2026-69244 (OOB heap read in C response parser) fixed in 3.14.3; CVE-2026-111063/111064 + GHSA-2g87-pp6c-29x5 (cookie Secure, keepalive, resource exhaustion) fixed in 3.14.4
 async-timeout
 aiocache
 aiofiles
