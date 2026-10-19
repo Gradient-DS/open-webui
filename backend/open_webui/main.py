@@ -83,6 +83,7 @@ from open_webui.config import (
     FEATURE_PROMPTS,
     FEATURE_REFERENCE_CHATS,
     FEATURE_SIMPLE_ASSISTANT_BUILDER,
+    WHATS_NEW_MODELS,
     FEATURE_SKILL_FILES,
     FEATURE_SKILLS,
     FEATURE_STRICT_DATA_SEPARATION,
@@ -2891,6 +2892,7 @@ async def get_app_config(request: Request):
                     'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]
                     'data_retention_ttl_days': config.get('admin.data_retention_ttl_days'),  # [Gradient]
                     'enable_welcome_message': config.get('ui.enable_welcome_message'),  # [Gradient]
+                    'whats_new_models': WHATS_NEW_MODELS,  # [Gradient]
                 }
                 if user is not None
                 else {}
