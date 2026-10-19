@@ -1,5 +1,5 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig, type Plugin } from 'vite';
+import { defaultClientConditions, defineConfig, type Plugin } from 'vite';
 import { resolveBuildInfo } from './scripts/build-info.js';
 
 import { createReadStream, readdirSync, readFileSync } from 'node:fs';
@@ -64,7 +64,9 @@ const buildInfo = resolveBuildInfo();
 
 export default defineConfig({
 	resolve: {
-		conditions: ['onnxruntime-web-use-extern-wasm']
+		// [Gradient] Vite 6 replaces the default conditions (upstream's Vite 5 extended them),
+		// so keep them or the client resolves svelte's server build.
+		conditions: [...defaultClientConditions, 'onnxruntime-web-use-extern-wasm']
 	},
 	plugins: [
 		sveltekit(),
