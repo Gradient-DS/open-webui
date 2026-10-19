@@ -5,13 +5,11 @@ import { composerPreferences, composerFeatures, composerFromFeatures } from './c
 
 const chosen = composerPreferences({
 	webSearchEnabled: true,
-	webSearchRequired: true,
 	liveDocumentsState: 'auto',
 	liveMailState: 'auto',
 	imageGenerationEnabled: true,
 	codeInterpreterEnabled: true,
 	documentWriterEnabled: true,
-	documentWriterRequired: true,
 	selectedToolIds: ['tool'],
 	selectedSkillIds: ['skill'],
 	selectedFilterIds: ['filter']
@@ -65,13 +63,20 @@ describe('composer preferences', () => {
 		const user = JSON.parse(JSON.stringify({ ui: { composerTools: lastUsed } }));
 		expect(composerPreferences(user.ui.composerTools, chosen)).toEqual(lastUsed);
 	});
-	it('chat settings are independent of later user defaults and old booleans restore as Auto', () => {
-		const restored = composerFromFeatures({ web_search: true });
+	it('restores a chat saved with Altijd as on', () => {
+		const restored = composerFromFeatures({
+			web_search: true,
+			web_search_required: true,
+			document_writer: true,
+			document_writer_required: true,
+			live_documents: 'required'
+		});
 		expect(restored.webSearchEnabled).toBe(true);
-		expect(restored.webSearchRequired).toBe(false);
-		expect(restored.liveDocumentsState).toBe('off');
+		expect(restored.documentWriterEnabled).toBe(true);
+		expect(restored.liveDocumentsState).toBe('auto');
 		expect(restored.liveMailState).toBe('off');
-		expect(chosen.webSearchRequired).toBe(true);
+		expect(restored).not.toHaveProperty('webSearchRequired');
+		expect(composerFeatures(restored)).not.toHaveProperty('web_search_required');
 	});
 	it('partial preferences inherit missing choices and do not share selection arrays', () => {
 		const restored = composerPreferences({ webSearchEnabled: false }, chosen);

@@ -44,16 +44,16 @@
 		auto.webSearch && auto.documentWriter
 			? {
 					title: 'Auto mode for web search and documents',
-					body: 'Set web search and the document writer to Auto in the + menu. soev.ai then decides per question whether to search the web or write a document.'
+					body: 'Turn on web search and the document writer in the + menu. soev.ai then decides per question whether to search the web or write a document.'
 				}
 			: auto.webSearch
 				? {
 						title: 'Auto mode for web search',
-						body: 'Set web search to Auto in the + menu. soev.ai then decides per question whether to search the web.'
+						body: 'Turn on web search in the + menu. soev.ai then decides per question whether to search the web.'
 					}
 				: {
 						title: 'Auto mode for the document writer',
-						body: 'Set the document writer to Auto in the + menu. soev.ai then writes a document as soon as you ask for one.'
+						body: 'Turn on the document writer in the + menu. soev.ai then writes a document as soon as you ask for one.'
 					}
 	);
 

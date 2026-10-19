@@ -25,14 +25,11 @@ export interface ChatDraft {
 	selectedSkillIds: string[];
 	selectedFilterIds: string[];
 	imageGenerationEnabled: boolean;
-	liveDocumentsState: import('$lib/utils/toolState').ToolState;
-	liveMailState: import('$lib/utils/toolState').ToolState;
+	liveDocumentsState: import('$lib/utils/toolState').LiveToolState;
+	liveMailState: import('$lib/utils/toolState').LiveToolState;
 	webSearchEnabled: boolean;
-	/** [Gradient] Web search Altijd; webSearchEnabled alone is Auto. */
-	webSearchRequired: boolean;
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
-	documentWriterRequired: boolean;
 	toolApprovalMode: string;
 }
 

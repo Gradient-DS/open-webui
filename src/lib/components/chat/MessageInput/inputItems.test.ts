@@ -20,9 +20,8 @@ describe('input items', () => {
 		]);
 	});
 
-	it('maps tool states and booleans to off / auto / on', () => {
-		expect(itemState('auto')).toBe('auto');
-		expect(itemState('required')).toBe('on');
+	it('maps tool states and booleans to off / on', () => {
+		expect(itemState('auto')).toBe('on');
 		expect(itemState('off')).toBe('off');
 		expect(itemState(true)).toBe('on');
 		expect(itemState(false)).toBe('off');
@@ -39,7 +38,7 @@ describe('composer bar', () => {
 		const ids = barItemIds({
 			order,
 			pinned: ['tools', 'attach_meetings', 'web_search'],
-			states: { web_search: 'auto', live_mail: 'auto', image_generation: 'on', 'filter:f1': 'on' }
+			states: { web_search: 'on', live_mail: 'on', image_generation: 'on', 'filter:f1': 'on' }
 		});
 		expect(ids).toEqual([
 			'attach_meetings',
@@ -61,7 +60,7 @@ describe('composer bar', () => {
 		const ids = barItemIds({
 			order,
 			pinned: [],
-			states: { web_search: 'off', live_mail: 'auto' },
+			states: { web_search: 'off', live_mail: 'on' },
 			used: ['web_search', 'live_mail']
 		});
 		expect(ids).toEqual(['live_mail', 'web_search']);
@@ -71,7 +70,7 @@ describe('composer bar', () => {
 		const ids = barItemIds({
 			order,
 			pinned: ['knowledge'],
-			states: { web_search: 'auto' },
+			states: { web_search: 'on' },
 			allowed: (id) => id !== 'web_search'
 		});
 		expect(ids).toEqual(['knowledge']);
@@ -80,7 +79,7 @@ describe('composer bar', () => {
 
 describe('used items', () => {
 	it('adds items that are active now, keeping the ones already used', () => {
-		expect(usedItemIds(['tools'], { web_search: 'auto', code_interpreter: 'off' })).toEqual([
+		expect(usedItemIds(['tools'], { web_search: 'on', code_interpreter: 'off' })).toEqual([
 			'tools',
 			'web_search'
 		]);

@@ -1,11 +1,11 @@
 // [Gradient] The "+" menu's items in menu order, and which of them the composer bar shows:
-// every pinned item, every item that is on or on Auto, and every item used earlier in this
+// every pinned item, every item that is on, and every item used earlier in this
 // chat, so switching one off never takes its button away mid-chat.
 
 export type InputItemSection = 'context' | 'knowledge' | 'tools';
 
-/** off: not used; auto: the model decides; on: always used (or attached/selected). */
-export type InputItemState = 'off' | 'auto' | 'on';
+/** off: not used; on: offered to the model (or attached/selected). */
+export type InputItemState = 'off' | 'on';
 
 export type InputItem = { id: string; section: InputItemSection; pinnable: true };
 
@@ -38,12 +38,9 @@ export const inputItemOrder = (filterIds: readonly string[] = []): string[] =>
 		item.id === 'filter:*' ? filterIds.map((id) => `filter:${id}`) : [item.id]
 	);
 
-/** Tool states ('off' | 'auto' | 'required') and booleans as one item state. */
-export const itemState = (value: string | boolean | number | null | undefined): InputItemState => {
-	if (value === 'auto') return 'auto';
-	if (value === 'off' || !value) return 'off';
-	return 'on';
-};
+/** Live tool states ('off' | 'auto'), booleans and counts as one item state. */
+export const itemState = (value: string | boolean | number | null | undefined): InputItemState =>
+	value === 'off' || !value ? 'off' : 'on';
 
 /** The stored pin set, cleaned: strings only, each once, in stored order. */
 export const normalizePins = (raw: unknown): string[] =>
@@ -63,7 +60,7 @@ export const usedItemIds = (
 };
 
 /**
- * The ids the composer bar renders: pinned, active (on/auto) or used earlier in this chat,
+ * The ids the composer bar renders: pinned, on or used earlier in this chat,
  * allowed here, in menu order, each once. Pins for items that no longer exist are ignored.
  */
 export const barItemIds = ({

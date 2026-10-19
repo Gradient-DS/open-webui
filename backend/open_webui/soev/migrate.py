@@ -466,8 +466,8 @@ def _print_uploads(state, *, prefix: str) -> None:
         print(f'{prefix}: original missing, skipped {line}')
 
 
-async def _model_catalog(options: Options) -> tuple[str, set[str]]:
-    """Step 3's one soev-api read: the catalog's default model and ids. Read before any write, so it fails first."""
+async def _model_catalog(options: Options) -> tuple[str, dict[str, str]]:
+    """Step 3's one soev-api read: the catalog's default model and its ids with their labels. Read before any write, so it fails first."""
     from open_webui.soev import identity
     from open_webui.soev.migrate_models import catalog_default
 
@@ -475,18 +475,20 @@ async def _model_catalog(options: Options) -> tuple[str, set[str]]:
 
 
 async def _rewrite_models(
-    session, options: Options, catalog: tuple[str, set[str]], *, clear_selection: bool, dry_run: bool = False
+    session, options: Options, catalog: tuple[str, dict[str, str]], *, v2_apply: bool, dry_run: bool = False
 ):
+    """The v2 apply clears selections and seeds system prompts; a --models run only maps."""
     from open_webui.soev import migrate_models
 
-    default, ids = catalog
+    default, labels = catalog
     return await migrate_models.rewrite(
         session,
         options.model_map,
         options.migration_id,
         default=default,
-        catalog=ids,
-        clear_selection=clear_selection,
+        catalog=labels,
+        clear_selection=v2_apply,
+        seed_prompts=v2_apply,
         dry_run=dry_run,
     )
 
@@ -504,6 +506,9 @@ def _print_model_report(report, *, prefix: str, default: str | None = None) -> N
         print(f'{prefix}: defaulted {model_id} -> {default} ({count} references)')
     for line in report.merged:
         print(f'{prefix}: merged {line}')
+    if report.prompt_source is not None:
+        targets = ', '.join(report.prompted) or 'no catalog model (each has its own)'
+        print(f'{prefix}: system prompt of {report.prompt_source} copied to {targets}')
     for line in report.skipped:
         print(f'{prefix}: skipped {line}')
 
@@ -572,7 +577,7 @@ async def apply(options: Options, *, db=None) -> int:
         if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
             print('3 model ids: already done')
         else:
-            report = await _rewrite_models(session, options, catalog, clear_selection=True)
+            report = await _rewrite_models(session, options, catalog, v2_apply=True)
             await migrate_state.add_marker(session, options.migration_id, 'model_ids')
             await session.commit()
             _print_model_report(report, prefix='3 model ids', default=catalog[0])
@@ -652,7 +657,7 @@ async def apply_models(options: Options, *, db=None) -> int:
         if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
             print('3 model ids: already done')
             return EXIT_OK
-        report = await _rewrite_models(session, options, catalog, clear_selection=False)
+        report = await _rewrite_models(session, options, catalog, v2_apply=False)
         await migrate_state.add_marker(session, options.migration_id, 'model_ids')
         await session.commit()
         _print_model_report(report, prefix='3 model ids', default=catalog[0])
@@ -667,7 +672,7 @@ async def plan_models(options: Options, *, db=None) -> int:
     async with get_async_db_context(db) as session:
         for source, target in sorted(options.model_map.items()):
             print(f'3 model ids: map {source} -> {target}')
-        report = await _rewrite_models(session, options, catalog, clear_selection=False, dry_run=True)
+        report = await _rewrite_models(session, options, catalog, v2_apply=False, dry_run=True)
         _print_model_report(report, prefix='3 model ids', default=catalog[0])
     return EXIT_OK
 
@@ -719,7 +724,7 @@ async def plan(options: Options, *, db=None) -> int:
         for source, target in sorted(options.model_map.items()):
             print(f'3 model ids: map {source} -> {target}')
         _print_model_report(
-            await _rewrite_models(session, options, catalog, clear_selection=True, dry_run=True),
+            await _rewrite_models(session, options, catalog, v2_apply=True, dry_run=True),
             prefix='3 model ids',
             default=catalog[0],
         )
