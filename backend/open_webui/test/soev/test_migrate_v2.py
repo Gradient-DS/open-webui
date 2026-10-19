@@ -621,6 +621,76 @@ async def test_an_unmapped_override_row_merges_into_the_default_and_catalog_ids_
     assert (await dumps(env), await rows(env, active_sql)) == original
 
 
+PROMPT_ROWS_SQL = 'SELECT id, user_id, base_model_id, name, params, is_active FROM model ORDER BY id'
+
+
+async def seed_prompts(env, monkeypatch):
+    """v1 base-model rows with and without a system prompt, and an assistant with its own."""
+    monkeypatch.setenv('SOEV_V2_MODEL_MAP', json.dumps({'v1/gemma': 'gemma-4-31b'}))
+    env.api.models = [{**entry, 'label': 'GLM-5.3'} if entry['id'] == 'glm-5-3' else entry for entry in CATALOG]
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
+                " VALUES ('v1/oldest', 'admin', NULL, 'Oldest', '{\"system\": \"Oud.\"}', '{}', 1, 1, 50),"
+                " ('v1/gemma', 'admin', NULL, 'Gemma', '{\"system\": \"Eigen.\"}', '{}', 1, 2, 2),"
+                " ('v1/latest', 'admin', NULL, 'Latest', '{\"system\": \"Nieuwste.\"}', '{}', 1, 5, 5),"
+                " ('v1/empty', 'admin', NULL, 'Empty', '{\"system\": \" \"}', '{}', 1, 9, 9),"
+                " ('qwen-3-32b', 'admin', NULL, 'Qwen', '{\"temperature\": 0.2}', '{}', 1, 1, 1),"
+                " ('helper', 'alice', 'v1/gemma', 'Helper', '{\"system\": \"Assistent.\"}', '{}', 1, 10, 10)"
+            )
+        )
+
+
+async def prompt_rows(env):
+    return {row[0]: (*row[1:4], json.loads(row[4]), row[5]) for row in await rows(env, PROMPT_ROWS_SQL)}
+
+
+@pytest.mark.asyncio
+async def test_catalog_models_without_a_prompt_get_the_most_recently_created_base_models(env, monkeypatch, capsys):
+    """The newest base-model prompt wins over the most recently updated; a model's own prompt and assistants stay."""
+    await seed_prompts(env, monkeypatch)
+    original = await rows(env, PROMPT_ROWS_SQL)
+    await env.module.plan(options(env))
+    copied = '3 model ids: system prompt of v1/latest copied to glm-5-3, mistral-small-4, qwen-3-32b\n'
+    assert copied in capsys.readouterr().out
+    assert await rows(env, PROMPT_ROWS_SQL) == original
+    await env.module.apply(options(env))
+    assert copied in capsys.readouterr().out
+    after = await prompt_rows(env)
+    assert after['gemma-4-31b'] == ('admin', None, 'Gemma', {'system': 'Eigen.'}, 1)
+    assert after['glm-5-3'][:4] == ('admin', None, 'GLM-5.3', {'system': 'Nieuwste.'})
+    assert after[DEFAULT][:4] == ('admin', None, DEFAULT, {'system': 'Nieuwste.'})
+    assert after['qwen-3-32b'][3] == {'temperature': 0.2, 'system': 'Nieuwste.'}
+    assert after['helper'][3] == {'system': 'Assistent.'}
+    assert await env.module.restore(MIGRATION) == 0
+    assert await rows(env, PROMPT_ROWS_SQL) == original
+
+
+@pytest.mark.asyncio
+async def test_without_any_base_model_prompt_no_catalog_model_gets_one(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    await env.module.apply(options(env))
+    assert 'system prompt' not in capsys.readouterr().out
+    assert [row[0] for row in await rows(env, PROMPT_ROWS_SQL)] == ['glm-5-3', 'helper', 'legacy']
+
+
+@pytest.mark.asyncio
+async def test_restore_keeps_a_copied_prompt_an_admin_changed_since(env, monkeypatch, capsys):
+    await seed_prompts(env, monkeypatch)
+    await env.module.apply(options(env))
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text('UPDATE model SET params = \'{"system": "Aangepast."}\' WHERE id = \'glm-5-3\'')
+        )
+    await env.module.restore(MIGRATION)
+    after = await prompt_rows(env)
+    assert after['glm-5-3'][3] == {'system': 'Aangepast.'}
+    assert DEFAULT not in after
+    assert after['qwen-3-32b'][3] == {'temperature': 0.2}
+    assert 'model ids restored: skipped model.created glm-5-3: changed since' in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     ('catalog', 'message'),
     [
