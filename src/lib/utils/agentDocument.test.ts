@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { encode } from 'html-entities';
-import { extractDocumentsFromMessage, labelDocuments } from './agentDocument';
+import { extractDocumentsFromMessage, labelDocuments, settleDocument } from './agentDocument';
 
 const marker = (format: string, content: string, title = 'Report') =>
 	`<document title="${encode(title)}" format="${format}">${content}</document>`;
@@ -56,6 +56,32 @@ describe('streamed documents', () => {
 	});
 });
 
+describe('echoed context tags and finished messages', () => {
+	it.each([
+		'Ik lees <document id="1" filename="a.txt"/>.',
+		'Zie <document-text cite="[1]">Tekst over fietsen.</document-text>',
+		'Zie <document_text>x</document_text>',
+		'Leeg <document title="Leeg"></document> en <document title="Punt"> . </document>'
+	])('makes no document of %j', (text) => {
+		expect(extractDocumentsFromMessage(text, true)).toEqual([]);
+	});
+	it('finishes an unclosed document once its message is done', () => {
+		const text = 'Hier: <document title="Plan"># Plan\nStap 1';
+		expect(extractDocumentsFromMessage(text)[0]).toMatchObject({ title: 'Plan', done: false });
+		expect(extractDocumentsFromMessage(text, true)[0]).toMatchObject({ title: 'Plan', done: true });
+	});
+	it('keeps a blank unclosed document writing until its message is done', () => {
+		const document = { title: 'Plan', content: ' ', format: 'markdown' as const, done: false };
+		expect(settleDocument(document, false)).toBe(document);
+		expect(settleDocument(document, true)).toBeUndefined();
+	});
+	it('still reads a closed document with its title', () => {
+		expect(
+			extractDocumentsFromMessage('<document title="Plan">\n# Plan\n</document>', true)
+		).toEqual([{ title: 'Plan', content: '\n# Plan\n', format: 'markdown', done: true }]);
+	});
+});
+
 describe('documents in reasoning', () => {
 	const label = (title: string) => title || 'Document';
 
@@ -86,6 +112,11 @@ describe('documents in reasoning', () => {
 			expect(labelDocuments(text, label)).toBe(text);
 			expect(performance.now() - started).toBeLessThan(200);
 		}
+	});
+
+	it('leaves echoed context tags in reasoning as they are', () => {
+		const text = 'Ik heb <document id="1" filename="a.txt"/> en <document-text cite="[1]">x';
+		expect(labelDocuments(text, label)).toBe(text);
 	});
 
 	it('leaves reasoning without documents as it is', () => {
