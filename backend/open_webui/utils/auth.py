@@ -276,7 +276,14 @@ async def is_valid_token(decoded, redis=None) -> bool:
     """
     from open_webui.utils.mfa import get_auth, get_mfa_config, is_mfa_required
 
-    auth = await get_auth(decoded.get('id', ''))
+    try:
+        auth = await get_auth(decoded.get('id', ''))
+    except HTTPException as e:
+        # [Gradient] A token of a deleted or deactivated account is invalid, not an error: a stale
+        # cookie must not fail the public /api/config. Database failures (503) still propagate.
+        if e.status_code == 401:
+            return False
+        raise
     if decoded.get('session_stamp') != auth.session_stamp:
         return False
     token_type = decoded.get('typ', 'session')
