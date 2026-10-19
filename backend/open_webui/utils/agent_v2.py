@@ -117,8 +117,9 @@ def _summary(count: int, seconds: float, language: str | None) -> str:
 
 
 def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] | None:
-    """The declared template, or its fallback, when every placeholder has a value."""
-    for template in (declared.get('template'), declared.get('fallback')):
+    """The declared template, or the first of its fallbacks (one or a list), whose every placeholder has a value."""
+    fallback = declared.get('fallback')
+    for template in (declared.get('template'), *(fallback if isinstance(fallback, list) else [fallback])):
         if isinstance(template, str) and all(name in params for name in _PLACEHOLDER.findall(template)):
             return {'description': template, **{name: params[name] for name in _PLACEHOLDER.findall(template)}}
     return None

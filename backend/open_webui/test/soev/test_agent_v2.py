@@ -4070,6 +4070,48 @@ def test_failed_status_parameters_use_the_declared_fallback(arguments, expected)
         assert turn.settling[0]['folder'] == 'Plans'
 
 
+@pytest.mark.parametrize(
+    'arguments,matches,expected',
+    [
+        ({'keywords': ['vink']}, 3, 'Searched your mail for "{{keywords}}": {{matches}} emails'),
+        (
+            {'keywords': [], 'from_addresses': ['ann@example.test']},
+            3,
+            'Searched your mail for sender {{from}}: {{matches}} emails',
+        ),
+        ({'keywords': ['vink']}, None, 'Searched your mail for "{{keywords}}": no emails'),
+        (
+            {'keywords': [], 'from_addresses': ['ann@example.test']},
+            None,
+            'Searched your mail for sender {{from}}: no emails',
+        ),
+    ],
+)
+def test_done_status_takes_the_first_fallback_it_can_fill(arguments, matches, expected):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {
+        'search_mail': {
+            'done': {
+                'template': 'Searched your mail for "{{keywords}}": {{matches}} emails',
+                'fallback': [
+                    'Searched your mail for sender {{from}}: {{matches}} emails',
+                    'Searched your mail for "{{keywords}}": no emails',
+                    'Searched your mail for sender {{from}}: no emails',
+                ],
+                'params': {
+                    'keywords': 'argument.keywords',
+                    'from': 'argument.from_addresses',
+                    'matches': 'output.first.mail-reference.matches',
+                },
+            }
+        }
+    }
+    turn.running['find'] = ('search_mail', arguments)
+    cards = [{'type': 'mail-reference', 'id': 'm1', 'matches': matches}] if matches else []
+    turn.end_tool({'call_id': 'find', 'elements': cards})
+    assert turn.settling[0]['description'] == expected
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('kind', ['document-text', 'chunk'])
 async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind):
