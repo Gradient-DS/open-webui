@@ -70,7 +70,8 @@
 		finishedRuns,
 		runIsLive,
 		syncableSources,
-		syncAllNotice
+		syncAllNotice,
+		syncStatusApplies
 	} from './utils/cloudSync';
 	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
 	import { runProgress, skippedRunKey } from './utils/sourceState';
@@ -1874,17 +1875,23 @@
 	// ===== Socket event handler references (for cleanup) =====
 
 	onMount(async () => {
-		void loadSourcePolicy(localStorage.token).then(() => {
+		const policy = loadSourcePolicy(localStorage.token);
+		void policy.then(() => {
 			if (destroyed) return;
 			for (const provider of $enabledProviders) void provider.warmUp?.();
 		});
 		id = $page.params.id;
 		knowledgeId = id;
-		// [Gradient] Start all three independent reads together; the first items page covers this poll.
+		// [Gradient] Load the KB and its first items page together; the first items page covers
+		// this poll. Sync status is polled only where it can apply, so a local KB on a tenant
+		// without cloud providers makes no status call and shows no false error.
 		const [res] = await Promise.all([
-			loadKnowledge(id, true),
-			getItemsPage(true),
-			pollCloudSyncStatus(false)
+			Promise.all([loadKnowledge(id, true), policy]).then(async ([res, { providers_enabled }]) => {
+				if (res && !destroyed && syncStatusApplies(res.type, providers_enabled))
+					await pollCloudSyncStatus(false);
+				return res;
+			}),
+			getItemsPage(true)
 		]);
 
 		if (destroyed) return;

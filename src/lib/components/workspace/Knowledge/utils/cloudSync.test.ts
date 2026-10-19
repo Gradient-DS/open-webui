@@ -15,7 +15,8 @@ import {
 	runIsLive,
 	runStatus,
 	syncableSources,
-	syncAllNotice
+	syncAllNotice,
+	syncStatusApplies
 } from './cloudSync';
 
 describe('connect popup messages', () => {
@@ -354,5 +355,19 @@ describe('sync all now', () => {
 		expect(refused('run_active', 'run_too_soon')).toBe('too_soon');
 		expect(refused('run_active', 'schedule_suspended')).toBe('running');
 		expect(refused('schedule_suspended')).toBe('paused');
+	});
+});
+
+describe('syncStatusApplies', () => {
+	it('skips a local KB when no provider is enabled', () => {
+		expect(syncStatusApplies('local', [])).toBe(false);
+		expect(syncStatusApplies(null, [])).toBe(false);
+	});
+	it('checks a local KB while a provider can add a source', () => {
+		expect(syncStatusApplies('local', ['onedrive'])).toBe(true);
+	});
+	it('always checks a cloud KB', () => {
+		expect(syncStatusApplies('onedrive', [])).toBe(true);
+		expect(syncStatusApplies('confluence', [])).toBe(true);
 	});
 });

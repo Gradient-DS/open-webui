@@ -1,3 +1,4 @@
+import { providerBadge } from '$lib/sources/badges';
 import { reconnectCodes } from '$lib/sources/registry';
 import equal from 'fast-deep-equal';
 import type { Connection, KnowledgeRun, RunOutcome, Schedule, SyncRun } from '$lib/apis/cloudSync';
@@ -233,4 +234,13 @@ export function shouldRefetchSyncItems(previous: Schedule[], current: Schedule[]
 		(!isLive && previous.some((schedule) => runIsLive(schedule.last_run))) ||
 		snapshot(previous) !== snapshot(current)
 	);
+}
+
+// A cloud KB always has sync status; any other KB only while a provider can
+// add a cloud source to it. Otherwise there is nothing to poll.
+export function syncStatusApplies(
+	type: string | null | undefined,
+	providersEnabled: string[]
+): boolean {
+	return !!providerBadge(type) || providersEnabled.length > 0;
 }
