@@ -411,7 +411,9 @@
 		selectedSkillIds,
 		selectedFilterIds
 	});
+	let composerSession = 0;
 	const restoreComposerPreferences = (value: ComposerPreferences) => {
+		composerSession += 1;
 		({
 			webSearchEnabled,
 			webSearchRequired,
@@ -5084,6 +5086,7 @@
 								>
 									<MessageInput
 										bind:this={messageInput}
+										{composerSession}
 										agentRouted={isAgentRouted()}
 										{history}
 										{taskIds}
@@ -5182,6 +5185,7 @@
 								<div id={embedded ? messageInputDropzoneId : undefined} class="pb-2 z-10">
 									<MessageInput
 										bind:this={messageInput}
+										{composerSession}
 										{history}
 										{taskIds}
 										bind:selectedModels
