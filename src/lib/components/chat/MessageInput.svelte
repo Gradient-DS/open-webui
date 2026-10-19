@@ -146,7 +146,13 @@
 	import PageEdit from '../icons/PageEdit.svelte';
 	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
 	import { meetingsAvailable } from '$lib/components/meetings/availability';
-	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
+	import {
+		barItemIds,
+		inputItemOrder,
+		itemState,
+		normalizePins,
+		usedItemIds
+	} from './MessageInput/inputItems';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
 	import DocumentArrowUp from '../icons/DocumentArrowUp.svelte';
@@ -188,6 +194,8 @@
 	export let statusHandler: () => void = () => {};
 	export let forkHandler: () => void = () => {};
 	export let chatId = '';
+	// [Gradient] Changes whenever Chat loads a chat's composer state (new chat or another chat).
+	export let composerSession = 0;
 	export let contextUsage = null;
 	export let contextCompactionEnabled = false;
 	export let embedded = false;
@@ -977,10 +985,22 @@
 			(selectedFilterIds ?? []).map((id: string) => [`filter:${id}`, itemState(true)])
 		)
 	};
+	// Items used in this chat keep their button until the next chat, which shows only the
+	// ones still on (they carry over through composerTools).
+	let usedInputItems: readonly string[] = [];
+	let usedInputItemsSession = composerSession;
+	$: {
+		if (usedInputItemsSession !== composerSession) {
+			usedInputItemsSession = composerSession;
+			usedInputItems = [];
+		}
+		usedInputItems = usedItemIds(usedInputItems, inputItemStates);
+	}
 	$: inputBarItems = barItemIds({
 		order: inputItemOrder(toggleFilters.map((filter: { id: string }) => filter.id)),
 		pinned: normalizePins($settings?.pinnedInputItems),
 		states: inputItemStates,
+		used: usedInputItems,
 		allowed: inputBarAllowed
 	});
 	$: inputMenuFileUploadCapableModels = getFilesystemUploadTerminal(

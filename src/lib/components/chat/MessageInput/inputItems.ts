@@ -1,5 +1,6 @@
 // [Gradient] The "+" menu's items in menu order, and which of them the composer bar shows:
-// every pinned item, plus every item that is on or on Auto, pinned or not.
+// every pinned item, every item that is on or on Auto, and every item used earlier in this
+// chat, so switching one off never takes its button away mid-chat.
 
 export type InputItemSection = 'context' | 'knowledge' | 'tools';
 
@@ -50,23 +51,36 @@ export const normalizePins = (raw: unknown): string[] =>
 		? [...new Set(raw.filter((id): id is string => typeof id === 'string' && id.length > 0))]
 		: [];
 
+/** `used` plus every item that is active now; the same array when nothing was added. */
+export const usedItemIds = (
+	used: readonly string[],
+	states: Readonly<Record<string, InputItemState | undefined>>
+): readonly string[] => {
+	const added = Object.keys(states).filter(
+		(id) => (states[id] ?? 'off') !== 'off' && !used.includes(id)
+	);
+	return added.length ? [...used, ...added] : used;
+};
+
 /**
- * The ids the composer bar renders: pinned or active (on/auto), allowed here, in menu order,
- * each once. Pins for items that no longer exist are ignored.
+ * The ids the composer bar renders: pinned, active (on/auto) or used earlier in this chat,
+ * allowed here, in menu order, each once. Pins for items that no longer exist are ignored.
  */
 export const barItemIds = ({
 	order,
 	pinned,
 	states,
+	used = [],
 	allowed = () => true
 }: {
 	order: readonly string[];
 	pinned: readonly string[];
 	states: Readonly<Record<string, InputItemState | undefined>>;
+	used?: readonly string[];
 	allowed?: (id: string) => boolean;
 }): string[] => {
-	const pins = new Set(pinned);
+	const shown = new Set([...pinned, ...used]);
 	return [...new Set(order)].filter(
-		(id) => allowed(id) && (pins.has(id) || (states[id] ?? 'off') !== 'off')
+		(id) => allowed(id) && (shown.has(id) || (states[id] ?? 'off') !== 'off')
 	);
 };
