@@ -58,6 +58,21 @@ jobs:
         with:
           persist-credentials: false
 
+      # [Gradient] The soev release for the chat footer: the tag itself on a
+      # release, else the latest release plus branch and commit. Upstream's
+      # v0.x tags are left out.
+      - name: Compute soev version
+        id: soev-version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            LATEST=$(git ls-remote --tags --refs origin | sed 's#.*refs/tags/v##' | grep -E '^[1-9][0-9]*\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+            VERSION="${LATEST:-0.0.0}+${GITHUB_REF_NAME//\//-}.${GITHUB_SHA::7}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "soev version: ${VERSION}"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -121,6 +136,7 @@ jobs:
           # Debian fixes.
           build-args: |
             BUILD_HASH=${{ github.sha }}
+            SOEV_VERSION=${{ steps.soev-version.outputs.version }}
             USE_SLIM=true
             UID=1000
             GID=1000
