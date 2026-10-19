@@ -13,6 +13,7 @@ export function citationFileInfo(
 	const isPDF = fileName.toLowerCase().endsWith('.pdf');
 	const isDocx = fileName.toLowerCase().endsWith('.docx');
 	const isXlsx = fileName.toLowerCase().endsWith('.xlsx');
+	const isPptx = fileName.toLowerCase().endsWith('.pptx');
 	const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fileName);
 	const isAudio = /\.(mp3|wav|ogg|m4a|webm)$/i.test(fileName);
 	return {
@@ -21,9 +22,10 @@ export function citationFileInfo(
 		isPDF,
 		isDocx,
 		isXlsx,
+		isPptx,
 		isImage,
 		isAudio,
-		isPreviewable: !!fileId && (isPDF || isDocx || isXlsx || isImage || isAudio),
+		isPreviewable: !!fileId && (isPDF || isDocx || isXlsx || isPptx || isImage || isAudio),
 		showSnippetRail: isPDF || isDocx
 	};
 }

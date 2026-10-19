@@ -35,6 +35,14 @@ describe('shared citation documents', () => {
 		expect(minimumPage(documents)).toBe(3);
 		expect(citationFileInfo(citation, documents).isPreviewable).toBe(true);
 	});
+	it('previews a slide deck that has a file', () => {
+		const deck = { ...citation, source: { name: 'Q3 plan.PPTX' } };
+		const info = citationFileInfo(deck, mergeCitationDocuments(deck));
+		expect(info.isPptx).toBe(true);
+		expect(info.isPreviewable).toBe(true);
+		const hit = { ...deck, metadata: [{ granularity: 'file-snippet' }] };
+		expect(citationFileInfo(hit, mergeCitationDocuments(hit)).isPreviewable).toBe(false);
+	});
 	it('preserves input order when a whole-document citation has no score', () => {
 		expect(
 			mergeCitationDocuments({ ...citation, distances: [undefined, 0.9] }).map(
