@@ -308,6 +308,11 @@ openWebui:
     # notes), never both. Off by default = both allowed together (current behavior).
     featureStrictDataSeparation: "False"
 
+    # "What's new" tour: new models to announce per release (catalog ids), e.g.
+    # {"1.3": ["zai-org/glm-5.3", "zai-org/glm-5.3-flash"]}. A release left out uses the
+    # app's own list of that release's new models; an empty list announces none.
+    whatsNewModels: {}
+
     # Feedback Reporting (product feedback — user-menu link + error reports).
     # Opt-in: off by default; a tenant enables it explicitly. PersistentConfig
     # seeds the initial value; the admin UI wins thereafter. The Slack webhook

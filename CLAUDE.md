@@ -94,6 +94,17 @@ An assistant's knowledge entries of type note, chat and folder are read the same
 chats come after the folder's notes in the shared ten texts (truncated, never refused), folders are expanded like
 attached ones, and unreadable ones get the assistant's notices.
 
+## What's new tour
+
+After sign-in, every user sees `layout/Overlay/WhatsNew.svelte` once per minor soev release: the last entry
+of `RELEASES` in `utils/whatsNew.ts` (`version` is major.minor, so a patch release never repeats it). Closing
+it stores `ui.whatsNewSeen`. Each release lists its slides; a slide shows only when its `SLIDE_GATES` entry
+passes for the tenant and user (feature flags, permissions, models in the picker). For a minor release, add
+an entry with its slides, new models and release-notes URL; a new slide also needs a gate, a scene in
+`WhatsNew/` and its text (nl-NL too). A tenant can name the models to announce per release with
+`openWebui.config.whatsNewModels` (`WHATS_NEW_MODELS`, `{"1.3": [catalog ids]}`; an empty list announces
+none); without it, the release's own `models` that the user can pick are shown.
+
 ## Live document attachments
 
 `utils/agent_v2.py` registers every `attached-document` element of a root `tool_output`
@@ -110,7 +121,7 @@ refuses collection_mismatch. Provider identity and Retry-After remain structured
 error fields. Unknown Graph readability is decided from downloaded bytes before staging.
 
 The OneDrive search toggle enables `search_live_documents`, `list_live_folder` and `attach_live_document` together
-with `auto` state; all remain off by default. `/cloud-sync/connections/{id}/live-documents`
+with `auto` state. `/cloud-sync/connections/{id}/live-documents`
 lists or enables owned OneDrive live grants. The toggle and Connect OneDrive card share the
 existing cloud consent popup and verify its origin, opener and connection before polling.
 Both the OWUI and platform live-document settings must be enabled.
@@ -126,8 +137,7 @@ picker commissioning; provision attach only to consumer products. The platform b
 picker attach and inspect per subject and UTC minute (default 10), independently of
 idempotency keys. Picker refusals preserve provider and Retry-After, including
 connection_required (409), not_readable (422), and provider_throttled (503).
-OneDrive search can be pinned to the composer; both controls cycle off/auto (off by default)
-and share the same consent flow.
+OneDrive search can be pinned to the composer; both controls share the same consent flow.
 Set ENABLE_LIVE_DOCUMENTS=true (config key live_documents.enable, default false) alongside
 AGENT_API_ENABLED to offer the control. The server gates every requested document tool state
 with that setting; enable the matching platform live_documents setting as well.
@@ -194,7 +204,7 @@ popups keep their postMessage page. A failure leaves the manual reconnect; the l
 exposed as `features.enable_live_mail` only with `AGENT_API_ENABLED`. The `/api/config`
 config read includes the key. `features.live_mail` maps to `search_mail` and `read_mail`;
 both stay off unless the gate allows them. The Mail search menu/pin has independent
-saved composer state, defaults off, and consents to `outlook_mail` on first enable.
+saved composer state and consents to `outlook_mail` when switched on.
 
 `utils/live-connections.ts` shares consent/prefetch across provider and family pairs.
 The proxy uses `/cloud-sync/connections/{id}/live/{family}` for `mail` or
@@ -213,6 +223,7 @@ favicon/document fallback; names and URLs never identify providers. Previously
 saved source payloads without provider metadata are not retroactively classified.
 Document-text sources from open_document or attach_live_document carry metadata.granularity=document for whole-document citations; chunk citations remain passage-level.
 Web search results (`search-result` elements) are citable for their snippet and carry metadata.granularity=snippet; `Citations/SearchSnippetNote.svelte` shows their title and address, says the page was not opened, and links to it.
+Live-document search hits (`live-document` elements) are citable for their search snippet too and carry metadata.granularity=file-snippet, their `web_url` and provider; the same note says the file was not opened and links to it.
 
 Composer choices persist in chat.features, including the initial chat creation, and
 ui.composerTools user settings for new chats. Model defaults seed only unsaved choices;
@@ -224,7 +235,12 @@ Mail shares ui.composerTools/chat.features persistence with every composer featu
 including the initial message. Search statuses retain structured order/from/to/cc
 options for English/Dutch rendering, including zero-result searches.
 
-PDF writer auto/required/off choices persist with composerPreferences in user settings and chat.features. Draft restoration restores text and files only; model defaults seed unsaved preferences.
+Every composer tool is on or off (`utils/toolState.ts`): the + menu shows a switch, the bar button is blue
+when on. On means `auto` for web search, the document writer, OneDrive search and mail search, and every
+message for image generation and Code Interpreter; the frontend never sends `required` (Altijd), and saved
+Altijd choices read as on. Until a user has saved composer choices, the auto tools start on (web search off
+under strict data separation) and the others off. Choices persist with composerPreferences in user settings
+and chat.features. Draft restoration restores text and files only; model defaults seed unsaved preferences.
 
 Platform API refusals reach HTTP clients through the `SoevApiError` handler in `main.py`.
 `soev/errors.py` selects fixed nl/en messages from `Accept-Language`; problem details are never echoed.

@@ -1,6 +1,6 @@
 <script lang="ts">
-	// [Gradient] What a search-result citation is: the page's title and address, that only the
-	// search engine's snippet was read, and a link to open the page.
+	// [Gradient] What a search-result citation is: the page's or file's title and address, that only the
+	// search snippet was read, and a link to open the original.
 	import { getContext } from 'svelte';
 	import type { i18n as I18n } from 'i18next';
 	import type { Readable } from 'svelte/store';
@@ -19,7 +19,9 @@
 		<div class="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">{page.title}</div>
 		<div class="truncate text-gray-500 dark:text-gray-400" title={page.url}>{page.address}</div>
 		<p class="text-gray-500 dark:text-gray-400">
-			{$i18n.t('Search result — snippet only, the page was not opened')}
+			{page.file
+				? $i18n.t('Search result in your files — snippet only, the file was not opened')
+				: $i18n.t('Search result — snippet only, the page was not opened')}
 		</p>
 		<a
 			class="inline-flex w-fit items-center gap-1 underline hover:text-gray-500 dark:hover:text-gray-100"
@@ -27,7 +29,7 @@
 			target="_blank"
 			rel="noopener noreferrer"
 		>
-			{$i18n.t('Open original page')}
+			{page.file ? $i18n.t('Open original file') : $i18n.t('Open original page')}
 			<ArrowTopRightOnSquare className="size-3" />
 		</a>
 	</div>

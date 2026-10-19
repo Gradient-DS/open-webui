@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { INPUT_ITEMS, barItemIds, inputItemOrder, itemState, normalizePins } from './inputItems';
+import {
+	INPUT_ITEMS,
+	barItemIds,
+	inputItemOrder,
+	itemState,
+	normalizePins,
+	usedItemIds
+} from './inputItems';
 
 describe('input items', () => {
 	it('lists every menu item as pinnable, meetings included, in menu order', () => {
@@ -13,9 +20,8 @@ describe('input items', () => {
 		]);
 	});
 
-	it('maps tool states and booleans to off / auto / on', () => {
-		expect(itemState('auto')).toBe('auto');
-		expect(itemState('required')).toBe('on');
+	it('maps tool states and booleans to off / on', () => {
+		expect(itemState('auto')).toBe('on');
 		expect(itemState('off')).toBe('off');
 		expect(itemState(true)).toBe('on');
 		expect(itemState(false)).toBe('off');
@@ -32,7 +38,7 @@ describe('composer bar', () => {
 		const ids = barItemIds({
 			order,
 			pinned: ['tools', 'attach_meetings', 'web_search'],
-			states: { web_search: 'auto', live_mail: 'auto', image_generation: 'on', 'filter:f1': 'on' }
+			states: { web_search: 'on', live_mail: 'on', image_generation: 'on', 'filter:f1': 'on' }
 		});
 		expect(ids).toEqual([
 			'attach_meetings',
@@ -50,14 +56,38 @@ describe('composer bar', () => {
 		).toEqual([]);
 	});
 
+	it('keeps items used earlier in the chat after they are switched off', () => {
+		const ids = barItemIds({
+			order,
+			pinned: [],
+			states: { web_search: 'off', live_mail: 'on' },
+			used: ['web_search', 'live_mail']
+		});
+		expect(ids).toEqual(['live_mail', 'web_search']);
+	});
+
 	it('respects what is allowed here (restrictions, data separation)', () => {
 		const ids = barItemIds({
 			order,
 			pinned: ['knowledge'],
-			states: { web_search: 'auto' },
+			states: { web_search: 'on' },
 			allowed: (id) => id !== 'web_search'
 		});
 		expect(ids).toEqual(['knowledge']);
+	});
+});
+
+describe('used items', () => {
+	it('adds items that are active now, keeping the ones already used', () => {
+		expect(usedItemIds(['tools'], { web_search: 'on', code_interpreter: 'off' })).toEqual([
+			'tools',
+			'web_search'
+		]);
+	});
+
+	it('returns the same array when nothing new is active', () => {
+		const used = ['web_search'];
+		expect(usedItemIds(used, { web_search: 'off', skills: 'off' })).toBe(used);
 	});
 });
 

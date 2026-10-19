@@ -1,79 +1,20 @@
 /**
- * [Gradient] Per-chat state of a composer tool, mirroring the soev agent's tool contract
- * (`off` = not offered, `auto` = offered for the model to decide, `required` = must use).
+ * [Gradient] A composer tool is on or off. On offers it to the model: web search, the document
+ * writer, OneDrive search and mail search are then the model's to use (`auto` in the soev agent's
+ * tool contract); image generation and Code Interpreter have no auto path and run on every message.
  *
- * Web search and document writer have all three. Image generation and Code Interpreter have
- * no real auto path, so they cycle between `off` and `required` only.
- *
- * Web search travels as two booleans: `webSearchEnabled` (auto or required, i.e. web
- * search is possible) and `webSearchRequired` (required).
+ * OneDrive and mail search travel and persist as `'auto' | 'off'`, the others as booleans.
  */
 
-export type ToolState = 'off' | 'auto' | 'required';
+export type LiveToolState = 'off' | 'auto';
 
-/** Click order for web search, starting from the new-chat default. */
-export const WEB_SEARCH_STATES: ToolState[] = ['auto', 'required', 'off'];
-
-/** Click order for tools without an auto path. */
-export const BINARY_TOOL_STATES: ToolState[] = ['off', 'required'];
-
-/** The state after one click; an unknown state starts the cycle. */
-export function nextToolState(state: ToolState, states: ToolState[]): ToolState {
-	const index = states.indexOf(state);
-	return states[(index + 1) % states.length];
+/** A saved live tool state; Altijd, which earlier versions stored, reads as on. */
+export function liveDocumentState(value: unknown): LiveToolState {
+	return value === 'auto' || value === 'required' ? 'auto' : 'off';
 }
 
-export function webSearchState(enabled: boolean, required: boolean): ToolState {
-	if (!enabled) return 'off';
-	return required ? 'required' : 'auto';
-}
+/** i18n key for a tool's state. */
+export const toolStateLabel = (on: boolean) => (on ? 'On' : 'Off');
 
-export function webSearchFlags(state: ToolState): { enabled: boolean; required: boolean } {
-	return { enabled: state !== 'off', required: state === 'required' };
-}
-
-/** i18n key for the state's own label. */
-export const TOOL_STATE_LABELS: Record<ToolState, string> = {
-	off: 'Off',
-	auto: 'Auto',
-	required: 'Always'
-};
-
-/** i18n key explaining what a web search state does. */
-export const WEB_SEARCH_STATE_DESCRIPTIONS: Record<ToolState, string> = {
-	off: 'Does not search the web',
-	auto: 'The model decides whether to search the web',
-	required: 'Searches the web for every message'
-};
-
-/** i18n key for a two-state tool that is off; the on state uses the tool's own description. */
+/** i18n key for a tool that is off; an on tool uses its own description. */
 export const TOOL_OFF_DESCRIPTION = 'Not used in this chat';
-
-export const LIVE_DOCUMENT_STATES: ToolState[] = ['off', 'auto'];
-
-export function liveDocumentState(value: unknown): ToolState {
-	return value === 'auto' || value === 'required' ? value : 'off';
-}
-
-/** Whether a model's default features start a live tool on `auto` while its tenant flag is on. */
-export function seedsLiveDefault(
-	meta: { capabilities?: object; defaultFeatureIds?: string[] } | undefined,
-	feature: 'live_documents' | 'live_mail',
-	enabled: boolean | undefined
-): boolean {
-	return (
-		!!enabled &&
-		!!(meta?.capabilities as Record<string, unknown> | undefined)?.[feature] &&
-		!!meta?.defaultFeatureIds?.includes(feature)
-	);
-}
-
-// [Gradient] Document writer shares web search's state contract, without its data restrictions.
-export const DOCUMENT_WRITER_STATES: ToolState[] = ['auto', 'required', 'off'];
-export const documentWriterState = webSearchState;
-export const documentWriterFlags = webSearchFlags;
-export const DOCUMENT_WRITER_STATE_DESCRIPTIONS: Record<ToolState, string> = {
-	off: 'Does not write documents',
-	auto: 'The model decides whether to write a document',
-	required: 'Writes a document for every message'
-};

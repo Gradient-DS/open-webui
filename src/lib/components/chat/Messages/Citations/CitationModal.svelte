@@ -8,6 +8,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 	import PDFViewer from '$lib/components/common/PDFViewer.svelte';
+	import PptxPreview from '$lib/components/common/PptxPreview.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings, config } from '$lib/stores';
 	import { getFileContentById } from '$lib/apis/files';
@@ -61,6 +62,9 @@
 	let xlsxSheetNames: string[] = [];
 	let selectedSheet = '';
 	let xlsxHtml = '';
+	// [Gradient] PPTX slides, rendered in the browser as images.
+	let pptxSlides: string[] = [];
+	let pptxCurrentSlide = 0;
 
 	const truncate = (text: string, limit: number): string =>
 		text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text;
@@ -96,6 +100,7 @@
 		isPDF,
 		isDocx,
 		isXlsx,
+		isPptx,
 		isImage,
 		isAudio,
 		isPreviewable,
@@ -167,14 +172,14 @@
 		show &&
 		previewAvailable &&
 		fileId &&
-		(isDocx || isXlsx) &&
+		(isDocx || isXlsx || isPptx) &&
 		fileId !== loadedOfficeFileId
 	) {
 		loadedOfficeFileId = fileId;
-		loadOfficeContent(fileId, isDocx);
+		loadOfficeContent(fileId, isDocx ? 'docx' : isPptx ? 'pptx' : 'xlsx');
 	}
 
-	const loadOfficeContent = async (id: string, asDocx: boolean) => {
+	const loadOfficeContent = async (id: string, kind: 'docx' | 'xlsx' | 'pptx') => {
 		officeLoading = true;
 		officeError = false;
 		officePending = false;
@@ -183,6 +188,8 @@
 		xlsxSheetNames = [];
 		selectedSheet = '';
 		xlsxHtml = '';
+		pptxSlides = [];
+		pptxCurrentSlide = 0;
 		try {
 			// [Gradient] Wait for an original that is still being prepared, then load it.
 			const result = await loadWithPreviewRetry(() => getFileContentById(id), {
@@ -203,7 +210,14 @@
 				officeError = true;
 				return;
 			}
-			if (asDocx) {
+			if (kind === 'pptx') {
+				const { pptxToImages } = await import('$lib/utils/pptxToHtml');
+				const { images } = await pptxToImages(buffer);
+				if (id !== loadedOfficeFileId) return;
+				pptxSlides = images;
+				return;
+			}
+			if (kind === 'docx') {
 				const html = await renderDocxHtml(buffer);
 				if (id !== loadedOfficeFileId) return;
 				docxHtml = html;
@@ -541,6 +555,29 @@
 								</div>
 							{/if}
 						</div>
+					{/if}
+				{:else if isPptx}
+					<!-- [Gradient] PPTX: the slides as images, opened at the cited slide. -->
+					{#if officeLoading}
+						<div class="flex flex-col items-center justify-center gap-2 h-[70vh]">
+							<Spinner className="size-5" />
+							{#if officePending}
+								<div class="text-sm text-gray-400">{$i18n.t('Preparing preview...')}</div>
+							{/if}
+						</div>
+					{:else if officeError || pptxSlides.length === 0}
+						<div class="flex items-center justify-center h-[70vh] text-sm text-gray-400">
+							{$i18n.t('Could not read file.')}
+						</div>
+					{:else}
+						<PptxPreview
+							slides={pptxSlides}
+							bind:currentSlide={pptxCurrentSlide}
+							targetPage={activePage === undefined ? null : activePage + 1}
+							itemLabel={$i18n.t('Slide')}
+							listLabel={$i18n.t('Slides')}
+							className="h-[70vh]"
+						/>
 					{/if}
 				{:else if isImage}
 					<img
