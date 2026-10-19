@@ -94,6 +94,17 @@ An assistant's knowledge entries of type note, chat and folder are read the same
 chats come after the folder's notes in the shared ten texts (truncated, never refused), folders are expanded like
 attached ones, and unreadable ones get the assistant's notices.
 
+## What's new tour
+
+After sign-in, every user sees `layout/Overlay/WhatsNew.svelte` once per minor soev release: the last entry
+of `RELEASES` in `utils/whatsNew.ts` (`version` is major.minor, so a patch release never repeats it). Closing
+it stores `ui.whatsNewSeen`. Each release lists its slides; a slide shows only when its `SLIDE_GATES` entry
+passes for the tenant and user (feature flags, permissions, models in the picker). For a minor release, add
+an entry with its slides, new models and release-notes URL; a new slide also needs a gate, a scene in
+`WhatsNew/` and its text (nl-NL too). A tenant can name the models to announce per release with
+`openWebui.config.whatsNewModels` (`WHATS_NEW_MODELS`, `{"1.3": [catalog ids]}`; an empty list announces
+none); without it, the release's own `models` that the user can pick are shown.
+
 ## Live document attachments
 
 `utils/agent_v2.py` registers every `attached-document` element of a root `tool_output`
