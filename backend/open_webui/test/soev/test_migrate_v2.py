@@ -516,7 +516,7 @@ async def test_mapped_ids_are_rewritten_and_unmapped_ids_defaulted_everywhere(en
     assert data['chat_message'] == [('m.1', None), ('m.2', 'glm-5-3'), ('m.3', DEFAULT)]
     assert data['model'] == [('glm-5-3', None), ('helper', 'glm-5-3'), ('legacy', DEFAULT)]
     assert data['access_grant'] == [('g1', 'glm-5-3'), ('g2', 'zai-org/GLM-5.3')]
-    assert data['user'] == [('alice', {'ui': {'models': ['glm-5-3'], 'pinnedModels': ['helper', DEFAULT]}})]
+    assert data['user'] == [('alice', {'ui': {'pinnedModels': ['helper', DEFAULT]}})]
     assert data['automation'][0][1]['model_id'] == 'glm-5-3'
     assert data['folder'] == [('f1', {'system_prompt': 'Kort.', 'model_ids': ['glm-5-3', 'helper']}), ('f2', None)]
     assert await config_value(env, 'ui.default_pinned_models') == f'glm-5-3,{DEFAULT}'
@@ -526,6 +526,7 @@ async def test_mapped_ids_are_rewritten_and_unmapped_ids_defaulted_everywhere(en
         assert f'3 model ids: defaulted {site} 1\n' in output
     assert f'3 model ids: defaulted unknown/model -> {DEFAULT} (5 references)' in output
     assert 'defaulted helper' not in output
+    assert '3 model ids: cleared the default model selection of 1 users' in output
 
 
 @pytest.mark.asyncio
@@ -561,7 +562,23 @@ async def test_restore_gives_back_the_original_model_ids_and_keeps_later_message
     dict_chat = dict(restored['chat'])['c1']
     assert dict_chat['history']['messages'].pop('m.4') == {'role': 'assistant', 'model': 'glm-5-3'}
     assert json.loads(json.dumps(restored)) == expected
+    assert dict(restored['user'])['alice']['ui']['models'] == ['zai-org/GLM-5.3']
     assert await rows(env, 'SELECT * FROM owui_v2_migration_model_id_backup') == []
+
+
+@pytest.mark.asyncio
+async def test_restore_keeps_a_default_model_the_user_chose_after_the_apply(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    await env.module.apply(options(env))
+    chosen = {'ui': {'models': ['qwen-3-32b'], 'pinnedModels': ['helper', DEFAULT]}}
+    async with env.engine.begin() as connection:
+        await connection.execute(
+            sa.text("UPDATE user SET settings = :settings WHERE id = 'alice'"), {'settings': json.dumps(chosen)}
+        )
+    await env.module.restore(MIGRATION)
+    settings = dict((await dumps(env))['user'])['alice']
+    assert settings == {'ui': {'models': ['qwen-3-32b'], 'pinnedModels': ['helper', 'unknown/model']}}
+    assert 'skipped user.settings.cleared alice: changed since' in capsys.readouterr().out
 
 
 @pytest.mark.asyncio
@@ -1020,6 +1037,18 @@ async def test_models_mode_rewrites_only_model_ids_and_restore_undoes_it(env, mo
     assert await env.module.restore(HANDLES) == 0
     assert await dumps(env) == original
     assert await config_rows(env) == config
+
+
+@pytest.mark.asyncio
+async def test_models_mode_maps_the_users_default_model_instead_of_clearing_it(env, monkeypatch, capsys):
+    await seed_models(env, monkeypatch)
+    original = await dumps(env)
+    assert await env.module.apply_models(handles_options(env, monkeypatch)) == 0
+    settings = dict((await dumps(env))['user'])['alice']
+    assert settings == {'ui': {'models': ['zai-org/glm-5.3'], 'pinnedModels': ['helper', DEFAULT]}}
+    assert 'cleared the default model selection' not in capsys.readouterr().out
+    assert await env.module.restore(HANDLES) == 0
+    assert await dumps(env) == original
 
 
 @pytest.mark.asyncio

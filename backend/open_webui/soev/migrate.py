@@ -474,12 +474,20 @@ async def _model_catalog(options: Options) -> tuple[str, set[str]]:
     return catalog_default(await identity.build_client().get('/v1/models'), options.model_map)
 
 
-async def _rewrite_models(session, options: Options, catalog: tuple[str, set[str]], *, dry_run: bool = False):
+async def _rewrite_models(
+    session, options: Options, catalog: tuple[str, set[str]], *, clear_selection: bool, dry_run: bool = False
+):
     from open_webui.soev import migrate_models
 
     default, ids = catalog
     return await migrate_models.rewrite(
-        session, options.model_map, options.migration_id, default=default, catalog=ids, dry_run=dry_run
+        session,
+        options.model_map,
+        options.migration_id,
+        default=default,
+        catalog=ids,
+        clear_selection=clear_selection,
+        dry_run=dry_run,
     )
 
 
@@ -490,6 +498,8 @@ def _print_model_report(report, *, prefix: str, default: str | None = None) -> N
         print(f'{prefix}: {site} {count}')
     for site, count in sorted(report.defaulted.items()):
         print(f'{prefix}: defaulted {site} {count}')
+    if report.cleared:
+        print(f'{prefix}: cleared the default model selection of {report.cleared} users')
     for model_id, count in sorted(report.defaulted_ids.items()):
         print(f'{prefix}: defaulted {model_id} -> {default} ({count} references)')
     for line in report.merged:
@@ -562,7 +572,7 @@ async def apply(options: Options, *, db=None) -> int:
         if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
             print('3 model ids: already done')
         else:
-            report = await _rewrite_models(session, options, catalog)
+            report = await _rewrite_models(session, options, catalog, clear_selection=True)
             await migrate_state.add_marker(session, options.migration_id, 'model_ids')
             await session.commit()
             _print_model_report(report, prefix='3 model ids', default=catalog[0])
@@ -642,7 +652,7 @@ async def apply_models(options: Options, *, db=None) -> int:
         if await migrate_state.has_marker(session, options.migration_id, 'model_ids'):
             print('3 model ids: already done')
             return EXIT_OK
-        report = await _rewrite_models(session, options, catalog)
+        report = await _rewrite_models(session, options, catalog, clear_selection=False)
         await migrate_state.add_marker(session, options.migration_id, 'model_ids')
         await session.commit()
         _print_model_report(report, prefix='3 model ids', default=catalog[0])
@@ -657,7 +667,7 @@ async def plan_models(options: Options, *, db=None) -> int:
     async with get_async_db_context(db) as session:
         for source, target in sorted(options.model_map.items()):
             print(f'3 model ids: map {source} -> {target}')
-        report = await _rewrite_models(session, options, catalog, dry_run=True)
+        report = await _rewrite_models(session, options, catalog, clear_selection=False, dry_run=True)
         _print_model_report(report, prefix='3 model ids', default=catalog[0])
     return EXIT_OK
 
@@ -709,7 +719,9 @@ async def plan(options: Options, *, db=None) -> int:
         for source, target in sorted(options.model_map.items()):
             print(f'3 model ids: map {source} -> {target}')
         _print_model_report(
-            await _rewrite_models(session, options, catalog, dry_run=True), prefix='3 model ids', default=catalog[0]
+            await _rewrite_models(session, options, catalog, clear_selection=True, dry_run=True),
+            prefix='3 model ids',
+            default=catalog[0],
         )
     directory = await copy_directory(dry_run=True, db=db)
     state = await migrate_ingest.reingest(directory, concurrency=options.ingest_concurrency, dry_run=True, db=db)
