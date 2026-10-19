@@ -1,12 +1,12 @@
 <script lang="ts">
-	// [Gradient] The + menu rows flipping from Off to Auto.
+	// [Gradient] The + menu rows switching from off to on.
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
-	import ToolStateLabel from '$lib/components/chat/MessageInput/InputMenu/ToolStateLabel.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
@@ -31,9 +31,9 @@
 			>
 				<row.icon className="size-4" />
 				<span class="flex-1">{$i18n.t(row.label)}</span>
-				<span class="relative inline-flex">
-					<span class="chip-off"><ToolStateLabel state="off" /></span>
-					<span class="chip-auto absolute inset-0"><ToolStateLabel state="auto" /></span>
+				<span class="relative inline-flex" inert>
+					<span class="chip-off"><Switch state={false} /></span>
+					<span class="chip-auto absolute inset-0"><Switch state={true} /></span>
 					<span class="ripple" aria-hidden="true"></span>
 				</span>
 			</div>

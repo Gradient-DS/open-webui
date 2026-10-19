@@ -121,7 +121,7 @@ refuses collection_mismatch. Provider identity and Retry-After remain structured
 error fields. Unknown Graph readability is decided from downloaded bytes before staging.
 
 The OneDrive search toggle enables `search_live_documents`, `list_live_folder` and `attach_live_document` together
-with `auto` state; all remain off by default. `/cloud-sync/connections/{id}/live-documents`
+with `auto` state. `/cloud-sync/connections/{id}/live-documents`
 lists or enables owned OneDrive live grants. The toggle and Connect OneDrive card share the
 existing cloud consent popup and verify its origin, opener and connection before polling.
 Both the OWUI and platform live-document settings must be enabled.
@@ -137,8 +137,7 @@ picker commissioning; provision attach only to consumer products. The platform b
 picker attach and inspect per subject and UTC minute (default 10), independently of
 idempotency keys. Picker refusals preserve provider and Retry-After, including
 connection_required (409), not_readable (422), and provider_throttled (503).
-OneDrive search can be pinned to the composer; both controls cycle off/auto (off by default)
-and share the same consent flow.
+OneDrive search can be pinned to the composer; both controls share the same consent flow.
 Set ENABLE_LIVE_DOCUMENTS=true (config key live_documents.enable, default false) alongside
 AGENT_API_ENABLED to offer the control. The server gates every requested document tool state
 with that setting; enable the matching platform live_documents setting as well.
@@ -205,7 +204,7 @@ popups keep their postMessage page. A failure leaves the manual reconnect; the l
 exposed as `features.enable_live_mail` only with `AGENT_API_ENABLED`. The `/api/config`
 config read includes the key. `features.live_mail` maps to `search_mail` and `read_mail`;
 both stay off unless the gate allows them. The Mail search menu/pin has independent
-saved composer state, defaults off, and consents to `outlook_mail` on first enable.
+saved composer state and consents to `outlook_mail` when switched on.
 
 `utils/live-connections.ts` shares consent/prefetch across provider and family pairs.
 The proxy uses `/cloud-sync/connections/{id}/live/{family}` for `mail` or
@@ -236,7 +235,12 @@ Mail shares ui.composerTools/chat.features persistence with every composer featu
 including the initial message. Search statuses retain structured order/from/to/cc
 options for English/Dutch rendering, including zero-result searches.
 
-PDF writer auto/required/off choices persist with composerPreferences in user settings and chat.features. Draft restoration restores text and files only; model defaults seed unsaved preferences.
+Every composer tool is on or off (`utils/toolState.ts`): the + menu shows a switch, the bar button is blue
+when on. On means `auto` for web search, the document writer, OneDrive search and mail search, and every
+message for image generation and Code Interpreter; the frontend never sends `required` (Altijd), and saved
+Altijd choices read as on. Until a user has saved composer choices, the auto tools start on (web search off
+under strict data separation) and the others off. Choices persist with composerPreferences in user settings
+and chat.features. Draft restoration restores text and files only; model defaults seed unsaved preferences.
 
 Platform API refusals reach HTTP clients through the `SoevApiError` handler in `main.py`.
 `soev/errors.py` selects fixed nl/en messages from `Accept-Language`; problem details are never echoed.
