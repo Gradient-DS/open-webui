@@ -4077,10 +4077,14 @@ def test_failed_status_parameters_use_the_declared_fallback(arguments, expected)
         (
             {'keywords': [], 'from_addresses': ['ann@example.test']},
             3,
-            'Searched mail from {{from}}: {{matches}} emails',
+            'Searched your mail for sender {{from}}: {{matches}} emails',
         ),
         ({'keywords': ['vink']}, None, 'Searched your mail for "{{keywords}}": no emails'),
-        ({'keywords': [], 'from_addresses': ['ann@example.test']}, None, 'Searched mail from {{from}}: no emails'),
+        (
+            {'keywords': [], 'from_addresses': ['ann@example.test']},
+            None,
+            'Searched your mail for sender {{from}}: no emails',
+        ),
     ],
 )
 def test_done_status_takes_the_first_fallback_it_can_fill(arguments, matches, expected):
@@ -4090,9 +4094,9 @@ def test_done_status_takes_the_first_fallback_it_can_fill(arguments, matches, ex
             'done': {
                 'template': 'Searched your mail for "{{keywords}}": {{matches}} emails',
                 'fallback': [
-                    'Searched mail from {{from}}: {{matches}} emails',
+                    'Searched your mail for sender {{from}}: {{matches}} emails',
                     'Searched your mail for "{{keywords}}": no emails',
-                    'Searched mail from {{from}}: no emails',
+                    'Searched your mail for sender {{from}}: no emails',
                 ],
                 'params': {
                     'keywords': 'argument.keywords',
