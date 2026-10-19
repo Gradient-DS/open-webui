@@ -253,6 +253,15 @@ jobs:
           test "$base" = "$(name --set openWebui.image.tag=other)"
           test "$base" != "$(name --set externalSecrets.onepassword.fields.feedbackReportSlackWebhookUrl=true)"
 
+      - name: v2-migrate plan mode previews once and passes the system prompt choice
+        run: |
+          job() { helm template t helm/open-webui-tenant -f helm/open-webui-tenant/ci/v2-values.yaml "$@" -s templates/open-webui/v2-migrate-job.yaml; }
+          plan="$(job --set soevApi.migrate.mode=plan --set soevApi.migrate.systemPrompt=openai/gpt-oss-120b)"
+          grep -q '"--dry-run"' <<<"$plan"
+          grep -q 'backoffLimit: 0' <<<"$plan"
+          grep -A1 'name: SOEV_V2_SYSTEM_PROMPT' <<<"$plan" | grep -q 'value: "openai/gpt-oss-120b"'
+          ! job | grep -q SOEV_V2_SYSTEM_PROMPT
+
   # Record only same-repository PRs whose tests really ran and whose other
   # quality checks passed. A path-only no-op cannot certify an untested tree.
   record:

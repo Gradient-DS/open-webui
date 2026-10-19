@@ -140,8 +140,8 @@ skipped on later runs with the same `soevApi.migrate.id`.
 The Job runs `python -m open_webui.soev.migrate --<mode>` with the app's
 ConfigMap, secrets, `extraEnv` and data volume, plus `ENABLE_DB_MIGRATIONS=true`
 so the app schema is current. The migration keeps its own state outside
-Alembic (schema `owui_v2_migration`). `soevApi.migrate.config` becomes `SOEV_V2_CONFIG` and `modelMap` becomes
-`SOEV_V2_MODEL_MAP`. Exit 1 (soev-api unreachable, collection mismatch) and 75
+Alembic (schema `owui_v2_migration`). `soevApi.migrate.config` becomes `SOEV_V2_CONFIG`, `modelMap` becomes
+`SOEV_V2_MODEL_MAP` and `systemPrompt` becomes `SOEV_V2_SYSTEM_PROMPT`. Exit 1 (soev-api unreachable, collection mismatch) and 75
 (ingest still running) are retried with Kubernetes' capped exponential backoff
 up to `backoffLimit`; exit 2 (invalid input) fails the Job at once. The
 finished Job is kept by default: with `ttlSecondsAfterFinished` set, the next
@@ -162,6 +162,16 @@ selection so everyone starts on the platform default, it maps that selection.
 In both `apply` and `models`, a stored model id that `modelMap` leaves out and
 that is no catalog id becomes the catalog's default model, read from soev-api
 before anything is written; with no default in the catalog the Job exits 2.
+
+`mode: plan` runs `--dry-run` once (no retries): it prints what `apply` would do
+and writes nothing. Its step 3 lists every distinct base-model system prompt in
+full, with the base models that carry it and when they were last updated.
+`apply` moves those prompts to the one global system prompt (Admin > Settings >
+System prompt) and clears them on the models: with one distinct prompt it is
+kept; with several, `soevApi.migrate.systemPrompt` names the v1 base model id
+whose prompt to keep, or `none`. Several and no choice exits 2 before any
+write. `restore` puts the global prompt and every cleared prompt back, except
+where an admin has changed them since.
 
 `mode: uploads` runs `--apply --uploads`: it ingests only the uploads stored
 chats attach (not KB files or images) into their owners' attachments
