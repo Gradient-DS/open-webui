@@ -45,8 +45,8 @@
 		<!-- Form -->
 		<div class="px-4 pb-2 flex flex-col gap-3">
 			<div>
-				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>
 				<input
+					aria-label={$i18n.t('Directory name')}
 					class="w-full text-sm bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700"
 					type="text"
 					bind:value={name}
