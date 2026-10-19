@@ -414,6 +414,21 @@ describe('admin settings features', () => {
 			expect(isAdminSettingsTabEnabled('pipelines')).toBe(false);
 		});
 
+		it('the system prompt tab comes with the models tab', () => {
+			vi.mocked(get).mockReturnValue({
+				features: { feature_admin_settings: true, feature_admin_settings_tabs: ['models'] }
+			});
+			expect(isAdminSettingsTabEnabled('system-prompt')).toBe(true);
+			vi.mocked(get).mockReturnValue({
+				features: { feature_admin_settings: true, feature_admin_settings_tabs: ['general'] }
+			});
+			expect(isAdminSettingsTabEnabled('system-prompt')).toBe(false);
+			vi.mocked(get).mockReturnValue({
+				features: { feature_admin_settings: true, feature_admin_settings_tabs: ['system-prompt'] }
+			});
+			expect(isAdminSettingsTabEnabled('system-prompt')).toBe(true);
+		});
+
 		it('returns false for all tabs when admin settings is disabled', () => {
 			vi.mocked(get).mockReturnValue({
 				features: {

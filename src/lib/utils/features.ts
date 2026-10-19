@@ -117,6 +117,7 @@ export const ADMIN_SETTINGS_TABS = [
 	'general',
 	'connections',
 	'models',
+	'system-prompt',
 	'evaluations',
 	'integrations',
 	'documents',
@@ -177,6 +178,11 @@ export function isAdminSettingsTabEnabled(tab: string): boolean {
 	// Audio tab has additional requirement: FEATURE_VOICE must be true
 	if (tab === 'audio') {
 		return tabAllowed && isFeatureEnabled('voice');
+	}
+
+	// [Gradient] The global system prompt belongs to the models: a tenant that allows the models tab gets it too.
+	if (tab === 'system-prompt') {
+		return tabAllowed || allowedTabs.includes('models');
 	}
 
 	// External Agents tab requires AGENT_API_ENABLED on the backend.
