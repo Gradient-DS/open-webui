@@ -36,6 +36,21 @@ describe('document blocks', () => {
 			expect(html).not.toMatch(/Secret|Body|document|format|title/);
 		}
 	});
+	it.each([
+		'Ik heb toegang tot <document id="1" filename="a.txt"/>.',
+		'Volgens **[1]** <document-text cite="[1]">Tekst</document-text> klopt het.',
+		'Leeg: <document title="Leeg">.</document> verder.'
+	])('keeps an echoed tag or blank document as text in its paragraph: %j', (raw) => {
+		const tokens = marked.lexer(raw);
+		expect(tokens.map((t) => t.type)).toEqual(['paragraph']);
+		expect(tokens[0].raw).toBe(raw);
+	});
+	it('still makes a card of a closed document after text', () => {
+		const tokens = marked.lexer('Zie hier.\n<document title="Plan"># Plan</document>');
+		expect(tokens.find((t) => t.type === 'document')).toMatchObject({
+			document: { title: 'Plan', done: true }
+		});
+	});
 	it('leaves the details tokenizer intact', () => {
 		expect(
 			marked.lexer('<details type="document">\n<summary>Document</summary>\n# Old\n</details>')[0]
