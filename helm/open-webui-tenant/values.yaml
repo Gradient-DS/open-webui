@@ -677,9 +677,11 @@ soevApi:
     # Pinned separately from openWebui.image.tag: the Job's pod template is immutable.
     image:
       tag: ""
-    # apply | restore (puts back the config snapshot and model ids) | models (only rewrites
-    # stored model ids by modelMap, e.g. after catalog ids are renamed; restore with the same id)
-    # | uploads (only ingests the uploads stored chats attach, for tenants applied before that step)
+    # apply | plan (the apply's dry run: prints what it would do, including every distinct
+    # base-model system prompt in full, and writes nothing) | restore (puts back the config
+    # snapshot and model ids) | models (only rewrites stored model ids by modelMap, e.g. after
+    # catalog ids are renamed; restore with the same id) | uploads (only ingests the uploads
+    # stored chats attach, for tenants applied before that step)
     mode: apply
     id: v2  # Snapshot, step markers and the one-time sign-out are kept per id.
     # SOEV_V2_CONFIG: exactly these keys (the migration refuses others).
@@ -696,6 +698,11 @@ soevApi:
     # names (take the pairs from the catalog); for models, the old catalog ids.
     modelMap: {}
     #   zai-org/GLM-5.3: zai-org/glm-5.3
+    # SOEV_V2_SYSTEM_PROMPT: the apply moves the v1 per-base-model system prompts to one global
+    # prompt (Admin > Settings > System prompt) and clears them on the models. With one distinct
+    # prompt it is kept; with several, name the v1 base model id whose prompt to keep (mode plan
+    # lists them in full), or none. Unset with several stops the apply before any write (exit 2).
+    systemPrompt: ""
     ingestConcurrency: 4
     # Keep polling running ingest this long before exiting 75 (retry).
     waitSeconds: 600
