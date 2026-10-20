@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import time
 from urllib.parse import quote
 
@@ -12,6 +13,19 @@ from open_webui.soev import identity, ingest
 from open_webui.soev.client import SoevApiError, SoevClient
 
 log = logging.getLogger(__name__)
+
+# An item's code and reason as soev-api gives them: fixed snake_case codes. A
+# file's error is shown to its user, so anything else is dropped, never shown.
+_FIXED_CODE = re.compile(r'[a-z][a-z0-9_]{0,63}')
+
+
+def _item_error(item: dict, status: str) -> str:
+    code, reason = item.get('code'), item.get('reason')
+    if not isinstance(code, str) or not _FIXED_CODE.fullmatch(code):
+        return status
+    if isinstance(reason, str) and _FIXED_CODE.fullmatch(reason) and reason != code:
+        return f'{code}: {reason}'
+    return code
 
 
 def _job_key(file: FileModel, job: dict) -> str:
@@ -105,8 +119,7 @@ async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
         return await _finish(file, job)
     if status in {'COMPLETED_WITH_ERRORS', 'FAILED', 'CANCELLED', 'EXPIRED'}:
         item = next((item for item in result.get('items', []) if item.get('source_id') == file.id), {})
-        reason = f'{item["code"]}: {item.get("detail")}' if item.get('code') else status
-        return await _finish(file, job, reason)
+        return await _finish(file, job, _item_error(item, status))
     return 0
 
 

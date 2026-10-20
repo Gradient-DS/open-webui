@@ -1057,7 +1057,7 @@ async def test_a_failed_file_stays_listed_as_error_until_removed(env, monkeypatc
     assert await jobs.poll_once(env.client, now=job['submitted_at']) == 1
     result = await env.store.search_files_by_id('kb', 'alice', {'directory_id': None}, metadata_only=True)
     assert result.total == 1 and result.items[0].status == 'failed'
-    assert result.items[0].error == 'unsupported_content_type: Cannot parse'
+    assert result.items[0].error == 'unsupported_content_type'
     root = env.projection.directory_id('kb', ())
     rollups = await env.store.get_directory_rollups('kb', [root])
     assert rollups[root]['status_counts']['failed'] == 1
