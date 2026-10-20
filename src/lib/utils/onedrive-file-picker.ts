@@ -1184,8 +1184,12 @@ export async function openOneDriveFolderPicker(): Promise<FolderPickerResult | n
 	});
 }
 
-// Open OneDrive item picker for multi-select files and folders
-export async function openOneDriveItemPicker(): Promise<MultiItemPickerResult | null> {
+// Open OneDrive item picker for multi-select files and folders. The picker is an
+// in-page modal; with allowPopup false it never opens a sign-in window either, and
+// throws when a silent sign-in is not enough (no click to open a popup from).
+export async function openOneDriveItemPicker({
+	allowPopup = true
+}: { allowPopup?: boolean } = {}): Promise<MultiItemPickerResult | null> {
 	if (typeof window === 'undefined') {
 		throw new Error('Not in browser environment');
 	}
@@ -1193,14 +1197,14 @@ export async function openOneDriveItemPicker(): Promise<MultiItemPickerResult | 
 	// Initialize the organisational picker
 	const config = OneDriveConfig.getInstance();
 	await config.initialize();
-	await config.resolveHost();
+	await config.resolveHost(allowPopup);
 
 	const channelId = uuidv4();
 	const params = getItemPickerParams(channelId);
 	const baseUrl = config.getBaseUrl();
 
 	// Get auth token first (before creating UI)
-	const authToken = await getToken(undefined);
+	const authToken = await getToken(undefined, allowPopup);
 	if (!authToken) {
 		throw new Error('Failed to acquire access token');
 	}

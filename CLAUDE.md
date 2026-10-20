@@ -295,8 +295,15 @@ OWUI's init container owns schema upgrades. A timeout exits with a clear retry m
 Knowledge grants project everyone to `platform:pseudo:owui`; writes explicitly include read access.
 Access changes commission one `PUT /access` job carrying readers and writers, retaining the owner in both.
 KB types come only from the collection's immutable `source_kind`, sent at create. Cloud collections omit the
-service reader. Without a content schedule, the view shows "Not connected", retry (where a browser provider
-adapter exists) and delete; Confluence has no browser picker adapter yet.
+service reader. Without a content schedule, a writer sees the empty state's "Sync from <provider>" card; only a
+provider the tenant cannot sync from (no browser picker adapter, e.g. Confluence, or not enabled) shows a
+"not available here" line with Delete for the owner. A new cloud KB opens its picker by itself (the create page's
+`start_<provider>_sync` param, consumed once) only when that needs no window: an enabled connection and a provider
+`pickSilently` (OneDrive: in-page picker, silent MSAL token); otherwise the card waits for a click.
+Skipped files in a synced folder are a collapsed list; each shows the platform's stored `reason` code when the
+browser knows it (`SKIP_REASONS` in `utils/sourceState.ts`; unknown codes read as the generic error, free text
+never reaches the browser), and writers get Retry failed files (schedule action `retry_failed`, a run that
+refetches every file without a landed version) there and in the source's ⋯ menu.
 
 Migration directory reports count the six original grant mappings, dropped cloud grants (listed by KB and
 principal), and skipped pending users. Only user/admin roles get links. Cloud KBs migrate with source_kind

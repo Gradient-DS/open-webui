@@ -56,6 +56,7 @@ def test_real_seed_selection_has_no_disabled_dependencies(monkeypatch, mode):
         'cloud_family',
         'cloud_knowledge',
         'cloud_schedule',
+        'retry_schedule',
         'meeting',
     } == private
     selected_keys = {p['key'] for p in selected}

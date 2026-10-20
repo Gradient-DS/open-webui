@@ -1,10 +1,14 @@
 """Subject-scoped connection and schedule calls through the existing soev-api client."""
 
 import asyncio
+import re
 from urllib.parse import quote
 from uuid import uuid4
 
 from open_webui.soev.client import SoevApiError, SoevClient
+
+# A skip code or reason as soev-sync stores it (snake_case), never free text.
+_FIXED_CODE = re.compile(r'[a-z][a-z0-9_]{0,63}')
 
 
 class CloudSync:
@@ -109,10 +113,15 @@ class CloudSync:
             # and keeps the specific reason (item_too_large, timed_out, ...) in
             # the detail, which is the one worth showing.
             code = item.get('code')
+            code = (item.get('detail') if code in (None, 'internal_error') else code) or code or item['status']
+            # Only fixed codes reach the browser, which maps them to a sentence;
+            # anything else (free text from a detail) reads as the generic error.
+            reason = item.get('reason')
             skipped[item['source_id']] = {
                 'source_id': item['source_id'],
                 'name': item.get('title') or names.get(item['source_id']) or item['source_id'],
-                'code': (item.get('detail') if code in (None, 'internal_error') else code) or code or item['status'],
+                'code': code if _FIXED_CODE.fullmatch(code) else 'internal_error',
+                'reason': reason if isinstance(reason, str) and _FIXED_CODE.fullmatch(reason) else None,
             }
         return list(skipped.values())
 
