@@ -151,8 +151,26 @@ async def test_an_item_failure_becomes_the_files_error_with_its_code(env, status
         env.api.jobs[job['job_id']]['items'] = []
     env.api.jobs[job['job_id']]['items'].insert(0, {'source_id': 'another-file', 'code': 'wrong', 'detail': 'wrong'})
     assert await env.jobs.poll_once(env.client, now=job['submitted_at']) == 1
-    reason = f'{code}: Cannot parse this media type' if code and items else status
-    await assert_terminal(env, file, error=reason)
+    await assert_terminal(env, file, error=code if code and items else status)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'item,error',
+    [
+        ({'code': 'internal_error', 'reason': 'unreadable_file'}, 'internal_error: unreadable_file'),
+        ({'code': 'empty_content', 'reason': 'empty_content'}, 'empty_content'),
+        ({'code': 'internal_error', 'reason': 'parse of doc_id=x failed: ParseError'}, 'internal_error'),
+        ({'code': 'Not A Code', 'reason': 'unreadable_file'}, 'COMPLETED_WITH_ERRORS'),
+    ],
+)
+async def test_a_files_error_carries_only_fixed_codes(env, item, error):
+    """Item text the platform should never send is still never shown as a file's error."""
+    file, job = await submitted(env)
+    env.api.advance(job['job_id'], 'COMPLETED_WITH_ERRORS', item_code='internal_error')
+    env.api.jobs[job['job_id']]['items'][0].update(item, detail=item['reason'])
+    assert await env.jobs.poll_once(env.client, now=job['submitted_at']) == 1
+    await assert_terminal(env, file, error=error)
 
 
 @pytest.mark.asyncio
