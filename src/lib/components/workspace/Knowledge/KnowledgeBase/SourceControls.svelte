@@ -38,10 +38,11 @@
 		reconnect: Connection;
 	}>();
 	// [Gradient] The inline sync chrome of one cloud source. The slots keep a
-	// fixed order (action or live progress, skipped files, status badge, menu)
+	// fixed order (skipped files, action or live progress, status badge, menu)
 	// and a minimum width, so nothing moves when a sync starts: the primary
 	// button gives way to the progress readout in the same place, and the
 	// badge column is wide enough for its common labels in every language.
+	// The skipped count comes first, so it never pushes the button out of line.
 	// Below `sm` the row stays on one line: the columns drop their minimum
 	// width, Sync now becomes an icon and the skipped count loses its words.
 	export let knowledgeId: string;
@@ -184,6 +185,41 @@
 	{#if showAccessHelp}<span class="text-xs text-gray-500" role="status">
 			{$i18n.t('Ask the knowledge base owner to restore your edit access, then resume syncing.')}
 		</span>{/if}
+	{#if skipped > 0}
+		<Dropdown
+			bind:show={skippedOpen}
+			align="end"
+			onOpenChange={(open) => {
+				if (!open && skippedError) loadedRunKey = '';
+			}}
+		>
+			<button
+				type="button"
+				class="flex items-center gap-0.5 text-xs text-amber-700 hover:underline dark:text-amber-300"
+				aria-label={$i18n.t('{{n}} files skipped', { n: skipped })}
+				><ExclamationTriangle className="size-3.5 sm:hidden" /><span class="sm:hidden"
+					>{skipped}</span
+				><span class="hidden sm:inline">{$i18n.t('{{n}} files skipped', { n: skipped })}</span
+				></button
+			>
+			<div slot="content">
+				<DropdownMenu className="max-w-sm p-2 text-xs">
+					{#if skippedLoading}<p role="status">{$i18n.t('Loading...')}</p>
+					{:else if skippedError}<p role="alert">
+							{$i18n.t('Failed to load skipped files. Reopen to try again.')}
+						</p>
+					{:else}<ul class="list-inside list-disc">
+							{#each skippedItems as item}<li>
+									{item.name || item.source_id} — {$i18n.t(skippedReason(item.code, item.reason))}
+								</li>{/each}
+						</ul>
+						<p class="mt-1 text-gray-500">
+							{$i18n.t('Open the folder to see why each file was skipped.')}
+						</p>{/if}
+				</DropdownMenu>
+			</div>
+		</Dropdown>
+	{/if}
 	<div class="flex items-center justify-end sm:min-w-[9.5rem]">
 		{#if view.state === 'syncing'}
 			<span
@@ -221,41 +257,6 @@
 			>
 		{/if}
 	</div>
-	{#if skipped > 0}
-		<Dropdown
-			bind:show={skippedOpen}
-			align="end"
-			onOpenChange={(open) => {
-				if (!open && skippedError) loadedRunKey = '';
-			}}
-		>
-			<button
-				type="button"
-				class="flex items-center gap-0.5 text-xs text-amber-700 hover:underline dark:text-amber-300"
-				aria-label={$i18n.t('{{n}} files skipped', { n: skipped })}
-				><ExclamationTriangle className="size-3.5 sm:hidden" /><span class="sm:hidden"
-					>{skipped}</span
-				><span class="hidden sm:inline">{$i18n.t('{{n}} files skipped', { n: skipped })}</span
-				></button
-			>
-			<div slot="content">
-				<DropdownMenu className="max-w-sm p-2 text-xs">
-					{#if skippedLoading}<p role="status">{$i18n.t('Loading...')}</p>
-					{:else if skippedError}<p role="alert">
-							{$i18n.t('Failed to load skipped files. Reopen to try again.')}
-						</p>
-					{:else}<ul class="list-inside list-disc">
-							{#each skippedItems as item}<li>
-									{item.name || item.source_id} — {$i18n.t(skippedReason(item.code, item.reason))}
-								</li>{/each}
-						</ul>
-						<p class="mt-1 text-gray-500">
-							{$i18n.t('Open the folder to see why each file was skipped.')}
-						</p>{/if}
-				</DropdownMenu>
-			</div>
-		</Dropdown>
-	{/if}
 	<Tooltip content={details.join('<br>')} className="flex justify-end sm:min-w-[8.5rem]">
 		<button type="button" aria-label={details[0]}
 			><Badge type={badge.type} content={$i18n.t(badge.label)} /></button
