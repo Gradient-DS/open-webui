@@ -200,6 +200,17 @@ const SKIP_REASONS: Record<string, { label: string; explainer: string }> = {
 		explainer:
 			'The processed result of this file could not be saved. It is retried on every sync, or use Retry failed files.'
 	},
+	// The processor could not read the file (soev-sync processing codes).
+	unreadable_file: {
+		label: 'File could not be read',
+		explainer:
+			'The file may be damaged, password-protected or not the type its name says. Open it and save it again, then use Retry failed files.'
+	},
+	processing_timed_out: {
+		label: 'Processing timed out',
+		explainer:
+			'Processing did not finish in time. It is retried on every sync, or use Retry failed files.'
+	},
 	timed_out: {
 		label: 'Processing timed out',
 		explainer:
