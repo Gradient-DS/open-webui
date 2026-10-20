@@ -48,7 +48,7 @@
 	import type { DirectoryItem } from './KnowledgeBase/directory';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
-	import { removalTargets, sortSourcePairs } from './KnowledgeBase/sources';
+	import { autoPickProvider, removalTargets, sortSourcePairs } from './KnowledgeBase/sources';
 	import type { SchedulePair } from './utils/cloudSync';
 	import { buildSyncToast } from './utils/syncToast';
 	import {
@@ -1198,7 +1198,10 @@
 		}
 	};
 
-	const cloudSyncHandler = async (provider: SourceProvider) => {
+	// [Gradient] silent: started without a click (a new KB opening its picker), so it
+	// never opens a window: no consent, no interactive sign-in. A picker that cannot
+	// open silently leaves the empty state's sync card to wait for a click.
+	const cloudSyncHandler = async (provider: SourceProvider, silent = false) => {
 		if (
 			!knowledge ||
 			cloudActionBusy ||
@@ -1222,10 +1225,17 @@
 				connection = accounts.find((item) => item.lifecycle === 'enabled') ?? accounts[0] ?? null;
 			}
 			if (connection?.lifecycle !== 'enabled') {
+				if (silent) return;
 				connection = await authorizeBackgroundSync(provider, connection?.id);
 			}
 			if (!connection || destroyed) return;
-			const scopes = await provider.pick();
+			let scopes: Awaited<ReturnType<SourceProvider['pick']>>;
+			try {
+				scopes = silent ? await provider.pickSilently!() : await provider.pick();
+			} catch (error) {
+				if (silent) return;
+				throw error;
+			}
 			if (!scopes?.length) return;
 			let started = 0;
 			for (const source of scopes) {
@@ -1276,6 +1286,22 @@
 		}
 	};
 
+	// [Gradient] The create page asks for the picker in the URL: open it once, never
+	// again on a reload.
+	const autoPick = async (requested: SourceProvider) => {
+		const url = new URL(window.location.href);
+		url.searchParams.delete(requested.startParam);
+		history.replaceState({}, '', url.toString());
+		const provider = autoPickProvider({
+			requested,
+			writeAccess: !!knowledge?.write_access && knowledge?.type === requested.kind,
+			providerEnabled: $enabledProviders.some((item) => item.kind === requested.kind),
+			hasContentSource: schedules.some((schedule) => schedule.kind === 'content'),
+			statusKnown: syncStatusLoaded && !syncStatusError
+		});
+		if (provider) await cloudSyncHandler(provider, true);
+	};
+
 	// [Gradient] Confirm unsubscribe against the selected source's shared usage.
 	let showRemoveSource = false;
 	let removeSourceTargets: Schedule[] = [];
@@ -1300,6 +1326,7 @@
 		try {
 			const actions = {
 				run: cloudSync.runSchedule,
+				retry_failed: cloudSync.retryFailedSchedule,
 				cancel: cloudSync.cancelSchedule,
 				suspend: cloudSync.suspendSchedule,
 				resume: cloudSync.resumeSchedule,
@@ -1307,21 +1334,24 @@
 			};
 			for (const schedule of targets) {
 				await actions[action](localStorage.token, knowledge.id, schedule.id);
-				if (action === 'run') queuedRuns = queueRuns(queuedRuns, schedules, [schedule.id]);
+				if (action === 'run' || action === 'retry_failed')
+					queuedRuns = queueRuns(queuedRuns, schedules, [schedule.id]);
 			}
 			done = true;
 			await refreshCloudSync();
 			repollCloudSyncSoon();
 		} catch (error) {
+			// An older platform refuses retry_failed as unknown: the generic error below.
+			const runs = action === 'run' || action === 'retry_failed';
 			if (
-				action === 'run' &&
+				runs &&
 				error instanceof cloudSync.CloudSyncError &&
 				error.status === 429 &&
 				error.code === 'run_too_soon'
 			)
 				toast.info($i18n.t('Sync was started recently. Try again in a moment.'));
 			else if (
-				action === 'run' &&
+				runs &&
 				error instanceof cloudSync.CloudSyncError &&
 				error.status === 409 &&
 				error.code === 'run_active'
@@ -1907,6 +1937,7 @@
 
 		if (destroyed) return;
 		loaded = true;
+		if (requestedProvider) void autoPick(requestedProvider);
 
 		const dropZone = document.querySelector('body');
 		dropZone?.addEventListener('dragover', onDragOver);
@@ -2210,29 +2241,26 @@
 			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
 			<!-- [Gradient] Cloud-sync notices; the sources themselves sit in the listing. -->
-			{#if cloudNotConnected}
+			<!-- Without a source, the empty state offers the provider's picker; only a
+				provider this tenant cannot sync from leaves nothing to do but delete. -->
+			{#if cloudNotConnected && !activeProviderEnabled}
 				<div
 					class="mx-4 mb-2 flex items-center justify-between gap-3 text-xs text-gray-500"
 					role="status"
 				>
-					<span>{$i18n.t('Not connected')}</span>
+					<span
+						>{$i18n.t('{{provider}} sync is not available here.', {
+							provider: cloudBadge?.label
+						})}</span
+					>
 					{#if knowledge.user_id === $user?.id}
-						<div class="flex gap-3">
-							{#if activeProviderEnabled}
-								<button
-									class="font-medium underline"
-									disabled={isSyncBusy}
-									on:click={() => cloudSyncHandler(activeProvider!)}
-								>{$i18n.t('Retry connection')}</button>
-							{/if}
-							<button
-								class="font-medium underline"
-								disabled={isSyncBusy}
-								on:click={() => {
-									showDeleteDisconnected = true;
-								}}
-							>{$i18n.t('Delete')}</button>
-						</div>
+						<button
+							class="font-medium underline"
+							disabled={isSyncBusy}
+							on:click={() => {
+								showDeleteDisconnected = true;
+							}}>{$i18n.t('Delete knowledge base')}</button
+						>
 					{/if}
 				</div>
 			{/if}
@@ -2544,6 +2572,7 @@
 												{sourcePairs}
 												looseSources={currentDirectoryId === null ? listedSources : []}
 												skippedItems={currentSourcePair ? skippedItems : []}
+												skippedSource={currentSourcePair?.content ?? null}
 												syncing={enclosingSyncing}
 												{enclosingProvider}
 												{uploadProgress}
@@ -2596,7 +2625,7 @@
 												{$i18n.t('Starting sync...')}
 											</div>
 										</div>
-									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null && (!cloudBadge || activeProviderEnabled) && !cloudNotConnected}
+									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null && (!cloudBadge || activeProviderEnabled)}
 										<EmptyStateCards
 											knowledgeType={activeProvider?.kind ?? knowledge?.type ?? 'local'}
 											integrationProviders={$config?.integration_providers}

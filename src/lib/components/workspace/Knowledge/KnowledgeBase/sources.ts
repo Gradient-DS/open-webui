@@ -1,4 +1,5 @@
 import type { Schedule } from '$lib/apis/cloudSync';
+import type { SourceProvider } from '$lib/sources/registry';
 import type { SchedulePair } from '../utils/cloudSync';
 import { sourceState } from '../utils/sourceState';
 import { sourceItem } from './selection';
@@ -15,20 +16,29 @@ export const sourcePairItem = (pair: SchedulePair) =>
 export const removalTargets = (pair: SchedulePair): Schedule[] =>
 	[pair.content, pair.acl].filter((item): item is Schedule => !!item).reverse();
 
-export type SourceMenuAction = 'copy_path' | 'cancel' | 'pause' | 'resume' | 'remove';
+export type SourceMenuAction =
+	| 'copy_path'
+	| 'retry_failed'
+	| 'cancel'
+	| 'pause'
+	| 'resume'
+	| 'remove';
 
 // The ⋯ menu of a source, folder or single file alike. Remove unsubscribes
 // this KB, which soev-api grants any KB writer; pause and resume act on the
-// connection owner's schedule and stay with admins.
+// connection owner's schedule and stay with admins. Retry failed files is a
+// writer's run, offered while the last run left files behind.
 export const sourceMenu = (source: {
 	itemPath: string;
 	writeAccess: boolean;
 	isAdmin: boolean;
 	live: boolean;
 	lifecycle: string;
+	skipped?: number;
 }): SourceMenuAction[] => {
 	const actions: SourceMenuAction[] = [];
 	if (source.itemPath) actions.push('copy_path');
+	if (source.writeAccess && !source.live && (source.skipped ?? 0) > 0) actions.push('retry_failed');
 	if (source.writeAccess && source.live) actions.push('cancel');
 	if (source.isAdmin && source.lifecycle === 'enabled') actions.push('pause');
 	if (source.isAdmin && source.lifecycle === 'suspended') actions.push('resume');
@@ -62,3 +72,22 @@ export const sortSourcePairs = (
 	};
 	return rows.sort((a, b) => sign * (time(a) - time(b)) || 0);
 };
+
+// A new cloud knowledge base opens its provider's picker by itself (the create
+// page asks for it in the URL), but only where nothing needs a click: a picker
+// that can open without a window, for a writer, while the KB has no source yet.
+// The caller still needs an enabled connection, or consent would open a window.
+export const autoPickProvider = (state: {
+	requested: SourceProvider | null;
+	writeAccess: boolean;
+	providerEnabled: boolean;
+	hasContentSource: boolean;
+	statusKnown: boolean;
+}): SourceProvider | null =>
+	state.requested?.pickSilently &&
+	state.writeAccess &&
+	state.providerEnabled &&
+	state.statusKnown &&
+	!state.hasContentSource
+		? state.requested
+		: null;

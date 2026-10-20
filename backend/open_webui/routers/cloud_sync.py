@@ -182,6 +182,16 @@ async def run_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_s
     return await sync.schedule_action(knowledge_id, schedule_id, 'run')
 
 
+# The same run, listing the whole folder so every file without a landed version is fetched again.
+@router.post(
+    '/knowledge/{knowledge_id}/schedules/{schedule_id}/retry_failed',
+    status_code=201,
+    dependencies=[Depends(require_soev)],
+)
+async def retry_failed_schedule(knowledge_id: str, schedule_id: str, sync=Depends(cloud_sync)):
+    return await sync.schedule_action(knowledge_id, schedule_id, 'retry_failed')
+
+
 @router.post(
     '/knowledge/{knowledge_id}/schedules/{schedule_id}/cancel', status_code=204, dependencies=[Depends(require_soev)]
 )

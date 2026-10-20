@@ -16,6 +16,8 @@
 	import Badge from '$lib/components/common/Badge.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
+	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import { runIsLive, type SchedulePair } from '../utils/cloudSync';
@@ -40,6 +42,8 @@
 	// and a minimum width, so nothing moves when a sync starts: the primary
 	// button gives way to the progress readout in the same place, and the
 	// badge column is wide enough for its common labels in every language.
+	// Below `sm` the row stays on one line: the columns drop their minimum
+	// width, Sync now becomes an icon and the skipped count loses its words.
 	export let knowledgeId: string;
 	export let pair: SchedulePair;
 	export let writeAccess = false;
@@ -109,7 +113,8 @@
 		writeAccess,
 		isAdmin,
 		live: liveTargets.length > 0,
-		lifecycle: schedule.lifecycle
+		lifecycle: schedule.lifecycle,
+		skipped: pair.content ? view.skipped : 0
 	});
 	$: expiry = targets.flatMap((item) =>
 		typeof item.provider_secret_days_to_expiry === 'number'
@@ -175,12 +180,11 @@
 	}
 </script>
 
-<!-- On a narrow screen the row wraps and these controls take their own line. -->
 <div class="ml-auto flex shrink-0 items-center gap-1.5">
 	{#if showAccessHelp}<span class="text-xs text-gray-500" role="status">
 			{$i18n.t('Ask the knowledge base owner to restore your edit access, then resume syncing.')}
 		</span>{/if}
-	<div class="flex min-w-[9.5rem] items-center justify-end">
+	<div class="flex items-center justify-end sm:min-w-[9.5rem]">
 		{#if view.state === 'syncing'}
 			<span
 				class="flex items-center gap-1 px-2 py-0.5 text-xs text-gray-500 dark:text-gray-400"
@@ -192,6 +196,22 @@
 					{$i18n.t('{{count}} documents', { count: view.documents })}
 				{/if}
 			</span>
+		{:else if view.primary === 'sync_now' && writeAccess}
+			<Tooltip content={$i18n.t(primary.sync_now)} className="flex sm:hidden">
+				<button
+					type="button"
+					class="rounded-lg border p-1 disabled:opacity-50 dark:border-gray-700"
+					aria-label={$i18n.t(primary.sync_now)}
+					disabled={busy}
+					on:click={primaryAction}><ArrowPath className="size-3.5" /></button
+				>
+			</Tooltip>
+			<button
+				type="button"
+				class="hidden rounded-lg border px-2 py-0.5 text-xs disabled:opacity-50 sm:block dark:border-gray-700"
+				disabled={busy}
+				on:click={primaryAction}>{$i18n.t(primary.sync_now)}</button
+			>
 		{:else if view.primary && (writeAccess || view.primary === 'request_access') && (view.primary !== 'resume' || isAdmin)}
 			<button
 				type="button"
@@ -209,8 +229,14 @@
 				if (!open && skippedError) loadedRunKey = '';
 			}}
 		>
-			<button type="button" class="text-xs text-amber-700 hover:underline dark:text-amber-300"
-				>{$i18n.t('{{n}} files skipped', { n: skipped })}</button
+			<button
+				type="button"
+				class="flex items-center gap-0.5 text-xs text-amber-700 hover:underline dark:text-amber-300"
+				aria-label={$i18n.t('{{n}} files skipped', { n: skipped })}
+				><ExclamationTriangle className="size-3.5 sm:hidden" /><span class="sm:hidden"
+					>{skipped}</span
+				><span class="hidden sm:inline">{$i18n.t('{{n}} files skipped', { n: skipped })}</span
+				></button
 			>
 			<div slot="content">
 				<DropdownMenu className="max-w-sm p-2 text-xs">
@@ -220,7 +246,7 @@
 						</p>
 					{:else}<ul class="list-inside list-disc">
 							{#each skippedItems as item}<li>
-									{item.name || item.source_id} — {$i18n.t(skippedReason(item.code))}
+									{item.name || item.source_id} — {$i18n.t(skippedReason(item.code, item.reason))}
 								</li>{/each}
 						</ul>
 						<p class="mt-1 text-gray-500">
@@ -230,7 +256,7 @@
 			</div>
 		</Dropdown>
 	{/if}
-	<Tooltip content={details.join('<br>')} className="flex min-w-[8.5rem] justify-end">
+	<Tooltip content={details.join('<br>')} className="flex justify-end sm:min-w-[8.5rem]">
 		<button type="button" aria-label={details[0]}
 			><Badge type={badge.type} content={$i18n.t(badge.label)} /></button
 		>
@@ -245,6 +271,11 @@
 			<div slot="content">
 				<DropdownMenu>
 					{#if menu.includes('copy_path')}<button on:click={copyPath}>{$i18n.t('Copy Path')}</button
+						>{/if}
+					{#if menu.includes('retry_failed') && pair.content}<button
+							disabled={busy}
+							on:click={() => action([pair.content!], 'retry_failed')}
+							>{$i18n.t('Retry failed files')}</button
 						>{/if}
 					{#if menu.includes('cancel')}<button
 							disabled={busy}
