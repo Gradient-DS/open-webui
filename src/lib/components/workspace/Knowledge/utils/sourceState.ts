@@ -172,17 +172,38 @@ const SKIP_REASONS: Record<string, { label: string; explainer: string }> = {
 	processing_failed: {
 		label: 'Processing failed',
 		explainer:
-			'The file could not be processed. It is retried automatically once a day, or use Retry failed files.'
+			'The file could not be processed. It is retried on every sync, or use Retry failed files.'
 	},
 	bundle_missing: {
 		label: 'Processing failed',
 		explainer:
-			'The processed text of this file was lost before it could be saved. It is retried automatically once a day, or use Retry failed files.'
+			'The processed text of this file was lost before it could be saved. It is retried on every sync, or use Retry failed files.'
+	},
+	// The processed result could not be saved (soev-sync landing codes).
+	bundle_invalid: {
+		label: 'Processing failed',
+		explainer:
+			'The processed result of this file could not be saved. It is retried on every sync, or use Retry failed files.'
+	},
+	bundle_item_mismatch: {
+		label: 'Processing failed',
+		explainer:
+			'The processed result of this file could not be saved. It is retried on every sync, or use Retry failed files.'
+	},
+	bundle_incomplete: {
+		label: 'Processing failed',
+		explainer:
+			'The processed result of this file could not be saved. It is retried on every sync, or use Retry failed files.'
+	},
+	artifact_rejected: {
+		label: 'Processing failed',
+		explainer:
+			'The processed result of this file could not be saved. It is retried on every sync, or use Retry failed files.'
 	},
 	timed_out: {
 		label: 'Processing timed out',
 		explainer:
-			'Processing did not finish in time. It is retried automatically once a day, or use Retry failed files.'
+			'Processing did not finish in time. It is retried on every sync, or use Retry failed files.'
 	},
 	restricted_item: {
 		label: 'Protected file',
@@ -200,7 +221,7 @@ const SKIP_REASONS: Record<string, { label: string; explainer: string }> = {
 const SKIP_FALLBACK = {
 	label: 'Internal error',
 	explainer:
-		'The file was skipped in the last sync. It is retried automatically once a day, or use Retry failed files.'
+		'The file was skipped in the last sync. It is retried on every sync, or use Retry failed files.'
 };
 
 // The stored reason (a fixed code soev-sync keeps per item; absent on older

@@ -370,7 +370,9 @@ describe('skip explainers', () => {
 			skippedExplainer('processing_failed')
 		);
 		expect(skippedReason('internal_error', null)).toBe('Internal error');
-		expect(skippedExplainer('processing_failed')).toMatch(/once a day, or use Retry failed files/);
+		expect(skippedExplainer('processing_failed')).toMatch(
+			/on every sync, or use Retry failed files/
+		);
 	});
 	it('explain what the user can do about it', () => {
 		expect(skippedExplainer('unsupported_content_type')).toMatch(/PDF, Word/);
