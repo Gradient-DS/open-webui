@@ -1,0 +1,49 @@
+name: Tag release
+
+# Merging a "Release vX.Y.Z" pull request from test into main tags its merge
+# commit vX.Y.Z. A tag created with GITHUB_TOKEN starts no workflows, so the
+# builds a v* tag push starts are dispatched on the new tag instead; keep
+# RELEASE_WORKFLOWS in step with the workflows that list 'v*' under push.tags.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged && github.event.pull_request.head.ref == 'test' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TITLE: ${{ github.event.pull_request.title }}
+      SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      RELEASE_WORKFLOWS: docker-build-soev.yaml
+    steps:
+      - name: Tag the merge commit and start the release builds
+        run: |
+          if [[ ! "$TITLE" =~ ^Release\ (v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::Title is not 'Release vX.Y.Z'; tag this release by hand."
+            exit 1
+          fi
+          TAG="${BASH_REMATCH[1]}"
+          if tagged=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha 2>/dev/null); then
+            if [[ "$tagged" != "$SHA" ]]; then
+              echo "::error::$TAG already tags $tagged, not the merge commit $SHA."
+              exit 1
+            fi
+            echo "$TAG already tags $SHA; its push started the builds."
+            exit 0
+          fi
+          tag_object=$(gh api "repos/$GH_REPO/git/tags" -f tag="$TAG" -f message="soev $TAG" -f object="$SHA" -f type=commit --jq .sha)
+          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$tag_object" --silent
+          echo "Tagged $SHA as $TAG."
+          for workflow in $RELEASE_WORKFLOWS; do
+            gh workflow run "$workflow" --ref "$TAG"
+          done
