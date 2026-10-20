@@ -731,6 +731,18 @@ actor = "admin"
 
 [[parameter]]
 backed_by = "soev-solutions"
+key = "retry_schedule"
+name = "schedule_id"
+prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/retry_failed"
+description = "Retry failed files queues a run, and POST .../run -- driven right after it -- is refused run_active while that run is live. Retry gets a schedule nothing else touches (its own scope, so soev-api does not reuse the shared one)."
+via = "POST /api/v1/cloud-sync/knowledge/{cloud_knowledge}/schedules"
+body = { connection_id = "{cloud_connection}", kind = "content", scope = { drive_id = "ci-retry-drive-{token}", item_id = "root", include_descendants = true, single_file = false }, label = "attack-retry-schedule-{token}" }
+extract = "id"
+depends_on = ["cloud_connection", "cloud_knowledge"]
+actor = "admin"
+
+[[parameter]]
+backed_by = "soev-solutions"
 key = "cloud_schedule"
 name = "schedule_id"
 prefix = "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}"
