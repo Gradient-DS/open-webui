@@ -3539,6 +3539,28 @@ async def test_a_cited_search_result_is_a_snippet_source(chat: Chat):
 
 
 @pytest.mark.asyncio
+async def test_a_cited_live_document_hit_is_a_file_snippet_source(chat: Chat):
+    url = 'https://tenant-my.sharepoint.com/personal/alex/Documents/Plans/Q3%20plan.pptx'
+    hit = {
+        'id': 'hit-1',
+        'ref': 'hit-1',
+        'type': 'live-document',
+        'title': 'Q3 plan.pptx',
+        'filename': 'Q3 plan.pptx',
+        'web_url': url,
+        'provider': 'onedrive',
+        'text': 'Q3 plan Widget launch in September',
+    }
+    chat.api.chat.turns = [[found(hit), answered('September', cited(9, 'hit-1', 'hit-1'))]]
+    assert content(await chat.turn('When is the launch?', 'a1')) == 'September [1]'
+    source = next(event['data'] for event in chat.socket if event['type'] == 'source')
+    assert source['source'] == {'id': 'hit-1', 'name': 'Q3 plan.pptx', 'url': url, 'provider': 'onedrive'}
+    assert source['document'] == [hit['text']]
+    assert source['metadata'][0]['granularity'] == 'file-snippet'
+    assert not any(event['type'] in ('files', 'chat:message:files') for event in chat.socket)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('success', [True, False])
 async def test_read_mail_status_reports_refusals(success):
     turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
@@ -4046,6 +4068,48 @@ def test_failed_status_parameters_use_the_declared_fallback(arguments, expected)
     assert turn.settling[0]['description'] == expected
     if arguments:
         assert turn.settling[0]['folder'] == 'Plans'
+
+
+@pytest.mark.parametrize(
+    'arguments,matches,expected',
+    [
+        ({'keywords': ['vink']}, 3, 'Searched your mail for "{{keywords}}": {{matches}} emails'),
+        (
+            {'keywords': [], 'from_addresses': ['ann@example.test']},
+            3,
+            'Searched your mail for sender {{from}}: {{matches}} emails',
+        ),
+        ({'keywords': ['vink']}, None, 'Searched your mail for "{{keywords}}": no emails'),
+        (
+            {'keywords': [], 'from_addresses': ['ann@example.test']},
+            None,
+            'Searched your mail for sender {{from}}: no emails',
+        ),
+    ],
+)
+def test_done_status_takes_the_first_fallback_it_can_fill(arguments, matches, expected):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    turn.tool_statuses = {
+        'search_mail': {
+            'done': {
+                'template': 'Searched your mail for "{{keywords}}": {{matches}} emails',
+                'fallback': [
+                    'Searched your mail for sender {{from}}: {{matches}} emails',
+                    'Searched your mail for "{{keywords}}": no emails',
+                    'Searched your mail for sender {{from}}: no emails',
+                ],
+                'params': {
+                    'keywords': 'argument.keywords',
+                    'from': 'argument.from_addresses',
+                    'matches': 'output.first.mail-reference.matches',
+                },
+            }
+        }
+    }
+    turn.running['find'] = ('search_mail', arguments)
+    cards = [{'type': 'mail-reference', 'id': 'm1', 'matches': matches}] if matches else []
+    turn.end_tool({'call_id': 'find', 'elements': cards})
+    assert turn.settling[0]['description'] == expected
 
 
 @pytest.mark.asyncio

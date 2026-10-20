@@ -5,7 +5,7 @@
 		composerFromFeatures,
 		type ComposerPreferences
 	} from '$lib/utils/composerPreferences';
-	import { type ToolState, seedsLiveDefault } from '$lib/utils/toolState';
+	import type { LiveToolState } from '$lib/utils/toolState';
 	import { getHistorySide } from '$lib/utils/dataSeparation';
 	import { turnNotices, withoutRemoved } from '$lib/utils/turnNotices';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
@@ -379,14 +379,11 @@
 	let pendingOAuthTools = [];
 
 	let imageGenerationEnabled = false;
-	let liveDocumentsState: ToolState = 'off';
-	let liveMailState: ToolState = 'off';
+	let liveDocumentsState: LiveToolState = 'off';
+	let liveMailState: LiveToolState = 'off';
 	let webSearchEnabled = false;
-	// [Gradient] Web search Altijd; webSearchEnabled alone is Auto (see utils/toolState).
-	let webSearchRequired = false;
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = true;
-	let documentWriterRequired = false;
 	let composerInitialized = false;
 	let composerSettingsSave = Promise.resolve();
 	const rememberComposerPreferences = (preferences: ComposerPreferences) => {
@@ -400,27 +397,25 @@
 	};
 	const currentComposerPreferences = (): ComposerPreferences => ({
 		webSearchEnabled,
-		webSearchRequired,
 		liveDocumentsState,
 		liveMailState,
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
-		documentWriterRequired,
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds
 	});
+	let composerSession = 0;
 	const restoreComposerPreferences = (value: ComposerPreferences) => {
+		composerSession += 1;
 		({
 			webSearchEnabled,
-			webSearchRequired,
 			liveDocumentsState,
 			liveMailState,
 			imageGenerationEnabled,
 			codeInterpreterEnabled,
 			documentWriterEnabled,
-			documentWriterRequired,
 			selectedToolIds,
 			selectedSkillIds,
 			selectedFilterIds
@@ -1037,13 +1032,11 @@
 	let lastSavedFeatures = '';
 	$: composerSnapshot = composerPreferences({
 		webSearchEnabled,
-		webSearchRequired,
 		liveDocumentsState,
 		liveMailState,
 		imageGenerationEnabled,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
-		documentWriterRequired,
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds
@@ -1137,9 +1130,11 @@
 			if (!$skills) {
 				skills.set(await getSkills(localStorage.token));
 			}
-			// [Gradient] A new chat starts web search on Auto, or Altijd when the user asks for
-			// it always. Strict data separation starts on Uit: Auto may reach the open internet,
-			// which would lock a fresh chat away from internal documents before anything is sent.
+			// [Gradient] Until the user has chosen (composerTools), the tools the model decides on
+			// start on: web search, the document writer, OneDrive search and mail search. Strict
+			// data separation starts web search off, unless the user turned it on in Settings: it may
+			// reach the open internet, which would lock a fresh chat away from internal documents
+			// before anything is sent. OneDrive and mail search ask for consent on their first use.
 			if (!history?.currentId) {
 				const webSearchAllowed =
 					$config?.features?.enable_web_search &&
@@ -1147,13 +1142,9 @@
 				const always = ($settings?.webSearch ?? null) === 'always';
 				const strict = $config?.features?.feature_strict_data_separation ?? false;
 				webSearchEnabled = Boolean(webSearchAllowed && (always || !strict));
-				webSearchRequired = Boolean(webSearchAllowed && always);
-			}
-
-			// [Gradient] Document writer reads no external data, including under strict separation.
-			if (!history?.currentId) {
 				documentWriterEnabled = true;
-				documentWriterRequired = false;
+				liveDocumentsState = $config?.features?.enable_live_documents ? 'auto' : 'off';
+				liveMailState = $config?.features?.enable_live_mail ? 'auto' : 'off';
 			}
 
 			if (selectedModels.length !== 1 && !atSelectedModel) {
@@ -1231,11 +1222,10 @@
 						$config?.features?.enable_web_search &&
 						($user?.role === 'admin' || $user?.permissions?.features?.web_search)
 					) {
-						// [Gradient] A default-on web search starts on Altijd; otherwise the chat
-						// keeps the starting state set above.
+						// [Gradient] A default-on web search starts on, also under strict separation;
+						// otherwise the chat keeps the starting state set above.
 						if (model.info.meta.defaultFeatureIds.includes('web_search')) {
 							webSearchEnabled = true;
-							webSearchRequired = true;
 						}
 					}
 
@@ -1245,31 +1235,6 @@
 						($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
 					) {
 						codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
-					}
-
-					if (
-						model.info?.meta?.capabilities?.['document_writer'] &&
-						$config?.features?.enable_document_writer &&
-						($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
-					) {
-						if (model.info.meta.defaultFeatureIds.includes('document_writer')) {
-							documentWriterEnabled = true;
-							documentWriterRequired = true;
-						}
-					}
-
-					// [Gradient] Live tools start on Auto; consent waits for the user's own click.
-					if (
-						seedsLiveDefault(
-							model.info.meta,
-							'live_documents',
-							$config?.features?.enable_live_documents
-						)
-					) {
-						liveDocumentsState = 'auto';
-					}
-					if (seedsLiveDefault(model.info.meta, 'live_mail', $config?.features?.enable_live_mail)) {
-						liveMailState = 'auto';
 					}
 				}
 
@@ -2479,7 +2444,6 @@
 
 		if ($page.url.searchParams.get('web-search') === 'true') {
 			webSearchEnabled = true;
-			webSearchRequired = true;
 		}
 
 		if ($page.url.searchParams.get('image-generation') === 'true') {
@@ -2493,7 +2457,6 @@
 		const writerParam = $page.url.searchParams.get('document-writer');
 		if (writerParam !== null) {
 			documentWriterEnabled = ['true', 'auto', 'required'].includes(writerParam);
-			documentWriterRequired = ['true', 'required'].includes(writerParam);
 		}
 
 		if ($page.url.searchParams.get('tools')) {
@@ -3943,16 +3906,7 @@
 						: false,
 				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
 				live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
-
-				document_writer_required: Boolean(
-					$config?.features?.enable_document_writer &&
-					($user?.role === 'admin' || $user?.permissions?.features?.document_writer) &&
-					documentWriterEnabled &&
-					documentWriterRequired
-				),
-				web_search: webSearchActive,
-				// [Gradient] Altijd: the agent must search, the non-agent path forces a search.
-				web_search_required: webSearchActive && webSearchRequired
+				web_search: webSearchActive
 			};
 
 		if ($settings?.memory ?? $config?.features?.enable_memories ?? false) {
@@ -5084,6 +5038,7 @@
 								>
 									<MessageInput
 										bind:this={messageInput}
+										{composerSession}
 										agentRouted={isAgentRouted()}
 										{history}
 										{taskIds}
@@ -5097,13 +5052,11 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
-										bind:documentWriterRequired
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
 										bind:liveMailState
 										bind:webSearchEnabled
-										bind:webSearchRequired
 										bind:atSelectedModel
 										bind:showCommands
 										bind:dragged
@@ -5182,6 +5135,7 @@
 								<div id={embedded ? messageInputDropzoneId : undefined} class="pb-2 z-10">
 									<MessageInput
 										bind:this={messageInput}
+										{composerSession}
 										{history}
 										{taskIds}
 										bind:selectedModels
@@ -5195,12 +5149,10 @@
 										bind:codeInterpreterEnabled
 										{pendingOAuthTools}
 										bind:documentWriterEnabled
-										bind:documentWriterRequired
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
 										bind:liveMailState
 										bind:webSearchEnabled
-										bind:webSearchRequired
 										bind:atSelectedModel
 										bind:showCommands
 										bind:dragged
@@ -5261,9 +5213,7 @@
 									bind:documentWriterEnabled
 									bind:liveDocumentsState
 									bind:liveMailState
-									bind:documentWriterRequired
 									bind:webSearchEnabled
-									bind:webSearchRequired
 									bind:atSelectedModel
 									bind:showCommands
 									bind:dragged

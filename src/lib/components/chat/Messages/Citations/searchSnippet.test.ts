@@ -17,7 +17,8 @@ describe('search result snippets', () => {
 		expect(searchResultPage(snippet({}))).toEqual({
 			title: 'Alpha widgets',
 			url: URL,
-			address: 'example.com/products/widgets/alpha'
+			address: 'example.com/products/widgets/alpha',
+			file: false
 		});
 	});
 
@@ -44,6 +45,26 @@ describe('search result snippets', () => {
 		expect(html).toContain('example.com/products/widgets/alpha');
 		expect(html).toContain('Search result — snippet only, the page was not opened');
 		expect(html).toContain(`href="${URL}"`);
+	});
+
+	it('names a file in the drive by its decoded address', () => {
+		const url = 'https://tenant-my.sharepoint.com/personal/alex/Documents/Plans/Q3%20plan.pptx';
+		const document: CitationDocument = {
+			source: { id: 'hit-1', name: 'Q3 plan.pptx', url, provider: 'onedrive' },
+			document: 'Q3 plan Widget launch in September',
+			metadata: { source: 'hit-1', name: 'Q3 plan.pptx', granularity: 'file-snippet' }
+		};
+		expect(searchResultPage(document)).toEqual({
+			title: 'Q3 plan.pptx',
+			url,
+			address: 'tenant-my.sharepoint.com/personal/alex/Documents/Plans/Q3 plan.pptx',
+			file: true
+		});
+		const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
+		const html = render(SearchSnippetNote, { props: { document }, context }).body;
+		expect(html).toContain('Search result in your files — snippet only, the file was not opened');
+		expect(html).toContain('Open original file');
+		expect(html).not.toContain('the page was not opened');
 	});
 
 	it('shows nothing for a passage of a read document', () => {

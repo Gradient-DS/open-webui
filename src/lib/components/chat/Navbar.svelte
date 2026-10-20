@@ -35,7 +35,7 @@
 	import EllipsisHorizontal from '../icons/EllipsisHorizontal.svelte';
 	import ChatPlus from '../icons/ChatPlus.svelte';
 	import ChatCheck from '../icons/ChatCheck.svelte';
-	import Knobs from '../icons/Knobs.svelte';
+	import BookOpen from '../icons/BookOpen.svelte'; // [Gradient] the panel opens on Sources
 	import { isTemporaryChatId } from '$lib/utils/chatId';
 
 	const i18n = getContext('i18n');
@@ -232,15 +232,15 @@
 					{/if}
 
 					{#if isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true))}
-						<Tooltip content={$i18n.t('Controls')}>
+						<Tooltip content={$i18n.t('Sources')}>
 							<button
 								class="flex size-6 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
 								on:click={async () => {
 									await showControls.set(!$showControls);
 								}}
-								aria-label="Controls"
+								aria-label="Sources"
 							>
-								<Knobs className="size-5" strokeWidth="1" />
+								<BookOpen className="size-4.5" strokeWidth="1.5" />
 							</button>
 						</Tooltip>
 					{/if}

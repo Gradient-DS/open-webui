@@ -16,6 +16,7 @@ from open_webui.env import (
 )
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
+from open_webui.soev.system_prompt import KEY as SYSTEM_PROMPT_KEY
 from open_webui.services.remaining_request_bodies import integrations_config_body
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import Users
@@ -802,6 +803,35 @@ async def set_models_config(request: Request, form_data: ModelsConfigForm, user=
         },
     )
     return values
+
+
+############################
+# SystemPrompt
+############################
+class SystemPromptForm(BaseModel):
+    SYSTEM_PROMPT: str
+
+
+@router.get('/system_prompt', response_model=SystemPromptForm)
+async def get_system_prompt(request: Request, user=Depends(get_admin_user)):
+    """[Gradient] The global system prompt of every base model without its own (soev/system_prompt.py)."""
+    return {'SYSTEM_PROMPT': await Config.get(SYSTEM_PROMPT_KEY, '') or ''}
+
+
+@router.post('/system_prompt', response_model=SystemPromptForm)
+async def set_system_prompt(request: Request, form_data: SystemPromptForm, user=Depends(get_admin_user)):
+    value = form_data.SYSTEM_PROMPT if form_data.SYSTEM_PROMPT.strip() else ''
+    await Config.upsert({SYSTEM_PROMPT_KEY: value})
+    # The audit event says whether a prompt is set and how long it is, never its text.
+    await publish_event(
+        request,
+        EVENTS.CONFIG_SYSTEM_PROMPT_UPDATED,
+        actor=user,
+        subject_id='system_prompt',
+        subject_type='config',
+        data={'length': len(value)},
+    )
+    return {'SYSTEM_PROMPT': value}
 
 
 class SubagentsConfigForm(BaseModel):

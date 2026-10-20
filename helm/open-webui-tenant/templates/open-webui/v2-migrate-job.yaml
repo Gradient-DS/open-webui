@@ -23,6 +23,9 @@ spec:
       {{- if eq $migrate.mode "models" }}
       # [Gradient] Only the stored model ids, under this id: no config, ingest or sign-out.
       command: ["python", "-m", "open_webui.soev.migrate", "--apply", "--models"]
+      {{- else if eq $migrate.mode "plan" }}
+      # [Gradient] The apply's preview: prints every step, the system prompt candidates in full; writes nothing.
+      command: ["python", "-m", "open_webui.soev.migrate", "--dry-run"]
       {{- else if eq $migrate.mode "uploads" }}
       # [Gradient] Only the uploads stored chats attach, into their owners' attachments collections.
       command: ["python", "-m", "open_webui.soev.migrate", "--apply", "--uploads"]
@@ -49,6 +52,10 @@ spec:
           value: {{ $migrate.ingestConcurrency | quote }}
         - name: SOEV_V2_WAIT_SECONDS
           value: {{ $migrate.waitSeconds | quote }}
+        {{- with $migrate.systemPrompt }}
+        - name: SOEV_V2_SYSTEM_PROMPT
+          value: {{ . | quote }}
+        {{- end }}
       resources:
         {{- toYaml ($migrate.resources | default .Values.openWebui.resources) | nindent 8 }}
       volumeMounts:
@@ -80,10 +87,10 @@ spec:
 {{- if not .Values.soevApi.url }}
 {{- fail "soevApi.migrate.enabled needs soevApi.url" }}
 {{- end }}
-{{- if not (has $migrate.mode (list "apply" "restore" "models" "uploads")) }}
-{{- fail "soevApi.migrate.mode must be apply, restore, models or uploads" }}
+{{- if not (has $migrate.mode (list "apply" "plan" "restore" "models" "uploads")) }}
+{{- fail "soevApi.migrate.mode must be apply, plan, restore, models or uploads" }}
 {{- end }}
-{{- if and (eq $migrate.mode "apply") (not $migrate.config) }}
+{{- if and (has $migrate.mode (list "apply" "plan")) (not $migrate.config) }}
 {{- fail "soevApi.migrate.config must hold the v2 config key set" }}
 {{- end }}
 {{- if and (eq $migrate.mode "models") (not $migrate.modelMap) }}
@@ -109,7 +116,8 @@ metadata:
     {{- include "open-webui-tenant.labels" . | nindent 4 }}
     app.kubernetes.io/component: v2-migrate
 spec:
-  backoffLimit: {{ $migrate.backoffLimit }}
+  {{- /* A preview runs once: its exit code reports, a retry would only print it again. */}}
+  backoffLimit: {{ eq $migrate.mode "plan" | ternary 0 $migrate.backoffLimit }}
   {{- with $migrate.ttlSecondsAfterFinished }}
   ttlSecondsAfterFinished: {{ . }}
   {{- end }}

@@ -215,7 +215,10 @@
 
 					{#if $user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true)}
 						<div class="my-1">
-							<div class="mb-2 text-xs text-gray-500">{$i18n.t('System Prompt')}</div>
+							<div class="mb-2 text-xs text-gray-500">
+								{$i18n.t('System Prompt')}
+								<span class="text-gray-400 dark:text-gray-600">({$i18n.t('optional')})</span>
+							</div>
 							<div>
 								<Textarea
 									className=" text-sm w-full bg-transparent outline-hidden "
@@ -235,6 +238,7 @@
 								<div class="flex w-full justify-between">
 									<div class=" text-xs text-gray-500">
 										{$i18n.t('Knowledge')}
+										<span class="text-gray-400 dark:text-gray-600">({$i18n.t('optional')})</span>
 									</div>
 								</div>
 							</div>

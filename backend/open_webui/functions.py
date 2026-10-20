@@ -21,6 +21,7 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, ENABLE_PLUGINS, GLOBAL_LOG_LEVEL
 from open_webui.models.functions import Functions
 from open_webui.models.models import Models
+from open_webui.soev import system_prompt
 from open_webui.models.users import UserModel
 from open_webui.socket.main import (
     get_event_call,
@@ -289,12 +290,15 @@ async def generate_function_chat_completion(request, form_data, user, models: di
             await check_model_access(user if isinstance(user, UserModel) else UserModel(**user), model_info, bypass)
 
         params = model_info.params.model_dump()
+        params.pop('system', None)
 
         if params:
-            system = params.pop('system', None)
             form_data = apply_model_params_to_body_openai(params, form_data)
-            if not bypass_system_prompt:
-                form_data = await apply_system_prompt_to_body(system, form_data, metadata, user)
+
+    # [Gradient] The model's own prompt, else (base models) the global system prompt.
+    if not bypass_system_prompt:
+        system = await system_prompt.for_model(model_info)
+        form_data = await apply_system_prompt_to_body(system, form_data, metadata, user)
 
     pipe_id = get_pipe_id(form_data)
     function_module = await get_function_module_by_id(request, pipe_id)

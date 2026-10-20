@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import redis
 import requests
 from authlib.integrations.starlette_client import OAuth
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from open_webui.utils.content_types import DEFAULT_ALLOWED_EXTENSIONS  # [Gradient]
 
@@ -1735,6 +1735,10 @@ except Exception as e:
 
 DEFAULT_MODEL_PARAMS = default_model_params
 
+# [Gradient] The global system prompt every base model uses unless its own row sets one
+# (Admin > Settings > System prompt). Persistent: the env value only seeds a fresh install.
+DEFAULT_SYSTEM_PROMPT = os.getenv('DEFAULT_SYSTEM_PROMPT', '')
+
 
 # [Gradient] Default: iframeSandboxAllowForms=False (upstream: enabled when unset).
 # Opt-in via Helm; deployment documentation: soev-gitops/docs/.
@@ -3000,6 +3004,10 @@ FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lowe
 
 FEATURE_SIMPLE_ASSISTANT_BUILDER = os.environ.get('FEATURE_SIMPLE_ASSISTANT_BUILDER', 'False').lower() == 'true'
 
+# [Gradient] New models the "what's new" tour announces, per release: {"1.3": ["zai-org/glm-5.3"]}.
+# A release left out falls back to the frontend's list for it; an empty list announces none.
+WHATS_NEW_MODELS = TypeAdapter(dict[str, list[str]]).validate_json(os.environ.get('WHATS_NEW_MODELS') or '{}')
+
 FEATURE_INPUT_MENU = os.environ.get('FEATURE_INPUT_MENU', 'True').lower() == 'true'
 
 FEATURE_TEMPORARY_CHAT = os.environ.get('FEATURE_TEMPORARY_CHAT', 'True').lower() == 'true'
@@ -3371,6 +3379,7 @@ DEFAULT_CONFIG = {
     'ui.model_order_list': MODEL_ORDER_LIST,
     'models.default_metadata': DEFAULT_MODEL_METADATA,
     'models.default_params': DEFAULT_MODEL_PARAMS,
+    'models.system_prompt': DEFAULT_SYSTEM_PROMPT,
     'ui.default_user_role': DEFAULT_USER_ROLE,
     'ui.default_group_id': DEFAULT_GROUP_ID,
     'ui.pending_user_overlay_title': PENDING_USER_OVERLAY_TITLE,

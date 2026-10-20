@@ -6,6 +6,12 @@ that is neither a catalog id nor an assistant becomes the catalog's default mode
 
 The v2 apply clears each user's default model selection (settings.ui.models), so every user starts
 on the platform default; a --models run maps it instead, since users chose it after the migration.
+
+The v2 apply moves the v1 per-base-model system prompts to the one global prompt (config models.system_prompt,
+soev/system_prompt.py): admins set one prompt per base model, and the catalog's models are new rows. The distinct
+prompts are candidates; with one it is kept, with several SOEV_V2_SYSTEM_PROMPT names the base model whose prompt
+to keep (or none), and the run stops before any write until it does. Every base-model row's own prompt is then
+cleared, so all of them use the global one.
 """
 
 import copy
@@ -26,10 +32,19 @@ from open_webui.models.folders import Folder
 from open_webui.models.models import Model
 from open_webui.models.users import User
 from open_webui.soev.migrate_state import MigrationError, state
+from open_webui.soev.system_prompt import KEY as SYSTEM_PROMPT_KEY
 
 BATCH = 200
 USER_SETTING_LISTS = (('ui', 'models'), ('ui', 'pinnedModels'))
 CLEARED_SELECTION = 'user.settings.cleared'
+# [Gradient] The global prompt written, and a base-model row's own prompt cleared.
+PROMPT_GLOBAL = 'config.models.system_prompt'
+PROMPT_CLEARED = 'model.params.system.cleared'
+# Written by the earlier per-model copy (#482); still restored.
+PROMPT_CREATED = 'model.created'
+PROMPT_SET = 'model.params.system'
+PROMPT_SITES = (PROMPT_GLOBAL, PROMPT_CLEARED, PROMPT_CREATED, PROMPT_SET)
+NO_PROMPT = 'none'
 
 
 def parse_model_map(raw: str | None) -> dict[str, str]:
@@ -50,8 +65,9 @@ def parse_model_map(raw: str | None) -> dict[str, str]:
     return mapping
 
 
-def catalog_default(listed: dict, mapping: dict[str, str]) -> tuple[str, set[str]]:
-    """The catalog default the chat picker starts on, and every catalog id, from soev-api's GET /v1/models."""
+def catalog_default(listed: dict, mapping: dict[str, str]) -> tuple[str, dict[str, str]]:
+    """The catalog default the chat picker starts on, and every catalog id with its label, from soev-api's
+    GET /v1/models."""
     data = listed.get('data')
     entries = [entry for entry in data if isinstance(entry, dict) and entry.get('id')] if isinstance(data, list) else []
     default = next((entry['id'] for entry in entries if entry.get('default')), None)
@@ -59,7 +75,7 @@ def catalog_default(listed: dict, mapping: dict[str, str]) -> tuple[str, set[str
         raise MigrationError('The soev-api model catalog marks no default model; unmapped model ids need one')
     if default in mapping:
         raise MigrationError(f'SOEV_V2_MODEL_MAP rewrites the default model {default}')
-    return default, {entry['id'] for entry in entries}
+    return default, {entry['id']: entry.get('label') or entry['id'] for entry in entries}
 
 
 @dataclass
@@ -72,6 +88,10 @@ class Report:
     merged: list[str] = field(default_factory=list)
     # Users whose default model selection was cleared.
     cleared: int = 0
+    # The global system prompt kept (None: none) and the base-model rows whose own prompt was cleared.
+    prompt_step: bool = False
+    prompt: str | None = None
+    cleared_prompts: list[str] = field(default_factory=list)
 
 
 class _Rewrite:
@@ -93,6 +113,8 @@ class _Rewrite:
         self.report = Report()
         self.now = int(time.time())
         self.records: list[dict] = []
+        # New id to old id of each base-model row renamed, so a dry run reads the row a rename would leave.
+        self.renamed: dict[str, str] = {}
 
     def target(self, value: str) -> str | None:
         """The id a stored reference becomes; None when it already is a v2 reference."""
@@ -178,6 +200,7 @@ class _Rewrite:
                 continue
             self.map(site, new, [], model_id)
             existing.add(new)
+            self.renamed[new] = model_id
             if self.dry_run:
                 continue
             await self.db.execute(sa.update(Model).where(Model.id == model_id).values(id=new))
@@ -225,6 +248,49 @@ class _Rewrite:
         state = 'deactivated' if active is not False else 'already inactive'
         reason = f'{new} exists' if model_id in self.mapping else f'unmapped, merged into the default {new}'
         self.report.merged.append(f'model {model_id}: {reason}; {moved} grants moved to it, {model_id} {state}')
+
+    async def global_prompt(self, prompt: str | None) -> None:
+        """[Gradient] Write the kept prompt as the global one and clear every base-model row's own, so each base
+        model uses it. Runs after the renames: the records are keyed by the ids restore finds first."""
+        self.report.prompt_step, self.report.prompt = True, prompt
+        if prompt is not None:
+            row = await self.db.get(Config, SYSTEM_PROMPT_KEY)
+            old = row.value if row is not None else None
+            if old != prompt:
+                self.report.changed[PROMPT_GLOBAL] += 1
+                if not self.dry_run:
+                    self.records.append(self._prompt_record(PROMPT_GLOBAL, SYSTEM_PROMPT_KEY, old, prompt))
+                    if row is None:
+                        self.db.add(Config(key=SYSTEM_PROMPT_KEY, value=prompt, updated_at=self.now))
+                    else:
+                        row.value, row.updated_at = prompt, self.now
+        query = sa.select(Model.id, Model.params).where(Model.base_model_id.is_(None)).order_by(Model.id)
+        for model_id, params in (await self.db.execute(query)).all():
+            own = params.get('system') if isinstance(params, dict) else None
+            if not isinstance(own, str) or not own.strip():
+                continue
+            self.report.changed[PROMPT_CLEARED] += 1
+            # A dry run leaves the v1 ids; report the ids the renames give them.
+            new_ids = {old: new for new, old in self.renamed.items()} if self.dry_run else {}
+            self.report.cleared_prompts.append(new_ids.get(model_id, model_id))
+            if self.dry_run:
+                continue
+            kept = {key: value for key, value in params.items() if key != 'system'}
+            # The whole params, so a restore puts the stored row back as it was.
+            self.records.append(self._prompt_record(PROMPT_CLEARED, model_id, params, kept, path=['params']))
+            await self.db.execute(sa.update(Model).where(Model.id == model_id).values(params=kept))
+        await self._flush()
+
+    def _prompt_record(self, site: str, row_id: str, old, new, *, path=('params', 'system')) -> dict:
+        return {
+            'migration_id': self.migration_id,
+            'site': site,
+            'row_id': row_id,
+            'path': json.dumps(list(path)),
+            'old_value': json.dumps(old),
+            'new_value': json.dumps(new),
+            'created_at': self.now,
+        }
 
     async def json_rows(self, site: str, table, column: str, rewrite) -> None:
         attribute, last = getattr(table, column), None
@@ -308,6 +374,56 @@ class _Rewrite:
         await self.db.commit()
 
 
+@dataclass
+class PromptCandidate:
+    """[Gradient] One distinct v1 base-model system prompt and the base-model rows that carry it, newest first."""
+
+    text: str
+    # (id, name, updated_at) per row.
+    rows: list[tuple[str, str | None, int | None]]
+
+    @property
+    def updated_at(self) -> int:
+        return max((updated or 0) for _, _, updated in self.rows)
+
+
+async def prompt_candidates(db: AsyncSession) -> list[PromptCandidate]:
+    """[Gradient] The distinct own prompts of the base-model rows (assistants never count), most recently updated
+    first. Prompts that differ only in surrounding whitespace are one."""
+    query = sa.select(Model.id, Model.name, Model.params, Model.updated_at).where(Model.base_model_id.is_(None))
+    query = query.order_by(sa.func.coalesce(Model.updated_at, 0).desc(), Model.id)
+    by_text: dict[str, PromptCandidate] = {}
+    for model_id, name, params, updated_at in (await db.execute(query)).all():
+        prompt = params.get('system') if isinstance(params, dict) else None
+        if not isinstance(prompt, str) or not prompt.strip():
+            continue
+        # Newest first, so the most recently updated row's text stands for the candidate.
+        candidate = by_text.setdefault(prompt.strip(), PromptCandidate(prompt, []))
+        candidate.rows.append((model_id, name, updated_at))
+    return list(by_text.values())
+
+
+def choose_prompt(candidates: list[PromptCandidate], choice: str | None) -> str | None:
+    """[Gradient] The prompt to keep as the global one: the candidate holding the chosen base model's row, none for
+    'none', the only candidate when there is one. Several and no choice stops the run before any write."""
+    if choice == NO_PROMPT:
+        return None
+    if choice:
+        for candidate in candidates:
+            if any(model_id == choice for model_id, _, _ in candidate.rows):
+                return candidate.text
+        ids = ', '.join(model_id for candidate in candidates for model_id, _, _ in candidate.rows) or 'none exist'
+        raise MigrationError(
+            f'SOEV_V2_SYSTEM_PROMPT names {choice}, which has no system prompt; base models with one: {ids}'
+        )
+    if len(candidates) > 1:
+        raise MigrationError(
+            f'{len(candidates)} different base-model system prompts; set SOEV_V2_SYSTEM_PROMPT (chart:'
+            ' soevApi.migrate.systemPrompt) to the base model whose prompt to keep, or none. Mode plan prints them.'
+        )
+    return candidates[0].text if candidates else None
+
+
 async def _assistant_ids(db: AsyncSession) -> set[str]:
     return set((await db.execute(sa.select(Model.id).where(Model.base_model_id.is_not(None)))).scalars().all())
 
@@ -318,18 +434,25 @@ async def rewrite(
     migration_id: str,
     *,
     default: str,
-    catalog: set[str],
+    catalog: dict[str, str],
     clear_selection: bool,
+    prompts: bool = False,
+    prompt_choice: str | None = None,
     dry_run: bool = False,
 ) -> Report:
     """Map every stored model reference, unmapped ones to the default; catalog ids and assistants are left alone.
 
-    clear_selection drops each user's settings.ui.models instead of mapping it."""
-    known = await _assistant_ids(db) | catalog
+    clear_selection drops each user's settings.ui.models instead of mapping it; prompts moves the base-model
+    system prompts to the global one, the candidate prompt_choice names (choose_prompt)."""
+    known = await _assistant_ids(db) | set(catalog)
     run = _Rewrite(db, mapping, migration_id, dry_run, known, default, clear_selection)
+    # Chosen before the renames, which merge and deactivate rows; the choice names a v1 id.
+    prompt = choose_prompt(await prompt_candidates(db), prompt_choice) if prompts else None
     await run.column('chat_message.model_id', ChatMessage, 'model_id')
     await run.column('model.base_model_id', Model, 'base_model_id')
     await run.rename_models()
+    if prompts:
+        await run.global_prompt(prompt)
     await run.json_rows('chat.chat', Chat, 'chat', lambda site, row_id, value: run.walk(site, row_id, value, []))
     await run.json_rows('user.settings', User, 'settings', run.settings)
     await run.json_rows('automation.data', Automation, 'data', run.automation)
@@ -386,6 +509,62 @@ async def _restore_active(db: AsyncSession, row_id: str, entries, report: Report
         report.skipped.append(f'model.is_active {row_id}: changed since')
 
 
+async def _restore_global_prompt(db: AsyncSession, row_id: str, entries, report: Report) -> None:
+    """[Gradient] Put back the global prompt (no row when there was none) unless an admin has changed it since."""
+    (entry,) = entries
+    row = await db.get(Config, row_id)
+    if row is None or row.value != json.loads(entry.new_value):
+        report.skipped.append(f'{PROMPT_GLOBAL}: changed since')
+        return
+    old = json.loads(entry.old_value)
+    if old is None:
+        await db.delete(row)
+    else:
+        row.value, row.updated_at = old, int(time.time())
+    report.changed[PROMPT_GLOBAL] += 1
+
+
+async def _restore_cleared_prompt(db: AsyncSession, row_id: str, entries, report: Report) -> None:
+    """[Gradient] Give a base-model row its own prompt back unless an admin has set one since; params nobody touched
+    get the stored value back as it was."""
+    (entry,) = entries
+    row = (await db.execute(sa.select(Model.params).where(Model.id == row_id))).first()
+    params = row.params if row is not None and isinstance(row.params, dict) else None
+    current = params.get('system') if params is not None else None
+    if params is None or (isinstance(current, str) and current.strip()):
+        report.skipped.append(f'{PROMPT_CLEARED} {row_id}: changed since')
+        return
+    old = json.loads(entry.old_value)
+    restored = old if params == json.loads(entry.new_value) else {**params, 'system': old.get('system')}
+    await db.execute(sa.update(Model).where(Model.id == row_id).values(params=restored))
+    report.changed[PROMPT_CLEARED] += 1
+
+
+async def _restore_prompt(db: AsyncSession, site: str, row_id: str, entries, report: Report) -> None:
+    """[Gradient] Remove a copied system prompt, and the row created for it, unless an admin has changed it since."""
+    if site == PROMPT_GLOBAL:
+        await _restore_global_prompt(db, row_id, entries, report)
+        return
+    if site == PROMPT_CLEARED:
+        await _restore_cleared_prompt(db, row_id, entries, report)
+        return
+    (entry,) = entries
+    row = (await db.execute(sa.select(Model.params).where(Model.id == row_id))).first()
+    params = row.params if row is not None and isinstance(row.params, dict) else None
+    if params is None or params.get('system') != json.loads(entry.new_value):
+        report.skipped.append(f'{site} {row_id}: changed since')
+        return
+    if site == PROMPT_CREATED:
+        await db.execute(sa.delete(Model).where(Model.id == row_id))
+    else:
+        old = json.loads(entry.old_value)
+        params = {key: value for key, value in params.items() if key != 'system'}
+        if old is not None:
+            params['system'] = old
+        await db.execute(sa.update(Model).where(Model.id == row_id).values(params=params))
+    report.changed[site] += 1
+
+
 async def _restore_column(db: AsyncSession, site: str, row_id: str, entries, report: Report) -> None:
     table, column = _COLUMN_SITES[site]
     (entry,) = entries
@@ -439,8 +618,11 @@ async def restore(db: AsyncSession, migration_id: str) -> Report:
     by_row: dict[tuple[str, str], list] = {}
     for record in records:
         by_row.setdefault((record.site, record.row_id), []).append(record)
-    for (site, row_id), entries in sorted(by_row.items()):
-        if site == 'model.id':
+    # Prompts first: they are recorded under the catalog id, which a renamed row gives up below.
+    for (site, row_id), entries in sorted(by_row.items(), key=lambda item: (item[0][0] not in PROMPT_SITES, item[0])):
+        if site in PROMPT_SITES:
+            await _restore_prompt(db, site, row_id, entries, report)
+        elif site == 'model.id':
             await _restore_rename(db, row_id, entries, report)
         elif site == 'model.is_active':
             await _restore_active(db, row_id, entries, report)

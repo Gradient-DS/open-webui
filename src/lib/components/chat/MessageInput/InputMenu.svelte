@@ -8,28 +8,13 @@
 	import { getContext, onDestroy, tick } from 'svelte';
 	import type { ChatInputCallbacks } from '$lib/types/chatAttachment';
 	import { fly } from 'svelte/transition';
-	import {
-		BINARY_TOOL_STATES,
-		DOCUMENT_WRITER_STATES,
-		documentWriterFlags,
-		TOOL_OFF_DESCRIPTION,
-		TOOL_STATE_LABELS,
-		WEB_SEARCH_STATE_DESCRIPTIONS,
-		DOCUMENT_WRITER_STATE_DESCRIPTIONS,
-		documentWriterState,
-		WEB_SEARCH_STATES,
-		nextToolState,
-		webSearchFlags,
-		webSearchState,
-		type ToolState
-	} from '$lib/utils/toolState';
+	import { TOOL_OFF_DESCRIPTION, toolStateLabel, type LiveToolState } from '$lib/utils/toolState';
 	import { prepareBusinessDocumentPicker } from '$lib/utils/onedrive-file-picker';
 	import {
 		connectLiveSource,
 		prefetchLiveConnections,
 		relinkPrompt
 	} from '$lib/utils/live-connections';
-	import { LIVE_DOCUMENT_STATES } from '$lib/utils/toolState';
 	import { toast } from 'svelte-sonner';
 
 	import { config, user, tools as _tools, skills as _skills, toolServers } from '$lib/stores';
@@ -131,23 +116,23 @@
 	export let toggleFilters: ToggleFilter[] = [];
 	export let showWebSearchButton = false;
 	export let webSearchEnabled = false;
-	export let liveDocumentsState: ToolState = 'off';
-	export let liveMailState: ToolState = 'off';
+	export let liveDocumentsState: LiveToolState = 'off';
+	export let liveMailState: LiveToolState = 'off';
 	let connectingDocuments = false;
 	let connectingMail = false;
-	async function cycleLive(family: 'live_documents' | 'mail') {
+	async function toggleLive(family: 'live_documents' | 'mail') {
 		const mail = family === 'mail';
 		if (!(mail ? $config?.features?.enable_live_mail : $config?.features?.enable_live_documents))
 			return;
 		if (mail ? connectingMail : connectingDocuments) return;
 		const state = mail ? liveMailState : liveDocumentsState;
-		const next = nextToolState(state, LIVE_DOCUMENT_STATES);
+		const next: LiveToolState = state === 'off' ? 'auto' : 'off';
 		if (mail) connectingMail = true;
 		else connectingDocuments = true;
 		const provider = mail ? 'Outlook' : 'OneDrive';
 		let consentToast: string | number | undefined;
 		try {
-			if (next !== 'off' && state === 'off')
+			if (next === 'auto')
 				await connectLiveSource(
 					localStorage.token,
 					mail ? 'outlook_mail' : 'onedrive',
@@ -167,17 +152,14 @@
 			else connectingDocuments = false;
 		}
 	}
-	export const cycleLiveDocuments = () => cycleLive('live_documents');
-	export const cycleLiveMail = () => cycleLive('mail');
-	// [Gradient] Altijd; webSearchEnabled alone is Auto.
-	export let webSearchRequired = false;
+	export const toggleLiveDocuments = () => toggleLive('live_documents');
+	export const toggleLiveMail = () => toggleLive('mail');
 	export let showImageGenerationButton = false;
 	export let imageGenerationEnabled = false;
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 	export let showDocumentWriterButton = false;
 	export let documentWriterEnabled = true;
-	export let documentWriterRequired = false;
 	export let oauthRedirectHandler: (tool: {
 		id: string;
 		serverId: string;
@@ -532,53 +514,37 @@
 		}
 	};
 
-	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
-	$: imageGenerationState = (imageGenerationEnabled ? 'required' : 'off') as ToolState;
-	$: codeInterpreterState = (codeInterpreterEnabled ? 'required' : 'off') as ToolState;
-	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
+	const stateAriaLabel = (label: string, on: boolean, description: string) =>
+		`${label}: ${$i18n.t(toolStateLabel(on))}. ${description}`;
 
-	const stateAriaLabel = (label: string, state: ToolState, description: string) =>
-		`${label}: ${$i18n.t(TOOL_STATE_LABELS[state])}. ${description}`;
-
-	// [Gradient] Web search cycles Auto, Altijd, Uit. Exported for the pinned composer button.
-	export const cycleWebSearch = () => {
+	// [Gradient] Web search is on or off. Exported for the pinned composer button.
+	export const toggleWebSearch = () => {
 		// Strict data separation and #171 capability exclusion.
 		if (openInternetBlocked) return;
-		const wasOff = !webSearchEnabled;
-		const { enabled, required } = webSearchFlags(
-			nextToolState(webSearchToolState, WEB_SEARCH_STATES)
-		);
-		webSearchEnabled = enabled;
-		webSearchRequired = required;
+		webSearchEnabled = !webSearchEnabled;
 		if (webSearchEnabled && imageGenerationEnabled) {
 			toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
 			imageGenerationEnabled = false;
 		}
-		// The confirmation flow cares about web search becoming possible, not about Altijd.
-		if (wasOff !== !webSearchEnabled) onWebSearchToggle(webSearchEnabled);
+		onWebSearchToggle(webSearchEnabled);
 	};
 
-	// [Gradient] Document writer cycles Auto, Altijd, Uit; the other tools use Uit and Altijd. Exported for the pinned composer buttons.
-	export const cycleTool = (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => {
+	// [Gradient] Exported for the pinned composer buttons.
+	export const toggleFeature = (
+		tool: 'image_generation' | 'code_interpreter' | 'document_writer'
+	) => {
 		if (tool === 'image_generation') {
-			imageGenerationEnabled =
-				nextToolState(imageGenerationState, BINARY_TOOL_STATES) === 'required';
-			// #171: image generation takes over from web search, which must then be Uit.
+			imageGenerationEnabled = !imageGenerationEnabled;
+			// #171: image generation takes over from web search, which must then be off.
 			if (imageGenerationEnabled && webSearchEnabled) {
 				toast.message($i18n.t('Web search and image generation cannot run in the same turn'));
 				webSearchEnabled = false;
-				webSearchRequired = false;
 				onWebSearchToggle(false);
 			}
 		} else if (tool === 'code_interpreter') {
-			codeInterpreterEnabled =
-				nextToolState(codeInterpreterState, BINARY_TOOL_STATES) === 'required';
+			codeInterpreterEnabled = !codeInterpreterEnabled;
 		} else {
-			const { enabled, required } = documentWriterFlags(
-				nextToolState(documentWriterToolState, DOCUMENT_WRITER_STATES)
-			);
-			documentWriterEnabled = enabled;
-			documentWriterRequired = required;
+			documentWriterEnabled = !documentWriterEnabled;
 		}
 	};
 
@@ -846,7 +812,7 @@
 							pinId="live_mail"
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Mail search'),
-								liveMailState,
+								liveMailState !== 'off',
 								liveMailState === 'off'
 									? $i18n.t(TOOL_OFF_DESCRIPTION)
 									: $i18n.t('The model decides whether to search your mail')
@@ -855,14 +821,14 @@
 								? $i18n.t('Unavailable')
 								: stateAriaLabel(
 										$i18n.t('Mail search'),
-										liveMailState,
+										liveMailState !== 'off',
 										liveMailState === 'off'
 											? $i18n.t(TOOL_OFF_DESCRIPTION)
 											: $i18n.t('The model decides whether to search your mail')
 									)}
-							toolState={liveMailState}
+							toggle={liveMailState !== 'off'}
 							disabled={connectingMail || !$config?.features?.enable_live_mail}
-							onClick={cycleLiveMail}
+							onClick={toggleLiveMail}
 						>
 							<MailSearch slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -874,7 +840,7 @@
 							pinId="live_documents"
 							ariaLabel={stateAriaLabel(
 								$i18n.t('OneDrive search'),
-								liveDocumentsState,
+								liveDocumentsState !== 'off',
 								liveDocumentsState === 'off'
 									? $i18n.t(TOOL_OFF_DESCRIPTION)
 									: $i18n.t('The model decides whether to search OneDrive')
@@ -883,14 +849,14 @@
 								? $i18n.t('Unavailable')
 								: stateAriaLabel(
 										$i18n.t('OneDrive search'),
-										liveDocumentsState,
+										liveDocumentsState !== 'off',
 										liveDocumentsState === 'off'
 											? $i18n.t(TOOL_OFF_DESCRIPTION)
 											: $i18n.t('The model decides whether to search OneDrive')
 									)}
-							toolState={liveDocumentsState}
+							toggle={liveDocumentsState !== 'off'}
 							disabled={connectingDocuments || !$config?.features?.enable_live_documents}
-							onClick={cycleLiveDocuments}
+							onClick={toggleLiveDocuments}
 						>
 							<OneDriveSearch slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -900,7 +866,7 @@
 						<MenuItem
 							label={$i18n.t('Search the web')}
 							pinId="web_search"
-							toolState={webSearchToolState}
+							toggle={webSearchEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showWebSearchButton
 								? $i18n.t('Unavailable')
@@ -908,14 +874,22 @@
 									? dataSeparationMessage
 									: imageGenerationEnabled
 										? $i18n.t('Web search and image generation cannot run in the same turn')
-										: $i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])}
+										: $i18n.t(
+												webSearchEnabled
+													? 'The model decides whether to search the web'
+													: TOOL_OFF_DESCRIPTION
+											)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Search the web'),
-								webSearchToolState,
-								$i18n.t(WEB_SEARCH_STATE_DESCRIPTIONS[webSearchToolState])
+								webSearchEnabled,
+								$i18n.t(
+									webSearchEnabled
+										? 'The model decides whether to search the web'
+										: TOOL_OFF_DESCRIPTION
+								)
 							)}
 							disabled={!showWebSearchButton || openInternetBlocked}
-							onClick={() => showWebSearchButton && cycleWebSearch()}
+							onClick={() => showWebSearchButton && toggleWebSearch()}
 						>
 							<GlobeAlt slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -926,7 +900,7 @@
 						<MenuItem
 							label={$i18n.t('Image')}
 							pinId="image_generation"
-							toolState={imageGenerationState}
+							toggle={imageGenerationEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showImageGenerationButton
 								? $i18n.t('Unavailable')
@@ -937,13 +911,13 @@
 										: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Image'),
-								imageGenerationState,
+								imageGenerationEnabled,
 								imageGenerationEnabled
 									? $i18n.t('Generate an image')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
 							disabled={!showImageGenerationButton}
-							onClick={() => showImageGenerationButton && cycleTool('image_generation')}
+							onClick={() => showImageGenerationButton && toggleFeature('image_generation')}
 						>
 							<Photo slot="icon" className="size-3.5" />
 						</MenuItem>
@@ -953,7 +927,7 @@
 						<MenuItem
 							label={$i18n.t('Code Interpreter')}
 							pinId="code_interpreter"
-							toolState={codeInterpreterState}
+							toggle={codeInterpreterEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showCodeInterpreterButton
 								? $i18n.t('Unavailable')
@@ -962,13 +936,13 @@
 									: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Code Interpreter'),
-								codeInterpreterState,
+								codeInterpreterEnabled,
 								codeInterpreterEnabled
 									? $i18n.t('Execute code for analysis')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
 							disabled={!showCodeInterpreterButton}
-							onClick={() => showCodeInterpreterButton && cycleTool('code_interpreter')}
+							onClick={() => showCodeInterpreterButton && toggleFeature('code_interpreter')}
 						>
 							<Terminal slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
@@ -978,18 +952,26 @@
 						<MenuItem
 							label={$i18n.t('Document writer')}
 							pinId="document_writer"
-							toolState={documentWriterToolState}
+							toggle={documentWriterEnabled}
 							tooltipPlacement="top-start"
 							tooltip={!showDocumentWriterButton
 								? $i18n.t('Unavailable')
-								: $i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])}
+								: $i18n.t(
+										documentWriterEnabled
+											? 'The model decides whether to write a document'
+											: TOOL_OFF_DESCRIPTION
+									)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Document writer'),
-								documentWriterToolState,
-								$i18n.t(DOCUMENT_WRITER_STATE_DESCRIPTIONS[documentWriterToolState])
+								documentWriterEnabled,
+								$i18n.t(
+									documentWriterEnabled
+										? 'The model decides whether to write a document'
+										: TOOL_OFF_DESCRIPTION
+								)
 							)}
 							disabled={!showDocumentWriterButton}
-							onClick={() => showDocumentWriterButton && cycleTool('document_writer')}
+							onClick={() => showDocumentWriterButton && toggleFeature('document_writer')}
 						>
 							<Document slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>

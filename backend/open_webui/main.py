@@ -83,6 +83,7 @@ from open_webui.config import (
     FEATURE_PROMPTS,
     FEATURE_REFERENCE_CHATS,
     FEATURE_SIMPLE_ASSISTANT_BUILDER,
+    WHATS_NEW_MODELS,
     FEATURE_SKILL_FILES,
     FEATURE_SKILLS,
     FEATURE_STRICT_DATA_SEPARATION,
@@ -120,7 +121,7 @@ from open_webui.config import (
 from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.soev.acting import install
-from open_webui.soev import capabilities, model_catalog
+from open_webui.soev import capabilities, model_catalog, system_prompt
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.errors import problem_message
@@ -1445,6 +1446,12 @@ async def chat_completion(
             default_model_params,
             model_info.params.model_dump() if model_info and model_info.params else {},
         )
+        # [Gradient] An empty prompt box (system: null) no longer blanks the default: a base model without
+        # its own prompt gets the global system prompt.
+        resolved_system_prompt = await system_prompt.for_model(model_info, default_model_params.get('system'))
+        model_info_params.pop('system', None)
+        if resolved_system_prompt:
+            model_info_params['system'] = resolved_system_prompt
         request_params = {key: value for key, value in (form_data.get('params') or {}).items() if value is not None}
         if model_info_params or request_params:
             form_data['params'] = merge_model_params(model_info_params, request_params)
@@ -2891,6 +2898,7 @@ async def get_app_config(request: Request):
                     'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]
                     'data_retention_ttl_days': config.get('admin.data_retention_ttl_days'),  # [Gradient]
                     'enable_welcome_message': config.get('ui.enable_welcome_message'),  # [Gradient]
+                    'whats_new_models': WHATS_NEW_MODELS,  # [Gradient]
                 }
                 if user is not None
                 else {}

@@ -16260,6 +16260,19 @@
         "title": "SyncPolicy",
         "type": "object"
       },
+      "SystemPromptForm": {
+        "properties": {
+          "SYSTEM_PROMPT": {
+            "title": "System Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "SYSTEM_PROMPT"
+        ],
+        "title": "SystemPromptForm",
+        "type": "object"
+      },
       "TTSConfigForm": {
         "properties": {
           "API_KEY": {
@@ -32623,6 +32636,77 @@
           }
         ],
         "summary": "Set Default Suggestions",
+        "tags": [
+          "configs"
+        ]
+      }
+    },
+    "/api/v1/configs/system_prompt": {
+      "get": {
+        "description": "[Gradient] The global system prompt of every base model without its own (soev/system_prompt.py).",
+        "operationId": "get_system_prompt_api_v1_configs_system_prompt_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemPromptForm"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get System Prompt",
+        "tags": [
+          "configs"
+        ]
+      },
+      "post": {
+        "operationId": "set_system_prompt_api_v1_configs_system_prompt_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemPromptForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemPromptForm"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set System Prompt",
         "tags": [
           "configs"
         ]

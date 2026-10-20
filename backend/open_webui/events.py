@@ -88,6 +88,11 @@ class EventDefinitions(BaseModel):
     CONFIG_MODELS_UPDATED: EventDefinition = EventDefinition(
         name='config.models.updated', description='Model configuration was updated.', message='Config Models updated'
     )
+    CONFIG_SYSTEM_PROMPT_UPDATED: EventDefinition = EventDefinition(
+        name='config.system_prompt.updated',
+        description='The global system prompt was updated.',
+        message='Config System Prompt updated',
+    )
     CONFIG_BANNERS_UPDATED: EventDefinition = EventDefinition(
         name='config.banners.updated', description='Banner configuration was updated.', message='Config Banners updated'
     )
