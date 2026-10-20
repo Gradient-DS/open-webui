@@ -73,6 +73,9 @@
 		: directory.updated_at
 			? new Date(directory.updated_at * 1000).toISOString()
 			: null;
+	// [Gradient] A source root stays one line on a narrow screen: its sync
+	// controls take the room, so the meta after the name shows from `sm` up.
+	$: meta = pair ? 'hidden sm:inline' : '';
 	let editing = false;
 	let editName = '';
 	let editInput: HTMLInputElement;
@@ -100,7 +103,7 @@
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
-	class="group flex flex-wrap cursor-pointer w-full px-1.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition
+	class="group flex cursor-pointer w-full px-1.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition
 		{dragOver
 		? 'bg-gray-100 dark:bg-gray-800 ring-1 ring-gray-300 dark:ring-gray-600'
 		: selected
@@ -201,13 +204,22 @@
 						autofocus
 					/>
 				{:else}
-					<div class="max-w-[60%] shrink-0 truncate text-xs">
+					<div
+						class="truncate text-xs {pair
+							? 'min-w-0 sm:max-w-[60%] sm:shrink-0'
+							: 'max-w-[60%] shrink-0'}"
+					>
 						{directory.name}
 					</div>
 				{/if}
 
 				{#if progress}
-					<span class="flex items-center gap-1 text-xs text-gray-400 shrink-0" role="status">
+					<span
+						class="flex items-center gap-1 text-xs text-gray-400 {pair
+							? 'min-w-0 overflow-hidden whitespace-nowrap sm:shrink-0'
+							: 'shrink-0'}"
+						role="status"
+					>
 						&middot; {$i18n.t(
 							sourceKind === 'local' ? 'Uploaded {{done}}/{{total}}' : 'Fetched {{done}}/{{total}}',
 							{
@@ -222,20 +234,25 @@
 						{#if uploading}<Spinner className="size-3" />{/if}
 					</span>
 				{:else if (directory.child_count ?? null) !== null}
-					<span class="text-xs text-gray-400 shrink-0">
+					<span class="text-xs text-gray-400 shrink-0 {meta}">
 						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
 					</span>
 				{/if}
 				{#if progress}
 					<!-- counters above carry the state -->
 				{:else if updatedAt}
-					<Tooltip content={dayjs(updatedAt).format('LLLL')} className="min-w-0 truncate">
+					<Tooltip
+						content={dayjs(updatedAt).format('LLLL')}
+						className="min-w-0 truncate {pair ? 'hidden sm:block' : ''}"
+					>
 						<span class="text-xs text-gray-400">
 							&middot; {$i18n.t('Updated {{time}}', { time: dayjs(updatedAt).fromNow() })}
 						</span>
 					</Tooltip>
 				{:else if source && source.state !== 'syncing'}
-					<span class="text-xs text-gray-400 shrink-0">&middot; {$i18n.t('Not synced yet')}</span>
+					<span class="text-xs text-gray-400 shrink-0 {meta}"
+						>&middot; {$i18n.t('Not synced yet')}</span
+					>
 				{/if}
 
 				{#if uploading}

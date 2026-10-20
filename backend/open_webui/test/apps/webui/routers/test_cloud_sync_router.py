@@ -177,6 +177,7 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
         'authorize',
         'delete',
         'run',
+        'retry_failed',
         'cancel',
         'suspend',
         'resume',
@@ -239,10 +240,11 @@ def test_every_call_carries_the_users_assertion(api, operation):
             result = api.browser.delete(path)
             assert result.status_code == 204
         else:
-            api.responses.append(response({'job_id': 'job-1'}, 201) if operation == 'run' else httpx.Response(204))
+            runs = operation in ('run', 'retry_failed')
+            api.responses.append(response({'job_id': 'job-1'}, 201) if runs else httpx.Response(204))
             result = api.browser.post(path + '/' + operation)
-            assert result.status_code == (201 if operation == 'run' else 204)
-            assert result.content == (b'{"job_id":"job-1"}' if operation == 'run' else b'')
+            assert result.status_code == (201 if runs else 204)
+            assert result.content == (b'{"job_id":"job-1"}' if runs else b'')
             assert api.requests[-1].url.path == '/v1/schedules/s/' + operation
     assert result.status_code < 300 or operation == 'foreign'
     api.link.assert_awaited_once()
@@ -313,7 +315,7 @@ def test_delete_forwards_the_kb_as_collection_key(api, key):
     assert_assertions(api.requests)
 
 
-@pytest.mark.parametrize('action', ['delete', 'run', 'cancel', 'suspend', 'resume'])
+@pytest.mark.parametrize('action', ['delete', 'run', 'retry_failed', 'cancel', 'suspend', 'resume'])
 @pytest.mark.parametrize('subscribed', [False, True])
 def test_actions_require_the_kb_to_subscribe(api, action, subscribed):
     """Every mutation checks subscribers even when the schedule destination equals the KB."""
@@ -326,11 +328,12 @@ def test_actions_require_the_kb_to_subscribe(api, action, subscribed):
             }
         )
     )
+    runs = action in ('run', 'retry_failed')
     if subscribed:
-        api.responses.append(response({'job_id': 'j'}, 201) if action == 'run' else httpx.Response(204))
+        api.responses.append(response({'job_id': 'j'}, 201) if runs else httpx.Response(204))
     path = '/api/v1/cloud-sync/knowledge/kb/schedules/s'
     result = api.browser.delete(path) if action == 'delete' else api.browser.post(path + '/' + action)
-    assert result.status_code == ((201 if action == 'run' else 204) if subscribed else 404)
+    assert result.status_code == ((201 if runs else 204) if subscribed else 404)
     assert len(api.requests) == (2 if subscribed else 1)
     if not subscribed:
         assert result.json()['detail']['code'] == 'connection_not_found'
@@ -463,6 +466,15 @@ def test_skipped_items_list_failed_job_items(api):
                             'title': 'Current.pdf',
                             'status': 'failed',
                             'code': 'processing_failed',
+                            'reason': 'bundle_missing',
+                        },
+                        {
+                            'source_id': 'odd',
+                            'title': 'Odd.pdf',
+                            'status': 'failed',
+                            'code': 'internal_error',
+                            'detail': 'Traceback: something broke',
+                            'reason': 'Graph said no',
                         },
                         {
                             'source_id': 'slow',
@@ -489,12 +501,14 @@ def test_skipped_items_list_failed_job_items(api):
     result = api.browser.get('/api/v1/cloud-sync/knowledge/kb/schedules/s/skipped')
     assert result.status_code == 200
     assert result.json() == [
-        {'source_id': 'large', 'name': 'Large.pdf', 'code': 'item_too_large'},
-        {'source_id': 'unknown', 'name': 'unknown', 'code': 'unsupported_content_type'},
-        {'source_id': 'waiting', 'name': 'waiting', 'code': 'pending'},
-        {'source_id': 'empty', 'name': 'Empty.pdf', 'code': 'empty_content'},
-        {'source_id': 'broken', 'name': 'Current.pdf', 'code': 'processing_failed'},
-        {'source_id': 'slow', 'name': 'Slow.pdf', 'code': 'timed_out'},
+        {'source_id': 'large', 'name': 'Large.pdf', 'code': 'item_too_large', 'reason': None},
+        {'source_id': 'unknown', 'name': 'unknown', 'code': 'unsupported_content_type', 'reason': None},
+        {'source_id': 'waiting', 'name': 'waiting', 'code': 'pending', 'reason': None},
+        {'source_id': 'empty', 'name': 'Empty.pdf', 'code': 'empty_content', 'reason': None},
+        {'source_id': 'broken', 'name': 'Current.pdf', 'code': 'processing_failed', 'reason': 'bundle_missing'},
+        # Free text never reaches the browser: neither a detail nor a reason.
+        {'source_id': 'odd', 'name': 'Odd.pdf', 'code': 'internal_error', 'reason': None},
+        {'source_id': 'slow', 'name': 'Slow.pdf', 'code': 'timed_out', 'reason': None},
     ]
     assert api.requests[2].url.path == '/v1/jobs/job-1'
     assert dict(api.requests[2].url.params) == {'include_items': 'true'}
