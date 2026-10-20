@@ -94,6 +94,15 @@ An assistant's knowledge entries of type note, chat and folder are read the same
 chats come after the folder's notes in the shared ten texts (truncated, never refused), folders are expanded like
 attached ones, and unreadable ones get the assistant's notices.
 
+## System prompt
+
+Every base model (a catalog model, or a row without `base_model_id`) uses the global system prompt, config
+`models.system_prompt` (Admin > Settings > System prompt, shown wherever the models tab is), unless its own row still
+has a prompt; `DEFAULT_MODEL_PARAMS.system` comes below it. An empty prompt box (`system: null`) falls back instead of
+blanking it. Assistants keep their own prompt only. One resolver, `soev/system_prompt.py`, serves the agent route
+(`main.py`) and the direct routers. The v2 migration moves the v1 per-model prompts to the global one: see
+`helm/open-webui-tenant/README.md` (`mode: plan`, `soevApi.migrate.systemPrompt`).
+
 ## What's new tour
 
 After sign-in, every user sees `layout/Overlay/WhatsNew.svelte` once per minor soev release: the last entry

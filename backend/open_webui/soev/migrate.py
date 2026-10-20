@@ -401,6 +401,8 @@ class Options:
     model_map: dict = field(default_factory=dict)
     ingest_concurrency: int = 4
     wait_seconds: int = 0
+    # [Gradient] The base model whose system prompt becomes the global one, 'none', or None (only one exists).
+    system_prompt: str | None = None
 
 
 def options_from_env(
@@ -424,6 +426,7 @@ def options_from_env(
         model_map=model_map,
         ingest_concurrency=_positive_int(environ, 'SOEV_V2_INGEST_CONCURRENCY', 4),
         wait_seconds=_positive_int(environ, 'SOEV_V2_WAIT_SECONDS', 0, minimum=0),
+        system_prompt=(environ.get('SOEV_V2_SYSTEM_PROMPT') or '').strip() or None,
     )
 
 
@@ -475,9 +478,15 @@ async def _model_catalog(options: Options) -> tuple[str, dict[str, str]]:
 
 
 async def _rewrite_models(
-    session, options: Options, catalog: tuple[str, dict[str, str]], *, v2_apply: bool, dry_run: bool = False
+    session,
+    options: Options,
+    catalog: tuple[str, dict[str, str]],
+    *,
+    v2_apply: bool,
+    prompts: bool | None = None,
+    dry_run: bool = False,
 ):
-    """The v2 apply clears selections and seeds system prompts; a --models run only maps."""
+    """The v2 apply clears selections and moves the system prompts to the global one; a --models run only maps."""
     from open_webui.soev import migrate_models
 
     default, labels = catalog
@@ -488,7 +497,8 @@ async def _rewrite_models(
         default=default,
         catalog=labels,
         clear_selection=v2_apply,
-        seed_prompts=v2_apply,
+        prompts=v2_apply if prompts is None else prompts,
+        prompt_choice=options.system_prompt,
         dry_run=dry_run,
     )
 
@@ -506,11 +516,42 @@ def _print_model_report(report, *, prefix: str, default: str | None = None) -> N
         print(f'{prefix}: defaulted {model_id} -> {default} ({count} references)')
     for line in report.merged:
         print(f'{prefix}: merged {line}')
-    if report.prompt_source is not None:
-        targets = ', '.join(report.prompted) or 'no catalog model (each has its own)'
-        print(f'{prefix}: system prompt of {report.prompt_source} copied to {targets}')
+    if report.prompt_step:
+        kept = f'{len(report.prompt)} chars' if report.prompt is not None else 'none'
+        print(f'{prefix}: global system prompt: {kept}')
+        if report.cleared_prompts:
+            print(f'{prefix}: own system prompt cleared on {", ".join(report.cleared_prompts)}')
     for line in report.skipped:
         print(f'{prefix}: skipped {line}')
+
+
+def _print_prompt_candidates(candidates, options: Options, *, prefix: str) -> bool:
+    """[Gradient] Every distinct base-model system prompt in full, for choosing SOEV_V2_SYSTEM_PROMPT; False when
+    an apply would stop on the choice."""
+    import datetime as dt
+
+    from open_webui.soev.migrate_models import choose_prompt
+    from open_webui.soev.migrate_state import MigrationError
+
+    print(f'{prefix}: {len(candidates)} distinct base-model system prompts')
+    for number, candidate in enumerate(candidates, 1):
+        rows = '; '.join(
+            f'{model_id} ({name or model_id}, updated '
+            f'{dt.datetime.fromtimestamp(updated or 0, dt.UTC).strftime("%Y-%m-%d %H:%M UTC")})'
+            for model_id, name, updated in candidate.rows
+        )
+        print(f'{prefix}: [{number}] {len(candidate.text)} chars, on {rows}')
+        print(f'----- [{number}] begin -----')
+        print(candidate.text)
+        print(f'----- [{number}] end -----')
+    try:
+        choose_prompt(candidates, options.system_prompt)
+    except MigrationError as error:
+        print(f'{prefix}: an apply would stop: {error}')
+        return False
+    choice = options.system_prompt or ('the only one' if candidates else 'none exists')
+    print(f'{prefix}: kept as the global prompt: {choice}')
+    return True
 
 
 def _uploads_running(state) -> int:
@@ -557,6 +598,7 @@ async def apply(options: Options, *, db=None) -> int:
         migrate_config,
         migrate_ingest,
         migrate_memories,
+        migrate_models,
         migrate_state,
         migrate_uploads,
     )
@@ -564,6 +606,12 @@ async def apply(options: Options, *, db=None) -> int:
     catalog = await _model_catalog(options)
     async with get_async_db_context(db) as session:
         await migrate_state.wait_for_schema(session)
+        # [Gradient] An unresolved system prompt choice stops the run before its first write.
+        if not (
+            await migrate_state.tables_exist(session)
+            and await migrate_state.has_marker(session, options.migration_id, 'model_ids')
+        ):
+            migrate_models.choose_prompt(await migrate_models.prompt_candidates(session), options.system_prompt)
         await migrate_state.ensure_tables(session)
         taken = await migrate_state.snapshot(session, options.migration_id, migrate_config.SNAPSHOT_KEYS)
         print(f'1 snapshot: {"taken" if taken else "kept"} ({len(migrate_config.SNAPSHOT_KEYS)} keys)')
@@ -701,6 +749,7 @@ async def plan(options: Options, *, db=None) -> int:
         migrate_config,
         migrate_ingest,
         migrate_memories,
+        migrate_models,
         migrate_state,
         migrate_uploads,
     )
@@ -723,8 +772,10 @@ async def plan(options: Options, *, db=None) -> int:
             print(f'2 config switch: {key} = {json.dumps(value, sort_keys=True)}')
         for source, target in sorted(options.model_map.items()):
             print(f'3 model ids: map {source} -> {target}')
+        candidates = await migrate_models.prompt_candidates(session)
+        resolved = _print_prompt_candidates(candidates, options, prefix='3 system prompt')
         _print_model_report(
-            await _rewrite_models(session, options, catalog, v2_apply=True, dry_run=True),
+            await _rewrite_models(session, options, catalog, v2_apply=True, prompts=resolved, dry_run=True),
             prefix='3 model ids',
             default=catalog[0],
         )

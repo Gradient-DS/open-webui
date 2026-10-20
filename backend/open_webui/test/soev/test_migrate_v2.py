@@ -624,22 +624,32 @@ async def test_an_unmapped_override_row_merges_into_the_default_and_catalog_ids_
 PROMPT_ROWS_SQL = 'SELECT id, user_id, base_model_id, name, params, is_active FROM model ORDER BY id'
 
 
-async def seed_prompts(env, monkeypatch):
-    """v1 base-model rows with and without a system prompt, and an assistant with its own."""
+async def seed_prompts(env, monkeypatch, *, same: bool = False):
+    """v1 base-model rows with and without a system prompt, and an assistant with its own. same: the prompted
+    base models share one prompt (whitespace aside), as most tenants do."""
     monkeypatch.setenv('SOEV_V2_MODEL_MAP', json.dumps({'v1/gemma': 'gemma-4-31b'}))
     env.api.models = [{**entry, 'label': 'GLM-5.3'} if entry['id'] == 'glm-5-3' else entry for entry in CATALOG]
+    oldest, gemma = ('Kwink.', ' Kwink.\n') if same else ('Oud.', 'Eigen.')
     async with env.engine.begin() as connection:
         await connection.execute(
             sa.text(
                 'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
-                " VALUES ('v1/oldest', 'admin', NULL, 'Oldest', '{\"system\": \"Oud.\"}', '{}', 1, 1, 50),"
-                " ('v1/gemma', 'admin', NULL, 'Gemma', '{\"system\": \"Eigen.\"}', '{}', 1, 2, 2),"
-                " ('v1/latest', 'admin', NULL, 'Latest', '{\"system\": \"Nieuwste.\"}', '{}', 1, 5, 5),"
+                " VALUES ('v1/oldest', 'admin', NULL, 'Oldest', :oldest, '{}', 1, 1, 50),"
+                " ('v1/gemma', 'admin', NULL, 'Gemma', :gemma, '{}', 1, 2, 2),"
                 " ('v1/empty', 'admin', NULL, 'Empty', '{\"system\": \" \"}', '{}', 1, 9, 9),"
                 " ('qwen-3-32b', 'admin', NULL, 'Qwen', '{\"temperature\": 0.2}', '{}', 1, 1, 1),"
                 " ('helper', 'alice', 'v1/gemma', 'Helper', '{\"system\": \"Assistent.\"}', '{}', 1, 10, 10)"
-            )
+            ),
+            {'oldest': json.dumps({'system': oldest}), 'gemma': json.dumps({'system': gemma, 'top_k': 3})},
         )
+        if not same:
+            await connection.execute(
+                sa.text(
+                    'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at,'
+                    " updated_at) VALUES ('v1/latest', 'admin', NULL, 'Latest', '{\"system\": \"Nieuwste.\"}',"
+                    " '{}', 1, 5, 5)"
+                )
+            )
 
 
 async def prompt_rows(env):
@@ -647,48 +657,131 @@ async def prompt_rows(env):
 
 
 @pytest.mark.asyncio
-async def test_catalog_models_without_a_prompt_get_the_most_recently_created_base_models(env, monkeypatch, capsys):
-    """The newest base-model prompt wins over the most recently updated; a model's own prompt and assistants stay."""
-    await seed_prompts(env, monkeypatch)
-    original = await rows(env, PROMPT_ROWS_SQL)
+async def test_one_distinct_prompt_becomes_the_global_one_and_every_own_prompt_is_cleared(env, monkeypatch, capsys):
+    """Prompts equal but for whitespace are one candidate; the renamed row is cleared too, assistants keep theirs."""
+    await seed_prompts(env, monkeypatch, same=True)
+    original = (await rows(env, PROMPT_ROWS_SQL), await config_rows(env))
     await env.module.plan(options(env))
-    copied = '3 model ids: system prompt of v1/latest copied to glm-5-3, mistral-small-4, qwen-3-32b\n'
-    assert copied in capsys.readouterr().out
-    assert await rows(env, PROMPT_ROWS_SQL) == original
+    output = capsys.readouterr().out
+    assert '3 system prompt: 1 distinct base-model system prompts\n' in output
+    assert '3 system prompt: [1] 6 chars, on v1/oldest (Oldest, updated 1970-01-01 00:00 UTC); v1/gemma' in output
+    assert '----- [1] begin -----\nKwink.\n----- [1] end -----\n' in output
+    assert '3 system prompt: kept as the global prompt: the only one\n' in output
+    assert '3 model ids: own system prompt cleared on gemma-4-31b, v1/oldest\n' in output
+    assert (await rows(env, PROMPT_ROWS_SQL), await config_rows(env)) == original
     await env.module.apply(options(env))
-    assert copied in capsys.readouterr().out
+    assert '3 model ids: global system prompt: 6 chars\n' in capsys.readouterr().out
+    assert await config_value(env, 'models.system_prompt') == 'Kwink.'
     after = await prompt_rows(env)
-    assert after['gemma-4-31b'] == ('admin', None, 'Gemma', {'system': 'Eigen.'}, 1)
-    assert after['glm-5-3'][:4] == ('admin', None, 'GLM-5.3', {'system': 'Nieuwste.'})
-    assert after[DEFAULT][:4] == ('admin', None, DEFAULT, {'system': 'Nieuwste.'})
-    assert after['qwen-3-32b'][3] == {'temperature': 0.2, 'system': 'Nieuwste.'}
+    assert after['gemma-4-31b'][3] == {'top_k': 3}
+    assert after['v1/oldest'][3] == {}
+    assert after['v1/empty'][3] == {'system': ' '}
     assert after['helper'][3] == {'system': 'Assistent.'}
+    # No catalog model gets a row of its own for the prompt.
+    assert 'glm-5-3' not in after and DEFAULT not in after
     assert await env.module.restore(MIGRATION) == 0
-    assert await rows(env, PROMPT_ROWS_SQL) == original
+    assert (await rows(env, PROMPT_ROWS_SQL), await config_rows(env)) == original
 
 
 @pytest.mark.asyncio
-async def test_without_any_base_model_prompt_no_catalog_model_gets_one(env, monkeypatch, capsys):
+async def test_several_prompts_without_a_choice_stop_the_apply_before_any_write(env, monkeypatch, capsys):
+    from open_webui.soev.migrate_state import MigrationError
+
+    await seed_prompts(env, monkeypatch)
+    before = (await config_rows(env), await dumps(env))
+    await env.module.plan(options(env))
+    output = capsys.readouterr().out
+    # Most recently updated first.
+    assert output.index('[1] 4 chars, on v1/oldest') < output.index('[2] 9 chars, on v1/latest')
+    assert output.index('[2] 9 chars, on v1/latest') < output.index('[3] 6 chars, on v1/gemma')
+    assert '----- [2] begin -----\nNieuwste.\n----- [2] end -----\n' in output
+    assert '3 system prompt: an apply would stop: 3 different base-model system prompts' in output
+    assert 'global system prompt' not in output
+    with pytest.raises(MigrationError, match='set SOEV_V2_SYSTEM_PROMPT'):
+        await env.module.apply(options(env))
+    assert (await config_rows(env), await dumps(env)) == before
+    assert await rows(env, "SELECT name FROM sqlite_master WHERE name LIKE 'owui_v2_migration%'") == []
+
+
+@pytest.mark.parametrize(('choice', 'kept'), [('v1/latest', 'Nieuwste.'), ('v1/gemma', 'Eigen.'), ('none', None)])
+@pytest.mark.asyncio
+async def test_the_chosen_base_models_prompt_is_kept_and_none_keeps_none(env, monkeypatch, capsys, choice, kept):
+    await seed_prompts(env, monkeypatch)
+    monkeypatch.setenv('SOEV_V2_SYSTEM_PROMPT', choice)
+    await env.module.plan(options(env))
+    assert f'3 system prompt: kept as the global prompt: {choice}\n' in capsys.readouterr().out
+    await env.module.apply(options(env))
+    assert await config_value(env, 'models.system_prompt') == kept
+    after = await prompt_rows(env)
+    assert [model_id for model_id, row in after.items() if 'system' in row[3]] == ['helper', 'v1/empty']
+
+
+@pytest.mark.asyncio
+async def test_a_choice_without_a_prompt_names_the_ones_with_one(env, monkeypatch):
+    from open_webui.soev.migrate_state import MigrationError
+
+    await seed_prompts(env, monkeypatch)
+    monkeypatch.setenv('SOEV_V2_SYSTEM_PROMPT', 'v1/empty')
+    with pytest.raises(MigrationError, match='names v1/empty, which has no system prompt; base models with one: v1/'):
+        await env.module.apply(options(env))
+
+
+@pytest.mark.asyncio
+async def test_without_any_base_model_prompt_there_is_no_global_one(env, monkeypatch, capsys):
     await seed_models(env, monkeypatch)
     await env.module.apply(options(env))
-    assert 'system prompt' not in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert '3 model ids: global system prompt: none\n' in output
+    assert 'own system prompt cleared' not in output
+    assert await config_value(env, 'models.system_prompt') is None
     assert [row[0] for row in await rows(env, PROMPT_ROWS_SQL)] == ['glm-5-3', 'helper', 'legacy']
 
 
 @pytest.mark.asyncio
-async def test_restore_keeps_a_copied_prompt_an_admin_changed_since(env, monkeypatch, capsys):
-    await seed_prompts(env, monkeypatch)
+async def test_restore_keeps_what_an_admin_changed_since(env, monkeypatch, capsys):
+    await seed_prompts(env, monkeypatch, same=True)
+    await env.module.apply(options(env))
+    async with env.engine.begin() as connection:
+        await connection.execute(sa.text('UPDATE model SET params = \'{"system": "Eigen."}\' WHERE id = \'v1/oldest\''))
+        await connection.execute(sa.text("UPDATE config SET value = '\"Nieuw.\"' WHERE key = 'models.system_prompt'"))
+    await env.module.restore(MIGRATION)
+    after = await prompt_rows(env)
+    assert after['v1/oldest'][3] == {'system': 'Eigen.'}
+    assert after['v1/gemma'][3] == {'system': ' Kwink.\n', 'top_k': 3}
+    assert await config_value(env, 'models.system_prompt') == 'Nieuw.'
+    output = capsys.readouterr().out
+    assert 'model ids restored: skipped config.models.system_prompt: changed since' in output
+    assert 'model ids restored: skipped model.params.system.cleared v1/oldest: changed since' in output
+
+
+@pytest.mark.asyncio
+async def test_restore_still_undoes_the_earlier_per_model_copy(env, monkeypatch):
+    """A migration run with the per-model copy (#482) recorded model.created and model.params.system."""
+    await seed_models(env, monkeypatch)
     await env.module.apply(options(env))
     async with env.engine.begin() as connection:
         await connection.execute(
-            sa.text('UPDATE model SET params = \'{"system": "Aangepast."}\' WHERE id = \'glm-5-3\'')
+            sa.text(
+                'INSERT INTO model (id, user_id, base_model_id, name, params, meta, is_active, created_at, updated_at)'
+                " VALUES ('qwen-3-32b', 'admin', NULL, 'Qwen', '{\"system\": \"Kwink.\"}', '{}', 1, 1, 1)"
+            )
+        )
+        await connection.execute(
+            sa.text('UPDATE model SET params = \'{"system": "Kwink.", "top_k": 3}\' WHERE id = \'glm-5-3\'')
+        )
+        await connection.execute(
+            sa.text(
+                'INSERT INTO owui_v2_migration_model_id_backup'
+                ' (migration_id, site, row_id, path, old_value, new_value, created_at) VALUES'
+                " (:id, 'model.created', 'qwen-3-32b', '[\"params\", \"system\"]', 'null', '\"Kwink.\"', 1),"
+                " (:id, 'model.params.system', 'glm-5-3', '[\"params\", \"system\"]', 'null', '\"Kwink.\"', 1)"
+            ),
+            {'id': MIGRATION},
         )
     await env.module.restore(MIGRATION)
     after = await prompt_rows(env)
-    assert after['glm-5-3'][3] == {'system': 'Aangepast.'}
-    assert DEFAULT not in after
-    assert after['qwen-3-32b'][3] == {'temperature': 0.2}
-    assert 'model ids restored: skipped model.created glm-5-3: changed since' in capsys.readouterr().out
+    assert 'qwen-3-32b' not in after
+    assert after['zai-org/GLM-5.3'][3] == {'top_k': 3}
 
 
 @pytest.mark.parametrize(
