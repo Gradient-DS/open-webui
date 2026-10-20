@@ -31235,6 +31235,60 @@
         ]
       }
     },
+    "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/retry_failed": {
+      "post": {
+        "operationId": "retry_failed_schedule_api_v1_cloud_sync_knowledge__knowledge_id__schedules__schedule_id__retry_failed_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "knowledge_id",
+            "required": true,
+            "schema": {
+              "title": "Knowledge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retry Failed Schedule",
+        "tags": [
+          "cloud-sync"
+        ]
+      }
+    },
     "/api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/run": {
       "post": {
         "operationId": "run_schedule_api_v1_cloud_sync_knowledge__knowledge_id__schedules__schedule_id__run_post",

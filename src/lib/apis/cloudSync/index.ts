@@ -2,7 +2,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export type CloudProvider = string;
 export type ScheduleKind = 'content' | 'acl_refresh';
-export type ScheduleAction = 'run' | 'cancel' | 'suspend' | 'resume';
+export type ScheduleAction = 'run' | 'retry_failed' | 'cancel' | 'suspend' | 'resume';
 
 export interface Connection {
 	id: string;
@@ -123,6 +123,9 @@ export const syncKnowledge = (token: string, knowledgeId: string) =>
 	request<{ data: KnowledgeRun[] }>(token, `${knowledgePath(knowledgeId)}/sync`, 'POST');
 export const runSchedule = (token: string, knowledgeId: string, id: string) =>
 	request<{ job_id: string }>(token, `${schedulePath(knowledgeId, id)}/run`, 'POST');
+// A run that lists the whole folder, so every file without a landed version is fetched again.
+export const retryFailedSchedule = (token: string, knowledgeId: string, id: string) =>
+	request<{ job_id: string }>(token, `${schedulePath(knowledgeId, id)}/retry_failed`, 'POST');
 export const cancelSchedule = (token: string, knowledgeId: string, id: string) =>
 	request<void>(token, `${schedulePath(knowledgeId, id)}/cancel`, 'POST');
 export const suspendSchedule = (token: string, knowledgeId: string, id: string) =>
@@ -134,6 +137,8 @@ export interface SkippedItem {
 	source_id: string;
 	name?: string;
 	code: string;
+	// The fixed code soev-sync stored for the failure; absent on older platforms.
+	reason?: string | null;
 }
 
 export const getSkippedItems = (token: string, knowledgeId: string, id: string) =>

@@ -171,11 +171,39 @@ const SKIP_REASONS: Record<string, { label: string; explainer: string }> = {
 	},
 	processing_failed: {
 		label: 'Processing failed',
-		explainer: 'The file could not be processed. It is retried on the next sync.'
+		explainer:
+			'The file could not be processed. It is retried on every sync, or use Retry failed files.'
+	},
+	bundle_missing: {
+		label: 'Processing failed',
+		explainer:
+			'The processed text of this file was lost before it could be saved. It is retried on every sync, or use Retry failed files.'
+	},
+	// The processed result could not be saved (soev-sync landing codes).
+	bundle_invalid: {
+		label: 'Processing failed',
+		explainer:
+			'The processed result of this file could not be saved. It is retried on every sync, or use Retry failed files.'
+	},
+	bundle_item_mismatch: {
+		label: 'Processing failed',
+		explainer:
+			'The processed result of this file could not be saved. It is retried on every sync, or use Retry failed files.'
+	},
+	bundle_incomplete: {
+		label: 'Processing failed',
+		explainer:
+			'The processed result of this file could not be saved. It is retried on every sync, or use Retry failed files.'
+	},
+	artifact_rejected: {
+		label: 'Processing failed',
+		explainer:
+			'The processed result of this file could not be saved. It is retried on every sync, or use Retry failed files.'
 	},
 	timed_out: {
 		label: 'Processing timed out',
-		explainer: 'Processing did not finish in time. It is retried on the next sync.'
+		explainer:
+			'Processing did not finish in time. It is retried on every sync, or use Retry failed files.'
 	},
 	restricted_item: {
 		label: 'Protected file',
@@ -192,30 +220,26 @@ const SKIP_REASONS: Record<string, { label: string; explainer: string }> = {
 };
 const SKIP_FALLBACK = {
 	label: 'Internal error',
-	explainer: 'The file was skipped in the last sync. It is retried on the next sync.'
+	explainer:
+		'The file was skipped in the last sync. It is retried on every sync, or use Retry failed files.'
 };
 
-export function skippedReason(code: string): string {
-	return SKIP_REASONS[code]?.label ?? (code in KNOWN_INTERNAL ? SKIP_FALLBACK.label : code);
+// The stored reason (a fixed code soev-sync keeps per item; absent on older
+// platforms) is more specific than the item's status code where we know it.
+// An unknown code reads as the generic error, never as its own text.
+const skip = (code: string, reason?: string | null) =>
+	(reason && Object.hasOwn(SKIP_REASONS, reason) ? SKIP_REASONS[reason] : null) ??
+	(Object.hasOwn(SKIP_REASONS, code) ? SKIP_REASONS[code] : SKIP_FALLBACK);
+
+export function skippedReason(code: string, reason?: string | null): string {
+	return skip(code, reason).label;
 }
 
 // Why a file was skipped, in one sentence the user can act on; `{{provider}}`
 // is left for the caller to fill.
-export function skippedExplainer(code: string): string {
-	return (SKIP_REASONS[code] ?? SKIP_FALLBACK).explainer;
+export function skippedExplainer(code: string, reason?: string | null): string {
+	return skip(code, reason).explainer;
 }
-
-// Worker-internal reasons (sync_execution.py) that mean nothing to the user.
-const KNOWN_INTERNAL: Record<string, true> = {
-	internal_error: true,
-	acl_write_failed: true,
-	acl_read_failed: true,
-	source_failed: true,
-	reach_failed: true,
-	delete_failed: true,
-	blank_failed: true,
-	unresolvable_principal: true
-};
 
 export function sourceTiming(
 	view: Pick<SourceView, 'lastSyncedAt' | 'nextDueAt' | 'documents'> &

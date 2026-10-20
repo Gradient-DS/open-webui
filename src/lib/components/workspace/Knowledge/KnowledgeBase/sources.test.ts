@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Connection, Schedule } from '$lib/apis/cloudSync';
 import type { SchedulePair } from '../utils/cloudSync';
-import { removalTargets, sortSourcePairs, sourceMenu, sourcePairItem } from './sources';
+import type { SourceProvider } from '$lib/sources/registry';
+import {
+	autoPickProvider,
+	removalTargets,
+	sortSourcePairs,
+	sourceMenu,
+	sourcePairItem
+} from './sources';
 
 const connection: Connection = { id: 'c', source_kind: 'onedrive', lifecycle: 'enabled' };
 const schedule = (id: string, changes: Partial<Schedule> = {}): Schedule => ({
@@ -124,5 +131,48 @@ describe('sourceMenu', () => {
 				isAdmin: true
 			})
 		).toEqual(['cancel', 'resume', 'remove']);
+	});
+
+	it('offers Retry failed files to a writer while the last run left files behind', () => {
+		expect(sourceMenu({ ...base, writeAccess: true, isAdmin: false, skipped: 3 })).toEqual([
+			'copy_path',
+			'retry_failed',
+			'remove'
+		]);
+		expect(sourceMenu({ ...base, writeAccess: false, isAdmin: false, skipped: 3 })).toEqual([
+			'copy_path'
+		]);
+		expect(
+			sourceMenu({ ...base, live: true, writeAccess: true, isAdmin: false, skipped: 3 })
+		).not.toContain('retry_failed');
+		expect(sourceMenu({ ...base, writeAccess: true, isAdmin: false, skipped: 0 })).not.toContain(
+			'retry_failed'
+		);
+	});
+});
+
+describe('autoPickProvider', () => {
+	const silent = { kind: 'onedrive', pickSilently: async () => [] } as unknown as SourceProvider;
+	const clickOnly = { kind: 'google_drive' } as unknown as SourceProvider;
+	const ready = {
+		requested: silent,
+		writeAccess: true,
+		providerEnabled: true,
+		hasContentSource: false,
+		statusKnown: true
+	};
+
+	it('opens the picker of a new knowledge base that asked for it', () => {
+		expect(autoPickProvider(ready)).toBe(silent);
+	});
+	it.each([
+		['nothing was asked', { requested: null }],
+		['the picker needs a click', { requested: clickOnly }],
+		['the reader cannot write', { writeAccess: false }],
+		['the provider is off', { providerEnabled: false }],
+		['a source exists already', { hasContentSource: true }],
+		['the sync status is unknown', { statusKnown: false }]
+	])('waits for a click when %s', (_, change) => {
+		expect(autoPickProvider({ ...ready, ...change })).toBeNull();
 	});
 });

@@ -342,6 +342,11 @@ backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 [[waived]]
+id = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/retry_failed"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
 id = "POST /api/v1/cloud-sync/knowledge/{knowledge_id}/schedules/{schedule_id}/run"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/cloud_sync.py proxies cloud connections, live grants and schedules to soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
