@@ -2414,11 +2414,13 @@ async def delete_knowledge_directory(
 
     # Full fork cascade (P2-8 ledger #4): with move_files=False the subtree's
     # files are deleted like single-file deletes (KB vectors, file-{id}
-    # collections, storage, DB rows; cross-KB shared files survive).
+    # collections, storage, DB rows; cross-KB shared files survive). Files
+    # the caller does not own are only unlinked, as in the single-file remove.
     report = await DeletionService.delete_directory(
         knowledge_id=id,
         directory_id=dir_id,
         move_files_to_parent=move_files,
+        user=user,
     )
     if 'knowledge_directory' not in report.db_records:
         raise HTTPException(

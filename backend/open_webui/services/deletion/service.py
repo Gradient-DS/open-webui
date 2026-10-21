@@ -7,6 +7,7 @@ from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
 from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.storage.provider import Storage
+from open_webui.utils.access_control import can_bypass_access_control
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 
 log = logging.getLogger(__name__)
@@ -203,6 +204,8 @@ class DeletionService:
         knowledge_id: str,
         directory_id: str,
         move_files_to_parent: bool = True,
+        *,
+        user,
     ) -> DeletionReport:
         """
         Delete a KB directory with full fork-cascade parity (P2-8 ledger #4).
@@ -214,7 +217,9 @@ class DeletionService:
           vectors by file_id + hash in this KB's collection, then the orphan
           batch (file-{id} collections, storage objects, DB rows). Files still
           referenced by another KB or chat survive with only this KB's link
-          and vectors removed.
+          and vectors removed. Only files `user` owns (or any, for an admin
+          who bypasses access control) are deleted; the others are only
+          unlinked from this KB.
 
         The directory must belong to knowledge_id — the KB-scope guard for the
         /sync/cleanup dir branch lives here so every caller gets it.
@@ -230,12 +235,14 @@ class DeletionService:
             return report
 
         subtree_file_ids: list[str] = []
+        owned_file_ids: list[str] = []
         if not move_files_to_parent:
             subtree_file_ids = await Knowledges.get_file_ids_in_directory_subtree(knowledge_id, directory_id)
             # Vectors first (deletion order: Vectors -> Storage -> DB). Remove
             # this KB's vectors by file_id and hash — the same double delete
             # the single-file path does.
             files = await Files.get_files_by_ids(subtree_file_ids) if subtree_file_ids else []
+            owned_file_ids = [file.id for file in files if file.user_id == user.id or can_bypass_access_control(user)]
             for file in files:
                 try:
                     await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge_id, filter={'file_id': file.id})
@@ -253,8 +260,8 @@ class DeletionService:
             return report
         report.add_db('knowledge_directory')
 
-        if subtree_file_ids:
-            batch_report = await DeletionService.delete_orphaned_files_batch(subtree_file_ids)
+        if owned_file_ids:
+            batch_report = await DeletionService.delete_orphaned_files_batch(owned_file_ids)
             for table, count in batch_report.db_records.items():
                 report.add_db(table, count)
             report.storage_files += batch_report.storage_files
