@@ -270,7 +270,10 @@ access (`may_share`, owner-only on v2); the modal is read-only otherwise.
 and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15), clearing remote OWUI groups absent locally.
 Unknown capabilities refuse narrowing and queue widening. User-deletion callers must propagate group failures.
 
-An assistant's files (explicit `file` entries of a model's `meta.knowledge`) live in its own collection,
+An assistant's files (explicit `file` entries of a model's `meta.knowledge`) must be files the model owner owns: a
+save holding anyone else's is refused (403), and file access, sync and migration ignore such an entry; another's file
+reaches an assistant through a knowledge base, whose access is checked live. Deleting a file drops its entries from
+the models holding it. They live in its own collection,
 `owui-assistant-<model id>` (`soev/assistant_files.py`): owned by the model owner, read and written per the
 assistant's access grants, hidden from KB lists. An event sink syncs it on model create/update/access/delete
 (access republished, missing files submitted as the owner, removed ones deleted, the collection deleted with the
