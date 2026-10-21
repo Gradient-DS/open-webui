@@ -630,7 +630,10 @@
 	};
 
 	// [Gradient] The v2 thread behind this answer, for admins: the trace file opens in soev-agents-inspect.
-	$: traceThreadId = $user?.role === 'admin' ? (message?.meta?.agent_v2?.thread_id ?? null) : null;
+	$: traceThreadId =
+		$user?.role === 'admin' && $config?.features?.enable_agent_trace_download
+			? (message?.meta?.agent_v2?.thread_id ?? null)
+			: null;
 
 	const downloadMessageTrace = async (threadId: string) => {
 		try {

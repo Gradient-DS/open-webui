@@ -357,6 +357,10 @@ openWebui:
     # from /utils/chat/docx and /utils/document/docx.
     enableDocxExport: "true"
 
+    # Admins' "Agent trace (.json)" download on agent answers. A trace holds the
+    # assistant's instructions; "false" hides the item and 404s the route.
+    enableAgentTraceDownload: "false"
+
     # MCP/Tool Servers (disabled)
     enableDirectConnections: "false"
     userPermissionsFeaturesDirectToolServers: "false"
