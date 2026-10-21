@@ -114,7 +114,8 @@ async def test_v2_base_models_are_the_catalog_mapping(v2: FakeSoevApi, connectio
     connections.assert_not_awaited()
     assert [model['id'] for model in models] == ['glm-5-3', 'gemma-4-31b']
     glm, gemma = models
-    assert glm['name'] == 'GLM 5.3' and glm['owned_by'] == 'soev'
+    # The catalog's label is not used: every model goes by its provider/model id.
+    assert glm['name'] == 'glm-5-3' and glm['owned_by'] == 'soev'
     meta = glm['info']['meta']
     assert meta['description'] == 'Strong general model'
     assert meta['capabilities'] == {'vision': False}
@@ -183,6 +184,9 @@ async def test_catalog_meta_survives_admin_rows_and_assistants_keep_catalog_base
     models = await run()
     assert set(models) == {'glm-5-3', 'gemma-4-31b', 'helper'}
     meta = models['glm-5-3']['info']['meta']
+    # The row's name ('Admin glm-5-3', or a migrated v1 name) never replaces the id.
+    assert models['glm-5-3']['name'] == 'glm-5-3'
+    assert models['helper']['name'] == 'Admin helper'
     assert meta['description'] == 'Admin text'
     assert meta['capabilities'] == {'vision': False, 'citations': False}
     assert meta['soev']['vendor'] == 'Zhipu AI'

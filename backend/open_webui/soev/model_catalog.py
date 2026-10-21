@@ -54,7 +54,8 @@ def owui_model(entry: dict) -> dict:
     description = entry.get('description')
     return {
         'id': entry['id'],
-        'name': entry.get('label') or entry['id'],
+        # Every model goes by its provider/model id, never a display label.
+        'name': entry['id'],
         'object': 'model',
         'created': 0,
         'owned_by': OWNER,
@@ -92,12 +93,14 @@ async def base_models() -> list[dict]:
 
 
 def apply_catalog(models: list[dict], base: list[dict]) -> None:
-    """Give each catalog model its own copy of the catalog meta, below an admin's model row."""
+    """Give each catalog model its own copy of the catalog meta, below an admin's model row. The name stays the
+    provider/model id, also over an admin's or a migrated v1 row's name."""
     pristine = {model['id']: model['info'] for model in base if model.get('owned_by') == OWNER}
     for model in models:
         info = pristine.get(model['id'])
         if info is None:
             continue
+        model['name'] = model['id']
         if model.get('info') is info:
             model['info'] = copy.deepcopy(info)
             continue

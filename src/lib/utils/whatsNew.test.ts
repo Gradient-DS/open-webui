@@ -18,7 +18,7 @@ const release: Release = {
 	version: '9.9',
 	notesUrl: 'https://docs.example/notes',
 	slides: ['auto_mode', 'citations', 'models', 'outlook', 'onedrive'],
-	models: [{ name: 'Model A', match: /model-a/, description: 'A for everything' }]
+	models: [{ match: /model-a/, description: 'A for everything' }]
 };
 
 const slides = (
@@ -78,12 +78,12 @@ describe('whatsNewSlides', () => {
 });
 
 describe('newModels', () => {
-	it('tells GLM-5.3 and its Flash variant apart', () => {
+	it('tells GLM-5.3 and its Flash variant apart, by their ids', () => {
 		const names = newModels(RELEASES[0], [
 			{ id: 'zai-org/glm-5.3' },
 			{ id: 'zai-org/glm-5.3-flash' }
 		]).map((model) => model.name);
-		expect(names).toEqual(['GLM-5.3', 'GLM-5.3 Flash']);
+		expect(names).toEqual(['zai-org/glm-5.3', 'zai-org/glm-5.3-flash']);
 	});
 
 	it('ignores hidden models, assistants and older models', () => {
@@ -104,8 +104,8 @@ describe('newModels', () => {
 		];
 		const configured = { '9.9': ['vendor/model-b', 'model-a', 'vendor/not-in-picker'] };
 		expect(newModels(release, models, configured)).toEqual([
-			{ name: 'Model B', description: undefined },
-			{ name: 'Model A', description: 'A for everything' }
+			{ name: 'vendor/model-b', description: undefined },
+			{ name: 'model-a', description: 'A for everything' }
 		]);
 	});
 
@@ -115,7 +115,7 @@ describe('newModels', () => {
 
 	it("ignores a tenant's list for another release", () => {
 		expect(newModels(release, [{ id: 'model-a' }], { '9.8': [] })).toEqual([
-			{ name: 'Model A', description: 'A for everything' }
+			{ name: 'model-a', description: 'A for everything' }
 		]);
 	});
 });
