@@ -6,16 +6,11 @@ import type { DisplayCitation } from './reduceSources';
 export const CHAT_FILE_PANEL = 'chat-file-panel';
 export type OpenFileInPanel = (item: ChatAttachment & { id: string }) => boolean;
 
-/** A stored chat file; one still uploading (no id yet) keeps the modal. */
+/** A stored chat file, also while it is still processing (the composer then reports `uploading`). */
 export function opensInPanel(
 	item: ChatAttachment | null | undefined
 ): item is ChatAttachment & { id: string } {
-	return (
-		item?.type === 'file' &&
-		typeof item.id === 'string' &&
-		item.id !== '' &&
-		item.status !== 'uploading'
-	);
+	return item?.type === 'file' && typeof item.id === 'string' && item.id !== '';
 }
 
 const inlineText = (item: ChatAttachment): string => {
