@@ -26,7 +26,7 @@ class FakeSoev:
             self.closed = True
 
 
-def _client(monkeypatch, fake: FakeSoev, *, role='admin', url='http://soev-api'):
+def _client(monkeypatch, fake: FakeSoev, *, role='admin', url='http://soev-api', enabled=True):
     from open_webui import config
     from open_webui.main import soev_api_error_handler, soev_not_configured_handler
     from open_webui.routers import agent_threads
@@ -37,6 +37,7 @@ def _client(monkeypatch, fake: FakeSoev, *, role='admin', url='http://soev-api')
         return f'owui:user:{user.id}'
 
     monkeypatch.setattr(config, 'SOEV_API_URL', url)
+    monkeypatch.setattr(config, 'ENABLE_AGENT_TRACE_DOWNLOAD', enabled)
     monkeypatch.setattr(agent_threads.identity, 'build_client', lambda **kwargs: fake)
     monkeypatch.setattr(agent_threads.identity, 'acting_ref', acting_ref)
     app = FastAPI(
@@ -67,6 +68,13 @@ def test_a_thread_soev_api_does_not_give_the_caller_is_a_404(monkeypatch):
     assert response.status_code == 404
     assert response.json()['detail']['code'] == 'not_found'
     assert fake.closed
+
+
+def test_a_tenant_without_the_flag_answers_404_before_soev_api(monkeypatch):
+    fake = FakeSoev()
+    response = _client(monkeypatch, fake, enabled=False).get('/api/v1/agent-threads/thr-abc/trace')
+    assert response.status_code == 404
+    assert fake.calls == []
 
 
 def test_a_user_who_is_not_an_admin_is_refused_before_soev_api(monkeypatch):

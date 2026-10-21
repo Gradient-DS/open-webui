@@ -57,6 +57,7 @@ from open_webui.config import (
     ENABLE_DATA_EXPORT,
     # [Gradient] export formats
     ENABLE_DOCX_EXPORT,
+    ENABLE_AGENT_TRACE_DOWNLOAD,
     USE_STYLIZED_PDF_EXPORT,
     # [Gradient] Skills
     ENABLE_SKILL_EXECUTION,
@@ -2877,6 +2878,7 @@ async def get_app_config(request: Request):
                     'feature_strict_data_separation': FEATURE_STRICT_DATA_SEPARATION,
                     'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,  # [Gradient]
                     'enable_docx_export': ENABLE_DOCX_EXPORT,  # [Gradient]
+                    'enable_agent_trace_download': ENABLE_AGENT_TRACE_DOWNLOAD,  # [Gradient]
                     'enable_google_drive_integration': config.get('google_drive.enable'),
                     'enable_onedrive_integration': config.get('onedrive.enable')
                     and await capabilities.has(capabilities.LIVE_DOCUMENTS),
