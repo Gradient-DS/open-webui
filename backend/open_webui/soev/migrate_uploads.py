@@ -214,9 +214,11 @@ def _by_collection(
 
     targets: dict[tuple[str, str | None, str], list] = {}
     for file in files:
+        # An assistant holds only its owner's files (`soev/assistant_files.py`).
         places = {
             (owner, model_id, ingest.assistant_collection_key(model_id))
             for model_id, owner in assistant_refs.get(file.id, set())
+            if owner == file.user_id
         }
         if file.id in chat_ids and file.id not in linked:
             places.add((file.user_id, None, ingest.attachments_collection_key(file.user_id)))

@@ -92,8 +92,10 @@ async def has_access_to_file(
     if access_type == 'read' and channels:
         return True
 
-    # Check if the file is associated with any chats the user has access to
-    shared_chat_ids = await Chats.get_shared_chat_ids_by_file_id(file_id, db=db)
+    # Check if the file is associated with any chats the user has access to. Only a chat of the file's owner
+    # counts: a chat's link to someone else's file was checked once at attach, so honouring it here would let
+    # the chat's grantees keep reading the file after the chat owner's own access to it was revoked.
+    shared_chat_ids = await Chats.get_shared_chat_ids_by_file_id(file_id, user_id=file.user_id, db=db)
     if access_type == 'read' and shared_chat_ids:
         accessible_ids = await AccessGrants.get_accessible_resource_ids(
             user_id=user.id,
@@ -106,13 +108,14 @@ async def has_access_to_file(
         if accessible_ids:
             return True
 
-    # Check if the file is directly attached to a shared workspace model (per the ownership
-    # note above, model write is conferred only for files the model owner owns).
-    model_owners = await Models.get_model_owners_attaching_file(file.id, db=db)
-    if access_type != 'read':
-        model_owners = {model_id: owner_id for model_id, owner_id in model_owners.items() if owner_id == file.user_id}
-    if user.id in model_owners.values():
-        return True
+    # Check if the file is directly attached to a shared workspace model. Only a model of the file's owner
+    # counts, for read too: a model holds only its owner's files (routers/models.py), and a reference to
+    # someone else's file would outlive the access it was created with.
+    model_owners = {
+        model_id: owner_id
+        for model_id, owner_id in (await Models.get_model_owners_attaching_file(file.id, db=db)).items()
+        if owner_id == file.user_id
+    }
 
     return bool(
         await AccessGrants.get_accessible_resource_ids(

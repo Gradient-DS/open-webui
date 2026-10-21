@@ -124,8 +124,10 @@ def test_model_import_preserves_partial_update_and_nested_extensions(mount, monk
     from open_webui.routers import models
 
     existing = ModelForm(id='research-model', name='Original name', meta={}, params={}, access_grants=GRANTS)
+    # The import names the stored model's owner as the owner its files must belong to.
+    object.__setattr__(existing, 'user_id', 'research-owner')
     monkeypatch.setattr(models.Models, 'get_models_by_ids', AsyncMock(return_value=[existing]))
-    monkeypatch.setattr(models, '_verify_knowledge_file_access', AsyncMock())
+    monkeypatch.setattr(models, '_verify_knowledge_file_ownership', AsyncMock())
     monkeypatch.setattr(models, 'publish_event', AsyncMock())
     # The fixture model has no owner; overwriting it is the explicit admin bypass.
     monkeypatch.setattr(models, 'can_bypass_access_control', lambda user: True)

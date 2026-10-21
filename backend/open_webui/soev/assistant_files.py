@@ -103,19 +103,22 @@ async def _delete_collection(model_id: str, client: SoevClient) -> None:
 
 
 async def sync(model_id: str, *, client: SoevClient | None = None) -> bool:
-    """Bring the assistant's collection in step with the assistant: its access, its files submitted where they
-    are missing and the ones it no longer has deleted. The collection of an assistant that is gone or has no files
-    is deleted. True while a file still ingests elsewhere and waits for another sync."""
+    """Bring the assistant's collection in step with the assistant: its access, its owner's files submitted where
+    they are missing and every other document deleted. The collection of an assistant that is gone or has no such
+    files is deleted. True while a file still ingests elsewhere and waits for another sync."""
     client = client if client is not None else identity.build_client()
     model = await Models.get_model_by_id(model_id)
     ids = file_ids(model.meta.model_dump() if model is not None and model.meta else None)
-    if not ids:
+    # [Gradient] Only the owner's own files: an assistant never shares, nor touches the record of, a file someone
+    # else owns (another's file reaches an assistant through a knowledge base, whose access is checked live).
+    files = [file for file in await Files.get_files_by_ids(ids) if file.user_id == model.user_id] if ids else []
+    if not files:
         await _delete_collection(model_id, client)
         return False
     key = await ensure_collection(model, client)
     documents = {document['source_id'] async for document in client.pages(_path(key) + '/documents', as_user=None)}
     owner = f'owui:user:{model.user_id}'
-    for stale in sorted(documents - set(ids)):
+    for stale in sorted(documents - {file.id for file in files}):
         await client.send(
             'DELETE',
             f'{_path(key)}/documents/{quote(stale, safe="")}',
@@ -124,7 +127,7 @@ async def sync(model_id: str, *, client: SoevClient | None = None) -> bool:
             idempotency_key=f'assistant-file-delete:{key}:{stale}:{uuid4()}',
         )
     waiting = False
-    for file in await Files.get_files_by_ids(ids):
+    for file in files:
         meta = file.meta or {}
         job = meta.get('soev_job')
         if job is not None:

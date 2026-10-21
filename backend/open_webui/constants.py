@@ -71,6 +71,10 @@ class ERROR_MESSAGES(str, Enum):
         'You do not have permission to access this resource. Please contact your administrator for assistance.'
     )
     ACTION_PROHIBITED = 'The requested action has been restricted as a security measure.'
+    MODEL_FILE_NOT_OWNED = (
+        "A model's files must belong to its owner. Remove the files you do not own, or add the knowledge base "
+        'that holds them instead.'
+    )
 
     FILE_NOT_SENT = 'FILE_NOT_SENT'
     FILE_NOT_SUPPORTED = "Oops! It seems like the file format you're trying to upload is not supported. Please upload a file with a supported format and try again."
