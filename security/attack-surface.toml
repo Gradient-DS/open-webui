@@ -752,6 +752,14 @@ body = { input = { type = "start", title = "attack-meeting-{token}", consent = {
 extract = "id"
 actor = "admin"
 
+[[parameter]]
+backed_by = "soev-solutions"
+key = "agent_thread"
+name = "thread_id"
+prefix = "/api/v1/agent-threads/{thread_id}"
+description = "routers/agent_threads.py reads a soev-api chat thread the caller owns; a meeting id is such a thread, started by the admin."
+same_as = "meeting"
+
 [[destructive]]
 id = "POST /api/v1/auths/signout"
 reason = "Revokes the caller JWT jti when Redis is present. CI runs real Redis; the same bearer cannot drive subsequent routes."
