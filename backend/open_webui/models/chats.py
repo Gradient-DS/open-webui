@@ -2738,8 +2738,10 @@ class ChatTable:
         except Exception:
             return False
 
-    async def get_shared_chat_ids_by_file_id(self, file_id: str, db: AsyncSession | None = None) -> list[str]:
-        """Return IDs of live chats whose share snapshot holds this file in the message it was attached to.
+    async def get_shared_chat_ids_by_file_id(
+        self, file_id: str, *, user_id: str, db: AsyncSession | None = None
+    ) -> list[str]:
+        """Return IDs of the user's live chats whose share snapshot holds this file in the message it was attached to.
 
         A file attached after the snapshot was taken is not part of the share."""
         from open_webui.models.shared_chats import SharedChat as SharedChatTable
@@ -2749,7 +2751,7 @@ class ChatTable:
                 select(SharedChatTable.chat_id, SharedChatTable.chat, ChatFile.message_id)
                 .join(ChatFile, ChatFile.chat_id == SharedChatTable.chat_id)
                 .join(Chat, Chat.id == SharedChatTable.chat_id)
-                .filter(ChatFile.file_id == file_id, Chat.deleted_at.is_(None))
+                .filter(ChatFile.file_id == file_id, Chat.user_id == user_id, Chat.deleted_at.is_(None))
             )
             chat_ids = []
             for chat_id, snapshot, message_id in result.all():
