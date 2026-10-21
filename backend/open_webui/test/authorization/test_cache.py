@@ -105,3 +105,12 @@ def test_only_data_exports_are_served(cache, path, role):
     assert response.status_code == 404
     assert b'shared cache entry' not in response.content
     assert EXPORT not in response.content
+
+
+def test_export_file_name_is_unguessable(application, monkeypatch, tmp_path):
+    from open_webui.services.export import service
+
+    monkeypatch.setattr(service, 'EXPORT_DIR', tmp_path)
+    names = {asyncio.run(service.ExportService.build_export_zip('alice', {})).name for _ in range(2)}
+    assert len(names) == 2
+    assert all(len(name.removeprefix('export-').removesuffix('.zip').split('-', 1)[1]) >= 32 for name in names)
