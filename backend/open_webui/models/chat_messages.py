@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import distinct
 from open_webui.internal.db import Base, get_async_db_context
+from open_webui.models.files import strip_file_paths
 from open_webui.utils.response import merge_usage, normalize_usage
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import (
@@ -227,7 +228,7 @@ class ChatMessageTable:
         if 'assistant_id' in data:
             message.assistant_id = data.get('assistant_id')
         if 'files' in data:
-            message.files = data.get('files')
+            message.files = strip_file_paths(data.get('files'))
         if 'sources' in data:
             message.sources = data.get('sources')
         if 'embeds' in data:
@@ -267,7 +268,7 @@ class ChatMessageTable:
             output=data.get('output'),
             model_id=data.get('model_id') or data.get('model'),
             assistant_id=data.get('assistant_id'),  # [Gradient] Split assistant identity.
-            files=data.get('files'),
+            files=strip_file_paths(data.get('files')),
             sources=data.get('sources'),
             embeds=data.get('embeds'),
             meta=data.get('meta'),

@@ -1,12 +1,13 @@
 import time
 import uuid
-from typing import Optional
+from typing import Annotated, Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.channels import ChannelMember, Channels
+from open_webui.models.files import strip_file_paths
 from open_webui.models.tags import Tag, TagModel, Tags
 from open_webui.models.users import User, UserNameResponse, Users
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator
 from sqlalchemy import JSON, BigInteger, Boolean, Column, String, Text, and_, delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import exists
@@ -58,6 +59,10 @@ class Message(Base):
     updated_at = Column(BigInteger)  # time_ns
 
 
+# Message data can embed File records; their storage paths never reach the client.
+MessageData = Annotated[Optional[dict], BeforeValidator(strip_file_paths)]
+
+
 class MessageModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -74,7 +79,7 @@ class MessageModel(BaseModel):
     pinned_at: Optional[int] = None  # timestamp in epoch (time_ns)
 
     content: str
-    data: Optional[dict] = None
+    data: MessageData = None
     meta: Optional[dict] = None
 
     created_at: int  # timestamp in epoch (time_ns)
@@ -91,7 +96,7 @@ class MessageForm(BaseModel):
     content: str
     reply_to_id: Optional[str] = None
     parent_id: Optional[str] = None
-    data: Optional[dict] = None
+    data: MessageData = None
     meta: Optional[dict] = None
 
 

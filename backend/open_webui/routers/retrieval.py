@@ -2382,6 +2382,7 @@ async def process_url(
             refreshed_file = await Files.get_file_by_id(file_id)
             if refreshed_file:
                 file_data = refreshed_file.model_dump()
+        file_data.pop('path', None)
         return {
             'status': True,
             'type': 'image' if is_image else 'file',

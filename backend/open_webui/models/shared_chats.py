@@ -4,6 +4,7 @@ import uuid
 from typing import Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
+from open_webui.models.files import strip_file_paths
 from open_webui.models.ordering import request_order
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import JSON, BigInteger, Column, ForeignKey, Text, delete, select
@@ -79,7 +80,7 @@ class SharedChatsTable:
                 chat_id=chat_id,
                 user_id=user_id,
                 title=chat.title,
-                chat=chat.chat,
+                chat=strip_file_paths(chat.chat),
                 created_at=now,
                 updated_at=now,
             )
@@ -105,7 +106,7 @@ class SharedChatsTable:
                 return None
 
             shared_chat.title = chat.title
-            shared_chat.chat = chat.chat
+            shared_chat.chat = strip_file_paths(chat.chat)
             shared_chat.updated_at = int(time.time())
 
             await db.commit()
