@@ -465,3 +465,13 @@ def test_archive_of_living_user_needs_chat_flag(seeded, bypass, monkeypatch):
     assert response.status_code == (200 if bypass else 403), response.text
     with Session(seeded.engine) as db:
         assert (db.query(UserArchive).count() == 1) is bypass
+
+
+def test_oauth_sessions_never_return_tokens(seeded, bypass):
+    from open_webui.models.oauth_sessions import OAuthSessions
+
+    seeded.run(OAuthSessions.create_session, 'owner', 'microsoft', {'access_token': 'secret-access', 'id_token': 'x'})
+    response = seeded.client.get('/api/v1/users/owner/oauth/sessions', headers=seeded.headers('admin'))
+    assert response.status_code == 200, response.text
+    assert 'secret-access' not in response.text and 'token' not in response.json()[0]
+    assert set(response.json()[0]) == {'id', 'user_id', 'provider', 'expires_at', 'created_at'}

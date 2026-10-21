@@ -23,7 +23,7 @@ from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chats
 from open_webui.services.remaining_request_bodies import user_info_body, user_settings_body
 from open_webui.models.groups import Groups
-from open_webui.models.oauth_sessions import OAuthSessions
+from open_webui.models.oauth_sessions import OAuthSessionResponse, OAuthSessions
 from open_webui.models.users import (
     UserGroupIdsListResponse,
     UserGroupIdsModel,
@@ -840,13 +840,14 @@ async def get_user_info_by_id(
         )
 
 
-@router.get('/{user_id}/oauth/sessions')
+@router.get('/{user_id}/oauth/sessions', response_model=list[OAuthSessionResponse])
 async def get_user_oauth_sessions_by_id(
     user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
 ):
+    """Session metadata only: the tokens are the user's credentials, never an admin's to read."""
     sessions = await OAuthSessions.get_sessions_by_user_id(user_id, db=db)
     if sessions and len(sessions) > 0:
-        return sessions
+        return [OAuthSessionResponse.model_validate(session.model_dump()) for session in sessions]
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

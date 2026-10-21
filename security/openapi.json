@@ -13656,6 +13656,39 @@
         "title": "OAuthConfigResponse",
         "type": "object"
       },
+      "OAuthSessionResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "provider",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "OAuthSessionResponse",
+        "type": "object"
+      },
       "PickerAttachment": {
         "additionalProperties": false,
         "properties": {
@@ -47779,6 +47812,7 @@
     },
     "/api/v1/users/{user_id}/oauth/sessions": {
       "get": {
+        "description": "Session metadata only: the tokens are the user's credentials, never an admin's to read.",
         "operationId": "get_user_oauth_sessions_by_id_api_v1_users__user_id__oauth_sessions_get",
         "parameters": [
           {
@@ -47795,7 +47829,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OAuthSessionResponse"
+                  },
+                  "title": "Response Get User Oauth Sessions By Id Api V1 Users  User Id  Oauth Sessions Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
