@@ -19,6 +19,9 @@ def cache(application, monkeypatch, tmp_path):
         (root / 'exports' / owner).mkdir(parents=True)
         (root / 'exports' / owner / 'export-1.zip').write_bytes(f'PK-{owner}-export'.encode())
     (tmp_path / 'outside.txt').write_text('outside')
+    for shared in ('audio/speech/0123abcd.json', 'audio/speech/0123abcd.mp3', 'pipelines/pipe.py', 'tools/t1/out.txt'):
+        (root / shared).parent.mkdir(parents=True, exist_ok=True)
+        (root / shared).write_text('shared cache entry')
     monkeypatch.setattr(main, 'CACHE_DIR', root)
 
     caller = SimpleNamespace(id='bob', role='user')
@@ -82,3 +85,23 @@ def test_handler_rejects_unnormalized_paths(cache, path):
     with pytest.raises(HTTPException) as raised:
         asyncio.run(serve_cache_file(path=path, user=SimpleNamespace(id='bob', role='admin')))
     assert raised.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    'path',
+    (
+        'audio/speech/0123abcd.json',
+        'audio/speech/0123abcd.mp3',
+        'pipelines/pipe.py',
+        'tools/t1/out.txt',
+        'exports/bob/../../audio/speech/0123abcd.json',
+        'Exports/alice/export-1.zip',
+    ),
+)
+@pytest.mark.parametrize('role', ('user', 'admin'))
+def test_only_data_exports_are_served(cache, path, role):
+    cache.caller.role = role
+    response = cache.client.get(f'/cache/{path}')
+    assert response.status_code == 404
+    assert b'shared cache entry' not in response.content
+    assert EXPORT not in response.content

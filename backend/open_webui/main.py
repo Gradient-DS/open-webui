@@ -3579,11 +3579,11 @@ async def serve_cache_file(
     path: str,
     user=Depends(get_verified_user),
 ):
-    """Serve cached files (e.g. tool outputs) with path-traversal protection.
+    """Serve the caller's own data export (exports/<user id>/<file>).
 
-    Only ``image/*``, ``audio/*``, and ``video/*`` MIME types are served inline;
-    everything else gets a ``Content-Disposition: attachment`` header to prevent
-    XSS from user-generated HTML stored in the cache directory.
+    The rest of the cache (speech, pipelines, tool and function dirs) is shared
+    or admin data and is never served here. Only ``image/*``, ``audio/*`` and
+    ``video/*`` MIME types are served inline; everything else is an attachment.
     """
     # Authorize on the resolved path: a check on the raw path is bypassed by
     # dot segments (exports/<me>/../<other>/...) that resolve elsewhere.
@@ -3594,8 +3594,8 @@ async def serve_cache_file(
     except (OSError, RuntimeError, ValueError):
         raise HTTPException(status_code=404, detail='File not found')
 
-    # [Gradient] A data export is readable by its owner only, admins included.
-    if parts and parts[0] == 'exports' and (len(parts) != 3 or parts[1] != user.id):
+    # [Gradient] Only data exports are served, each to its owner only, admins included.
+    if len(parts) != 3 or parts[0] != 'exports' or parts[1] != user.id:
         raise HTTPException(status_code=404, detail='File not found')
 
     if not os.path.isfile(file_path):
