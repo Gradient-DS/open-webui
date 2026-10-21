@@ -81,6 +81,8 @@
 				showFileNavPath.set(filesystemPath);
 			} else if (openInPanel && opensInPanel(item) && openInPanel(item)) {
 				// [Gradient] Opened in the chat's sources panel.
+			} else if (openInPanel && item?.type === 'file' && !item.id) {
+				// [Gradient] Not stored yet: nothing to show; the panel opens it once it has an id.
 			} else if (
 				(typeof item?.file === 'object' && item.file?.data?.content) ||
 				item?.type === 'file' ||

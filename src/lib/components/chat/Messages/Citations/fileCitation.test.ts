@@ -5,10 +5,12 @@ describe('opensInPanel', () => {
 	it('opens stored chat files, processing ones included', () => {
 		expect(opensInPanel({ type: 'file', id: 'f1', status: 'uploaded' })).toBe(true);
 		expect(opensInPanel({ type: 'file', id: 'f1', status: 'processing' })).toBe(true);
+		// The composer keeps a stored file `uploading` until processing completes.
+		expect(opensInPanel({ type: 'file', id: 'f1', status: 'uploading' })).toBe(true);
 	});
 
-	it('keeps the modal for uploads, collections and missing items', () => {
-		expect(opensInPanel({ type: 'file', id: 'f1', status: 'uploading' })).toBe(false);
+	it('leaves out unstored files, collections and missing items', () => {
+		expect(opensInPanel({ type: 'file', id: null, status: 'uploading' })).toBe(false);
 		expect(opensInPanel({ type: 'file', id: null })).toBe(false);
 		expect(opensInPanel({ type: 'collection', id: 'kb1' })).toBe(false);
 		expect(opensInPanel(null)).toBe(false);
