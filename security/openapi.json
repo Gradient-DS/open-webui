@@ -34515,7 +34515,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/FileModel"
+                      "$ref": "#/components/schemas/FileModelResponse"
                     },
                     {
                       "type": "null"
@@ -34939,7 +34939,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FileModelResponse"
+                }
               }
             },
             "description": "Successful Response"
