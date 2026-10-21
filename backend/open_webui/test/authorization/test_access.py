@@ -307,17 +307,21 @@ def test_shared_chat_reference_does_not_outlive_revoked_file_access(seeded):
     async def check():
         from open_webui.models.access_grants import AccessGrants
         from open_webui.models.chats import Chat, Chats
+        from open_webui.models.shared_chats import SharedChats
         from open_webui.models.users import Users
         from open_webui.utils.access_control.files import has_access_to_file
 
         await seed_resource(seeded, 'file')
+        # The share snapshot holds the file in the message it is linked to (a share covers only its snapshot).
+        message = {'id': 'message', 'role': 'user', 'content': 'x', 'files': [{'type': 'file', 'id': 'target'}]}
+        chat = {'title': 't', 'history': {'messages': {'message': message}, 'currentId': 'message'}}
         async with seeded.sessions() as db:
             for chat_id, owner in (('reader-chat', 'reader'), ('owner-chat', 'owner')):
-                db.add(Chat(id=chat_id, user_id=owner, title='t', chat={}, meta={}, created_at=1, updated_at=1))
+                db.add(Chat(id=chat_id, user_id=owner, title='t', chat=chat, meta={}, created_at=1, updated_at=1))
             await db.commit()
             for chat_id, owner in (('reader-chat', 'reader'), ('owner-chat', 'owner')):
                 assert await Chats.insert_chat_files(chat_id, 'message', ['target'], owner, db=db)
-                await Chats.update_chat_share_id_by_id(chat_id, f'share-{chat_id}', db=db)
+                assert await SharedChats.create(chat_id, owner, db=db)
             await AccessGrants.set_access_grants('shared_chat', 'reader-chat', OUTSIDER_READ, db=db)
             outsider = await Users.get_user_by_id('outsider', db=db)
             reader = await Users.get_user_by_id('reader', db=db)
