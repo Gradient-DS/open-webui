@@ -464,6 +464,9 @@ openWebui:
     enableAdminChatAccess: "false"
     enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
     bypassAdminAccessControl: "false"  # Admin must follow access control
+    # Tools and Functions run admin-written Python in the pod, which holds the
+    # tenant's credentials. Off unless a tenant needs them.
+    enablePlugins: "false"
     showAdminDetails: "false"
     enableEvaluationArenaModels: "false"
     enableApiKeys: "false"

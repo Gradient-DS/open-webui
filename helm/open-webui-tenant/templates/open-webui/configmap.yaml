@@ -323,6 +323,7 @@ data:
   ENABLE_ADMIN_CHAT_ACCESS: {{ .Values.openWebui.config.enableAdminChatAccess | quote }}
   ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS: {{ .Values.openWebui.config.enableAdminWorkspaceContentAccess | quote }}
   BYPASS_ADMIN_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassAdminAccessControl | quote }}
+  ENABLE_PLUGINS: {{ .Values.openWebui.config.enablePlugins | quote }}
   SHOW_ADMIN_DETAILS: {{ .Values.openWebui.config.showAdminDetails | quote }}
   ENABLE_EVALUATION_ARENA_MODELS: {{ .Values.openWebui.config.enableEvaluationArenaModels | quote }}
   ENABLE_API_KEYS: {{ .Values.openWebui.config.enableApiKeys | quote }}
