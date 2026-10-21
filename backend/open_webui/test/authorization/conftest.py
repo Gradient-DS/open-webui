@@ -32,6 +32,7 @@ MODULES = (
     'utils',
     'calendar',
     'analytics',
+    'archives',
 )
 
 

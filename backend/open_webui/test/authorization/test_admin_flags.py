@@ -412,3 +412,56 @@ def test_analytics_messages_skip_deleted_chats(seeded, monkeypatch, query):
     response = seeded.client.get(f'/api/v1/analytics/messages?{query}', headers=seeded.headers('admin'))
     assert response.status_code == 200, response.text
     assert response.json() == []
+
+
+def seed_archive(seeded, owner):
+    from open_webui.models.user_archives import UserArchive
+
+    with Session(seeded.engine) as db:
+        db.add(
+            UserArchive(
+                id='archive',
+                user_id=owner,
+                user_email=f'{owner}@acl.invalid',
+                user_name=owner,
+                reason='test',
+                archived_by='system:retention',
+                data={'chats': [{'title': 'private'}]},
+                created_at=1,
+                updated_at=1,
+            )
+        )
+        db.commit()
+
+
+@pytest.mark.parametrize('owner', ['owner', 'admin'])
+@pytest.mark.parametrize('suffix', ['', '/export'])
+def test_archive_content_needs_chat_flag(seeded, bypass, monkeypatch, owner, suffix):
+    from open_webui import config
+
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    seed_archive(seeded, owner)
+    seeded.client.post(
+        '/api/v1/archives/admin/config', json={'enable_user_archival': True}, headers=seeded.headers('admin')
+    )
+    response = seeded.client.get('/api/v1/archives/archive' + suffix, headers=seeded.headers('admin'))
+    allowed = bypass or owner == 'admin'
+    assert response.status_code == (200 if allowed else 403), response.text
+    assert ('private' in response.text) is allowed
+
+
+def test_archive_of_living_user_needs_chat_flag(seeded, bypass, monkeypatch):
+    from open_webui import config
+    from open_webui.models.user_archives import UserArchive
+
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    seeded.run(seed_resource, seeded, 'chat')
+    # An admin can flip archival on, so the config switch must not be what protects the chats.
+    enabled = seeded.client.post(
+        '/api/v1/archives/admin/config', json={'enable_user_archival': True}, headers=seeded.headers('admin')
+    )
+    assert enabled.status_code == 200, enabled.text
+    response = seeded.client.post('/api/v1/archives/user/owner', json={'reason': 'x'}, headers=seeded.headers('admin'))
+    assert response.status_code == (200 if bypass else 403), response.text
+    with Session(seeded.engine) as db:
+        assert (db.query(UserArchive).count() == 1) is bypass
