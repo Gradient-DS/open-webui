@@ -31,6 +31,8 @@ MODULES = (
     'evaluations',
     'utils',
     'calendar',
+    'analytics',
+    'archives',
 )
 
 

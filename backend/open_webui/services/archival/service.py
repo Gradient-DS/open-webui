@@ -141,24 +141,6 @@ class ArchiveService:
         return result
 
     @staticmethod
-    async def get_exportable_chats(archive_id: str) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get chats from an archive in the native Open WebUI export format.
-        This can be directly imported using Settings > Data Controls > Import Chats.
-
-        Returns:
-            List of chats in export format, or None if archive not found
-        """
-        from open_webui.models.user_archives import UserArchives
-
-        archive = await UserArchives.get_archive_by_id(archive_id)
-        if not archive:
-            return None
-
-        data = archive.data
-        return data.get('chats', [])
-
-    @staticmethod
     async def cleanup_expired_archives() -> Dict[str, int]:
         """
         Delete archives past their retention period.

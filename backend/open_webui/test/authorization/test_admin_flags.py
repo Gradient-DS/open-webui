@@ -349,3 +349,129 @@ def test_workspace_nested_content(seeded, bypass, kind, suffix):
     seeded.run(seed_resource, seeded, kind)
     response = seeded.client.get(f'/api/v1/{kind}s/id/target{suffix}', headers=seeded.headers('admin'))
     assert response.status_code == 200 if bypass else response.status_code in (401, 403), response.text
+
+
+def seed_chat_message(seeded, deleted=False):
+    from open_webui.models.chat_messages import ChatMessage
+    from open_webui.models.chats import Chat
+
+    seeded.run(seed_resource, seeded, 'chat')
+    with Session(seeded.engine) as db:
+        db.execute(update(Chat).where(Chat.id == 'target').values(deleted_at=1 if deleted else None))
+        db.add(
+            ChatMessage(
+                id='target-message',
+                chat_id='target',
+                user_id='owner',
+                role='assistant',
+                content='private',
+                model_id='model',
+                created_at=1,
+                updated_at=1,
+            )
+        )
+        db.commit()
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        '/analytics/messages?chat_id=target',
+        '/analytics/messages?user_id=owner',
+        '/analytics/messages?model_id=model',
+        '/analytics/models/model/chats',
+    ],
+)
+def test_analytics_content_needs_chat_flag(seeded, bypass, monkeypatch, path):
+    from open_webui import config
+
+    # Only the chat flag decides; the other admin flags must not open it.
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_EXPORT', True)
+    seed_chat_message(seeded)
+    response = seeded.client.get('/api/v1' + path, headers=seeded.headers('admin'))
+    assert response.status_code == (200 if bypass else 403), response.text
+    if bypass:
+        assert 'private' in response.text or 'original' in response.text
+
+
+@pytest.mark.parametrize('path', ['/analytics/summary', '/analytics/models', '/analytics/users', '/analytics/tokens'])
+def test_analytics_aggregates_stay_open(seeded, bypass, path):
+    seed_chat_message(seeded)
+    response = seeded.client.get('/api/v1' + path, headers=seeded.headers('admin'))
+    assert response.status_code == 200, response.text
+    assert 'private' not in response.text and 'original' not in response.text
+
+
+@pytest.mark.parametrize('query', ['chat_id=target', 'user_id=owner', 'model_id=model'])
+def test_analytics_messages_skip_deleted_chats(seeded, monkeypatch, query):
+    from open_webui import config
+
+    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
+    seed_chat_message(seeded, deleted=True)
+    response = seeded.client.get(f'/api/v1/analytics/messages?{query}', headers=seeded.headers('admin'))
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+
+
+def seed_archive(seeded, owner):
+    from open_webui.models.user_archives import UserArchive
+
+    with Session(seeded.engine) as db:
+        db.add(
+            UserArchive(
+                id='archive',
+                user_id=owner,
+                user_email=f'{owner}@acl.invalid',
+                user_name=owner,
+                reason='test',
+                archived_by='system:retention',
+                data={'chats': [{'title': 'private'}]},
+                created_at=1,
+                updated_at=1,
+            )
+        )
+        db.commit()
+
+
+@pytest.mark.parametrize('owner', ['owner', 'admin'])
+@pytest.mark.parametrize('suffix', ['', '/export'])
+def test_archive_content_needs_chat_flag(seeded, bypass, monkeypatch, owner, suffix):
+    from open_webui import config
+
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    seed_archive(seeded, owner)
+    seeded.client.post(
+        '/api/v1/archives/admin/config', json={'enable_user_archival': True}, headers=seeded.headers('admin')
+    )
+    response = seeded.client.get('/api/v1/archives/archive' + suffix, headers=seeded.headers('admin'))
+    allowed = bypass or owner == 'admin'
+    assert response.status_code == (200 if allowed else 403), response.text
+    assert ('private' in response.text) is allowed
+
+
+def test_archive_of_living_user_needs_chat_flag(seeded, bypass, monkeypatch):
+    from open_webui import config
+    from open_webui.models.user_archives import UserArchive
+
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
+    seeded.run(seed_resource, seeded, 'chat')
+    # An admin can flip archival on, so the config switch must not be what protects the chats.
+    enabled = seeded.client.post(
+        '/api/v1/archives/admin/config', json={'enable_user_archival': True}, headers=seeded.headers('admin')
+    )
+    assert enabled.status_code == 200, enabled.text
+    response = seeded.client.post('/api/v1/archives/user/owner', json={'reason': 'x'}, headers=seeded.headers('admin'))
+    assert response.status_code == (200 if bypass else 403), response.text
+    with Session(seeded.engine) as db:
+        assert (db.query(UserArchive).count() == 1) is bypass
+
+
+def test_oauth_sessions_never_return_tokens(seeded, bypass):
+    from open_webui.models.oauth_sessions import OAuthSessions
+
+    seeded.run(OAuthSessions.create_session, 'owner', 'microsoft', {'access_token': 'secret-access', 'id_token': 'x'})
+    response = seeded.client.get('/api/v1/users/owner/oauth/sessions', headers=seeded.headers('admin'))
+    assert response.status_code == 200, response.text
+    assert 'secret-access' not in response.text and 'token' not in response.json()[0]
+    assert set(response.json()[0]) == {'id', 'user_id', 'provider', 'expires_at', 'created_at'}

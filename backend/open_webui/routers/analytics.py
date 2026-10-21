@@ -3,13 +3,15 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
 from open_webui.models.chat_messages import ChatMessageModel, ChatMessages
 from open_webui.models.chats import Chats
 from open_webui.models.feedbacks import Feedbacks
 from open_webui.models.groups import Groups
 from open_webui.models.users import Users
+from open_webui.utils.access_control import can_access_admin_chats
 from open_webui.utils.auth import get_admin_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,13 @@ log = logging.getLogger(__name__)
 
 
 router = APIRouter()
+
+
+def get_admin_chat_reader(user=Depends(get_admin_user)):
+    """Admin who may read other users' chats; aggregate endpoints only need get_admin_user."""
+    if not can_access_admin_chats(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+    return user
 
 
 ####################
@@ -131,26 +140,22 @@ async def get_messages(
     end_date: Optional[int] = Query(None, description='End timestamp (epoch)'),
     skip: int = Query(0),
     limit: int = Query(50, le=100),
-    user=Depends(get_admin_user),
+    user=Depends(get_admin_chat_reader),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Query messages with filters."""
-    if chat_id:
-        return await ChatMessages.get_messages_by_chat_id(chat_id=chat_id, db=db)
-    elif model_id:
-        return await ChatMessages.get_messages_by_model_id(
-            model_id=model_id,
-            start_date=start_date,
-            end_date=end_date,
-            skip=skip,
-            limit=limit,
-            db=db,
-        )
-    elif user_id:
-        return await ChatMessages.get_messages_by_user_id(user_id=user_id, skip=skip, limit=limit, db=db)
-    else:
-        # Return empty if no filter specified
+    """Query messages of live chats; every given filter applies."""
+    if not (chat_id or model_id or user_id):
         return []
+    return await ChatMessages.get_live_messages(
+        chat_id=chat_id,
+        model_id=model_id,
+        user_id=user_id,
+        start_date=start_date,
+        end_date=end_date,
+        skip=skip,
+        limit=limit,
+        db=db,
+    )
 
 
 class SummaryResponse(BaseModel):
@@ -291,7 +296,7 @@ async def get_model_chats(
     limit: int = Query(50, le=100),
     order_by: str = Query('updated_at'),
     direction: str = Query('desc'),
-    user=Depends(get_admin_user),
+    user=Depends(get_admin_chat_reader),
     db: AsyncSession = Depends(get_async_session),
 ):
     """Get chats that used a specific model, with preview and feedback info."""

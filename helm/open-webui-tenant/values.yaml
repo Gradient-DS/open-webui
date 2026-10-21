@@ -462,6 +462,7 @@ openWebui:
     enableDataExport: "true"
     dataExportRetentionHours: "24"
     enableAdminChatAccess: "false"
+    enableAdminAnalytics: "true"  # Aggregate usage only; message content and chat titles also need enableAdminChatAccess
     enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
     bypassAdminAccessControl: "false"  # Admin must follow access control
     # Tools and Functions run admin-written Python in the pod, which holds the
