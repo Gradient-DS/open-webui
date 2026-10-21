@@ -663,10 +663,11 @@ async def _texts(
                 or (can_bypass_access_control(user) if kind == 'note' else can_access_admin_chats(user))
             )
         )
-        if item and user and not allowed:
+        # A shared_chat grant covers the share snapshot only, never the live chat.
+        if item and user and not allowed and kind == 'note':
             allowed = await AccessGrants.has_access(
                 user_id=user.id,
-                resource_type='note' if kind == 'note' else 'shared_chat',
+                resource_type='note',
                 resource_id=item.id,
                 permission='read',
             )

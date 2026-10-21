@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -17,7 +18,7 @@ from typing import Optional
 # local imports
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.ordering import request_order
-from open_webui.models.access_grants import AccessGrants
+from open_webui.models.access_grants import AccessGrant
 from open_webui.models.automations import AutomationRun
 from open_webui.models.chat_messages import ChatMessage, ChatMessages
 from open_webui.models.folders import Folders
@@ -1819,15 +1820,7 @@ class ChatTable:
         if can_access_admin_chats(user):
             return chat
 
-        if await AccessGrants.has_access(
-            user_id=user.id,
-            resource_type='shared_chat',
-            resource_id=id,
-            permission='read',
-            db=db,
-        ):
-            return chat
-
+        # A shared_chat grant covers the share snapshot only, never the live chat.
         if chat.folder_id:
             from open_webui.utils.access_control.folders import has_folder_access
 
@@ -2592,8 +2585,9 @@ class ChatTable:
     async def soft_delete_by_user_id_and_folder_id(
         self, user_id: str, folder_id: str, db: Optional[AsyncSession] = None
     ) -> int:
-        """Soft-delete all chats in a folder for a user. Returns count of affected rows."""
+        """Soft-delete all chats in a folder for a user and revoke their shares. Returns count of affected rows."""
         async with get_async_db_context(db) as db:
+            await self._unshare(db, select(Chat.id).filter_by(user_id=user_id, folder_id=folder_id))
             result = await db.execute(
                 update(Chat)
                 .filter_by(user_id=user_id, folder_id=folder_id)
@@ -2745,15 +2739,24 @@ class ChatTable:
             return False
 
     async def get_shared_chat_ids_by_file_id(self, file_id: str, db: AsyncSession | None = None) -> list[str]:
-        """Return IDs of chats that contain this file and have an active share link."""
+        """Return IDs of live chats whose share snapshot holds this file in the message it was attached to.
+
+        A file attached after the snapshot was taken is not part of the share."""
+        from open_webui.models.shared_chats import SharedChat as SharedChatTable
+
         async with get_async_db_context(db) as session:
             result = await session.execute(
-                select(Chat.id)
-                .join(ChatFile, Chat.id == ChatFile.chat_id)
-                .filter(ChatFile.file_id == file_id, Chat.share_id.isnot(None))
-                .filter(Chat.deleted_at.is_(None))
+                select(SharedChatTable.chat_id, SharedChatTable.chat, ChatFile.message_id)
+                .join(ChatFile, ChatFile.chat_id == SharedChatTable.chat_id)
+                .join(Chat, Chat.id == SharedChatTable.chat_id)
+                .filter(ChatFile.file_id == file_id, Chat.deleted_at.is_(None))
             )
-            return [row[0] for row in result.all()]
+            chat_ids = []
+            for chat_id, snapshot, message_id in result.all():
+                message = ((snapshot or {}).get('history') or {}).get('messages', {}).get(message_id) or {}
+                if file_id in json.dumps(message.get('files') or []) and chat_id not in chat_ids:
+                    chat_ids.append(chat_id)
+            return chat_ids
 
     async def update_chat_tasks_by_id(self, id: str, tasks: list[dict]) -> ChatModel | None:
         """Update the tasks list on a chat."""
@@ -2807,9 +2810,23 @@ class ChatTable:
             result = await db.execute(stmt)
             return [ChatModel.model_validate(chat) for chat in result.scalars().all()]
 
+    @staticmethod
+    async def _unshare(db: AsyncSession, chat_ids) -> None:
+        """Drop the share snapshots and shared_chat grants of `chat_ids` (a list or select) in `db`."""
+        from open_webui.models.shared_chats import SharedChat as SharedChatTable
+
+        await db.execute(
+            delete(AccessGrant).filter(
+                AccessGrant.resource_type == 'shared_chat', AccessGrant.resource_id.in_(chat_ids)
+            )
+        )
+        await db.execute(delete(SharedChatTable).filter(SharedChatTable.chat_id.in_(chat_ids)))
+        await db.execute(update(Chat).filter(Chat.id.in_(chat_ids)).values(share_id=None))
+
     async def soft_delete_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
-        """Mark a chat as deleted (soft-delete)."""
+        """Mark a chat as deleted (soft-delete) and revoke its shares."""
         async with get_async_db_context(db) as db:
+            await self._unshare(db, [id])
             result = await db.execute(
                 update(Chat).filter_by(id=id).filter(Chat.deleted_at.is_(None)).values(deleted_at=int(time.time()))
             )
@@ -2817,8 +2834,9 @@ class ChatTable:
             return result.rowcount > 0
 
     async def soft_delete_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> int:
-        """Soft-delete all chats for a user. Returns count of affected rows."""
+        """Soft-delete all chats for a user and revoke their shares. Returns count of affected rows."""
         async with get_async_db_context(db) as db:
+            await self._unshare(db, select(Chat.id).filter_by(user_id=user_id))
             result = await db.execute(
                 update(Chat)
                 .filter_by(user_id=user_id)
