@@ -23,6 +23,7 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
+from open_webui.models.files import Files
 from open_webui.services.remaining_request_bodies import models_import_body
 from open_webui.models.groups import Groups
 from open_webui.models.models import (
@@ -37,7 +38,6 @@ from open_webui.models.models import (
     Models,
 )
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
-from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.utils.models import get_all_models
@@ -94,30 +94,29 @@ def is_valid_model_id(model_id: str) -> bool:
     return model_id and len(model_id) <= 256
 
 
-async def _verify_knowledge_file_access(
+async def _verify_knowledge_file_ownership(
     knowledge_items: list | None,
-    user,
+    owner_id: str,
     db: AsyncSession,
 ) -> None:
-    """Raise 403 if any knowledge item references a file the caller cannot read."""
-    if not knowledge_items or can_bypass_access_control(user):
+    """Raise 403 unless every file entry of a model's knowledge is a file the model's owner owns.
+
+    A model shares its files with its whole audience, independent of how the editor could read them; someone else's
+    file reaches a model through a knowledge base, whose access is checked on every read."""
+    file_ids = {
+        item.get('id')
+        for item in knowledge_items or []
+        if isinstance(item, dict) and item.get('type') == 'file' and item.get('id')
+    }
+    if not file_ids:
         return
-    for item in knowledge_items:
-        if not isinstance(item, dict) or item.get('type') != 'file':
-            continue
-        file_id = item.get('id')
-        if not file_id:
-            continue
-        if not await has_access_to_file(file_id, 'read', user, db=db):
-            log.warning(
-                'knowledge file access denied: user %s cannot read file %s',
-                user.id,
-                file_id,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-            )
+    owned = {file.id for file in await Files.get_files_by_ids(list(file_ids), db=db) if file.user_id == owner_id}
+    if file_ids - owned:
+        log.warning('model knowledge refused: %d file(s) not owned by the model owner', len(file_ids - owned))
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.MODEL_FILE_NOT_OWNED,
+        )
 
 
 ###########################
@@ -298,9 +297,9 @@ async def create_new_model(
                     detail=ERROR_MESSAGES.MODEL_ID_TAKEN,
                 )
 
-    await _verify_knowledge_file_access(
+    await _verify_knowledge_file_ownership(
         getattr(form_data.meta, 'knowledge', None) if form_data.meta else None,
-        user,
+        user.id,
         db,
     )
 
@@ -423,22 +422,22 @@ async def import_models(
                         # Should never be stored: heal bad exports/API payloads.
                         model_data['base_model_id'] = None
 
-                    # Defense-in-depth: skip models referencing inaccessible files
+                    existing_model = existing_models.get(model_id)
+                    # Skip models holding files their owner does not own
                     try:
-                        await _verify_knowledge_file_access(
+                        await _verify_knowledge_file_ownership(
                             (model_data.get('meta') or {}).get('knowledge'),
-                            user,
+                            existing_model.user_id if existing_model else user.id,
                             db,
                         )
                     except HTTPException:
                         log.warning(
-                            'import_models: user %s skipped model %s (knowledge file access denied)',
+                            'import_models: user %s skipped model %s (knowledge file not owned)',
                             user.id,
                             model_id,
                         )
                         continue
 
-                    existing_model = existing_models.get(model_id)
                     if existing_model:
                         # Enforce ownership/write-access before allowing overwrite
                         if (
@@ -809,9 +808,9 @@ async def update_model_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    await _verify_knowledge_file_access(
+    await _verify_knowledge_file_ownership(
         getattr(form_data.meta, 'knowledge', None) if form_data.meta else None,
-        user,
+        model.user_id,
         db,
     )
 

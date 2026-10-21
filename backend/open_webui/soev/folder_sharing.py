@@ -12,7 +12,7 @@ import asyncio
 import copy
 import logging
 from collections.abc import Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass
 
 from open_webui.models.access_grants import AccessGrants
@@ -23,6 +23,7 @@ from open_webui.models.folders import Folders
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
+from open_webui.socket.main import note_access_change
 from open_webui.soev import acting, folder_files
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
@@ -161,7 +162,10 @@ async def reconcile(owner_id: str, folders: View, *, widen: bool) -> None:
                     {'principal_type': principal_type, 'principal_id': principal_id, 'permission': 'read'}
                     for principal_type, principal_id in sorted(add)
                 ]
-                await AccessGrants.set_access_grants(resource[0], resource[1], grants)
+                # A note's open editors that lose access must leave its rooms.
+                evicting = note_access_change(resource[1]) if resource[0] == 'note' else nullcontext()
+                async with evicting:
+                    await AccessGrants.set_access_grants(resource[0], resource[1], grants)
             if mine - want:
                 await FolderShareGrants.forget(*resource, mine - want)
 

@@ -19,6 +19,7 @@
 	import { getChatById } from '$lib/apis/chats';
 	import { generateTags } from '$lib/apis';
 	import { exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
+	import { downloadAgentTrace } from '$lib/apis/agentThreads'; // [Gradient]
 
 	import {
 		audioQueue,
@@ -100,7 +101,8 @@
 		id: string;
 		model: string;
 		assistant_id?: string; // [Gradient]
-		meta?: { answered_model?: string }; // [Gradient] Set when a fallback answered a v2 turn.
+		// [Gradient] answered_model: set when a fallback answered a v2 turn. agent_v2: the turn's soev-api thread.
+		meta?: { answered_model?: string; agent_v2?: { thread_id?: string } };
 		notices?: string[]; // [Claude] Chat items a v2 turn ran without, shown above its answer.
 		content: string;
 		output?: OutputItem[];
@@ -624,6 +626,21 @@
 		} catch (e) {
 			console.error('Message DOCX export failed:', e);
 			toast.error($i18n.t('Failed to export Word document'));
+		}
+	};
+
+	// [Gradient] The v2 thread behind this answer, for admins: the trace file opens in soev-agents-inspect.
+	$: traceThreadId =
+		$user?.role === 'admin' && $config?.features?.enable_agent_trace_download
+			? (message?.meta?.agent_v2?.thread_id ?? null)
+			: null;
+
+	const downloadMessageTrace = async (threadId: string) => {
+		try {
+			saveAs(await downloadAgentTrace(localStorage.token, threadId), `${threadId}.trace.json`);
+		} catch (e) {
+			console.error('Message trace download failed:', e);
+			toast.error($i18n.t('Failed to download trace'));
 		}
 	};
 
@@ -1643,6 +1660,23 @@
 												>
 													<div class="flex items-center line-clamp-1">
 														{$i18n.t('Word document (.docx)')}
+													</div>
+												</button>
+											{/if}
+											{#if traceThreadId}
+												<button
+													class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
+													on:click={() => {
+														downloadMessageTrace(traceThreadId);
+														showDownloadMenu = false;
+													}}
+												>
+													<div class="flex items-center line-clamp-1">
+														{$i18n.t('Agent trace (.json)')}
+														<span
+															class="ml-1.5 rounded-lg bg-orange-500/15 px-1.5 text-xs font-medium text-orange-700 dark:text-orange-300"
+															>{$i18n.t('dev')}</span
+														>
 													</div>
 												</button>
 											{/if}

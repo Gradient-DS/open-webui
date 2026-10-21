@@ -233,6 +233,9 @@ data:
   # DOCX export
   ENABLE_DOCX_EXPORT: {{ .Values.openWebui.config.enableDocxExport | default "true" | quote }}
 
+  # Agent trace download (admins)
+  ENABLE_AGENT_TRACE_DOWNLOAD: {{ .Values.openWebui.config.enableAgentTraceDownload | default "false" | quote }}
+
   # MCP
   ENABLE_DIRECT_CONNECTIONS: {{ .Values.openWebui.config.enableDirectConnections | quote }}
   USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS: {{ .Values.openWebui.config.userPermissionsFeaturesDirectToolServers | quote }}
@@ -321,8 +324,10 @@ data:
   ENABLE_DATA_EXPORT: {{ .Values.openWebui.config.enableDataExport | quote }}
   DATA_EXPORT_RETENTION_HOURS: {{ .Values.openWebui.config.dataExportRetentionHours | quote }}
   ENABLE_ADMIN_CHAT_ACCESS: {{ .Values.openWebui.config.enableAdminChatAccess | quote }}
+  ENABLE_ADMIN_ANALYTICS: {{ .Values.openWebui.config.enableAdminAnalytics | quote }}
   ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS: {{ .Values.openWebui.config.enableAdminWorkspaceContentAccess | quote }}
   BYPASS_ADMIN_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassAdminAccessControl | quote }}
+  ENABLE_PLUGINS: {{ .Values.openWebui.config.enablePlugins | quote }}
   SHOW_ADMIN_DETAILS: {{ .Values.openWebui.config.showAdminDetails | quote }}
   ENABLE_EVALUATION_ARENA_MODELS: {{ .Values.openWebui.config.enableEvaluationArenaModels | quote }}
   ENABLE_API_KEYS: {{ .Values.openWebui.config.enableApiKeys | quote }}

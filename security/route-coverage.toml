@@ -397,6 +397,11 @@ backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/meetings.py stores meetings as soev-api chat threads and answers 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
 
 [[waived]]
+id = "GET /api/v1/agent-threads/{thread_id}/trace"
+backed_by = "soev-solutions"
+reason = "Backed by soev-solutions; security tested there. routers/agent_threads.py streams a soev-api chat thread export as the admin caller, answers 404 unless ENABLE_AGENT_TRACE_DOWNLOAD is set and 503 without soev-api. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."
+
+[[waived]]
 id = "POST /api/v1/files/onedrive/attach"
 backed_by = "soev-solutions"
 reason = "Backed by soev-solutions; security tested there. routers/live_documents.py attaches OneDrive items through a soev-api live grant. Not driven: the sealed stack runs no soev-solutions service. Anonymous refusal is checked live."

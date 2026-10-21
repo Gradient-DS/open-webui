@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import secrets
 import time
 import zipfile
 from pathlib import Path
@@ -177,8 +178,9 @@ class ExportService:
         for old_file in export_dir.glob('export-*.zip'):
             old_file.unlink()
 
+        # The random part keeps the download path unguessable, independent of the /cache ownership check.
         timestamp = int(time.time())
-        zip_path = export_dir / f'export-{timestamp}.zip'
+        zip_path = export_dir / f'export-{timestamp}-{secrets.token_urlsafe(24)}.zip'
 
         local_file_ids = ExportService._get_local_file_ids(data)
 

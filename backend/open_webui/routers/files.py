@@ -31,18 +31,18 @@ from open_webui.models.config import Config
 from open_webui.models.files import (
     FileForm,
     FileListResponse,
-    FileModel,
     FileModelResponse,
     Files,
 )
 from open_webui.models.knowledge import Knowledges
+from open_webui.models.models import Models
 from open_webui.models.users import Users
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.audio import transcribe
 from open_webui.routers.live_documents import router as live_documents_router
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
-from open_webui.soev import ingest
+from open_webui.soev import assistant_files, ingest
 from open_webui.soev.availability import SoevNotConfigured, configured
 from open_webui.soev.catalog_content import catalog_file, stream_catalog_content  # [Gradient] Catalog files.
 from open_webui.soev.live_documents import stream_original
@@ -772,7 +772,7 @@ async def delete_all_files(
 ############################
 
 
-@router.get('/{id}', response_model=Optional[FileModel])
+@router.get('/{id}', response_model=Optional[FileModelResponse])
 async def get_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     file = await Files.get_file_by_id(id, db=db)
 
@@ -1166,7 +1166,7 @@ class FileRenameForm(BaseModel):
     filename: str
 
 
-@router.post('/{id}/rename')
+@router.post('/{id}/rename', response_model=FileModelResponse)
 async def rename_file_by_id(
     request: Request,
     id: str,
@@ -1231,6 +1231,9 @@ async def delete_file_by_id(
         for knowledge in knowledges:
             # Remove KB-file relationship
             await Knowledges.remove_file_from_knowledge_by_id(knowledge.id, id, db=db)
+        # Detach it from the assistants holding it, and take it out of their collections.
+        for model_id in await Models.remove_file_from_models(id, db=db):
+            assistant_files.schedule(model_id)
         result = await Files.delete_file_by_id(id, db=db)
         if result:
             try:

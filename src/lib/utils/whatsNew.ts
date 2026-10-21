@@ -2,7 +2,7 @@
 
 export type WhatsNewSlide = 'auto_mode' | 'citations' | 'models' | 'outlook' | 'onedrive';
 
-export type KnownModel = { name: string; match: RegExp; description: string };
+export type KnownModel = { match: RegExp; description: string };
 
 export type Release = {
 	/** major.minor: patch releases keep their minor's tour, so 1.3.1 does not show it again. */
@@ -10,7 +10,7 @@ export type Release = {
 	notesUrl: string;
 	/** In order; each shows only when its gate (`SLIDE_GATES`) passes. */
 	slides: WhatsNewSlide[];
-	/** New models, announced to users whose picker lists them unless the tenant names its own. */
+	/** New models, announced by their provider/model id to users whose picker lists them unless the tenant names its own. */
 	models: KnownModel[];
 };
 
@@ -22,17 +22,14 @@ export const RELEASES: Release[] = [
 		slides: ['auto_mode', 'citations', 'models', 'outlook', 'onedrive'],
 		models: [
 			{
-				name: 'GLM-5.3',
 				match: /glm-?5[.-]3(?!-?flash)/i,
 				description: "Z.ai's newest, for complex questions"
 			},
 			{
-				name: 'GLM-5.3 Flash',
 				match: /glm-?5[.-]3-?flash/i,
 				description: 'Fast answers to everyday questions'
 			},
 			{
-				name: 'Mistral Large 4',
 				match: /mistral-large-4/i,
 				description: 'The newest large model from Mistral AI'
 			}
@@ -53,8 +50,8 @@ type PickerModel = {
 };
 
 /**
- * The release's new models among the user's visible base models. A tenant's own list
- * (`WHATS_NEW_MODELS`, per release) replaces the release's; unknown ones go by their catalog name.
+ * The release's new models among the user's visible base models, each by its provider/model id. A tenant's own
+ * list (`WHATS_NEW_MODELS`, per release) replaces the release's.
  */
 export function newModels(
 	release: Release,
@@ -71,12 +68,13 @@ export function newModels(
 			.filter((model) => !!model)
 			.map((model) => {
 				const known = release.models.find((entry) => entry.match.test(model.id));
-				return { name: known?.name ?? (model.name || model.id), description: known?.description };
+				return { name: model.id, description: known?.description };
 			});
 	}
-	return release.models
-		.filter((known) => visible.some((model) => known.match.test(model.id)))
-		.map(({ name, description }) => ({ name, description }));
+	return release.models.flatMap(({ match, description }) => {
+		const model = visible.find((candidate) => match.test(candidate.id));
+		return model ? [{ name: model.id, description }] : [];
+	});
 }
 
 const allowed = (user: User, permission: string) =>

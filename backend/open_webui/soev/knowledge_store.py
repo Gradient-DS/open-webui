@@ -462,18 +462,26 @@ class SoevKnowledgeTable:
         path = self._path(collection['key']) + '/documents/' + quote(source_id, safe='') + '/original'
         return _catalog_file_row(document, user_id), self._client.stream(path, as_user=await self._as_user(user_id))
 
-    async def _references(self, ids, *, user_id=None):
+    async def _references(self, ids, *, user_id=None, as_service=False):
         result = []
         collections = {}
         for source_id in sorted(ids):
-            response = await self._get('/v1/documents', params={'source_id': source_id}, user_id=user_id)
+            params = {'source_id': source_id}
+            if as_service:
+                response = await self._client.get('/v1/documents', as_user=None, params=params)
+            else:
+                response = await self._get('/v1/documents', params=params, user_id=user_id)
             keys = list(
                 dict.fromkeys(
                     doc['collection_key'] for doc in response['data'] if doc['collection_key'] not in collections
                 )
             )
             rows = await asyncio.gather(
-                *(self._collection(key, user_id=user_id) for key in keys), return_exceptions=True
+                *(
+                    self._service_collection(key) if as_service else self._collection(key, user_id=user_id)
+                    for key in keys
+                ),
+                return_exceptions=True,
             )
             for key, row in zip(keys, rows):
                 if isinstance(row, BaseException):
@@ -500,9 +508,11 @@ class SoevKnowledgeTable:
         ]
 
     async def get_referenced_file_ids(self, file_ids, db=None):
+        """The file_ids any knowledge base still holds, read as the service: one the acting user cannot see still
+        counts, so deleting it as an orphan never reaches into someone else's knowledge base."""
         if not file_ids:
             return set()
-        return {document['source_id'] for _, document in await self._references(set(file_ids))}
+        return {document['source_id'] for _, document in await self._references(set(file_ids), as_service=True)}
 
     async def remove_file_from_knowledge_by_id(self, knowledge_id, file_id, db=None):
         from open_webui.models.files import Files

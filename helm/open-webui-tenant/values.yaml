@@ -357,6 +357,10 @@ openWebui:
     # from /utils/chat/docx and /utils/document/docx.
     enableDocxExport: "true"
 
+    # Admins' "Agent trace (.json)" download on agent answers. A trace holds the
+    # assistant's instructions; "false" hides the item and 404s the route.
+    enableAgentTraceDownload: "false"
+
     # MCP/Tool Servers (disabled)
     enableDirectConnections: "false"
     userPermissionsFeaturesDirectToolServers: "false"
@@ -462,8 +466,12 @@ openWebui:
     enableDataExport: "true"
     dataExportRetentionHours: "24"
     enableAdminChatAccess: "false"
+    enableAdminAnalytics: "true"  # Aggregate usage only; message content and chat titles also need enableAdminChatAccess
     enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
     bypassAdminAccessControl: "false"  # Admin must follow access control
+    # Tools and Functions run admin-written Python in the pod, which holds the
+    # tenant's credentials. Off unless a tenant needs them.
+    enablePlugins: "false"
     showAdminDetails: "false"
     enableEvaluationArenaModels: "false"
     enableApiKeys: "false"
