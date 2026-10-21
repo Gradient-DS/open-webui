@@ -197,6 +197,7 @@ from open_webui.models.messages import Messages
 from open_webui.models.models import Models, normalize_model_tags
 from open_webui.models.users import Users
 from open_webui.routers import (
+    agent_threads,
     analytics,
     archives,
     audio,
@@ -1137,6 +1138,9 @@ app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['fee
 
 # [Gradient] Vergadering: thin forward to soev-api, gated in-handler on FEATURE_MEETINGS.
 app.include_router(meetings.router, prefix='/api/v1/meetings', tags=['meetings'])
+
+# [Gradient] Download a v2 agent thread's trace file from soev-api, as the caller.
+app.include_router(agent_threads.router, prefix='/api/v1/agent-threads', tags=['agent-threads'])
 
 
 ##################################

@@ -22313,6 +22313,53 @@
         "summary": "Get Current Usage"
       }
     },
+    "/api/v1/agent-threads/{thread_id}/trace": {
+      "get": {
+        "description": "The thread's `soev.trace/1` file from soev-api, unchanged, as `<thread_id>.trace.json`.",
+        "operationId": "download_trace_api_v1_agent_threads__thread_id__trace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,256}$",
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download Trace",
+        "tags": [
+          "agent-threads"
+        ]
+      }
+    },
     "/api/v1/analytics/daily": {
       "get": {
         "description": "Get message counts grouped by model for time-series chart.",
