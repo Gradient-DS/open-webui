@@ -484,6 +484,36 @@ class ChatMessageTable:
             messages = result.scalars().all()
             return [ChatMessageModel.model_validate(message) for message in messages]
 
+    async def get_live_messages(
+        self,
+        chat_id: Optional[str] = None,
+        model_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        start_date: Optional[int] = None,
+        end_date: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 50,
+        db: Optional[AsyncSession] = None,
+    ) -> list[ChatMessageModel]:
+        """Messages matching every given filter, excluding those of soft-deleted chats."""
+        from open_webui.models.chats import Chat
+
+        async with get_async_db_context(db) as db:
+            stmt = select(ChatMessage).join(Chat, Chat.id == ChatMessage.chat_id).where(Chat.deleted_at.is_(None))
+            if chat_id:
+                stmt = stmt.where(ChatMessage.chat_id == chat_id)
+            if model_id:
+                stmt = stmt.where(ChatMessage.model_id == model_id)
+            if user_id:
+                stmt = stmt.where(ChatMessage.user_id == user_id)
+            if start_date:
+                stmt = stmt.where(ChatMessage.created_at >= start_date)
+            if end_date:
+                stmt = stmt.where(ChatMessage.created_at <= end_date)
+            stmt = stmt.order_by(ChatMessage.created_at.desc()).offset(skip).limit(limit)
+            result = await db.execute(stmt)
+            return [ChatMessageModel.model_validate(message) for message in result.scalars().all()]
+
     async def get_chat_ids_by_model_id(
         self,
         model_id: str,

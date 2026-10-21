@@ -22387,7 +22387,7 @@
     },
     "/api/v1/analytics/messages": {
       "get": {
-        "description": "Query messages with filters.",
+        "description": "Query messages of live chats; every given filter applies.",
         "operationId": "get_messages_api_v1_analytics_messages_get",
         "parameters": [
           {
