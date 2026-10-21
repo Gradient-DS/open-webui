@@ -9,6 +9,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 import aiohttp
@@ -3578,25 +3579,24 @@ async def serve_cache_file(
     path: str,
     user=Depends(get_verified_user),
 ):
-    """Serve cached files (e.g. tool outputs) with path-traversal protection.
+    """Serve the caller's own data export (exports/<user id>/<file>).
 
-    Only ``image/*``, ``audio/*``, and ``video/*`` MIME types are served inline;
-    everything else gets a ``Content-Disposition: attachment`` header to prevent
-    XSS from user-generated HTML stored in the cache directory.
+    The rest of the cache (speech, pipelines, tool and function dirs) is shared
+    or admin data and is never served here. Only ``image/*``, ``audio/*`` and
+    ``video/*`` MIME types are served inline; everything else is an attachment.
     """
-    file_path = os.path.abspath(os.path.join(CACHE_DIR, path))
-    # trailing os.sep is required: without it, a path resolving to a sibling
-    # whose name starts with the cache-dir basename (e.g. cache_backup) passes
-    cache_root = os.path.abspath(CACHE_DIR) + os.sep
-    if not file_path.startswith(cache_root):
+    # Authorize on the resolved path: a check on the raw path is bypassed by
+    # dot segments (exports/<me>/../<other>/...) that resolve elsewhere.
+    cache_root = Path(CACHE_DIR).resolve()
+    try:
+        file_path = (cache_root / path).resolve()
+        parts = file_path.relative_to(cache_root).parts
+    except (OSError, RuntimeError, ValueError):
         raise HTTPException(status_code=404, detail='File not found')
 
-    # [Gradient] Ownership check for user exports: only the owning user or an admin
-    parts = path.split('/')
-    if len(parts) >= 2 and parts[0] == 'exports':
-        export_owner_id = parts[1]
-        if user.role != 'admin' and user.id != export_owner_id:
-            raise HTTPException(status_code=404, detail='File not found')
+    # [Gradient] Only data exports are served, each to its owner only, admins included.
+    if len(parts) != 3 or parts[0] != 'exports' or parts[1] != user.id:
+        raise HTTPException(status_code=404, detail='File not found')
 
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail='File not found')

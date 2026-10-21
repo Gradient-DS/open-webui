@@ -48380,7 +48380,7 @@
     },
     "/cache/{path}": {
       "get": {
-        "description": "Serve cached files (e.g. tool outputs) with path-traversal protection.\n\nOnly ``image/*``, ``audio/*``, and ``video/*`` MIME types are served inline;\neverything else gets a ``Content-Disposition: attachment`` header to prevent\nXSS from user-generated HTML stored in the cache directory.",
+        "description": "Serve the caller's own data export (exports/<user id>/<file>).\n\nThe rest of the cache (speech, pipelines, tool and function dirs) is shared\nor admin data and is never served here. Only ``image/*``, ``audio/*`` and\n``video/*`` MIME types are served inline; everything else is an attachment.",
         "operationId": "serve_cache_file_cache__path__get",
         "parameters": [
           {
