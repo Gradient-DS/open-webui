@@ -31,7 +31,6 @@ from open_webui.models.config import Config
 from open_webui.models.files import (
     FileForm,
     FileListResponse,
-    FileModel,
     FileModelResponse,
     Files,
 )
@@ -773,7 +772,7 @@ async def delete_all_files(
 ############################
 
 
-@router.get('/{id}', response_model=Optional[FileModel])
+@router.get('/{id}', response_model=Optional[FileModelResponse])
 async def get_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     file = await Files.get_file_by_id(id, db=db)
 
@@ -1167,7 +1166,7 @@ class FileRenameForm(BaseModel):
     filename: str
 
 
-@router.post('/{id}/rename')
+@router.post('/{id}/rename', response_model=FileModelResponse)
 async def rename_file_by_id(
     request: Request,
     id: str,

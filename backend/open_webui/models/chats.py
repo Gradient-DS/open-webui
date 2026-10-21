@@ -21,6 +21,7 @@ from open_webui.models.ordering import request_order
 from open_webui.models.access_grants import AccessGrant
 from open_webui.models.automations import AutomationRun
 from open_webui.models.chat_messages import ChatMessage, ChatMessages
+from open_webui.models.files import strip_file_paths
 from open_webui.models.folders import Folders
 from open_webui.models.tags import Tag, TagModel, Tags
 from open_webui.utils.misc import get_output_text, sanitize_data_for_db, sanitize_text_for_db
@@ -409,9 +410,9 @@ class ChatStatsExport(BaseModel):
 
 # [Gradient] User-facing queries exclude soft-deleted rows until retention cleanup.
 class ChatTable:
-    def _clean_null_bytes(self, obj):
-        """Recursively remove null bytes from strings in dict/list structures."""
-        return sanitize_data_for_db(obj)
+    def _sanitize_for_db(self, obj):
+        """Remove null bytes from strings and storage paths from embedded File records."""
+        return strip_file_paths(sanitize_data_for_db(obj))
 
     def get_current_message_id(self, chat: dict | None) -> str | None:
         chat = chat or {}
@@ -440,14 +441,14 @@ class ChatTable:
 
         # Clean title
         if chat_item.title:
-            cleaned = self._clean_null_bytes(chat_item.title)
+            cleaned = self._sanitize_for_db(chat_item.title)
             if cleaned != chat_item.title:
                 chat_item.title = cleaned
                 changed = True
 
         # Clean JSON
         if chat_item.chat:
-            cleaned = self._clean_null_bytes(chat_item.chat)
+            cleaned = self._sanitize_for_db(chat_item.chat)
             if cleaned != chat_item.chat:
                 chat_item.chat = cleaned
                 changed = True
@@ -564,10 +565,10 @@ class ChatTable:
                 **{
                     'id': id,
                     'user_id': user_id,
-                    'title': self._clean_null_bytes(
+                    'title': self._sanitize_for_db(
                         form_data.chat['title'] if 'title' in form_data.chat else 'New Chat'
                     ),
-                    'chat': self._clean_null_bytes(form_data.chat),
+                    'chat': self._sanitize_for_db(form_data.chat),
                     'folder_id': form_data.folder_id,
                     'meta': {**(form_data.meta or {}), **(internal_meta or {})},
                     'timer_at': timer_at,
@@ -659,8 +660,8 @@ class ChatTable:
             **{
                 'id': id,
                 'user_id': user_id,
-                'title': self._clean_null_bytes(form_data.chat['title'] if 'title' in form_data.chat else 'New Chat'),
-                'chat': self._clean_null_bytes(form_data.chat),
+                'title': self._sanitize_for_db(form_data.chat['title'] if 'title' in form_data.chat else 'New Chat'),
+                'chat': self._sanitize_for_db(form_data.chat),
                 'meta': form_data.meta,
                 'variables': form_data.variables or {},
                 'pinned': form_data.pinned,
@@ -758,7 +759,7 @@ class ChatTable:
                     # The caller built its history from an earlier read; merge so messages saved since then survive.
                     updated['history'] = self.merge_history(stored.get('history'), chat['history'])
 
-                updated = self._clean_null_bytes(updated)
+                updated = self._sanitize_for_db(updated)
                 chat_item.chat = updated
                 chat_item.title = updated.get('title', 'New Chat')
                 if any(key in chat for key in ('history', 'messages', 'currentId', 'branchPointMessageId')):
@@ -879,7 +880,7 @@ class ChatTable:
                 )
                 if chat_item is None:
                     return None
-                clean_title = self._clean_null_bytes(title)
+                clean_title = self._sanitize_for_db(title)
                 chat_item.title = clean_title
                 chat_item.chat = {**(chat_item.chat or {}), 'title': clean_title}
                 await session.commit()
@@ -1177,8 +1178,8 @@ class ChatTable:
             if output_text:
                 message['content'] = output_text
 
-        message = self._clean_null_bytes(message)
-        message_id = self._clean_null_bytes(message_id)
+        message = self._sanitize_for_db(message)
+        message_id = self._sanitize_for_db(message_id)
 
         try:
             async with get_async_db_context() as session:
@@ -1273,7 +1274,7 @@ class ChatTable:
         self, id: str, message_id: str, status: dict
     ) -> ChatModel | None:
         try:
-            status = self._clean_null_bytes(status)
+            status = self._sanitize_for_db(status)
             async with get_async_db_context() as session:
                 chat_item = await session.get(
                     Chat,
@@ -1346,7 +1347,7 @@ class ChatTable:
             # Written here rather than through update_chat_by_id: with session sharing off that opens a second
             # connection, which then blocks on the lock this one holds.
             chat['history'] = history
-            chat_item.chat = self._clean_null_bytes(chat)
+            chat_item.chat = self._sanitize_for_db(chat)
             # History was mutated in place, so the new blob compares equal to the loaded one.
             flag_modified(chat_item, 'chat')
             chat_item.updated_at = int(time.time())

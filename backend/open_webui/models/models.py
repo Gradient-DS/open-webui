@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants
+from open_webui.models.files import strip_file_paths
 from open_webui.models.groups import Groups
 from open_webui.models.users import User, UserModel, UserResponse, Users
 from open_webui.utils.misc import json_text_variants
@@ -35,7 +36,7 @@ def normalize_model_tags(tags: Any) -> list[dict[str, str]]:
 
 
 def strip_extracted_content_from_model_knowledge(knowledge: Any) -> Any:
-    """Drop duplicated extracted text from ModelMeta.knowledge."""
+    """Drop duplicated extracted text and storage paths from ModelMeta.knowledge."""
     if not isinstance(knowledge, list):
         return knowledge
 
@@ -63,7 +64,7 @@ def strip_extracted_content_from_model_knowledge(knowledge: Any) -> Any:
 
         sanitized.append(next_item)
 
-    return sanitized
+    return strip_file_paths(sanitized)
 
 
 # --- Models DB Schema ---
