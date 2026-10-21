@@ -684,6 +684,12 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
         )
     agent_v2.AccessGrants.has_access.return_value = access == 'grant'
     chunks = await chat.turn('read', 'a1', files=[{'type': kind, 'id': item_id, 'name': 'Stale title'}])
+    if access == 'grant' and kind == 'chat':
+        # A share grant reaches the snapshot only, never the live chat.
+        assert 'texts' not in chat.mutations()[-1][1]['input']
+        assert notices(chat)[0]['notices'] == ["Chat 'Stale title' is not accessible and was skipped."]
+        agent_v2.AccessGrants.has_access.assert_not_awaited()
+        return
     if access == 'admin' and kind == 'note' and not bypass:
         assert 'texts' not in chat.mutations()[-1][1]['input']
         assert notices(chat)[0]['notices'] == ["Note 'Stale title' is not accessible and was skipped."]
@@ -702,7 +708,7 @@ async def test_attached_texts_use_upstream_access_and_stored_titles(
     if access == 'grant':
         agent_v2.AccessGrants.has_access.assert_awaited_once_with(
             user_id='alice',
-            resource_type='note' if kind == 'note' else 'shared_chat',
+            resource_type='note',
             resource_id=item_id,
             permission='read',
         )
@@ -722,12 +728,7 @@ async def test_attached_chat_uses_folder_read_access(
     agent_v2.Folders.get_folder_by_id.return_value = folder
     agent_v2.has_folder_access.return_value = allowed
     chunks = await chat.turn('read', 'a1', files=[{'type': 'chat', 'id': 'c1', 'name': 'Shared chat'}])
-    agent_v2.AccessGrants.has_access.assert_awaited_once_with(
-        user_id='alice',
-        resource_type='shared_chat',
-        resource_id='c1',
-        permission='read',
-    )
+    agent_v2.AccessGrants.has_access.assert_not_awaited()
     agent_v2.Folders.get_folder_by_id.assert_awaited_once_with('folder')
     if folder_exists:
         agent_v2.has_folder_access.assert_awaited_once_with('alice', folder, 'read', db=None)

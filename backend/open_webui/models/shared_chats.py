@@ -113,9 +113,16 @@ class SharedChatsTable:
             return SharedChatModel.model_validate(shared_chat)
 
     async def get_by_id(self, share_id: str, db: Optional[AsyncSession] = None) -> Optional[SharedChatModel]:
-        """Get a shared chat by its share token."""
+        """Get a shared chat by its share token; none once its original chat is deleted."""
         async with get_async_db_context(db) as db:
-            shared_chat = await db.get(SharedChat, share_id)
+            from open_webui.models.chats import Chat
+
+            result = await db.execute(
+                select(SharedChat)
+                .join(Chat, Chat.id == SharedChat.chat_id)
+                .filter(SharedChat.id == share_id, Chat.deleted_at.is_(None))
+            )
+            shared_chat = result.scalars().first()
             if shared_chat:
                 return SharedChatModel.model_validate(shared_chat)
             return None
