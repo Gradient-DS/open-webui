@@ -93,7 +93,7 @@ psutil==7.2.2
 sentencepiece==0.2.1
 soundfile==0.13.1
 
-pillow==12.3.0 # security: CVE-2026-54058/59197/59199/59200/59204/59205 + 4 more (DoS/heap OOB via crafted images) fixed in 12.3.0
+pillow==13.0.0 # security: CVE-2026-112403 (critical JPEG decode heap overflow) + 8 more (TIFF/GIF/PDF/EPS/morph OOB and DoS via crafted images) fixed in 13.0.0
 opencv-python-headless==4.13.0.92
 rapidocr==3.9.2
 rank-bm25==0.2.2
