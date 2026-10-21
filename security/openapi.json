@@ -13656,6 +13656,39 @@
         "title": "OAuthConfigResponse",
         "type": "object"
       },
+      "OAuthSessionResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "provider",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "OAuthSessionResponse",
+        "type": "object"
+      },
       "PickerAttachment": {
         "additionalProperties": false,
         "properties": {
@@ -22280,6 +22313,53 @@
         "summary": "Get Current Usage"
       }
     },
+    "/api/v1/agent-threads/{thread_id}/trace": {
+      "get": {
+        "description": "The thread's `soev.trace/1` file from soev-api, unchanged, as `<thread_id>.trace.json`.",
+        "operationId": "download_trace_api_v1_agent_threads__thread_id__trace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,256}$",
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download Trace",
+        "tags": [
+          "agent-threads"
+        ]
+      }
+    },
     "/api/v1/analytics/daily": {
       "get": {
         "description": "Get message counts grouped by model for time-series chart.",
@@ -22387,7 +22467,7 @@
     },
     "/api/v1/analytics/messages": {
       "get": {
-        "description": "Query messages with filters.",
+        "description": "Query messages of live chats; every given filter applies.",
         "operationId": "get_messages_api_v1_analytics_messages_get",
         "parameters": [
           {
@@ -34482,7 +34562,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/FileModel"
+                      "$ref": "#/components/schemas/FileModelResponse"
                     },
                     {
                       "type": "null"
@@ -34906,7 +34986,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FileModelResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -47779,6 +47861,7 @@
     },
     "/api/v1/users/{user_id}/oauth/sessions": {
       "get": {
+        "description": "Session metadata only: the tokens are the user's credentials, never an admin's to read.",
         "operationId": "get_user_oauth_sessions_by_id_api_v1_users__user_id__oauth_sessions_get",
         "parameters": [
           {
@@ -47795,7 +47878,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OAuthSessionResponse"
+                  },
+                  "title": "Response Get User Oauth Sessions By Id Api V1 Users  User Id  Oauth Sessions Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -48380,7 +48469,7 @@
     },
     "/cache/{path}": {
       "get": {
-        "description": "Serve cached files (e.g. tool outputs) with path-traversal protection.\n\nOnly ``image/*``, ``audio/*``, and ``video/*`` MIME types are served inline;\neverything else gets a ``Content-Disposition: attachment`` header to prevent\nXSS from user-generated HTML stored in the cache directory.",
+        "description": "Serve the caller's own data export (exports/<user id>/<file>).\n\nThe rest of the cache (speech, pipelines, tool and function dirs) is shared\nor admin data and is never served here. Only ``image/*``, ``audio/*`` and\n``video/*`` MIME types are served inline; everything else is an attachment.",
         "operationId": "serve_cache_file_cache__path__get",
         "parameters": [
           {

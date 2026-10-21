@@ -166,7 +166,8 @@ async def test_local_grants_still_work_without_soev(access, monkeypatch, grant):
         access.Chats.get_shared_chat_ids_by_file_id.return_value = ['chat']
         access.AccessGrants.get_accessible_resource_ids.return_value = {'chat'}
     else:
-        access.Models.get_model_owners_attaching_file.return_value = {'model': 'reader'}
+        access.Models.get_model_owners_attaching_file.return_value = {'model': 'owner'}
+        access.AccessGrants.get_accessible_resource_ids.return_value = {'model'}
     assert await access.has_access_to_file('file', 'read', SimpleNamespace(id='reader', role='user'))
     access.Knowledges.get_knowledges_by_file_id.assert_not_awaited()
     access.Knowledges.get_knowledge_by_id.assert_not_awaited()

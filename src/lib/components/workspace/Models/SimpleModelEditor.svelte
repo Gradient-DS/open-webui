@@ -28,7 +28,10 @@
 	// options.skipNavigate lets callers persist without the parent route
 	// navigating away — used by the "+ Add knowledge" flow, which saves
 	// the assistant then navigates to the KB-create flow itself.
-	export let onSubmit: (info: any, options?: { skipNavigate?: boolean }) => Promise<void> | void;
+	export let onSubmit: (
+		info: any,
+		options?: { skipNavigate?: boolean }
+	) => Promise<boolean | void> | boolean | void;
 	export let onAdvanced: () => void;
 
 	let loaded = false;
@@ -197,7 +200,10 @@
 		info.meta = applyToggles(info.meta, toggles);
 		info.access_grants = accessGrants;
 
-		await onSubmit(info, options);
+		if ((await onSubmit(info, options)) === false) {
+			loading = false;
+			return false;
+		}
 		// Reset the dirty baseline to the values we just persisted, so
 		// the Save button disappears until the user makes a new edit.
 		savedSnapshot = _snapshot();

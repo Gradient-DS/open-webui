@@ -43,8 +43,8 @@ def assistant(*file_ids: str, grants: list[AccessGrantModel] | None = None) -> M
     )
 
 
-def file(file_id: str, **meta) -> SimpleNamespace:
-    return SimpleNamespace(id=file_id, user_id='alice', filename=f'{file_id}.txt', meta={'status': 'completed', **meta})
+def file(file_id: str, owner: str = 'bob', **meta) -> SimpleNamespace:
+    return SimpleNamespace(id=file_id, user_id=owner, filename=f'{file_id}.txt', meta={'status': 'completed', **meta})
 
 
 @pytest.fixture
@@ -130,6 +130,32 @@ async def test_the_collection_of_a_deleted_or_fileless_assistant_is_deleted(save
     await assistant_files.sync('helper')
     deletes = [request.url.path for request in saved.api.requests if request.method == 'DELETE']
     assert deletes == [f'/v1/collections/{KEY}']
+
+
+@pytest.mark.asyncio
+async def test_someone_elses_file_is_never_ingested_and_its_copy_and_a_deleted_files_are_dropped(saved):
+    saved.model = assistant('mine', 'theirs', 'deleted')
+    saved.files = {'mine': file('mine'), 'theirs': file('theirs', owner='alice')}
+    await assistant_files.sync('helper')
+    saved.api.add_document(KEY, 'mine')
+    saved.api.add_document(KEY, 'theirs')
+    saved.api.add_document(KEY, 'deleted')
+    saved.submitted.clear()
+    saved.api.requests.clear()
+    await assistant_files.sync('helper')
+    assert saved.submitted == []
+    assert saved.files['theirs'].meta == {'status': 'completed'}
+    deletes = {request.url.path for request in saved.api.requests if request.method == 'DELETE'}
+    assert deletes == {f'/v1/collections/{KEY}/documents/theirs', f'/v1/collections/{KEY}/documents/deleted'}
+
+
+@pytest.mark.asyncio
+async def test_an_assistant_holding_only_someone_elses_files_has_no_collection(saved):
+    saved.model = assistant('theirs')
+    saved.files = {'theirs': file('theirs', owner='alice')}
+    await assistant_files.sync('helper')
+    assert KEY not in saved.api.collections
+    assert saved.submitted == []
 
 
 @pytest.mark.asyncio

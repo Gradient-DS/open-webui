@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants
+from open_webui.models.files import strip_file_paths
 from open_webui.models.groups import Groups
 from open_webui.models.users import User, UserModel, UserResponse, Users
 from open_webui.utils.misc import json_text_variants
@@ -35,7 +36,7 @@ def normalize_model_tags(tags: Any) -> list[dict[str, str]]:
 
 
 def strip_extracted_content_from_model_knowledge(knowledge: Any) -> Any:
-    """Drop duplicated extracted text from ModelMeta.knowledge."""
+    """Drop duplicated extracted text and storage paths from ModelMeta.knowledge."""
     if not isinstance(knowledge, list):
         return knowledge
 
@@ -63,7 +64,7 @@ def strip_extracted_content_from_model_knowledge(knowledge: Any) -> Any:
 
         sanitized.append(next_item)
 
-    return sanitized
+    return strip_file_paths(sanitized)
 
 
 # --- Models DB Schema ---
@@ -307,6 +308,25 @@ class ModelsTable:
                     for item in meta.get('knowledge') or []
                 )
             }
+
+    async def remove_file_from_models(self, file_id: str, db: AsyncSession | None = None) -> list[str]:
+        """Drop the file's entries from every workspace model's knowledge; return the ids of the models changed."""
+        model_ids = list(await self.get_model_owners_attaching_file(file_id, db=db))
+        if not model_ids:
+            return []
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Model).filter(Model.id.in_(model_ids)))
+            for model in result.scalars().all():
+                meta = dict(model.meta or {})
+                meta['knowledge'] = [
+                    item
+                    for item in meta.get('knowledge') or []
+                    if not (isinstance(item, dict) and item.get('type') == 'file' and item.get('id') == file_id)
+                ]
+                model.meta = meta
+                model.updated_at = int(time.time())
+            await db.commit()
+        return model_ids
 
     @staticmethod
     def _meta_has_tag(meta: dict | None, tag: str) -> bool:

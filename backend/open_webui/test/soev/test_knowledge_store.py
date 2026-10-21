@@ -1091,6 +1091,23 @@ async def test_a_landed_file_is_listed_once(env):
 
 
 @pytest.mark.asyncio
+async def test_referenced_file_ids_count_knowledge_bases_the_acting_user_cannot_see(env):
+    """The orphan check reads as the service, so a file in someone else's private KB is never an orphan."""
+    await file(env, 'shared')
+    await seed(env, 'private', owner='bob')
+    env.api.add_document('private', 'shared')
+    env.api.add_document('private', 'only-bobs')
+    acting = importlib.import_module('open_webui.soev.acting')
+    token = acting._acting_ref.set('owui:user:alice')
+    env.api.requests.clear()
+    try:
+        assert await env.store.get_referenced_file_ids(['shared', 'only-bobs', 'gone']) == {'shared', 'only-bobs'}
+    finally:
+        acting._acting_ref.reset(token)
+    assert all('X-Soev-Subject' not in request.headers for request in env.api.requests)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('acting_user', [None, 'alice'])
 async def test_references_use_the_source_lookup_route(env, acting_user):
     """One lookup per source resolves each collection once under the same acting identity."""

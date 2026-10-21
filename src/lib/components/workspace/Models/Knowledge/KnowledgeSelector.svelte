@@ -7,6 +7,7 @@
 	import { searchKnowledgeBases, searchKnowledgeFiles } from '$lib/apis/knowledge';
 
 	import { decodeString } from '$lib/utils';
+	import { user } from '$lib/stores';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
@@ -93,14 +94,17 @@
 		});
 
 		if (res) {
-			fileItems = res.items.map((file) => {
-				return {
-					...file,
-					type: 'file',
-					name: file.meta?.name || file.filename,
-					description: file.description || ''
-				};
-			});
+			// An assistant holds only its owner's own files; others' are reached through their knowledge base.
+			fileItems = res.items
+				.filter((file) => file.user_id === $user?.id)
+				.map((file) => {
+					return {
+						...file,
+						type: 'file',
+						name: file.meta?.name || file.filename,
+						description: file.description || ''
+					};
+				});
 		}
 	};
 

@@ -23,7 +23,7 @@ from open_webui.models.notes import (
     NoteUserResponse,
 )
 from open_webui.models.users import UserResponse, Users
-from open_webui.socket.main import sio
+from open_webui.socket.main import close_note_rooms, note_access_change, sio
 from open_webui.utils.access_control import (
     filter_allowed_access_grants,
     has_permission,
@@ -567,7 +567,8 @@ async def update_note_by_id(
     )
 
     try:
-        note = await Notes.update_note_by_id(id, form_data, db=db)
+        async with note_access_change(id, db=db):
+            note = await Notes.update_note_by_id(id, form_data, db=db)
         pinned_note_ids = await Notes.get_pinned_note_ids(user.id, db=db)
         note.is_pinned = note.id in pinned_note_ids
 
@@ -645,7 +646,8 @@ async def update_note_access_by_id(
         'sharing.public_notes',
     )
 
-    await AccessGrants.set_access_grants('note', id, form_data.access_grants, db=db)
+    async with note_access_change(id, db=db):
+        await AccessGrants.set_access_grants('note', id, form_data.access_grants, db=db)
 
     note = await Notes.get_note_by_id(id, db=db)
     pinned_note_ids = await Notes.get_pinned_note_ids(user.id, db=db)
@@ -746,6 +748,8 @@ async def delete_note_by_id(
 
     try:
         note = await Notes.delete_note_by_id(id, db=db)
+        if note:
+            await close_note_rooms(id)
         await publish_event(
             request,
             EVENTS.NOTE_DELETED,

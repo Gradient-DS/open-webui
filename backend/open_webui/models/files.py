@@ -9,7 +9,7 @@ import time
 # local imports
 from open_webui.internal.db import Base, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import JSON, BigInteger, Column, String, Text, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +55,37 @@ class FileModel(BaseModel):
     updated_at: int | None  # timestamp in epoch
 
 
+_FILE_RECORD_KEYS = frozenset({'id', 'user_id', 'filename', 'path'})
+
+
+def strip_file_paths(value):
+    """Drop the storage `path` from File records embedded under `file` keys or in `files` lists.
+
+    The path is the storage location (bucket and object key); clients never need it.
+    Returns `value` itself when nothing was stripped, so callers can detect a change by identity.
+    """
+    if isinstance(value, list):
+        items = [strip_file_paths(item) for item in value]
+        return items if any(new is not old for new, old in zip(items, value)) else value
+    if not isinstance(value, dict):
+        return value
+    changed = False
+    result = {}
+    for key, item in value.items():
+        new = strip_file_paths(item)
+        if key == 'file' and _is_file_record(new):
+            new = {k: v for k, v in new.items() if k != 'path'}
+        elif key == 'files' and isinstance(new, list) and any(_is_file_record(f) for f in new):
+            new = [{k: v for k, v in f.items() if k != 'path'} if _is_file_record(f) else f for f in new]
+        changed = changed or new is not item
+        result[key] = new
+    return result if changed else value
+
+
+def _is_file_record(value) -> bool:
+    return isinstance(value, dict) and _FILE_RECORD_KEYS <= value.keys()
+
+
 ####################
 # Forms
 ####################
@@ -92,6 +123,8 @@ class FileModelResponse(BaseModel):
     hash: str | None = None
 
     filename: str
+    # Storage location: accepted from a FileModel dump but never serialized.
+    path: str | None = Field(default=None, exclude=True)
     data: dict | None = None
     meta: FileMeta | None = None
 

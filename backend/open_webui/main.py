@@ -9,6 +9,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 import aiohttp
@@ -56,6 +57,7 @@ from open_webui.config import (
     ENABLE_DATA_EXPORT,
     # [Gradient] export formats
     ENABLE_DOCX_EXPORT,
+    ENABLE_AGENT_TRACE_DOWNLOAD,
     USE_STYLIZED_PDF_EXPORT,
     # [Gradient] Skills
     ENABLE_SKILL_EXECUTION,
@@ -196,6 +198,7 @@ from open_webui.models.messages import Messages
 from open_webui.models.models import Models, normalize_model_tags
 from open_webui.models.users import Users
 from open_webui.routers import (
+    agent_threads,
     analytics,
     archives,
     audio,
@@ -1136,6 +1139,9 @@ app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['fee
 
 # [Gradient] Vergadering: thin forward to soev-api, gated in-handler on FEATURE_MEETINGS.
 app.include_router(meetings.router, prefix='/api/v1/meetings', tags=['meetings'])
+
+# [Gradient] Download a v2 agent thread's trace file from soev-api, as the caller.
+app.include_router(agent_threads.router, prefix='/api/v1/agent-threads', tags=['agent-threads'])
 
 
 ##################################
@@ -2872,6 +2878,7 @@ async def get_app_config(request: Request):
                     'feature_strict_data_separation': FEATURE_STRICT_DATA_SEPARATION,
                     'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,  # [Gradient]
                     'enable_docx_export': ENABLE_DOCX_EXPORT,  # [Gradient]
+                    'enable_agent_trace_download': ENABLE_AGENT_TRACE_DOWNLOAD,  # [Gradient]
                     'enable_google_drive_integration': config.get('google_drive.enable'),
                     'enable_onedrive_integration': config.get('onedrive.enable')
                     and await capabilities.has(capabilities.LIVE_DOCUMENTS),
@@ -3578,25 +3585,24 @@ async def serve_cache_file(
     path: str,
     user=Depends(get_verified_user),
 ):
-    """Serve cached files (e.g. tool outputs) with path-traversal protection.
+    """Serve the caller's own data export (exports/<user id>/<file>).
 
-    Only ``image/*``, ``audio/*``, and ``video/*`` MIME types are served inline;
-    everything else gets a ``Content-Disposition: attachment`` header to prevent
-    XSS from user-generated HTML stored in the cache directory.
+    The rest of the cache (speech, pipelines, tool and function dirs) is shared
+    or admin data and is never served here. Only ``image/*``, ``audio/*`` and
+    ``video/*`` MIME types are served inline; everything else is an attachment.
     """
-    file_path = os.path.abspath(os.path.join(CACHE_DIR, path))
-    # trailing os.sep is required: without it, a path resolving to a sibling
-    # whose name starts with the cache-dir basename (e.g. cache_backup) passes
-    cache_root = os.path.abspath(CACHE_DIR) + os.sep
-    if not file_path.startswith(cache_root):
+    # Authorize on the resolved path: a check on the raw path is bypassed by
+    # dot segments (exports/<me>/../<other>/...) that resolve elsewhere.
+    cache_root = Path(CACHE_DIR).resolve()
+    try:
+        file_path = (cache_root / path).resolve()
+        parts = file_path.relative_to(cache_root).parts
+    except (OSError, RuntimeError, ValueError):
         raise HTTPException(status_code=404, detail='File not found')
 
-    # [Gradient] Ownership check for user exports: only the owning user or an admin
-    parts = path.split('/')
-    if len(parts) >= 2 and parts[0] == 'exports':
-        export_owner_id = parts[1]
-        if user.role != 'admin' and user.id != export_owner_id:
-            raise HTTPException(status_code=404, detail='File not found')
+    # [Gradient] Only data exports are served, each to its owner only, admins included.
+    if len(parts) != 3 or parts[0] != 'exports' or parts[1] != user.id:
+        raise HTTPException(status_code=404, detail='File not found')
 
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail='File not found')

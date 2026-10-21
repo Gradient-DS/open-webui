@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import distinct
 from open_webui.internal.db import Base, get_async_db_context
+from open_webui.models.files import strip_file_paths
 from open_webui.utils.response import merge_usage, normalize_usage
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import (
@@ -227,7 +228,7 @@ class ChatMessageTable:
         if 'assistant_id' in data:
             message.assistant_id = data.get('assistant_id')
         if 'files' in data:
-            message.files = data.get('files')
+            message.files = strip_file_paths(data.get('files'))
         if 'sources' in data:
             message.sources = data.get('sources')
         if 'embeds' in data:
@@ -267,7 +268,7 @@ class ChatMessageTable:
             output=data.get('output'),
             model_id=data.get('model_id') or data.get('model'),
             assistant_id=data.get('assistant_id'),  # [Gradient] Split assistant identity.
-            files=data.get('files'),
+            files=strip_file_paths(data.get('files')),
             sources=data.get('sources'),
             embeds=data.get('embeds'),
             meta=data.get('meta'),
@@ -483,6 +484,36 @@ class ChatMessageTable:
             result = await db.execute(stmt)
             messages = result.scalars().all()
             return [ChatMessageModel.model_validate(message) for message in messages]
+
+    async def get_live_messages(
+        self,
+        chat_id: Optional[str] = None,
+        model_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        start_date: Optional[int] = None,
+        end_date: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 50,
+        db: Optional[AsyncSession] = None,
+    ) -> list[ChatMessageModel]:
+        """Messages matching every given filter, excluding those of soft-deleted chats."""
+        from open_webui.models.chats import Chat
+
+        async with get_async_db_context(db) as db:
+            stmt = select(ChatMessage).join(Chat, Chat.id == ChatMessage.chat_id).where(Chat.deleted_at.is_(None))
+            if chat_id:
+                stmt = stmt.where(ChatMessage.chat_id == chat_id)
+            if model_id:
+                stmt = stmt.where(ChatMessage.model_id == model_id)
+            if user_id:
+                stmt = stmt.where(ChatMessage.user_id == user_id)
+            if start_date:
+                stmt = stmt.where(ChatMessage.created_at >= start_date)
+            if end_date:
+                stmt = stmt.where(ChatMessage.created_at <= end_date)
+            stmt = stmt.order_by(ChatMessage.created_at.desc()).offset(skip).limit(limit)
+            result = await db.execute(stmt)
+            return [ChatMessageModel.model_validate(message) for message in result.scalars().all()]
 
     async def get_chat_ids_by_model_id(
         self,

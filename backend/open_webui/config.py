@@ -3026,6 +3026,9 @@ USE_STYLIZED_PDF_EXPORT = os.environ.get('USE_STYLIZED_PDF_EXPORT', 'False').low
 
 ENABLE_DOCX_EXPORT = os.environ.get('ENABLE_DOCX_EXPORT', 'True').lower() == 'true'
 
+# [Gradient] Admins' "Agent trace (.json)" download; off unless a tenant turns it on.
+ENABLE_AGENT_TRACE_DOWNLOAD = os.environ.get('ENABLE_AGENT_TRACE_DOWNLOAD', 'False').lower() == 'true'
+
 FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'
 
 FEATURE_ADMIN_FUNCTIONS = os.environ.get('FEATURE_ADMIN_FUNCTIONS', 'True').lower() == 'true'

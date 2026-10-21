@@ -72,7 +72,9 @@ To develop this fork against the soev platform, run it from your checkout (comma
 With `AGENT_API_ENABLED` and `SOEV_API_URL` set, `soev/model_catalog.py` makes soev-api
 the only source of models (`GET /v1/models`), the default (served as `default_models`) and task completions
 (`POST /v1/completions/task`, called from `generate_chat_completion`). Connections, `ui.default_models` and the task
-model settings are not used. Details: `docs/agent-api-deployment.md`.
+model settings are not used. Details: `docs/agent-api-deployment.md`. Every model goes by its provider/model id:
+the catalog's label is not used, and an admin's or a migrated v1 base-model row never renames a catalog model
+(`apply_catalog`); assistants keep their own names.
 
 A turn the agent refuses arrives as `invalid_field` with constraint `chat:<reason>`; `utils/agent_v2.py`
 (`_REFUSALS`) shows a nl/en message per reason, with the agent's detail only where it names what to fix
@@ -112,7 +114,7 @@ passes for the tenant and user (feature flags, permissions, models in the picker
 an entry with its slides, new models and release-notes URL; a new slide also needs a gate, a scene in
 `WhatsNew/` and its text (nl-NL too). A tenant can name the models to announce per release with
 `openWebui.config.whatsNewModels` (`WHATS_NEW_MODELS`, `{"1.3": [catalog ids]}`; an empty list announces
-none); without it, the release's own `models` that the user can pick are shown.
+none); without it, the release's own `models` that the user can pick are shown. Both are announced by their id.
 
 ## Live document attachments
 
@@ -268,7 +270,10 @@ access (`may_share`, owner-only on v2); the modal is read-only otherwise.
 and every `SOEV_GROUP_RECONCILE_MINUTES` (default 15), clearing remote OWUI groups absent locally.
 Unknown capabilities refuse narrowing and queue widening. User-deletion callers must propagate group failures.
 
-An assistant's files (explicit `file` entries of a model's `meta.knowledge`) live in its own collection,
+An assistant's files (explicit `file` entries of a model's `meta.knowledge`) must be files the model owner owns: a
+save holding anyone else's is refused (403), and file access, sync and migration ignore such an entry; another's file
+reaches an assistant through a knowledge base, whose access is checked live. Deleting a file drops its entries from
+the models holding it. They live in its own collection,
 `owui-assistant-<model id>` (`soev/assistant_files.py`): owned by the model owner, read and written per the
 assistant's access grants, hidden from KB lists. An event sink syncs it on model create/update/access/delete
 (access republished, missing files submitted as the owner, removed ones deleted, the collection deleted with the

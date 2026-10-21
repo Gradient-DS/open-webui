@@ -271,13 +271,20 @@
 		const modelSearchParam =
 			$page.url.searchParams.get('models') || $page.url.searchParams.get('model');
 
+		// [Gradient] A model removed from the tenant must never leave a chat without one:
+		// drop unknown ids (saved chats, settings, a refreshed model list) and fall back to
+		// the user's or tenant's default when nothing is left.
 		if (
-			chatIdProp === '' &&
-			$models.length > 0 &&
-			!selectedModels?.some((modelId) => modelId) &&
-			!modelSearchParam
+			$rawModels.length > 0 &&
+			(chatIdProp === '' ? !modelSearchParam : !loading) &&
+			Array.isArray(selectedModels)
 		) {
-			const fallbackModels = normalizeSelectedModels(selectedModels);
+			const knownModels = selectedModels.filter(
+				(modelId) => !modelId || $rawModels.some((m) => m.id === modelId)
+			);
+			const fallbackModels = knownModels.some((modelId) => modelId)
+				? knownModels
+				: normalizeSelectedModels(knownModels);
 			if (!equal(fallbackModels, selectedModels)) {
 				selectedModels = fallbackModels;
 			}
