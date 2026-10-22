@@ -17,7 +17,7 @@ from open_webui.soev.client import SoevClient, close_client
 EMAIL = 'alice@example.invalid'
 START = 'https://soev.invalid/oauth/start/invalid-attempt-capability-{}'
 CONNECTIONS = [
-    {'id': 'c-enabled', 'source_kind': 'onedrive', 'lifecycle': 'enabled'},
+    {'id': 'c-enabled', 'source_kind': 'google_drive', 'lifecycle': 'enabled'},
     {'id': 'c-revoked', 'source_kind': 'onedrive', 'lifecycle': 'revoked'},
     {'id': 'c-google', 'source_kind': 'google_drive', 'lifecycle': 'pending'},
     {'id': 'c-onedrive', 'source_kind': 'onedrive', 'lifecycle': 'pending'},
@@ -205,3 +205,45 @@ def test_no_capability_or_token_reaches_the_logs(api, caplog):
     assert 'invalid-test-runtime-key' not in caplog.text
     started = [record for record in caplog.records if record.getMessage() == 'Silent reconnect started']
     assert [record.connection_id for record in started] == ['c-onedrive']
+
+
+def test_only_the_newest_pending_connection_of_a_provider_is_tried(api):
+    """Three leftover pending rows and none enabled: one attempt, on the newest, never the others."""
+    pending = [
+        {
+            'id': f'c-{day}',
+            'source_kind': 'outlook_mail',
+            'lifecycle': 'pending',
+            'created_at': f'2026-10-{day}T08:00:00Z',
+        }
+        for day in ('19', '21', '20')
+    ]
+    api.responses.extend(
+        [
+            httpx.Response(200, json={'data': pending}),
+            httpx.Response(200, json={'authorize_url': START.format('c-21')}),
+        ]
+    )
+    assert login(api) == START.format('c-21')
+    api.responses.append(httpx.Response(200, json={'data': pending}))
+    assert done(api, 'c-21', 'interaction_required').headers['location'] == 'https://owui.invalid/auth'
+    authorized = [request.url.path for request in api.requests if request.method == 'POST']
+    assert authorized == ['/v1/connections/c-21/authorize']
+
+
+def test_a_provider_with_an_enabled_connection_gets_no_attempt(api):
+    """Re-authorizing a stale pending row next to an enabled one would make an enabled duplicate."""
+    api.responses.append(
+        httpx.Response(
+            200,
+            json={
+                'data': [
+                    {'id': 'c-old', 'source_kind': 'outlook_mail', 'lifecycle': 'pending'},
+                    {'id': 'c-live', 'source_kind': 'outlook_mail', 'lifecycle': 'enabled'},
+                    {'id': 'c-stale', 'source_kind': 'outlook_mail', 'lifecycle': 'suspended:reauth'},
+                ]
+            },
+        )
+    )
+    assert login(api) == 'https://owui.invalid/auth'
+    assert [request.method for request in api.requests] == ['GET']

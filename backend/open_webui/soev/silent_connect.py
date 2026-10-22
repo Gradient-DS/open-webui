@@ -1,8 +1,9 @@
 """Silent Microsoft reconnect after an Entra login, as a chain of top-level redirects.
 
-After login, each OneDrive or Outlook connection that still needs consent gets one
-silent attempt (prompt=none) at soev-api. The provider returns to the consent done
-page, which continues with the next connection or lands the person in the app.
+After login, per provider without an enabled connection, the newest OneDrive or Outlook
+connection that still needs consent gets one silent attempt (prompt=none) at soev-api.
+The provider returns to the consent done page, which continues with the next connection
+or lands the person in the app.
 Every connection is tried at most once per person, so a failure never loops; it
 leaves the manual reconnect in place.
 """
@@ -54,16 +55,7 @@ async def next_hop(user: UserModel) -> str | None:
     client = identity.build_client(timeout=TIMEOUT_SECONDS)
     sync = CloudSync(client, await identity.acting_ref(user, client))
     state = await _state(user.id)
-    candidate = next(
-        (
-            row
-            for row in await sync.connections()
-            if row.get('source_kind') in PROVIDERS
-            and row.get('lifecycle') in NEEDS_CONSENT
-            and row.get('id') not in state['tried']
-        ),
-        None,
-    )
+    candidate = next((row for row in _candidates(await sync.connections()) if row['id'] not in state['tried']), None)
     if candidate is None:
         return None
     # Marked before the attempt exists: whatever happens next, this connection is not tried again.
@@ -72,6 +64,25 @@ async def next_hop(user: UserModel) -> str | None:
     await _save(user.id, inflight={'connection': candidate['id'], 'at': int(time.time())})
     log.info('Silent reconnect started', extra={'user_id': user.id, 'connection_id': candidate['id']})
     return authorization['authorize_url']
+
+
+def _candidates(connections: list[dict]) -> list[dict]:
+    """Per provider, the one connection worth a silent attempt, in listing order.
+
+    A provider with an enabled connection needs none: re-authorizing a stale pending row
+    would only turn it into an enabled duplicate. Otherwise only the newest connection
+    needing consent is tried, never every leftover pending row.
+    """
+    enabled = {row.get('source_kind') for row in connections if row.get('lifecycle') == 'enabled'}
+    newest: dict[str, dict] = {}
+    for row in connections:
+        provider = row.get('source_kind')
+        if provider not in PROVIDERS or provider in enabled or row.get('lifecycle') not in NEEDS_CONSENT:
+            continue
+        if provider not in newest or (row.get('created_at') or '') > (newest[provider].get('created_at') or ''):
+            newest[provider] = row
+    chosen = {id(row) for row in newest.values()}
+    return [row for row in connections if id(row) in chosen]
 
 
 async def returned(user: UserModel, connection_id: str) -> bool:
