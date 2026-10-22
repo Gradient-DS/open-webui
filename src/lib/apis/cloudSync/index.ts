@@ -95,8 +95,12 @@ const knowledgePath = (id: string) => `/knowledge/${encodeURIComponent(id)}`;
 const schedulePath = (knowledgeId: string, id: string) =>
 	`${knowledgePath(knowledgeId)}/schedules/${encodeURIComponent(id)}`;
 
+// [Gradient] No authorize_url: the user already holds a healthy connection of this provider,
+// which soev-api returns instead of creating another one.
 export const createConnection = (token: string, provider: CloudProvider) =>
-	request<Authorization & { connection_id: string }>(token, '/connections', 'POST', { provider });
+	request<
+		Omit<Authorization, 'authorize_url'> & { connection_id: string; authorize_url: string | null }
+	>(token, '/connections', 'POST', { provider });
 export const listConnections = (token: string) => request<Connection[]>(token, '/connections');
 export const getConnection = (token: string, id: string) =>
 	request<Connection>(token, connectionPath(id));

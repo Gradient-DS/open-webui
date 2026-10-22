@@ -6,6 +6,15 @@
 		type ComposerPreferences
 	} from '$lib/utils/composerPreferences';
 	import type { LiveToolState } from '$lib/utils/toolState';
+	import {
+		grantedLiveState,
+		liveConnected,
+		liveDefaultState,
+		liveGranted,
+		liveGrants,
+		prefetchLiveFamilies,
+		type LiveFamily
+	} from '$lib/utils/live-connections';
 	import { getHistorySide } from '$lib/utils/dataSeparation';
 	import { turnNotices, withoutRemoved } from '$lib/utils/turnNotices';
 	import type { ChatAttachment } from '$lib/types/chatAttachment';
@@ -388,6 +397,43 @@
 	let imageGenerationEnabled = false;
 	let liveDocumentsState: LiveToolState = 'off';
 	let liveMailState: LiveToolState = 'off';
+	// [Gradient] A live family is on only with a grant. Prefetch the grant snapshots when a chat
+	// loads, so a new chat's default and the composer reflect them.
+	const prefetchLiveGrants = () => {
+		const families: LiveFamily[] = [];
+		if ($config?.features?.enable_live_documents) families.push('live_documents');
+		if ($config?.features?.enable_live_mail) families.push('mail');
+		if (families.length) prefetchLiveFamilies(localStorage.token, families);
+	};
+	const setLiveState = (family: LiveFamily, state: LiveToolState) => {
+		if (family === 'mail') liveMailState = state;
+		else liveDocumentsState = state;
+	};
+	// A new chat's families whose grant was still loading when the default was set: once it
+	// arrives with a grant, the family turns on unless the user changed it in the meantime.
+	let liveDefaultWait: { session: number; families: LiveFamily[] } | null = null;
+	$: if (liveDefaultWait) applyLateLiveDefaults($liveGrants);
+	const applyLateLiveDefaults = (grants: Record<string, boolean>) => {
+		if (!liveDefaultWait) return;
+		if (liveDefaultWait.session !== composerSession) {
+			liveDefaultWait = null;
+			return;
+		}
+		const waiting = liveDefaultWait.families.filter((family) => {
+			const granted = liveGranted(grants, family);
+			if (granted === undefined) return true;
+			const state = family === 'mail' ? liveMailState : liveDocumentsState;
+			if (granted && state === 'off') setLiveState(family, 'auto');
+			return false;
+		});
+		liveDefaultWait = waiting.length ? { ...liveDefaultWait, families: waiting } : null;
+	};
+	// The chat's connect card connected a family: the user asked for it, so it is on.
+	let liveConnectedSeen = get(liveConnected)?.seq ?? 0;
+	$: if ($liveConnected && $liveConnected.seq > liveConnectedSeen) {
+		liveConnectedSeen = $liveConnected.seq;
+		setLiveState($liveConnected.family, 'auto');
+	}
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
 	let documentWriterEnabled = true;
@@ -914,6 +960,7 @@
 
 	const navigateHandler = async () => {
 		noteChatDebug('navigateHandler start');
+		prefetchLiveGrants();
 		// Mark the outgoing chat as read before loading the new one.
 		// $chatId still holds the previous chat here — loadChat() updates it.
 		if ($chatId && $chatId !== chatIdProp && !$temporaryChatEnabled) {
@@ -1126,6 +1173,7 @@
 			return;
 		}
 		settingDefaults = true;
+		let liveWaiting: LiveFamily[] = [];
 
 		try {
 			if (!$tools) {
@@ -1150,8 +1198,16 @@
 				const strict = $config?.features?.feature_strict_data_separation ?? false;
 				webSearchEnabled = Boolean(webSearchAllowed && (always || !strict));
 				documentWriterEnabled = true;
-				liveDocumentsState = $config?.features?.enable_live_documents ? 'auto' : 'off';
-				liveMailState = $config?.features?.enable_live_mail ? 'auto' : 'off';
+				// OneDrive and mail search start on only with a grant; without one the composer
+				// offers to connect instead. A grant still loading is applied when it arrives.
+				const documentsOffered = Boolean($config?.features?.enable_live_documents);
+				const mailOffered = Boolean($config?.features?.enable_live_mail);
+				const documentsGranted = liveGranted($liveGrants, 'live_documents');
+				const mailGranted = liveGranted($liveGrants, 'mail');
+				liveDocumentsState = liveDefaultState(documentsOffered, documentsGranted);
+				liveMailState = liveDefaultState(mailOffered, mailGranted);
+				if (documentsOffered && documentsGranted === undefined) liveWaiting.push('live_documents');
+				if (mailOffered && mailGranted === undefined) liveWaiting.push('mail');
 			}
 
 			if (selectedModels.length !== 1 && !atSelectedModel) {
@@ -1259,6 +1315,9 @@
 					composerPreferences($settings.composerTools, currentComposerPreferences())
 				);
 			}
+			liveDefaultWait = liveWaiting.length
+				? { session: composerSession, families: liveWaiting }
+				: null;
 			settingDefaults = false;
 		}
 	};
@@ -2288,6 +2347,7 @@
 	};
 
 	const initNewChat = async () => {
+		prefetchLiveGrants();
 		// [Gradient] Reset the loaded chat so stale meta (e.g. agent_id from
 		// the previous chat) doesn't bleed into the empty-state Navbar.
 		chat = null;
@@ -3911,8 +3971,13 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
 						: false,
-				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
-				live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
+				// [Gradient] A family known to have no grant is never sent on.
+				live_documents: $config?.features?.enable_live_documents
+					? grantedLiveState(liveDocumentsState, liveGranted($liveGrants, 'live_documents'))
+					: 'off',
+				live_mail: $config?.features?.enable_live_mail
+					? grantedLiveState(liveMailState, liveGranted($liveGrants, 'mail'))
+					: 'off',
 				web_search: webSearchActive
 			};
 
