@@ -173,6 +173,14 @@ _NAMED = {'open_document': ('Opening document: {{title}}', 'Opened document: {{t
 # [Claude] A tool OWUI has no label for still shows its name, but reads as finished once it is.
 _UNKNOWN = ('Running {{tool}}…', 'Ran {{tool}}', 'Could not run {{tool}}')
 _PHASES = ('running', 'done', 'failed')
+# [Claude] The failed line of a call the agent refused before its tool ran, by the output's `error_kind`: it says why,
+# where the tool's own failed line would read as if the mailbox or the web were down. A tool's own error keeps it.
+_REFUSED = {
+    'invalid_arguments': 'The request was not well-formed',
+    'repeated': 'Skipped: already done for this answer',
+    'limit': 'Skipped: limit reached for this question',
+    'unknown_tool': 'This tool is not available',
+}
 
 
 def _web_items(elements: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -1635,6 +1643,8 @@ class AgentTurn:
             _filled(declared, self.tool_params(declared, arguments, output)) if isinstance(declared, dict) else None
         )
         status = {'action': name, **filled} if filled else self.generic_status(name, phase, arguments, output)
+        if phase == 'failed' and (reason := _REFUSED.get(output.get('error_kind'))):
+            return {'action': name, 'description': reason}
         if name == 'search_mail':
             status = mail_search_status(status, arguments)
         if items := _web_items(self.touched(arguments, output)):

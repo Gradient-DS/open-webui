@@ -4177,3 +4177,21 @@ async def test_non_streaming_returns_the_summed_usage(chat: Chat) -> None:
     result = await chat.response('question', 'a1', stream=False)
     assert result['choices'][0]['message']['content'] == 'Answer'
     assert result['usage'] == usage(12, 3)
+
+
+@pytest.mark.parametrize(
+    'kind,description',
+    [
+        ('invalid_arguments', 'The request was not well-formed'),
+        ('repeated', 'Skipped: already done for this answer'),
+        ('limit', 'Skipped: limit reached for this question'),
+        ('unknown_tool', 'This tool is not available'),
+        ('tool', 'Could not search your mail'),
+        (None, 'Could not search your mail'),
+    ],
+)
+def test_a_refused_call_says_why_and_a_tool_error_keeps_the_tools_failed_line(kind, description) -> None:
+    turn = agent_v2.AgentTurn(AsyncMock(), {}, 'owui:user:alice')
+    output = {'call_id': 'c1', 'error': 'refused', 'error_kind': kind}
+    status = turn.tool_status('search_mail', {'keywords': ['KNB']}, output)
+    assert (status['action'], status['description']) == ('search_mail', description)
