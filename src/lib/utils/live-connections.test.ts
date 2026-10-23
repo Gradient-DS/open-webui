@@ -1,9 +1,16 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import * as api from '$lib/apis/cloudSync';
+import { get } from 'svelte/store';
 import {
 	attachErrorMessage,
 	connectLiveSource,
+	grantedLiveState,
+	liveConnections,
+	liveDefaultState,
+	liveGranted,
+	liveGrants,
 	prefetchLiveConnections,
+	prefetchLiveFamilies,
 	relinkPrompt
 } from './live-connections';
 vi.mock('$lib/apis/cloudSync', async (original) => ({
@@ -13,7 +20,8 @@ vi.mock('$lib/apis/cloudSync', async (original) => ({
 	enableLiveFamily: vi.fn(),
 	createConnection: vi.fn(),
 	authorizeConnection: vi.fn(),
-	getConnection: vi.fn()
+	getConnection: vi.fn(),
+	grantAutoConnected: vi.fn()
 }));
 const popup = { close: vi.fn(), closed: false, location: { href: '' } };
 let receive: (event: unknown) => void;
@@ -217,4 +225,122 @@ it('maps picker attach refusals to user messages without upstream detail', () =>
 	);
 	expect(attachErrorMessage(new Error('upstream_error'))).toBe('Could not attach OneDrive file');
 	expect(attachErrorMessage('too_large')).toBe('Could not attach OneDrive file');
+});
+
+it('refreshes the snapshot after a cancelled consent, so a retry reuses the pending connection', async () => {
+	vi.mocked(api.listConnections)
+		.mockResolvedValueOnce([])
+		.mockResolvedValue([{ id: 'c', source_kind: 'onedrive', lifecycle: 'pending' }]);
+	vi.mocked(api.createConnection).mockResolvedValue({
+		connection_id: 'c',
+		authorize_url: 'https://provider.invalid/auth'
+	});
+	vi.mocked(api.getConnection).mockResolvedValue({
+		id: 'c',
+		source_kind: 'onedrive',
+		lifecycle: 'pending'
+	});
+	await prefetchLiveConnections('cancel-session');
+	const pending = connectLiveSource('cancel-session');
+	const rejected = expect(pending).rejects.toThrow('Provider connection cancelled');
+	await vi.advanceTimersByTimeAsync(0);
+	popup.closed = true;
+	await vi.advanceTimersByTimeAsync(500);
+	await rejected;
+	expect(api.getConnection).toHaveBeenCalledWith('cancel-session', 'c');
+	expect(liveConnections('cancel-session')?.map((row) => row.connection.id)).toEqual(['c']);
+	vi.mocked(api.authorizeConnection).mockResolvedValue({
+		authorize_url: 'https://provider.invalid/auth'
+	});
+	void connectLiveSource('cancel-session').catch(() => {});
+	await vi.advanceTimersByTimeAsync(0);
+	expect(api.authorizeConnection).toHaveBeenCalledWith('cancel-session', 'c');
+	expect(api.createConnection).toHaveBeenCalledOnce();
+});
+it('treats a popup that closed before its message as connected when the connection is enabled', async () => {
+	vi.mocked(api.listConnections).mockResolvedValue([]);
+	vi.mocked(api.createConnection).mockResolvedValue({
+		connection_id: 'c',
+		authorize_url: 'https://provider.invalid/auth'
+	});
+	vi.mocked(api.getConnection).mockResolvedValue({
+		id: 'c',
+		source_kind: 'onedrive',
+		lifecycle: 'enabled'
+	});
+	vi.mocked(api.listLiveGrants).mockResolvedValue([]);
+	vi.mocked(api.enableLiveFamily).mockResolvedValue({
+		id: 'g',
+		lifecycle: 'enabled',
+		families: ['live_documents']
+	});
+	await prefetchLiveConnections('closed-session');
+	const pending = connectLiveSource('closed-session');
+	await vi.advanceTimersByTimeAsync(0);
+	popup.closed = true;
+	await vi.advanceTimersByTimeAsync(500);
+	expect(await pending).toBe('g');
+	expect(api.enableLiveFamily).toHaveBeenCalledWith('closed-session', 'c', 'live_documents');
+});
+it('enables the family on an existing healthy connection without waiting for consent', async () => {
+	vi.mocked(api.listConnections).mockResolvedValue([]);
+	vi.mocked(api.createConnection).mockResolvedValue({ connection_id: 'c', authorize_url: null });
+	vi.mocked(api.getConnection).mockResolvedValue({
+		id: 'c',
+		source_kind: 'outlook_mail',
+		lifecycle: 'enabled'
+	});
+	vi.mocked(api.enableLiveFamily).mockResolvedValue({
+		id: 'g',
+		lifecycle: 'enabled',
+		families: ['mail']
+	});
+	await prefetchLiveConnections('exists-session', 'outlook_mail', 'mail');
+	expect(await connectLiveSource('exists-session', 'outlook_mail', 'mail')).toBe('g');
+	expect(popup.location.href).toBe('');
+	expect(popup.close).toHaveBeenCalled();
+});
+it('publishes per family whether the snapshot holds a grant', async () => {
+	vi.mocked(api.listConnections).mockResolvedValue([
+		{ id: 'm', source_kind: 'outlook_mail', lifecycle: 'enabled' },
+		{ id: 'c', source_kind: 'onedrive', lifecycle: 'pending' }
+	]);
+	vi.mocked(api.listLiveGrants).mockResolvedValue([
+		{ id: 'g', lifecycle: 'enabled', families: ['mail'] }
+	]);
+	await Promise.all([
+		prefetchLiveConnections('grant-session', 'outlook_mail', 'mail'),
+		prefetchLiveConnections('grant-session', 'onedrive', 'live_documents')
+	]);
+	expect(liveGranted(get(liveGrants), 'mail')).toBe(true);
+	expect(liveGranted(get(liveGrants), 'live_documents')).toBe(false);
+});
+it('starts a family on only with the feature and a grant, and never sends it on without one', () => {
+	expect(liveDefaultState(true, true)).toBe('auto');
+	expect(liveDefaultState(true, false)).toBe('off');
+	expect(liveDefaultState(true, undefined)).toBe('off');
+	expect(liveDefaultState(false, true)).toBe('off');
+	expect(grantedLiveState('auto', false)).toBe('off');
+	expect(grantedLiveState('auto', true)).toBe('auto');
+	expect(grantedLiveState('auto', undefined)).toBe('auto');
+	expect(grantedLiveState('off', true)).toBe('off');
+});
+
+it('grants what the Microsoft login connected once per session, before the first snapshot', async () => {
+	let grantedNow = false;
+	vi.mocked(api.grantAutoConnected).mockImplementation(async () => {
+		grantedNow = true;
+		return { families: ['mail'] };
+	});
+	vi.mocked(api.listConnections).mockImplementation(async () =>
+		grantedNow ? [{ id: 'c', source_kind: 'outlook_mail', lifecycle: 'enabled' }] : []
+	);
+	vi.mocked(api.listLiveGrants).mockResolvedValue([
+		{ id: 'g', lifecycle: 'enabled', families: ['mail'] }
+	]);
+	prefetchLiveFamilies('auto-session', ['mail']);
+	prefetchLiveFamilies('auto-session', ['mail']);
+	await vi.advanceTimersByTimeAsync(0);
+	expect(api.grantAutoConnected).toHaveBeenCalledTimes(1);
+	expect(liveGranted(get(liveGrants), 'mail')).toBe(true);
 });

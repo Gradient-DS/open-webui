@@ -95,8 +95,12 @@ const knowledgePath = (id: string) => `/knowledge/${encodeURIComponent(id)}`;
 const schedulePath = (knowledgeId: string, id: string) =>
 	`${knowledgePath(knowledgeId)}/schedules/${encodeURIComponent(id)}`;
 
+// [Gradient] No authorize_url: the user already holds a healthy connection of this provider,
+// which soev-api returns instead of creating another one.
 export const createConnection = (token: string, provider: CloudProvider) =>
-	request<Authorization & { connection_id: string }>(token, '/connections', 'POST', { provider });
+	request<
+		Omit<Authorization, 'authorize_url'> & { connection_id: string; authorize_url: string | null }
+	>(token, '/connections', 'POST', { provider });
 export const listConnections = (token: string) => request<Connection[]>(token, '/connections');
 export const getConnection = (token: string, id: string) =>
 	request<Connection>(token, connectionPath(id));
@@ -106,6 +110,9 @@ export const authorizeConnection = (token: string, id: string) =>
 	request<Authorization>(token, `${connectionPath(id)}/authorize`, 'POST');
 export const revokeConnection = (token: string, id: string) =>
 	request<void>(token, connectionPath(id), 'DELETE');
+// [Gradient] Live search on for what the Microsoft login connected; the families turned on now.
+export const grantAutoConnected = (token: string) =>
+	request<{ families: string[] }>(token, '/live/auto', 'POST');
 export const createSchedule = (token: string, knowledgeId: string, form: ScheduleForm) =>
 	request<Schedule>(token, `${knowledgePath(knowledgeId)}/schedules`, 'POST', form);
 export const deleteSchedule = (token: string, knowledgeId: string, id: string) =>

@@ -64,10 +64,20 @@ class CloudSync:
             body = {**(body or {}), 'silent': True}
         return await self._send('POST', f'/v1/connections/{quote(connection_id, safe="")}/authorize', body)
 
+    async def open_connection(self, provider: str) -> dict:
+        """The user's connection for this provider: soev-api creates one only when none is held."""
+        return await self._send('POST', '/v1/connections', {'source_kind': provider, 'credential_kind': 'user_oauth'})
+
     async def create_connection(self, provider: str, owner_email: str | None = None) -> dict:
-        connection = await self._send(
-            'POST', '/v1/connections', {'source_kind': provider, 'credential_kind': 'user_oauth'}
-        )
+        """Start consent for a new connection, or reuse the one the user already holds.
+
+        soev-api keeps one connection per owner and provider and answers a create with the
+        existing row. A healthy enabled one needs no consent (no authorize URL): the caller
+        enables its live family on it. Any other row gets consent as usual.
+        """
+        connection = await self.open_connection(provider)
+        if connection.get('lifecycle') == 'enabled' and not connection.get('last_error'):
+            return {'connection_id': connection['id'], 'authorize_url': None}
         authorization = await self.authorize(connection['id'], owner_email if provider == 'google_drive' else None)
         return {'connection_id': connection['id'], 'authorize_url': authorization['authorize_url']}
 

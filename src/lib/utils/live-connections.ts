@@ -2,6 +2,8 @@ import type { DocumentReference } from './onedrive-file-picker';
 import type { ChatAttachment } from '$lib/types/chatAttachment';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { centeredPopupFeatures } from './popup';
+import type { LiveToolState } from './toolState';
+import { writable } from 'svelte/store';
 import {
 	listConnections,
 	listLiveGrants,
@@ -9,6 +11,7 @@ import {
 	createConnection,
 	authorizeConnection,
 	getConnection,
+	grantAutoConnected,
 	CloudSyncError
 } from '$lib/apis/cloudSync';
 import {
@@ -64,14 +67,79 @@ export type LiveConnection = {
 	grantId?: string;
 };
 export type LiveFamily = 'live_documents' | 'mail';
+/** The provider whose connection carries each family's grant (separate consent per family). */
+export const LIVE_PROVIDERS: Record<LiveFamily, string> = {
+	live_documents: 'onedrive',
+	mail: 'outlook_mail'
+};
 let session: string | undefined;
 const snapshots = new Map<string, LiveConnection[]>();
 function snapshotKey(token: string, provider: string, family: LiveFamily): string {
 	if (session !== token) {
 		snapshots.clear();
+		liveGrants.set({});
 		session = token;
 	}
 	return `${provider}:${family}`;
+}
+
+/**
+ * [Gradient] Per `provider:family`, whether the latest snapshot holds an enabled grant; absent
+ * until the first snapshot. A family is only ever shown on (and sent on) with a grant.
+ */
+export const liveGrants = writable<Record<string, boolean>>({});
+function remember(key: string, rows: LiveConnection[]) {
+	snapshots.set(key, rows);
+	const granted = rows.some((row) => !!row.grantId);
+	liveGrants.update((grants) => (grants[key] === granted ? grants : { ...grants, [key]: granted }));
+}
+
+/** Whether `family` has an enabled grant: undefined while its snapshot is loading. */
+export function liveGranted(
+	grants: Record<string, boolean>,
+	family: LiveFamily
+): boolean | undefined {
+	return grants[`${LIVE_PROVIDERS[family]}:${family}`];
+}
+
+/** A new chat starts a family on only when the tenant offers it and the user holds a grant. */
+export function liveDefaultState(featureOn: boolean, granted: boolean | undefined): LiveToolState {
+	return featureOn && granted === true ? 'auto' : 'off';
+}
+
+/** The state a turn sends: a family known to have no grant is off whatever was chosen. */
+export function grantedLiveState(
+	state: LiveToolState,
+	granted: boolean | undefined
+): LiveToolState {
+	return granted === false ? 'off' : state;
+}
+
+/**
+ * [Gradient] A connect finished outside the composer (the chat's connect card): the chat turns
+ * the family on. `seq` makes every announcement distinct.
+ */
+export const liveConnected = writable<{ family: LiveFamily; seq: number } | null>(null);
+let connectedSeq = 0;
+export function announceLiveConnected(family: LiveFamily) {
+	liveConnected.set({ family, seq: ++connectedSeq });
+}
+
+// [Gradient] Once per session, before the first snapshot: the server turns live search on for
+// what the Microsoft login connected, waiting briefly for a token exchange still running.
+let autoGrant: { token: string; request: Promise<unknown> } | null = null;
+function autoGranted(token: string): Promise<unknown> {
+	if (autoGrant?.token !== token)
+		autoGrant = { token, request: grantAutoConnected(token).catch(() => {}) };
+	return autoGrant.request;
+}
+
+/** Prefetch the snapshot of every live family the tenant offers. */
+export function prefetchLiveFamilies(token: string, families: LiveFamily[]) {
+	void autoGranted(token).then(() => {
+		for (const family of families)
+			void prefetchLiveConnections(token, LIVE_PROVIDERS[family], family).catch(() => {});
+	});
 }
 
 // The composer prefetches every provider/family pair at once; they share one connection list.
@@ -106,7 +174,7 @@ export async function prefetchLiveConnections(
 					: undefined
 		}))
 	);
-	if (session === token) snapshots.set(key, rows);
+	if (session === token) remember(key, rows);
 	return rows;
 }
 
@@ -139,6 +207,7 @@ export async function connectLiveSource(
 		try {
 			const grant = await enableLiveFamily(token, connection.id, family);
 			selected.grantId = grant.id;
+			remember(snapshotKey(token, provider, family), rows);
 			return grant.id;
 		} catch (error) {
 			if (
@@ -155,45 +224,63 @@ export async function connectLiveSource(
 	if (!popup) throw new Error('Allow popups to connect your account');
 	onConsentOpened?.();
 	try {
+		// soev-api answers a create for a provider the user already holds with that connection;
+		// a healthy one needs no consent (no authorize URL), only the family enabled on it.
 		const authorization = connection
 			? { ...(await authorizeConnection(token, connection.id)), connection_id: connection.id }
 			: await createConnection(token, provider);
 		const id = authorization.connection_id;
-		const trusted = trustedConnectOrigins(window.location.origin, WEBUI_API_BASE_URL);
-		await new Promise<void>((resolve, reject) => {
-			const finish = (error?: Error) => {
-				clearInterval(timer);
-				window.removeEventListener('message', received);
-				if (error) reject(error);
-				else resolve();
-			};
-			const received = (event: MessageEvent) => {
-				const result = connectResult(event, trusted, popup, id);
-				if (result)
-					finish(result === 'pending' ? undefined : new Error('Provider connection failed'));
-			};
-			const started = Date.now();
-			const timer = setInterval(() => {
-				if (popup.closed || Date.now() - started > 120000)
+		if (authorization.authorize_url) {
+			const authorizeUrl = authorization.authorize_url;
+			const trusted = trustedConnectOrigins(window.location.origin, WEBUI_API_BASE_URL);
+			await new Promise<void>((resolve, reject) => {
+				let closing = false;
+				const finish = (error?: Error) => {
+					clearInterval(timer);
+					window.removeEventListener('message', received);
+					if (error) reject(error);
+					else resolve();
+				};
+				const received = (event: MessageEvent) => {
+					const result = connectResult(event, trusted, popup, id);
+					if (result)
+						finish(result === 'pending' ? undefined : new Error('Provider connection failed'));
+				};
+				// [Gradient] A popup can close before its message arrives (or without one) while the
+				// exchange succeeded: ask the connection once before calling it cancelled.
+				const closed = async () => {
+					closing = true;
+					try {
+						const outcome = connectionOutcome(await getConnection(token, id), 0);
+						if (outcome.status === 'done') return finish();
+					} catch {
+						// Unreadable: treated as cancelled below.
+					}
 					finish(new Error('Provider connection cancelled'));
-			}, 500);
-			window.addEventListener('message', received);
-			popup.location.href = authorization.authorize_url;
-		});
+				};
+				const started = Date.now();
+				const timer = setInterval(() => {
+					if (closing) return;
+					if (Date.now() - started > 120000) finish(new Error('Provider connection cancelled'));
+					else if (popup.closed) void closed();
+				}, 500);
+				window.addEventListener('message', received);
+				popup.location.href = authorizeUrl;
+			});
+		}
 		const started = Date.now();
 		while (Date.now() - started <= 120000) {
 			const outcome = connectionOutcome(await getConnection(token, id), Date.now() - started);
-			if (outcome.status === 'done') {
-				const grant = await enableLiveFamily(token, id, family);
-				await prefetchLiveConnections(token, provider, family);
-				return grant.id;
-			}
+			if (outcome.status === 'done') return (await enableLiveFamily(token, id, family)).id;
 			if (outcome.status !== 'waiting') throw new Error('Provider connection failed');
 			await new Promise((resolve) => setTimeout(resolve, 1000));
 		}
 		throw new Error('Provider connection failed');
 	} finally {
 		popup.close();
+		// Also after a cancel, error or timeout: a retry then finds the connection this attempt
+		// created instead of creating another one.
+		await prefetchLiveConnections(token, provider, family).catch(() => {});
 	}
 }
 

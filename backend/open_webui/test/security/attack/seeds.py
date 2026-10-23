@@ -526,20 +526,33 @@ def seed_cloud_family(ctx, parameter):
 def seed_cloud_connection(ctx, parameter):
     created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': 'onedrive'})
     connection = _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
-    # OAuth cannot return from Microsoft on the sealed network. Only consent
-    # state is seeded; the application must admit the owner and create its grant.
-    with requests.Session() as session:
-        session.trust_env = False
-        response = session.post(
-            os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
-            headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
-            json={'connection_id': connection},
-            timeout=30,
-        )
-        response.raise_for_status()
+    # soev-api keeps one connection per owner and provider: a later pass gets the
+    # consented connection back, without an authorize URL, and needs no new consent.
+    if created.get('authorize_url') is not None:
+        # OAuth cannot return from Microsoft on the sealed network. Only consent
+        # state is seeded; the application must admit the owner and create its grant.
+        with requests.Session() as session:
+            session.trust_env = False
+            response = session.post(
+                os.environ['CI_PLATFORM_FIXTURE_URL'] + '/ci/consent',
+                headers={'Authorization': 'Bearer ' + os.environ['CI_PLATFORM_FIXTURE_KEY']},
+                json={'connection_id': connection},
+                timeout=30,
+            )
+            response.raise_for_status()
     grant = ctx.request('POST', f'/api/v1/cloud-sync/connections/{connection}/live/live_documents', actor=ctx.admin)
     ctx.provide(parameter, 'cloud_grant', grant['id'])
     return connection
+
+
+def seed_cloud_authorize_connection(ctx, parameter):
+    # Authorizing an enabled connection suspends it, so this control needs a pending
+    # connection that is not the consented OneDrive fixture. With one connection per owner
+    # and provider that takes another provider; Outlook mail where the platform offers it.
+    policy = ctx.request('GET', '/api/v1/cloud-sync/policy', actor=ctx.admin)
+    provider = 'outlook_mail' if 'outlook_mail' in policy.get('providers_enabled', []) else 'onedrive'
+    created = ctx.request('POST', '/api/v1/cloud-sync/connections', actor=ctx.admin, json={'provider': provider})
+    return _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
 
 
 def seed_external_source(ctx, parameter):
@@ -583,6 +596,7 @@ _SEEDERS = {
         seed_active_function,
         seed_totp_user,
         seed_cloud_connection,
+        seed_cloud_authorize_connection,
         seed_cloud_family,
         seed_knowledge_file,
         seed_external_source,

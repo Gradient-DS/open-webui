@@ -1135,7 +1135,9 @@
 						expectedId = authorization.connection_id;
 					if (!expectedId) return finish(null);
 					connecting = { id: expectedId, source_kind: provider.kind, lifecycle: 'pending' };
-					popup.location.href = authorization.authorize_url;
+					// [Gradient] An existing healthy connection comes back without consent to give.
+					if (authorization.authorize_url) popup.location.href = authorization.authorize_url;
+					else void checkConnection();
 				} catch (error) {
 					reportCloudError(error);
 					finish(null);
