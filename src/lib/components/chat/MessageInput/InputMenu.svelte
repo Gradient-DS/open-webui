@@ -3,7 +3,7 @@
 	// item pinnable to the composer bar ($settings.pinnedInputItems). It absorbs upstream's
 	// separate integrations menu; tenant gates apply to every item.
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import type { Writable } from 'svelte/store';
+	import { get, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onDestroy, tick } from 'svelte';
 	import type { ChatInputCallbacks } from '$lib/types/chatAttachment';
@@ -12,8 +12,12 @@
 	import { prepareBusinessDocumentPicker } from '$lib/utils/onedrive-file-picker';
 	import {
 		connectLiveSource,
+		liveGranted,
+		liveGrants,
+		LIVE_PROVIDERS,
 		prefetchLiveConnections,
-		relinkPrompt
+		relinkPrompt,
+		type LiveFamily
 	} from '$lib/utils/live-connections';
 	import { toast } from 'svelte-sonner';
 
@@ -120,29 +124,37 @@
 	export let liveMailState: LiveToolState = 'off';
 	let connectingDocuments = false;
 	let connectingMail = false;
-	async function toggleLive(family: 'live_documents' | 'mail') {
+	// [Gradient] A family is a switch only with a grant; without one it is a Connect action that
+	// runs the consent and turns the family on when it succeeds. Turning on is the consent.
+	$: documentsGranted = liveGranted($liveGrants, 'live_documents') === true;
+	$: mailGranted = liveGranted($liveGrants, 'mail') === true;
+	async function toggleLive(family: LiveFamily) {
 		const mail = family === 'mail';
 		if (!(mail ? $config?.features?.enable_live_mail : $config?.features?.enable_live_documents))
 			return;
 		if (mail ? connectingMail : connectingDocuments) return;
-		const state = mail ? liveMailState : liveDocumentsState;
-		const next: LiveToolState = state === 'off' ? 'auto' : 'off';
+		if (liveGranted(get(liveGrants), family) === true) {
+			const next: LiveToolState =
+				(mail ? liveMailState : liveDocumentsState) === 'off' ? 'auto' : 'off';
+			if (mail) liveMailState = next;
+			else liveDocumentsState = next;
+			return;
+		}
 		if (mail) connectingMail = true;
 		else connectingDocuments = true;
 		const provider = mail ? 'Outlook' : 'OneDrive';
 		let consentToast: string | number | undefined;
 		try {
-			if (next === 'auto')
-				await connectLiveSource(
-					localStorage.token,
-					mail ? 'outlook_mail' : 'onedrive',
-					family,
-					() => (consentToast = toast.loading($i18n.t('Connecting to {{provider}}…', { provider })))
-				);
+			await connectLiveSource(
+				localStorage.token,
+				LIVE_PROVIDERS[family],
+				family,
+				() => (consentToast = toast.loading($i18n.t('Connecting to {{provider}}…', { provider })))
+			);
 			if (consentToast !== undefined)
 				toast.success($i18n.t('{{provider}} connected', { provider }), { id: consentToast });
-			if (mail) liveMailState = next;
-			else liveDocumentsState = next;
+			if (mail) liveMailState = 'auto';
+			else liveDocumentsState = 'auto';
 		} catch (error) {
 			if (consentToast !== undefined) toast.dismiss(consentToast);
 			const prompt = relinkPrompt(error);
@@ -516,6 +528,8 @@
 
 	const stateAriaLabel = (label: string, on: boolean, description: string) =>
 		`${label}: ${$i18n.t(toolStateLabel(on))}. ${description}`;
+	const connectAriaLabel = (label: string) =>
+		`${label}: ${$i18n.t('Not connected')}. ${$i18n.t('Connect your account to use this')}`;
 
 	// [Gradient] Web search is on or off. Exported for the pinned composer button.
 	export const toggleWebSearch = () => {
@@ -810,27 +824,40 @@
 						<MenuItem
 							label={$i18n.t('Mail search')}
 							pinId="live_mail"
-							ariaLabel={stateAriaLabel(
-								$i18n.t('Mail search'),
-								liveMailState !== 'off',
-								liveMailState === 'off'
-									? $i18n.t(TOOL_OFF_DESCRIPTION)
-									: $i18n.t('The model decides whether to search your mail')
-							)}
-							tooltip={!$config?.features?.enable_live_mail
-								? $i18n.t('Unavailable')
-								: stateAriaLabel(
+							ariaLabel={mailGranted
+								? stateAriaLabel(
 										$i18n.t('Mail search'),
 										liveMailState !== 'off',
 										liveMailState === 'off'
 											? $i18n.t(TOOL_OFF_DESCRIPTION)
 											: $i18n.t('The model decides whether to search your mail')
-									)}
-							toggle={liveMailState !== 'off'}
+									)
+								: connectAriaLabel($i18n.t('Mail search'))}
+							tooltip={!$config?.features?.enable_live_mail
+								? $i18n.t('Unavailable')
+								: mailGranted
+									? stateAriaLabel(
+											$i18n.t('Mail search'),
+											liveMailState !== 'off',
+											liveMailState === 'off'
+												? $i18n.t(TOOL_OFF_DESCRIPTION)
+												: $i18n.t('The model decides whether to search your mail')
+										)
+									: connectAriaLabel($i18n.t('Mail search'))}
+							toggle={mailGranted ? liveMailState !== 'off' : null}
 							disabled={connectingMail || !$config?.features?.enable_live_mail}
 							onClick={toggleLiveMail}
 						>
 							<MailSearch slot="icon" className="size-3.5" />
+							<svelte:fragment slot="actions">
+								{#if connectingMail}
+									<Spinner className="size-3.5 shrink-0" />
+								{:else if !mailGranted}
+									<span class="shrink-0 text-xs font-medium text-sky-600 dark:text-sky-400"
+										>{$i18n.t('Connect')}</span
+									>
+								{/if}
+							</svelte:fragment>
 						</MenuItem>
 					{/if}
 
@@ -838,27 +865,40 @@
 						<MenuItem
 							label={$i18n.t('OneDrive search')}
 							pinId="live_documents"
-							ariaLabel={stateAriaLabel(
-								$i18n.t('OneDrive search'),
-								liveDocumentsState !== 'off',
-								liveDocumentsState === 'off'
-									? $i18n.t(TOOL_OFF_DESCRIPTION)
-									: $i18n.t('The model decides whether to search OneDrive')
-							)}
-							tooltip={!$config?.features?.enable_live_documents
-								? $i18n.t('Unavailable')
-								: stateAriaLabel(
+							ariaLabel={documentsGranted
+								? stateAriaLabel(
 										$i18n.t('OneDrive search'),
 										liveDocumentsState !== 'off',
 										liveDocumentsState === 'off'
 											? $i18n.t(TOOL_OFF_DESCRIPTION)
 											: $i18n.t('The model decides whether to search OneDrive')
-									)}
-							toggle={liveDocumentsState !== 'off'}
+									)
+								: connectAriaLabel($i18n.t('OneDrive search'))}
+							tooltip={!$config?.features?.enable_live_documents
+								? $i18n.t('Unavailable')
+								: documentsGranted
+									? stateAriaLabel(
+											$i18n.t('OneDrive search'),
+											liveDocumentsState !== 'off',
+											liveDocumentsState === 'off'
+												? $i18n.t(TOOL_OFF_DESCRIPTION)
+												: $i18n.t('The model decides whether to search OneDrive')
+										)
+									: connectAriaLabel($i18n.t('OneDrive search'))}
+							toggle={documentsGranted ? liveDocumentsState !== 'off' : null}
 							disabled={connectingDocuments || !$config?.features?.enable_live_documents}
 							onClick={toggleLiveDocuments}
 						>
 							<OneDriveSearch slot="icon" className="size-3.5" />
+							<svelte:fragment slot="actions">
+								{#if connectingDocuments}
+									<Spinner className="size-3.5 shrink-0" />
+								{:else if !documentsGranted}
+									<span class="shrink-0 text-xs font-medium text-sky-600 dark:text-sky-400"
+										>{$i18n.t('Connect')}</span
+									>
+								{/if}
+							</svelte:fragment>
 						</MenuItem>
 					{/if}
 

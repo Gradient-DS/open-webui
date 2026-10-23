@@ -3105,6 +3105,8 @@ if SOEV_GROUP_RECONCILE_MINUTES <= 0:
 SOEV_API_JOB_POLL_SECONDS = int(os.environ.get('SOEV_API_JOB_POLL_SECONDS', '5'))
 SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS = int(os.environ.get('SOEV_API_JOB_MAX_WALL_CLOCK_SECONDS', '21600'))
 SOEV_API_INLINE_DOCUMENT_BYTES = int(os.environ.get('SOEV_API_INLINE_DOCUMENT_BYTES', '262144'))
+# A Microsoft login connects OneDrive and Outlook mail silently and turns their live search on.
+SOEV_AUTO_CONNECT = os.environ.get('SOEV_AUTO_CONNECT', 'true').lower() == 'true'
 
 
 _default_selected_agent = AGENT_API_AGENTS[0] if AGENT_API_AGENTS else ''

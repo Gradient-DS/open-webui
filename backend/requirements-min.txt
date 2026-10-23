@@ -22,8 +22,8 @@ async-timeout
 aiocache
 aiofiles
 starlette-compress==1.7.1
-Brotli==1.2.0
-brotlicffi==1.2.0.1
+Brotli==1.2.1 # security: PYSEC-2026-4322 / PYSEC-2026-4323 (CVE-2026-111497, out-of-bounds write in the Brotli decoder) fixed in brotli 1.2.1 and brotlicffi 1.2.1.0
+brotlicffi==1.2.1.0 # security: PYSEC-2026-4322 / PYSEC-2026-4323 (CVE-2026-111497, out-of-bounds write in the Brotli decoder) fixed in brotli 1.2.1 and brotlicffi 1.2.1.0
 httpx[socks,http2,zstd,cli,brotli]==0.28.1
 starsessions[redis]==2.2.1
 
@@ -52,7 +52,7 @@ langchain-text-splitters==1.1.2
 
 fake-useragent==2.2.0
 
-black==26.5.1
+black==26.10.1 # security: CVE-2026-114134 fixed in 26.10.1
 pydub
 chardet==7.4.3
 beautifulsoup4

@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 613 operations. Audit bodies across all
-# OpenAPI methods (617 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 614 operations. Audit bodies across all
+# OpenAPI methods (618 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (613, 617), (
-        f'Expected 613 five-method operations / 617 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (614, 618), (
+        f'Expected 614 five-method operations / 618 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 

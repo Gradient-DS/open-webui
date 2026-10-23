@@ -690,10 +690,11 @@ backed_by = "soev-solutions"
 key = "cloud_connection"
 name = "connection_id"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}"
-description = "routers/cloud_sync.py resolves an owned connection through soev-api."
+description = "routers/cloud_sync.py resolves an owned connection through soev-api. soev-api keeps one connection per owner and provider, so every pass resolves the same consented OneDrive connection."
 seeded_by = "seed_cloud_connection"
 depends_on = []
 provides = ["cloud_grant"]
+fresh = false
 actor = "admin"
 
 [[parameter]]
@@ -701,10 +702,10 @@ backed_by = "soev-solutions"
 key = "cloud_authorize_connection"
 name = "connection_id"
 prefix = "/api/v1/cloud-sync/connections/{connection_id}/authorize"
-description = "Starting consent suspends an enabled connection. Use a separate pending connection so this control cannot revoke the live grant and schedule fixtures' consent."
-via = "POST /api/v1/cloud-sync/connections"
-body = { provider = "onedrive" }
-extract = "connection_id"
+description = "Starting consent suspends an enabled connection. Use a separate pending connection so this control cannot revoke the live grant and schedule fixtures' consent: one of another provider (Outlook mail) where the platform offers it, since soev-api keeps one connection per owner and provider. A later pass gets the same pending connection."
+seeded_by = "seed_cloud_authorize_connection"
+depends_on = []
+fresh = false
 actor = "admin"
 
 [[parameter]]

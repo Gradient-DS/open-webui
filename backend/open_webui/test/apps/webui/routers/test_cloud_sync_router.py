@@ -76,6 +76,41 @@ def test_create_connection_returns_the_authorize_url(api, provider):
     assert_assertions(api.requests)
 
 
+def test_create_connection_reuses_an_existing_healthy_connection_without_consent(api):
+    """soev-api answers with the user's enabled connection: no authorize call, no authorize URL."""
+    api.responses.append(response({'id': 'conn-live', 'source_kind': 'onedrive', 'lifecycle': 'enabled'}))
+    result = api.browser.post('/api/v1/cloud-sync/connections', json={'provider': 'onedrive'})
+    assert result.status_code == 200
+    assert result.json() == {'connection_id': 'conn-live', 'authorize_url': None}
+    assert [(request.method, request.url.path) for request in api.requests] == [('POST', '/v1/connections')]
+    assert_assertions(api.requests)
+
+
+@pytest.mark.parametrize(
+    'connection',
+    [
+        {'lifecycle': 'pending'},
+        {'lifecycle': 'suspended:reauth'},
+        {'lifecycle': 'enabled', 'last_error': 'reauth_required'},
+    ],
+)
+def test_create_connection_authorizes_an_existing_connection_that_needs_consent(api, connection):
+    """A returned pending, suspended or failing connection gets consent instead of a duplicate."""
+    api.responses.extend(
+        [
+            response({'id': 'conn-old', 'source_kind': 'onedrive', **connection}),
+            response({'authorize_url': 'https://provider.invalid/consent'}),
+        ]
+    )
+    result = api.browser.post('/api/v1/cloud-sync/connections', json={'provider': 'onedrive'})
+    assert result.status_code == 200
+    assert result.json() == {'connection_id': 'conn-old', 'authorize_url': 'https://provider.invalid/consent'}
+    assert [(request.method, request.url.path) for request in api.requests] == [
+        ('POST', '/v1/connections'),
+        ('POST', '/v1/connections/conn-old/authorize'),
+    ]
+
+
 @pytest.mark.parametrize('result', ['pending', 'error', 'invalid'])
 def test_the_done_page_posts_the_result_and_closes(api, result, monkeypatch):
     """The popup posts its escaped result to its own origin and each configured product origin, then closes."""
@@ -185,7 +220,7 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
         'unauthenticated',
     ],
 )
-def test_every_call_carries_the_users_assertion(api, operation):
+def test_every_call_carries_the_users_assertion(api, operation, monkeypatch):
     """All calls carry fresh user assertions and mutations cannot cross a KB boundary."""
     prefix = '/api/v1/cloud-sync'
     if operation == 'unauthenticated':
@@ -212,9 +247,14 @@ def test_every_call_carries_the_users_assertion(api, operation):
         result = api.browser.get(prefix + '/connections/c')
         assert result.json()['lifecycle'] == 'pending'
     elif operation == 'revoke':
+        decline = AsyncMock()
+        monkeypatch.setattr(cloud_sync.silent_connect, 'decline', decline)
+        api.responses.append(response({'id': 'c', 'source_kind': 'outlook_mail'}))
         api.responses.append(httpx.Response(204))
         result = api.browser.delete(prefix + '/connections/c')
         assert result.status_code == 204
+        # A disconnected provider is not connected again by the next Microsoft login.
+        decline.assert_awaited_once_with('alice', 'outlook_mail')
     elif operation == 'authorize':
         api.responses.append(response({'id': 'c', 'source_kind': 'onedrive'}))
         api.responses.append(response({'authorize_url': 'https://provider.invalid/fresh'}))

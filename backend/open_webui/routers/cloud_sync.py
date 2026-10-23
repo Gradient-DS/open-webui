@@ -106,9 +106,17 @@ async def connection_usage(connection_id: str, sync=Depends(cloud_sync)):
 
 
 @router.delete('/connections/{connection_id}', status_code=204)
-async def revoke_connection(connection_id: str, sync=Depends(cloud_sync)):
+async def revoke_connection(connection_id: str, sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+    connection = await sync.connection(connection_id)
     await sync.revoke_connection(connection_id)
+    await silent_connect.decline(user.id, connection['source_kind'])
     return Response(status_code=204)
+
+
+# The app's first load after a Microsoft login: live search starts on for what auto-connect connected.
+@router.post('/live/auto')
+async def grant_live(sync=Depends(cloud_sync), user=Depends(get_verified_user)):
+    return {'families': await silent_connect.grant_live(user, sync)}
 
 
 @router.post('/connections/{connection_id}/authorize')
