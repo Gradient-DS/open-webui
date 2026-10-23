@@ -148,7 +148,6 @@ def oauth_manager_with_mocks(monkeypatch):
         OAUTH_ALLOWED_TENANTS=[],
         ENABLE_OAUTH_SIGNUP=True,
         OAUTH_INVITE_REQUIRED=False,
-        OAUTH_MERGE_ACCOUNTS_BY_EMAIL=False,
         ENABLE_OAUTH_ROLE_MANAGEMENT=False,
         ENABLE_OAUTH_GROUP_MANAGEMENT=False,
         OAUTH_UPDATE_NAME_ON_LOGIN=False,
