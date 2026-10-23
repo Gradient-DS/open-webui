@@ -1032,8 +1032,6 @@
 				toggleFeature: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
 		  }
 		| undefined;
-	const liveMailTooltipId = `mail-search-${uuidv4()}`;
-	const liveDocumentsTooltipId = `onedrive-search-${uuidv4()}`;
 	const pinnedStateTooltip = (label: string, on: boolean, description: string) =>
 		`${label}: ${$i18n.t(toolStateLabel(on))}. ${description}`;
 	const pinnedLiveTooltip = (label: string, granted: boolean, on: boolean, description: string) =>
@@ -2781,7 +2779,6 @@
 													</Tooltip>
 												{:else if itemId === 'live_mail' && $config?.features?.enable_live_mail}
 													<Tooltip
-														elementId={liveMailTooltipId}
 														content={pinnedLiveTooltip(
 															$i18n.t('Mail search'),
 															liveMailGranted,
@@ -2804,23 +2801,9 @@
 																<span class="text-xs font-medium pr-1">{$i18n.t('Connect')}</span>
 															{/if}
 														</button>
-														<div slot="tooltip" class="hidden">
-															<div id={liveMailTooltipId} class="flex items-center gap-2">
-																<MailSearch className="size-4 shrink-0" />
-																<span
-																	>{pinnedLiveTooltip(
-																		$i18n.t('Mail search'),
-																		liveMailGranted,
-																		liveMailOn,
-																		$i18n.t('The model decides whether to search your mail')
-																	)}</span
-																>
-															</div>
-														</div>
 													</Tooltip>
 												{:else if itemId === 'live_documents' && $config?.features?.enable_live_documents}
 													<Tooltip
-														elementId={liveDocumentsTooltipId}
 														content={pinnedLiveTooltip(
 															$i18n.t('OneDrive search'),
 															liveDocumentsGranted,
@@ -2843,19 +2826,6 @@
 																<span class="text-xs font-medium pr-1">{$i18n.t('Connect')}</span>
 															{/if}
 														</button>
-														<div slot="tooltip" class="hidden">
-															<div id={liveDocumentsTooltipId} class="flex items-center gap-2">
-																<OneDriveSearch className="size-4 shrink-0" />
-																<span
-																	>{pinnedLiveTooltip(
-																		$i18n.t('OneDrive search'),
-																		liveDocumentsGranted,
-																		liveDocumentsOn,
-																		$i18n.t('The model decides whether to search OneDrive')
-																	)}</span
-																>
-															</div>
-														</div>
 													</Tooltip>
 												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
 													<Tooltip
