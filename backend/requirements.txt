@@ -21,8 +21,8 @@ async-timeout==5.0.1
 aiocache==0.12.3
 aiofiles==25.1.0
 starlette-compress==1.7.1
-Brotli==1.2.0
-brotlicffi==1.2.0.1
+Brotli==1.2.1 # security: PYSEC-2026-4322 / PYSEC-2026-4323 (CVE-2026-111497, out-of-bounds write in the Brotli decoder) fixed in brotli 1.2.1 and brotlicffi 1.2.1.0
+brotlicffi==1.2.1.0 # security: PYSEC-2026-4322 / PYSEC-2026-4323 (CVE-2026-111497, out-of-bounds write in the Brotli decoder) fixed in brotli 1.2.1 and brotlicffi 1.2.1.0
 httpx[socks,http2,zstd,cli,brotli]==0.28.1
 starsessions[redis]==2.2.1
 python-mimeparse==2.0.0
