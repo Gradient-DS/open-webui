@@ -11,7 +11,7 @@ on:
   # and the first scan happened on the test → main release PR — where a
   # pre-existing dependency advisory shows up looking like a release blocker.
   pull_request:
-    branches: [main, dev, test]
+    branches: [main, dev, test, feat/platform-target]
   # Daily: catches advisories published against code and images that have not
   # changed, which a push whose scans are reused (see `reuse`) does not.
   schedule:
