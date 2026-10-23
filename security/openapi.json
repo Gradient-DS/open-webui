@@ -13077,17 +13077,6 @@
             ],
             "title": "Oauth Group Default Share"
           },
-          "OAUTH_MERGE_ACCOUNTS_BY_EMAIL": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Oauth Merge Accounts By Email"
-          },
           "OAUTH_PICTURE_CLAIM": {
             "anyOf": [
               {
@@ -13469,17 +13458,6 @@
               }
             ],
             "title": "Oauth Group Default Share"
-          },
-          "OAUTH_MERGE_ACCOUNTS_BY_EMAIL": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Oauth Merge Accounts By Email"
           },
           "OAUTH_PICTURE_CLAIM": {
             "anyOf": [
@@ -48680,7 +48658,7 @@
     },
     "/oauth/{provider}/callback": {
       "get": {
-        "description": "Handle the OAuth provider callback.\n\nResolution order:\n1. Match by subject ID bound to the provider.\n2. If ``OAUTH_MERGE_ACCOUNTS_BY_EMAIL`` is enabled, match by email\n   (note: some providers do not verify email addresses).\n3. If no match and ``ENABLE_OAUTH_SIGNUP`` is enabled, create a new user\n   (fails if the email is already registered).",
+        "description": "Handle the OAuth provider callback.\n\nResolution order:\n1. Match by subject ID bound to the provider.\n2. If no match and signup policy allows it, create a new user.\n   An already registered email is refused; it never links accounts.",
         "operationId": "oauth_login_callback_oauth__provider__callback_get",
         "parameters": [
           {
@@ -48755,7 +48733,7 @@
     },
     "/oauth/{provider}/login/callback": {
       "get": {
-        "description": "Handle the OAuth provider callback.\n\nResolution order:\n1. Match by subject ID bound to the provider.\n2. If ``OAUTH_MERGE_ACCOUNTS_BY_EMAIL`` is enabled, match by email\n   (note: some providers do not verify email addresses).\n3. If no match and ``ENABLE_OAUTH_SIGNUP`` is enabled, create a new user\n   (fails if the email is already registered).",
+        "description": "Handle the OAuth provider callback.\n\nResolution order:\n1. Match by subject ID bound to the provider.\n2. If no match and signup policy allows it, create a new user.\n   An already registered email is refused; it never links accounts.",
         "operationId": "oauth_login_callback_oauth__provider__login_callback_get",
         "parameters": [
           {

@@ -3399,10 +3399,8 @@ async def oauth_login_callback(
 
     Resolution order:
     1. Match by subject ID bound to the provider.
-    2. If ``OAUTH_MERGE_ACCOUNTS_BY_EMAIL`` is enabled, match by email
-       (note: some providers do not verify email addresses).
-    3. If no match and ``ENABLE_OAUTH_SIGNUP`` is enabled, create a new user
-       (fails if the email is already registered).
+    2. If no match and signup policy allows it, create a new user.
+       An already registered email is refused; it never links accounts.
     """
     return await oauth_manager.handle_callback(request, provider, response, db=db)
 

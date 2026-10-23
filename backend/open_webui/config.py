@@ -2522,9 +2522,7 @@ OAUTH_AUTO_REDIRECT = os.getenv('OAUTH_AUTO_REDIRECT', 'False').lower() == 'true
 
 OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE = os.getenv('OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE', 'False').lower() == 'true'
 
-
-OAUTH_MERGE_ACCOUNTS_BY_EMAIL = os.getenv('OAUTH_MERGE_ACCOUNTS_BY_EMAIL', 'False').lower() == 'true'
-
+# [Gradient] Email-based OAuth account binding has no configuration switch.
 OAUTH_PROVIDERS = {}
 
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
@@ -3452,7 +3450,6 @@ DEFAULT_CONFIG = {
     'oauth.enable_signup': ENABLE_OAUTH_SIGNUP,
     'oauth.auto_redirect': OAUTH_AUTO_REDIRECT,
     'oauth.refresh_token.include_scope': OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE,
-    'oauth.merge_accounts_by_email': OAUTH_MERGE_ACCOUNTS_BY_EMAIL,
     'oauth.google.client_id': GOOGLE_CLIENT_ID,
     'oauth.google.client_secret': GOOGLE_CLIENT_SECRET,
     'oauth.google.scope': GOOGLE_OAUTH_SCOPE,

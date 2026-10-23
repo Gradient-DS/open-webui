@@ -8,6 +8,7 @@ on:
       - dev
       - test
       - main
+      - feat/platform-target
 
 # Cancel a superseded run of the same pull request; never cancel anything else.
 concurrency:

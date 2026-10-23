@@ -1599,7 +1599,6 @@ class OAuthConfigForm(BaseModel):
     # General OAuth
     ENABLE_OAUTH: bool | None = None
     ENABLE_OAUTH_SIGNUP: bool | None = None
-    OAUTH_MERGE_ACCOUNTS_BY_EMAIL: bool | None = None
     OAUTH_AUTO_REDIRECT: bool | None = None
     OAUTH_ALLOWED_DOMAINS: str | None = None
     OAUTH_BLOCKED_GROUPS: str | None = None
@@ -1655,7 +1654,6 @@ OAUTH_COMMA_LIST_FIELDS = {
 OAUTH_CONFIG_KEYS = {
     'ENABLE_OAUTH': 'oauth.enable',
     'ENABLE_OAUTH_SIGNUP': 'oauth.enable_signup',
-    'OAUTH_MERGE_ACCOUNTS_BY_EMAIL': 'oauth.merge_accounts_by_email',
     'OAUTH_AUTO_REDIRECT': 'oauth.auto_redirect',
     'OAUTH_ALLOWED_DOMAINS': 'oauth.allowed_domains',
     'OAUTH_BLOCKED_GROUPS': 'oauth.blocked_groups',
@@ -1953,15 +1951,8 @@ async def token_exchange(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    # Try to find the user by OAuth sub
+    # [Gradient] Token exchange also requires an existing provider/sub binding.
     user = await Users.get_user_by_oauth_sub(provider, sub, db=db)
-
-    if not user and await Config.get('oauth.merge_accounts_by_email'):
-        # Try to find by email if merge is enabled
-        user = await Users.get_user_by_email(email, db=db)
-        if user:
-            # Link the OAuth sub to this user
-            user = await Users.update_user_oauth_by_id(user.id, provider, sub, db=db) or user
 
     if user:
         provider_oauth = (user.oauth or {}).get(provider) if isinstance(user.oauth, dict) else None

@@ -47,7 +47,6 @@ def login(identity_config, monkeypatch):
         OAUTH_USERNAME_CLAIM='name',
         OAUTH_PICTURE_CLAIM='',
         OAUTH_ALLOWED_DOMAINS=['*'],
-        OAUTH_MERGE_ACCOUNTS_BY_EMAIL=True,
         OAUTH_UPDATE_NAME_ON_LOGIN=False,
         OAUTH_UPDATE_EMAIL_ON_LOGIN=False,
         OAUTH_UPDATE_PICTURE_ON_LOGIN=False,
@@ -92,15 +91,13 @@ def assert_logged_in(response, login):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('account', ['existing', 'merged', 'new'])
+@pytest.mark.parametrize('account', ['existing', 'new'])
 async def test_a_microsoft_login_links_the_entra_oid_as_proven(identity_config, login, identity_http, account):
     """Every Microsoft sign-in sends its oid proof before minting the OWUI session."""
     identity, key = identity_config
     requests, responses = identity_http
     if account != 'existing':
         login.oauth.Users.get_user_by_oauth_sub.return_value = None
-    if account == 'merged':
-        login.oauth.Users.get_user_by_email.return_value = login.user
 
     async def accept(request):
         assert login.mint.call_count == len(requests) - 1

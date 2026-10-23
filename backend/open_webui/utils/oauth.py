@@ -55,7 +55,6 @@ from open_webui.config import (
     OAUTH_GROUPS_CLAIM,
     OAUTH_GROUPS_SEPARATOR,
     OAUTH_INVITE_REQUIRED,
-    OAUTH_MERGE_ACCOUNTS_BY_EMAIL,
     OAUTH_PICTURE_CLAIM,
     OAUTH_PROVIDERS,
     OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE,
@@ -144,10 +143,6 @@ OAUTH_RUNTIME_CONFIG = {
     'OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE': (
         'oauth.refresh_token.include_scope',
         OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE,
-    ),
-    'OAUTH_MERGE_ACCOUNTS_BY_EMAIL': (
-        'oauth.merge_accounts_by_email',
-        OAUTH_MERGE_ACCOUNTS_BY_EMAIL,
     ),
     'ENABLE_OAUTH_ROLE_MANAGEMENT': (
         'oauth.enable_role_mapping',
@@ -2080,20 +2075,8 @@ class OAuthManager:
                 log.warning('OAuth callback failed, e-mail domain is not in the list of allowed domains')
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
-            # Check if the user exists
+            # [Gradient] Only an existing provider/sub binding identifies an account.
             user = await Users.get_user_by_oauth_sub(provider, sub, db=db)
-            if not user:
-                # If the user does not exist, check if merging is enabled
-                if auth_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
-                    # Check if the user exists by email
-                    user = await Users.get_user_by_email(email, db=db)
-                    if user:
-                        # Update the user with the new oauth sub
-                        user = await Users.update_user_oauth_by_id(user.id, provider, sub, db=db) or user
-                        # [Gradient] Housekeeping: if there was a pending invite, mark it
-                        # consumed so it stops appearing in the admin invite list.
-                        if pending_invite:
-                            await Invites.consume_invite_by_email(email)
 
             if user:
                 provider_oauth = (user.oauth or {}).get(provider) if isinstance(user.oauth, dict) else None
@@ -2192,13 +2175,18 @@ class OAuthManager:
                             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
                         )
 
-                # Existing email-uniqueness guard. A concurrent invite-accept on
-                # the password page could have created the user between our
-                # checks; treat that as success and attach the OAuth sub.
+                # [Gradient] A concurrent password signup or invite acceptance
+                # never authorizes attaching a previously unknown OAuth subject.
                 existing_user = await Users.get_user_by_email(email, db=db)
                 if existing_user:
-                    await Users.update_user_oauth_by_id(existing_user.id, provider, sub, db=db)
-                    user = existing_user
+                    log.warning(
+                        'OAuth signup denied',
+                        extra={'code': 'oauth_email_conflict', 'provider': provider},
+                    )
+                    raise HTTPException(
+                        status.HTTP_403_FORBIDDEN,
+                        detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+                    )
                 else:
                     picture_claim = auth_config.OAUTH_PICTURE_CLAIM
                     if picture_claim:
