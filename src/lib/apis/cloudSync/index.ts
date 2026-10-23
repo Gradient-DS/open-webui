@@ -110,6 +110,9 @@ export const authorizeConnection = (token: string, id: string) =>
 	request<Authorization>(token, `${connectionPath(id)}/authorize`, 'POST');
 export const revokeConnection = (token: string, id: string) =>
 	request<void>(token, connectionPath(id), 'DELETE');
+// [Gradient] Live search on for what the Microsoft login connected; the families turned on now.
+export const grantAutoConnected = (token: string) =>
+	request<{ families: string[] }>(token, '/live/auto', 'POST');
 export const createSchedule = (token: string, knowledgeId: string, form: ScheduleForm) =>
 	request<Schedule>(token, `${knowledgePath(knowledgeId)}/schedules`, 'POST', form);
 export const deleteSchedule = (token: string, knowledgeId: string, id: string) =>

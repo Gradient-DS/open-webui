@@ -10,6 +10,7 @@ import {
 	liveGranted,
 	liveGrants,
 	prefetchLiveConnections,
+	prefetchLiveFamilies,
 	relinkPrompt
 } from './live-connections';
 vi.mock('$lib/apis/cloudSync', async (original) => ({
@@ -19,7 +20,8 @@ vi.mock('$lib/apis/cloudSync', async (original) => ({
 	enableLiveFamily: vi.fn(),
 	createConnection: vi.fn(),
 	authorizeConnection: vi.fn(),
-	getConnection: vi.fn()
+	getConnection: vi.fn(),
+	grantAutoConnected: vi.fn()
 }));
 const popup = { close: vi.fn(), closed: false, location: { href: '' } };
 let receive: (event: unknown) => void;
@@ -322,4 +324,23 @@ it('starts a family on only with the feature and a grant, and never sends it on 
 	expect(grantedLiveState('auto', true)).toBe('auto');
 	expect(grantedLiveState('auto', undefined)).toBe('auto');
 	expect(grantedLiveState('off', true)).toBe('off');
+});
+
+it('grants what the Microsoft login connected once per session, before the first snapshot', async () => {
+	let grantedNow = false;
+	vi.mocked(api.grantAutoConnected).mockImplementation(async () => {
+		grantedNow = true;
+		return { families: ['mail'] };
+	});
+	vi.mocked(api.listConnections).mockImplementation(async () =>
+		grantedNow ? [{ id: 'c', source_kind: 'outlook_mail', lifecycle: 'enabled' }] : []
+	);
+	vi.mocked(api.listLiveGrants).mockResolvedValue([
+		{ id: 'g', lifecycle: 'enabled', families: ['mail'] }
+	]);
+	prefetchLiveFamilies('auto-session', ['mail']);
+	prefetchLiveFamilies('auto-session', ['mail']);
+	await vi.advanceTimersByTimeAsync(0);
+	expect(api.grantAutoConnected).toHaveBeenCalledTimes(1);
+	expect(liveGranted(get(liveGrants), 'mail')).toBe(true);
 });

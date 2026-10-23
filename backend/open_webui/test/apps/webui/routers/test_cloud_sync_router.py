@@ -220,7 +220,7 @@ def test_sync_status_shapes_the_schedule_and_the_connection(api):
         'unauthenticated',
     ],
 )
-def test_every_call_carries_the_users_assertion(api, operation):
+def test_every_call_carries_the_users_assertion(api, operation, monkeypatch):
     """All calls carry fresh user assertions and mutations cannot cross a KB boundary."""
     prefix = '/api/v1/cloud-sync'
     if operation == 'unauthenticated':
@@ -247,9 +247,14 @@ def test_every_call_carries_the_users_assertion(api, operation):
         result = api.browser.get(prefix + '/connections/c')
         assert result.json()['lifecycle'] == 'pending'
     elif operation == 'revoke':
+        decline = AsyncMock()
+        monkeypatch.setattr(cloud_sync.silent_connect, 'decline', decline)
+        api.responses.append(response({'id': 'c', 'source_kind': 'outlook_mail'}))
         api.responses.append(httpx.Response(204))
         result = api.browser.delete(prefix + '/connections/c')
         assert result.status_code == 204
+        # A disconnected provider is not connected again by the next Microsoft login.
+        decline.assert_awaited_once_with('alice', 'outlook_mail')
     elif operation == 'authorize':
         api.responses.append(response({'id': 'c', 'source_kind': 'onedrive'}))
         api.responses.append(response({'authorize_url': 'https://provider.invalid/fresh'}))

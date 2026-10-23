@@ -11,6 +11,7 @@ import {
 	createConnection,
 	authorizeConnection,
 	getConnection,
+	grantAutoConnected,
 	CloudSyncError
 } from '$lib/apis/cloudSync';
 import {
@@ -124,10 +125,21 @@ export function announceLiveConnected(family: LiveFamily) {
 	liveConnected.set({ family, seq: ++connectedSeq });
 }
 
+// [Gradient] Once per session, before the first snapshot: the server turns live search on for
+// what the Microsoft login connected, waiting briefly for a token exchange still running.
+let autoGrant: { token: string; request: Promise<unknown> } | null = null;
+function autoGranted(token: string): Promise<unknown> {
+	if (autoGrant?.token !== token)
+		autoGrant = { token, request: grantAutoConnected(token).catch(() => {}) };
+	return autoGrant.request;
+}
+
 /** Prefetch the snapshot of every live family the tenant offers. */
 export function prefetchLiveFamilies(token: string, families: LiveFamily[]) {
-	for (const family of families)
-		void prefetchLiveConnections(token, LIVE_PROVIDERS[family], family).catch(() => {});
+	void autoGranted(token).then(() => {
+		for (const family of families)
+			void prefetchLiveConnections(token, LIVE_PROVIDERS[family], family).catch(() => {});
+	});
 }
 
 // The composer prefetches every provider/family pair at once; they share one connection list.
