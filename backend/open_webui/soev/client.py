@@ -15,6 +15,7 @@ from urllib.parse import quote
 
 import httpx
 
+from open_webui.soev.acting import user_token
 from open_webui.soev.request_cache import invalidate, memoized
 
 log = logging.getLogger(__name__)
@@ -180,6 +181,17 @@ class SoevClient:
         self._subject_minter = subject_minter
         self._timeout = timeout
 
+    async def _headers(self, as_user: str | None = None) -> dict[str, str]:
+        headers = {'Authorization': f'Bearer {self._api_key}'}
+        if as_user is not None:
+            if self._subject_minter is None:
+                raise ValueError('Acting as a user requires a subject minter')
+            headers['X-Soev-Subject'] = self._subject_minter(as_user)
+        access_token = await user_token(as_user)
+        if access_token:
+            headers['X-Soev-User-Token'] = access_token
+        return headers
+
     async def chat_post(self, path: str, body: dict | None, *, as_user: str) -> dict:
         """Send a thread operation once; the chat contract has no mutation replay key."""
         if not as_user:
@@ -207,11 +219,8 @@ class SoevClient:
         """Pass a streamed task completion's SSE bytes through unchanged."""
         if not as_user or self._subject_minter is None:
             raise ValueError('A task completion requires an acting user and subject minter')
-        headers = {
-            'Authorization': f'Bearer {self._api_key}',
-            'X-Soev-Subject': self._subject_minter(as_user),
-            'Accept': 'text/event-stream',
-        }
+        headers = await self._headers(as_user)
+        headers['Accept'] = 'text/event-stream'
         try:
             async with _shared_client().stream(
                 'POST',
@@ -252,11 +261,8 @@ class SoevClient:
         method = 'POST'
         try:
             while True:
-                headers = {
-                    'Authorization': f'Bearer {self._api_key}',
-                    'X-Soev-Subject': self._subject_minter(as_user),
-                    'Accept': 'text/event-stream',
-                }
+                headers = await self._headers(as_user)
+                headers['Accept'] = 'text/event-stream'
                 if method == 'GET':
                     headers['Last-Event-ID'] = str(after)
                 timeout = httpx.Timeout(self._timeout, read=660.0)
@@ -314,7 +320,7 @@ class SoevClient:
             raise ValueError('An API path must start with a single slash')
         if self._subject_minter is None or not as_user:
             raise ValueError('Acting as a user requires a subject minter and user')
-        headers = {'Authorization': f'Bearer {self._api_key}', 'X-Soev-Subject': self._subject_minter(as_user)}
+        headers = await self._headers(as_user)
         try:
             async with AsyncExitStack() as stack:
                 client = _shared_client()
@@ -388,11 +394,7 @@ class SoevClient:
     ) -> httpx.Response:
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
-        headers = {'Authorization': f'Bearer {self._api_key}'}
-        if as_user is not None:
-            if self._subject_minter is None:
-                raise ValueError('Acting as a user requires a subject minter')
-            headers['X-Soev-Subject'] = self._subject_minter(as_user)
+        headers = await self._headers(as_user)
         if idempotency_key is not None:
             headers['Idempotency-Key'] = idempotency_key
         started = time.perf_counter()
