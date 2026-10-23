@@ -681,17 +681,6 @@
 						</AdminSettingRow>
 
 						<AdminSettingRow
-							label={$i18n.t('Merge Accounts by Email')}
-							description={$i18n.t('Link OAuth sign-ins to existing accounts with the same email.')}
-							let:labelId
-						>
-							<Switch
-								bind:state={oauthConfig.OAUTH_MERGE_ACCOUNTS_BY_EMAIL}
-								ariaLabelledbyId={labelId}
-							/>
-						</AdminSettingRow>
-
-						<AdminSettingRow
 							label={$i18n.t('Auto Redirect')}
 							description={$i18n.t(
 								'Send users directly to the OAuth provider from the sign-in page.'

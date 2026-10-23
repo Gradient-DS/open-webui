@@ -173,7 +173,6 @@ openWebui:
     defaultUserRole: "user"
     enableOauthSignup: "false"
     oauthInviteRequired: "false"
-    oauthMergeAccountsByEmail: "true"
     enablePasswordAuth: "true"
     jwtExpiresIn: "4w"
 

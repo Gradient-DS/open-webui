@@ -15,6 +15,17 @@ Each entry states what diverges, why, how it is gated, and the key files.
 
 ---
 
+## OAuth account binding
+
+[Gradient] OAuth callbacks and token exchange identify existing accounts only by
+their stored provider and subject. Email never attaches a new OAuth identity.
+The callback refuses an unknown subject with an already registered email using
+the generic access-prohibited error and an `oauth_email_conflict` log code without the email.
+New-user signup keeps its existing signup and invite policy. This is unconditional:
+the email-merge setting is removed from runtime config, the admin form, and Helm.
+Key files: `backend/open_webui/utils/oauth.py`, `backend/open_webui/routers/auths.py`,
+`backend/open_webui/config.py`. Trusted-header and LDAP login remain separate paths.
+
 ## Model request bodies for the security derivation
 
 Phase 4a declares permissive request shapes for 25 model-invoking operations in
