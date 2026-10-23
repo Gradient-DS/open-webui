@@ -38,6 +38,8 @@
 		attachPickedDocument,
 		attachErrorMessage,
 		liveConnections,
+		liveGranted,
+		liveGrants,
 		matchingPickerConnection,
 		prefetchLiveConnections,
 		relinkPrompt
@@ -959,9 +961,14 @@
 			inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
 			(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
 		!dataSeparationBlockedItems.has(id);
+	// [Gradient] A live family is on only with a grant; without one its pinned button connects.
+	$: liveMailGranted = liveGranted($liveGrants, 'mail') === true;
+	$: liveDocumentsGranted = liveGranted($liveGrants, 'live_documents') === true;
+	$: liveMailOn = liveMailGranted && liveMailState !== 'off';
+	$: liveDocumentsOn = liveDocumentsGranted && liveDocumentsState !== 'off';
 	$: inputItemStates = {
-		live_mail: itemState(liveMailState),
-		live_documents: itemState(liveDocumentsState),
+		live_mail: itemState(liveMailOn),
+		live_documents: itemState(liveDocumentsOn),
 		web_search: itemState(webSearchEnabled),
 		image_generation: itemState(imageGenerationEnabled),
 		code_interpreter: itemState(codeInterpreterEnabled),
@@ -1025,10 +1032,12 @@
 				toggleFeature: (tool: 'image_generation' | 'code_interpreter' | 'document_writer') => void;
 		  }
 		| undefined;
-	const liveMailTooltipId = `mail-search-${uuidv4()}`;
-	const liveDocumentsTooltipId = `onedrive-search-${uuidv4()}`;
 	const pinnedStateTooltip = (label: string, on: boolean, description: string) =>
 		`${label}: ${$i18n.t(toolStateLabel(on))}. ${description}`;
+	const pinnedLiveTooltip = (label: string, granted: boolean, on: boolean, description: string) =>
+		granted
+			? pinnedStateTooltip(label, on, on ? description : $i18n.t(TOOL_OFF_DESCRIPTION))
+			: `${label}: ${$i18n.t('Not connected')}. ${$i18n.t('Connect your account to use this')}`;
 	const pinnedButtonClass =
 		'p-[0.375rem] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden shrink-0';
 	// An item that is on gets the accent, one that is off none.
@@ -2770,75 +2779,53 @@
 													</Tooltip>
 												{:else if itemId === 'live_mail' && $config?.features?.enable_live_mail}
 													<Tooltip
-														elementId={liveMailTooltipId}
-														content={pinnedStateTooltip(
+														content={pinnedLiveTooltip(
 															$i18n.t('Mail search'),
-															liveMailState !== 'off',
-															liveMailState !== 'off'
-																? $i18n.t('The model decides whether to search your mail')
-																: $i18n.t(TOOL_OFF_DESCRIPTION)
+															liveMailGranted,
+															liveMailOn,
+															$i18n.t('The model decides whether to search your mail')
 														)}
 														placement="top"
 													>
 														<button
 															type="button"
-															aria-label={`${$i18n.t('Mail search')}: ${$i18n.t(toolStateLabel(liveMailState !== 'off'))}`}
-															aria-pressed={liveMailState !== 'off'}
+															aria-label={liveMailGranted
+																? `${$i18n.t('Mail search')}: ${$i18n.t(toolStateLabel(liveMailOn))}`
+																: pinnedLiveTooltip($i18n.t('Mail search'), false, false, '')}
+															aria-pressed={liveMailGranted ? liveMailOn : undefined}
 															on:click|preventDefault={() => inputMenuRef?.toggleLiveMail()}
-															class={pinnedToggleClass(liveMailState !== 'off')}
+															class={pinnedToggleClass(liveMailOn)}
 														>
 															<MailSearch className="size-4" />
+															{#if !liveMailGranted}
+																<span class="text-xs font-medium pr-1">{$i18n.t('Connect')}</span>
+															{/if}
 														</button>
-														<div slot="tooltip" class="hidden">
-															<div id={liveMailTooltipId} class="flex items-center gap-2">
-																<MailSearch className="size-4 shrink-0" />
-																<span
-																	>{pinnedStateTooltip(
-																		$i18n.t('Mail search'),
-																		liveMailState !== 'off',
-																		liveMailState !== 'off'
-																			? $i18n.t('The model decides whether to search your mail')
-																			: $i18n.t(TOOL_OFF_DESCRIPTION)
-																	)}</span
-																>
-															</div>
-														</div>
 													</Tooltip>
 												{:else if itemId === 'live_documents' && $config?.features?.enable_live_documents}
 													<Tooltip
-														elementId={liveDocumentsTooltipId}
-														content={pinnedStateTooltip(
+														content={pinnedLiveTooltip(
 															$i18n.t('OneDrive search'),
-															liveDocumentsState !== 'off',
-															liveDocumentsState !== 'off'
-																? $i18n.t('The model decides whether to search OneDrive')
-																: $i18n.t(TOOL_OFF_DESCRIPTION)
+															liveDocumentsGranted,
+															liveDocumentsOn,
+															$i18n.t('The model decides whether to search OneDrive')
 														)}
 														placement="top"
 													>
 														<button
 															type="button"
-															aria-label={`${$i18n.t('OneDrive search')}: ${$i18n.t(toolStateLabel(liveDocumentsState !== 'off'))}`}
-															aria-pressed={liveDocumentsState !== 'off'}
+															aria-label={liveDocumentsGranted
+																? `${$i18n.t('OneDrive search')}: ${$i18n.t(toolStateLabel(liveDocumentsOn))}`
+																: pinnedLiveTooltip($i18n.t('OneDrive search'), false, false, '')}
+															aria-pressed={liveDocumentsGranted ? liveDocumentsOn : undefined}
 															on:click|preventDefault={() => inputMenuRef?.toggleLiveDocuments()}
-															class={pinnedToggleClass(liveDocumentsState !== 'off')}
+															class={pinnedToggleClass(liveDocumentsOn)}
 														>
 															<OneDriveSearch className="size-4" />
+															{#if !liveDocumentsGranted}
+																<span class="text-xs font-medium pr-1">{$i18n.t('Connect')}</span>
+															{/if}
 														</button>
-														<div slot="tooltip" class="hidden">
-															<div id={liveDocumentsTooltipId} class="flex items-center gap-2">
-																<OneDriveSearch className="size-4 shrink-0" />
-																<span
-																	>{pinnedStateTooltip(
-																		$i18n.t('OneDrive search'),
-																		liveDocumentsState !== 'off',
-																		liveDocumentsState !== 'off'
-																			? $i18n.t('The model decides whether to search OneDrive')
-																			: $i18n.t(TOOL_OFF_DESCRIPTION)
-																	)}</span
-																>
-															</div>
-														</div>
 													</Tooltip>
 												{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
 													<Tooltip

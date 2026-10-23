@@ -4,19 +4,19 @@
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
+		announceLiveConnected,
 		connectLiveSource,
 		prefetchLiveConnections,
 		consentLabels,
-		relinkPrompt
+		LIVE_PROVIDERS,
+		relinkPrompt,
+		type LiveFamily
 	} from '$lib/utils/live-connections';
 	const i18n = getContext<Readable<I18n>>('i18n');
 	export let provider: string;
+	$: family = (provider === 'outlook_mail' ? 'mail' : 'live_documents') as LiveFamily;
 	onMount(() => {
-		void prefetchLiveConnections(
-			localStorage.token,
-			provider,
-			provider === 'outlook_mail' ? 'mail' : 'live_documents'
-		).catch(() => {});
+		void prefetchLiveConnections(localStorage.token, provider, family).catch(() => {});
 	});
 	let busy = false;
 	let connected = false;
@@ -30,12 +30,10 @@
 		on:click={async () => {
 			busy = true;
 			try {
-				await connectLiveSource(
-					localStorage.token,
-					provider,
-					provider === 'outlook_mail' ? 'mail' : 'live_documents'
-				);
+				await connectLiveSource(localStorage.token, provider, family);
 				connected = true;
+				// [Gradient] Connecting from the card turns the family on in this chat.
+				if (LIVE_PROVIDERS[family] === provider) announceLiveConnected(family);
 			} catch (error) {
 				toast.error($i18n.t(relinkPrompt(error) ?? 'Could not connect account'));
 			} finally {
@@ -46,8 +44,10 @@
 		{$i18n.t(
 			connected
 				? provider === 'outlook_mail'
-					? 'Account connected. Enable mail search to continue.'
-					: 'Account connected. Enable file search to continue.'
+					? 'Account connected. Mail search is on.'
+					: provider === 'onedrive'
+						? 'Account connected. OneDrive search is on.'
+						: 'Account connected. Enable file search to continue.'
 				: consentLabels[provider]
 		)}
 	</button>
