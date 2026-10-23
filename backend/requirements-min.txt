@@ -52,7 +52,7 @@ langchain-text-splitters==1.1.2
 
 fake-useragent==2.2.0
 
-black==26.5.1
+black==26.10.1 # security: CVE-2026-114134 fixed in 26.10.1
 pydub
 chardet==7.4.3
 beautifulsoup4
