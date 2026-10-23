@@ -28,6 +28,33 @@ is sent with every turn. There is no per-chat agent: with the agent API on,
 every chat goes to the agent service. A `chat.meta.agent_id` left by the
 retired v1 picker is ignored.
 
+## Keycloak login
+
+Use the generic OIDC provider for the tenant's Keycloak realm:
+
+```env
+ENABLE_OAUTH_SIGNUP=true
+OAUTH_PROVIDER_NAME=Keycloak
+OPENID_PROVIDER_URL=https://login.example.invalid/realms/fictional-tenant/.well-known/openid-configuration
+OAUTH_CLIENT_ID=fictional-owui-client
+OAUTH_CLIENT_SECRET=<client secret>
+OAUTH_SCOPES=openid email profile
+ENABLE_LOGIN_FORM=false
+```
+
+Set the client secret through the deployment's secret store. Password login takes
+place only through Keycloak; OWUI's login form stays disabled. Existing users must
+have their OIDC identity mapping provisioned by the migration; matching email
+addresses do not link accounts.
+
+For authenticated requests with an owned `oidc` OAuth session, OWUI refreshes the
+access token when needed and forwards it as `X-Soev-User-Token` beside the product
+credential in `Authorization`. Other providers, password users, API-key requests
+and calls started without a user request send no user token. Chat tasks started
+by a user request inherit that request's token context. Presigned storage requests
+use only their presigned credentials. `X-Soev-Subject` remains during this
+integration step and is removed in the person-identity cutover (step 2).
+
 ## Optional platform capabilities
 
 The fork reads `GET /v1/capabilities` with its existing API credential at startup
