@@ -180,4 +180,5 @@ opentelemetry-instrumentation-system-metrics==0.63b1
 msgpack==1.2.1 # security: GHSA-6v7p-g79w-8964 (OOB read/crash)
 setuptools>=83.0.0 # security: PYSEC-2026-3447 (image had 70.3.0)
 oauthlib==4.0.0 # security: GHSA-hj66-6f7g-4r5v / GHSA-xpv3-w29h-x7cv fixed in 4.0.0
+certifi==2026.10.19 # security: GHSA-6q48-6c7w-9gw2 (eMudhra/emSign CA key compromise, MITM on outbound TLS) fixed in 2026.10.18; 2026.10.19 is the recommended release
 werkzeug==3.1.9 # security: GHSA-g6x2-hccm-hh4m fixed in 3.1.9
