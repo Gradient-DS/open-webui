@@ -527,6 +527,7 @@
 {#if loaded}
 	<AccessControlModal
 		bind:show={showAccessControlModal}
+		modelId={edit ? info.id || null : null}
 		bind:accessGrants
 		accessRoles={preset ? ['read', 'write'] : ['read']}
 		share={$user?.permissions?.sharing?.models || $user?.role === 'admin'}

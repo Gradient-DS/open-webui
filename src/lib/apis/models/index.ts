@@ -421,3 +421,21 @@ export const deleteAllModels = async (token: string) => {
 
 	return res;
 };
+
+export const getModelSharing = async (
+	token: string,
+	id: string
+): Promise<{
+	shares_knowledge: boolean;
+	may_share: boolean;
+	left_out: { type: string; id: string; name: string; reason: 'cloud' | 'owner' }[];
+}> => {
+	const response = await fetch(
+		`${WEBUI_API_BASE_URL}/models/model/sharing?${new URLSearchParams({ id })}`,
+		{
+			headers: { authorization: `Bearer ${token}` }
+		}
+	);
+	if (!response.ok) throw await response.json();
+	return response.json();
+};

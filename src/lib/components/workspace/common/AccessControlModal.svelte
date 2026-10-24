@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import AccessControl from './AccessControl.svelte';
+	import LeftOutList from './LeftOutList.svelte';
+	import { getModelSharing } from '$lib/apis/models';
 	import XMark from '$lib/components/icons/XMark.svelte';
 
 	type AccessGrant = {
@@ -11,6 +13,24 @@
 		principal_type: 'user' | 'group' | 'anyone';
 		principal_id: string;
 		permission: 'read' | 'write';
+	};
+
+	export let modelId: string | null = null;
+	let sharing: Awaited<ReturnType<typeof getModelSharing>> | null = null;
+	let loadingSharing = false;
+	$: if (show && modelId) loadSharing(modelId);
+
+	const loadSharing = async (id: string) => {
+		loadingSharing = true;
+		sharing = null;
+		try {
+			const result = await getModelSharing(localStorage.token, id);
+			if (id === modelId) sharing = result;
+		} catch (error) {
+			console.error('Failed to load assistant sharing', error);
+		} finally {
+			loadingSharing = false;
+		}
 	};
 
 	export let show = false;
@@ -44,12 +64,23 @@
 		</div>
 
 		<div class="w-full px-4 pb-3 dark:text-white">
+			{#if modelId && sharing?.shares_knowledge}
+				<div class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+					{$i18n.t('Sharing this assistant also shares its knowledge bases, files and notes.')}
+				</div>
+				{#if !sharing.may_share}
+					<div class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+						{$i18n.t('Only the owner can change who this assistant is shared with.')}
+					</div>
+				{/if}
+				<LeftOutList items={sharing.left_out} />
+			{/if}
 			<AccessControl
 				bind:accessGrants
 				bind:accessControl
 				{onChange}
 				{accessRoles}
-				{readOnly}
+				readOnly={readOnly || (!!modelId && (loadingSharing || !sharing?.may_share))}
 				{share}
 				{sharePublic}
 				{shareOpen}
