@@ -69,7 +69,8 @@ export const DEFAULT_PERMISSIONS = {
 		image_generation: true,
 		code_interpreter: true,
 		document_writer: true,
-		workspace: true,
+		// [Gradient] Opt-in, as USER_PERMISSIONS_FEATURES_WORKSPACE.
+		workspace: false,
 		memories: true,
 		automations: false,
 		calendar: true,

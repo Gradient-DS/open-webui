@@ -288,7 +288,7 @@ class FeaturesPermissions(BaseModel):
     image_generation: bool = True
     code_interpreter: bool = True
     document_writer: bool = True
-    workspace: bool = True
+    workspace: bool = False  # [Gradient] opt-in, as USER_PERMISSIONS_FEATURES_WORKSPACE
     memories: bool = True
     automations: bool = False
     calendar: bool = True

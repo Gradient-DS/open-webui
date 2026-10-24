@@ -719,7 +719,7 @@ async def verify_tool_servers_config(
 ############################
 class CodeInterpreterConfigForm(BaseModel):
     ENABLE_DOCUMENT_WRITER: bool
-    ENABLE_WORKSPACE: bool = True
+    ENABLE_WORKSPACE: bool = False
     ENABLE_CODE_EXECUTION: bool
     CODE_EXECUTION_ENGINE: str
     CODE_EXECUTION_JUPYTER_URL: str | None

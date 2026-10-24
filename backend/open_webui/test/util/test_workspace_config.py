@@ -60,3 +60,22 @@ def test_document_writer_switch_in_the_same_section_round_trips(client):
     }
     assert api.post('/code_execution', json=payload).status_code == 200
     assert values['document_writer.enable'] is True
+
+
+def test_workspace_is_off_unless_the_tenant_enables_it():
+    import os
+    import subprocess
+
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {'ENABLE_WORKSPACE', 'FEATURE_WORKSPACE', 'USER_PERMISSIONS_FEATURES_WORKSPACE'}
+    }
+    probe = (
+        'from open_webui import config; '
+        "print(config.ENABLE_WORKSPACE, config.FEATURE_WORKSPACE, config.DEFAULT_USER_PERMISSIONS['features']['workspace'], "
+        "config.DEFAULT_CONFIG['workspace.enable'])"
+    )
+    result = subprocess.run([sys.executable, '-c', probe], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.split()[-4:] == ['False'] * 4

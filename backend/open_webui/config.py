@@ -1972,7 +1972,8 @@ USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER = (
 USER_PERMISSIONS_SETTINGS_INTERFACE = os.getenv('USER_PERMISSIONS_SETTINGS_INTERFACE', 'True').lower() == 'true'
 
 
-USER_PERMISSIONS_FEATURES_WORKSPACE = os.environ.get('USER_PERMISSIONS_FEATURES_WORKSPACE', 'True').lower() == 'true'
+# [Gradient] The workspace agent runs model-written code; a tenant opts in.
+USER_PERMISSIONS_FEATURES_WORKSPACE = os.environ.get('USER_PERMISSIONS_FEATURES_WORKSPACE', 'False').lower() == 'true'
 
 DEFAULT_USER_PERMISSIONS = {
     'workspace': {
@@ -2966,7 +2967,8 @@ FEATURE_CAPTURE = os.environ.get('FEATURE_CAPTURE', 'True').lower() == 'true'
 FEATURE_ARTIFACTS = os.environ.get('FEATURE_ARTIFACTS', 'True').lower() == 'true'
 
 FEATURE_DOCUMENT_WRITER = os.environ.get('FEATURE_DOCUMENT_WRITER', 'True').lower() == 'true'
-FEATURE_WORKSPACE = os.environ.get('FEATURE_WORKSPACE', 'True').lower() == 'true'
+# [Gradient] The workspace agent runs model-written code; a tenant opts in.
+FEATURE_WORKSPACE = os.environ.get('FEATURE_WORKSPACE', 'False').lower() == 'true'
 
 FEATURE_PLAYGROUND = os.environ.get('FEATURE_PLAYGROUND', 'True').lower() == 'true'
 
@@ -3055,7 +3057,8 @@ ENABLE_CITATION_TEXT_HIGHLIGHT = os.environ.get('ENABLE_CITATION_TEXT_HIGHLIGHT'
 SOEV_LOGIN_FOOTER = os.environ.get('SOEV_LOGIN_FOOTER', 'Powered by [soev.ai](https://soev.ai)')
 
 ENABLE_DOCUMENT_WRITER = os.environ.get('ENABLE_DOCUMENT_WRITER', 'True').lower() == 'true'
-ENABLE_WORKSPACE = os.environ.get('ENABLE_WORKSPACE', 'True').lower() == 'true'
+# [Gradient] The workspace agent runs model-written code; a tenant opts in.
+ENABLE_WORKSPACE = os.environ.get('ENABLE_WORKSPACE', 'False').lower() == 'true'
 
 WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get('WEAVIATE_WEB_SEARCH_TTL_MINUTES', '1440'))
 
