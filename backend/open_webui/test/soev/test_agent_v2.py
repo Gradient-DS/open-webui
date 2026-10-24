@@ -3605,6 +3605,9 @@ async def test_a_workspace_task_rolls_its_steps_into_its_own_line(declared: Chat
     ]
     steps = [s['step']['description'] for s in statuses(declared) if 'step' in s]
     assert steps == ['Grafiek maken', 'Docx bouwen']
+    running = [s for s in statuses(declared) if not s['done']]
+    assert [s['steps'] for s in running] == [0, 1, 2]
+    assert len({s['started_at'] for s in running}) == 1
     (worked,) = [s for s in statuses(declared) if s['done']]
     assert 'step' not in worked
     assert worked['duration']

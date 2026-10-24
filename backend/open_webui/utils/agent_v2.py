@@ -1123,6 +1123,9 @@ class AgentTurn:
         self.call_streams: dict[str, str] = {}
         # [Gradient] When each running rolled delegation (`_ROLLED`) started.
         self.rolled_started: dict[str, float] = {}
+        # [Gradient] Its start as epoch seconds and the steps its subagent took, for the running line's clock.
+        self.rolled_since: dict[str, float] = {}
+        self.rolled_steps: dict[str, int] = {}
         # [Claude] Calls of the last model output, shown as running once its reasoning and text are out, so a
         # call's status never lands above the thoughts that led to it.
         self.pending_calls: list[dict] = []
@@ -1320,9 +1323,12 @@ class AgentTurn:
             call_id = _call_key(stream, call['id'])
             self.running[call_id] = (name, arguments)
             self.call_streams[call_id] = stream
+            status = self.tool_status(name, arguments)
             if name in _ROLLED and stream == _ROOT_STREAM:
                 self.rolled_started[call_id] = time.monotonic()
-            status = self.tool_status(name, arguments)
+                self.rolled_since[call_id] = time.time()
+                self.rolled_steps[call_id] = 0
+                status = {**status, 'started_at': self.rolled_since[call_id], 'steps': 0}
             await self.emit('status', {**status, 'call_id': call_id, 'done': False})
             anchors.append(_marker(status))
         return anchors
@@ -1354,6 +1360,8 @@ class AgentTurn:
         name, arguments = call
         status = self.tool_status(name, arguments, output)
         started = self.rolled_started.pop(output['call_id'], None)
+        self.rolled_since.pop(output['call_id'], None)
+        self.rolled_steps.pop(output['call_id'], None)
         if started is not None and output.get('error') is None:
             dutch = (self.metadata.get('user_language') or '').lower().startswith('nl')
             duration = _duration(time.monotonic() - started, dutch)
@@ -1665,7 +1673,9 @@ class AgentTurn:
         running = self.tool_status(name, arguments)
         for call in payload.get('tool_calls', []):
             step = self.tool_status(call['name'], call.get('arguments') or {})
-            await self.emit('status', {**running, 'step': step, 'call_id': call_id, 'done': False})
+            self.rolled_steps[call_id] = self.rolled_steps.get(call_id, 0) + 1
+            clock = {'started_at': self.rolled_since.get(call_id), 'steps': self.rolled_steps[call_id]}
+            await self.emit('status', {**running, **clock, 'step': step, 'call_id': call_id, 'done': False})
         return []
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
