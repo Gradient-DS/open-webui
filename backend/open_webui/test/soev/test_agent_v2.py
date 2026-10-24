@@ -3444,24 +3444,24 @@ async def test_citation_metadata_distinguishes_document_reads_from_chunks(kind):
     assert metadata['page'] == 1
 
 
-# [Gradient] Office files (feat/office-files).
+# [Gradient] Delivered workspace files.
 @pytest.mark.asyncio
 @pytest.mark.parametrize('branch', [False, True])
-async def test_a_delivered_office_file_is_attached_without_copying_bytes(
+async def test_a_delivered_workspace_file_is_attached_without_copying_bytes(
     chat: Chat, monkeypatch: pytest.MonkeyPatch, branch: bool
 ) -> None:
     # [Gradient] C1 has no inline bytes; neither the file nor its pages enter OWUI Files.
     inserted = AsyncMock()
     monkeypatch.setattr(agent_v2.Files, 'insert_new_file', inserted)
-    office = {
-        'type': 'office-file',
+    workspace = {
+        'type': 'workspace-file',
         'id': uuid4().hex,
         'name': 'begroting.xlsx',
         'content_type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'size': 4,
         'sha256': 'a' * 64,
-        'key': 'owner/office/workbook.xlsx',
-        'pages': [{'key': 'owner/office/page.png', 'sha256': 'b' * 64, 'size': 8}],
+        'key': 'owner/workspace/workbook.xlsx',
+        'pages': [{'key': 'owner/workspace/page.png', 'sha256': 'b' * 64, 'size': 8}],
         'version': 2,
         'edits': uuid4().hex,
     }
@@ -3469,7 +3469,7 @@ async def test_a_delivered_office_file_is_attached_without_copying_bytes(
         await chat.turn('first', 'parent')
         await chat.turn('second', 'old-answer', 'parent')
         assert chat.bookmark('parent')['position'] < len(chat.api.chat.threads['thr-1']['events'])
-    chat.api.chat.turns = [[found(office), answered('Klaar.')]]
+    chat.api.chat.turns = [[found(workspace), answered('Klaar.')]]
     await chat.turn('Maak een begroting', 'a1', 'parent' if branch else None)
     assert chat.bookmark('a1')['thread_id'] == ('thr-2' if branch else 'thr-1')
     inserted.assert_not_awaited()
@@ -3477,15 +3477,15 @@ async def test_a_delivered_office_file_is_attached_without_copying_bytes(
     assert event == {
         'files': [
             {
-                'type': 'office',
-                'name': office['name'],
-                'content_type': office['content_type'],
+                'type': 'workspace',
+                'name': workspace['name'],
+                'content_type': workspace['content_type'],
                 'size': 4,
                 'thread_id': chat.bookmark('a1')['thread_id'],
-                'element_id': office['id'],
+                'element_id': workspace['id'],
                 'pages': 1,
                 'version': 2,
-                'edits': office['edits'],
+                'edits': workspace['edits'],
             }
         ]
     }
@@ -3500,34 +3500,34 @@ async def test_workspace_toggle_always_sends_the_workspace_tool_state(chat: Chat
 
 
 @pytest.mark.asyncio
-async def test_temporary_office_reference_is_recorded_on_delivery_and_expires_with_chat(temporary: Chat):
-    office = {
-        'type': 'office-file',
+async def test_temporary_workspace_reference_is_recorded_on_delivery_and_expires_with_chat(temporary: Chat):
+    workspace = {
+        'type': 'workspace-file',
         'id': uuid4().hex,
         'name': 'deck.pptx',
-        'content_type': 'application/office',
+        'content_type': 'application/octet-stream',
         'size': 42,
         'pages': [],
         'version': 1,
     }
-    temporary.api.chat.turns = [[found(office), answered('Done')]]
-    chat_id = 'local:sid-1:office'
+    temporary.api.chat.turns = [[found(workspace), answered('Done')]]
+    chat_id = 'local:sid-1:workspace'
     await temporary.turn('make a deck', 'answer', chat_id=chat_id)
-    attachment = agent_threads.temporary_office(chat_id, office['id'], 'alice')
+    attachment = agent_threads.temporary_workspace(chat_id, workspace['id'], 'alice')
     assert attachment['thread_id'] == agent_threads.temporary_bookmark(chat_id, 'answer')['thread_id']
     assert attachment == next(event['data']['files'][0] for event in temporary.socket if event['type'] == 'files')
     assert not temporary.messages
-    assert agent_threads.temporary_office(chat_id, office['id'], 'bob') is None
+    assert agent_threads.temporary_workspace(chat_id, workspace['id'], 'bob') is None
     await agent_threads.release_temporary(['sid-1'])
-    assert agent_threads.temporary_office(chat_id, office['id'], 'alice') is None
+    assert agent_threads.temporary_workspace(chat_id, workspace['id'], 'alice') is None
 
 
-def test_an_original_office_attachment_has_no_parent():
-    attachment = agent_v2._office_attachment(
+def test_an_original_workspace_attachment_has_no_parent():
+    attachment = agent_v2._workspace_attachment(
         {
             'id': 'original',
             'name': 'deck.pptx',
-            'content_type': 'application/office',
+            'content_type': 'application/octet-stream',
             'size': 1,
             'pages': [],
             'version': 1,
@@ -3614,14 +3614,14 @@ async def test_a_workspace_task_rolls_its_steps_into_its_own_line(declared: Chat
 
 @pytest.mark.asyncio
 async def test_a_note_on_a_delivered_file_cites_that_file_for_the_panel(chat: Chat) -> None:
-    office = {
-        'type': 'office-file',
+    workspace = {
+        'type': 'workspace-file',
         'id': 'chart-element',
         'name': 'chart.png',
         'content_type': 'image/png',
         'size': 4,
         'sha256': 'a' * 64,
-        'key': 'owner/office/chart-element/file.png',
+        'key': 'owner/workspace/chart-element/file.png',
         'pages': [],
         'version': 1,
     }
@@ -3632,11 +3632,11 @@ async def test_a_note_on_a_delivered_file_cites_that_file_for_the_panel(chat: Ch
         'name': 'chart.png',
         'text': 'A chart.',
     }
-    chat.api.chat.turns = [[found(office, note), answered('Hier is de grafiek', cited(18, 'chart-element:note'))]]
+    chat.api.chat.turns = [[found(workspace, note), answered('Hier is de grafiek', cited(18, 'chart-element:note'))]]
 
     assert content(await chat.turn('Maak een grafiek', 'a1')) == 'Hier is de grafiek [1]'
 
     source = next(event['data'] for event in chat.socket if event['type'] == 'source')
     assert source['source']['name'] == 'chart.png'
     assert source['source']['delivered_file']['element_id'] == 'chart-element'
-    assert source['source']['delivered_file']['type'] == 'office'
+    assert source['source']['delivered_file']['type'] == 'workspace'

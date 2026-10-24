@@ -114,19 +114,19 @@ async def remember_temporary(chat_id: str, message_id: str, as_user: str, bookma
     store[chat_id] = entry
 
 
-# [Gradient] Temporary Office references live and expire with their chat's bookmarks.
-def remember_temporary_office(chat_id: str, user_id: str, files: list[dict]) -> None:
+# [Gradient] Temporary workspace file references live and expire with their chat's bookmarks.
+def remember_temporary_workspace(chat_id: str, user_id: str, files: list[dict]) -> None:
     store = _temporary()
     entry = store.get(chat_id)
     if entry is not None and entry['as_user'] == f'owui:user:{user_id}':
-        entry.setdefault('office', {}).update({file['element_id']: file for file in files})
+        entry.setdefault('workspace', {}).update({file['element_id']: file for file in files})
         store[chat_id] = entry
 
 
-def temporary_office(chat_id: str, element_id: str, user_id: str) -> dict | None:
+def temporary_workspace(chat_id: str, element_id: str, user_id: str) -> dict | None:
     entry = _temporary().get(chat_id)
     if entry is not None and entry['as_user'] == f'owui:user:{user_id}':
-        return entry.get('office', {}).get(element_id)
+        return entry.get('workspace', {}).get(element_id)
     return None
 
 

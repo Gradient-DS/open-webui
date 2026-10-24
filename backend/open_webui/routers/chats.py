@@ -62,10 +62,10 @@ router = APIRouter()
 
 
 # [Gradient] A stream must close even if response headers fail or the browser disconnects.
-_OFFICE_HEADERS = {'X-Content-Type-Options': 'nosniff'}
+_WORKSPACE_HEADERS = {'X-Content-Type-Options': 'nosniff'}
 
 
-class _OfficeStreamingResponse(StreamingResponse):
+class _WorkspaceStreamingResponse(StreamingResponse):
     def __init__(self, upstream: httpx.Response):
         self.upstream = upstream
         headers = {
@@ -74,7 +74,7 @@ class _OfficeStreamingResponse(StreamingResponse):
             if key in upstream.headers
         }
         super().__init__(
-            upstream.aiter_bytes(), status_code=upstream.status_code, headers={**headers, **_OFFICE_HEADERS}
+            upstream.aiter_bytes(), status_code=upstream.status_code, headers={**headers, **_WORKSPACE_HEADERS}
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -85,23 +85,23 @@ class _OfficeStreamingResponse(StreamingResponse):
                 await self.upstream.aclose()
 
 
-# [Gradient] Resolve Office references from stored messages; bytes remain in the agent's storage.
-@router.get('/{chat_id}/office/{element_id}/{part}')
-async def get_office_content(
+# [Gradient] Resolve workspace file references from stored messages; bytes remain in the agent's storage.
+@router.get('/{chat_id}/workspace/{element_id}/{part}')
+async def get_workspace_content(
     chat_id: str,
     element_id: str,
     part: str,
     user=Depends(get_verified_user),
 ):
     if part != 'file' and not re.fullmatch(r'page-[1-9][0-9]*', part):
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_OFFICE_HEADERS)
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_WORKSPACE_HEADERS)
     if is_temporary_chat_id(chat_id):
-        attachment = agent_threads.temporary_office(chat_id, element_id, user.id)
+        attachment = agent_threads.temporary_workspace(chat_id, element_id, user.id)
         as_user = f'owui:user:{user.id}'
     else:
         chat = await Chats.get_chat_by_id_for_user(chat_id, user)
         if chat is None or (chat.user_id != user.id and user.role != 'admin'):
-            raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_OFFICE_HEADERS)
+            raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_WORKSPACE_HEADERS)
         as_user = f'owui:user:{chat.user_id}'
         files = await ChatMessages.get_files_by_chat_id(chat_id)
         attachment = next(
@@ -109,7 +109,7 @@ async def get_office_content(
                 file
                 for file in files
                 if isinstance(file, dict)
-                and file.get('type') == 'office'
+                and file.get('type') == 'workspace'
                 and file.get('element_id') == element_id
                 and isinstance(file.get('thread_id'), str)
                 and file['thread_id']
@@ -117,8 +117,8 @@ async def get_office_content(
             None,
         )
     if attachment is None:
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_OFFICE_HEADERS)
-    path = f'/v1/chat/threads/{quote(attachment["thread_id"], safe="")}/office/{quote(element_id, safe="")}'
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_WORKSPACE_HEADERS)
+    path = f'/v1/chat/threads/{quote(attachment["thread_id"], safe="")}/workspace/{quote(element_id, safe="")}'
     try:
         upstream = await identity.build_client().chat_get_stream(
             path,
@@ -128,10 +128,10 @@ async def get_office_content(
     except (SoevApiError, ValueError) as error:
         # [Gradient] Neither upstream problem text nor credential configuration belongs in the response.
         code = 404 if isinstance(error, SoevApiError) and error.status == 404 else 502
-        detail = ERROR_MESSAGES.NOT_FOUND if code == 404 else 'Office file download failed'
-        raise HTTPException(status_code=code, detail=detail, headers=_OFFICE_HEADERS) from None
+        detail = ERROR_MESSAGES.NOT_FOUND if code == 404 else 'Workspace file download failed'
+        raise HTTPException(status_code=code, detail=detail, headers=_WORKSPACE_HEADERS) from None
 
-    return _OfficeStreamingResponse(upstream)
+    return _WorkspaceStreamingResponse(upstream)
 
 
 CHAT_CONFIG_KEYS = {

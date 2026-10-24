@@ -990,13 +990,13 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
     }
 
 
-# [Gradient] Office bytes stay on the agent side; messages keep only their references.
-OFFICE_FILE = 'office-file'
+# [Gradient] Workspace file bytes stay on the agent side; messages keep only their references.
+WORKSPACE_FILE = 'workspace-file'
 
 
-def _office_attachment(element: dict[str, Any], thread_id: str) -> dict[str, Any]:
+def _workspace_attachment(element: dict[str, Any], thread_id: str) -> dict[str, Any]:
     return {
-        'type': 'office',
+        'type': 'workspace',
         'name': element['name'],
         'content_type': element['content_type'],
         'size': element['size'],
@@ -1257,8 +1257,8 @@ class AgentTurn:
             if _read(element) and element['id'] not in self.citations.sources:
                 whole = self.elements.get(element['ref'])
                 read = await _as_source(element, whole)
-                if whole is not None and whole.get('type') == OFFICE_FILE:
-                    read['delivered_file'] = _office_attachment(whole, self.thread_id)
+                if whole is not None and whole.get('type') == WORKSPACE_FILE:
+                    read['delivered_file'] = _workspace_attachment(whole, self.thread_id)
                 source = self.citations.add(read)
                 if source:
                     added.append(source)
@@ -1479,21 +1479,21 @@ class AgentTurn:
                 await self.emit('action_required', {'kind': 'connect', 'provider': element['provider']})
             if _read(element):
                 await self.show_source(element['id'])
-        await self.attach_files([e for e in payload.get('elements') or [] if e.get('type') == OFFICE_FILE])
+        await self.attach_files([e for e in payload.get('elements') or [] if e.get('type') == WORKSPACE_FILE])
         self.end_tool(payload)
 
     async def attach_files(self, elements: list[dict[str, Any]]) -> None:
-        """[Gradient] Attach Office references using the same thread this message bookmarks."""
+        """[Gradient] Attach workspace file references using the same thread this message bookmarks."""
         if not elements or not self.thread_id:
             return
         try:
-            files = [_office_attachment(element, self.thread_id) for element in elements]
+            files = [_workspace_attachment(element, self.thread_id) for element in elements]
         except (KeyError, TypeError):
-            log.exception('Could not attach an Office file', extra={'thread_id': self.thread_id})
+            log.exception('Could not attach a workspace file', extra={'thread_id': self.thread_id})
             return
         chat_id = self.metadata.get('chat_id')
         if is_temporary_chat_id(chat_id):
-            agent_threads.remember_temporary_office(chat_id, self.metadata['user_id'], files)
+            agent_threads.remember_temporary_workspace(chat_id, self.metadata['user_id'], files)
         await self.emit('files', {'files': files})
 
     async def show_source(self, source_id: str) -> None:

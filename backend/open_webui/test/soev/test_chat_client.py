@@ -167,7 +167,7 @@ async def test_terminal_error_is_not_retried(chat_http: FakeSoevApi) -> None:
     assert json.loads(chat_http.chat.requests[0].content)['input'] == {'text': 'hello'}
 
 
-# [Gradient] Office GETs expose headers without reading or copying the body in advance.
+# [Gradient] Workspace file GETs expose headers without reading or copying the body in advance.
 @pytest.mark.asyncio
 async def test_chat_get_stream_keeps_bytes_lazy_and_uses_the_acting_user(monkeypatch):
     from open_webui.soev import client as client_module
@@ -179,7 +179,7 @@ async def test_chat_get_stream_keeps_bytes_lazy_and_uses_the_acting_user(monkeyp
 
         async def __aiter__(self):
             self.read = True
-            yield b'office'
+            yield b'workspace'
 
         async def aclose(self):
             self.closed = True
@@ -200,11 +200,11 @@ async def test_chat_get_stream_keeps_bytes_lazy_and_uses_the_acting_user(monkeyp
         monkeypatch.setattr(client_module, '_shared_client', lambda: http)
         client = SoevClient('https://soev.test', 'key', subject_minter=mint)
         response = await client.chat_get_stream(
-            '/v1/chat/threads/thread/office/element', as_user='owui:user:alice', params={'part': 'page:1'}
+            '/v1/chat/threads/thread/workspace/element', as_user='owui:user:alice', params={'part': 'page:1'}
         )
         assert not body.read
         assert response.status_code == 200 and response.headers['Content-Type'] == 'image/png'
-        assert b''.join([chunk async for chunk in response.aiter_bytes()]) == b'office'
+        assert b''.join([chunk async for chunk in response.aiter_bytes()]) == b'workspace'
         await response.aclose()
     assert body.closed
     assert subjects == ['owui:user:alice']
@@ -221,7 +221,7 @@ async def test_chat_get_stream_closes_failed_responses(identity_config, identity
     responses.append(response)
     with pytest.raises(SoevApiError) as caught:
         await identity.build_client().chat_get_stream(
-            '/v1/chat/threads/thread/office/element', as_user='owui:user:alice'
+            '/v1/chat/threads/thread/workspace/element', as_user='owui:user:alice'
         )
     assert caught.value.status == status
     assert response.is_closed
@@ -250,5 +250,5 @@ async def test_chat_download_does_not_read_upstream_error_body(monkeypatch):
         monkeypatch.setattr(client_module, '_shared_client', lambda: http)
         client = SoevClient('https://soev.test', 'key', subject_minter=lambda user: 'assertion')
         with pytest.raises(SoevApiError):
-            await client.chat_get_stream('/v1/chat/threads/thread/office/element', as_user='owui:user:alice')
+            await client.chat_get_stream('/v1/chat/threads/thread/workspace/element', as_user='owui:user:alice')
     assert body.closed

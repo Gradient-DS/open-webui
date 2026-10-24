@@ -1,4 +1,4 @@
-"""[Gradient] Office downloads are authorized by the chat and its stored attachments."""
+"""[Gradient] Workspace file downloads are authorized by the chat and its stored attachments."""
 
 from copy import deepcopy
 from types import SimpleNamespace
@@ -13,12 +13,12 @@ from open_webui.routers import chats
 from open_webui.soev.client import SoevApiError
 
 
-class OfficeBytes(httpx.AsyncByteStream):
+class WorkspaceBytes(httpx.AsyncByteStream):
     def __init__(self):
         self.closed = 0
 
     async def __aiter__(self):
-        yield b'office-'
+        yield b'workspace-'
         yield b'bytes'
 
     async def aclose(self):
@@ -26,9 +26,9 @@ class OfficeBytes(httpx.AsyncByteStream):
 
 
 @pytest.fixture
-def office(monkeypatch):
+def workspace(monkeypatch):
     user = SimpleNamespace(id='alice', role='user')
-    attachment = {'type': 'office', 'element_id': 'element', 'thread_id': 'attached-thread', 'pages': 2}
+    attachment = {'type': 'workspace', 'element_id': 'element', 'thread_id': 'attached-thread', 'pages': 2}
     lookup = AsyncMock(return_value=SimpleNamespace(user_id='alice', meta={}, folder_id=None))
     messages = AsyncMock(return_value=[attachment])
     monkeypatch.setattr(chats.Chats, 'get_chat_by_id', lookup)
@@ -43,7 +43,7 @@ def office(monkeypatch):
     monkeypatch.setattr(
         chats.ChatMessages, 'get_messages_by_chat_id', AsyncMock(side_effect=AssertionError('Full messages loaded'))
     )
-    stream = OfficeBytes()
+    stream = WorkspaceBytes()
     upstream = httpx.Response(
         200,
         stream=stream,
@@ -73,98 +73,98 @@ def office(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('admin', [False, True])
-async def test_download_relays_bytes_and_headers_as_chat_owner(office, admin):
+async def test_download_relays_bytes_and_headers_as_chat_owner(workspace, admin):
     if admin:
-        office.user.id, office.user.role = 'admin', 'admin'
-    async with office.client as client:
-        response = await client.get('/api/v1/chats/chat/office/element/file?thread_id=request-thread')
+        workspace.user.id, workspace.user.role = 'admin', 'admin'
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file?thread_id=request-thread')
     assert response.status_code == 200
     assert response.headers['x-content-type-options'] == 'nosniff'
-    assert response.content == b'office-bytes'
+    assert response.content == b'workspace-bytes'
     for header in ('content-type', 'content-disposition', 'cache-control'):
-        assert response.headers[header] == office.upstream.headers[header]
+        assert response.headers[header] == workspace.upstream.headers[header]
     assert 'x-private-upstream' not in response.headers
-    office.lookup.assert_awaited_once_with('chat', db=None)
-    office.messages.assert_awaited_once_with('chat')
-    office.get.assert_awaited_once_with(
-        '/v1/chat/threads/attached-thread/office/element', as_user='owui:user:alice', params={'part': 'file'}
+    workspace.lookup.assert_awaited_once_with('chat', db=None)
+    workspace.messages.assert_awaited_once_with('chat')
+    workspace.get.assert_awaited_once_with(
+        '/v1/chat/threads/attached-thread/workspace/element', as_user='owui:user:alice', params={'part': 'file'}
     )
-    assert office.stream.closed == 1
+    assert workspace.stream.closed == 1
 
 
 @pytest.mark.asyncio
-async def test_page_part_is_one_based_and_relays_image_headers(office):
-    office.upstream.headers['Content-Type'] = 'image/png'
-    del office.upstream.headers['Content-Disposition']
-    async with office.client as client:
-        response = await client.get('/api/v1/chats/chat/office/element/page-2')
+async def test_page_part_is_one_based_and_relays_image_headers(workspace):
+    workspace.upstream.headers['Content-Type'] = 'image/png'
+    del workspace.upstream.headers['Content-Disposition']
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/page-2')
     assert response.status_code == 200
     assert response.headers['x-content-type-options'] == 'nosniff'
     assert response.headers['content-type'] == 'image/png'
     assert 'content-disposition' not in response.headers
-    assert office.get.call_args.kwargs['params'] == {'part': 'page:2'}
+    assert workspace.get.call_args.kwargs['params'] == {'part': 'page:2'}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('case', ['foreign', 'unknown-chat', 'unknown-element', 'not-office', 'no-thread'])
-async def test_unavailable_attachment_is_404_without_upstream_request(office, case):
+@pytest.mark.parametrize('case', ['foreign', 'unknown-chat', 'unknown-element', 'not-workspace', 'no-thread'])
+async def test_unavailable_attachment_is_404_without_upstream_request(workspace, case):
     if case == 'foreign':
-        office.user.id = 'bob'
+        workspace.user.id = 'bob'
     elif case == 'unknown-chat':
-        office.lookup.return_value = None
+        workspace.lookup.return_value = None
     elif case == 'unknown-element':
-        office.attachment['element_id'] = 'elsewhere'
-    elif case == 'not-office':
-        office.attachment['type'] = 'file'
+        workspace.attachment['element_id'] = 'elsewhere'
+    elif case == 'not-workspace':
+        workspace.attachment['type'] = 'file'
     else:
-        del office.attachment['thread_id']
-    async with office.client as client:
-        response = await client.get('/api/v1/chats/chat/office/element/file')
+        del workspace.attachment['thread_id']
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
     assert response.status_code == 404
     assert response.headers['x-content-type-options'] == 'nosniff'
-    office.get.assert_not_awaited()
+    workspace.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('part', ['workspace', 'page-0', 'page--1', 'page-1.5', 'page-01', 'page:1'])
-async def test_only_file_and_positive_page_parts_are_allowed(office, part):
-    async with office.client as client:
-        response = await client.get(f'/api/v1/chats/chat/office/element/{part}')
+async def test_only_file_and_positive_page_parts_are_allowed(workspace, part):
+    async with workspace.client as client:
+        response = await client.get(f'/api/v1/chats/chat/workspace/element/{part}')
     assert response.status_code == 404
     assert response.headers['x-content-type-options'] == 'nosniff'
-    office.get.assert_not_awaited()
+    workspace.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('status', [400, 401, 403, 404, 409, 429, 500, 502, 503, 504])
-async def test_upstream_errors_are_resolved_before_response_headers(office, status):
-    office.get.side_effect = SoevApiError(status, 'upstream_error', 'private upstream problem text')
-    async with office.client as client:
-        response = await client.get('/api/v1/chats/chat/office/element/file')
+async def test_upstream_errors_are_resolved_before_response_headers(workspace, status):
+    workspace.get.side_effect = SoevApiError(status, 'upstream_error', 'private upstream problem text')
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
     assert response.status_code == (404 if status == 404 else 502)
     assert response.headers['x-content-type-options'] == 'nosniff'
     assert 'private upstream' not in response.text
     assert response.json()['detail'] == (
-        chats.ERROR_MESSAGES.NOT_FOUND if status == 404 else 'Office file download failed'
+        chats.ERROR_MESSAGES.NOT_FOUND if status == 404 else 'Workspace file download failed'
     )
 
 
 @pytest.mark.asyncio
-async def test_admin_cannot_download_when_admin_chat_access_is_disabled(office, monkeypatch):
+async def test_admin_cannot_download_when_admin_chat_access_is_disabled(workspace, monkeypatch):
     monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', False)
-    office.user.id, office.user.role = 'admin', 'admin'
-    async with office.client as client:
-        response = await client.get('/api/v1/chats/chat/office/element/file')
+    workspace.user.id, workspace.user.role = 'admin', 'admin'
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
     assert response.status_code == 404
     assert response.headers['x-content-type-options'] == 'nosniff'
-    office.get.assert_not_awaited()
+    workspace.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     'user_id,role,expected', [('alice', 'user', 200), ('bob', 'user', 404), ('admin', 'admin', 404)]
 )
-async def test_temporary_office_is_available_only_to_its_owner(office, monkeypatch, user_id, role, expected):
+async def test_temporary_workspace_is_available_only_to_its_owner(workspace, monkeypatch, user_id, role, expected):
     class DetachedValues(dict):
         def get(self, key, default=None):
             return deepcopy(super().get(key, default))
@@ -177,34 +177,34 @@ async def test_temporary_office_is_available_only_to_its_owner(office, monkeypat
     }
     store = DetachedValues(store)
     monkeypatch.setattr(chats.agent_threads, '_temporary', lambda: store)
-    chats.agent_threads.remember_temporary_office('local:socket:chat', 'alice', [office.attachment])
-    office.user.id, office.user.role = user_id, role
-    async with office.client as client:
-        response = await client.get('/api/v1/chats/local:socket:chat/office/element/file')
+    chats.agent_threads.remember_temporary_workspace('local:socket:chat', 'alice', [workspace.attachment])
+    workspace.user.id, workspace.user.role = user_id, role
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/local:socket:chat/workspace/element/file')
     assert response.status_code == expected
-    office.lookup.assert_not_awaited()
-    office.messages.assert_not_awaited()
+    workspace.lookup.assert_not_awaited()
+    workspace.messages.assert_not_awaited()
     if expected == 200:
-        assert response.content == b'office-bytes'
-        office.get.assert_awaited_once_with(
-            '/v1/chat/threads/attached-thread/office/element', as_user='owui:user:alice', params={'part': 'file'}
+        assert response.content == b'workspace-bytes'
+        workspace.get.assert_awaited_once_with(
+            '/v1/chat/threads/attached-thread/workspace/element', as_user='owui:user:alice', params={'part': 'file'}
         )
     else:
-        office.get.assert_not_awaited()
+        workspace.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('case', ['no-chat', 'no-element', 'wrong-owner-emission'])
-async def test_temporary_office_requires_a_recorded_attachment(office, monkeypatch, case):
+async def test_temporary_workspace_requires_a_recorded_attachment(workspace, monkeypatch, case):
     store = {} if case == 'no-chat' else {'local:socket:chat': {'as_user': 'owui:user:alice', 'bookmarks': {}}}
     monkeypatch.setattr(chats.agent_threads, '_temporary', lambda: store)
     if case == 'wrong-owner-emission':
-        chats.agent_threads.remember_temporary_office('local:socket:chat', 'bob', [office.attachment])
-    async with office.client as client:
-        response = await client.get('/api/v1/chats/local:socket:chat/office/element/file')
+        chats.agent_threads.remember_temporary_workspace('local:socket:chat', 'bob', [workspace.attachment])
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/local:socket:chat/workspace/element/file')
     assert response.status_code == 404
     assert response.headers['x-content-type-options'] == 'nosniff'
-    office.get.assert_not_awaited()
+    workspace.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -214,7 +214,7 @@ async def test_files_query_filters_by_chat_without_validating_messages(monkeypat
     from open_webui.models.chats import ChatForm, Chats
 
     chat_id, other_id = str(uuid4()), str(uuid4())
-    attachment = {'type': 'office', 'element_id': 'element', 'thread_id': 'thread'}
+    attachment = {'type': 'workspace', 'element_id': 'element', 'thread_id': 'thread'}
     for id in (chat_id, other_id):
         await Chats.insert_new_chat(id, 'alice', ChatForm(chat={'history': {'messages': {}}}))
         await Chats.upsert_message_to_chat_by_id_and_message_id(
@@ -231,24 +231,24 @@ async def test_files_query_filters_by_chat_without_validating_messages(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_missing_subject_minter_returns_generic_bad_gateway(office):
-    office.get.side_effect = ValueError('private credential configuration')
-    async with office.client as client:
-        response = await client.get('/api/v1/chats/chat/office/element/file')
+async def test_missing_subject_minter_returns_generic_bad_gateway(workspace):
+    workspace.get.side_effect = ValueError('private credential configuration')
+    async with workspace.client as client:
+        response = await client.get('/api/v1/chats/chat/workspace/element/file')
     assert response.status_code == 502
-    assert response.json() == {'detail': 'Office file download failed'}
+    assert response.json() == {'detail': 'Workspace file download failed'}
 
 
 @pytest.mark.asyncio
-async def test_midstream_failure_aborts_the_body_and_closes_upstream_once(office):
-    class BrokenBytes(OfficeBytes):
+async def test_midstream_failure_aborts_the_body_and_closes_upstream_once(workspace):
+    class BrokenBytes(WorkspaceBytes):
         async def __aiter__(self):
             yield b'first chunk'
             raise httpx.ReadError('private upstream failure')
 
     stream = BrokenBytes()
-    office.get.return_value = httpx.Response(200, stream=stream, headers={'Content-Type': 'image/png'})
-    response = await chats.get_office_content('chat', 'element', 'file', user=office.user)
+    workspace.get.return_value = httpx.Response(200, stream=stream, headers={'Content-Type': 'image/png'})
+    response = await chats.get_workspace_content('chat', 'element', 'file', user=workspace.user)
     sent = []
 
     async def send(message):
@@ -263,12 +263,12 @@ async def test_midstream_failure_aborts_the_body_and_closes_upstream_once(office
 
 
 @pytest.mark.asyncio
-async def test_failure_sending_headers_still_closes_upstream(office):
-    response = await chats.get_office_content('chat', 'element', 'file', user=office.user)
+async def test_failure_sending_headers_still_closes_upstream(workspace):
+    response = await chats.get_workspace_content('chat', 'element', 'file', user=workspace.user)
     with pytest.raises(RuntimeError, match='connection gone'):
         await response(
             {'type': 'http', 'asgi': {'spec_version': '2.4'}},
             AsyncMock(),
             AsyncMock(side_effect=RuntimeError('connection gone')),
         )
-    assert office.stream.closed == 1
+    assert workspace.stream.closed == 1
