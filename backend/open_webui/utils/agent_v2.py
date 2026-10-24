@@ -645,9 +645,9 @@ def _tools(
             'attach_live_document': documents,
             'search_mail': mail,
             'read_mail': mail,
-            # [Gradient] The Workspace switch (feature id `office`), gated upstream by
-            # gate_office_features; off is sent too.
-            'workspace_task': 'auto' if features.get('office') else 'off',
+            # [Gradient] The Workspace switch (feature id `workspace`), gated upstream by
+            # gate_workspace_features; off is sent too.
+            'workspace_task': 'auto' if features.get('workspace') else 'off',
         }
     }
 

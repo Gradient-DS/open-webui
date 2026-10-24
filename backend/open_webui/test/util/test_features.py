@@ -282,46 +282,48 @@ class TestAllFeatureFlags:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('office', [False, True])
-async def test_office_requires_the_capability(office):
+@pytest.mark.parametrize('workspace', [False, True])
+async def test_workspace_requires_the_capability(workspace):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
-    from open_webui.utils.features import gate_office_features
+    from open_webui.utils.features import gate_workspace_features
 
     with (
         patch('open_webui.models.config.Config.get', AsyncMock(return_value=True)),
-        patch.dict(FEATURE_FLAGS, {'office': True}),
+        patch.dict(FEATURE_FLAGS, {'workspace': True}),
     ):
-        result = await gate_office_features(
-            {'office': True, 'web_search': True}, {'office': office}, SimpleNamespace(role='admin')
+        result = await gate_workspace_features(
+            {'workspace': True, 'web_search': True}, {'workspace': workspace}, SimpleNamespace(role='admin')
         )
-    assert result == {'office': office, 'web_search': True}
+    assert result == {'workspace': workspace, 'web_search': True}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('gate', ['flag', 'enable', 'permission', 'missing_capability'])
-async def test_office_cannot_bypass_disabled_gate(gate):
+async def test_workspace_cannot_bypass_disabled_gate(gate):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
-    from open_webui.utils.features import gate_office_features
+    from open_webui.utils.features import gate_workspace_features
 
-    flags = {'office': gate != 'flag'}
-    capabilities = {} if gate == 'missing_capability' else {'office': True}
-    config = AsyncMock(side_effect=lambda key: not (gate == 'enable' and key == 'office.enable'))
+    flags = {'workspace': gate != 'flag'}
+    capabilities = {} if gate == 'missing_capability' else {'workspace': True}
+    config = AsyncMock(side_effect=lambda key: not (gate == 'enable' and key == 'workspace.enable'))
     permission = AsyncMock(
-        side_effect=lambda uid, key, defaults: not (gate == 'permission' and key == 'features.office')
+        side_effect=lambda uid, key, defaults: not (gate == 'permission' and key == 'features.workspace')
     )
     with (
         patch.dict(FEATURE_FLAGS, flags),
         patch('open_webui.models.config.Config.get', config),
         patch('open_webui.utils.access_control.has_permission', permission),
     ):
-        result = await gate_office_features({'office': True}, capabilities, SimpleNamespace(role='user', id='alice'))
-    assert result['office'] is False
+        result = await gate_workspace_features(
+            {'workspace': True}, capabilities, SimpleNamespace(role='user', id='alice')
+        )
+    assert result['workspace'] is False
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('saved', [{}, {'office': False}, {'web_search': False, 'custom': True}])
+@pytest.mark.parametrize('saved', [{}, {'workspace': False}, {'web_search': False, 'custom': True}])
 async def test_feature_permission_defaults_preserve_saved_values_and_match_authorization(saved):
     from unittest.mock import AsyncMock
     from open_webui.config import DEFAULT_USER_PERMISSIONS

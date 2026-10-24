@@ -52,7 +52,7 @@ CONNECTIONS_CONFIG_KEYS = {
 }
 CODE_EXECUTION_CONFIG_KEYS = {
     'ENABLE_DOCUMENT_WRITER': 'document_writer.enable',
-    'ENABLE_OFFICE': 'office.enable',
+    'ENABLE_WORKSPACE': 'workspace.enable',
     'ENABLE_CODE_EXECUTION': 'code_execution.enable',
     'CODE_EXECUTION_ENGINE': 'code_execution.engine',
     'CODE_EXECUTION_JUPYTER_URL': 'code_execution.jupyter.url',
@@ -719,7 +719,7 @@ async def verify_tool_servers_config(
 ############################
 class CodeInterpreterConfigForm(BaseModel):
     ENABLE_DOCUMENT_WRITER: bool
-    ENABLE_OFFICE: bool = True
+    ENABLE_WORKSPACE: bool = True
     ENABLE_CODE_EXECUTION: bool
     CODE_EXECUTION_ENGINE: str
     CODE_EXECUTION_JUPYTER_URL: str | None

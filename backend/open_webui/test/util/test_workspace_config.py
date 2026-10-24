@@ -29,26 +29,26 @@ def client(monkeypatch):
         yield client, values
 
 
-@pytest.mark.parametrize('office', [False, True])
-def test_office_runtime_settings_round_trip_through_admin_endpoint(client, office):
+@pytest.mark.parametrize('workspace', [False, True])
+def test_workspace_runtime_settings_round_trip_through_admin_endpoint(client, workspace):
     api, values = client
     response = api.get('/code_execution')
     assert response.status_code == 200
-    payload = {**response.json(), 'ENABLE_OFFICE': office}
+    payload = {**response.json(), 'ENABLE_WORKSPACE': workspace}
     updated = api.post('/code_execution', json=payload)
     assert updated.status_code == 200
-    assert updated.json()['ENABLE_OFFICE'] is office
-    assert values['office.enable'] is office
+    assert updated.json()['ENABLE_WORKSPACE'] is workspace
+    assert values['workspace.enable'] is workspace
     assert api.get('/code_execution').json() == updated.json()
 
 
 def test_older_settings_clients_preserve_new_fields(client):
     api, values = client
-    values.update({'office.enable': False, 'document_writer.enable': True})
+    values.update({'workspace.enable': False, 'document_writer.enable': True})
     payload = api.get('/code_execution').json()
-    payload.pop('ENABLE_OFFICE')
+    payload.pop('ENABLE_WORKSPACE')
     assert api.post('/code_execution', json=payload).status_code == 200
-    assert values['office.enable'] is False
+    assert values['workspace.enable'] is False
     assert values['document_writer.enable'] is True
 
 

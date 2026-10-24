@@ -13,7 +13,7 @@ from open_webui.config import (
     FEATURE_CAPTURE,
     FEATURE_ARTIFACTS,
     FEATURE_DOCUMENT_WRITER,
-    FEATURE_OFFICE,
+    FEATURE_WORKSPACE,
     FEATURE_PLAYGROUND,
     FEATURE_CHAT_OVERVIEW,
     FEATURE_NOTES_AI_CONTROLS,
@@ -41,7 +41,7 @@ Feature = Literal[
     'capture',
     'artifacts',
     'document_writer',
-    'office',
+    'workspace',
     'playground',
     'chat_overview',
     'notes_ai_controls',
@@ -69,7 +69,7 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     'capture': FEATURE_CAPTURE,
     'artifacts': FEATURE_ARTIFACTS,
     'document_writer': FEATURE_DOCUMENT_WRITER,
-    'office': FEATURE_OFFICE,
+    'workspace': FEATURE_WORKSPACE,
     'playground': FEATURE_PLAYGROUND,
     'chat_overview': FEATURE_CHAT_OVERVIEW,
     'notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
@@ -136,19 +136,19 @@ def require_feature(feature: Feature):
     return check_feature
 
 
-async def gate_office_features(features: dict, capabilities: dict, user) -> dict:
+async def gate_workspace_features(features: dict, capabilities: dict, user) -> dict:
     from open_webui.models.config import Config
     from open_webui.utils.access_control import has_permission
 
     features = dict(features)
-    features['office'] = bool(
-        features.get('office')
-        and capabilities.get('office', False)
-        and is_feature_enabled('office')
-        and await Config.get('office.enable')
+    features['workspace'] = bool(
+        features.get('workspace')
+        and capabilities.get('workspace', False)
+        and is_feature_enabled('workspace')
+        and await Config.get('workspace.enable')
         and (
             user.role == 'admin'
-            or await has_permission(user.id, 'features.office', await Config.get('user.permissions'))
+            or await has_permission(user.id, 'features.workspace', await Config.get('user.permissions'))
         )
     )
     return features

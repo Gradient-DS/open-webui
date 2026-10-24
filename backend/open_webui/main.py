@@ -74,7 +74,7 @@ from open_webui.config import (
     FEATURE_CHAT_CONTROLS_SECTIONS,
     FEATURE_CHAT_OVERVIEW,
     FEATURE_DOCUMENT_WRITER,
-    FEATURE_OFFICE,
+    FEATURE_WORKSPACE,
     FEATURE_INPUT_MENU,
     FEATURE_KNOWLEDGE,
     FEATURE_MODEL_METERS,
@@ -1413,9 +1413,9 @@ async def chat_completion(
         # Read before the fallback below can rebind model to a different one.
         model_capabilities = ((model.get('info') or {}).get('meta') or {}).get('capabilities') or {}
 
-        from open_webui.utils.features import gate_office_features
+        from open_webui.utils.features import gate_workspace_features
 
-        form_data['features'] = await gate_office_features(form_data.get('features') or {}, model_capabilities, user)
+        form_data['features'] = await gate_workspace_features(form_data.get('features') or {}, model_capabilities, user)
 
         # Model params: global defaults as base, per-model overrides win
         default_model_params = copy.deepcopy(await Config.get('models.default_params', {}) or {})
@@ -2683,7 +2683,7 @@ async def get_app_config(request: Request):
         'rag.enable_filter_ui',
         'rag.file.allowed_extensions',
         'document_writer.enable',
-        'office.enable',
+        'workspace.enable',
         'ui.enable_citation_relevance',
         'ui.enable_citation_text_highlight',
         'evaluation.feedback.layer2.enable',
@@ -2780,7 +2780,7 @@ async def get_app_config(request: Request):
                     'enable_code_execution': config.get('code_execution.enable'),
                     'enable_code_interpreter': config.get('code_interpreter.enable'),
                     'enable_document_writer': config.get('document_writer.enable'),  # [Gradient]
-                    'enable_office': FEATURE_OFFICE and config.get('office.enable'),  # [Gradient]
+                    'enable_workspace': FEATURE_WORKSPACE and config.get('workspace.enable'),  # [Gradient]
                     'enable_image_generation': config.get('image_generation.enable'),
                     'enable_autocomplete_generation': config.get('task.autocomplete.enable'),
                     'enable_community_sharing': config.get('ui.enable_community_sharing'),
@@ -2810,7 +2810,7 @@ async def get_app_config(request: Request):
                     'feature_capture': FEATURE_CAPTURE,
                     'feature_artifacts': FEATURE_ARTIFACTS,
                     'feature_document_writer': FEATURE_DOCUMENT_WRITER,
-                    'feature_office': FEATURE_OFFICE,
+                    'feature_workspace': FEATURE_WORKSPACE,
                     'feature_playground': FEATURE_PLAYGROUND,
                     'feature_chat_overview': FEATURE_CHAT_OVERVIEW,
                     'feature_notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,

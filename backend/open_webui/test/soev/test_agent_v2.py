@@ -3492,10 +3492,10 @@ async def test_a_delivered_office_file_is_attached_without_copying_bytes(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('office', [False, True])
-async def test_workspace_toggle_always_sends_the_workspace_tool_state(chat: Chat, office) -> None:
-    await chat.turn('question', 'a1', features={'office': office})
-    expected = {**WEB_SEARCH_OFF, 'workspace_task': 'auto' if office else 'off'}
+@pytest.mark.parametrize('workspace', [False, True])
+async def test_workspace_toggle_always_sends_the_workspace_tool_state(chat: Chat, workspace) -> None:
+    await chat.turn('question', 'a1', features={'workspace': workspace})
+    expected = {**WEB_SEARCH_OFF, 'workspace_task': 'auto' if workspace else 'off'}
     assert chat.mutations()[-1][1]['input']['tools'] == expected
 
 
