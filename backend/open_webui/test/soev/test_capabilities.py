@@ -147,11 +147,10 @@ async def test_backend_change_resets_last_good_features(
     ],
 )
 async def test_expected_client_errors_preserve_last_good_features(cache, monkeypatch, error):
-    from open_webui.soev import identity
 
     client = AsyncMock()
     client.get.side_effect = [{'contract': '0.3.0', 'features': ['images']}, error]
-    monkeypatch.setattr(identity, 'build_client', lambda: client)
+    monkeypatch.setattr('open_webui.soev.client.build_service_client', lambda: client)
     assert await capabilities.has('images')
     cache[0] += 60
     assert await capabilities.has('images')
@@ -168,11 +167,10 @@ async def test_expected_client_errors_preserve_last_good_features(cache, monkeyp
 
 @pytest.mark.asyncio
 async def test_unexpected_programming_errors_are_not_suppressed(cache, monkeypatch):
-    from open_webui.soev import identity
 
     client = AsyncMock()
     client.get.side_effect = RuntimeError('unexpected bug')
-    monkeypatch.setattr(identity, 'build_client', lambda: client)
+    monkeypatch.setattr('open_webui.soev.client.build_service_client', lambda: client)
     with pytest.raises(RuntimeError, match='unexpected bug'):
         await capabilities.refresh()
 
@@ -180,11 +178,10 @@ async def test_unexpected_programming_errors_are_not_suppressed(cache, monkeypat
 @pytest.mark.asyncio
 async def test_no_backend_does_not_construct_client(cache, monkeypatch):
     from open_webui import config
-    from open_webui.soev import identity
 
     monkeypatch.setattr(config, 'SOEV_API_URL', '')
     client = AsyncMock()
-    monkeypatch.setattr(identity, 'build_client', client)
+    monkeypatch.setattr('open_webui.soev.client.build_service_client', client)
     assert not await capabilities.refresh()
     client.assert_not_called()
 

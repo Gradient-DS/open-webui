@@ -25,7 +25,7 @@ class SoevGroupTable(GroupTable):
         current = set(await self.get_group_user_ids_by_id(group_id, db=db))
         target = set(user_ids)
         if current - target:
-            await group_sync.narrow(group_id, sorted(current & target))
+            await group_sync.narrow(group_id, sorted(current & target), db=db)
         result = await super().set_group_user_ids_by_id(group_id, user_ids, db=db)
         await group_sync.publish(self, [group_id], db=db)
         return result
@@ -40,13 +40,13 @@ class SoevGroupTable(GroupTable):
 
     @group_sync.serialized
     async def delete_group_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
-        await group_sync.narrow(id, [])
+        await group_sync.narrow(id, [], db=db)
         return await super().delete_group_by_id(id, db=db)
 
     @group_sync.serialized
     async def delete_all_groups(self, db: AsyncSession | None = None) -> bool:
         for group in await self.get_all_groups(db=db):
-            await group_sync.narrow(group.id, [])
+            await group_sync.narrow(group.id, [], db=db)
         return await super().delete_all_groups(db=db)
 
     @group_sync.serialized
@@ -97,11 +97,11 @@ class SoevGroupTable(GroupTable):
     async def delete_groups_by_user_id(self, user_id: str, db: AsyncSession | None = None) -> bool:
         for group in await self.get_all_groups(db=db):
             if group.user_id == user_id:
-                await group_sync.narrow(group.id, [])
+                await group_sync.narrow(group.id, [], db=db)
         return await super().delete_groups_by_user_id(user_id, db=db)
 
     async def _narrow_members(self, groups, removed: set[str], *, db=None) -> None:
         for group in groups:
             current = set(await self.get_group_user_ids_by_id(group.id, db=db))
             if current & removed:
-                await group_sync.narrow(group.id, sorted(current - removed))
+                await group_sync.narrow(group.id, sorted(current - removed), db=db)

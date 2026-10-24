@@ -16,10 +16,10 @@ from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from open_webui.soev.client import SoevApiError
+from open_webui.soev.client import SoevApiError, build_service_client
 
 if TYPE_CHECKING:
     from open_webui.models.groups import GroupModel, GroupTable
@@ -81,10 +81,10 @@ def pending_groups() -> set[str]:
     return set(_pending)
 
 
-async def push(group_id: str, user_ids: list[str]) -> None:
+async def push(group_id: str, user_ids: list[str], *, db: AsyncSession | None = None) -> None:
     """Replace membership once; an unknown capability is a failed push."""
     from open_webui import config
-    from open_webui.soev import capabilities, identity
+    from open_webui.soev import capabilities
 
     if not config.SOEV_API_URL:
         return
@@ -92,8 +92,20 @@ async def push(group_id: str, user_ids: list[str]) -> None:
         if capabilities.known():
             return
         raise SoevApiError(503, 'capabilities_unknown', 'Group capability is unknown')
-    members = sorted({f'owui:user:{user_id}' for user_id in user_ids})
-    await identity.build_client().send(
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.models.users import User
+
+    async with get_async_db_context(db) as session:
+        members = sorted(
+            set(
+                (
+                    await session.scalars(
+                        select(User.person_id).where(User.id.in_(user_ids), User.person_id.isnot(None))
+                    )
+                ).all()
+            )
+        )
+    await build_service_client().send(
         'PUT',
         f'/v1/directory/groups/{quote(f"owui:group:{group_id}", safe="")}/members',
         {'members': members},
@@ -101,10 +113,10 @@ async def push(group_id: str, user_ids: list[str]) -> None:
     )
 
 
-async def narrow(group_id: str, user_ids: list[str]) -> None:
+async def narrow(group_id: str, user_ids: list[str], *, db: AsyncSession | None = None) -> None:
     """Refuse a local narrowing when its preceding platform replacement fails."""
     try:
-        await push(group_id, user_ids)
+        await push(group_id, user_ids, db=db)
     except (SoevApiError, httpx.TransportError):
         raise HTTPException(
             status_code=503,
@@ -120,7 +132,7 @@ async def publish(table: GroupTable, group_ids: Iterable[str], *, db: AsyncSessi
     for group_id in sorted(set(group_ids)):
         user_ids = await _members(table, group_id, db=db)
         try:
-            await push(group_id, user_ids)
+            await push(group_id, user_ids, db=db)
         except (SoevApiError, httpx.TransportError):
             attempts = _pending.get(group_id, (0, 0))[1] + 1
             _pending[group_id] = (monotonic() + min(10 * 2 ** min(attempts - 1, 5), 300), attempts)
@@ -132,33 +144,17 @@ async def publish(table: GroupTable, group_ids: Iterable[str], *, db: AsyncSessi
 async def retry_pending(table: GroupTable, *, now: float, db: AsyncSession | None = None) -> None:
     """Retry due groups using their current local membership, never a captured payload."""
     async with membership_lock(db):
-        from open_webui.soev import identity
-
         await publish(table, [group_id for group_id, (due, _) in _pending.items() if due <= now], db=db)
-        await identity.retry_links(now=now, db=db)
 
 
 async def reconcile(table: GroupTable, *, db: AsyncSession | None = None) -> None:
     """Publish all local groups and clear remote OWUI groups missing locally."""
     from open_webui import config
-    from open_webui.soev import capabilities, identity
+    from open_webui.soev import capabilities
 
     if not config.SOEV_API_URL:
         return
     async with membership_lock(db):
-        from open_webui.models.users import Users
-
-        users = (await Users.get_users(db=db))['users']
-        refs = {identity.external_ref(user) for user in users}
-        for ref in identity._linked_refs - refs:
-            await identity.unlink(ref, identity.build_client())
-        for user in users:
-            ref = identity.external_ref(user)
-            if user.role in {'user', 'admin'}:
-                identity._linked_refs.discard(ref)
-                await identity.publish_link(ref, identity.build_client(), db=db)
-            else:
-                await identity.unlink(ref, identity.build_client())
         groups = await table.get_all_groups(db=db)
         local_ids = {group.id for group in groups} | {ADMIN_ARCHIVE_GROUP}
         await publish(table, local_ids, db=db)
@@ -168,12 +164,7 @@ async def reconcile(table: GroupTable, *, db: AsyncSession | None = None) -> Non
             return
         params = {'limit': 200}
         while True:
-            page = await identity.build_client().get('/v1/directory/groups', params=params)
-            remote_members = {
-                member for row in page['groups'] for member in row['members'] if member.startswith('owui:user:')
-            }
-            for ref in remote_members - refs:
-                await identity.unlink(ref, identity.build_client())
+            page = await build_service_client().get('/v1/directory/groups', params=params)
             orphans = {
                 row['group'].removeprefix('owui:group:')
                 for row in page['groups']
@@ -203,7 +194,7 @@ async def narrow_admin(user_id: str, *, db: AsyncSession | None = None) -> None:
     """Remove archive readership before demoting or deleting an admin."""
     ids = await admin_ids(db=db)
     if user_id in ids:
-        await narrow(ADMIN_ARCHIVE_GROUP, [value for value in ids if value != user_id])
+        await narrow(ADMIN_ARCHIVE_GROUP, [value for value in ids if value != user_id], db=db)
 
 
 async def archive_groups_for_users(user_ids: list[str], *, db: AsyncSession) -> dict[str, list[GroupModel]]:

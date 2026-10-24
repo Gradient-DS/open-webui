@@ -18,7 +18,7 @@ async def test_admin_demotion_narrows_before_role_commit(role_store, monkeypatch
     with pytest.raises(store.identity.SoevApiError):
         await store.users.update_user_role_by_id('fern', 'user', db=store.db)
     assert (await store.users.get_user_by_id('fern', db=store.db)).role == 'admin'
-    narrow.assert_awaited_once_with('admins-archive', [])
+    narrow.assert_awaited_once_with('admins-archive', [], db=store.db)
 
 
 @pytest.mark.asyncio
@@ -47,8 +47,15 @@ async def test_reconcile_always_publishes_admin_archive_group(role_store, monkey
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
     await store.users.update_user_role_by_id('fern', 'admin', db=store.db)
     client.send.reset_mock()
+    from open_webui.models.users import User
+    from sqlalchemy import update
+
+    person_id = 'platform:user:8a12d036-55dd-46a8-a852-8e22489f1ace'
+    await store.db.execute(update(User).where(User.id == 'fern').values(person_id=person_id))
+    await store.db.commit()
+    monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
     await group_sync.reconcile(SimpleNamespace(get_all_groups=AsyncMock(return_value=[])), db=store.db)
     assert any(
-        'owui%3Agroup%3Aadmins-archive' in call.args[1] and call.args[2] == {'members': ['owui:user:fern']}
+        'owui%3Agroup%3Aadmins-archive' in call.args[1] and call.args[2] == {'members': [person_id]}
         for call in client.send.await_args_list
     )

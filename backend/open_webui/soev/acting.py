@@ -5,7 +5,7 @@ from contextvars import ContextVar
 from collections.abc import Awaitable, Callable
 from functools import wraps
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 
 from open_webui.soev.request_cache import request_cache
@@ -62,6 +62,15 @@ def install(app: FastAPI) -> None:
         resolver = _token_resolver.set(_oidc_token_resolver(request, user, auth_token))
         try:
             with request_cache():
+                if identity.config.SOEV_API_URL and user.person_id is None:
+                    access_token = await user_token(ref)
+                    if access_token:
+                        from open_webui.soev.persons import PersonMismatchError, remember_person
+
+                        try:
+                            await remember_person(user, access_token)
+                        except PersonMismatchError:
+                            raise HTTPException(status_code=401, detail='Identity could not be verified') from None
                 yield user
         finally:
             _token_resolver.reset(resolver)

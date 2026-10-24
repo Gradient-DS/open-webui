@@ -79,6 +79,34 @@ async def submitted(env, **meta):
     return row, row.meta['soev_job']
 
 
+@pytest.mark.asyncio
+async def test_upload_recovery_is_service_only_even_inside_a_request(env):
+    from open_webui.soev import acting
+
+    file, job = await submitted(env)
+    env.api.advance(job['job_id'], 'AWAITING_UPLOAD')
+    env.api.uploads.pop((job['job_id'], file.id))
+    resolver = AsyncMock(return_value='fictional-user-token')
+    token = acting._token_resolver.set(resolver)
+    requester = acting._requester_ref.set('owui:user:alice')
+    try:
+        with acting.acting_as('owui:user:alice'):
+            assert await env.jobs.poll_once(env.client, now=job['submitted_at'] + 61) == 1
+    finally:
+        acting._requester_ref.reset(requester)
+        acting._token_resolver.reset(token)
+    assert any(request.url.path.endswith('/commit') for request in env.api.requests)
+    assert any(request.url.path.endswith('/cancel') for request in env.api.requests)
+    assert any(request.url.path == '/v1/jobs' for request in env.api.requests)
+    for request in env.api.requests:
+        if request.url.path.startswith('/v1/'):
+            assert request.headers['Authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
+            assert 'X-Soev-Subject' not in request.headers
+            assert 'X-Soev-User-Token' not in request.headers
+            assert b'acting_as' not in request.content
+    resolver.assert_not_awaited()
+
+
 async def assert_terminal(env, file, *, error=None):
     row = await env.files.Files.get_file_by_id(file.id)
     status = 'failed' if error is not None else 'completed'
@@ -310,14 +338,16 @@ async def test_one_rows_failure_does_not_stop_the_tick(env, monkeypatch, caplog,
     if failure == 'api':
         env.api.failures.append(503)
     else:
-        get = env.client.get
+        service = env.client.as_service()
+        monkeypatch.setattr(env.client, 'as_service', lambda: service)
+        get = service.get
 
         async def fail_first(path, **kwargs):
             if path.endswith(first_job['job_id']):
                 raise ValueError('secret-assertion secret-key https://private.invalid')
             return await get(path, **kwargs)
 
-        monkeypatch.setattr(env.client, 'get', fail_first)
+        monkeypatch.setattr(service, 'get', fail_first)
     assert await env.jobs.poll_once(env.client, now=second_job['submitted_at']) == 1
     assert await env.files.Files.get_file_by_id(first.id) == first
     assert (await env.files.Files.get_file_by_id(second.id)).meta['status'] == 'completed'

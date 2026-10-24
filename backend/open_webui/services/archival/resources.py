@@ -17,7 +17,7 @@ from open_webui.services.deletion.offboarding_store import (
     delete_storage_files,
 )
 from open_webui.soev import group_sync, identity
-from open_webui.soev.client import SoevApiError
+from open_webui.soev.client import SoevApiError, build_service_client
 from open_webui.soev.group_sync import ARCHIVE_OWNER
 
 
@@ -27,7 +27,7 @@ async def set_expiry(archive: UserArchiveModel) -> None:
     if archive.expires_at is not None and not archive.never_delete:
         body['expires_at'] = dt.datetime.fromtimestamp(archive.expires_at, dt.UTC).isoformat().replace('+00:00', 'Z')
     for key in archive.data.get('collections', []):
-        await identity.build_client().send(
+        await build_service_client().send(
             'POST',
             f'/v1/collections/{quote(key, safe="")}/owner',
             body,
@@ -35,7 +35,7 @@ async def set_expiry(archive: UserArchiveModel) -> None:
         )
 
 
-async def delete_archive(archive_id: str, *, db: AsyncSession | None = None) -> bool:
+async def delete_archive(archive_id: str, *, db: AsyncSession | None = None, delete_collections: bool = True) -> bool:
     """Remove archived content before dropping its snapshot and resource manifest."""
     async with get_async_db_context(db) as session:
         archive = await UserArchives.get_archive_by_id(archive_id, db=session)
@@ -43,7 +43,8 @@ async def delete_archive(archive_id: str, *, db: AsyncSession | None = None) -> 
             return False
         if archive.restored:
             return await UserArchives.delete_archive(archive_id, db=session)
-        for key in archive.data.get('collections', []):
+        # Expired platform archives are deleted by soev-sync using archive_expires_at.
+        for key in archive.data.get('collections', []) if delete_collections else []:
             try:
                 await identity.build_client().send(
                     'DELETE',

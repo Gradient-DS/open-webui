@@ -11,7 +11,7 @@ from starlette.responses import StreamingResponse
 
 from open_webui import config, env
 from open_webui.soev import capabilities, identity
-from open_webui.soev.client import SoevApiError
+from open_webui.soev.client import SoevApiError, build_service_client
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ async def catalog() -> list[dict]:
     if time.monotonic() < CATALOG_CACHE['expires_at']:
         return CATALOG_CACHE['entries']
     try:
-        listed = await identity.build_client().get('/v1/models')
+        listed = await build_service_client().get('/v1/models')
         entries = [entry for entry in listed['data'] if isinstance(entry, dict) and entry.get('id')]
     except (SoevApiError, KeyError, TypeError):
         log.warning('Could not read the soev-api model catalog')

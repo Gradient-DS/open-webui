@@ -383,7 +383,7 @@ class FakeSoevApi:
             return httpx.Response(204)
         if len(parts) == 5 and parts[1:3] == ['directory', 'groups'] and parts[-1] == 'members' and method == 'PUT':
             if not parts[3].startswith('owui:group:') or any(
-                not ref.startswith('owui:user:') for ref in body['members']
+                not ref.startswith(('owui:user:', 'platform:user:')) for ref in body['members']
             ):
                 raise Problem(422, 'invalid_field')
             self.groups[parts[3]] = sorted(set(body['members']))

@@ -1,5 +1,7 @@
 """Move an Open WebUI v1 tenant to the v2 shape in one idempotent, reversible run.
 
+This operator CLI runs before the platform-target cutover only.
+
 python -m open_webui.soev.migrate --apply | --restore | --dry-run. The directory copy
 (identities, groups, collections, folders, cloud schedules) only reads OWUI tables.
 --models with --apply or --dry-run rewrites stored model ids alone, under its own id.
