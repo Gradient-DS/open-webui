@@ -261,9 +261,9 @@ def test_model_knowledge_refuses_files_its_owner_does_not_own(seeded):
     # The reader can read the owner's file through the knowledge base, yet may not pin it to their own model.
     response = update('reader', 'reader-model', 'target')
     assert response.status_code == 403, response.text
-    # A co-writer may attach only files of the model's owner, not their own.
+    # Only the owner may change an assistant's knowledge.
     assert update('writer', 'own-model', 'writer-file').status_code == 403
-    assert update('writer', 'own-model', 'target').status_code == 200
+    assert update('writer', 'own-model', 'target').status_code == 403
     assert update('owner', 'own-model', 'missing').status_code == 403
 
 
@@ -343,7 +343,11 @@ def test_deleting_a_file_detaches_it_from_the_models_holding_it(seeded, monkeypa
     from open_webui.soev import assistant_files
 
     synced = []
-    monkeypatch.setattr(assistant_files, 'schedule', synced.append)
+
+    async def delete_document(model_id, file_id):
+        synced.append((model_id, file_id))
+
+    monkeypatch.setattr(assistant_files, 'delete_document', delete_document)
 
     async def prepare():
         from open_webui.models.models import Model
@@ -376,7 +380,7 @@ def test_deleting_a_file_detaches_it_from_the_models_holding_it(seeded, monkeypa
         assert model.meta.knowledge == [{'type': 'collection', 'id': 'file-kb'}]
 
     seeded.run(check)
-    assert synced == ['own-model']
+    assert synced == [('own-model', 'target')]
 
 
 def test_folder_file_entries_require_valid_readable_targets(seeded):

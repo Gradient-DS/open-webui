@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from open_webui.soev import folder_files, folder_sharing, ingest
+from open_webui.soev import acting, folder_files, folder_sharing, ingest
 from open_webui.test.soev.fake_api import FakeSoevApi
 
 KEY = ingest.folder_collection_key('project')
@@ -50,6 +50,16 @@ def folder(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(folder_files.ingest, 'submit', submit)
     monkeypatch.setattr(folder_sharing, 'view', view)
     monkeypatch.setattr(folder_sharing, 'permitted', permitted)
+    monkeypatch.setattr(
+        acting, '_requester_ref', __import__('contextvars').ContextVar('test_requester', default='owui:user:dana')
+    )
+    original = __import__('open_webui.soev.client', fromlist=['SoevClient']).SoevClient._request
+
+    async def guarded(self, *args, **kwargs):
+        assert kwargs.get('as_user') in (None, acting.requester_ref())
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr('open_webui.soev.client.SoevClient._request', guarded)
     return state
 
 
@@ -62,7 +72,11 @@ def grant(principal_type: str, principal_id: str, permission: str = 'read') -> d
 
 
 def writes(api: FakeSoevApi) -> list[tuple[str, str]]:
-    return [(request.method, request.url.path) for request in api.requests if request.method != 'GET']
+    return [
+        (request.method, request.url.path)
+        for request in api.requests
+        if request.method != 'GET' and request.url.path != '/v1/identity/links'
+    ]
 
 
 @pytest.mark.asyncio

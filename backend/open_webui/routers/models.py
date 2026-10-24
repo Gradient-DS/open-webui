@@ -43,6 +43,9 @@ from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.utils.models import get_all_models
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.soev import assistant_sharing, knowledge_sharing
+from open_webui.soev.availability import configured
+from open_webui.soev.client import SoevApiError
 from open_webui import config
 from open_webui.utils.access_control import can_bypass_access_control
 
@@ -311,7 +314,8 @@ async def create_new_model(
         'sharing.public_models',
     )
 
-    model = await Models.insert_new_model(form_data, user.id, db=db)
+    async with assistant_sharing.change(user.id, form_data.id, form_data):
+        model = await Models.insert_new_model(form_data, user.id, db=db)
     if not model:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -395,6 +399,8 @@ async def import_models(
                 model.id: model for model in (await Models.get_models_by_ids(model_ids, db=db) if model_ids else [])
             }
 
+            assistant_sharing.check_import(user.id, data, existing_models)
+
             # Batch-resolve write permissions in one query instead of
             # per-model has_access calls (N+1 avoidance).
             existing_model_ids = list(existing_models.keys())
@@ -475,7 +481,8 @@ async def import_models(
                         # Only filter access_grants when explicitly provided
                         # in the payload to avoid altering existing ACLs on
                         # metadata-only imports.
-                        if 'access_grants' in model_data:
+                        assistant_sharing.check_edit(user.id, existing_model, updated_model)
+                        if 'access_grants' in model_data and updated_model.access_grants is not None:
                             updated_model.access_grants = await filter_allowed_access_grants(
                                 await Config.get('user.permissions'),
                                 user.id,
@@ -483,7 +490,8 @@ async def import_models(
                                 updated_model.access_grants,
                                 'sharing.public_models',
                             )
-                        await Models.update_model_by_id(model_id, updated_model, db=db)
+                        async with assistant_sharing.change(user.id, model_id, updated_model, existing_model):
+                            await Models.update_model_by_id(model_id, updated_model, db=db)
                     else:
                         # Insert new model
                         model_data['meta'] = model_data.get('meta', {})
@@ -527,7 +535,8 @@ async def import_models(
                             new_model.access_grants,
                             'sharing.public_models',
                         )
-                        await Models.insert_new_model(user_id=user.id, form_data=new_model, db=db)
+                        async with assistant_sharing.change(user.id, model_id, new_model):
+                            await Models.insert_new_model(user_id=user.id, form_data=new_model, db=db)
 
                     imported_ids.append(model_id)
             await publish_event(
@@ -540,6 +549,10 @@ async def import_models(
             return True
         else:
             raise HTTPException(status_code=400, detail='Invalid JSON format')
+    except HTTPException:
+        raise
+    except SoevApiError:
+        raise
     except Exception as e:
         log.exception(e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -564,7 +577,17 @@ async def sync_models(
     if not can_bypass_access_control(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
-    models = await Models.sync_models(user.id, form_data.models, db=db)
+    if configured():
+        existing = list((await knowledge_sharing.assistants_view(None)).values())
+        if any(model.user_id != user.id for model in existing) or any(
+            model.user_id != user.id for model in form_data.models
+        ):
+            raise HTTPException(403, ERROR_MESSAGES.ACCESS_PROHIBITED)
+        # One owner context avoids nesting the shared owner lock for a batch.
+        async with assistant_sharing.changing_all(user.id, {model.id: model for model in form_data.models}):
+            models = await Models.sync_models(user.id, form_data.models, db=db)
+    else:
+        models = await Models.sync_models(user.id, form_data.models, db=db)
     await publish_event(
         request,
         EVENTS.MODEL_SYNCED,
@@ -637,6 +660,39 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
 ###########################
 # GetModelById
 ###########################
+
+
+@router.get('/model/sharing')
+async def get_model_sharing(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+    model = await Models.get_model_by_id(id, db=db)
+    if model is None or not (
+        user.id == model.user_id
+        or can_bypass_access_control(user)
+        or await AccessGrants.has_access(
+            user_id=user.id, resource_type='model', resource_id=id, permission='read', db=db
+        )
+        or await AccessGrants.has_access(
+            user_id=user.id, resource_type='model', resource_id=id, permission='write', db=db
+        )
+    ):
+        raise HTTPException(404, ERROR_MESSAGES.NOT_FOUND)
+    owner = model.user_id == user.id
+    return {
+        'shares_knowledge': configured(),
+        'may_share': owner
+        or (
+            not configured()
+            and (
+                can_bypass_access_control(user)
+                or await AccessGrants.has_access(
+                    user_id=user.id, resource_type='model', resource_id=id, permission='write', db=db
+                )
+            )
+        ),
+        'left_out': await knowledge_sharing.left_out(model.user_id, model.meta.knowledge)
+        if configured() and owner
+        else [],
+    }
 
 
 @router.get('/model/profile/image')
@@ -792,6 +848,8 @@ async def update_model_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
+    assistant_sharing.check_edit(user.id, model, form_data)
+
     if (
         model.user_id != user.id
         and not await AccessGrants.has_access(
@@ -829,15 +887,13 @@ async def update_model_by_id(
     if 'profile_image_url' not in form_data.meta.model_fields_set:
         form_data.meta.profile_image_url = model.meta.profile_image_url
 
-    form_data.access_grants = await filter_allowed_access_grants(
-        await Config.get('user.permissions'),
-        user.id,
-        user.role,
-        form_data.access_grants,
-        'sharing.public_models',
-    )
+    if form_data.access_grants is not None:
+        form_data.access_grants = await filter_allowed_access_grants(
+            await Config.get('user.permissions'), user.id, user.role, form_data.access_grants, 'sharing.public_models'
+        )
 
-    model = await Models.update_model_by_id(form_data.id, ModelForm(**form_data.model_dump()), db=db)
+    async with assistant_sharing.change(user.id, form_data.id, form_data, model):
+        model = await Models.update_model_by_id(form_data.id, ModelForm(**form_data.model_dump()), db=db)
     if model:
         await publish_event(
             request,
@@ -893,6 +949,9 @@ async def update_model_access_by_id(
                 detail=ERROR_MESSAGES.DEFAULT('Error creating model entry'),
             )
 
+    if configured() and model.user_id != user.id:
+        raise HTTPException(403, ERROR_MESSAGES.ACCESS_PROHIBITED)
+
     if (
         model.user_id != user.id
         and not await AccessGrants.has_access(
@@ -917,9 +976,10 @@ async def update_model_access_by_id(
         'sharing.public_models',
     )
 
-    await AccessGrants.set_access_grants('model', form_data.id, form_data.access_grants, db=db)
-
-    await Models.update_model_updated_at_by_id(form_data.id, db=db)
+    planned = ModelForm(**{**model.model_dump(), 'access_grants': form_data.access_grants})
+    async with assistant_sharing.change(user.id, form_data.id, planned, model):
+        await AccessGrants.set_access_grants('model', form_data.id, form_data.access_grants, db=db)
+        await Models.update_model_updated_at_by_id(form_data.id, db=db)
 
     model = await Models.get_model_by_id(form_data.id, db=db)
     await publish_event(
@@ -966,7 +1026,10 @@ async def delete_model_by_id(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    result = await Models.delete_model_by_id(form_data.id, db=db)
+    if configured() and model.user_id != user.id and await assistant_sharing.remote_cleanup_needed(model):
+        raise HTTPException(403, ERROR_MESSAGES.ACCESS_PROHIBITED)
+    async with assistant_sharing.change(user.id, form_data.id, before=model):
+        result = await Models.delete_model_by_id(form_data.id, db=db)
     if result:
         await publish_event(
             request,
@@ -985,7 +1048,15 @@ async def delete_all_models(
     if not can_bypass_access_control(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
-    result = await Models.delete_all_models(db=db)
+    if configured():
+        existing = list((await knowledge_sharing.assistants_view(None)).values())
+        for model in existing:
+            if model.user_id != user.id and await assistant_sharing.remote_cleanup_needed(model):
+                raise HTTPException(403, ERROR_MESSAGES.ACCESS_PROHIBITED)
+        async with assistant_sharing.changing_all(user.id, {}):
+            result = await Models.delete_all_models(db=db)
+    else:
+        result = await Models.delete_all_models(db=db)
     if result:
         await publish_event(request, EVENTS.MODEL_DELETED, actor=user, subject_type='model')
     return result

@@ -5,7 +5,7 @@ from contextvars import ContextVar
 from collections.abc import Awaitable, Callable
 from functools import wraps
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 
 from open_webui.soev.request_cache import request_cache
@@ -19,6 +19,16 @@ _token_resolver: ContextVar[Callable[[], Awaitable[str | None]] | None] = Contex
 
 def acting_ref() -> str | None:
     return _acting_ref.get()
+
+
+def requester_ref() -> str | None:
+    return _requester_ref.get()
+
+
+def require_owner(owner_id: str) -> None:
+    """[Gradient] Raise unless the request is `owner_id`'s own: sharing work never runs for someone else."""
+    if requester_ref() != f'owui:user:{owner_id}':
+        raise PermissionError('Sharing reconciliation requires the owner request')
 
 
 async def user_token(as_user: str | None) -> str | None:
@@ -53,6 +63,7 @@ def install(app: FastAPI) -> None:
 
     async def with_acting_user(
         request: Request,
+        background_tasks: BackgroundTasks,
         user=Depends(upstream_user),
         auth_token: HTTPAuthorizationCredentials = Depends(bearer_security),
     ):
@@ -71,6 +82,9 @@ def install(app: FastAPI) -> None:
                             await remember_person(user, access_token)
                         except PersonMismatchError:
                             raise HTTPException(status_code=401, detail='Identity could not be verified') from None
+                from open_webui.soev import pending_sync
+
+                await pending_sync.on_request(user.id, background_tasks)
                 yield user
         finally:
             _token_resolver.reset(resolver)

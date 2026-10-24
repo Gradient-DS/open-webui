@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 614 operations. Audit bodies across all
-# OpenAPI methods (618 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 615 operations. Audit bodies across all
+# OpenAPI methods (619 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (614, 618), (
-        f'Expected 614 five-method operations / 618 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (615, 619), (
+        f'Expected 615 five-method operations / 619 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -48,9 +48,9 @@ def test_derived_counts(surface):
         2663,
     ), f'Expected 231 routes / 2663 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     assert query_counts == (
-        49,
-        105,
-    ), f'Expected 49 routes / 105 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+        50,
+        106,
+    ), f'Expected 50 routes / 106 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
 
 
 def test_derivation_cannot_silently_collapse(surface):

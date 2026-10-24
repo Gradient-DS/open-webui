@@ -41257,6 +41257,51 @@
         ]
       }
     },
+    "/api/v1/models/model/sharing": {
+      "get": {
+        "operationId": "get_model_sharing_api_v1_models_model_sharing_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Model Sharing",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/model/toggle": {
       "post": {
         "operationId": "toggle_model_by_id_api_v1_models_model_toggle_post",

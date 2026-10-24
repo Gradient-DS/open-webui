@@ -360,7 +360,14 @@ async def update_folder_name_by_id(
                     detail=ERROR_MESSAGES.DEFAULT('Folder already exists'),
                 )
 
-        if form_data.data and 'files' in form_data.data:
+        files_change = bool(
+            form_data.data
+            and 'files' in form_data.data
+            and form_data.data['files'] != (folder.data or {}).get('files', [])
+        )
+        if configured() and folder.user_id != user.id and files_change:
+            raise HTTPException(403, ERROR_MESSAGES.ACCESS_PROHIBITED)
+        if files_change or (not configured() and form_data.data and 'files' in form_data.data):
             owner = user if folder.user_id == user.id else await Users.get_user_by_id(folder.user_id, db=db)
             if not owner:
                 raise HTTPException(
@@ -372,21 +379,10 @@ async def update_folder_name_by_id(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
                 )
-            # [Gradient] A folder share shares its knowledge: only the owner adds to it, others may remove.
-            if (
-                configured()
-                and folder.user_id != user.id
-                and folder_sharing.adds_entries((folder.data or {}).get('files'), form_data.data['files'])
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-                )
 
         def edit(folders: folder_sharing.View) -> None:
             folders.files[id] = list(form_data.data['files'] or [])
 
-        files_change = bool(form_data.data and 'files' in form_data.data)
         sharing = folder_sharing.changing(folder.user_id, edit) if files_change else nullcontext()
         try:
             async with sharing:
@@ -771,6 +767,8 @@ async def delete_folder_by_id(
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
 
+    await folder_sharing.check_delete(user.id, folder_owner_id, folder_ids)
+
     folders = []
     folders.append(folder)
     while folders:
@@ -778,7 +776,12 @@ async def delete_folder_by_id(
         if folder:
             try:
                 subtree = await Folders.get_folder_ids_by_id_and_user_id_in_subtree(folder.id, folder_owner_id, db=db)
-                async with folder_sharing.changing(folder_owner_id, lambda folders: folders.drop(subtree)):
+                sharing = (
+                    folder_sharing.changing(folder_owner_id, lambda folders: folders.drop(subtree))
+                    if folder_owner_id == user.id or not configured()
+                    else nullcontext()
+                )
+                async with sharing:
                     folder_ids = await Folders.delete_folder_by_id_and_user_id(folder.id, folder_owner_id, db=db)
 
                 for folder_id in folder_ids:

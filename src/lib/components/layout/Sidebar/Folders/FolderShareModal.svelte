@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	const i18n = getContext('i18n');
+	const i18n = getContext<import('svelte/store').Writable<import('i18next').i18n>>('i18n');
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import AccessControl from '$lib/components/workspace/common/AccessControl.svelte';
 	import XMark from '../icons/XMark.svelte';
-	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
+	import LeftOutList from '$lib/components/workspace/common/LeftOutList.svelte';
 	import { getFolderById, getFolderSharingById, updateFolderAccessById } from '$lib/apis/folders';
 	import { user } from '$lib/stores';
 
@@ -93,26 +93,7 @@
 					{$i18n.t('Sharing this folder also shares the knowledge bases, files and notes in it.')}
 				</div>
 			{/if}
-			{#if leftOut.length > 0}
-				<div
-					class="mb-3 flex gap-2 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-800 dark:text-yellow-200"
-				>
-					<ExclamationTriangle className="size-4 shrink-0 mt-0.5" />
-					<div>
-						<div>{$i18n.t('These items stay private:')}</div>
-						<ul class="mt-1 list-disc pl-4">
-							{#each leftOut as item (item.type + item.id)}
-								<li>
-									<span class="font-medium">{item.name}</span>:
-									{item.reason === 'cloud'
-										? $i18n.t('synced from the cloud, never shared')
-										: $i18n.t("someone else's, only its owner can share it")}
-								</li>
-							{/each}
-						</ul>
-					</div>
-				</div>
-			{/if}
+			<LeftOutList items={leftOut} />
 			<AccessControl
 				bind:accessGrants
 				onChange={handleAccessChange}

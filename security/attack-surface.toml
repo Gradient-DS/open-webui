@@ -913,6 +913,11 @@ params = { name = "attack-{token}.wav" }
 body_base64 = "UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAAAAA=="
 
 [[field]]
+route = "GET /api/v1/models/model/sharing"
+description = "routers/models.py:get_model_sharing reads the seeded model; only its owner sees the items left out of sharing."
+params = { "id" = "{model}" }
+
+[[field]]
 route = "GET /api/v1/models/model"
 description = "routers/models.py reads the model by the id query parameter; the seeded model exists and is readable."
 params = { "id" = "{model}" }
