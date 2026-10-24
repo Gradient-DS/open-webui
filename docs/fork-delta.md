@@ -469,3 +469,61 @@ missing note (agent path). Upstream files touched: `InputMenu.svelte` (menu
 item and tab), `FileItem.svelte` (chip icon and label), `Chat.svelte` (the two
 attachment type lists). "Chat over deze vergadering" uses the existing new-chat
 draft hand-off (`sessionStorage['chat-input']`, restored by `Chat.svelte`).
+
+## Model output never fetches from other hosts on its own
+
+A prompt-injected answer can put chat content into a URL; rendering that URL as an image, video or embed sends it
+to its host with no click. Upstream renders external markdown images, `<video>`/`<audio>` sources and arbitrary
+`<iframe src>` embeds in every answer. The fork holds them:
+
+- Markdown images (`common/Image.svelte` with `allowExternal`, used by `MarkdownInlineTokens`) from another host
+  show a "Load image from {{host}}" button; the click loads it. Our own paths, our origin and `data:` load as
+  before. `safeImageUrl.isSafeImageUrl` no longer takes `//host`, `/\host` or paths with tabs/newlines for own
+  paths (browsers read those as another host), and `WEBUI_BASE_URL` must be followed by `/`.
+- `HTMLToken.svelte`: external `<video>`, `<audio>` and generic `<iframe>` sources wait for a click the same way.
+  The YouTube embed (fixed host, 11-character id) is unchanged. Raw HTML tables and Mermaid SVG (`sanitizeSvg`)
+  go through `utils/remoteLoads.withoutRemoteLoads`: remote images become their alt text, remote `src`/`href`/
+  `poster`/`background`, `srcset` and `ping` go, and CSS `url()`, `@import` and `image-set()` to other hosts are
+  removed (escaped CSS that would hide one is dropped whole). Links stay: they go nowhere without a click.
+- No switch: upstream has none for markdown images. The path is shared with user messages rendered as markdown,
+  which get the same click.
+- Not changed: web-search and citation favicons go to `www.google.com/s2/favicons` with the cited domain (Google,
+  not the attacker); Artifacts (off by default, `detectArtifacts`) and file HTML previews use upstream's
+  `IFRAME_CSP`; the `<file type="html">` embed is an upstream same-origin file page.
+
+Parent-page CSP: `CONTENT_SECURITY_POLICY` (`utils/security_headers.py`, applied to every HTTP response) is
+empty by default and stays a tenant choice. A tenant that wants the browser to enforce this too can set
+`img-src 'self' data: blob: https://www.gravatar.com https://www.google.com https://*.gstatic.com; media-src 'self' data: blob:`
+(external images then stay blocked even after the click). Do not add `script-src`, `connect-src` or
+`frame-src` without testing the tenant: srcdoc frames (Artifacts, delivered pages) inherit the page's policy and
+need inline scripts, and sign-in, the OneDrive picker and the agent stream need their own hosts.
+
+## Workspace: delivered HTML pages, files and flags
+
+`ENABLE_WORKSPACE`, `FEATURE_WORKSPACE`, `USER_PERMISSIONS_FEATURES_WORKSPACE` and the group permission default
+to off: the workspace agent runs model-written code, so a tenant opts in. The download route
+`/api/v1/chats/{id}/workspace/{element}/{part}` is owner-only, admins included (404 otherwise): it asserts the
+owner to the agent, so `ENABLE_ADMIN_CHAT_ACCESS` or a chat share must not reach the owner's files. Delivered file
+names lose control, format (bidi override, zero-width) and line-separator characters and path separators, in the
+backend attachment (`agent_v2._shown_name`) and in the UI and download name (`deliveredFile.deliveredFileName`).
+
+A delivered HTML page (`DeliveredHtmlFrame.svelte`, `utils/deliveredHtml.ts`) is hostile by assumption:
+
+| Defence | Chromium | Firefox | Safari |
+|---|---|---|---|
+| `sandbox` without `allow-same-origin`, forms, popups, modals, downloads, top navigation | enforced (spec; opaque origin verified) | enforced (spec) | enforced (spec) |
+| Meta CSP in the srcdoc: `default-src 'none'`, `connect-src`/`frame-src`/`child-src`/`worker-src`/`object-src`/`form-action`/`base-uri 'none'` | enforced (verified: no fetch, no nested frame) | enforced (spec) | enforced (spec) |
+| `webrtc 'block'` | not implemented, ignored | not implemented | not implemented |
+| `csp` attribute (refuses a navigated-to page that does not accept the policy) | enforced, but the request is still sent | ignored | ignored |
+| Scripts only after "Run interactive page", once per file per app load; a page without scripts renders static | all | all | all |
+| Static removal of link targets (all, or all but `#…` when running), `<base>`, frames, refresh/policy metas, prefetch/preconnect links; `no-referrer`; `x-dns-prefetch-control: off` | all | all (DNS prefetch control: reasoned) | all (reasoned) |
+| Guard script (first script, removes itself): link clicks never follow (in-page links scroll instead: an `about:srcdoc#x` link is a new document), submits stopped, `window.open` nulled, `RTC*` constructors deleted, frame `contentWindow`/`contentDocument` null, added frames/prefetch links removed | verified | reasoned | reasoned |
+| Panel blanks on the guard's `beforeunload`/`pagehide` message or on a second frame load, and says the page tried to leave | verified (message arrives before the new page commits; a navigation during parsing also reports `beforeunload`) | reasoned | reasoned |
+
+What remains: no browser can stop a frame navigating itself (`location = …`; CSP `navigate-to` never shipped,
+the Navigation API's `navigate` event does not fire in opaque-origin documents: verified in Chromium). A running
+page can therefore send one request carrying data in its URL; the panel then blanks and tells the user. In
+Chromium a nested `about:blank` frame is cross-origin to the page (verified), so it hands out no fresh WebRTC; in
+Firefox and Safari it may be same-origin and reachable through `window[0]` before the guard's observer removes
+it, so WebRTC (STUN to an attacker host) may remain there for a running page. A page that never runs scripts can
+neither navigate nor reach the network.
