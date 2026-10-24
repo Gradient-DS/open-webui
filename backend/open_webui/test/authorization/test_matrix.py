@@ -32,7 +32,7 @@ MATRIX = [
     ('model', 'read', 'DAAADDA', 'AAAADDA'),
     ('model', 'update', 'DADADDD', 'AADADDD'),
     ('model', 'delete', 'DADADDD', 'AADADDD'),
-    ('model', 'share', 'DADADDD', 'AADADDD'),
+    ('model', 'share', 'DADDDDD', 'DADDDDD'),
     ('prompt', 'read', 'DAAADDA', 'AAAADDA'),
     ('prompt', 'update', 'DADADDD', 'AADADDD'),
     ('prompt', 'delete', 'DADADDD', 'AADADDD'),

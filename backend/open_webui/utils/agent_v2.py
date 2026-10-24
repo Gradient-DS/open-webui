@@ -26,6 +26,7 @@ from open_webui.models.config import Config
 from open_webui.models.files import FileModel, Files
 from open_webui.models.folders import Folders
 from open_webui.models.knowledge import Knowledges
+from open_webui.models.models import Models
 from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
@@ -315,8 +316,11 @@ async def _assistant_file_reason(key: str, file: FileModel | None, model_id: str
     if user_id is not None and await Knowledges.existing_knowledge([key]):
         if not await Knowledges.describe_knowledge([key], user_id=user_id):
             return 'denied'
-    if meta.get('soev_job') is None:
-        assistant_files.schedule(model_id)
+    model = await Models.get_model_by_id(model_id)
+    if model is not None and acting.requester_ref() == f'owui:user:{model.user_id}':
+        from open_webui.models.soev_pending_sync import PendingSyncs
+
+        await PendingSyncs.mark(model.user_id, 'assistant_files', model_id)
     return 'processing'
 
 

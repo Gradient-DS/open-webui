@@ -1,14 +1,11 @@
 """An assistant's files collection follows the assistant: its access, its files, and its deletion."""
 
-import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
-from open_webui.events import EVENT_SINKS, Event
 from open_webui.models.access_grants import AccessGrantModel
 from open_webui.models.models import ModelMeta, ModelModel, ModelParams
-from open_webui.soev import assistant_files, ingest
+from open_webui.soev import acting, assistant_files, ingest
 from open_webui.test.soev.fake_api import FakeSoevApi
 
 KEY = ingest.assistant_collection_key('helper')
@@ -67,6 +64,18 @@ def saved(chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(assistant_files.Models, 'get_model_by_id', get_model)
     monkeypatch.setattr(assistant_files.Files, 'get_files_by_ids', get_files)
     monkeypatch.setattr(assistant_files.ingest, 'submit', submit)
+    monkeypatch.setattr(
+        acting, '_requester_ref', __import__('contextvars').ContextVar('test_requester', default='owui:user:bob')
+    )
+    from open_webui.soev.client import SoevClient
+
+    original = SoevClient._request
+
+    async def guarded(self, *args, **kwargs):
+        assert kwargs.get('as_user') in (None, acting.requester_ref())
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(SoevClient, '_request', guarded)
     return state
 
 
@@ -95,7 +104,11 @@ async def test_a_resync_republishes_access_submits_only_whats_missing_and_drops_
     saved.api.requests.clear()
     await assistant_files.sync('helper')
     assert saved.submitted == [('f3', KEY, 'bob')]
-    writes = [(request.method, request.url.path) for request in saved.api.requests if request.method != 'GET']
+    writes = [
+        (request.method, request.url.path)
+        for request in saved.api.requests
+        if request.method != 'GET' and request.url.path != '/v1/identity/links'
+    ]
     assert ('PUT', f'/v1/collections/{KEY}/access') in writes
     assert ('DELETE', f'/v1/collections/{KEY}/documents/old') in writes
     assert ('DELETE', f'/v1/collections/{KEY}/documents/f1') not in writes
@@ -163,84 +176,11 @@ async def test_an_assistant_without_files_never_creates_a_collection(saved):
     saved.model = assistant()
     await assistant_files.sync('helper')
     assert KEY not in saved.api.collections
-    assert not [request for request in saved.api.requests if request.method != 'GET']
-
-
-def event(name: str, subject: dict | None) -> Event:
-    return Event(
-        schema='owui.event.v1',
-        id='e1',
-        event=name,
-        resource=name.rpartition('.')[0],
-        operation=name.rpartition('.')[2],
-        created_at=1,
-        instance_id=None,
-        version='1',
-        source='api',
-        subject=subject,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    'name,subject,expected',
-    [
-        ('model.created', {'type': 'model', 'id': 'helper'}, ['helper']),
-        ('model.updated', {'type': 'model', 'id': 'helper'}, ['helper']),
-        ('model.access_updated', {'type': 'model', 'id': 'helper'}, ['helper']),
-        ('model.deleted', {'type': 'model', 'id': 'helper'}, ['helper']),
-        ('model.deleted', {'type': 'model', 'id': None}, []),
-        ('model.enabled', {'type': 'model', 'id': 'helper'}, []),
-        ('knowledge.updated', {'type': 'knowledge', 'id': 'helper'}, []),
-    ],
-)
-async def test_the_sink_syncs_on_an_assistants_save_share_and_delete_only(monkeypatch, name, subject, expected):
-    scheduled = []
-    monkeypatch.setattr(assistant_files, 'schedule', scheduled.append)
-    await assistant_files.AssistantFilesSink().handle_event(None, event(name, subject))
-    assert scheduled == expected
-
-
-def test_install_registers_the_sink_once(monkeypatch):
-    monkeypatch.setattr('open_webui.events.EVENT_SINKS', list(EVENT_SINKS))
-    from open_webui import events
-
-    assistant_files.install()
-    assistant_files.install()
-    assert sum(isinstance(sink, assistant_files.AssistantFilesSink) for sink in events.EVENT_SINKS) == 1
-
-
-@pytest.mark.asyncio
-async def test_a_file_still_ingesting_elsewhere_is_retried_until_it_lands(monkeypatch):
-    monkeypatch.setattr(assistant_files.config, 'SOEV_API_URL', 'http://soev.test')
-    monkeypatch.setattr(assistant_files, 'RETRY_SECONDS', 0)
-    sync = AsyncMock(side_effect=[True, True, False])
-    monkeypatch.setattr(assistant_files, 'sync', sync)
-    assistant_files.schedule('helper')
-    await asyncio.gather(*assistant_files._tasks)
-    assert sync.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_retries_stop_after_the_last_one(monkeypatch):
-    monkeypatch.setattr(assistant_files.config, 'SOEV_API_URL', 'http://soev.test')
-    monkeypatch.setattr(assistant_files, 'RETRY_SECONDS', 0)
-    monkeypatch.setattr(assistant_files, 'RETRIES', 2)
-    sync = AsyncMock(return_value=True)
-    monkeypatch.setattr(assistant_files, 'sync', sync)
-    assistant_files.schedule('helper')
-    await asyncio.gather(*assistant_files._tasks)
-    assert sync.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_a_failing_sync_is_logged_without_its_details(monkeypatch, caplog):
-    monkeypatch.setattr(assistant_files.config, 'SOEV_API_URL', 'http://soev.test')
-    monkeypatch.setattr(assistant_files, 'sync', AsyncMock(side_effect=RuntimeError('secret detail')))
-    assistant_files.schedule('helper')
-    await asyncio.gather(*assistant_files._tasks)
-    assert 'Assistant files sync failed for helper (RuntimeError)' in caplog.text
-    assert 'secret detail' not in caplog.text
+    assert not [
+        request
+        for request in saved.api.requests
+        if request.method != 'GET' and request.url.path != '/v1/identity/links'
+    ]
 
 
 def test_a_long_model_id_gets_a_collection_key_soev_api_accepts():

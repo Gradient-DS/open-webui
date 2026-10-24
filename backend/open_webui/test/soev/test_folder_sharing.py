@@ -1,13 +1,15 @@
 """Sharing a folder shares its owner's local knowledge bases and notes, and unsharing takes back only that."""
 
+from functools import partial
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from open_webui.models.access_grants import AccessGrantModel
-from open_webui.soev import acting, folder_sharing
+from open_webui.soev import acting, folder_sharing, knowledge_sharing
 from open_webui.soev.client import SoevApiError
 
 
@@ -42,6 +44,11 @@ class Ledger:
             if (row[1], row[2], row[3], row[4])
             not in {(resource_type, resource_id, *principal) for principal in principals}
         }
+
+
+async def record_sync(state, owner_id, kind, folder_id):
+    state.scheduled.append(folder_id)
+    return False
 
 
 @pytest.fixture
@@ -97,24 +104,30 @@ def world(monkeypatch):
         return grants if state.public_allowed else []
 
     monkeypatch.setattr(folder_sharing, 'configured', lambda: True)
-    monkeypatch.setattr(folder_sharing, 'FolderShareGrants', state.ledger)
+    monkeypatch.setattr(knowledge_sharing, 'FolderShareGrants', state.ledger)
     monkeypatch.setattr(folder_sharing.Folders, 'get_folders_by_user_id', folders_of)
     monkeypatch.setattr(folder_sharing.AccessGrants, 'get_grants_by_resources', folder_grants)
     monkeypatch.setattr(folder_sharing.AccessGrants, 'get_grants_by_resource', note_grants)
     monkeypatch.setattr(folder_sharing.AccessGrants, 'set_access_grants', set_grants)
-    monkeypatch.setattr(folder_sharing.Knowledges, 'get_knowledge_by_id', knowledge_by_id)
-    monkeypatch.setattr(folder_sharing.Notes, 'get_note_by_id', note_by_id)
-    monkeypatch.setattr(folder_sharing.Users, 'get_user_by_id', user_by_id)
-    monkeypatch.setattr(folder_sharing.Config, 'get', permissions)
-    monkeypatch.setattr(folder_sharing, 'filter_allowed_access_grants', allowed)
+    monkeypatch.setattr(knowledge_sharing.Knowledges, 'get_knowledge_by_id', knowledge_by_id)
+    monkeypatch.setattr(knowledge_sharing.Notes, 'get_note_by_id', note_by_id)
+    monkeypatch.setattr(knowledge_sharing.Users, 'get_user_by_id', user_by_id)
+    monkeypatch.setattr(knowledge_sharing.Config, 'get', permissions)
+    monkeypatch.setattr(knowledge_sharing, 'filter_allowed_access_grants', allowed)
     monkeypatch.setattr(folder_sharing, '_locks', {})
+    monkeypatch.setattr(knowledge_sharing, 'assistants_view', AsyncMock(return_value={}))
+    monkeypatch.setattr(knowledge_sharing.AssistantShareGrants, 'get_by_owner', AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        acting, '_requester_ref', __import__('contextvars').ContextVar('test_requester', default='owui:user:dana')
+    )
     state.narrowed, state.scheduled = [], []
 
     async def narrow(owner_id, folder_id, principals, files):
         state.narrowed.append((folder_id, principals, files, dict(state.folder_grants)))
 
     monkeypatch.setattr(folder_sharing.folder_files, 'narrow', narrow)
-    monkeypatch.setattr(folder_sharing.folder_files, 'schedule', state.scheduled.append)
+
+    monkeypatch.setattr(folder_sharing.pending_sync, 'run', partial(record_sync, state))
 
     state.knowledge = {
         'kb-local': {'user_id': 'dana', 'type': 'local', 'name': 'Beleid'},
@@ -363,7 +376,9 @@ async def test_the_share_dialog_lists_cloud_knowledge_and_other_peoples_items_as
     async def file_by_id(file_id, db=None):
         return SimpleNamespace(id=file_id, user_id='erik', filename='offerte.pdf')
 
-    monkeypatch.setattr(folder_sharing.Files, 'get_file_by_id', file_by_id)
+    monkeypatch.setattr(knowledge_sharing.Files, 'get_file_by_id', file_by_id)
+    monkeypatch.setattr(knowledge_sharing.AccessGrants, 'has_access', AsyncMock(return_value=True))
+    monkeypatch.setattr('open_webui.utils.access_control.files.has_access_to_file', AsyncMock(return_value=True))
     left_out = await folder_sharing.left_out('dana', world.folders['project'].data['files'])
     assert left_out == [
         {'type': 'collection', 'id': 'kb-cloud', 'name': 'OneDrive Projecten', 'reason': 'cloud'},
@@ -402,3 +417,41 @@ def test_without_soev_api_a_write_member_may_still_share(monkeypatch):
     client = _route(monkeypatch, '/{id}/sharing', folder, method='GET')
     monkeypatch.setattr(folders, 'configured', lambda: False)
     assert client.get('/project/sharing').json() == {'shares_knowledge': False, 'may_share': True, 'left_out': []}
+
+
+def test_a_write_member_cannot_remove_knowledge_and_nothing_commits(monkeypatch):
+    from open_webui.routers import folders
+
+    folder = SimpleNamespace(
+        id='project', user_id='dana', parent_id=None, data={'files': [{'type': 'collection', 'id': 'kb-local'}]}
+    )
+    client = _route(monkeypatch, '/{id}/update', folder)
+    update = AsyncMock()
+    monkeypatch.setattr(folders.Folders, 'update_folder_by_id_and_user_id', update)
+    assert client.post('/project/update', json={'data': {'files': []}}).status_code == 403
+    update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_refuses_another_requester_before_any_grant_write(world, monkeypatch):
+    monkeypatch.setattr(acting, 'requester_ref', lambda: 'owui:user:frank')
+    with pytest.raises(PermissionError):
+        await folder_sharing.reconcile('dana', await folder_sharing.view('dana'), widen=True)
+    assert world.writes == []
+
+
+@pytest.mark.asyncio
+async def test_left_out_does_not_reveal_an_unreadable_notes_or_files_metadata(world, monkeypatch):
+    monkeypatch.setattr(knowledge_sharing.AccessGrants, 'has_access', AsyncMock(return_value=False))
+    monkeypatch.setattr('open_webui.utils.access_control.files.has_access_to_file', AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        knowledge_sharing.Files,
+        'get_file_by_id',
+        AsyncMock(return_value=SimpleNamespace(id='private-file', user_id='erik', filename='Private fable.txt')),
+    )
+    assert (
+        await knowledge_sharing.left_out(
+            'dana', [{'type': 'note', 'id': 'note-erik'}, {'type': 'file', 'id': 'private-file'}]
+        )
+        == []
+    )

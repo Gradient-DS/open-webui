@@ -253,7 +253,13 @@ def test_bulk_workspace_mutation(seeded, bypass, monkeypatch, tmp_path, module_n
             if function_name == 'sync_models':
                 kwargs['form_data'] = module.SyncModelsForm(models=[])
             if bypass:
-                await function(**kwargs)
+                from open_webui.soev import acting
+
+                token = acting._requester_ref.set('owui:user:admin')
+                try:
+                    await function(**kwargs)
+                finally:
+                    acting._requester_ref.reset(token)
             else:
                 with pytest.raises(HTTPException) as denied:
                     await function(**kwargs)

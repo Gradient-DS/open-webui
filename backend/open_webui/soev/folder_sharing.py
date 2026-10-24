@@ -12,33 +12,27 @@ import asyncio
 import copy
 import logging
 from collections.abc import Callable
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.config import Config
-from open_webui.models.files import Files
-from open_webui.models.folder_share_grants import FolderShareGrants
 from open_webui.models.folders import Folders
-from open_webui.models.knowledge import Knowledges
-from open_webui.models.notes import Notes
-from open_webui.models.users import Users
-from open_webui.socket.main import note_access_change
-from open_webui.soev import acting, folder_files
+from open_webui.soev import acting, folder_files, knowledge_sharing, pending_sync
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
-from open_webui.utils.access_control import filter_allowed_access_grants
 
 log = logging.getLogger(__name__)
 
 # A folder entry's type, and the resource type its grants have.
-SHARED = {'collection': 'knowledge', 'note': 'note'}
+SHARED = knowledge_sharing.SHARED
 PUBLIC_PERMISSION = {'knowledge': 'sharing.public_knowledge', 'note': 'sharing.public_notes'}
 
 Principal = tuple[str, str]
 Resource = tuple[str, str]
 
-_locks: dict[str, asyncio.Lock] = {}
+_locks = knowledge_sharing._locks
+permitted = knowledge_sharing.permitted
+left_out = knowledge_sharing.left_out
 
 
 @dataclass
@@ -97,77 +91,8 @@ def desired(folders: View, owner_id: str) -> dict[Resource, set[Principal]]:
     return wanted
 
 
-async def _grants(resource: Resource, owner_id: str) -> list[dict] | None:
-    """The item's grants, or None when a folder share cannot share it: gone, another owner's, or a cloud KB."""
-    resource_type, resource_id = resource
-    if resource_type == 'knowledge':
-        knowledge = await Knowledges.get_knowledge_by_id(resource_id)
-        if knowledge is None or knowledge.user_id != owner_id or knowledge.type != 'local':
-            return None
-        grants = knowledge.access_grants
-    else:
-        note = await Notes.get_note_by_id(resource_id)
-        if note is None or note.user_id != owner_id:
-            return None
-        grants = await AccessGrants.get_grants_by_resource('note', resource_id)
-    return [
-        {'principal_type': grant.principal_type, 'principal_id': grant.principal_id, 'permission': grant.permission}
-        for grant in grants
-    ]
-
-
-async def permitted(owner, resource_type: str, principals: set[Principal]) -> set[Principal]:
-    """`principals` without everyone when the owner may not share this kind of item with everyone directly."""
-    if ('user', '*') not in principals:
-        return principals
-    everyone = [{'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}]
-    kept = await filter_allowed_access_grants(
-        await Config.get('user.permissions'), owner.id, owner.role, everyone, PUBLIC_PERMISSION[resource_type]
-    )
-    return principals if kept else principals - {('user', '*')}
-
-
 async def reconcile(owner_id: str, folders: View, *, widen: bool) -> None:
-    """Bring the owner's items in step with `folders`: remove recorded grants no folder gives any more and, when
-    `widen`, add (and record first) the ones the folders give that the item lacks. A recorded principal that now
-    holds a write grant was shared directly since, so it is kept and forgotten."""
-    owner = await Users.get_user_by_id(owner_id)
-    wanted = desired(folders, owner_id) if owner is not None else {}
-    recorded: dict[Resource, set[Principal]] = {}
-    for row in await FolderShareGrants.get_by_owner(owner_id):
-        recorded.setdefault((row.resource_type, row.resource_id), set()).add((row.principal_type, row.principal_id))
-    with acting.acting_as(f'owui:user:{owner_id}'):
-        for resource in sorted(set(wanted) | set(recorded)):
-            mine = recorded.get(resource, set())
-            current = await _grants(resource, owner_id)
-            if current is None:
-                await FolderShareGrants.forget(*resource, mine)
-                continue
-            want = await permitted(owner, resource[0], wanted.get(resource, set()))
-            holders = {(grant['principal_type'], grant['principal_id']) for grant in current}
-            writers = {
-                (grant['principal_type'], grant['principal_id']) for grant in current if grant['permission'] == 'write'
-            }
-            remove = mine - want - writers
-            add = want - holders if widen else set()
-            if add:
-                await FolderShareGrants.record(owner_id, *resource, add)
-            if remove or add:
-                grants = [
-                    grant
-                    for grant in current
-                    if grant['permission'] != 'read' or (grant['principal_type'], grant['principal_id']) not in remove
-                ]
-                grants += [
-                    {'principal_type': principal_type, 'principal_id': principal_id, 'permission': 'read'}
-                    for principal_type, principal_id in sorted(add)
-                ]
-                # A note's open editors that lose access must leave its rooms.
-                evicting = note_access_change(resource[1]) if resource[0] == 'note' else nullcontext()
-                async with evicting:
-                    await AccessGrants.set_access_grants(resource[0], resource[1], grants)
-            if mine - want:
-                await FolderShareGrants.forget(*resource, mine - want)
+    await knowledge_sharing.reconcile(owner_id, folders, await knowledge_sharing.assistants_view(owner_id), widen=widen)
 
 
 def changed(before: View, after: View, owner_id: str) -> list[str]:
@@ -185,7 +110,7 @@ async def _widen(owner_id: str, before: View) -> None:
     try:
         after = await view(owner_id)
         for folder_id in changed(before, after, owner_id):
-            folder_files.schedule(folder_id)
+            await pending_sync.run(owner_id, 'folder_files', folder_id)
         await reconcile(owner_id, after, widen=True)
     except Exception as error:
         code = error.code if isinstance(error, SoevApiError) else type(error).__name__
@@ -200,6 +125,7 @@ async def changing(owner_id: str, edit: Callable[[View], None] | None = None):
     if not configured():
         yield
         return
+    acting.require_owner(owner_id)
     async with _locks.setdefault(owner_id, asyncio.Lock()):
         before = await view(owner_id)
         if edit is not None:
@@ -216,35 +142,30 @@ async def changing(owner_id: str, edit: Callable[[View], None] | None = None):
             await _widen(owner_id, before)
 
 
-async def left_out(owner_id: str, entries: list | None) -> list[dict]:
-    """The folder's items a share does not share, each with why: `cloud` (a synced knowledge base, never shared) or
-    `owner` (another person's item, theirs to share). Read as the owner; items gone are skipped."""
-    items = []
-    for entry in entries or []:
-        if not isinstance(entry, dict) or not isinstance(entry.get('id'), str):
-            continue
-        kind, item_id, name, reason = entry.get('type'), entry['id'], entry.get('name'), None
-        if kind == 'collection':
-            knowledge = await Knowledges.get_knowledge_by_id(item_id)
-            if knowledge is not None:
-                reason = 'cloud' if knowledge.type != 'local' else 'owner' if knowledge.user_id != owner_id else None
-                name = knowledge.name
-        elif kind == 'note':
-            note = await Notes.get_note_by_id(item_id)
-            if note is not None:
-                reason, name = ('owner' if note.user_id != owner_id else None), note.title
-        elif kind == 'file':
-            file = await Files.get_file_by_id(item_id)
-            if file is not None:
-                reason, name = ('owner' if file.user_id != owner_id else None), name or file.filename
-        if reason:
-            items.append({'type': kind, 'id': item_id, 'name': name or item_id, 'reason': reason})
-    return items
-
-
 def adds_entries(before: list | None, after: list | None) -> bool:
     """Whether `after` holds a folder entry `before` lacks."""
     known = {(entry.get('type'), entry.get('id')) for entry in before or [] if isinstance(entry, dict)}
     return any(
         not isinstance(entry, dict) or (entry.get('type'), entry.get('id')) not in known for entry in after or []
     )
+
+
+async def refuse_remote_delete(owner_id: str, folder_ids: list[str]) -> None:
+    from fastapi import HTTPException
+
+    from open_webui.models.folder_share_grants import FolderShareGrants
+    from open_webui.soev import ingest
+
+    folders = await view(owner_id)
+    resources = set().union(*(set(knowledge_sharing.desired(folders.files.get(fid), set())) for fid in folder_ids))
+    recorded = await FolderShareGrants.get_by_owner(owner_id)
+    if any((row.resource_type, row.resource_id) in resources for row in recorded):
+        raise HTTPException(403, 'Access prohibited')
+    for folder_id in folder_ids:
+        if await knowledge_sharing.remote_cleanup_needed(ingest.folder_collection_key(folder_id), with_files=True):
+            raise HTTPException(403, 'Access prohibited')
+
+
+async def check_delete(requester_id: str, owner_id: str, folder_ids: list[str]) -> None:
+    if configured() and requester_id != owner_id:
+        await refuse_remote_delete(owner_id, folder_ids)

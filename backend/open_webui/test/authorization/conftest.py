@@ -79,12 +79,13 @@ def application(tmp_path_factory, no_network):
 
 @pytest.fixture(scope='module')
 def template(application, tmp_path_factory):
+    from copy import deepcopy
+
+    from open_webui.config import DEFAULT_USER_PERMISSIONS
     from open_webui.internal.db import Base
     from open_webui.models.config import Config
     from open_webui.models.groups import Group, GroupMember
     from open_webui.models.users import User
-    from open_webui.config import DEFAULT_USER_PERMISSIONS
-    from copy import deepcopy
 
     path = tmp_path_factory.mktemp('acl-template') / 'seed.db'
     engine = create_engine(f'sqlite:///{path}')
@@ -128,12 +129,12 @@ def template(application, tmp_path_factory):
 @pytest.fixture
 def seeded(template, application, monkeypatch, tmp_path):
     from open_webui.internal import db as database
-    from open_webui.models.config import Config
-    from open_webui.utils import features
-    from open_webui.utils.auth import create_token
     from open_webui.models.access_grants import AccessGrants, AccessGrantsTable
+    from open_webui.models.config import Config
     from open_webui.models.groups import Groups, GroupTable
     from open_webui.models.knowledge import Knowledges, KnowledgeTable
+    from open_webui.utils import features
+    from open_webui.utils.auth import create_token
 
     # The fork exports remote adapters unconditionally; exercise the retained SQL implementations.
     sql_grants, sql_knowledge, sql_groups = AccessGrantsTable(), KnowledgeTable(), GroupTable()
@@ -174,6 +175,16 @@ def seeded(template, application, monkeypatch, tmp_path):
 
     # Exercise bundle authorization independently of the deployment feature gate.
     app.include_router(skill_files.router, prefix='/api/v1/skills')
+    from unittest.mock import AsyncMock
+
+    from open_webui.soev import acting, assistant_files, assistant_sharing, folder_sharing, identity, pending_sync
+
+    monkeypatch.setattr(identity, 'validate_config', lambda: None)
+    monkeypatch.setattr(assistant_files, 'narrow', AsyncMock())
+    monkeypatch.setattr(pending_sync, 'run', AsyncMock(return_value=False))
+    monkeypatch.setattr(assistant_sharing, 'remote_cleanup_needed', AsyncMock(return_value=False))
+    monkeypatch.setattr(folder_sharing, 'refuse_remote_delete', AsyncMock())
+    acting.install(app)
     app.state.redis = None
     app.state.MODELS = {}
     with TestClient(app) as client:

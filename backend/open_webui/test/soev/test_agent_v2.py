@@ -1008,7 +1008,12 @@ async def test_an_assistant_file_not_yet_in_its_collection_is_skipped_as_process
 ) -> None:
     """Saved before the sync landed it, or never migrated: the turn asks for a sync instead of failing."""
     scheduled = []
-    monkeypatch.setattr(agent_v2.assistant_files, 'schedule', scheduled.append)
+    from open_webui.models.soev_pending_sync import PendingSyncs
+
+    async def mark(*args):
+        scheduled.append(args)
+
+    monkeypatch.setattr(PendingSyncs, 'mark', mark)
     seed_assistant_collection(chat.api, 'helper', 'owui:user:alice')
     stored_files(monkeypatch, new='completed')
     await chat.turn('question', 'a1', model_id='helper', knowledge=[{'id': 'new', 'type': 'file', 'name': 'nieuw.txt'}])
@@ -1016,7 +1021,7 @@ async def test_an_assistant_file_not_yet_in_its_collection_is_skipped_as_process
     assert 'attachments' not in sent
     assert sent['text'] == 'question\n\nAttachment status:\nstill processing: nieuw.txt'
     assert notices(chat)[-1]['notices'] == ["File 'nieuw.txt' is still being processed and was skipped this time."]
-    assert scheduled == ['helper']
+    assert scheduled == []
 
 
 @pytest.mark.asyncio

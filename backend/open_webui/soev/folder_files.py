@@ -7,7 +7,6 @@ another person's file is theirs to share. It exists while the folder is shared a
 folder file there first, as the user (`agent_v2._folder_attachment`).
 """
 
-import asyncio
 import logging
 from urllib.parse import quote
 from uuid import uuid4
@@ -16,17 +15,12 @@ from open_webui import config
 from open_webui.models.files import Files
 from open_webui.models.folders import Folders
 from open_webui.models.users import Users
-from open_webui.soev import identity, ingest, projection
+from open_webui.soev import acting, identity, ingest, projection
 from open_webui.soev.client import SoevApiError, SoevClient
 
 log = logging.getLogger(__name__)
 
 FOLDER_TAG = 'folder-files'
-# A file still ingesting elsewhere is retried this often, this many times: ten minutes in all.
-RETRY_SECONDS, RETRIES = 30, 20
-
-_locks: dict[str, asyncio.Lock] = {}
-_tasks: set[asyncio.Task] = set()
 
 
 def file_ids(entries: list | None) -> list[str]:
@@ -56,8 +50,10 @@ def _path(key: str) -> str:
 
 
 async def _existing(key: str, client: SoevClient) -> dict | None:
+    if acting.requester_ref() is not None:
+        await identity.ensure_link(acting.requester_ref(), client)
     try:
-        return await client.get(_path(key), as_user=None)
+        return await client.get(_path(key), as_user=acting.requester_ref())
     except SoevApiError as error:
         if error.status == 404:
             return None
@@ -66,8 +62,10 @@ async def _existing(key: str, client: SoevClient) -> dict | None:
 
 async def _delete(collection: dict, client: SoevClient) -> None:
     key = collection['key']
+    if collection['created_by'] != acting.requester_ref():
+        raise PermissionError('Folder collection requires its owner request')
     await client.send(
-        'DELETE', _path(key), None, as_user=collection['created_by'], idempotency_key=f'folder-delete:{key}:{uuid4()}'
+        'DELETE', _path(key), None, as_user=acting.requester_ref(), idempotency_key=f'folder-delete:{key}:{uuid4()}'
     )
 
 
@@ -87,6 +85,7 @@ async def narrow(
 ) -> None:
     """Before a folder change commits: take away the readers and files the folder will no longer have, or the whole
     collection when the folder will not be shared or hold files any more. Never widens."""
+    acting.require_owner(owner_id)
     client = client if client is not None else identity.build_client()
     key = ingest.folder_collection_key(folder_id)
     collection = await _existing(key, client)
@@ -101,26 +100,35 @@ async def narrow(
     if readers != sorted(collection['principals']):
         body = {'visibility': 'restricted', 'principals': readers, 'writers': [owner]}
         await client.send('PUT', _path(key) + '/access', body, as_user=owner, idempotency_key=f'{key}:access:{uuid4()}')
-    documents = {document['source_id'] async for document in client.pages(_path(key) + '/documents', as_user=None)}
+    documents = {
+        document['source_id']
+        async for document in client.pages(_path(key) + '/documents', as_user=acting.requester_ref())
+    }
     await _delete_documents(key, owner, documents - set(files), client)
+
+
+async def _contents(folder) -> tuple[set, list]:
+    from open_webui.soev import folder_sharing
+
+    principals, files = set(), []
+    if folder is not None:
+        acting.require_owner(folder.user_id)
+        owner_user = await Users.get_user_by_id(folder.user_id)
+        audience = folder_sharing.audience(await folder_sharing.view(folder.user_id), folder.id, folder.user_id)
+        if owner_user is not None:
+            principals = await folder_sharing.permitted(owner_user, 'knowledge', audience)
+        ids = file_ids((folder.data or {}).get('files'))
+        files = [file for file in await Files.get_files_by_ids(ids) if file.user_id == folder.user_id] if ids else []
+    return principals, files
 
 
 async def sync(folder_id: str, *, client: SoevClient | None = None) -> bool:
     """Bring the folder's collection in step with the folder: its access and its owner's files, or no collection
     when it is gone, not shared or has no such files. True while a file still ingests elsewhere."""
-    from open_webui.soev import folder_sharing
-
     client = client if client is not None else identity.build_client()
     key = ingest.folder_collection_key(folder_id)
     folder = await Folders.get_folder_by_id(folder_id)
-    principals, files = set(), []
-    if folder is not None:
-        owner_user = await Users.get_user_by_id(folder.user_id)
-        audience = folder_sharing.audience(await folder_sharing.view(folder.user_id), folder_id, folder.user_id)
-        if owner_user is not None:
-            principals = await folder_sharing.permitted(owner_user, 'knowledge', audience)
-        ids = file_ids((folder.data or {}).get('files'))
-        files = [file for file in await Files.get_files_by_ids(ids) if file.user_id == folder.user_id] if ids else []
+    principals, files = await _contents(folder)
     if not principals or not files:
         collection = await _existing(key, client)
         if collection is not None:
@@ -139,7 +147,10 @@ async def sync(folder_id: str, *, client: SoevClient | None = None) -> bool:
         )
     else:
         await client.send('PUT', _path(key) + '/access', body, as_user=owner, idempotency_key=f'{key}:access:{uuid4()}')
-    documents = {document['source_id'] async for document in client.pages(_path(key) + '/documents', as_user=None)}
+    documents = {
+        document['source_id']
+        async for document in client.pages(_path(key) + '/documents', as_user=acting.requester_ref())
+    }
     await _delete_documents(key, owner, documents - {file.id for file in files}, client)
     waiting = False
     for file in files:
@@ -157,25 +168,3 @@ async def sync(folder_id: str, *, client: SoevClient | None = None) -> bool:
         except OSError as error:
             log.warning('Folder file %s of %s not submitted (%s)', file.id, folder_id, type(error).__name__)
     return waiting
-
-
-async def _sync_serialized(folder_id: str, retries: int) -> None:
-    try:
-        async with _locks.setdefault(folder_id, asyncio.Lock()):
-            waiting = await sync(folder_id)
-    except Exception as error:
-        code = error.code if isinstance(error, SoevApiError) else type(error).__name__
-        log.warning('Folder files sync failed for %s (%s)', folder_id, code)
-        return
-    if waiting and retries > 0:
-        await asyncio.sleep(RETRY_SECONDS)
-        await _sync_serialized(folder_id, retries - 1)
-
-
-def schedule(folder_id: str) -> None:
-    """Sync the folder's collection in the background; syncs of one folder run one at a time."""
-    if not config.SOEV_API_URL:
-        return
-    task = asyncio.create_task(_sync_serialized(folder_id, RETRIES))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)

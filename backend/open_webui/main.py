@@ -586,10 +586,6 @@ async def lifespan(app: FastAPI):
     from open_webui.soev.group_sync import start_reconciler
 
     start_reconciler(app)
-    # [Gradient] Keep each assistant's files collection in step with the assistant.
-    from open_webui.soev import assistant_files
-
-    assistant_files.install()
 
     # [Gradient] Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker

@@ -1223,8 +1223,11 @@ async def delete_file_by_id(
         )
 
     if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'write', user, db=db):
-        if configured() and (file.meta or {}).get('soev_job') is not None:
-            await ingest.cancel(file)
+        if configured():
+            for model_id in await Models.get_model_owners_attaching_file(id, db=db):
+                await assistant_files.delete_document(model_id, id)
+            if (file.meta or {}).get('soev_job') is not None:
+                await ingest.cancel(file)
 
         # Remove knowledge memberships before deleting the file.
         knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db) if configured() else []
@@ -1232,8 +1235,7 @@ async def delete_file_by_id(
             # Remove KB-file relationship
             await Knowledges.remove_file_from_knowledge_by_id(knowledge.id, id, db=db)
         # Detach it from the assistants holding it, and take it out of their collections.
-        for model_id in await Models.remove_file_from_models(id, db=db):
-            assistant_files.schedule(model_id)
+        await Models.remove_file_from_models(id, db=db)
         result = await Files.delete_file_by_id(id, db=db)
         if result:
             try:

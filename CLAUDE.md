@@ -275,10 +275,11 @@ save holding anyone else's is refused (403), and file access, sync and migration
 reaches an assistant through a knowledge base, whose access is checked live. Deleting a file drops its entries from
 the models holding it. They live in its own collection,
 `owui-assistant-<model id>` (`soev/assistant_files.py`): owned by the model owner, read and written per the
-assistant's access grants, hidden from KB lists. An event sink syncs it on model create/update/access/delete
-(access republished, missing files submitted as the owner, removed ones deleted, the collection deleted with the
-assistant or its last file; a file still ingesting elsewhere is retried for ten minutes). A turn sends them as
-`attachments`, read as the user; one not there yet is skipped as processing and asks for a sync, a deleted one is
+assistant's access grants, hidden from KB lists. The owner's save, share and delete requests sync it once after
+commit; narrowing runs before commit. A file still ingesting elsewhere records a pending sync for the owner's next
+authenticated request. A turn sends them as
+`attachments`, read as the user; one not there yet is skipped as processing and records pending work only on its
+owner's turn, a deleted one is
 noticed as the assistant's. The v2 migration uploads step ingests them into that same collection.
 
 Sharing a folder shares its knowledge (`soev/folder_sharing.py`): everyone a folder (or a same-owner ancestor) is
@@ -287,11 +288,12 @@ shared with gets a read grant on the local knowledge bases and notes in it that 
 owners' items are never shared. `folder_share_grant` records only the grants this added, so unsharing, removing an
 item or moving a folder out revokes those and keeps grants the item already had. The folder routes remove grants
 before committing (a failure refuses the change) and add them after. On v2 only the owner changes a folder's grants
-or adds items to it; write members may remove items.
+or adds or removes items in it. Removing an item narrows grants on the owner's knowledge, so writers may edit other
+fields only.
 A shared folder's files go to its own collection, `owui-folder-<folder id>` (`soev/folder_files.py`): owned by the
 folder owner, read by the folder's audience, holding the `file` entries the owner uploaded, deleted when the folder
-is unshared, emptied or deleted. Its readers and files are narrowed before a folder change commits and synced in the
-background after (missing files submitted as the owner, retried while still ingesting elsewhere). Folder items carry
+is unshared, emptied or deleted. Its readers and files are narrowed before a folder change commits and synced once in the
+owner's request after commit (missing files submitted as the owner; waiting files record a pending sync). Folder items carry
 `folder_id`, and a turn reads a folder file there first, as the user. Hidden from KB lists.
 
 Before snapshot/config reads, the migration waits up to five minutes for this image's Alembic head;
@@ -337,3 +339,11 @@ There is no archive restore endpoint; archived KBs return to a person through th
 transfer path (`POST /v1/collections/{key}/owner`).
 The supplied platform contract has no link listing to discover otherwise unknown deleted users.
 The plan's unlink-first order is superseded by spec §10's revoke-before-unlink order.
+
+Assistant knowledge sharing uses the same owner-wide derivation as folder sharing (`soev/knowledge_sharing.py`):
+local KBs and notes owned by the assistant owner receive read access for its audience. `assistant_share_grant`
+records only derived grants; a grant stays while any of that owner's folders or assistants wants it. Cloud KBs and
+others' items appear as left out in both share dialogs (`GET /models/model/sharing`). Only owners change assistant
+grants or knowledge; writers can edit other fields. Non-owner folder/assistant deletion refuses remote cleanup.
+`soev_pending_sync` markers settle after an owner's authenticated response, at most once per 30 seconds per process,
+using that request's token. No detached folder/assistant file retry tasks or assistant event sink remain.
