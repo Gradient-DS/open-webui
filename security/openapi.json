@@ -687,15 +687,21 @@
       "AudioConfigUpdateForm": {
         "properties": {
           "stt": {
-            "$ref": "#/components/schemas/STTConfigForm"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/STTConfigForm"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "tts": {
             "$ref": "#/components/schemas/TTSConfigForm"
           }
         },
         "required": [
-          "tts",
-          "stt"
+          "tts"
         ],
         "title": "AudioConfigUpdateForm",
         "type": "object"

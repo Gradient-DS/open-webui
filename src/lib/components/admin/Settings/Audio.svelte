@@ -50,6 +50,7 @@
 	let STT_OPENAI_API_KEY = '';
 	let STT_OPENAI_API_REQUEST_FORMAT = 'multipart';
 	let STT_ENGINE = '';
+	let platformSTT = false;
 	let STT_MODEL = '';
 	let STT_SUPPORTED_CONTENT_TYPES = '';
 	let STT_WHISPER_MODEL = '';
@@ -159,24 +160,26 @@
 				MISTRAL_API_BASE_URL: TTS_MISTRAL_API_BASE_URL,
 				SPLIT_ON: TTS_SPLIT_ON
 			},
-			stt: {
-				OPENAI_API_BASE_URL: STT_OPENAI_API_BASE_URL,
-				OPENAI_API_KEY: STT_OPENAI_API_KEY,
-				OPENAI_API_REQUEST_FORMAT: STT_OPENAI_API_REQUEST_FORMAT,
-				ENGINE: STT_ENGINE,
-				MODEL: STT_MODEL,
-				SUPPORTED_CONTENT_TYPES: STT_SUPPORTED_CONTENT_TYPES.split(','),
-				WHISPER_MODEL: STT_WHISPER_MODEL,
-				DEEPGRAM_API_KEY: STT_DEEPGRAM_API_KEY,
-				AZURE_API_KEY: STT_AZURE_API_KEY,
-				AZURE_REGION: STT_AZURE_REGION,
-				AZURE_LOCALES: STT_AZURE_LOCALES,
-				AZURE_BASE_URL: STT_AZURE_BASE_URL,
-				AZURE_MAX_SPEAKERS: STT_AZURE_MAX_SPEAKERS,
-				MISTRAL_API_KEY: STT_MISTRAL_API_KEY,
-				MISTRAL_API_BASE_URL: STT_MISTRAL_API_BASE_URL,
-				MISTRAL_USE_CHAT_COMPLETIONS: STT_MISTRAL_USE_CHAT_COMPLETIONS
-			}
+			stt: platformSTT
+				? null
+				: {
+						OPENAI_API_BASE_URL: STT_OPENAI_API_BASE_URL,
+						OPENAI_API_KEY: STT_OPENAI_API_KEY,
+						OPENAI_API_REQUEST_FORMAT: STT_OPENAI_API_REQUEST_FORMAT,
+						ENGINE: STT_ENGINE,
+						MODEL: STT_MODEL,
+						SUPPORTED_CONTENT_TYPES: STT_SUPPORTED_CONTENT_TYPES.split(','),
+						WHISPER_MODEL: STT_WHISPER_MODEL,
+						DEEPGRAM_API_KEY: STT_DEEPGRAM_API_KEY,
+						AZURE_API_KEY: STT_AZURE_API_KEY,
+						AZURE_REGION: STT_AZURE_REGION,
+						AZURE_LOCALES: STT_AZURE_LOCALES,
+						AZURE_BASE_URL: STT_AZURE_BASE_URL,
+						AZURE_MAX_SPEAKERS: STT_AZURE_MAX_SPEAKERS,
+						MISTRAL_API_KEY: STT_MISTRAL_API_KEY,
+						MISTRAL_API_BASE_URL: STT_MISTRAL_API_BASE_URL,
+						MISTRAL_USE_CHAT_COMPLETIONS: STT_MISTRAL_USE_CHAT_COMPLETIONS
+					}
 		});
 
 		if (res) {
@@ -218,6 +221,7 @@
 			STT_OPENAI_API_REQUEST_FORMAT = res.stt.OPENAI_API_REQUEST_FORMAT || 'multipart';
 
 			STT_ENGINE = res.stt.ENGINE;
+			platformSTT = STT_ENGINE === 'soev';
 			STT_MODEL = res.stt.MODEL;
 			STT_SUPPORTED_CONTENT_TYPES = (res?.stt?.SUPPORTED_CONTENT_TYPES ?? []).join(',');
 			STT_WHISPER_MODEL = res.stt.WHISPER_MODEL;
@@ -248,227 +252,231 @@
 
 	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
 		<AdminSettingSection title={$i18n.t('Speech-to-Text')} first>
-			<AdminSettingRow
-				label={$i18n.t('Speech-to-Text Engine')}
-				description={$i18n.t('Choose the transcription provider used for audio input.')}
-			>
-				<SettingsSelect bind:value={STT_ENGINE} placeholder={$i18n.t('Select an engine')}>
-					<option value="">{$i18n.t('Whisper (Local)')}</option>
-					<option value="openai">{$i18n.t('OpenAI')}</option>
-					<option value="web">{$i18n.t('Web API')}</option>
-					<option value="deepgram">{$i18n.t('Deepgram')}</option>
-					<option value="azure">{$i18n.t('Azure AI Speech')}</option>
-					<option value="mistral">{$i18n.t('MistralAI')}</option>
-				</SettingsSelect>
-			</AdminSettingRow>
-
-			{#if STT_ENGINE !== 'web'}
-				<AdminSettingField
-					label={$i18n.t('Supported MIME Types')}
-					description={$i18n.t('Comma-separated audio or video MIME types accepted for upload.')}
-				>
-					<input
-						class={inputClass}
-						bind:value={STT_SUPPORTED_CONTENT_TYPES}
-						placeholder={$i18n.t('e.g., audio/wav,audio/mpeg,video/* (leave blank for defaults)')}
-					/>
-				</AdminSettingField>
-			{/if}
-
-			{#if STT_ENGINE === 'openai'}
-				<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-					<AdminSettingField label={$i18n.t('API Base URL')}>
-						<input
-							class={inputClass}
-							placeholder={$i18n.t('API Base URL')}
-							bind:value={STT_OPENAI_API_BASE_URL}
-							required
-						/>
-					</AdminSettingField>
-					<AdminSettingField label={$i18n.t('API Key')}>
-						<SensitiveInput
-							variant="settings"
-							placeholder={$i18n.t('API Key')}
-							bind:value={STT_OPENAI_API_KEY}
-						/>
-					</AdminSettingField>
-				</div>
-
+			{#if platformSTT}
+				<p class="text-xs text-gray-500">{$i18n.t('Dictation is managed by the platform.')}</p>
+			{:else}
 				<AdminSettingRow
-					label={$i18n.t('Request Format')}
-					description={$i18n.t('Select how audio is sent to the OpenAI-compatible endpoint.')}
+					label={$i18n.t('Speech-to-Text Engine')}
+					description={$i18n.t('Choose the transcription provider used for audio input.')}
 				>
-					<SettingsSelect bind:value={STT_OPENAI_API_REQUEST_FORMAT}>
-						<option value="multipart">{$i18n.t('Multipart Upload')}</option>
-						<option value="json">{$i18n.t('JSON Base64')}</option>
+					<SettingsSelect bind:value={STT_ENGINE} placeholder={$i18n.t('Select an engine')}>
+						<option value="">{$i18n.t('Whisper (Local)')}</option>
+						<option value="openai">{$i18n.t('OpenAI')}</option>
+						<option value="web">{$i18n.t('Web API')}</option>
+						<option value="deepgram">{$i18n.t('Deepgram')}</option>
+						<option value="azure">{$i18n.t('Azure AI Speech')}</option>
+						<option value="mistral">{$i18n.t('MistralAI')}</option>
 					</SettingsSelect>
 				</AdminSettingRow>
 
-				<AdminSettingField label={$i18n.t('STT Model')}>
-					<input
-						list="stt-openai-model-list"
-						class={inputClass}
-						bind:value={STT_MODEL}
-						placeholder={$i18n.t('Select a model')}
-					/>
-					<datalist id="stt-openai-model-list">
-						<option value="whisper-1"></option>
-					</datalist>
-				</AdminSettingField>
-			{:else if STT_ENGINE === 'deepgram'}
-				<AdminSettingField label={$i18n.t('API Key')}>
-					<SensitiveInput
-						variant="settings"
-						placeholder={$i18n.t('API Key')}
-						bind:value={STT_DEEPGRAM_API_KEY}
-					/>
-				</AdminSettingField>
+				{#if STT_ENGINE !== 'web'}
+					<AdminSettingField
+						label={$i18n.t('Supported MIME Types')}
+						description={$i18n.t('Comma-separated audio or video MIME types accepted for upload.')}
+					>
+						<input
+							class={inputClass}
+							bind:value={STT_SUPPORTED_CONTENT_TYPES}
+							placeholder={$i18n.t('e.g., audio/wav,audio/mpeg,video/* (leave blank for defaults)')}
+						/>
+					</AdminSettingField>
+				{/if}
 
-				<AdminSettingField
-					label={$i18n.t('STT Model')}
-					description={$i18n.t('Leave model field empty to use the default model.')}
-				>
-					<input
-						class={inputClass}
-						bind:value={STT_MODEL}
-						placeholder={$i18n.t('Select a model (optional)')}
-					/>
-					<div class="mt-1 {linkedHelpClass}">
-						<a href="https://developers.deepgram.com/docs/models" target="_blank">
-							{$i18n.t('Click here to see available models.')}
-						</a>
+				{#if STT_ENGINE === 'openai'}
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+						<AdminSettingField label={$i18n.t('API Base URL')}>
+							<input
+								class={inputClass}
+								placeholder={$i18n.t('API Base URL')}
+								bind:value={STT_OPENAI_API_BASE_URL}
+								required
+							/>
+						</AdminSettingField>
+						<AdminSettingField label={$i18n.t('API Key')}>
+							<SensitiveInput
+								variant="settings"
+								placeholder={$i18n.t('API Key')}
+								bind:value={STT_OPENAI_API_KEY}
+							/>
+						</AdminSettingField>
 					</div>
-				</AdminSettingField>
-			{:else if STT_ENGINE === 'azure'}
-				<AdminSettingField label={$i18n.t('API Key')}>
-					<SensitiveInput
-						variant="settings"
-						placeholder={$i18n.t('API Key')}
-						bind:value={STT_AZURE_API_KEY}
-						required
-					/>
-				</AdminSettingField>
 
-				<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-					<AdminSettingField label={$i18n.t('Azure Region')}>
+					<AdminSettingRow
+						label={$i18n.t('Request Format')}
+						description={$i18n.t('Select how audio is sent to the OpenAI-compatible endpoint.')}
+					>
+						<SettingsSelect bind:value={STT_OPENAI_API_REQUEST_FORMAT}>
+							<option value="multipart">{$i18n.t('Multipart Upload')}</option>
+							<option value="json">{$i18n.t('JSON Base64')}</option>
+						</SettingsSelect>
+					</AdminSettingRow>
+
+					<AdminSettingField label={$i18n.t('STT Model')}>
 						<input
+							list="stt-openai-model-list"
 							class={inputClass}
-							bind:value={STT_AZURE_REGION}
-							placeholder={$i18n.t('e.g., westus (leave blank for eastus)')}
+							bind:value={STT_MODEL}
+							placeholder={$i18n.t('Select a model')}
 						/>
+						<datalist id="stt-openai-model-list">
+							<option value="whisper-1"></option>
+						</datalist>
 					</AdminSettingField>
-					<AdminSettingField label={$i18n.t('Language Locales')}>
-						<input
-							class={inputClass}
-							bind:value={STT_AZURE_LOCALES}
-							placeholder={$i18n.t('e.g., en-US,ja-JP (leave blank for auto-detect)')}
-						/>
-					</AdminSettingField>
-					<AdminSettingField label={$i18n.t('Endpoint URL')}>
-						<input
-							class={inputClass}
-							bind:value={STT_AZURE_BASE_URL}
-							placeholder={$i18n.t('(leave blank for to use commercial endpoint)')}
-						/>
-					</AdminSettingField>
-					<AdminSettingField label={$i18n.t('Max Speakers')}>
-						<input
-							class={inputClass}
-							bind:value={STT_AZURE_MAX_SPEAKERS}
-							placeholder={$i18n.t('e.g., 3, 4, 5 (leave blank for default)')}
-						/>
-					</AdminSettingField>
-				</div>
-			{:else if STT_ENGINE === 'mistral'}
-				<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-					<AdminSettingField label={$i18n.t('API Base URL')}>
-						<input
-							class={inputClass}
-							placeholder={$i18n.t('API Base URL')}
-							bind:value={STT_MISTRAL_API_BASE_URL}
-							required
-						/>
-					</AdminSettingField>
+				{:else if STT_ENGINE === 'deepgram'}
 					<AdminSettingField label={$i18n.t('API Key')}>
 						<SensitiveInput
 							variant="settings"
 							placeholder={$i18n.t('API Key')}
-							bind:value={STT_MISTRAL_API_KEY}
+							bind:value={STT_DEEPGRAM_API_KEY}
 						/>
 					</AdminSettingField>
-				</div>
 
-				<AdminSettingField
-					label={$i18n.t('STT Model')}
-					description={$i18n.t('Leave empty to use the default model (voxtral-mini-latest).')}
-				>
-					<input class={inputClass} bind:value={STT_MODEL} placeholder="voxtral-mini-latest" />
-					<div class="mt-1 {linkedHelpClass}">
-						<a href="https://docs.mistral.ai/capabilities/audio_transcription" target="_blank">
-							{$i18n.t('Learn more about Voxtral transcription.')}
-						</a>
-					</div>
-				</AdminSettingField>
-
-				<AdminSettingRow
-					label={$i18n.t('Use Chat Completions API')}
-					description={$i18n.t(
-						'Use /v1/chat/completions endpoint instead of /v1/audio/transcriptions for potentially better accuracy.'
-					)}
-					let:labelId
-				>
-					<Switch bind:state={STT_MISTRAL_USE_CHAT_COMPLETIONS} ariaLabelledbyId={labelId} />
-				</AdminSettingRow>
-			{:else if STT_ENGINE === ''}
-				<!-- LICENSE covers this Open WebUI wordmark.
-					Do not alter, remove, obscure, or replace it except as LICENSE permits:
-					https://docs.openwebui.com/license. -->
-				<AdminSettingField
-					label={$i18n.t('STT Model')}
-					description={$i18n.t('Open WebUI uses faster-whisper internally.')}
-				>
-					<div class="flex w-full gap-2">
+					<AdminSettingField
+						label={$i18n.t('STT Model')}
+						description={$i18n.t('Leave model field empty to use the default model.')}
+					>
 						<input
 							class={inputClass}
-							placeholder={$i18n.t('Set whisper model')}
-							bind:value={STT_WHISPER_MODEL}
+							bind:value={STT_MODEL}
+							placeholder={$i18n.t('Select a model (optional)')}
 						/>
-						<button
-							class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-black/5 hover:text-gray-900 disabled:opacity-50 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-white"
-							type="button"
-							on:click={() => {
-								sttModelUpdateHandler();
-							}}
-							disabled={STT_WHISPER_MODEL_LOADING}
-							aria-label={$i18n.t('Update model')}
-						>
-							{#if STT_WHISPER_MODEL_LOADING}
-								<Spinner />
-							{:else}
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 16 16"
-									fill="currentColor"
-									class="size-4"
-								>
-									<path
-										d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z"
-									/>
-									<path
-										d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"
-									/>
-								</svg>
-							{/if}
-						</button>
+						<div class="mt-1 {linkedHelpClass}">
+							<a href="https://developers.deepgram.com/docs/models" target="_blank">
+								{$i18n.t('Click here to see available models.')}
+							</a>
+						</div>
+					</AdminSettingField>
+				{:else if STT_ENGINE === 'azure'}
+					<AdminSettingField label={$i18n.t('API Key')}>
+						<SensitiveInput
+							variant="settings"
+							placeholder={$i18n.t('API Key')}
+							bind:value={STT_AZURE_API_KEY}
+							required
+						/>
+					</AdminSettingField>
+
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+						<AdminSettingField label={$i18n.t('Azure Region')}>
+							<input
+								class={inputClass}
+								bind:value={STT_AZURE_REGION}
+								placeholder={$i18n.t('e.g., westus (leave blank for eastus)')}
+							/>
+						</AdminSettingField>
+						<AdminSettingField label={$i18n.t('Language Locales')}>
+							<input
+								class={inputClass}
+								bind:value={STT_AZURE_LOCALES}
+								placeholder={$i18n.t('e.g., en-US,ja-JP (leave blank for auto-detect)')}
+							/>
+						</AdminSettingField>
+						<AdminSettingField label={$i18n.t('Endpoint URL')}>
+							<input
+								class={inputClass}
+								bind:value={STT_AZURE_BASE_URL}
+								placeholder={$i18n.t('(leave blank for to use commercial endpoint)')}
+							/>
+						</AdminSettingField>
+						<AdminSettingField label={$i18n.t('Max Speakers')}>
+							<input
+								class={inputClass}
+								bind:value={STT_AZURE_MAX_SPEAKERS}
+								placeholder={$i18n.t('e.g., 3, 4, 5 (leave blank for default)')}
+							/>
+						</AdminSettingField>
 					</div>
-					<div class="mt-1 {linkedHelpClass}">
-						<a href="https://github.com/SYSTRAN/faster-whisper" target="_blank">
-							{$i18n.t(
-								'Click here to learn more about faster-whisper and see the available models.'
-							)}
-						</a>
+				{:else if STT_ENGINE === 'mistral'}
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+						<AdminSettingField label={$i18n.t('API Base URL')}>
+							<input
+								class={inputClass}
+								placeholder={$i18n.t('API Base URL')}
+								bind:value={STT_MISTRAL_API_BASE_URL}
+								required
+							/>
+						</AdminSettingField>
+						<AdminSettingField label={$i18n.t('API Key')}>
+							<SensitiveInput
+								variant="settings"
+								placeholder={$i18n.t('API Key')}
+								bind:value={STT_MISTRAL_API_KEY}
+							/>
+						</AdminSettingField>
 					</div>
-				</AdminSettingField>
+
+					<AdminSettingField
+						label={$i18n.t('STT Model')}
+						description={$i18n.t('Leave empty to use the default model (voxtral-mini-latest).')}
+					>
+						<input class={inputClass} bind:value={STT_MODEL} placeholder="voxtral-mini-latest" />
+						<div class="mt-1 {linkedHelpClass}">
+							<a href="https://docs.mistral.ai/capabilities/audio_transcription" target="_blank">
+								{$i18n.t('Learn more about Voxtral transcription.')}
+							</a>
+						</div>
+					</AdminSettingField>
+
+					<AdminSettingRow
+						label={$i18n.t('Use Chat Completions API')}
+						description={$i18n.t(
+							'Use /v1/chat/completions endpoint instead of /v1/audio/transcriptions for potentially better accuracy.'
+						)}
+						let:labelId
+					>
+						<Switch bind:state={STT_MISTRAL_USE_CHAT_COMPLETIONS} ariaLabelledbyId={labelId} />
+					</AdminSettingRow>
+				{:else if STT_ENGINE === ''}
+					<!-- LICENSE covers this Open WebUI wordmark.
+					Do not alter, remove, obscure, or replace it except as LICENSE permits:
+					https://docs.openwebui.com/license. -->
+					<AdminSettingField
+						label={$i18n.t('STT Model')}
+						description={$i18n.t('Open WebUI uses faster-whisper internally.')}
+					>
+						<div class="flex w-full gap-2">
+							<input
+								class={inputClass}
+								placeholder={$i18n.t('Set whisper model')}
+								bind:value={STT_WHISPER_MODEL}
+							/>
+							<button
+								class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-black/5 hover:text-gray-900 disabled:opacity-50 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-white"
+								type="button"
+								on:click={() => {
+									sttModelUpdateHandler();
+								}}
+								disabled={STT_WHISPER_MODEL_LOADING}
+								aria-label={$i18n.t('Update model')}
+							>
+								{#if STT_WHISPER_MODEL_LOADING}
+									<Spinner />
+								{:else}
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										viewBox="0 0 16 16"
+										fill="currentColor"
+										class="size-4"
+									>
+										<path
+											d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z"
+										/>
+										<path
+											d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"
+										/>
+									</svg>
+								{/if}
+							</button>
+						</div>
+						<div class="mt-1 {linkedHelpClass}">
+							<a href="https://github.com/SYSTRAN/faster-whisper" target="_blank">
+								{$i18n.t(
+									'Click here to learn more about faster-whisper and see the available models.'
+								)}
+							</a>
+						</div>
+					</AdminSettingField>
+				{/if}
 			{/if}
 		</AdminSettingSection>
 

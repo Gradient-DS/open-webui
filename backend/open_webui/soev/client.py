@@ -229,6 +229,29 @@ class SoevClient:
         response = await self._request('POST', '/v1/completions/task', body=body, as_user=as_user)
         return self._json_object(response)
 
+    async def embed(self, texts: list[str], *, as_user: str) -> dict:
+        if not as_user:
+            raise ValueError('Embedding requires an acting user')
+        response = await self._request('POST', '/v1/embeddings', body={'input': texts}, as_user=as_user)
+        return self._json_object(response)
+
+    async def transcribe(
+        self, audio: bytes, *, filename: str, content_type: str, language: str | None, as_user: str
+    ) -> dict:
+        if not as_user:
+            raise ValueError('Transcription requires an acting user')
+        data = {'response_format': 'json'}
+        if language:
+            data['language'] = language
+        response = await self._request(
+            'POST',
+            '/v1/audio/transcriptions',
+            files={'file': (filename, audio, content_type)},
+            data=data,
+            as_user=as_user,
+        )
+        return self._json_object(response)
+
     async def stream_task(self, body: dict, *, as_user: str) -> AsyncIterator[bytes]:
         """Pass a streamed task completion's SSE bytes through unchanged."""
         if not as_user or self._subject_minter is None:
@@ -402,6 +425,8 @@ class SoevClient:
         *,
         body: dict | None = None,
         content: bytes | None = None,
+        files: dict | None = None,
+        data: dict | None = None,
         as_user: str | None = None,
         params: dict | None = None,
         idempotency_key: str | None = None,
@@ -423,6 +448,8 @@ class SoevClient:
                 params=params,
                 json=body,
                 content=content,
+                files=files,
+                data=data,
                 timeout=self._timeout,
             )
             status = response.status_code

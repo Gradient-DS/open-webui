@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { AUDIO_API_BASE_URL } from '$lib/constants';
 
 export const getAudioConfig = async (token: string) => {
@@ -76,6 +77,7 @@ export const transcribeAudio = async (token: string, file: File, language?: stri
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
+			'Accept-Language': i18next.resolvedLanguage ?? i18next.language ?? 'en-US',
 			authorization: `Bearer ${token}`
 		},
 		body: data
@@ -85,7 +87,7 @@ export const transcribeAudio = async (token: string, file: File, language?: stri
 			return res.json();
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = err.detail?.detail ?? err.detail;
 			console.error(err);
 			return null;
 		});
