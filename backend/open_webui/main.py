@@ -2946,7 +2946,7 @@ async def get_app_config(request: Request):
                         'split_on': config.get('audio.tts.split_on'),
                     },
                     'stt': {
-                        'engine': config.get('audio.stt.engine'),
+                        'engine': 'soev' if model_catalog.is_v2() else config.get('audio.stt.engine'),
                     },
                 },
                 'file': {

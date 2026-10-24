@@ -96,7 +96,9 @@ async def reembed(*, dry_run: bool = False, db=None, embedding_function=None) ->
             function = embedding_function or await build_embedding_function()
             request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(EMBEDDING_FUNCTION=function)))
         user = await Users.get_user_by_id(user_id)
-        await router.reindex_memory_vectors_for_user(request, user_id, memories=memories, user=user)
+        await router.reindex_memory_vectors_for_user(
+            request, user_id, memories=memories, user=user, embedding_function=request.app.state.EMBEDDING_FUNCTION
+        )
         state.reembedded.append(user_id)
         stored = await _vector_ids(router.ASYNC_VECTOR_DB_CLIENT, user_id)
         state.per_user[user_id] = (len(memories), len(stored & expected))
