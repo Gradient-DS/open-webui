@@ -38,9 +38,11 @@
 		fileKind,
 		newestFileVersionIndex,
 		loadPages,
-		isTextPreview
+		isTextPreview,
+		isHtmlPage
 	} from '$lib/utils/deliveredFile';
 	import DeliveredTextPreview from './DeliveredTextPreview.svelte';
+	import DeliveredHtmlFrame from './DeliveredHtmlFrame.svelte';
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import { groupDocuments } from '$lib/utils/documentGroups';
 
@@ -452,6 +454,8 @@
 							itemLabel={fileKind(current.file) === 'PPTX' ? $i18n.t('Slide') : $i18n.t('Page')}
 							listLabel={fileKind(current.file) === 'PPTX' ? $i18n.t('Slides') : $i18n.t('Pages')}
 						/>
+					{:else if current.file.pages === 0 && isHtmlPage(current.file)}
+						<DeliveredHtmlFrame file={current.file} chatId={$chatId} />
 					{:else if current.file.pages === 0 && isTextPreview(current.file)}
 						<DeliveredTextPreview file={current.file} chatId={$chatId} />
 					{:else if current.file.pages === 0}

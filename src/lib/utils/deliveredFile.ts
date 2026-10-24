@@ -98,6 +98,13 @@ const TEXT_TYPES = ['text/csv', 'text/plain', 'text/markdown', 'application/json
 export const isTextPreview = (file: DeliveredFile): boolean =>
 	TEXT_TYPES.includes(file.content_type) && file.size <= SHOWN_TEXT_BYTES;
 
+/** [Gradient] The largest delivered HTML page the panel runs; plotly's own script is about 5 MB of it. */
+const SHOWN_HTML_BYTES = 25 * 1024 * 1024;
+
+/** True for a delivered HTML page small enough to show in the panel. */
+export const isHtmlPage = (file: DeliveredFile): boolean =>
+	file.content_type === 'text/html' && file.size <= SHOWN_HTML_BYTES;
+
 /** The delivered file as text. Throws when it cannot be read. */
 export const loadText = async (file: DeliveredFile, chatId: string): Promise<string> =>
 	await (await officeBlob(file, chatId, 'file')).text();

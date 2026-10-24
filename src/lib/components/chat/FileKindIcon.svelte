@@ -12,6 +12,9 @@
 		PNG: ['IMG', '#7C3AED'],
 		JPG: ['IMG', '#7C3AED'],
 		SVG: ['SVG', '#7C3AED'],
+		GIF: ['IMG', '#7C3AED'],
+		WEBP: ['IMG', '#7C3AED'],
+		HTML: ['WEB', '#0E7490'],
 		ZIP: ['ZIP', '#6B7280']
 	};
 	$: label = LABELS[kind];
