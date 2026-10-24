@@ -3682,3 +3682,18 @@ def test_workspace_status_lists_three_names_then_counts_the_rest(arguments, expe
         }
     }
     assert turn.tool_status('workspace_task', arguments) == {'action': 'workspace_task', **expected}
+
+
+@pytest.mark.parametrize(
+    'name,shown',
+    [
+        ('report\u202excod.exe', 'reportxcod.exe'),
+        ('deck\u2066.pptx\u2069', 'deck.pptx'),
+        ('zero\u200bwidth.csv', 'zerowidth.csv'),
+        ('../notes\\a.txt', '.._notes_a.txt'),
+        ('\u202e\x07 ', 'file'),
+    ],
+)
+def test_delivered_file_names_lose_hidden_characters(name, shown):
+    element = {'id': 'e', 'name': name, 'content_type': 'text/plain', 'size': 1, 'pages': [], 'version': 1}
+    assert agent_v2._workspace_attachment(element, 'thread')['name'] == shown

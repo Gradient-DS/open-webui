@@ -35,6 +35,14 @@ export const isDeliveredFile = (file: any): file is DeliveredFile => {
 	return false;
 };
 
+// Control, format (bidi overrides, zero-width) and line/paragraph separator characters.
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+
+/** [Gradient] The file's name as shown and saved: without characters that hide or reorder what it says (a right-to-left
+ * override can make `report\u202Excod.exe` read as `reportexe.docx`), and without path separators. */
+export const deliveredFileName = (file: Pick<DeliveredFile, 'name'>): string =>
+	file.name.replace(HIDDEN, '').replace(/[/\\]/g, '_').trim() || 'file';
+
 const workspaceBlob = async (file: DeliveredFile, chatId: string, part: string): Promise<Blob> => {
 	const response = await fetch(
 		`${WEBUI_API_BASE_URL}/chats/${encodeURIComponent(chatId)}/workspace/${encodeURIComponent(file.element_id)}/${part}`,
@@ -110,12 +118,12 @@ export const loadText = async (file: DeliveredFile, chatId: string): Promise<str
 /** Throws when the file cannot be read. */
 export const downloadDeliveredFile = async (file: DeliveredFile, chatId: string): Promise<void> => {
 	const data = await workspaceBlob(file, chatId, 'file');
-	saveAs(data, file.name);
+	saveAs(data, deliveredFileName(file));
 };
 
 /** The file's type as its extension, e.g. PPTX. */
 export const fileKind = (file: DeliveredFile): string =>
-	(file.name.split('.').pop() ?? '').toUpperCase();
+	(deliveredFileName(file).split('.').pop() ?? '').toUpperCase();
 
 export const newestFileVersionIndex = (
 	contents: Array<{ file?: DeliveredFile }>,

@@ -12,6 +12,7 @@
 	import Download from '$lib/components/icons/Download.svelte';
 	import DocumentCard from './Markdown/DocumentCard.svelte';
 	import {
+		deliveredFileName,
 		downloadDeliveredFile,
 		loadImage,
 		pngBlob,
@@ -61,10 +62,10 @@
 </script>
 
 {#if failed}
-	<DocumentCard title={file.name} {file} {chatId} />
+	<DocumentCard title={deliveredFileName(file)} {file} {chatId} />
 {:else if src}
 	<div class="group relative max-w-md">
-		<img {src} alt={file.name} class="w-full rounded-lg" />
+		<img {src} alt={deliveredFileName(file)} class="w-full rounded-lg" />
 		<div
 			class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition"
 		>

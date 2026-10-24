@@ -1006,10 +1006,17 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
 WORKSPACE_FILE = 'workspace-file'
 
 
+def _shown_name(name: str) -> str:
+    """[Gradient] A delivered file's name without characters that hide or reorder what it says (bidi overrides,
+    zero-width, controls) and without path separators; the frontend applies the same rule to stored names."""
+    kept = ''.join(char for char in name if unicodedata.category(char) not in {'Cc', 'Cf', 'Zl', 'Zp'})
+    return re.sub(r'[/\\]', '_', kept).strip() or 'file'
+
+
 def _workspace_attachment(element: dict[str, Any], thread_id: str) -> dict[str, Any]:
     return {
         'type': 'workspace',
-        'name': element['name'],
+        'name': _shown_name(element['name']),
         'content_type': element['content_type'],
         'size': element['size'],
         'thread_id': thread_id,

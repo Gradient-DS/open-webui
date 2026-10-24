@@ -70,7 +70,7 @@
 	import ConnectOneDrive from './ConnectOneDrive.svelte';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import DocumentCard from './Markdown/DocumentCard.svelte';
-	import { isDeliveredFile, isShownImage } from '$lib/utils/deliveredFile';
+	import { deliveredFileName, isDeliveredFile, isShownImage } from '$lib/utils/deliveredFile';
 	import DeliveredImage from './DeliveredImage.svelte';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
 	import { fade } from 'svelte/transition';
@@ -1207,7 +1207,7 @@
 										{#if isDeliveredFile(file) && isShownImage(file)}
 											<DeliveredImage {file} {chatId} />
 										{:else if isDeliveredFile(file)}
-											<DocumentCard title={file.name} {file} {chatId} />
+											<DocumentCard title={deliveredFileName(file)} {file} {chatId} />
 										{:else if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 											<Image src={file.url} alt={file.name || $i18n.t('Generated Image')} />
 										{:else}

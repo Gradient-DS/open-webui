@@ -6,6 +6,7 @@ vi.mock('file-saver', () => ({ default: { saveAs } }));
 vi.mock('$lib/constants', () => ({ WEBUI_API_BASE_URL: '/api/v1' }));
 
 import {
+	deliveredFileName,
 	downloadDeliveredFile,
 	fileKind,
 	isDeliveredFile,
@@ -68,6 +69,23 @@ describe('delivered files', () => {
 			credentials: 'include'
 		});
 		expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'deck.pptx');
+	});
+
+	it.each([
+		['report\u202Excod.exe', 'reportxcod.exe'],
+		['deck\u2066.pptx\u2069', 'deck.pptx'],
+		['zero\u200bwidth\u200f.csv', 'zerowidth.csv'],
+		['line\nbreak\u2028.txt', 'linebreak.txt'],
+		['../../etc\\passwd', '.._.._etc_passwd'],
+		['\u202e\u0007 ', 'file']
+	])('shows and saves %j as %j', async (name, expected) => {
+		expect(deliveredFileName({ name })).toBe(expected);
+		await downloadDeliveredFile({ ...workspace, name }, 'chat');
+		expect(saveAs).toHaveBeenLastCalledWith(expect.any(Blob), expected);
+	});
+
+	it('takes the kind from the shown name', () => {
+		expect(fileKind({ ...workspace, name: 'invoice\u202Efdp.exe' })).toBe('EXE');
 	});
 
 	it('loads one-based page routes in parallel and preserves their order', async () => {

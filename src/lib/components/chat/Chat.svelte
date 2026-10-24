@@ -14,7 +14,7 @@
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { isDeliveredFile } from '$lib/utils/deliveredFile';
+	import { deliveredFileName, isDeliveredFile } from '$lib/utils/deliveredFile';
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -2339,7 +2339,7 @@
 				docs = [
 					...docs,
 					...delivered.map((file) => ({
-						title: file.name,
+						title: deliveredFileName(file),
 						content: '',
 						format: 'markdown' as const,
 						done: true,
