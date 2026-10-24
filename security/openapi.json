@@ -13744,6 +13744,43 @@
         "title": "PinMessageForm",
         "type": "object"
       },
+      "PlatformRetentionConfigForm": {
+        "additionalProperties": false,
+        "properties": {
+          "temporary_idle_hours": {
+            "anyOf": [
+              {
+                "maximum": 720.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temporary Idle Hours"
+          },
+          "thread_idle_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Idle Days"
+          }
+        },
+        "required": [
+          "temporary_idle_hours",
+          "thread_idle_days"
+        ],
+        "title": "PlatformRetentionConfigForm",
+        "type": "object"
+      },
       "ProcessFileForm": {
         "properties": {
           "collection_name": {
@@ -31955,7 +31992,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DataRetentionConfigForm"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DataRetentionConfigForm"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PlatformRetentionConfigForm"
+                  }
+                ],
+                "title": "Form Data"
               }
             }
           },

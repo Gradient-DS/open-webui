@@ -767,7 +767,19 @@ async def delete_folder_by_id(
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
 
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    chat_ids = []
+    if v2_enabled() and delete_contents:
+        from open_webui.soev.agent_threads import delete_chats_threads, deletion_chat_ids
+
+        chat_ids = await deletion_chat_ids(folder_owner_id, folder_ids=folder_ids, db=db)
+        await delete_chats_threads(folder_owner_id, chat_ids, db=db)
     await folder_sharing.check_delete(user.id, folder_owner_id, folder_ids)
+
+    if v2_enabled() and delete_contents:
+        for chat_id in chat_ids:
+            await Chats.soft_delete_by_id(chat_id, db=db)
 
     folders = []
     folders.append(folder)

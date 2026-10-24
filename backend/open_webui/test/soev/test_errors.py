@@ -14,6 +14,34 @@ from open_webui.soev.client import SoevApiError
     [
         (
             403,
+            'policy_forbids',
+            'offboarding:console',
+            'Offboarding happens in the soev console',
+            'Uitdiensttreding gebeurt in de soev-console',
+        ),
+        (
+            403,
+            'policy_forbids',
+            'automations:unavailable',
+            'Automations are not available yet',
+            'Automatiseringen zijn nog niet beschikbaar',
+        ),
+        (
+            403,
+            'policy_forbids',
+            'thread:owner_request',
+            'Delete this conversation in the soev console or sign in as its owner.',
+            'Verwijder dit gesprek in de soev-console of meld je aan als de eigenaar.',
+        ),
+        (
+            422,
+            'invalid_field',
+            'retention:rules',
+            'Choose valid retention periods or leave them empty to disable deletion.',
+            'Kies geldige bewaartermijnen of laat ze leeg om verwijdering uit te schakelen.',
+        ),
+        (
+            403,
             'scope_insufficient',
             'collection:access_owner',
             'Only the owner can change access to this knowledge base.',
