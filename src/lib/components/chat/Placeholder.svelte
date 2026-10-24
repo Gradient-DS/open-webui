@@ -61,7 +61,6 @@
 	export let documentWriterEnabled = true;
 	export let documentWriterRequired = false;
 	export let officeEnabled = false;
-	export let officeEditEnabled = false;
 	export let webSearchEnabled = false;
 	export let webSearchRequired = false;
 	export let toolApprovalMode = 'full';
@@ -277,7 +276,6 @@
 						bind:documentWriterEnabled
 						bind:documentWriterRequired
 						bind:officeEnabled
-						bind:officeEditEnabled
 						bind:webSearchEnabled
 						bind:webSearchRequired
 						bind:atSelectedModel

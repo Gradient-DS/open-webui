@@ -14,7 +14,6 @@ from open_webui.config import (
     FEATURE_ARTIFACTS,
     FEATURE_DOCUMENT_WRITER,
     FEATURE_OFFICE,
-    FEATURE_OFFICE_EDIT,
     FEATURE_PLAYGROUND,
     FEATURE_CHAT_OVERVIEW,
     FEATURE_NOTES_AI_CONTROLS,
@@ -43,7 +42,6 @@ Feature = Literal[
     'artifacts',
     'document_writer',
     'office',
-    'office_edit',
     'playground',
     'chat_overview',
     'notes_ai_controls',
@@ -72,7 +70,6 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     'artifacts': FEATURE_ARTIFACTS,
     'document_writer': FEATURE_DOCUMENT_WRITER,
     'office': FEATURE_OFFICE,
-    'office_edit': FEATURE_OFFICE_EDIT,
     'playground': FEATURE_PLAYGROUND,
     'chat_overview': FEATURE_CHAT_OVERVIEW,
     'notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
@@ -144,16 +141,14 @@ async def gate_office_features(features: dict, capabilities: dict, user) -> dict
     from open_webui.utils.access_control import has_permission
 
     features = dict(features)
-    for feature in ('office', 'office_edit'):
-        features[feature] = bool(
-            features.get(feature)
-            and capabilities.get(feature, False)
-            and is_feature_enabled(feature)
-            and await Config.get(f'{feature}.enable')
-            and (
-                user.role == 'admin'
-                or await has_permission(user.id, f'features.{feature}', await Config.get('user.permissions'))
-            )
+    features['office'] = bool(
+        features.get('office')
+        and capabilities.get('office', False)
+        and is_feature_enabled('office')
+        and await Config.get('office.enable')
+        and (
+            user.role == 'admin'
+            or await has_permission(user.id, 'features.office', await Config.get('user.permissions'))
         )
-    features['office_edit'] = features['office'] and features['office_edit']
+    )
     return features

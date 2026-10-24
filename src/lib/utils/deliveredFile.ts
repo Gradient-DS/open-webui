@@ -54,6 +54,54 @@ export const loadPages = async (file: DeliveredFile, chatId: string): Promise<st
 	return pages.map((page) => URL.createObjectURL(page));
 };
 
+/** [Gradient] The largest delivered picture shown in the chat; a larger one stays a card. */
+const SHOWN_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/** True for a delivered PNG or JPEG small enough to show in the chat. */
+export const isShownImage = (file: DeliveredFile): boolean =>
+	['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'].includes(
+		file.content_type
+	) && file.size <= SHOWN_IMAGE_BYTES;
+
+/** The delivered picture as a data URL, loaded with the user's token. Throws when it cannot be read. */
+export const loadImage = async (file: DeliveredFile, chatId: string): Promise<string> => {
+	const data = await officeBlob(file, chatId, 'file');
+	return await new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onload = () => resolve(reader.result as string);
+		reader.onerror = () => reject(reader.error);
+		reader.readAsDataURL(new Blob([data], { type: file.content_type }));
+	});
+};
+
+/** A loaded picture as PNG for the clipboard, drawn on a canvas unless it is one already;
+ * an animation gives its first frame, an SVG is drawn at its own size. */
+export const pngBlob = async (dataUrl: string): Promise<Blob> => {
+	if (dataUrl.startsWith('data:image/png')) return await (await fetch(dataUrl)).blob();
+	const image = new Image();
+	image.src = dataUrl;
+	await image.decode();
+	const canvas = document.createElement('canvas');
+	canvas.width = image.naturalWidth || 800;
+	canvas.height = image.naturalHeight || 600;
+	canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
+	return await new Promise((resolve, reject) =>
+		canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('no PNG'))), 'image/png')
+	);
+};
+
+/** [Gradient] The largest delivered text file the panel shows. */
+const SHOWN_TEXT_BYTES = 5 * 1024 * 1024;
+const TEXT_TYPES = ['text/csv', 'text/plain', 'text/markdown', 'application/json'];
+
+/** True for a delivered CSV, text, markdown or JSON file small enough to preview. */
+export const isTextPreview = (file: DeliveredFile): boolean =>
+	TEXT_TYPES.includes(file.content_type) && file.size <= SHOWN_TEXT_BYTES;
+
+/** The delivered file as text. Throws when it cannot be read. */
+export const loadText = async (file: DeliveredFile, chatId: string): Promise<string> =>
+	await (await officeBlob(file, chatId, 'file')).text();
+
 /** Throws when the file cannot be read. */
 export const downloadDeliveredFile = async (file: DeliveredFile, chatId: string): Promise<void> => {
 	const data = await officeBlob(file, chatId, 'file');

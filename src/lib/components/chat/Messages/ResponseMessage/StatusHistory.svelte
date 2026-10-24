@@ -66,6 +66,10 @@
 			: null;
 	$: historyItems = history.filter((item) => !isSummary(item));
 	$: expandable = historyItems.length > (isSummary(status) ? 0 : 1);
+	// [Gradient] A block of nothing but one reasoning step (the thinking before the model's first words) has no
+	// list to open: it is shown as its own reasoning row, which opens to the reasoning, instead of a header whose
+	// toggle shows nothing.
+	$: loneReasoning = !blockSummary && historyItems.length === 1 && isReasoning(historyItems[0]);
 	// [Gradient] A step that is still running keeps the block shimmering, also while a
 	// subagent thinks between its own steps under a running Office call.
 	$: blockRunning = !messageDone && history.some((item) => item?.done === false);
@@ -96,7 +100,18 @@
 <!-- [Gradient] Visibility is decided one level up by ResponseMessage's
      shouldShowStatusHistory, whose OR lets live tool activity win over a hidden
      tail status. Upstream's unconditional inner gate defeated that OR. -->
-{#if history && history.length > 0}
+{#if history && history.length > 0 && loneReasoning}
+	<div class="text-[0.9375rem] flex flex-col w-full my-1 text-gray-500">
+		<ReasoningBullet
+			id={`${id}-reasoning`}
+			summary={historyItems[0].summary}
+			body={historyItems[0].body}
+			attributes={messageDone && historyItems[0]?.attributes?.done !== 'true'
+				? { ...(historyItems[0].attributes ?? {}), done: 'true' }
+				: (historyItems[0].attributes ?? {})}
+		/>
+	</div>
+{:else if history && history.length > 0}
 	<div class="text-[0.9375rem] flex flex-col w-full my-1">
 		<button
 			class="w-full text-left text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"

@@ -35,8 +35,7 @@ WEB_SEARCH_OFF = {
     'attach_live_document': 'off',
     'search_mail': 'off',
     'read_mail': 'off',
-    'create_office_file': 'off',
-    'edit_office_file': 'off',
+    'workspace_task': 'off',
 }
 
 
@@ -3493,21 +3492,10 @@ async def test_a_delivered_office_file_is_attached_without_copying_bytes(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('office,office_edit', [(False, False), (False, True), (True, False), (True, True)])
-async def test_office_toggles_always_send_both_tool_states(chat: Chat, office, office_edit) -> None:
-    await chat.turn(
-        'question',
-        'a1',
-        features={
-            'office': office,
-            'office_edit': office_edit,
-        },
-    )
-    expected = {
-        **WEB_SEARCH_OFF,
-        'create_office_file': 'auto' if office else 'off',
-        'edit_office_file': 'auto' if office and office_edit else 'off',
-    }
+@pytest.mark.parametrize('office', [False, True])
+async def test_workspace_toggle_always_sends_the_workspace_tool_state(chat: Chat, office) -> None:
+    await chat.turn('question', 'a1', features={'office': office})
+    expected = {**WEB_SEARCH_OFF, 'workspace_task': 'auto' if office else 'off'}
     assert chat.mutations()[-1][1]['input']['tools'] == expected
 
 
@@ -3551,7 +3539,7 @@ def test_an_original_office_attachment_has_no_parent():
 
 @pytest.mark.asyncio
 async def test_a_subagents_tool_calls_show_as_statuses_by_their_own_ids(declared: Chat) -> None:
-    child = 'root/create_office_file#0@2'
+    child = 'root/delegate_task#0@2'
     path = {'path': 'argument.path'}
     writing = {
         'running': {'template': 'Writing {{path}}...', 'params': path},
@@ -3561,7 +3549,7 @@ async def test_a_subagents_tool_calls_show_as_statuses_by_their_own_ids(declared
     _, payload = call('write_file', path='/workspace/deck.html', content='x')
     declared.api.chat.turns = [
         [
-            call('create_office_file', kind='pptx', brief='b', language='nl'),
+            call('delegate_task', brief='b', language='nl'),
             (f'model_output@{child}', payload),
             (f'tool_output@{child}', {'call_id': 'c1', 'text': 'ok'}),
             ('tool_output', {'call_id': 'c1', 'error': 'no file'}),
@@ -3576,3 +3564,79 @@ async def test_a_subagents_tool_calls_show_as_statuses_by_their_own_ids(declared
     assert (f'{child}:c1', 'Wrote {{path}}', True) in shown
     assert [call_id for call_id, _, done in shown if done].count('c1') == 1
     assert content(chunks).endswith('Helaas.')
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_task_rolls_its_steps_into_its_own_line(declared: Chat) -> None:
+    child = 'root/workspace_task#0@2'
+    agent_v2.TOOL_STATUS_CACHE['statuses'] = {
+        **STATUSES,
+        'workspace_task': {'running': {'template': 'Working...', 'params': {}}},
+        'bash': {
+            'running': {
+                'template': '{{description}}...',
+                'params': {'description': 'argument.description'},
+            }
+        },
+    }
+    _, first = call('bash', description='Grafiek maken', command='python a.py')
+    _, second = call('bash', description='Docx bouwen', command='python b.py')
+    declared.api.chat.turns = [
+        [
+            call('workspace_task', task='t', language='nl'),
+            (f'model_output@{child}', first),
+            (f'tool_output@{child}', {'call_id': 'c1', 'text': 'ok'}),
+            (f'model_output@{child}', second),
+            (f'tool_output@{child}', {'call_id': 'c1', 'text': 'ok'}),
+            ('tool_output', {'call_id': 'c1', 'text': 'Delivered.'}),
+            ('model_output', {'content': 'Klaar.'}),
+        ]
+    ]
+
+    await declared.turn('Maak een grafiek', 'a1')
+
+    shown = [(s['call_id'], s['description'], s['done']) for s in statuses(declared)]
+    assert {call_id for call_id, _, _ in shown} == {'c1'}
+    assert [description for _, description, _ in shown] == [
+        'Working...',
+        'Working...',
+        'Working...',
+        'Worked in the sandbox for {{duration}}',
+    ]
+    steps = [s['step']['description'] for s in statuses(declared) if 'step' in s]
+    assert steps == ['Grafiek maken', 'Docx bouwen']
+    (worked,) = [s for s in statuses(declared) if s['done']]
+    assert 'step' not in worked
+    assert worked['duration']
+    (summary,) = [e['data'] for e in declared.socket if e['type'] == 'status' and e['data'].get('action') == 'summary']
+    assert summary['description'].startswith('1 tool ')
+
+
+@pytest.mark.asyncio
+async def test_a_note_on_a_delivered_file_cites_that_file_for_the_panel(chat: Chat) -> None:
+    office = {
+        'type': 'office-file',
+        'id': 'chart-element',
+        'name': 'chart.png',
+        'content_type': 'image/png',
+        'size': 4,
+        'sha256': 'a' * 64,
+        'key': 'owner/office/chart-element/file.png',
+        'pages': [],
+        'version': 1,
+    }
+    note = {
+        'type': 'file-note',
+        'id': 'chart-element:note',
+        'ref': 'chart-element',
+        'name': 'chart.png',
+        'text': 'A chart.',
+    }
+    chat.api.chat.turns = [[found(office, note), answered('Hier is de grafiek', cited(18, 'chart-element:note'))]]
+
+    assert content(await chat.turn('Maak een grafiek', 'a1')) == 'Hier is de grafiek [1]'
+
+    source = next(event['data'] for event in chat.socket if event['type'] == 'source')
+    assert source['source']['name'] == 'chart.png'
+    assert source['source']['delivered_file']['element_id'] == 'chart-element'
+    assert source['source']['delivered_file']['type'] == 'office'

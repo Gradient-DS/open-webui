@@ -40,12 +40,8 @@
 			description: $i18n.t('Model can write and create downloadable documents')
 		},
 		office: {
-			label: $i18n.t('Create Office files'),
-			description: $i18n.t('Model can create Office files')
-		},
-		office_edit: {
-			label: $i18n.t('Edit Office files'),
-			description: $i18n.t('Model can edit Office files made in this conversation')
+			label: $i18n.t('Workspace'),
+			description: $i18n.t('Model can work in the workspace: run code and make files')
 		},
 		live_documents: {
 			label: $i18n.t('OneDrive search'),
@@ -93,13 +89,11 @@
 
 	const setCapability = (capability: Capability, checked: boolean) => {
 		capabilities[capability] = checked;
-		if (capability === 'office' && !checked) capabilities.office_edit = false;
 		capabilities = capabilities;
 	};
 
 	// Hide file_context when file_upload is disabled
 	$: visibleCapabilities = (Object.keys(capabilityLabels) as Capability[]).filter((cap) => {
-		if (cap === 'office_edit' && !capabilities.office) return false;
 		if (cap === 'file_context' && !capabilities.file_upload) {
 			return false;
 		}

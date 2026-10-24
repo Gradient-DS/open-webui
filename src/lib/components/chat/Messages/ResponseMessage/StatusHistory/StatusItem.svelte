@@ -5,6 +5,7 @@
 	import Search from '$lib/components/icons/Search.svelte';
 	import { t } from 'i18next';
 	import { statusI18nParams } from './statusI18nParams';
+	import TypedText from '$lib/components/common/TypedText.svelte';
 
 	export let status = null;
 	export let done = false;
@@ -205,6 +206,17 @@
 						)}
 					{/if}
 				</div>
+				<!-- [Gradient] A rolled subagent's current step, under its delegation's line while it runs. -->
+				{#if status?.step?.description && (done || status?.done) === false}
+					<div class="text-gray-400 dark:text-gray-500 text-xs line-clamp-1 pt-0.5">
+						<TypedText
+							text={$i18n.t(
+								status.step.description,
+								statusI18nParams(status.step, (key) => $i18n.t(key))
+							)}
+						/>
+					</div>
+				{/if}
 			</div>
 		{/if}
 	</div>

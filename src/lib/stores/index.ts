@@ -404,9 +404,7 @@ type Config = {
 		enable_login_form: boolean;
 		enable_web_search?: boolean;
 		enable_office?: boolean;
-		enable_office_edit?: boolean;
 		feature_office?: boolean;
-		feature_office_edit?: boolean;
 		enable_web_search_confirmation?: boolean;
 		web_search_confirmation_content?: string;
 		enable_google_drive_integration: boolean;

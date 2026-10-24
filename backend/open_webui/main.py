@@ -75,7 +75,6 @@ from open_webui.config import (
     FEATURE_CHAT_OVERVIEW,
     FEATURE_DOCUMENT_WRITER,
     FEATURE_OFFICE,
-    FEATURE_OFFICE_EDIT,
     FEATURE_INPUT_MENU,
     FEATURE_KNOWLEDGE,
     FEATURE_MODEL_METERS,
@@ -2685,7 +2684,6 @@ async def get_app_config(request: Request):
         'rag.file.allowed_extensions',
         'document_writer.enable',
         'office.enable',
-        'office_edit.enable',
         'ui.enable_citation_relevance',
         'ui.enable_citation_text_highlight',
         'evaluation.feedback.layer2.enable',
@@ -2783,10 +2781,6 @@ async def get_app_config(request: Request):
                     'enable_code_interpreter': config.get('code_interpreter.enable'),
                     'enable_document_writer': config.get('document_writer.enable'),  # [Gradient]
                     'enable_office': FEATURE_OFFICE and config.get('office.enable'),  # [Gradient]
-                    'enable_office_edit': FEATURE_OFFICE
-                    and FEATURE_OFFICE_EDIT
-                    and config.get('office.enable')
-                    and config.get('office_edit.enable'),  # [Gradient]
                     'enable_image_generation': config.get('image_generation.enable'),
                     'enable_autocomplete_generation': config.get('task.autocomplete.enable'),
                     'enable_community_sharing': config.get('ui.enable_community_sharing'),
@@ -2817,7 +2811,6 @@ async def get_app_config(request: Request):
                     'feature_artifacts': FEATURE_ARTIFACTS,
                     'feature_document_writer': FEATURE_DOCUMENT_WRITER,
                     'feature_office': FEATURE_OFFICE,
-                    'feature_office_edit': FEATURE_OFFICE_EDIT,
                     'feature_playground': FEATURE_PLAYGROUND,
                     'feature_chat_overview': FEATURE_CHAT_OVERVIEW,
                     'feature_notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,

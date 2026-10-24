@@ -645,9 +645,9 @@ def _tools(
             'attach_live_document': documents,
             'search_mail': mail,
             'read_mail': mail,
-            # [Gradient] Gated upstream by gate_office_features; off is sent too.
-            'create_office_file': 'auto' if features.get('office') else 'off',
-            'edit_office_file': 'auto' if features.get('office') and features.get('office_edit') else 'off',
+            # [Gradient] The Workspace switch (feature id `office`), gated upstream by
+            # gate_office_features; off is sent too.
+            'workspace_task': 'auto' if features.get('office') else 'off',
         }
     }
 
@@ -967,7 +967,7 @@ async def _as_source(element: dict[str, Any], whole: dict[str, Any] | None) -> d
     in the shape `Citations.add` takes. A whole document's text is a document-granularity source."""
     whole = whole or {}
     properties = {
-        'title': whole.get('title') or whole.get('filename'),
+        'title': whole.get('title') or whole.get('filename') or whole.get('name'),
         'source_id': whole.get('source_id'),
         'source_url': whole.get('source_url'),
         'page_numbers': element.get('pages'),
@@ -1009,6 +1009,12 @@ def _office_attachment(element: dict[str, Any], thread_id: str) -> dict[str, Any
 
 
 _ROOT_STREAM = 'root'
+#: [Gradient] Delegations whose subagent shows one rolling line: each step replaces the call's own line while it
+#: runs, which ends on how long it took, instead of a line per step.
+_ROLLED = frozenset({'workspace_task'})
+#: [Gradient] A subagent's stream: the delegating tool and its call's place in the root output.
+_SUBAGENT = re.compile(r'^root/(?P<tool>[A-Za-z0-9_]+)#(?P<index>\d+)@')
+_WORKED = 'Worked in the sandbox for {{duration}}'
 #: [Claude] The error a call stopped by the tool budget ends with: it never ran.
 _NOT_RUN = 'budget_exceeded'
 
@@ -1044,6 +1050,8 @@ class Citations:
                 'name': name,
                 'url': properties.get('source_url') or ref,
                 **({'provider': source['provider']} if source.get('provider') else {}),
+                # [Gradient] A note on a file the agent delivered opens that file, not the sources panel.
+                **({'delivered_file': source['delivered_file']} if source.get('delivered_file') else {}),
             },
             'document': [source['text']],
             'metadata': [
@@ -1113,6 +1121,8 @@ class AgentTurn:
         self.running: dict[str, tuple[str, dict[str, Any]]] = {}
         # [Claude] The stream each shown call was made in.
         self.call_streams: dict[str, str] = {}
+        # [Gradient] When each running rolled delegation (`_ROLLED`) started.
+        self.rolled_started: dict[str, float] = {}
         # [Claude] Calls of the last model output, shown as running once its reasoning and text are out, so a
         # call's status never lands above the thoughts that led to it.
         self.pending_calls: list[dict] = []
@@ -1245,7 +1255,11 @@ class AgentTurn:
         added = []
         for element in elements:
             if _read(element) and element['id'] not in self.citations.sources:
-                source = self.citations.add(await _as_source(element, self.elements.get(element['ref'])))
+                whole = self.elements.get(element['ref'])
+                read = await _as_source(element, whole)
+                if whole is not None and whole.get('type') == OFFICE_FILE:
+                    read['delivered_file'] = _office_attachment(whole, self.thread_id)
+                source = self.citations.add(read)
                 if source:
                     added.append(source)
         return added
@@ -1306,6 +1320,8 @@ class AgentTurn:
             call_id = _call_key(stream, call['id'])
             self.running[call_id] = (name, arguments)
             self.call_streams[call_id] = stream
+            if name in _ROLLED and stream == _ROOT_STREAM:
+                self.rolled_started[call_id] = time.monotonic()
             status = self.tool_status(name, arguments)
             await self.emit('status', {**status, 'call_id': call_id, 'done': False})
             anchors.append(_marker(status))
@@ -1337,6 +1353,11 @@ class AgentTurn:
             return
         name, arguments = call
         status = self.tool_status(name, arguments, output)
+        started = self.rolled_started.pop(output['call_id'], None)
+        if started is not None and output.get('error') is None:
+            dutch = (self.metadata.get('user_language') or '').lower().startswith('nl')
+            duration = _duration(time.monotonic() - started, dutch)
+            status = {**status, 'description': _WORKED, 'duration': duration}
         self.settling.append({**status, 'call_id': output['call_id'], 'done': True})
 
     async def settle(self) -> None:
@@ -1612,6 +1633,8 @@ class AgentTurn:
         in the content as its output lands, so the steps read in the order they happened, before the done line of
         the call that started the subagent. Its answer is that call's output, not text of this message."""
         stream, payload = event.data.get('stream') or '', event.data.get('payload') or {}
+        if (rolled := self.rolled_call(stream)) is not None:
+            return await self.roll(rolled, event.event, payload)
         chunks: list[dict[str, Any]] = []
         if event.event == 'model_output':
             await self.settle()
@@ -1622,6 +1645,28 @@ class AgentTurn:
             self.stop_tools(stream)
         await self.settle()
         return chunks
+
+    def rolled_call(self, stream: str) -> str | None:
+        """[Gradient] The running rolled delegation call a subagent stream belongs to, or None."""
+        match = _SUBAGENT.match(stream)
+        if match is None or match['tool'] not in _ROLLED:
+            return None
+        calls = [call_id for call_id in self.rolled_started if self.running.get(call_id, ('',))[0] == match['tool']]
+        if not calls:
+            return None
+        return calls[min(int(match['index']), len(calls) - 1)]
+
+    async def roll(self, call_id: str, kind: str, payload: dict) -> list[dict[str, Any]]:
+        """[Gradient] Show a rolled subagent's newest step under its delegation's own running line, as `step`; its
+        steps are not counted as calls and leave no line of their own, and the done line has no step."""
+        if kind != 'model_output':
+            return []
+        name, arguments = self.running[call_id]
+        running = self.tool_status(name, arguments)
+        for call in payload.get('tool_calls', []):
+            step = self.tool_status(call['name'], call.get('arguments') or {})
+            await self.emit('status', {**running, 'step': step, 'call_id': call_id, 'done': False})
+        return []
 
     async def model_output(self, payload: dict) -> list[dict[str, Any]]:
         await self.settle()

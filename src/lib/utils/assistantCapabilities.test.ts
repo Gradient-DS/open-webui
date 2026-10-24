@@ -13,7 +13,6 @@ const ALL_ON: AssistantToggles = {
 	code_interpreter: true,
 	document_writer: true,
 	office: true,
-	office_edit: true,
 	live_documents: true,
 	live_mail: true,
 	vision: true,
@@ -26,7 +25,6 @@ const ALL_OFF: AssistantToggles = {
 	code_interpreter: false,
 	document_writer: false,
 	office: false,
-	office_edit: false,
 	live_documents: false,
 	live_mail: false,
 	vision: false,
@@ -86,8 +84,7 @@ describe('round-trip togglesFromMeta(applyToggles(...))', () => {
 		ALL_OFF,
 		{ ...ALL_OFF, web_search: true, citations: true },
 		{ ...ALL_OFF, document_writer: true, vision: true },
-		{ ...ALL_OFF, office: true },
-		{ ...ALL_OFF, office: true, office_edit: true }
+		{ ...ALL_OFF, office: true }
 	]) {
 		it(`is identity for ${JSON.stringify(sample)}`, () => {
 			expect(togglesFromMeta(applyToggles({}, sample))).toEqual(sample);
@@ -105,22 +102,12 @@ describe('togglesFromMeta', () => {
 	});
 });
 
-describe('Office toggles', () => {
-	it('maps both Office toggles to capabilities and default features without builtin tools', () => {
-		const meta = applyToggles({}, { ...ALL_OFF, office: true, office_edit: true });
-		expect(meta.capabilities).toMatchObject({ office: true, office_edit: true });
-		expect(meta.defaultFeatureIds).toEqual(['office', 'office_edit']);
+describe('Workspace toggle', () => {
+	it('maps the Workspace toggle to a capability and a default feature without a builtin tool', () => {
+		const meta = applyToggles({}, { ...ALL_OFF, office: true });
+		expect(meta.capabilities.office).toBe(true);
+		expect(meta.defaultFeatureIds).toEqual(['office']);
 		expect(meta.builtinTools.office).toBeUndefined();
-		expect(meta.builtinTools.office_edit).toBeUndefined();
-	});
-	it('clears editing when creation is off, including stale default features', () => {
-		const meta = applyToggles(
-			{ defaultFeatureIds: ['office', 'office_edit', 'custom'] },
-			{ ...ALL_OFF, office_edit: true }
-		);
-		expect(meta.capabilities).toMatchObject({ office: false, office_edit: false });
-		expect(meta.defaultFeatureIds).toEqual(['custom']);
-		expect(togglesFromMeta({ capabilities: { office_edit: true } })).toEqual(ALL_OFF);
 	});
 });
 

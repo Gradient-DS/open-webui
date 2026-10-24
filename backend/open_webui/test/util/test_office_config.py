@@ -29,30 +29,26 @@ def client(monkeypatch):
         yield client, values
 
 
-@pytest.mark.parametrize('office,editing', [(False, False), (False, True), (True, False), (True, True)])
-def test_office_runtime_settings_round_trip_through_admin_endpoint(client, office, editing):
+@pytest.mark.parametrize('office', [False, True])
+def test_office_runtime_settings_round_trip_through_admin_endpoint(client, office):
     api, values = client
     response = api.get('/code_execution')
     assert response.status_code == 200
-    payload = {**response.json(), 'ENABLE_OFFICE': office, 'ENABLE_OFFICE_EDIT': editing}
+    payload = {**response.json(), 'ENABLE_OFFICE': office}
     updated = api.post('/code_execution', json=payload)
     assert updated.status_code == 200
     assert updated.json()['ENABLE_OFFICE'] is office
-    assert updated.json()['ENABLE_OFFICE_EDIT'] is (office and editing)
     assert values['office.enable'] is office
-    assert values['office_edit.enable'] is (office and editing)
     assert api.get('/code_execution').json() == updated.json()
 
 
 def test_older_settings_clients_preserve_new_fields(client):
     api, values = client
-    values.update({'office.enable': False, 'office_edit.enable': False, 'document_writer.enable': True})
+    values.update({'office.enable': False, 'document_writer.enable': True})
     payload = api.get('/code_execution').json()
-    for key in ['ENABLE_OFFICE', 'ENABLE_OFFICE_EDIT']:
-        payload.pop(key)
+    payload.pop('ENABLE_OFFICE')
     assert api.post('/code_execution', json=payload).status_code == 200
     assert values['office.enable'] is False
-    assert values['office_edit.enable'] is False
     assert values['document_writer.enable'] is True
 
 

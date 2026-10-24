@@ -9,7 +9,6 @@
 	import Terminal from '$lib/components/icons/Terminal.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
 	import PagePlus from '$lib/components/icons/PagePlus.svelte';
-	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
 	import Eye from '$lib/components/icons/Eye.svelte';
@@ -27,8 +26,7 @@
 		{ key: 'image_generation', icon: Photo, label: 'Generate images' },
 		{ key: 'code_interpreter', icon: Terminal, label: 'Run code & analyze data' },
 		{ key: 'document_writer', icon: Document, label: 'Document writer' },
-		{ key: 'office', icon: PagePlus, label: 'Create Office files' },
-		{ key: 'office_edit', icon: PageEdit, label: 'Edit Office files' },
+		{ key: 'office', icon: PagePlus, label: 'Workspace' },
 		{ key: 'live_documents', icon: OneDriveSearch, label: 'OneDrive search' },
 		{ key: 'live_mail', icon: MailSearch, label: 'Mail search' },
 		{ key: 'vision', icon: Eye, label: 'Understand images' },
@@ -36,12 +34,7 @@
 		{ key: 'citations', icon: Link, label: 'Show sources' }
 	];
 
-	$: rows = allRows.filter(
-		(row) =>
-			!(row.key === 'office_edit' && !toggles.office) &&
-			simpleCapabilityOffered(row.key, $config?.features)
-	);
-	$: if (!toggles.office && toggles.office_edit) toggles.office_edit = false;
+	$: rows = allRows.filter((row) => simpleCapabilityOffered(row.key, $config?.features));
 </script>
 
 <div class="flex flex-col gap-2.5">

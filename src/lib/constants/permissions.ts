@@ -70,7 +70,6 @@ export const DEFAULT_PERMISSIONS = {
 		code_interpreter: true,
 		document_writer: true,
 		office: true,
-		office_edit: true,
 		memories: true,
 		automations: false,
 		calendar: true,

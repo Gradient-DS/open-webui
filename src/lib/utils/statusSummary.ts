@@ -18,9 +18,7 @@ const PHRASES: Array<{ actions: string[]; one: string; many: string }> = [
 		actions: ['open_document', 'list_documents'],
 		one: 'read a document',
 		many: 'read {{count}} documents'
-	},
-	{ actions: ['create_office_file'], one: 'created a file', many: 'created {{count}} files' },
-	{ actions: ['edit_office_file'], one: 'edited a file', many: 'edited {{count}} files' }
+	}
 ];
 
 const OTHER = { one: 'took a step', many: 'took {{count}} steps' };
@@ -45,10 +43,7 @@ export const describeBlock = (items: Item[], t: Translate): string | null => {
 			const count = counts.get(p.one) ?? 0;
 			return count === 1 ? t(p.one) : t(p.many, { count });
 		}),
-		// An Office agent's own steps are the making of its file.
-		...(other && !counts.has('created a file') && !counts.has('edited a file')
-			? [other === 1 ? t(OTHER.one) : t(OTHER.many, { count: other })]
-			: [])
+		...(other ? [other === 1 ? t(OTHER.one) : t(OTHER.many, { count: other })] : [])
 	];
 	if (parts.length === 0 || (parts.length === 1 && items.length <= 1)) return null;
 	const sentence =

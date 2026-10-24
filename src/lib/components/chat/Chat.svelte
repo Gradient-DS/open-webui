@@ -416,10 +416,8 @@
 		} = value);
 		composerInitialized = true;
 	};
-	// [Gradient] Office creation/editing; not a remembered composer preference.
+	// [Gradient] The Workspace switch (feature id `office`); not a remembered composer preference.
 	let officeEnabled = false;
-	let officeEditEnabled = false;
-	$: if (!officeEnabled) officeEditEnabled = false;
 	let webSearchActive = false;
 	let showWebSearchConfirm = false;
 	let pendingWebSearchPrompt: string | null = null;
@@ -928,7 +926,6 @@
 		files = [];
 		composerInitialized = false;
 		officeEnabled = false;
-		officeEditEnabled = false;
 		acceptedDataWarnings = new Set();
 		contextUsage = null;
 
@@ -1007,7 +1004,6 @@
 		composerInitialized = false;
 		restoreComposerPreferences(composerPreferences($settings.composerTools));
 		officeEnabled = false;
-		officeEditEnabled = false;
 		prompt = '';
 		messageInput?.setText('');
 		await chatId.set('');
@@ -1281,15 +1277,6 @@
 						($user?.role === 'admin' || $user?.permissions?.features?.office)
 					) {
 						officeEnabled = model.info.meta.defaultFeatureIds.includes('office');
-					}
-					if (
-						model.info?.meta?.capabilities?.['office_edit'] &&
-						officeEnabled &&
-						isFeatureEnabled('office_edit') &&
-						$config?.features?.enable_office_edit &&
-						($user?.role === 'admin' || $user?.permissions?.features?.office_edit)
-					) {
-						officeEditEnabled = model.info.meta.defaultFeatureIds.includes('office_edit');
 					}
 				}
 
@@ -2562,8 +2549,6 @@
 		}
 
 		if ($page.url.searchParams.get('office') === 'true') officeEnabled = true;
-		if (officeEnabled && $page.url.searchParams.get('office-edit') === 'true')
-			officeEditEnabled = true;
 
 		if ($page.url.searchParams.get('tools')) {
 			selectedToolIds = $page.url.searchParams
@@ -2743,7 +2728,6 @@
 				restoreComposerPreferences(composerFromFeatures(chatContent?.features));
 				lastSavedFeatures = JSON.stringify(currentComposerPreferences());
 				officeEnabled = chatContent?.features?.office ?? false;
-				officeEditEnabled = chatContent?.features?.office_edit ?? false;
 
 				// Load tasks from chat-level DB field
 				chatTasks = chat?.tasks ?? [];
@@ -3400,8 +3384,7 @@
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
 					document_writer: $i18n.t('Document writer'),
-					office: $i18n.t('Create Office files'),
-					office_edit: $i18n.t('Edit Office files'),
+					office: $i18n.t('Workspace'),
 					image_generation: $i18n.t('Image Generation')
 				};
 				const capabilityLabels = warning.capabilities.map(
@@ -3712,7 +3695,6 @@
 			code_interpreter: codeInterpreterEnabled,
 			document_writer: documentWriterEnabled,
 			office: officeEnabled,
-			office_edit: officeEditEnabled,
 			knowledge_local: hasLocalKb,
 			knowledge_external: hasExternalKb
 		};
@@ -4003,13 +3985,6 @@
 					$config?.features?.enable_office &&
 					($user?.role === 'admin' || $user?.permissions?.features?.office)
 						? officeEnabled
-						: false,
-				office_edit:
-					officeEnabled &&
-					isFeatureEnabled('office_edit') &&
-					$config?.features?.enable_office_edit &&
-					($user?.role === 'admin' || $user?.permissions?.features?.office_edit)
-						? officeEnabled && officeEditEnabled
 						: false,
 				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
 				live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
@@ -4646,8 +4621,7 @@
 			files: structuredClone(chatFiles),
 			features: {
 				...composerFeatures(currentComposerPreferences()),
-				office: officeEnabled,
-				office_edit: officeEditEnabled
+				office: officeEnabled
 			}
 		};
 		if ($chatId !== _chatId || $temporaryChatEnabled) return chatSaveQueue;
@@ -5172,7 +5146,6 @@
 										bind:documentWriterEnabled
 										bind:documentWriterRequired
 										bind:officeEnabled
-										bind:officeEditEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
@@ -5269,7 +5242,6 @@
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:officeEnabled
-										bind:officeEditEnabled
 										{pendingOAuthTools}
 										bind:documentWriterEnabled
 										bind:documentWriterRequired
@@ -5340,7 +5312,6 @@
 									bind:liveMailState
 									bind:documentWriterRequired
 									bind:officeEnabled
-									bind:officeEditEnabled
 									bind:webSearchEnabled
 									bind:webSearchRequired
 									bind:atSelectedModel

@@ -13,7 +13,6 @@ export interface AssistantToggles {
 	code_interpreter: boolean;
 	document_writer: boolean;
 	office: boolean;
-	office_edit: boolean;
 	live_documents: boolean;
 	live_mail: boolean;
 	vision: boolean;
@@ -28,7 +27,6 @@ export const FEATURE_TOGGLES = [
 	'code_interpreter',
 	'document_writer',
 	'office',
-	'office_edit',
 	'live_documents',
 	'live_mail'
 ] as const;
@@ -41,7 +39,6 @@ const CAPABILITY_GATES: Record<string, string[]> = {
 	code_interpreter: ['enable_code_interpreter'],
 	document_writer: ['enable_document_writer', 'feature_document_writer'],
 	office: ['enable_office'],
-	office_edit: ['enable_office', 'enable_office_edit'],
 	live_documents: ['enable_live_documents'],
 	live_mail: ['enable_live_mail'],
 	builtin_tools: ['feature_builtin_tools']
@@ -76,7 +73,6 @@ export function togglesFromMeta(meta: any): AssistantToggles {
 		code_interpreter: !!c.code_interpreter,
 		document_writer: !!c.document_writer,
 		office: !!c.office,
-		office_edit: !!c.office && !!c.office_edit,
 		live_documents: !!c.live_documents,
 		live_mail: !!c.live_mail,
 		vision: !!c.vision,
@@ -96,7 +92,6 @@ export function applyToggles(meta: any, toggles: AssistantToggles): any {
 	capabilities.code_interpreter = toggles.code_interpreter;
 	capabilities.document_writer = toggles.document_writer;
 	capabilities.office = toggles.office;
-	capabilities.office_edit = toggles.office && toggles.office_edit;
 	capabilities.live_documents = toggles.live_documents;
 	capabilities.live_mail = toggles.live_mail;
 	capabilities.vision = toggles.vision;

@@ -139,7 +139,7 @@
 
 {#if file && sharedChat}
 	<p class="text-xs text-gray-500 dark:text-gray-400">
-		{$i18n.t('Office files are not available in shared chats')}
+		{$i18n.t('Files made in the workspace are not available in shared chats')}
 	</p>
 {:else}
 	<!-- svelte-ignore a11y-no-static-element-interactions -->

@@ -1,7 +1,16 @@
 <script lang="ts">
 	import SourceIcon from './Citations/SourceIcon.svelte';
 	import { getContext } from 'svelte';
-	import { config, embed, showControls, showEmbeds } from '$lib/stores';
+	import {
+		config,
+		embed,
+		openDocumentTabSignal,
+		requestedOfficeFile,
+		showControls,
+		showDocument,
+		showEmbeds
+	} from '$lib/stores';
+	import { isDeliveredFile } from '$lib/utils/deliveredFile';
 
 	import CitationModal from './Citations/CitationModal.svelte';
 	import { reduceSources } from './Citations/reduceSources';
@@ -47,6 +56,16 @@
 			}
 		} else {
 			index = sourceId - 1;
+		}
+
+		// [Gradient] A note on a file the agent delivered opens that file in the document panel.
+		const delivered = citations[index]?.source?.delivered_file;
+		if (delivered && isDeliveredFile(delivered)) {
+			requestedOfficeFile.set(delivered);
+			showDocument.set(true);
+			showControls.set(true);
+			openDocumentTabSignal.update((n) => n + 1);
+			return;
 		}
 
 		if (citations[index]) {

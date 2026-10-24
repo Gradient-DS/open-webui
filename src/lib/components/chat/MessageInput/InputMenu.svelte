@@ -55,7 +55,7 @@
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
 	import Document from '$lib/components/icons/Document.svelte';
-	import Grid from '$lib/components/icons/Grid.svelte';
+	import CommandLine from '$lib/components/icons/CommandLine.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import Cube from '$lib/components/icons/Cube.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
@@ -180,7 +180,6 @@
 	// [Gradient] Office files (xlsx, pptx and docx on the demo stack): on/off, editing follows creation.
 	export let showOfficeButton = false;
 	export let officeEnabled = false;
-	export let officeEditEnabled = false;
 	export let documentWriterEnabled = true;
 	export let documentWriterRequired = false;
 	export let oauthRedirectHandler: (tool: {
@@ -584,8 +583,6 @@
 				nextToolState(codeInterpreterState, BINARY_TOOL_STATES) === 'required';
 		} else if (tool === 'office') {
 			officeEnabled = nextToolState(officeState, BINARY_TOOL_STATES) === 'required';
-			// Editing follows, so a follow-up turn can change the file; MessageInput clears it where not allowed.
-			officeEditEnabled = officeEnabled;
 		} else {
 			const { enabled, required } = documentWriterFlags(
 				nextToolState(documentWriterToolState, DOCUMENT_WRITER_STATES)
@@ -1010,24 +1007,26 @@
 
 					{#if showOffice}
 						<MenuItem
-							label={$i18n.t('Office')}
+							label={$i18n.t('Workspace')}
 							pinId="office"
 							toolState={officeState}
 							tooltipPlacement="top-start"
 							tooltip={!showOfficeButton
 								? $i18n.t('Unavailable')
 								: officeEnabled
-									? $i18n.t('Create Office files')
+									? $i18n.t('Make files, analyse data and draw charts in a secure workspace')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
-								$i18n.t('Office'),
+								$i18n.t('Workspace'),
 								officeState,
-								officeEnabled ? $i18n.t('Create Office files') : $i18n.t(TOOL_OFF_DESCRIPTION)
+								officeEnabled
+									? $i18n.t('Make files, analyse data and draw charts in a secure workspace')
+									: $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
 							disabled={!showOfficeButton}
 							onClick={() => showOfficeButton && cycleTool('office')}
 						>
-							<Grid slot="icon" className="size-3.5" strokeWidth="1.75" />
+							<CommandLine slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>
 					{/if}
 

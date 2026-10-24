@@ -21,10 +21,6 @@ export function getDefaultCapabilities() {
 				? DEFAULT_CAPABILITIES.document_writer
 				: false,
 		office: features?.enable_office !== false ? DEFAULT_CAPABILITIES.office : false,
-		office_edit:
-			features?.enable_office !== false && features?.enable_office_edit !== false
-				? DEFAULT_CAPABILITIES.office_edit
-				: false,
 		builtin_tools:
 			features?.feature_builtin_tools !== false ? DEFAULT_CAPABILITIES.builtin_tools : false
 	};

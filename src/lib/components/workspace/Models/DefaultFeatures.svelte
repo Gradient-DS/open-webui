@@ -27,12 +27,8 @@
 			description: $i18n.t('Model can write and create downloadable documents')
 		},
 		office: {
-			label: $i18n.t('Create Office files'),
-			description: $i18n.t('Model can create Office files')
-		},
-		office_edit: {
-			label: $i18n.t('Edit Office files'),
-			description: $i18n.t('Model can edit Office files made in this conversation')
+			label: $i18n.t('Workspace'),
+			description: $i18n.t('Model can work in the workspace: run code and make files')
 		},
 		live_documents: {
 			label: $i18n.t('OneDrive search'),
@@ -51,10 +47,6 @@
 
 	const getFeatureLabel = (feature: string) => featureLabels[feature as Feature];
 
-	$: if (!featureIds.includes('office') && featureIds.includes('office_edit')) {
-		featureIds = featureIds.filter((id) => id !== 'office_edit');
-	}
-
 	const setFeature = (feature: string, checked: boolean) => {
 		if (checked) {
 			if (!featureIds.includes(feature)) {
@@ -69,7 +61,7 @@
 <div>
 	<div class="mb-1.5 text-xs text-gray-400 dark:text-gray-600">{$i18n.t('Default Features')}</div>
 	<div class="grid grid-cols-1 gap-x-5 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
-		{#each availableFeatures.filter((id) => id !== 'office_edit' || featureIds.includes('office')) as feature}
+		{#each availableFeatures as feature}
 			<div class="flex min-h-6 items-center gap-2.5">
 				<Checkbox
 					ariaLabel={$i18n.t(getFeatureLabel(feature).label)}

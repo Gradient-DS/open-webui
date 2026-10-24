@@ -31,13 +31,16 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 	import PptxPreview from '../common/PptxPreview.svelte';
+	import FileKindIcon from './FileKindIcon.svelte';
 	import {
 		type DeliveredFile,
 		downloadDeliveredFile,
 		fileKind,
 		newestFileVersionIndex,
-		loadPages
+		loadPages,
+		isTextPreview
 	} from '$lib/utils/deliveredFile';
+	import DeliveredTextPreview from './DeliveredTextPreview.svelte';
 	import ChevronDown from '../icons/ChevronDown.svelte';
 	import { groupDocuments } from '$lib/utils/documentGroups';
 
@@ -102,6 +105,12 @@
 
 	// Different documents are picked from the title menu; the arrows page through one document's versions.
 	$: groups = groupDocuments(contents);
+	// [Gradient] The picker lists the newest document first, each with its type.
+	$: newestFirst = [...groups].reverse();
+	const kindOf = (index: number): string => {
+		const content = contents[index];
+		return content?.file ? fileKind(content.file) : $i18n.t('Text');
+	};
 	$: currentGroup = groups.find((group) => group.indices.includes($selectedDocumentIndex));
 	$: versions = currentGroup?.indices ?? [];
 	$: versionPosition = versions.indexOf($selectedDocumentIndex);
@@ -291,10 +300,11 @@
 								contentClass="select-none min-w-[240px] max-w-[min(28rem,90vw)] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 							>
 								<button
-									class="flex items-center gap-1 min-w-0 px-1.5 py-0.5 -mx-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition"
+									class="flex items-center gap-1.5 min-w-0 px-1.5 py-0.5 -mx-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition"
 									aria-label={$i18n.t('Switch document')}
 									title={current.title}
 								>
+									<FileKindIcon kind={kindOf($selectedDocumentIndex)} />
 									<span class="text-sm font-medium truncate text-gray-900 dark:text-white">
 										{current.title || $i18n.t('Document')}
 									</span>
@@ -302,12 +312,13 @@
 								</button>
 
 								<div slot="content">
-									{#each groups as group}
+									{#each newestFirst as group}
 										<button
 											class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full text-left"
 											class:font-medium={group === currentGroup}
 											on:click={() => selectDocument(group.indices)}
 										>
+											<FileKindIcon kind={kindOf(group.indices[group.indices.length - 1])} />
 											<span class="flex-1 truncate">{group.title || $i18n.t('Document')}</span>
 											{#if group.indices.length > 1}
 												<span class="shrink-0 text-xs text-gray-500">
@@ -431,7 +442,7 @@
 				{#if contents.length > 0 && current?.file}
 					{#if sharedChat}
 						<p class="m-auto text-xs text-gray-500 dark:text-gray-400">
-							{$i18n.t('Office files are not available in shared chats')}
+							{$i18n.t('Files made in the workspace are not available in shared chats')}
 						</p>
 					{:else if pages.length > 0}
 						<PptxPreview
@@ -441,6 +452,8 @@
 							itemLabel={fileKind(current.file) === 'PPTX' ? $i18n.t('Slide') : $i18n.t('Page')}
 							listLabel={fileKind(current.file) === 'PPTX' ? $i18n.t('Slides') : $i18n.t('Pages')}
 						/>
+					{:else if current.file.pages === 0 && isTextPreview(current.file)}
+						<DeliveredTextPreview file={current.file} chatId={$chatId} />
 					{:else if current.file.pages === 0}
 						<p class="m-auto text-xs text-gray-500 dark:text-gray-400">
 							{$i18n.t('No preview available. Download the file to open it.')}

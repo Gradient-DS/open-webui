@@ -142,7 +142,7 @@
 	import Camera from '../icons/Camera.svelte';
 	import Link from '../icons/Link.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
-	import Grid from '../icons/Grid.svelte';
+	import CommandLine from '../icons/CommandLine.svelte';
 	// [Gradient] One list of "+" menu items drives the composer bar; meetings can be pinned.
 	import { meetingsAvailable } from '$lib/components/meetings/availability';
 	import { barItemIds, inputItemOrder, itemState, normalizePins } from './MessageInput/inputItems';
@@ -255,7 +255,6 @@
 	export let documentWriterEnabled = true;
 	export let documentWriterRequired = false;
 	export let officeEnabled = false;
-	export let officeEditEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 
@@ -317,7 +316,6 @@
 		codeInterpreterEnabled,
 		documentWriterEnabled,
 		officeEnabled,
-		officeEditEnabled,
 		documentWriterRequired,
 		toolApprovalMode
 	};
@@ -861,9 +859,6 @@
 	$: officeCapableModels = selectedModelIds.filter(
 		(id) => $models.find((m) => m.id === id)?.info?.meta?.capabilities?.office === true
 	);
-	$: officeEditCapableModels = selectedModelIds.filter(
-		(id) => $models.find((m) => m.id === id)?.info?.meta?.capabilities?.office_edit === true
-	);
 
 	let terminalCapableModels = [];
 	$: terminalCapableModels = getCapableModelIds(
@@ -926,15 +921,6 @@
 		$config?.features?.enable_office &&
 		($_user?.role === 'admin' || $_user?.permissions?.features?.office);
 	$: if (!showOfficeButton) officeEnabled = false;
-	$: showOfficeEditButton =
-		selectedModelIds.length > 0 &&
-		selectedModelIds.length === officeEditCapableModels.length &&
-		isFeatureEnabled('office_edit') &&
-		$config?.features?.enable_office_edit &&
-		($_user?.role === 'admin' || $_user?.permissions?.features?.office_edit) &&
-		officeEnabled &&
-		showOfficeButton;
-	$: if (!showOfficeEditButton) officeEditEnabled = false;
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
 	// The first side used locks the conversation; the unavailable side is grayed out with a
@@ -2575,7 +2561,6 @@
 											bind:documentWriterEnabled
 											bind:documentWriterRequired
 											bind:officeEnabled
-											bind:officeEditEnabled
 											oauthRedirectHandler={(tool: {
 												id: string;
 												serverId: string;
@@ -2914,22 +2899,24 @@
 												{:else if itemId === 'office' && showOfficeButton}
 													<Tooltip
 														content={pinnedStateTooltip(
-															$i18n.t('Office'),
+															$i18n.t('Workspace'),
 															officeEnabled ? 'required' : 'off',
 															officeEnabled
-																? $i18n.t('Create Office files')
+																? $i18n.t(
+																		'Make files, analyse data and draw charts in a secure workspace'
+																	)
 																: $i18n.t(TOOL_OFF_DESCRIPTION)
 														)}
 														placement="top"
 													>
 														<button
 															type="button"
-															aria-label={$i18n.t('Office')}
+															aria-label={$i18n.t('Workspace')}
 															aria-pressed={officeEnabled}
 															on:click|preventDefault={() => inputMenuRef?.cycleTool('office')}
 															class={pinnedToggleClass(officeEnabled)}
 														>
-															<Grid className="size-4" strokeWidth="1.75" />
+															<CommandLine className="size-4" strokeWidth="1.75" />
 														</button>
 													</Tooltip>
 												{:else if itemId === 'tools' && showToolsButton}
