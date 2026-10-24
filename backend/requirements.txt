@@ -68,7 +68,7 @@ einops==0.8.2
 
 ftfy==6.3.1
 chardet==7.4.3
-pypdf==6.21.1 # security: CVE-2026-113786 (crafted PDF reaches arbitrary image parsers) and CVE-2026-113789..113791 (memory/CPU blow-up via crafted PDFs) fixed in 6.21.0-6.21.1; CVE-2026-113792..113795 and earlier fixes (CVE-2026-102993..103000, CVE-2026-84309/84310/84311 and prior) stay fixed
+pypdf==6.21.2 # security: CVE-2026-115572/115580/115585 (crafted-PDF runtime blow-ups) fixed in 6.21.2; CVE-2026-113786 (crafted PDF reaches arbitrary image parsers) and CVE-2026-113789..113791 (memory/CPU blow-up via crafted PDFs) fixed in 6.21.0-6.21.1; CVE-2026-113792..113795 and earlier fixes (CVE-2026-102993..103000, CVE-2026-84309/84310/84311 and prior) stay fixed
 fpdf2==2.8.7
 pymdown-extensions==11.0.1 # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
 docx2txt==0.9
