@@ -45,10 +45,9 @@ async def refresh() -> frozenset[str]:
             return _features
         ttl = TTL_SECONDS
         try:
-            # Identity imports availability during model/config initialization.
-            from open_webui.soev.identity import build_client
+            from open_webui.soev.client import build_service_client
 
-            payload = await build_client().get('/v1/capabilities')
+            payload = await build_service_client().get('/v1/capabilities')
             if not isinstance(payload, dict):
                 raise ValueError('Invalid capabilities response')
             features = payload.get('features')

@@ -164,7 +164,7 @@ async def submit(
         document['created_at'] = dt.datetime.fromtimestamp(file.created_at, dt.UTC).isoformat().replace('+00:00', 'Z')
     document.update({'text': text} if inline else {'size': len(body), 'sha256': digest})
     job_key = f'ingest:{file.id}:{collection_key}:{digest}:{attempt}'
-    ref = await _as_user(user_id, client)
+    ref = None if client.is_service else await _as_user(user_id, client)
     response = await client.send(
         'POST',
         '/v1/jobs',

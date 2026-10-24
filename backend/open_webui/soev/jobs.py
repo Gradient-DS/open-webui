@@ -52,6 +52,7 @@ async def _finish(file: FileModel, job: dict, error: str | None = None) -> int:
 
 
 async def _commit_upload(client: SoevClient, file: FileModel, job: dict) -> int:
+    client = client.as_service()
     try:
         await client.send(
             'POST',
@@ -82,6 +83,7 @@ async def _commit_upload(client: SoevClient, file: FileModel, job: dict) -> int:
 
 
 async def _reference_ready(client: SoevClient, file: FileModel, job: dict) -> int:
+    # TODO(D-2g-4): Move owner-scoped metadata lookup to the owner's next request or server-side.
     if not file.meta.get('content_type'):
         path = f'/v1/collections/{quote(job["collection_key"], safe="")}/documents/{quote(file.id, safe="")}'
         ref = f'owui:user:{file.user_id}'
@@ -95,7 +97,9 @@ async def _reference_ready(client: SoevClient, file: FileModel, job: dict) -> in
 async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
     job = file.meta['soev_job']
     try:
-        result = await client.get(f'/v1/jobs/{quote(job["job_id"], safe="")}', params={'include_items': 'true'})
+        result = await client.as_service().get(
+            f'/v1/jobs/{quote(job["job_id"], safe="")}', params={'include_items': 'true'}
+        )
     except SoevApiError as error:
         if error.status == 404 and error.code == 'job_not_found':
             return await _finish(file, job, 'job disappeared')
@@ -110,6 +114,7 @@ async def _poll_file(client: SoevClient, file: FileModel, now: int) -> int:
     if status == 'SUCCEEDED':
         if job.get('kind') == 'reference':
             return await _reference_ready(client, file, job)
+        # TODO(D-2g-4): Land the document server-side or defer lookup/move to the owner's next request.
         path = f'/v1/collections/{quote(job["collection_key"], safe="")}/documents/{quote(file.id, safe="")}'
         document = await client.get(path)
         if (document.get('path') or '') != (job['path'] or ''):

@@ -453,9 +453,40 @@ async def test_archive_cleanup_removes_owned_resources_and_snapshot(offboard_sto
 
 
 @pytest.mark.asyncio
+async def test_expired_archive_cleanup_never_calls_the_platform(offboard_store, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from open_webui.models.user_archives import UserArchives
+    from open_webui.services.archival import resources
+    from open_webui.services.archival.service import ArchiveService
+
+    store = offboard_store
+    await store.module.offboard_user(
+        'fern', actor_id='operator', options=store.module.OffboardingOptions(mode='archive'), db=store.db
+    )
+    Archive = store.classes[-2]
+    row = (await store.db.execute(select(Archive))).scalar_one()
+    archive = await UserArchives.get_archive_by_id(row.id, db=store.db)
+    monkeypatch.setattr(UserArchives, 'get_expired_archives', AsyncMock(return_value=[archive]))
+
+    @asynccontextmanager
+    async def context(db=None):
+        yield store.db
+
+    monkeypatch.setattr(resources, 'get_async_db_context', context)
+    store.api.requests.clear()
+    assert await ArchiveService.cleanup_expired_archives() == {'checked': 1, 'deleted': 1, 'errors': 0}
+    assert store.api.requests == []
+    assert await store.db.get(Archive, row.id) is None
+    store.db.expire_all()
+    assert await store.db.get(store.classes[1], 'assistant') is None
+
+
+@pytest.mark.asyncio
 async def test_retention_edits_send_the_same_expiry_and_never_delete(offboard_store, monkeypatch):
     from open_webui.models.user_archives import UserArchives
     from open_webui.services.archival.resources import set_expiry
+    from open_webui.soev import acting
 
     store = offboard_store
     await store.module.offboard_user(
@@ -465,9 +496,19 @@ async def test_retention_edits_send_the_same_expiry_and_never_delete(offboard_st
     row = (await store.db.execute(select(Archive))).scalar_one()
     archive = await UserArchives.get_archive_by_id(row.id, db=store.db)
     archive.expires_at = archive.created_at + 2 * 86400
-    await set_expiry(archive)
+    resolver = AsyncMock(return_value='fictional-admin-token')
+    token = acting._token_resolver.set(resolver)
+    requester = acting._requester_ref.set('owui:user:lark')
+    try:
+        with acting.acting_as('owui:user:lark'):
+            await set_expiry(archive)
+    finally:
+        acting._requester_ref.reset(requester)
+        acting._token_resolver.reset(token)
+    resolver.assert_not_awaited()
     request = store.api.requests[-1]
     assert 'X-Soev-Subject' not in request.headers
+    assert 'X-Soev-User-Token' not in request.headers
     assert json.loads(request.content)['expires_at']
     archive.never_delete = True
     await set_expiry(archive)

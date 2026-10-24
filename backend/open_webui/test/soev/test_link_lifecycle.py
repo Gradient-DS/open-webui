@@ -80,6 +80,9 @@ async def test_approval_links_and_demotion_unlinks(role_store, monkeypatch, role
     store = role_store
     client = SimpleNamespace(send=AsyncMock(), pages=empty_cloud_pages)
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
+    from open_webui.soev import group_sync
+
+    monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
     await store.users.update_user_role_by_id('fern', role, db=store.db)
     assert client.send.await_args_list[0].args[:2] == ('POST', '/v1/identity/links')
     await store.users.update_user_role_by_id('fern', 'pending', db=store.db)
@@ -89,7 +92,7 @@ async def test_approval_links_and_demotion_unlinks(role_store, monkeypatch, role
 
 
 @pytest.mark.asyncio
-async def test_reconcile_links_eligible_and_unlinks_pending_and_known_deleted(
+async def test_group_reconcile_does_not_publish_unlink_or_retry_identities(
     role_store, monkeypatch, platform_capabilities
 ):
     from open_webui.soev import group_sync
@@ -97,17 +100,17 @@ async def test_reconcile_links_eligible_and_unlinks_pending_and_known_deleted(
     store = role_store
     client = SimpleNamespace(send=AsyncMock(), get=AsyncMock(return_value={'groups': [], 'next_cursor': None}))
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
+    monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
+    retry = AsyncMock()
+    monkeypatch.setattr(store.identity, 'retry_links', retry)
     store.identity._linked_refs.add('owui:user:gone')
     await store.users.insert_new_user('lark', 'Lark', 'lark@example.invalid', role='user', db=store.db)
     table = SimpleNamespace(get_all_groups=AsyncMock(return_value=[]))
     await group_sync.reconcile(table, db=store.db)
-    calls = client.send.await_args_list
-    assert any(
-        c.args[0] == 'POST' and c.args[2]['platform_user_id'] == store.identity.platform_user_id('owui:user:lark')
-        for c in calls
-    )
-    for ref in ['owui:user:fern', 'owui:user:gone']:
-        assert any(c.args[0] == 'DELETE' and store.identity.platform_user_id(ref) in c.args[1] for c in calls)
+    assert all('/v1/identity/' not in call.args[1] for call in client.send.await_args_list)
+    assert 'owui:user:gone' in store.identity._linked_refs
+    await group_sync.retry_pending(table, now=float('inf'), db=store.db)
+    retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio

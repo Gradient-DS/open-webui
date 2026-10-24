@@ -15,7 +15,14 @@ from urllib.parse import quote
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+PERSONS = {
+    'alice': 'platform:user:8a12d036-55dd-46a8-a852-8e22489f1ace',
+    'bob': 'platform:user:f92f2148-7789-4d52-8f78-fb77601e5090',
+    'carol': 'platform:user:dd573aff-c5d5-4923-a967-006331e24baa',
+}
 
 OVERRIDDEN = {
     'insert_new_group',
@@ -100,7 +107,7 @@ def directory_http(monkeypatch):
         assert set(body) == {'members'}
         members = body['members']
         assert members == sorted(set(members))
-        assert all(ref.startswith('owui:user:') for ref in members)
+        assert all(ref.startswith('platform:user:') for ref in members)
         if state.failures:
             failure = state.failures.pop(0)
             if isinstance(failure, Exception):
@@ -145,6 +152,8 @@ async def group_store(identity_config, directory_http, monkeypatch, platform_cap
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         for user_id in ('alice', 'bob', 'carol'):
             await users.Users.insert_new_user(user_id, user_id, f'{user_id}@example.test', db=session)
+            await session.execute(update(users.User).where(users.User.id == user_id).values(person_id=PERSONS[user_id]))
+        await session.commit()
         yield SimpleNamespace(
             models=models, table=models.Groups, raw=models.GroupTable(), db=session, http=directory_http
         )
@@ -158,10 +167,34 @@ async def seed(store, name='staff', members=('bob', 'alice'), owner='alice'):
     return group
 
 
+@pytest.mark.asyncio
+async def test_push_skips_users_without_person_ids_and_keeps_local_members(group_store):
+    from open_webui.models.users import User
+    from open_webui.soev import acting, group_sync
+
+    store = group_store
+    group = await seed(store)
+    await store.db.execute(update(User).where(User.id == 'bob').values(person_id=None))
+    await store.db.commit()
+    resolver = AsyncMock(return_value='fictional-user-token')
+    token = acting._token_resolver.set(resolver)
+    requester = acting._requester_ref.set('owui:user:alice')
+    try:
+        with acting.acting_as('owui:user:alice'):
+            await group_sync.publish(store.table, [group.id], db=store.db)
+    finally:
+        acting._requester_ref.reset(requester)
+        acting._token_resolver.reset(token)
+    assert store.http.members[f'owui:group:{group.id}'] == [PERSONS['alice']]
+    assert sorted(await store.raw.get_group_user_ids_by_id(group.id, db=store.db)) == ['alice', 'bob']
+    assert 'X-Soev-User-Token' not in store.http.requests[-1].headers
+    resolver.assert_not_awaited()
+
+
 async def assert_pushed(store, expected):
     assert set(store.http.members) == {f'owui:group:{group_id}' for group_id in expected}
     for group_id, members in expected.items():
-        assert store.http.members[f'owui:group:{group_id}'] == [f'owui:user:{user_id}' for user_id in sorted(members)]
+        assert store.http.members[f'owui:group:{group_id}'] == sorted(PERSONS[user_id] for user_id in members)
         group = await store.raw.get_group_by_id(group_id, db=store.db)
         actual = await store.raw.get_group_user_ids_by_id(group_id, db=store.db) if group else []
         assert sorted(actual) == sorted(members)
@@ -322,7 +355,7 @@ async def test_widening_queues_retry_reads_current_members_and_logs_only_group_i
     assert group.id in group_sync.pending_groups()
     await store.raw.remove_users_from_group(group.id, ['alice'], db=store.db)
     await group_sync.retry_pending(store.table, now=float('inf'), db=store.db)
-    assert store.http.members[f'owui:group:{group.id}'] == ['owui:user:bob', 'owui:user:carol']
+    assert store.http.members[f'owui:group:{group.id}'] == sorted([PERSONS['bob'], PERSONS['carol']])
     assert group.id not in group_sync.pending_groups()
 
 
@@ -333,7 +366,7 @@ async def test_mixed_replacement_never_publishes_new_members_before_commit(group
     original = store.models.GroupTable.set_group_user_ids_by_id
 
     async def commit(table, group_id, user_ids, db=None):
-        assert store.http.members[f'owui:group:{group_id}'] == ['owui:user:alice']
+        assert store.http.members[f'owui:group:{group_id}'] == [PERSONS['alice']]
         return await original(table, group_id, user_ids, db=db)
 
     monkeypatch.setattr(store.models.GroupTable, 'set_group_user_ids_by_id', commit)
@@ -448,7 +481,7 @@ async def test_reconcile_paginates_and_empties_remote_orphans(group_store, fake_
         'foreign:group:kept': ['foreign:user:x'],
     }
     await group_sync.reconcile(group_store.table, db=group_store.db)
-    assert chat_http.groups[f'owui:group:{group.id}'] == ['owui:user:alice', 'owui:user:bob']
+    assert chat_http.groups[f'owui:group:{group.id}'] == sorted([PERSONS['alice'], PERSONS['bob']])
     assert chat_http.groups['owui:group:missing'] == []
     assert chat_http.groups['foreign:group:kept'] == ['foreign:user:x']
     gets = [r for r in chat_http.requests if r.method == 'GET']

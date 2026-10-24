@@ -175,22 +175,36 @@ class SoevClient:
         *,
         subject_minter: Callable[[str], str] | None = None,
         timeout: float = 30.0,
+        service: bool = False,
     ) -> None:
         self._base_url = base_url.rstrip('/')
         self._api_key = api_key
         self._subject_minter = subject_minter
         self._timeout = timeout
+        self.is_service = service
 
-    async def _headers(self, as_user: str | None = None) -> dict[str, str]:
+    def as_service(self) -> 'SoevClient':
+        """Use only the product credential, regardless of inherited request context."""
+        return SoevClient(self._base_url, self._api_key, timeout=self._timeout, service=True)
+
+    async def _headers(self, as_user: str | None = None, *, user_access_token: str | None = None) -> dict[str, str]:
         headers = {'Authorization': f'Bearer {self._api_key}'}
+        if self.is_service:
+            return headers
         if as_user is not None:
             if self._subject_minter is None:
                 raise ValueError('Acting as a user requires a subject minter')
             headers['X-Soev-Subject'] = self._subject_minter(as_user)
-        access_token = await user_token(as_user)
+        access_token = user_access_token if user_access_token is not None else await user_token(as_user)
         if access_token:
             headers['X-Soev-User-Token'] = access_token
         return headers
+
+    async def me(self, access_token: str) -> dict:
+        """Resolve only the supplied login token, without a legacy subject assertion."""
+        if self.is_service or not access_token:
+            raise ValueError('Person discovery requires a user token')
+        return self._json_object(await self._request('GET', '/v1/me', user_access_token=access_token))
 
     async def chat_post(self, path: str, body: dict | None, *, as_user: str) -> dict:
         """Send a thread operation once; the chat contract has no mutation replay key."""
@@ -391,10 +405,11 @@ class SoevClient:
         as_user: str | None = None,
         params: dict | None = None,
         idempotency_key: str | None = None,
+        user_access_token: str | None = None,
     ) -> httpx.Response:
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
-        headers = await self._headers(as_user)
+        headers = await self._headers(as_user, user_access_token=user_access_token)
         if idempotency_key is not None:
             headers['Idempotency-Key'] = idempotency_key
         started = time.perf_counter()
@@ -458,3 +473,11 @@ class SoevClient:
         if not isinstance(result, dict):
             raise SoevApiError(502, 'upstream_error', 'soev-api returned an invalid JSON object')
         return result
+
+
+def build_service_client(*, timeout: float = 30.0) -> SoevClient:
+    from open_webui import config
+    from open_webui.soev.availability import ensure_configured
+
+    ensure_configured()
+    return SoevClient(config.SOEV_API_URL, config.SOEV_API_KEY, timeout=timeout, service=True)

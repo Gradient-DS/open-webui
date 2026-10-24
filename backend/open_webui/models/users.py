@@ -71,6 +71,7 @@ class User(Base):  # identity & profile
     variables = Column(JSON, nullable=True)
     settings = Column(JSON, nullable=True)
     oauth = Column(JSON, nullable=True)
+    person_id = Column(String, nullable=True, unique=True)
     scim = Column(JSON, nullable=True)
 
     # Timestamps (epoch seconds)
@@ -109,6 +110,7 @@ class UserModel(BaseModel):
     settings: UserSettings | None = None
 
     oauth: dict | None = None
+    person_id: str | None = Field(default=None, exclude=True)
     scim: dict | None = None
 
     last_active_at: int  # timestamp in epoch

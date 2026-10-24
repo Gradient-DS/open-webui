@@ -157,7 +157,7 @@ class ArchiveService:
 
         for archive in expired:
             try:
-                if await delete_archive(archive.id):
+                if await delete_archive(archive.id, delete_collections=False):
                     stats['deleted'] += 1
                     log.info(f'Deleted expired archive {archive.id} for user {archive.user_id}')
                 else:

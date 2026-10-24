@@ -25,7 +25,14 @@ async def token_app(identity_config, monkeypatch):
 
     identity, _ = identity_config
     user = identity.UserModel(
-        id='fern', name='Fern', email='fern@example.invalid', role='user', created_at=0, updated_at=0, last_active_at=0
+        person_id='platform:user:8a12d036-55dd-46a8-a852-8e22489f1ace',
+        id='fern',
+        name='Fern',
+        email='fern@example.invalid',
+        role='user',
+        created_at=0,
+        updated_at=0,
+        last_active_at=0,
     )
     monkeypatch.setattr(auth.Users, 'get_user_by_id', AsyncMock(return_value=user))
     monkeypatch.setattr(auth, 'SESSION_SECRET', 'fictional-session-secret-for-keycloak-token-tests')
@@ -64,6 +71,8 @@ async def token_app(identity_config, monkeypatch):
 
     def handle(request):
         requests.append(request)
+        if request.url.path == '/v1/me':
+            return httpx.Response(200, json={'person_id': 'platform:user:8a12d036-55dd-46a8-a852-8e22489f1ace'})
         if request.url.path == '/v1/chat':
             return httpx.Response(
                 200, headers={'X-Soev-Thread-Id': 'fictional-thread'}, text='event: status\ndata: {"state":"idle"}\n\n'
@@ -131,6 +140,7 @@ async def token_app(identity_config, monkeypatch):
                 refresh=refresh,
                 update=update,
                 auth=auth,
+                user=user,
             )
 
 
