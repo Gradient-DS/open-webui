@@ -32,7 +32,7 @@ export interface ChatDraft {
 	webSearchRequired: boolean;
 	codeInterpreterEnabled: boolean;
 	documentWriterEnabled: boolean;
-	officeEnabled: boolean;
+	workspaceEnabled: boolean;
 	documentWriterRequired: boolean;
 	toolApprovalMode: string;
 }

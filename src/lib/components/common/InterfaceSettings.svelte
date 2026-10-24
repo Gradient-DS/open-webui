@@ -1785,8 +1785,8 @@
 			</p>
 		</div>
 	{/if}
-	<!-- [Gradient] Detection is shared by generated documents and Office files. -->
-	{#if isFeatureEnabled('document_writer') || isFeatureEnabled('office')}
+	<!-- [Gradient] Detection is shared by generated documents and workspace files. -->
+	{#if isFeatureEnabled('document_writer') || isFeatureEnabled('workspace')}
 		<div class={sectionHeadingClass}>{$i18n.t('Documents')}</div>
 		<div>
 			<div class={settingRowClass}>

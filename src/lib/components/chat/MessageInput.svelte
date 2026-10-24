@@ -254,7 +254,7 @@
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = true;
 	export let documentWriterRequired = false;
-	export let officeEnabled = false;
+	export let workspaceEnabled = false;
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: ChatInputCallbacks['onToolApprovalModeChange'] = () => {};
 
@@ -315,7 +315,7 @@
 		liveMailState,
 		codeInterpreterEnabled,
 		documentWriterEnabled,
-		officeEnabled,
+		workspaceEnabled,
 		documentWriterRequired,
 		toolApprovalMode
 	};
@@ -856,8 +856,8 @@
 			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.document_writer ?? true
 	);
 
-	$: officeCapableModels = selectedModelIds.filter(
-		(id) => $models.find((m) => m.id === id)?.info?.meta?.capabilities?.office === true
+	$: workspaceCapableModels = selectedModelIds.filter(
+		(id) => $models.find((m) => m.id === id)?.info?.meta?.capabilities?.workspace === true
 	);
 
 	let terminalCapableModels = [];
@@ -914,13 +914,13 @@
 		$config?.features?.enable_document_writer &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.document_writer);
 
-	$: showOfficeButton =
+	$: showWorkspaceButton =
 		selectedModelIds.length > 0 &&
-		selectedModelIds.length === officeCapableModels.length &&
-		isFeatureEnabled('office') &&
-		$config?.features?.enable_office &&
-		($_user?.role === 'admin' || $_user?.permissions?.features?.office);
-	$: if (!showOfficeButton) officeEnabled = false;
+		selectedModelIds.length === workspaceCapableModels.length &&
+		isFeatureEnabled('workspace') &&
+		$config?.features?.enable_workspace &&
+		($_user?.role === 'admin' || $_user?.permissions?.features?.workspace);
+	$: if (!showWorkspaceButton) workspaceEnabled = false;
 	// Strict data separation (data-sovereignty): a conversation may use the open internet
 	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
 	// The first side used locks the conversation; the unavailable side is grayed out with a
@@ -983,7 +983,7 @@
 		image_generation: itemState(imageGenerationEnabled),
 		code_interpreter: itemState(codeInterpreterEnabled),
 		document_writer: itemState(documentWriterToolState),
-		office: itemState(officeEnabled),
+		workspace: itemState(workspaceEnabled),
 		tools: itemState((selectedToolIds ?? []).length),
 		skills: itemState((selectedSkillIds ?? []).length),
 		...Object.fromEntries(
@@ -1030,7 +1030,7 @@
 				cycleLiveDocuments: () => Promise<void>;
 				cycleLiveMail: () => Promise<void>;
 				cycleTool: (
-					tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'office'
+					tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace'
 				) => void;
 		  }
 		| undefined;
@@ -2550,7 +2550,7 @@
 											{showImageGenerationButton}
 											{showCodeInterpreterButton}
 											{showDocumentWriterButton}
-											{showOfficeButton}
+											{showWorkspaceButton}
 											bind:selectedToolIds
 											bind:selectedSkillIds
 											bind:selectedFilterIds
@@ -2560,7 +2560,7 @@
 											bind:codeInterpreterEnabled
 											bind:documentWriterEnabled
 											bind:documentWriterRequired
-											bind:officeEnabled
+											bind:workspaceEnabled
 											oauthRedirectHandler={(tool: {
 												id: string;
 												serverId: string;
@@ -2896,12 +2896,12 @@
 															<Document className="size-4" strokeWidth="1.75" />
 														</button>
 													</Tooltip>
-												{:else if itemId === 'office' && showOfficeButton}
+												{:else if itemId === 'workspace' && showWorkspaceButton}
 													<Tooltip
 														content={pinnedStateTooltip(
 															$i18n.t('Workspace'),
-															officeEnabled ? 'required' : 'off',
-															officeEnabled
+															workspaceEnabled ? 'required' : 'off',
+															workspaceEnabled
 																? $i18n.t(
 																		'Make files, analyse data and draw charts in a secure workspace'
 																	)
@@ -2912,9 +2912,9 @@
 														<button
 															type="button"
 															aria-label={$i18n.t('Workspace')}
-															aria-pressed={officeEnabled}
-															on:click|preventDefault={() => inputMenuRef?.cycleTool('office')}
-															class={pinnedToggleClass(officeEnabled)}
+															aria-pressed={workspaceEnabled}
+															on:click|preventDefault={() => inputMenuRef?.cycleTool('workspace')}
+															class={pinnedToggleClass(workspaceEnabled)}
 														>
 															<CommandLine className="size-4" strokeWidth="1.75" />
 														</button>

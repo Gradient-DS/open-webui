@@ -272,10 +272,10 @@
 					</AdminSettingField>
 				{/if}
 			</AdminSettingSection>
-			{#if isFeatureEnabled('office')}
+			{#if isFeatureEnabled('workspace')}
 				<AdminSettingSection title={$i18n.t('Workspace')}>
 					<AdminSettingRow label={$i18n.t('Workspace')} let:labelId>
-						<Switch bind:state={config.ENABLE_OFFICE} ariaLabelledbyId={labelId} />
+						<Switch bind:state={config.ENABLE_WORKSPACE} ariaLabelledbyId={labelId} />
 					</AdminSettingRow>
 				</AdminSettingSection>
 			{/if}

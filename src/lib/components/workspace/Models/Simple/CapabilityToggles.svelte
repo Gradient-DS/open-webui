@@ -26,7 +26,7 @@
 		{ key: 'image_generation', icon: Photo, label: 'Generate images' },
 		{ key: 'code_interpreter', icon: Terminal, label: 'Run code & analyze data' },
 		{ key: 'document_writer', icon: Document, label: 'Document writer' },
-		{ key: 'office', icon: PagePlus, label: 'Workspace' },
+		{ key: 'workspace', icon: PagePlus, label: 'Workspace' },
 		{ key: 'live_documents', icon: OneDriveSearch, label: 'OneDrive search' },
 		{ key: 'live_mail', icon: MailSearch, label: 'Mail search' },
 		{ key: 'vision', icon: Eye, label: 'Understand images' },

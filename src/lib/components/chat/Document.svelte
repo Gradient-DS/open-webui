@@ -17,7 +17,7 @@
 		showDocument,
 		documentContents,
 		selectedDocumentIndex,
-		requestedOfficeFile
+		requestedWorkspaceFile
 	} from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { printDocument } from '$lib/utils/documentPrint';
@@ -55,19 +55,19 @@
 	let downloadOpen = false;
 	let citationsElement: Citations | null = null;
 
-	$: if ($requestedOfficeFile) {
-		const newest = newestFileVersionIndex(contents, $requestedOfficeFile);
+	$: if ($requestedWorkspaceFile) {
+		const newest = newestFileVersionIndex(contents, $requestedWorkspaceFile);
 		if (newest >= 0) {
 			$selectedDocumentIndex = newest;
-			requestedOfficeFile.set(null);
+			requestedWorkspaceFile.set(null);
 		}
 	}
 
 	$: current = contents[$selectedDocumentIndex];
-	// [Gradient] Shared snapshots have no Office download route.
+	// [Gradient] Shared snapshots have no workspace file download route.
 	$: sharedChat = $page.url.pathname.startsWith('/s/');
 
-	// [Gradient] A delivered Office file shows its rendered pages, loaded with the user's token.
+	// [Gradient] A delivered workspace file shows its rendered pages, loaded with the user's token.
 	let pages: string[] = [];
 	let currentPage = 0;
 	let pagesError = false;

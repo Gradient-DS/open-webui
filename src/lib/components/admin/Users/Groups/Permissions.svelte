@@ -1133,9 +1133,9 @@
 				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Workspace')}
 				</div>
-				<Switch bind:state={permissions.features.office} />
+				<Switch bind:state={permissions.features.workspace} />
 			</div>
-			{#if defaultPermissions?.features?.office && !permissions.features.office}
+			{#if defaultPermissions?.features?.workspace && !permissions.features.workspace}
 				<div>
 					<div class="text-xs text-gray-500">
 						{$i18n.t('This is a default user permission and will remain enabled.')}

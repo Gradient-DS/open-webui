@@ -51,7 +51,7 @@
 		showDocument,
 		documentContents,
 		openDocumentTabSignal,
-		requestedOfficeFile,
+		requestedWorkspaceFile,
 		tools,
 		skills,
 		toolServers,
@@ -416,8 +416,8 @@
 		} = value);
 		composerInitialized = true;
 	};
-	// [Gradient] The Workspace switch (feature id `office`); not a remembered composer preference.
-	let officeEnabled = false;
+	// [Gradient] The Workspace switch (feature id `workspace`); not a remembered composer preference.
+	let workspaceEnabled = false;
 	let webSearchActive = false;
 	let showWebSearchConfirm = false;
 	let pendingWebSearchPrompt: string | null = null;
@@ -925,7 +925,7 @@
 
 		files = [];
 		composerInitialized = false;
-		officeEnabled = false;
+		workspaceEnabled = false;
 		acceptedDataWarnings = new Set();
 		contextUsage = null;
 
@@ -1003,7 +1003,7 @@
 		files = [];
 		composerInitialized = false;
 		restoreComposerPreferences(composerPreferences($settings.composerTools));
-		officeEnabled = false;
+		workspaceEnabled = false;
 		prompt = '';
 		messageInput?.setText('');
 		await chatId.set('');
@@ -1271,12 +1271,12 @@
 						liveMailState = 'auto';
 					}
 					if (
-						model.info?.meta?.capabilities?.['office'] &&
-						isFeatureEnabled('office') &&
-						$config?.features?.enable_office &&
-						($user?.role === 'admin' || $user?.permissions?.features?.office)
+						model.info?.meta?.capabilities?.['workspace'] &&
+						isFeatureEnabled('workspace') &&
+						$config?.features?.enable_workspace &&
+						($user?.role === 'admin' || $user?.permissions?.features?.workspace)
 					) {
-						officeEnabled = model.info.meta.defaultFeatureIds.includes('office');
+						workspaceEnabled = model.info.meta.defaultFeatureIds.includes('workspace');
 					}
 				}
 
@@ -1503,14 +1503,14 @@
 				} else if (type === 'chat:message:files' || type === 'files') {
 					const previous = new Set((message.files ?? []).map((file: ChatAttachment) => file.id));
 					message.files = data.files;
-					// [Gradient] A delivered Office file opens the document panel, like a generated document.
+					// [Gradient] A delivered workspace file opens the document panel, like a generated document.
 					if (
 						(data.files ?? []).some(isDeliveredFile) &&
-						isFeatureEnabled('office') &&
+						isFeatureEnabled('workspace') &&
 						($settings?.detectDocuments ?? true) &&
 						!$mobile
 					) {
-						requestedOfficeFile.set(data.files.filter(isDeliveredFile).at(-1) ?? null);
+						requestedWorkspaceFile.set(data.files.filter(isDeliveredFile).at(-1) ?? null);
 						showDocument.set(true);
 						showControls.set(true);
 						openDocumentTabSignal.update((n) => n + 1);
@@ -2210,7 +2210,7 @@
 		} else {
 			artifactContents.set([]);
 			documentContents.set([]);
-			requestedOfficeFile.set(null);
+			requestedWorkspaceFile.set(null);
 		}
 	};
 
@@ -2334,7 +2334,7 @@
 						}))
 					];
 				}
-				// [Gradient] Office files an agent delivered open in the same panel.
+				// [Gradient] Workspace files an agent delivered open in the same panel.
 				const delivered = (message?.files ?? []).filter(isDeliveredFile);
 				docs = [
 					...docs,
@@ -2496,7 +2496,7 @@
 		await showArtifacts.set(false);
 		await showDocument.set(false);
 		documentContents.set([]);
-		requestedOfficeFile.set(null);
+		requestedWorkspaceFile.set(null);
 
 		if (!embedded && $page.url.pathname.includes('/c/')) {
 			window.history.replaceState(history.state, '', `/`);
@@ -2548,7 +2548,7 @@
 			documentWriterRequired = ['true', 'required'].includes(writerParam);
 		}
 
-		if ($page.url.searchParams.get('office') === 'true') officeEnabled = true;
+		if ($page.url.searchParams.get('workspace') === 'true') workspaceEnabled = true;
 
 		if ($page.url.searchParams.get('tools')) {
 			selectedToolIds = $page.url.searchParams
@@ -2727,7 +2727,7 @@
 
 				restoreComposerPreferences(composerFromFeatures(chatContent?.features));
 				lastSavedFeatures = JSON.stringify(currentComposerPreferences());
-				officeEnabled = chatContent?.features?.office ?? false;
+				workspaceEnabled = chatContent?.features?.workspace ?? false;
 
 				// Load tasks from chat-level DB field
 				chatTasks = chat?.tasks ?? [];
@@ -3384,7 +3384,7 @@
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
 					document_writer: $i18n.t('Document writer'),
-					office: $i18n.t('Workspace'),
+					workspace: $i18n.t('Workspace'),
 					image_generation: $i18n.t('Image Generation')
 				};
 				const capabilityLabels = warning.capabilities.map(
@@ -3694,7 +3694,7 @@
 			image_generation: imageGenerationEnabled,
 			code_interpreter: codeInterpreterEnabled,
 			document_writer: documentWriterEnabled,
-			office: officeEnabled,
+			workspace: workspaceEnabled,
 			knowledge_local: hasLocalKb,
 			knowledge_external: hasExternalKb
 		};
@@ -3980,11 +3980,11 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
 						? documentWriterEnabled
 						: false,
-				office:
-					isFeatureEnabled('office') &&
-					$config?.features?.enable_office &&
-					($user?.role === 'admin' || $user?.permissions?.features?.office)
-						? officeEnabled
+				workspace:
+					isFeatureEnabled('workspace') &&
+					$config?.features?.enable_workspace &&
+					($user?.role === 'admin' || $user?.permissions?.features?.workspace)
+						? workspaceEnabled
 						: false,
 				live_documents: $config?.features?.enable_live_documents ? liveDocumentsState : 'off',
 				live_mail: $config?.features?.enable_live_mail ? liveMailState : 'off',
@@ -4621,7 +4621,7 @@
 			files: structuredClone(chatFiles),
 			features: {
 				...composerFeatures(currentComposerPreferences()),
-				office: officeEnabled
+				workspace: workspaceEnabled
 			}
 		};
 		if ($chatId !== _chatId || $temporaryChatEnabled) return chatSaveQueue;
@@ -5145,7 +5145,7 @@
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
 										bind:documentWriterRequired
-										bind:officeEnabled
+										bind:workspaceEnabled
 										{pendingOAuthTools}
 										{oauthRedirectHandler}
 										bind:liveDocumentsState
@@ -5241,7 +5241,7 @@
 										bind:selectedFilterIds
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
-										bind:officeEnabled
+										bind:workspaceEnabled
 										{pendingOAuthTools}
 										bind:documentWriterEnabled
 										bind:documentWriterRequired
@@ -5311,7 +5311,7 @@
 									bind:liveDocumentsState
 									bind:liveMailState
 									bind:documentWriterRequired
-									bind:officeEnabled
+									bind:workspaceEnabled
 									bind:webSearchEnabled
 									bind:webSearchRequired
 									bind:atSelectedModel

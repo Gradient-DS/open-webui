@@ -177,9 +177,9 @@
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 	export let showDocumentWriterButton = false;
-	// [Gradient] Office files (xlsx, pptx and docx on the demo stack): on/off, editing follows creation.
-	export let showOfficeButton = false;
-	export let officeEnabled = false;
+	// [Gradient] The Workspace switch: on/off, editing follows creation.
+	export let showWorkspaceButton = false;
+	export let workspaceEnabled = false;
 	export let documentWriterEnabled = true;
 	export let documentWriterRequired = false;
 	export let oauthRedirectHandler: (tool: {
@@ -290,7 +290,7 @@
 		itemAllowed('code_interpreter') && (showCodeInterpreterButton || codeInterpreterEnabled);
 	$: showDocumentWriter =
 		itemAllowed('document_writer') && (showDocumentWriterButton || documentWriterEnabled);
-	$: showOffice = itemAllowed('office') && (showOfficeButton || officeEnabled);
+	$: showWorkspace = itemAllowed('workspace') && (showWorkspaceButton || workspaceEnabled);
 	$: showToolPermissions =
 		toolPermissionsEnabled && itemAllowed('tools') && isFeatureEnabled('tools');
 
@@ -540,7 +540,7 @@
 	$: webSearchToolState = webSearchState(webSearchEnabled, webSearchRequired);
 	$: imageGenerationState = (imageGenerationEnabled ? 'required' : 'off') as ToolState;
 	$: codeInterpreterState = (codeInterpreterEnabled ? 'required' : 'off') as ToolState;
-	$: officeState = (officeEnabled ? 'required' : 'off') as ToolState;
+	$: workspaceState = (workspaceEnabled ? 'required' : 'off') as ToolState;
 	$: documentWriterToolState = documentWriterState(documentWriterEnabled, documentWriterRequired);
 
 	const stateAriaLabel = (label: string, state: ToolState, description: string) =>
@@ -566,7 +566,7 @@
 
 	// [Gradient] Document writer cycles Auto, Altijd, Uit; the other tools use Uit and Altijd. Exported for the pinned composer buttons.
 	export const cycleTool = (
-		tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'office'
+		tool: 'image_generation' | 'code_interpreter' | 'document_writer' | 'workspace'
 	) => {
 		if (tool === 'image_generation') {
 			imageGenerationEnabled =
@@ -581,8 +581,8 @@
 		} else if (tool === 'code_interpreter') {
 			codeInterpreterEnabled =
 				nextToolState(codeInterpreterState, BINARY_TOOL_STATES) === 'required';
-		} else if (tool === 'office') {
-			officeEnabled = nextToolState(officeState, BINARY_TOOL_STATES) === 'required';
+		} else if (tool === 'workspace') {
+			workspaceEnabled = nextToolState(workspaceState, BINARY_TOOL_STATES) === 'required';
 		} else {
 			const { enabled, required } = documentWriterFlags(
 				nextToolState(documentWriterToolState, DOCUMENT_WRITER_STATES)
@@ -1005,26 +1005,26 @@
 						</MenuItem>
 					{/if}
 
-					{#if showOffice}
+					{#if showWorkspace}
 						<MenuItem
 							label={$i18n.t('Workspace')}
-							pinId="office"
-							toolState={officeState}
+							pinId="workspace"
+							toolState={workspaceState}
 							tooltipPlacement="top-start"
-							tooltip={!showOfficeButton
+							tooltip={!showWorkspaceButton
 								? $i18n.t('Unavailable')
-								: officeEnabled
+								: workspaceEnabled
 									? $i18n.t('Make files, analyse data and draw charts in a secure workspace')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)}
 							ariaLabel={stateAriaLabel(
 								$i18n.t('Workspace'),
-								officeState,
-								officeEnabled
+								workspaceState,
+								workspaceEnabled
 									? $i18n.t('Make files, analyse data and draw charts in a secure workspace')
 									: $i18n.t(TOOL_OFF_DESCRIPTION)
 							)}
-							disabled={!showOfficeButton}
-							onClick={() => showOfficeButton && cycleTool('office')}
+							disabled={!showWorkspaceButton}
+							onClick={() => showWorkspaceButton && cycleTool('workspace')}
 						>
 							<CommandLine slot="icon" className="size-3.5" strokeWidth="1.75" />
 						</MenuItem>

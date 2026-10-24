@@ -109,7 +109,7 @@
 		output?: OutputItem[];
 		files?: {
 			type: string;
-			// [Gradient] Office attachments resolve their content through the owning chat.
+			// [Gradient] Workspace file attachments resolve their content through the owning chat.
 			url?: string;
 			id?: string;
 			attached_by?: string;
@@ -1197,12 +1197,12 @@
 						{#if message?.action_required?.kind === 'connect' && consentLabels[message.action_required.provider]}
 							<ConnectOneDrive provider={message.action_required.provider} />
 						{/if}
-						{#if message?.files && message.files?.filter( (f) => ['image', 'file', 'office'].includes(f.type) ).length > 0}
+						{#if message?.files && message.files?.filter( (f) => ['image', 'file', 'workspace'].includes(f.type) ).length > 0}
 							<div
 								class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap"
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
-								{#each message.files.filter( (f) => ['image', 'file', 'office'].includes(f.type) ) as file}
+								{#each message.files.filter( (f) => ['image', 'file', 'workspace'].includes(f.type) ) as file}
 									<div>
 										{#if isDeliveredFile(file) && isShownImage(file)}
 											<DeliveredImage {file} {chatId} />

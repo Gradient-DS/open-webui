@@ -60,7 +60,7 @@
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = true;
 	export let documentWriterRequired = false;
-	export let officeEnabled = false;
+	export let workspaceEnabled = false;
 	export let webSearchEnabled = false;
 	export let webSearchRequired = false;
 	export let toolApprovalMode = 'full';
@@ -275,7 +275,7 @@
 						bind:codeInterpreterEnabled
 						bind:documentWriterEnabled
 						bind:documentWriterRequired
-						bind:officeEnabled
+						bind:workspaceEnabled
 						bind:webSearchEnabled
 						bind:webSearchRequired
 						bind:atSelectedModel

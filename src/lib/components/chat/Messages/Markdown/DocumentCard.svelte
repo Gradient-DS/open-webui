@@ -15,7 +15,7 @@
 		openDocumentTabSignal,
 		documentContents,
 		selectedDocumentIndex,
-		requestedOfficeFile
+		requestedWorkspaceFile
 	} from '$lib/stores';
 	import { getExportMarkdown } from '$lib/utils/documentCitations';
 	import { documentPdf } from '$lib/utils/documentPdf';
@@ -35,11 +35,11 @@
 	export let done: boolean = true;
 	export let messageDone: boolean = true;
 	export let className: string = '';
-	// [Gradient] An Office file an agent delivered: downloaded as is, not exported from markdown.
+	// [Gradient] A workspace file an agent delivered: downloaded as is, not exported from markdown.
 	export let file: DeliveredFile | null = null;
 	export let chatId: string = '';
 
-	// [Gradient] Shared snapshots have no Office download route.
+	// [Gradient] Shared snapshots have no workspace file download route.
 	$: sharedChat = $appPage.url.pathname.startsWith('/s/');
 	let downloadOpen = false;
 
@@ -59,7 +59,7 @@
 	const openDocument = async () => {
 		if (file) {
 			// [Gradient] Document.svelte selects the newest version of this file.
-			requestedOfficeFile.set(file);
+			requestedWorkspaceFile.set(file);
 			showDocument.set(true);
 			showControls.set(true);
 			openDocumentTabSignal.update((n) => n + 1);

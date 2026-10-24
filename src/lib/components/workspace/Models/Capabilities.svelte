@@ -39,7 +39,7 @@
 			label: $i18n.t('Document writer'),
 			description: $i18n.t('Model can write and create downloadable documents')
 		},
-		office: {
+		workspace: {
 			label: $i18n.t('Workspace'),
 			description: $i18n.t('Model can work in the workspace: run code and make files')
 		},

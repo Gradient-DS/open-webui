@@ -5,7 +5,7 @@
 		config,
 		embed,
 		openDocumentTabSignal,
-		requestedOfficeFile,
+		requestedWorkspaceFile,
 		showControls,
 		showDocument,
 		showEmbeds
@@ -61,7 +61,7 @@
 		// [Gradient] A note on a file the agent delivered opens that file in the document panel.
 		const delivered = citations[index]?.source?.delivered_file;
 		if (delivered && isDeliveredFile(delivered)) {
-			requestedOfficeFile.set(delivered);
+			requestedWorkspaceFile.set(delivered);
 			showDocument.set(true);
 			showControls.set(true);
 			openDocumentTabSignal.update((n) => n + 1);

@@ -165,7 +165,7 @@ export const artifactContents = writable(null);
 
 export const showDocument = writable(false);
 export const openDocumentTabSignal = writable(0);
-export const requestedOfficeFile = writable<DeliveredFile | null>(null);
+export const requestedWorkspaceFile = writable<DeliveredFile | null>(null);
 
 export const submitPromptSignal: Writable<{ text: string; ts: number } | null> = writable(null);
 
@@ -182,7 +182,7 @@ export const documentContents: Writable<Array<
 	AgentDocument & {
 		sources?: any[];
 		messageId?: string;
-		// [Gradient] An Office file an agent delivered: the panel shows its rendered pages, not markdown.
+		// [Gradient] A workspace file an agent delivered: the panel shows its rendered pages, not markdown.
 		file?: DeliveredFile;
 	}
 > | null> = writable(null);
@@ -403,8 +403,8 @@ type Config = {
 		enable_signup: boolean;
 		enable_login_form: boolean;
 		enable_web_search?: boolean;
-		enable_office?: boolean;
-		feature_office?: boolean;
+		enable_workspace?: boolean;
+		feature_workspace?: boolean;
 		enable_web_search_confirmation?: boolean;
 		web_search_confirmation_content?: string;
 		enable_google_drive_integration: boolean;

@@ -20,7 +20,7 @@ export function getDefaultCapabilities() {
 			features.enable_document_writer !== false && features.feature_document_writer !== false
 				? DEFAULT_CAPABILITIES.document_writer
 				: false,
-		office: features?.enable_office !== false ? DEFAULT_CAPABILITIES.office : false,
+		workspace: features?.enable_workspace !== false ? DEFAULT_CAPABILITIES.workspace : false,
 		builtin_tools:
 			features?.feature_builtin_tools !== false ? DEFAULT_CAPABILITIES.builtin_tools : false
 	};

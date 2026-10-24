@@ -1,12 +1,12 @@
-// [Gradient] Delivered Office files stay in agent storage.
+// [Gradient] Files the workspace agent delivered stay in agent storage.
 import fileSaver from 'file-saver';
 
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 const { saveAs } = fileSaver;
 
-export type OfficeAttachment = {
-	type: 'office';
+export type DeliveredFile = {
+	type: 'workspace';
 	name: string;
 	content_type: string;
 	size: number;
@@ -17,10 +17,8 @@ export type OfficeAttachment = {
 	edits?: string | null;
 };
 
-export type DeliveredFile = OfficeAttachment;
-
 export const isDeliveredFile = (file: any): file is DeliveredFile => {
-	if (file?.type === 'office') {
+	if (file?.type === 'workspace') {
 		return (
 			typeof file.name === 'string' &&
 			typeof file.content_type === 'string' &&
@@ -37,19 +35,19 @@ export const isDeliveredFile = (file: any): file is DeliveredFile => {
 	return false;
 };
 
-const officeBlob = async (file: OfficeAttachment, chatId: string, part: string): Promise<Blob> => {
+const workspaceBlob = async (file: DeliveredFile, chatId: string, part: string): Promise<Blob> => {
 	const response = await fetch(
-		`${WEBUI_API_BASE_URL}/chats/${encodeURIComponent(chatId)}/office/${encodeURIComponent(file.element_id)}/${part}`,
+		`${WEBUI_API_BASE_URL}/chats/${encodeURIComponent(chatId)}/workspace/${encodeURIComponent(file.element_id)}/${part}`,
 		{ headers: { Authorization: `Bearer ${localStorage.token}` }, credentials: 'include' }
 	);
-	if (!response.ok) throw new Error(`Office download failed: ${response.status}`);
+	if (!response.ok) throw new Error(`Workspace file download failed: ${response.status}`);
 	return response.blob();
 };
 
 /** Each page as an object URL, loaded with the user's token; the caller revokes them. Throws when one fails. */
 export const loadPages = async (file: DeliveredFile, chatId: string): Promise<string[]> => {
 	const pages = await Promise.all(
-		Array.from({ length: file.pages }, (_, i) => officeBlob(file, chatId, `page-${i + 1}`))
+		Array.from({ length: file.pages }, (_, i) => workspaceBlob(file, chatId, `page-${i + 1}`))
 	);
 	return pages.map((page) => URL.createObjectURL(page));
 };
@@ -65,7 +63,7 @@ export const isShownImage = (file: DeliveredFile): boolean =>
 
 /** The delivered picture as a data URL, loaded with the user's token. Throws when it cannot be read. */
 export const loadImage = async (file: DeliveredFile, chatId: string): Promise<string> => {
-	const data = await officeBlob(file, chatId, 'file');
+	const data = await workspaceBlob(file, chatId, 'file');
 	return await new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onload = () => resolve(reader.result as string);
@@ -107,11 +105,11 @@ export const isHtmlPage = (file: DeliveredFile): boolean =>
 
 /** The delivered file as text. Throws when it cannot be read. */
 export const loadText = async (file: DeliveredFile, chatId: string): Promise<string> =>
-	await (await officeBlob(file, chatId, 'file')).text();
+	await (await workspaceBlob(file, chatId, 'file')).text();
 
 /** Throws when the file cannot be read. */
 export const downloadDeliveredFile = async (file: DeliveredFile, chatId: string): Promise<void> => {
-	const data = await officeBlob(file, chatId, 'file');
+	const data = await workspaceBlob(file, chatId, 'file');
 	saveAs(data, file.name);
 };
 

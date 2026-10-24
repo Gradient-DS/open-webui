@@ -100,7 +100,7 @@
 		(codeInterpreterEnabled && $config?.code?.interpreter_engine !== 'jupyter');
 	$: showOverviewTab = hasMessages && isFeatureEnabled('chat_overview');
 	$: showDocumentTab = ($documentContents ?? []).some((doc) =>
-		isFeatureEnabled(doc.file ? 'office' : 'document_writer')
+		isFeatureEnabled(doc.file ? 'workspace' : 'document_writer')
 	);
 	// [Gradient] The tab is named in the plural once it holds more than one document (versions count once).
 	$: documentTabLabel =

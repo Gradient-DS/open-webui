@@ -71,10 +71,10 @@
 	// toggle shows nothing.
 	$: loneReasoning = !blockSummary && historyItems.length === 1 && isReasoning(historyItems[0]);
 	// [Gradient] A step that is still running keeps the block shimmering, also while a
-	// subagent thinks between its own steps under a running Office call.
+	// subagent thinks between its own steps under a running workspace call.
 	$: blockRunning = !messageDone && history.some((item) => item?.done === false);
 	// Only the newest row shimmers, with the header, while the block runs; earlier
-	// rows read as history even when a step under them (an Office call) still runs.
+	// rows read as history even when a step under them (a workspace call) still runs.
 	$: running = (_item, idx) => blockRunning && idx === historyItems.length - 1;
 
 	$: if (!equal(statusHistory, history)) {
