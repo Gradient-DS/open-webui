@@ -213,3 +213,72 @@ exceptions:
       Verified absent from the running slim container.
     approved_by: Lex Lubbers, 2026-09-09
     recheck: 2026-12-09
+
+  # filelock 4.2.1 fixes the three findings below, but every unstructured
+  # release up to 0.27.34 (2026-10-22) declares filelock<4.0.0, and the 3.x line
+  # has no backport. pip-audit resolves requirements.txt with pip, which cannot
+  # override that cap. Upgrade and delete all four entries once unstructured
+  # allows filelock 4.
+  - id: GHSA-v4x8-3wr5-3wq8
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      CVE-2026-112940 (high); pip-audit matches this id against the advisory's
+      aliases, so the CVE id stays free for the trivy entry below. filelock.ReadWriteLock and AsyncReadWriteLock
+      hand SQLite a path it reopens by name, so another local user who can
+      write in the lock directory can redirect its side files. Fixed only in
+      4.2.1, which unstructured's declared filelock<4.0.0 excludes.
+    replacement_considered: >-
+      Replacing unstructured would change how every existing document is
+      parsed and chunked. Forcing filelock 4 past unstructured's cap needs a
+      resolver override that pip, which this audit resolves with, does not
+      support.
+    usage_analysis: >-
+      The backend never imports filelock. It arrives through huggingface-hub,
+      torch, datasets and unstructured, which use FileLock and, as a
+      fallback, SoftFileLock; none of them uses ReadWriteLock or
+      AsyncReadWriteLock (chromadb's ReadWriteLock is its own class). The
+      container runs a single unprivileged user, so there is no second local
+      account to plant files.
+    approved_by: "@LexLubbers (pending, review on PR #523)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112940
+    package: filelock
+    scanner: trivy
+    reason: >-
+      The same finding as the pip-audit entry above, reported by the image
+      scan. See that entry.
+    replacement_considered: >-
+      Same as the pip-audit entry above.
+    usage_analysis: >-
+      Same as the pip-audit entry above.
+    approved_by: "@LexLubbers (pending, review on PR #523)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112913
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-9vhv-jxww-xfm5 (low). Windows only: ReadWriteLock acts on SQLite
+      side files another local user places beside its database.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: we ship Linux images only, and nothing uses ReadWriteLock.
+    approved_by: "@LexLubbers (pending, review on PR #523)"
+    recheck: 2026-11-07
+
+  - id: CVE-2026-112907
+    package: filelock
+    scanner: pip-audit
+    reason: >-
+      GHSA-567q-5qvw-pf92 (low). Windows only: an oplock on a soft lock's marker
+      stalls SoftFileLock.acquire() past its timeout.
+    replacement_considered: >-
+      Same capped upgrade as CVE-2026-112940.
+    usage_analysis: >-
+      Unreachable: oplocks are a Windows mechanism, and we ship Linux images
+      only.
+    approved_by: "@LexLubbers (pending, review on PR #523)"
+    recheck: 2026-11-07
