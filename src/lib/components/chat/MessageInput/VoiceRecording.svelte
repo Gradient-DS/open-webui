@@ -178,7 +178,10 @@
 		const file = blobToFile(audioBlob, `Recording-${dayjs().format('L LT')}.${ext}`);
 
 		if (transcribe) {
-			if ($config.audio.stt.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
+			if (
+				$config.audio.stt.engine === 'web' ||
+				($config.audio.stt.engine !== 'soev' && ($settings?.audio?.stt?.engine ?? '') === 'web')
+			) {
 				// with web stt, we don't need to send the file to the server
 				return;
 			}
@@ -298,7 +301,10 @@
 		}
 
 		if (transcribe) {
-			if ($config.audio.stt.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
+			if (
+				$config.audio.stt.engine === 'web' ||
+				($config.audio.stt.engine !== 'soev' && ($settings?.audio?.stt?.engine ?? '') === 'web')
+			) {
 				if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
 					// reset accumulated transcription from previous sessions
 					transcription = '';
