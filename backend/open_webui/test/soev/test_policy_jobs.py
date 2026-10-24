@@ -293,3 +293,24 @@ async def test_v2_thread_delete_requires_a_completed_204(v2, monkeypatch, status
     else:
         with pytest.raises(SoevApiError):
             await caller.chat_delete('/v1/chat/threads/thread-elm', as_user='owui:user:person-elm')
+
+
+def test_retention_policy_routes_are_admin_only(monkeypatch):
+    """A non-admin never reaches the platform policy: both routes depend on the admin check."""
+    from fastapi import HTTPException
+
+    from open_webui.routers import configs
+    from open_webui.utils.auth import get_admin_user
+
+    routes = {
+        (method, route.path): route
+        for route in configs.router.routes
+        for method in getattr(route, 'methods', ())
+        if route.path == '/data-retention'
+    }
+    assert set(routes) == {('GET', '/data-retention'), ('POST', '/data-retention')}
+    for route in routes.values():
+        assert get_admin_user in {dependency.call for dependency in route.dependant.dependencies}
+    with pytest.raises(HTTPException) as refused:
+        get_admin_user(SimpleNamespace(role='user'))
+    assert refused.value.status_code == 401
