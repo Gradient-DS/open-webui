@@ -6,6 +6,7 @@
 	import { t } from 'i18next';
 	import { statusI18nParams } from './statusI18nParams';
 	import TypedText from '$lib/components/common/TypedText.svelte';
+	import RunningClock from '$lib/components/common/RunningClock.svelte';
 
 	export let status = null;
 	export let done = false;
@@ -206,15 +207,25 @@
 						)}
 					{/if}
 				</div>
-				<!-- [Gradient] A rolled subagent's current step, under its delegation's line while it runs. -->
-				{#if status?.step?.description && (done || status?.done) === false}
+				<!-- [Gradient] A rolled subagent's time running, steps taken and current step, under its
+				     delegation's line while it runs. -->
+				{#if (status?.step?.description || status?.started_at) && (done || status?.done) === false}
 					<div class="text-gray-400 dark:text-gray-500 text-xs line-clamp-1 pt-0.5">
-						<TypedText
-							text={$i18n.t(
-								status.step.description,
-								statusI18nParams(status.step, (key) => $i18n.t(key))
-							)}
-						/>
+						{#if status?.started_at}
+							<RunningClock since={status.started_at} />
+							{#if status?.steps}
+								· {$i18n.t('{{count}} steps', { count: status.steps })}
+							{/if}
+							{#if status?.step?.description}·{/if}
+						{/if}
+						{#if status?.step?.description}
+							<TypedText
+								text={$i18n.t(
+									status.step.description,
+									statusI18nParams(status.step, (key) => $i18n.t(key))
+								)}
+							/>
+						{/if}
 					</div>
 				{/if}
 			</div>
