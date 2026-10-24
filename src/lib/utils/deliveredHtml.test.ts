@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @ts-expect-error jsdom ships no types; the test runs the guard in a realm of its own.
 import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -39,7 +40,9 @@ describe('deliveredHtmlDocument', () => {
 		const scripts = parse(deliveredHtmlDocument(html, true)).scripts;
 		expect(scripts).toHaveLength(2);
 		expect(scripts[0].textContent).toBe(GUARD);
-		expect(scripts[0].previousElementSibling?.getAttribute('http-equiv')).toBe('x-dns-prefetch-control');
+		expect(scripts[0].previousElementSibling?.getAttribute('http-equiv')).toBe(
+			'x-dns-prefetch-control'
+		);
 	});
 
 	it("drops the page's own refresh, policy, referrer, base, frames and prefetching", () => {
@@ -49,10 +52,9 @@ describe('deliveredHtmlDocument', () => {
 				true
 			)
 		);
-		expect([...doc.querySelectorAll('meta[http-equiv]')].map((m) => m.getAttribute('http-equiv'))).toEqual([
-			'Content-Security-Policy',
-			'x-dns-prefetch-control'
-		]);
+		expect(
+			[...doc.querySelectorAll('meta[http-equiv]')].map((m) => m.getAttribute('http-equiv'))
+		).toEqual(['Content-Security-Policy', 'x-dns-prefetch-control']);
 		expect(doc.querySelectorAll('meta[name="referrer"]')).toHaveLength(1);
 		expect(doc.querySelector('base, iframe, object, embed')).toBeNull();
 		expect([...doc.querySelectorAll('link')].map((l) => l.rel)).toEqual(['stylesheet']);
@@ -132,7 +134,7 @@ describe('the guard', () => {
 	const page = (body: string) => {
 		const dom = new JSDOM(deliveredHtmlDocument(`<body>${body}</body>`, true), {
 			runScripts: 'dangerously',
-			beforeParse(window) {
+			beforeParse(window: Window & typeof globalThis) {
 				Object.assign(window, {
 					RTCPeerConnection: class {},
 					webkitRTCPeerConnection: class {},
@@ -150,7 +152,9 @@ describe('the guard', () => {
 	};
 
 	it('removes itself and WebRTC before the page runs', () => {
-		const window = page('<script>window.seen = [typeof RTCPeerConnection, document.scripts.length]</script>');
+		const window = page(
+			'<script>window.seen = [typeof RTCPeerConnection, document.scripts.length]</script>'
+		);
 		expect((window as unknown as { seen: unknown }).seen).toEqual(['undefined', 1]);
 		expect('webkitRTCPeerConnection' in window || 'RTCDataChannel' in window).toBe(false);
 	});
@@ -178,7 +182,7 @@ describe('the guard', () => {
 	it('tells the panel when the page starts to leave', async () => {
 		const window = page('');
 		const messages: unknown[] = [];
-		window.addEventListener('message', (event) => messages.push(event.data));
+		window.addEventListener('message', (event: MessageEvent) => messages.push(event.data));
 		window.dispatchEvent(new window.Event('beforeunload'));
 		window.dispatchEvent(new window.Event('pagehide'));
 		await new Promise((resolve) => setTimeout(resolve, 10));

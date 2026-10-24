@@ -92,7 +92,9 @@
 			<div
 				class="flex shrink-0 items-center gap-2 border-b border-gray-100 bg-gray-50 px-3 py-1.5 text-xs text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
 			>
-				<span class="flex-1">{$i18n.t('This page has scripts, which only run once you start them.')}</span>
+				<span class="flex-1"
+					>{$i18n.t('This page has scripts, which only run once you start them.')}</span
+				>
 				<button
 					type="button"
 					class="shrink-0 rounded-md bg-gray-900 px-2 py-1 font-medium text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
