@@ -591,6 +591,10 @@ async def lifespan(app: FastAPI):
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
 
     start_cleanup_worker()
+    from open_webui.soev.policy_jobs import v2_enabled
+    from open_webui.soev.retention import deletion_feed_worker
+
+    deletion_feed_task = asyncio.create_task(deletion_feed_worker()) if v2_enabled() else None
 
     from open_webui.utils.automations import scheduler_worker_loop
 
@@ -671,6 +675,9 @@ async def lifespan(app: FastAPI):
     from open_webui.services.deletion.cleanup_worker import stop_cleanup_worker
 
     stop_cleanup_worker()
+    if deletion_feed_task is not None:
+        deletion_feed_task.cancel()
+        await asyncio.gather(deletion_feed_task, return_exceptions=True)
 
     # Shutdown: clean up shared resources (after our schedulers so they release pool slots first)
     from open_webui.utils.session_pool import close_session

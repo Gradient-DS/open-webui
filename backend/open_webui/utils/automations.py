@@ -37,6 +37,7 @@ from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.messages import MessageForm
 from open_webui.models.users import Users
+from open_webui.soev.policy_jobs import v2_enabled
 from open_webui.utils.auth import create_token
 from open_webui.utils.misc import parse_duration
 from open_webui.utils.task import prompt_template
@@ -218,6 +219,8 @@ async def scheduler_worker_loop(app) -> None:
     Runs on every instance. Poll interval is configurable via
     SCHEDULER_POLL_INTERVAL env var (default: 10 seconds).
     """
+    if v2_enabled():
+        return
     log.info(
         'Scheduler worker started (timer poll interval: %ss, scheduler poll interval: %ss)',
         TIMER_POLL_INTERVAL,
@@ -392,6 +395,8 @@ async def _execute_channel_automation(
     model_id: str,
     token: str,
 ) -> None:
+    if v2_enabled():
+        return
     target = automation.data.get('target') or {}
     channel_id = target.get('channel_id')
     if not channel_id or not await Config.get('channels.enable'):
@@ -494,6 +499,8 @@ async def execute_automation(app, automation: AutomationModel) -> None:
     session_id + chat_id + message_id → async task → pipeline handles everything
     (filters, model params, knowledge/RAG, tools, DB saves, webhooks).
     """
+    if v2_enabled():
+        return
     try:
         user = await Users.get_user_by_id(automation.user_id)
         if not user:

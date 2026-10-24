@@ -31,6 +31,8 @@ from open_webui.utils.automations import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.utils.access_control import can_bypass_access_control
 
+from open_webui.soev.policy_jobs import refuse_automations
+
 log = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -213,6 +215,7 @@ async def create_new_automation(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_automations()
     await check_automations_permission(request, user)
     await check_automation_folder_access(form_data.folder_id, user, db)
     await check_automation_channel_access(form_data, user, db)
@@ -270,6 +273,7 @@ async def update_automation_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_automations()
     await check_automations_permission(request, user)
     automation = await Automations.get_by_id(id, db=db)
     check_automation_access(automation, user)
@@ -311,6 +315,7 @@ async def toggle_automation_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_automations()
     await check_automations_permission(request, user)
     automation = await Automations.get_by_id(id, db=db)
     check_automation_access(automation, user)
@@ -339,6 +344,7 @@ async def run_automation_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    refuse_automations()
     await check_automations_permission(request, user)
     automation = await Automations.get_by_id(id, db=db)
     check_automation_access(automation, user)
