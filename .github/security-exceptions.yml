@@ -214,96 +214,71 @@ exceptions:
     approved_by: Lex Lubbers, 2026-09-09
     recheck: 2026-12-09
 
-  # ------------------------------------------------------------------- npm
-  # dompurify 3.4.17 fixes the three findings below but was published 2026-10-12,
-  # inside the 14-day window the required lockfile-age check enforces. NOT §7
-  # exceptions: DEFERRED UPGRADES. On or after 2026-10-26 run
-  # `npm update dompurify` (package.json accepts ^3.4.17) and delete all three.
-  - id: GHSA-cg2g-xh64-v4q7
-    package: dompurify
-    scanner: npm
+  # filelock 4.2.1 fixes the three findings below, but every unstructured
+  # release up to 0.27.34 (2026-10-22) declares filelock<4.0.0, and the 3.x line
+  # has no backport. pip-audit resolves requirements.txt with pip, which cannot
+  # override that cap. Upgrade and delete all four entries once unstructured
+  # allows filelock 4.
+  - id: GHSA-v4x8-3wr5-3wq8
+    package: filelock
+    scanner: pip-audit
     reason: >-
-      SAFE_FOR_TEMPLATES bypass: split template expressions survive in attached
-      shadow root content on DOM output modes. Fixed in 3.4.17, published
-      2026-10-12; lockfile-age refuses it until 2026-10-26.
+      CVE-2026-112940 (high); pip-audit matches this id against the advisory's
+      aliases, so the CVE id stays free for the trivy entry below. filelock.ReadWriteLock and AsyncReadWriteLock
+      hand SQLite a path it reopens by name, so another local user who can
+      write in the lock directory can redirect its side files. Fixed only in
+      4.2.1, which unstructured's declared filelock<4.0.0 excludes.
     replacement_considered: >-
-      No replacement is needed; this is a deferred upgrade. Every release before
-      3.4.17 is affected, and npm has no cooldown exemption outside our own
-      @gradient-ds scope.
+      Replacing unstructured would change how every existing document is
+      parsed and chunked. Forcing filelock 4 past unstructured's cap needs a
+      resolver override that pip, which this audit resolves with, does not
+      support.
     usage_analysis: >-
-      Unreachable in what we ship. The bypass needs SAFE_FOR_TEMPLATES; no
-      sanitize call under src/ sets it. The only custom config,
-      DOCUMENT_PURIFY_CONFIG in src/lib/utils/htmlDocument.ts, uses
-      WHOLE_DOCUMENT, RETURN_DOM, USE_PROFILES, ADD_TAGS/ADD_ATTR and
-      FORBID_TAGS.
-    approved_by: "@LexLubbers"
-    recheck: 2026-10-26
+      The backend never imports filelock. It arrives through huggingface-hub,
+      torch, datasets and unstructured, which use FileLock and, as a
+      fallback, SoftFileLock; none of them uses ReadWriteLock or
+      AsyncReadWriteLock (chromadb's ReadWriteLock is its own class). The
+      container runs a single unprivileged user, so there is no second local
+      account to plant files.
+    approved_by: "@LexLubbers (pending, review on PR #523)"
+    recheck: 2026-11-07
 
-  - id: GHSA-mrv2-3pqr-j5jr
-    package: dompurify
-    scanner: npm
+  - id: CVE-2026-112940
+    package: filelock
+    scanner: trivy
     reason: >-
-      IN_PLACE sanitizing: a hook that removes a parent or sibling leaves the
-      detached subtree's event handlers armed. Fixed in 3.4.17, published
-      2026-10-12; lockfile-age refuses it until 2026-10-26.
+      The same finding as the pip-audit entry above, reported by the image
+      scan. See that entry.
     replacement_considered: >-
-      Same deferred upgrade as GHSA-cg2g-xh64-v4q7.
+      Same as the pip-audit entry above.
     usage_analysis: >-
-      Unreachable in what we ship: no sanitize call under src/ sets IN_PLACE,
-      and nothing registers a DOMPurify hook (no addHook call).
-    approved_by: "@LexLubbers"
-    recheck: 2026-10-26
+      Same as the pip-audit entry above.
+    approved_by: "@LexLubbers (pending, review on PR #523)"
+    recheck: 2026-11-07
 
-  - id: GHSA-c6gr-qvv4-5v3f
-    package: dompurify
-    scanner: npm
+  - id: CVE-2026-112913
+    package: filelock
+    scanner: pip-audit
     reason: >-
-      The SMIL attributeName=href guard is skipped when PARSER_MEDIA_TYPE is
-      application/xhtml+xml. Fixed in 3.4.17, published 2026-10-12;
-      lockfile-age refuses it until 2026-10-26.
+      GHSA-9vhv-jxww-xfm5 (low). Windows only: ReadWriteLock acts on SQLite
+      side files another local user places beside its database.
     replacement_considered: >-
-      Same deferred upgrade as GHSA-cg2g-xh64-v4q7.
+      Same capped upgrade as CVE-2026-112940.
     usage_analysis: >-
-      Unreachable in what we ship: no sanitize call under src/ sets
-      PARSER_MEDIA_TYPE, so DOMPurify always parses as text/html.
-    approved_by: "@LexLubbers"
-    recheck: 2026-10-26
+      Unreachable: we ship Linux images only, and nothing uses ReadWriteLock.
+    approved_by: "@LexLubbers (pending, review on PR #523)"
+    recheck: 2026-11-07
 
-  # markdown-it 14.3.3 fixes both findings below but was published 2026-10-16,
-  # inside the 14-day window the required lockfile-age check enforces. NOT §7
-  # exceptions: DEFERRED UPGRADES. On or after 2026-10-30 run
-  # `npm update markdown-it` (prosemirror-markdown accepts ^14.3.3) and delete
-  # both entries.
-  - id: GHSA-gfr2-rv44-r23c
-    package: markdown-it
-    scanner: npm
+  - id: CVE-2026-112907
+    package: filelock
+    scanner: pip-audit
     reason: >-
-      CVE-2026-111758. Quadratic-time rendering of a single multi-line link
-      reference definition. Fixed in 14.3.3, published 2026-10-16;
-      lockfile-age refuses it until 2026-10-30.
+      GHSA-567q-5qvw-pf92 (low). Windows only: an oplock on a soft lock's marker
+      stalls SoftFileLock.acquire() past its timeout.
     replacement_considered: >-
-      No replacement is needed; this is a deferred upgrade. Every release before
-      14.3.3 is affected, and npm has no cooldown exemption outside our own
-      @gradient-ds scope.
+      Same capped upgrade as CVE-2026-112940.
     usage_analysis: >-
-      Unreachable in what we ship. markdown-it arrives only through
-      prosemirror-markdown, which nothing under src/ imports, so the frontend
-      bundle never contains it, and the runtime image copies only the built
-      frontend (/app/build), not node_modules.
-    approved_by: "@LexLubbers"
-    recheck: 2026-10-30
-
-  - id: GHSA-vfgh-jcmw-g37q
-    package: markdown-it
-    scanner: npm
-    reason: >-
-      CVE-2026-111766. Quadratic-time denial of service in inline HTML parsing
-      when markdown-it runs with html enabled. Fixed in 14.3.3, published
-      2026-10-16; lockfile-age refuses it until 2026-10-30.
-    replacement_considered: >-
-      Same deferred upgrade as GHSA-gfr2-rv44-r23c.
-    usage_analysis: >-
-      See GHSA-gfr2-rv44-r23c: no module under src/ imports
-      prosemirror-markdown or markdown-it, so neither is bundled or run.
-    approved_by: "@LexLubbers"
-    recheck: 2026-10-30
+      Unreachable: oplocks are a Windows mechanism, and we ship Linux images
+      only.
+    approved_by: "@LexLubbers (pending, review on PR #523)"
+    recheck: 2026-11-07
