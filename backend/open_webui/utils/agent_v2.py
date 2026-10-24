@@ -117,11 +117,23 @@ def _summary(count: int, seconds: float, language: str | None) -> str:
 
 
 def _filled(declared: dict[str, Any], params: dict[str, str]) -> dict[str, Any] | None:
-    """The declared template, or its fallback, when every placeholder has a value."""
-    for template in (declared.get('template'), declared.get('fallback')):
+    """The declared template, or the first fallback, when every placeholder has a value; `fallback` is one template
+    or a list of them."""
+    fallback = declared.get('fallback')
+    for template in [declared.get('template'), *(fallback if isinstance(fallback, list) else [fallback])]:
         if isinstance(template, str) and all(name in params for name in _PLACEHOLDER.findall(template)):
             return {'description': template, **{name: params[name] for name in _PLACEHOLDER.findall(template)}}
     return None
+
+
+#: [Gradient] Names a status line lists before it counts the rest, so a long list cannot flood it.
+_LISTED = 3
+
+
+def _listed(names: list[str]) -> str:
+    """[Gradient] The first names, then `+N` for the rest."""
+    shown = ', '.join(names[:_LISTED])
+    return f'{shown} +{len(names) - _LISTED}' if len(names) > _LISTED else shown
 
 
 def _field(element: dict[str, Any], field: str) -> Any:
@@ -1421,7 +1433,7 @@ class AgentTurn:
             if kind == 'argument':
                 value = arguments.get(rest)
                 if isinstance(value, list) and all(isinstance(item, str) for item in value):
-                    value = ', '.join(item for item in value if item.strip())
+                    value = _listed([item for item in value if item.strip()])
             elif kind == 'knowledge':
                 key = arguments.get(rest)
                 only = list(self.knowledge_names.values()) if len(self.knowledge_names) == 1 else [None]
@@ -1431,8 +1443,8 @@ class AgentTurn:
                 named = arguments.get(argument)
                 names = named if isinstance(named, list) else [named]
                 values = [_field(self.elements.get(name) or {}, field) for name in names if isinstance(name, str)]
-                value = ', '.join(
-                    str(item) for item in values if isinstance(item, str | int | float) and str(item).strip()
+                value = _listed(
+                    [str(item) for item in values if isinstance(item, str | int | float) and str(item).strip()]
                 )
             elif kind == 'output' and output is not None:
                 value = _from_output(rest, output.get('elements') or [])

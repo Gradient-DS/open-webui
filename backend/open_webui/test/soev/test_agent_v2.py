@@ -3643,3 +3643,42 @@ async def test_a_note_on_a_delivered_file_cites_that_file_for_the_panel(chat: Ch
     assert source['source']['name'] == 'chart.png'
     assert source['source']['delivered_file']['element_id'] == 'chart-element'
     assert source['source']['delivered_file']['type'] == 'workspace'
+
+
+@pytest.mark.parametrize(
+    'arguments,expected',
+    [
+        (
+            {'documents': ['d1', 'd2', 'd3', 'd4', 'd5'], 'earlier_files': ['f1']},
+            {
+                'description': 'Working in the sandbox with {{documents}} and {{files}}...',
+                'documents': 'Budget, Minutes, Plan +2',
+                'files': 'chart.html',
+            },
+        ),
+        (
+            {'documents': ['d1', 'd2', 'd3']},
+            {'description': 'Working in the sandbox with {{documents}}...', 'documents': 'Budget, Minutes, Plan'},
+        ),
+        ({'earlier_files': ['f1']}, {'description': 'Working in the sandbox with {{files}}...', 'files': 'chart.html'}),
+        ({}, {'description': 'Working in the sandbox...'}),
+    ],
+)
+def test_workspace_status_lists_three_names_then_counts_the_rest(arguments, expected):
+    turn = agent_v2.AgentTurn(None, {}, 'owui:user:alice')
+    titles = ['Budget', 'Minutes', 'Plan', 'Roadmap', 'Report']
+    turn.elements = {f'd{i + 1}': {'title': title} for i, title in enumerate(titles)} | {'f1': {'name': 'chart.html'}}
+    turn.tool_statuses = {
+        'workspace_task': {
+            'running': {
+                'template': 'Working in the sandbox with {{documents}} and {{files}}...',
+                'fallback': [
+                    'Working in the sandbox with {{documents}}...',
+                    'Working in the sandbox with {{files}}...',
+                    'Working in the sandbox...',
+                ],
+                'params': {'documents': 'element.documents.title', 'files': 'element.earlier_files.name'},
+            }
+        }
+    }
+    assert turn.tool_status('workspace_task', arguments) == {'action': 'workspace_task', **expected}
