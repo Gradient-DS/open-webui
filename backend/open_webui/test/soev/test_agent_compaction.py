@@ -8,8 +8,8 @@ import pytest
 from open_webui.utils import middleware
 
 
-class Stop(Exception):
-    """Ends the payload pass at the pipeline filters, after compaction and the chat prompt are settled."""
+class Stop(BaseException):
+    """Ends the payload pass at the function filters, after compaction and the chat prompt are settled."""
 
 
 @pytest.fixture
@@ -19,12 +19,13 @@ def compaction(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     history = [{'role': 'user', 'content': 'earlier'}, {'role': 'user', 'content': 'now'}]
     monkeypatch.setattr(middleware, 'load_messages_from_db', AsyncMock(return_value=history))
     monkeypatch.setattr(middleware, 'get_system_oauth_token', AsyncMock(return_value=None))
-    monkeypatch.setattr(middleware, 'process_pipeline_inlet_filter', AsyncMock(side_effect=Stop))
+    monkeypatch.setattr(middleware, 'ENABLE_PLUGINS', True)
+    monkeypatch.setattr(middleware, 'get_filter_functions', AsyncMock(side_effect=Stop))
     return compact
 
 
 async def settled(*, route_to_agent: bool) -> dict:
-    """The metadata as the payload pass leaves it at the pipeline filters."""
+    """The metadata as the payload pass leaves it at the function filters."""
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(MODELS={})), state=SimpleNamespace())
     form_data = {'model': 'llm', 'messages': [{'role': 'system', 'content': 'Ik ben jurist.'}]}
     metadata = {'chat_id': 'chat-1', 'user_message_id': 'u1', 'route_to_agent': route_to_agent}

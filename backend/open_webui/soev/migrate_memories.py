@@ -6,47 +6,14 @@ from types import SimpleNamespace
 
 import sqlalchemy as sa
 
-RAG_KEYS = (
-    'rag.embedding_engine',
-    'rag.embedding_model',
-    'rag.openai.api_base_url',
-    'rag.ollama.base_url',
-    'rag.azure_openai.base_url',
-    'rag.openai.api_key',
-    'rag.ollama.api_key',
-    'rag.azure_openai.api_key',
-    'rag.embedding_batch_size',
-    'rag.azure_openai.api_version',
-    'rag.enable_async_embedding',
-    'rag.embedding_concurrent_requests',
-)
-
 
 async def build_embedding_function() -> Callable[..., Awaitable]:
-    """The function main.py puts on app.state.EMBEDDING_FUNCTION, from the same config rows."""
-    from open_webui.models.config import Config
-    from open_webui.retrieval.utils import get_embedding_function
-    from open_webui.routers.retrieval import get_ef
+    from open_webui.soev.primitives import embed_memory
 
-    rag = await Config.get_many(*RAG_KEYS)
-    engine = rag.get('rag.embedding_engine')
-    if engine == 'openai':
-        url, key = rag.get('rag.openai.api_base_url'), rag.get('rag.openai.api_key')
-    elif engine == 'ollama':
-        url, key = rag.get('rag.ollama.base_url'), rag.get('rag.ollama.api_key')
-    else:
-        url, key = rag.get('rag.azure_openai.base_url'), rag.get('rag.azure_openai.api_key')
-    return get_embedding_function(
-        engine,
-        rag.get('rag.embedding_model'),
-        embedding_function=get_ef(engine, rag.get('rag.embedding_model')),
-        url=url,
-        key=key,
-        embedding_batch_size=rag.get('rag.embedding_batch_size'),
-        azure_api_version=rag.get('rag.azure_openai.api_version') if engine == 'azure_openai' else None,
-        enable_async=rag.get('rag.enable_async_embedding'),
-        concurrent_requests=rag.get('rag.embedding_concurrent_requests'),
-    )
+    async def embed(text, prefix=None, user=None):
+        return await embed_memory(text, user)
+
+    return embed
 
 
 @dataclass
@@ -96,7 +63,9 @@ async def reembed(*, dry_run: bool = False, db=None, embedding_function=None) ->
             function = embedding_function or await build_embedding_function()
             request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(EMBEDDING_FUNCTION=function)))
         user = await Users.get_user_by_id(user_id)
-        await router.reindex_memory_vectors_for_user(request, user_id, memories=memories, user=user)
+        await router.reindex_memory_vectors_for_user(
+            request, user_id, memories=memories, user=user, embedding_function=request.app.state.EMBEDDING_FUNCTION
+        )
         state.reembedded.append(user_id)
         stored = await _vector_ids(router.ASYNC_VECTOR_DB_CLIENT, user_id)
         state.per_user[user_id] = (len(memories), len(stored & expected))

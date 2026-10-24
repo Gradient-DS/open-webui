@@ -2,7 +2,8 @@
 
 Agent chat uses v2 exclusively. All tenants cut over in the same release; this
 image has no legacy agent transport, discovery proxy or service-key retrieval
-callbacks. Stock Open WebUI routing remains available when agent routing is disabled.
+callbacks. OpenAI-compatible provider connections, browser direct connections and remote
+pipelines have been removed. Configure soev-api for the model catalog and tasks.
 
 ## Configuration
 
@@ -85,7 +86,7 @@ access still depend on the configured backend URL. An open soev-server advertisi
 
 v2 mode is on when `AGENT_API_ENABLED=true` and `SOEV_API_URL` is set. soev-api then decides which models exist, which one is the default, and which model runs tasks:
 
-- **Models.** The picker lists only soev-api's catalog (`GET /v1/models`, cached per process for 60 s). OpenAI and Ollama connections, function models and direct user connections are not offered, so `OPENAI_API_BASE_URLS` and connection `model_ids` have no effect. Access is unchanged: as with any base model, users see a catalog model only once an admin grants it under Admin > Models.
+- **Models.** The picker lists only soev-api's catalog (`GET /v1/models`, cached per process for 60 s). Ollama and function models are not offered. OpenAI-compatible and browser direct connections no longer exist. Access is unchanged: as with any base model, users see a catalog model only once an admin grants it under Admin > Models.
 - **Default.** `/api/config` serves the catalog entry marked `default` as `default_models`. `ui.default_models` (`DEFAULT_MODELS`) is ignored. A model the user saved or picked still wins.
 - **Tasks.** Titles, tags, follow-ups, emoji, queries, autocomplete, image prompts, MoA, context compaction, memory review and tool selection all go to `POST /v1/completions/task` as the acting user. soev-api runs them on the client's `task` model, so `TASK_MODEL`, `TASK_MODEL_EXTERNAL` and a direct LiteLLM connection are not needed. The prompt templates still come from Open WebUI.
 
@@ -132,3 +133,60 @@ Inputs (environment):
 Rollback: redeploy the previous full image set and values, and restore the database backup taken before the cutover. v2 migrates the schema past the v1 Alembic head (it drops `agent_config`), so a v1 image does not start on a v2 database.
 
 Not migrated: Confluence KBs (Confluence is out of scope), web-search result collections (transient), Weaviate vectors (re-embedded from the originals), and model ids in feedback records. Proven Entra links are never backfilled; they form at login.
+
+## Retired inference surfaces and remaining credentials
+
+The v2 image no longer mounts `/openai/*` or `/api/v1/pipelines/*`, or the main
+Anthropic messages and token-count proxies. Admin Connections, personal direct
+connections, provider model management and pipeline settings are removed. Saved
+`ui.directConnections` are discarded by the user-settings model on reads and
+writes; a submitted `model_item` cannot select a provider or bypass catalog access.
+Local knowledge embedding and reranking engines, their configuration endpoints,
+local query/text-processing routes (`/api/v1/retrieval/query/doc`,
+`/query/collection`, `/process/text`), the development `/ef/{text}` probe, and
+the Documents embedding/reranking controls are removed. Provider model
+management and OpenAI-compatible model unloading are gone; Ollama management
+remains. Remote pipeline inlet/outlet calls are removed from chat and task
+processing; local custom-function filters remain. Single-file and batch ingestion use soev-api; web extraction returns
+text without creating local embedding collections. Memory embeddings and dictation
+use the soev-api primitives. Memory re-embedding during migration uses the same
+platform primitive; connection snapshots and their byte-for-byte restore remain
+in `soev/migrate_config.py` and the historical Alembic migration. This removes
+runtime use and settings surfaces; it does not erase old values from migration
+snapshots or existing raw config/user-settings rows. A later user-settings save
+drops the retired direct-connection payload.
+
+The chart no longer supplies `OPENAI_API_KEY`, `RAG_OPENAI_API_KEY`,
+`RAG_EXTERNAL_RERANKER_API_KEY`, loader-worker `LITELLM_API_KEY` or
+`LOADER_LITELLM_BASE_URL`. It no longer defines the `openai-api-key` and
+`rag-openai-api-key` secrets. Image generation previously reused the first secret;
+it now uses `secrets.imagesOpenaiApiKey` / `images-openai-api-key`, with the matching
+`imagesOpenaiApiKey` field in the External Secrets item (enable
+`externalSecrets.onepassword.fields.imagesOpenaiApiKey` to read it). Migrate that field before
+upgrading a deployment that uses OWUI image generation.
+
+Part 1 deliberately leaves these provider credentials and direct inference paths
+pending decisions about images, speech and custom functions:
+
+- `routers/images.py`: image generation and editing, including `IMAGES_OPENAI_*`,
+  `IMAGES_EDIT_OPENAI_*`, Gemini, Automatic1111 and ComfyUI provider settings.
+- `routers/audio.py`: speech output (`AUDIO_TTS_*`) and legacy upload-file
+  transcription (`AUDIO_STT_*`). Dictation uses soev-api in v2; the upload path
+  still calls the existing transcription function.
+- `OPENAI_API_KEY` / `OPENAI_API_BASE_URL` remain compatibility defaults for those
+  image and audio settings only. Legacy `OPENAI_API_KEYS` / `OPENAI_API_BASE_URLS`
+  environment values are read only to preserve their original public-OpenAI
+  default-key selection; they no longer configure a connection or model. Their
+  runtime connection arrays/configuration and chart injection are removed. Deployments can still supply dedicated audio/image
+  credentials through existing provider settings or extra environment variables.
+  Deployments that inherited speech credentials from the old chart key must
+  populate their dedicated `AUDIO_TTS_OPENAI_API_KEY` / `AUDIO_STT_OPENAI_API_KEY`
+  settings before upgrading.
+- Admin-authored custom functions, including FunctionEditor's existing OpenAI
+  pipe template, can hold their own credentials. No function/template change is
+  included until the custom-function decision is made.
+- Legacy deployment examples and the sealed security test stack still contain
+  their fictional provider credentials. They do not supply production chart keys.
+
+`SOEV_API_KEY` is the product credential for soev-api, not a model-gateway key.
+The complete removal of every gateway credential awaits the decisions above.

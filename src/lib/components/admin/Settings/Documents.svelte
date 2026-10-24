@@ -9,10 +9,6 @@
 		getQuerySettings,
 		updateQuerySettings,
 		resetVectorDB,
-		getEmbeddingConfig,
-		updateEmbeddingConfig,
-		getRerankingConfig,
-		updateRerankingConfig,
 		getRAGConfig,
 		updateRAGConfig
 	} from '$lib/apis/retrieval';
@@ -36,31 +32,9 @@
 
 	const i18n: any = getContext('i18n');
 
-	let updateEmbeddingModelLoading = false;
-	let updateRerankingModelLoading = false;
-
 	let showResetConfirm = false;
 	let showResetUploadDirConfirm = false;
-	let showReindexConfirm = false;
 	let showExternalDocumentLoaderHeadersHint = false;
-
-	let RAG_EMBEDDING_ENGINE = '';
-	let RAG_EMBEDDING_MODEL = '';
-	let RAG_EMBEDDING_BATCH_SIZE = 1;
-	let ENABLE_ASYNC_EMBEDDING = true;
-	let RAG_EMBEDDING_CONCURRENT_REQUESTS = 0;
-
-	let rerankingModel = '';
-
-	let OpenAIUrl = '';
-	let OpenAIKey = '';
-
-	let AzureOpenAIUrl = '';
-	let AzureOpenAIKey = '';
-	let AzureOpenAIVersion = '';
-
-	let OllamaUrl = '';
-	let OllamaKey = '';
 
 	let querySettings = {
 		template: '',
@@ -77,88 +51,6 @@
 		'shrink-0 text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white';
 	const textareaClass =
 		'w-full rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1.5 text-xs text-gray-700 outline-hidden transition-colors placeholder:text-gray-300 focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:placeholder:text-gray-700 dark:focus:border-blue-500';
-
-	const embeddingModelUpdateHandler = async () => {
-		if (RAG_EMBEDDING_ENGINE === '' && RAG_EMBEDDING_MODEL.split('/').length - 1 > 1) {
-			toast.error(
-				$i18n.t(
-					'Model filesystem path detected. Model shortname is required for update, cannot continue.'
-				)
-			);
-			return;
-		}
-		if (RAG_EMBEDDING_ENGINE === 'ollama' && RAG_EMBEDDING_MODEL === '') {
-			toast.error(
-				$i18n.t(
-					'Model filesystem path detected. Model shortname is required for update, cannot continue.'
-				)
-			);
-			return;
-		}
-
-		if (RAG_EMBEDDING_ENGINE === 'openai' && RAG_EMBEDDING_MODEL === '') {
-			toast.error(
-				$i18n.t(
-					'Model filesystem path detected. Model shortname is required for update, cannot continue.'
-				)
-			);
-			return;
-		}
-
-		if (
-			RAG_EMBEDDING_ENGINE === 'azure_openai' &&
-			(AzureOpenAIKey === '' || AzureOpenAIUrl === '' || AzureOpenAIVersion === '')
-		) {
-			toast.error($i18n.t('OpenAI URL/Key required.'));
-			return;
-		}
-
-		console.debug('Update embedding model attempt:', {
-			RAG_EMBEDDING_ENGINE,
-			RAG_EMBEDDING_MODEL,
-			RAG_EMBEDDING_BATCH_SIZE,
-			ENABLE_ASYNC_EMBEDDING,
-			RAG_EMBEDDING_CONCURRENT_REQUESTS
-		});
-
-		updateEmbeddingModelLoading = true;
-		const payload: Parameters<typeof updateEmbeddingConfig>[1] = {
-			RAG_EMBEDDING_ENGINE: RAG_EMBEDDING_ENGINE,
-			RAG_EMBEDDING_MODEL: RAG_EMBEDDING_MODEL,
-			RAG_EMBEDDING_BATCH_SIZE: RAG_EMBEDDING_BATCH_SIZE,
-			ENABLE_ASYNC_EMBEDDING: ENABLE_ASYNC_EMBEDDING,
-			RAG_EMBEDDING_CONCURRENT_REQUESTS: RAG_EMBEDDING_CONCURRENT_REQUESTS
-		};
-
-		if (RAG_EMBEDDING_ENGINE === 'ollama') {
-			payload.ollama_config = {
-				key: OllamaKey,
-				url: OllamaUrl
-			};
-		} else if (RAG_EMBEDDING_ENGINE === 'openai') {
-			payload.openai_config = {
-				key: OpenAIKey,
-				url: OpenAIUrl
-			};
-		} else if (RAG_EMBEDDING_ENGINE === 'azure_openai') {
-			payload.azure_openai_config = {
-				key: AzureOpenAIKey,
-				url: AzureOpenAIUrl,
-				version: AzureOpenAIVersion
-			};
-		}
-
-		const res = await updateEmbeddingConfig(localStorage.token, payload).catch(async (error) => {
-			toast.error(`${error}`);
-			await setEmbeddingConfig();
-			return null;
-		});
-		updateEmbeddingModelLoading = false;
-
-		if (res) {
-			console.debug('embeddingModelUpdateHandler:', res);
-		}
-	};
 
 	const submitHandler = async () => {
 		if (
@@ -235,10 +127,6 @@
 			return;
 		}
 
-		if (!RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL) {
-			await embeddingModelUpdateHandler();
-		}
-
 		if (RAGConfig.DOCLING_PARAMS) {
 			try {
 				JSON.parse(RAGConfig.DOCLING_PARAMS);
@@ -296,31 +184,7 @@
 		});
 		dispatch('save');
 	};
-
-	const setEmbeddingConfig = async () => {
-		const embeddingConfig = await getEmbeddingConfig(localStorage.token);
-
-		if (embeddingConfig) {
-			RAG_EMBEDDING_ENGINE = embeddingConfig.RAG_EMBEDDING_ENGINE;
-			RAG_EMBEDDING_MODEL = embeddingConfig.RAG_EMBEDDING_MODEL;
-			RAG_EMBEDDING_BATCH_SIZE = embeddingConfig.RAG_EMBEDDING_BATCH_SIZE ?? 1;
-			ENABLE_ASYNC_EMBEDDING = embeddingConfig.ENABLE_ASYNC_EMBEDDING ?? true;
-			RAG_EMBEDDING_CONCURRENT_REQUESTS = embeddingConfig.RAG_EMBEDDING_CONCURRENT_REQUESTS ?? 0;
-
-			OpenAIKey = embeddingConfig.openai_config.key ?? '';
-			OpenAIUrl = embeddingConfig.openai_config.url ?? '';
-
-			OllamaKey = embeddingConfig.ollama_config.key ?? '';
-			OllamaUrl = embeddingConfig.ollama_config.url ?? '';
-
-			AzureOpenAIKey = embeddingConfig.azure_openai_config.key ?? '';
-			AzureOpenAIUrl = embeddingConfig.azure_openai_config.url ?? '';
-			AzureOpenAIVersion = embeddingConfig.azure_openai_config.version ?? '';
-		}
-	};
 	onMount(async () => {
-		await setEmbeddingConfig();
-
 		const config = await getRAGConfig(localStorage.token);
 		// Cloud sync integrations are now managed in the Cloud Sync admin tab.
 		// Drop these fields so saving Documents config never round-trips (and
@@ -379,42 +243,6 @@
 		});
 
 		if (res) {
-			toast.success($i18n.t('Success'));
-		}
-	}}
-/>
-
-<ReindexEmbeddingDataConfirmDialog
-	bind:show={showReindexConfirm}
-	title={$i18n.t('Reindex Embedding Data')}
-	message={$i18n.t(
-		'Rebuild knowledge file, knowledge search, and memory vectors using the current embedding model.'
-	)}
-	on:confirm={async () => {
-		const knowledgeRes = await reindexKnowledgeFiles(localStorage.token).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		if (!knowledgeRes) {
-			return;
-		}
-
-		const knowledgeMetadataRes = await reindexKnowledgeMetadata(localStorage.token).catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
-		if (!knowledgeMetadataRes) {
-			return;
-		}
-
-		const memoryRes = await reindexMemoryVectors(localStorage.token).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-
-		if (memoryRes) {
 			toast.success($i18n.t('Success'));
 		}
 	}}
@@ -930,7 +758,7 @@
 								placeholder={$i18n.t('Enter Tokenizer Model')}
 								bind:value={RAGConfig.RAG_TOKENIZER_MODEL}
 								autocomplete="off"
-								required={RAG_EMBEDDING_ENGINE !== ''}
+								required
 							/>
 						</AdminSettingField>
 					{/if}
@@ -997,216 +825,6 @@
 				{/if}
 			</AdminSettingSection>
 
-			{#if !RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL}
-				<AdminSettingSection title={$i18n.t('Embedding')}>
-					<AdminSettingRow
-						label={$i18n.t('Embedding Model Engine')}
-						description={$i18n.t('Provider used to generate document embeddings.')}
-					>
-						<SettingsSelect
-							bind:value={RAG_EMBEDDING_ENGINE}
-							placeholder={$i18n.t('Select an embedding model engine')}
-							on:change={(e) => {
-								if (e.target.value === 'ollama') {
-									RAG_EMBEDDING_MODEL = '';
-								} else if (e.target.value === 'openai') {
-									RAG_EMBEDDING_MODEL = 'text-embedding-3-small';
-								} else if (e.target.value === 'azure_openai') {
-									RAG_EMBEDDING_MODEL = 'text-embedding-3-small';
-								} else if (e.target.value === '') {
-									RAG_EMBEDDING_MODEL = 'sentence-transformers/all-MiniLM-L6-v2';
-								}
-							}}
-						>
-							<option value="">{$i18n.t('Default (SentenceTransformers)')}</option>
-							<option value="ollama">{$i18n.t('Ollama')}</option>
-							<option value="openai">{$i18n.t('OpenAI')}</option>
-							<option value="azure_openai">{$i18n.t('Azure OpenAI')}</option>
-						</SettingsSelect>
-					</AdminSettingRow>
-
-					{#if RAG_EMBEDDING_ENGINE === 'openai'}
-						<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-							<AdminSettingField
-								label={$i18n.t('API Base URL')}
-								description={$i18n.t('OpenAI-compatible embeddings endpoint.')}
-							>
-								<input
-									class={inputClass}
-									placeholder={$i18n.t('API Base URL')}
-									bind:value={OpenAIUrl}
-									required
-								/>
-							</AdminSettingField>
-							<AdminSettingField
-								label={$i18n.t('API Key')}
-								description={$i18n.t('API key for embedding requests.')}
-							>
-								<SensitiveInput
-									variant="settings"
-									placeholder={$i18n.t('API Key')}
-									bind:value={OpenAIKey}
-									required={false}
-								/>
-							</AdminSettingField>
-						</div>
-					{:else if RAG_EMBEDDING_ENGINE === 'ollama'}
-						<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-							<AdminSettingField
-								label={$i18n.t('API Base URL')}
-								description={$i18n.t('Ollama endpoint used for embeddings.')}
-							>
-								<input
-									class={inputClass}
-									placeholder={$i18n.t('API Base URL')}
-									bind:value={OllamaUrl}
-									required
-								/>
-							</AdminSettingField>
-							<AdminSettingField
-								label={$i18n.t('API Key')}
-								description={$i18n.t('Optional API key for Ollama requests.')}
-							>
-								<SensitiveInput
-									variant="settings"
-									placeholder={$i18n.t('API Key')}
-									bind:value={OllamaKey}
-									required={false}
-								/>
-							</AdminSettingField>
-						</div>
-					{:else if RAG_EMBEDDING_ENGINE === 'azure_openai'}
-						<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-							<AdminSettingField
-								label={$i18n.t('API Base URL')}
-								description={$i18n.t('Azure OpenAI endpoint used for embeddings.')}
-							>
-								<input
-									class={inputClass}
-									placeholder={$i18n.t('API Base URL')}
-									bind:value={AzureOpenAIUrl}
-									required
-								/>
-							</AdminSettingField>
-							<AdminSettingField
-								label={$i18n.t('API Key')}
-								description={$i18n.t('Azure OpenAI API key.')}
-							>
-								<SensitiveInput
-									variant="settings"
-									placeholder={$i18n.t('API Key')}
-									bind:value={AzureOpenAIKey}
-								/>
-							</AdminSettingField>
-							<AdminSettingField
-								label={$i18n.t('Version')}
-								description={$i18n.t('Azure OpenAI API version.')}
-							>
-								<input
-									class={inputClass}
-									placeholder={$i18n.t('Version')}
-									bind:value={AzureOpenAIVersion}
-									required
-								/>
-							</AdminSettingField>
-						</div>
-					{/if}
-
-					<AdminSettingField
-						label={$i18n.t('Embedding Model')}
-						description={$i18n.t(
-							'Model used to generate embeddings. Reindex knowledge after changing this.'
-						)}
-					>
-						<div class="flex w-full gap-2">
-							<input
-								class={inputClass}
-								placeholder={RAG_EMBEDDING_ENGINE === 'ollama'
-									? $i18n.t('Set embedding model')
-									: $i18n.t('Set embedding model (e.g. {{model}})', {
-											model: RAG_EMBEDDING_MODEL.slice(-40)
-										})}
-								bind:value={RAG_EMBEDDING_MODEL}
-								required={RAG_EMBEDDING_ENGINE === 'ollama'}
-							/>
-
-							{#if RAG_EMBEDDING_ENGINE === ''}
-								<button
-									class="flex size-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-black/5 hover:text-gray-900 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-white"
-									type="button"
-									on:click={() => {
-										embeddingModelUpdateHandler();
-									}}
-									disabled={updateEmbeddingModelLoading}
-									aria-label={$i18n.t('Update embedding model')}
-								>
-									{#if updateEmbeddingModelLoading}
-										<Spinner />
-									{:else}
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 16 16"
-											fill="currentColor"
-											class="size-4"
-										>
-											<path
-												d="M8.75 2.75a.75.75 0 0 0-1.5 0v5.69L5.03 6.22a.75.75 0 0 0-1.06 1.06l3.5 3.5a.75.75 0 0 0 1.06 0l3.5-3.5a.75.75 0 0 0-1.06-1.06L8.75 8.44V2.75Z"
-											/>
-											<path
-												d="M3.5 9.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 14h6.5A2.75 2.75 0 0 0 14 11.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25h-6.5c-.69 0-1.25-.56-1.25-1.25v-1.5Z"
-											/>
-										</svg>
-									{/if}
-								</button>
-							{/if}
-						</div>
-						<div class="mt-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-							{$i18n.t(
-								'After changing the embedding model, reindex knowledge, knowledge search, and memory vectors for changes to take effect.'
-							)}
-						</div>
-					</AdminSettingField>
-
-					<AdminSettingRow
-						label={$i18n.t('Embedding Batch Size')}
-						description={$i18n.t('Number of items processed per embedding batch.')}
-					>
-						<input
-							bind:value={RAG_EMBEDDING_BATCH_SIZE}
-							type="number"
-							class="w-14 bg-transparent text-center text-xs outline-none"
-							min="-2"
-							max="16000"
-							step="1"
-						/>
-					</AdminSettingRow>
-
-					{#if RAG_EMBEDDING_ENGINE === 'ollama' || RAG_EMBEDDING_ENGINE === 'openai' || RAG_EMBEDDING_ENGINE === 'azure_openai'}
-						<AdminSettingRow
-							label={$i18n.t('Async Embedding Processing')}
-							description={$i18n.t('Run embedding tasks concurrently to speed up processing.')}
-							let:labelId
-						>
-							<Switch bind:state={ENABLE_ASYNC_EMBEDDING} ariaLabelledbyId={labelId} />
-						</AdminSettingRow>
-						<AdminSettingRow
-							label={$i18n.t('Embedding Concurrent Requests')}
-							description={$i18n.t(
-								'Maximum concurrent embedding requests. Set to 0 for unlimited.'
-							)}
-						>
-							<input
-								bind:value={RAG_EMBEDDING_CONCURRENT_REQUESTS}
-								type="number"
-								class="w-14 bg-transparent text-center text-xs outline-none"
-								min="0"
-								step="1"
-							/>
-						</AdminSettingRow>
-					{/if}
-				</AdminSettingSection>
-			{/if}
-
 			<AdminSettingSection title={$i18n.t('Retrieval')}>
 				{#if !RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL}
 					<!-- [Gradient] No Full Context Mode switch: retrieval strategy is decided
@@ -1235,128 +853,6 @@
 									ariaLabelledbyId={labelId}
 								/>
 							</AdminSettingRow>
-
-							<AdminSettingRow
-								label={$i18n.t('Reranking Engine')}
-								description={$i18n.t('Provider used to rerank hybrid search results.')}
-							>
-								<SettingsSelect
-									bind:value={RAGConfig.RAG_RERANKING_ENGINE}
-									placeholder={$i18n.t('Select a reranking model engine')}
-									on:change={(e) => {
-										if (e.target.value === 'external') {
-											RAGConfig.RAG_RERANKING_MODEL = '';
-										} else if (e.target.value === '') {
-											RAGConfig.RAG_RERANKING_MODEL = 'BAAI/bge-reranker-v2-m3';
-										}
-									}}
-								>
-									<option value="">{$i18n.t('Default (SentenceTransformers)')}</option>
-									<option value="external">{$i18n.t('External')}</option>
-								</SettingsSelect>
-							</AdminSettingRow>
-
-							{#if RAGConfig.RAG_RERANKING_ENGINE === 'external'}
-								<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-									<AdminSettingField
-										label={$i18n.t('API Base URL')}
-										description={$i18n.t('External reranker endpoint.')}
-									>
-										<input
-											class={inputClass}
-											placeholder={$i18n.t('API Base URL')}
-											bind:value={RAGConfig.RAG_EXTERNAL_RERANKER_URL}
-											required
-										/>
-									</AdminSettingField>
-									<AdminSettingField
-										label={$i18n.t('API Key')}
-										description={$i18n.t('API key sent to the external reranker.')}
-									>
-										<SensitiveInput
-											variant="settings"
-											placeholder={$i18n.t('API Key')}
-											bind:value={RAGConfig.RAG_EXTERNAL_RERANKER_API_KEY}
-											required={false}
-										/>
-									</AdminSettingField>
-								</div>
-							{/if}
-
-							<AdminSettingField
-								label={$i18n.t('Reranking Model')}
-								description={$i18n.t('Model used to rerank retrieved results.')}
-							>
-								<input
-									class={inputClass}
-									placeholder={$i18n.t('Set reranking model (e.g. {{model}})', {
-										model: 'BAAI/bge-reranker-v2-m3'
-									})}
-									bind:value={RAGConfig.RAG_RERANKING_MODEL}
-								/>
-							</AdminSettingField>
-						{/if}
-
-						<AdminSettingRow
-							label={$i18n.t('Reranking Batch Size')}
-							description={$i18n.t('Number of results processed per reranking batch.')}
-						>
-							<input
-								bind:value={RAGConfig.RAG_RERANKING_BATCH_SIZE}
-								type="number"
-								class="w-14 bg-transparent text-center text-xs outline-none"
-								min="1"
-								max="16000"
-								step="1"
-							/>
-						</AdminSettingRow>
-
-						<AdminSettingField
-							label={$i18n.t('Top K')}
-							description={$i18n.t('Maximum number of retrieved chunks returned to the model.')}
-						>
-							<input
-								class={inputClass}
-								type="number"
-								placeholder={$i18n.t('Enter Top K')}
-								bind:value={RAGConfig.TOP_K}
-								autocomplete="off"
-								min="0"
-							/>
-						</AdminSettingField>
-
-						{#if RAGConfig.ENABLE_RAG_HYBRID_SEARCH === true}
-							<AdminSettingField
-								label={$i18n.t('Top K Reranker')}
-								description={$i18n.t('Maximum number of hybrid results sent to the reranker.')}
-							>
-								<input
-									class={inputClass}
-									type="number"
-									placeholder={$i18n.t('Enter Top K Reranker')}
-									bind:value={RAGConfig.TOP_K_RERANKER}
-									autocomplete="off"
-									min="0"
-								/>
-							</AdminSettingField>
-
-							<AdminSettingField
-								label={$i18n.t('Relevance Threshold')}
-								description={$i18n.t(
-									'Only return documents with a score greater than or equal to this value.'
-								)}
-							>
-								<input
-									class={inputClass}
-									type="number"
-									step="0.01"
-									placeholder={$i18n.t('Enter Score')}
-									bind:value={RAGConfig.RELEVANCE_THRESHOLD}
-									autocomplete="off"
-									min="0.0"
-									title={$i18n.t('The score should be a value between 0.0 (0%) and 1.0 (100%).')}
-								/>
-							</AdminSettingField>
 
 							<AdminSettingRow
 								label={$i18n.t('BM25 Weight')}
@@ -1550,17 +1046,7 @@
 					description={$i18n.t(
 						'Rebuild vectors for existing knowledge files, knowledge search, and memories.'
 					)}
-				>
-					<button
-						class={actionButtonClass}
-						type="button"
-						on:click={() => {
-							showReindexConfirm = true;
-						}}
-					>
-						{$i18n.t('Reindex')}
-					</button>
-				</AdminSettingRow>
+				></AdminSettingRow>
 			</AdminSettingSection>
 		</div>
 

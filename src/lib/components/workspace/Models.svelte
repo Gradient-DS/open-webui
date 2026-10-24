@@ -190,12 +190,7 @@
 			getModelList();
 		}
 
-		await _models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		await _models.set(await getModels(localStorage.token, null));
 	};
 
 	const getFullModel = async (model: any) =>
@@ -257,12 +252,7 @@
 			await getModelList();
 		}
 
-		await _models.set(
-			await getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			)
-		);
+		await _models.set(await getModels(localStorage.token, null));
 	};
 
 	const copyLinkHandler = async (model) => {
@@ -490,12 +480,7 @@
 					}
 				}
 
-				await _models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
+				await _models.set(await getModels(localStorage.token, null));
 
 				page = 1;
 				getModelList();
@@ -883,13 +868,7 @@
 															bind:state={model.is_active}
 															on:change={async () => {
 																toggleModelById(localStorage.token, model.id);
-																_models.set(
-																	await getModels(
-																		localStorage.token,
-																		$config?.features?.enable_direct_connections &&
-																			($settings?.directConnections ?? null)
-																	)
-																);
+																_models.set(await getModels(localStorage.token, null));
 															}}
 														/>
 													</Tooltip>

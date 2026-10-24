@@ -18,8 +18,6 @@ data:
   LOADER_DB_PORT: {{ include "open-webui-tenant.postgres.port" . | quote }}
   LOADER_DB_NAME: {{ .Values.loaderWorker.postgres.database | default "loader_worker" | quote }}
   LOADER_DB_USER: {{ .Values.loaderWorker.postgres.user | default "loader_worker_app" | quote }}
-  # LITELLM base URL the loader-worker hits for embedding (key is sourced from <tenant>-secrets).
-  LOADER_LITELLM_BASE_URL: {{ .Values.loaderWorker.config.litellmBaseUrl | quote }}
   # Pipeline mode: "doc_processor" (default, sync) or "warren" (bulk/async). See soev-solutions loader-worker config.
   LOADER_PIPELINE_MODE: {{ .Values.loaderWorker.config.pipelineMode | default "doc_processor" | quote }}
   # Warren mode requires a non-empty OWUI base URL; fall back to the same in-cluster URL used below.

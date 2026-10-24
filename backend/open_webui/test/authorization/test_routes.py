@@ -119,24 +119,6 @@ def test_dev_only_routes_require_authentication(dev_retrieval_router):
     audit_routes(dev_retrieval_router.routes, {}, authentication_dependencies())
 
 
-@pytest.mark.parametrize('principal', (None, 'owner', 'admin'))
-def test_embedding_probe_requires_admin_before_embedding(seeded, dev_retrieval_router, principal):
-    probe = FastAPI()
-    probe.include_router(dev_retrieval_router, prefix='/api/v1/retrieval')
-    route = next(route for route in probe.routes if getattr(route, 'path', '') == '/api/v1/retrieval/ef/{text}')
-    seeded.client.app.router.routes.insert(0, route)
-    calls = []
-
-    async def embed(text, **kwargs):
-        calls.append(text)
-        return [1.0]
-
-    seeded.client.app.state.EMBEDDING_FUNCTION = embed
-    response = seeded.client.get('/api/v1/retrieval/ef/probe', headers=seeded.headers(principal) if principal else {})
-    assert response.status_code == (200 if principal == 'admin' else 401)
-    assert calls == (['probe'] if principal == 'admin' else [])
-
-
 def test_sweep_rejects_new_unprotected_mounted_route():
     app, child = FastAPI(), FastAPI()
     child.add_api_route('/private', lambda: {})

@@ -7,7 +7,7 @@
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, models, settings, showSidebar } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { chatCompletion } from '$lib/apis/openai';
+	import { chatCompletion } from '$lib/apis/chat';
 
 	import { splitStream } from '$lib/utils';
 	import Spinner from '$lib/components/common/Spinner.svelte';

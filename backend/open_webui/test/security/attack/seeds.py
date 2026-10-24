@@ -363,13 +363,8 @@ def catalog_default_model(ctx, parameter):
 
 
 def seed_model(ctx, parameter):
-    path = f'/openai/models/{quote(ctx.values["openai_index"], safe="")}'
-    upstream = ctx.request('GET', path, actor=ctx.admin)
-    ctx.values['upstream_model'] = _extract(upstream, 'data.0.id', name=parameter['key'], via=f'GET {path}')
-    if runtime_soev_backed() == 'drive':
-        model_id = catalog_default_model(ctx, parameter)
-    else:
-        model_id = ctx.values['upstream_model']
+    model_id = catalog_default_model(ctx, parameter)
+    ctx.values['upstream_model'] = model_id
     register_readable_model(ctx, model_id)
     return model_id
 

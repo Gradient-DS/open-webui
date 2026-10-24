@@ -52,21 +52,6 @@ reason = "Never attempted: every owner pass skips it because `provider` is decla
 # --- Pipelines: creation is delegated to an external Pipelines server --------
 
 [[waived]]
-id = "GET /api/v1/pipelines/{pipeline_id}/valves"
-reason = "Never attempted: every owner pass skips it because `pipeline_id` is declared unseedable (attack-surface.toml, key pipeline). pipelines.py:/upload and /add delegate creation to an external Pipelines server; the CI stub's catch-all 200 creates nothing, and an id extracted from it would be invented. Closes with a pipeline registry on the stub."
-
-[[waived]]
-id = "GET /api/v1/pipelines/{pipeline_id}/valves/spec"
-reason = "Never attempted: every owner pass skips it because `pipeline_id` is declared unseedable (attack-surface.toml, key pipeline). pipelines.py:/upload and /add delegate creation to an external Pipelines server; the CI stub's catch-all 200 creates nothing, and an id extracted from it would be invented. Closes with a pipeline registry on the stub."
-
-[[waived]]
-id = "POST /api/v1/pipelines/{pipeline_id}/valves/update"
-reason = "Never attempted: every owner pass skips it because `pipeline_id` is declared unseedable (attack-surface.toml, key pipeline). pipelines.py:/upload and /add delegate creation to an external Pipelines server; the CI stub's catch-all 200 creates nothing, and an id extracted from it would be invented. Closes with a pipeline registry on the stub."
-
-# --- Event webhooks: unseedable because the SSRF guard works -----------------
-# These should outlive the others. Seeding them means switching the guard off.
-
-[[waived]]
 id = "PUT /api/events/webhooks/{webhook_id}"
 reason = "Never attempted: every owner pass skips it because `webhook_id` is declared unseedable (attack-surface.toml, key event_webhook). main.py:create_event_webhook validates the target with retrieval/web/utils.py:validate_url, which refuses every in-network host (private Docker addresses), and external hosts do not resolve on the internal network. ENABLE_LOCAL_WEB_FETCH would seed it by disabling the SSRF guard, and production leaves it unset. Does not close: the route is unseedable because the guard works."
 
@@ -97,10 +82,6 @@ reason = "Never attempted: every owner pass skips it because `target_id` is decl
 [[waived]]
 id = "GET /api/v1/auths/password/reset/{token}/validate"
 reason = "Never attempted: every owner pass skips it because `token` is declared unseedable (attack-surface.toml, key reset_token). auths.py:forgot_password stores only a hash and sends the raw token by email, the response is deliberately generic, and the plane reads neither mail nor the database. Closes with a mail sink on the CI network that the plane can read."
-
-[[waived]]
-id = "GET /openai/models/{url_idx}/download/status/{job_id}"
-reason = "Never attempted: every owner pass skips it because `job_id` is declared unseedable (attack-surface.toml, key model_download_job). routers/openai.py:get_provider_model_download_status reads a job an actual provider model download created; the CI stub serves model metadata but has no download-job lifecycle. Closes when the stub grows one."
 
 [[waived]]
 id = "GET /cache/{path}"

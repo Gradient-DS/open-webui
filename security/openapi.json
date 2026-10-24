@@ -185,24 +185,6 @@
         "title": "AddMemoryForm",
         "type": "object"
       },
-      "AddPipelineForm": {
-        "properties": {
-          "url": {
-            "title": "Url",
-            "type": "string"
-          },
-          "urlIdx": {
-            "title": "Urlidx",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "url",
-          "urlIdx"
-        ],
-        "title": "AddPipelineForm",
-        "type": "object"
-      },
       "AddUserForm": {
         "properties": {
           "email": {
@@ -687,15 +669,21 @@
       "AudioConfigUpdateForm": {
         "properties": {
           "stt": {
-            "$ref": "#/components/schemas/STTConfigForm"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/STTConfigForm"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "tts": {
             "$ref": "#/components/schemas/TTSConfigForm"
           }
         },
         "required": [
-          "tts",
-          "stt"
+          "tts"
         ],
         "title": "AudioConfigUpdateForm",
         "type": "object"
@@ -1008,45 +996,6 @@
         "title": "AutomationTerminalConfig",
         "type": "object"
       },
-      "AzureOpenAIConfigForm": {
-        "properties": {
-          "key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Key"
-          },
-          "url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Url"
-          },
-          "version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version"
-          }
-        },
-        "title": "AzureOpenAIConfigForm",
-        "type": "object"
-      },
       "BannerModel": {
         "properties": {
           "content": {
@@ -1245,25 +1194,6 @@
           "file"
         ],
         "title": "Body_upload_model_ollama_models_upload_post",
-        "type": "object"
-      },
-      "Body_upload_pipeline_api_v1_pipelines_upload_post": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          },
-          "urlIdx": {
-            "title": "Urlidx",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "urlIdx",
-          "file"
-        ],
-        "title": "Body_upload_pipeline_api_v1_pipelines_upload_post",
         "type": "object"
       },
       "CalendarEventAttendeeModel": {
@@ -5140,39 +5070,6 @@
             ],
             "title": "Pdf Loader Mode"
           },
-          "RAG_EXTERNAL_RERANKER_API_KEY": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rag External Reranker Api Key"
-          },
-          "RAG_EXTERNAL_RERANKER_TIMEOUT": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rag External Reranker Timeout"
-          },
-          "RAG_EXTERNAL_RERANKER_URL": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rag External Reranker Url"
-          },
           "RAG_FULL_CONTEXT": {
             "anyOf": [
               {
@@ -5183,39 +5080,6 @@
               }
             ],
             "title": "Rag Full Context"
-          },
-          "RAG_RERANKING_BATCH_SIZE": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rag Reranking Batch Size"
-          },
-          "RAG_RERANKING_ENGINE": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rag Reranking Engine"
-          },
-          "RAG_RERANKING_MODEL": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rag Reranking Model"
           },
           "RAG_TEMPLATE": {
             "anyOf": [
@@ -5337,6 +5201,30 @@
           "provider"
         ],
         "title": "ConnectionForm",
+        "type": "object"
+      },
+      "ConnectionVerificationForm": {
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "ConnectionVerificationForm",
         "type": "object"
       },
       "ConnectionsConfigForm": {
@@ -6039,24 +5927,6 @@
         "title": "DeleteForm",
         "type": "object"
       },
-      "DeletePipelineForm": {
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "urlIdx": {
-            "title": "Urlidx",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "urlIdx"
-        ],
-        "title": "DeletePipelineForm",
-        "type": "object"
-      },
       "EditImageForm": {
         "properties": {
           "background": {
@@ -6166,90 +6036,6 @@
           "INVITE_EXPIRY_HOURS"
         ],
         "title": "EmailConfigForm",
-        "type": "object"
-      },
-      "EmbeddingModelUpdateForm": {
-        "properties": {
-          "ENABLE_ASYNC_EMBEDDING": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": true,
-            "title": "Enable Async Embedding"
-          },
-          "RAG_EMBEDDING_BATCH_SIZE": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": 1,
-            "title": "Rag Embedding Batch Size"
-          },
-          "RAG_EMBEDDING_CONCURRENT_REQUESTS": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": 0,
-            "title": "Rag Embedding Concurrent Requests"
-          },
-          "RAG_EMBEDDING_ENGINE": {
-            "title": "Rag Embedding Engine",
-            "type": "string"
-          },
-          "RAG_EMBEDDING_MODEL": {
-            "title": "Rag Embedding Model",
-            "type": "string"
-          },
-          "azure_openai_config": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AzureOpenAIConfigForm"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "ollama_config": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/open_webui__routers__retrieval__OllamaConfigForm"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "openai_config": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/open_webui__routers__retrieval__OpenAIConfigForm"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "RAG_EMBEDDING_ENGINE",
-          "RAG_EMBEDDING_MODEL"
-        ],
-        "title": "EmbeddingModelUpdateForm",
         "type": "object"
       },
       "EmbeddingsBody": {
@@ -13667,6 +13453,40 @@
         "title": "OAuthSessionResponse",
         "type": "object"
       },
+      "OllamaConfigForm": {
+        "description": "Payload for updating the Ollama connection configuration.",
+        "properties": {
+          "ENABLE_OLLAMA_API": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Ollama Api"
+          },
+          "OLLAMA_API_CONFIGS": {
+            "additionalProperties": true,
+            "title": "Ollama Api Configs",
+            "type": "object"
+          },
+          "OLLAMA_BASE_URLS": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ollama Base Urls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "OLLAMA_BASE_URLS",
+          "OLLAMA_API_CONFIGS"
+        ],
+        "title": "OllamaConfigForm",
+        "type": "object"
+      },
       "PickerAttachment": {
         "additionalProperties": false,
         "properties": {
@@ -13777,35 +13597,6 @@
           "file_id"
         ],
         "title": "ProcessFileForm",
-        "type": "object"
-      },
-      "ProcessTextForm": {
-        "properties": {
-          "collection_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Collection Name"
-          },
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "content"
-        ],
-        "title": "ProcessTextForm",
         "type": "object"
       },
       "ProcessUrlForm": {
@@ -14534,20 +14325,6 @@
         "title": "ProviderMetadataField",
         "type": "object"
       },
-      "ProviderModelOperationForm": {
-        "additionalProperties": true,
-        "properties": {
-          "model": {
-            "title": "Model",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model"
-        ],
-        "title": "ProviderModelOperationForm",
-        "type": "object"
-      },
       "PushModelForm": {
         "description": "Payload for pushing a model to a registry.",
         "properties": {
@@ -14582,155 +14359,6 @@
           "model"
         ],
         "title": "PushModelForm",
-        "type": "object"
-      },
-      "QueryCollectionsForm": {
-        "properties": {
-          "collection_names": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Collection Names",
-            "type": "array"
-          },
-          "enable_enriched_texts": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Enriched Texts"
-          },
-          "hybrid": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hybrid"
-          },
-          "hybrid_bm25_weight": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hybrid Bm25 Weight"
-          },
-          "k": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "K"
-          },
-          "k_reranker": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "K Reranker"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "r": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "R"
-          }
-        },
-        "required": [
-          "collection_names",
-          "query"
-        ],
-        "title": "QueryCollectionsForm",
-        "type": "object"
-      },
-      "QueryDocForm": {
-        "properties": {
-          "collection_name": {
-            "title": "Collection Name",
-            "type": "string"
-          },
-          "hybrid": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hybrid"
-          },
-          "k": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "K"
-          },
-          "k_reranker": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "K Reranker"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "r": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "R"
-          }
-        },
-        "required": [
-          "collection_name",
-          "query"
-        ],
-        "title": "QueryDocForm",
         "type": "object"
       },
       "QueryMemoryForm": {
@@ -14992,6 +14620,20 @@
           "action"
         ],
         "title": "ResolveToolCallForm",
+        "type": "object"
+      },
+      "ResponsesForm": {
+        "additionalProperties": true,
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "ResponsesForm",
         "type": "object"
       },
       "STTConfigForm": {
@@ -21157,385 +20799,6 @@
         ],
         "title": "MessageForm",
         "type": "object"
-      },
-      "open_webui__routers__ollama__ConnectionVerificationForm": {
-        "properties": {
-          "key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Key"
-          },
-          "url": {
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "title": "ConnectionVerificationForm",
-        "type": "object"
-      },
-      "open_webui__routers__ollama__OllamaConfigForm": {
-        "description": "Payload for updating the Ollama connection configuration.",
-        "properties": {
-          "ENABLE_OLLAMA_API": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Ollama Api"
-          },
-          "OLLAMA_API_CONFIGS": {
-            "additionalProperties": true,
-            "title": "Ollama Api Configs",
-            "type": "object"
-          },
-          "OLLAMA_BASE_URLS": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Ollama Base Urls",
-            "type": "array"
-          }
-        },
-        "required": [
-          "OLLAMA_BASE_URLS",
-          "OLLAMA_API_CONFIGS"
-        ],
-        "title": "OllamaConfigForm",
-        "type": "object"
-      },
-      "open_webui__routers__ollama__ResponsesForm": {
-        "additionalProperties": true,
-        "properties": {
-          "model": {
-            "title": "Model",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model"
-        ],
-        "title": "ResponsesForm",
-        "type": "object"
-      },
-      "open_webui__routers__openai__ConnectionVerificationForm": {
-        "properties": {
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "url": {
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "url",
-          "key"
-        ],
-        "title": "ConnectionVerificationForm",
-        "type": "object"
-      },
-      "open_webui__routers__openai__OpenAIConfigForm": {
-        "properties": {
-          "ENABLE_OPENAI_API": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Openai Api"
-          },
-          "OPENAI_API_BASE_URLS": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Openai Api Base Urls",
-            "type": "array"
-          },
-          "OPENAI_API_CONFIGS": {
-            "additionalProperties": true,
-            "title": "Openai Api Configs",
-            "type": "object"
-          },
-          "OPENAI_API_KEYS": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Openai Api Keys",
-            "type": "array"
-          }
-        },
-        "required": [
-          "OPENAI_API_BASE_URLS",
-          "OPENAI_API_KEYS",
-          "OPENAI_API_CONFIGS"
-        ],
-        "title": "OpenAIConfigForm",
-        "type": "object"
-      },
-      "open_webui__routers__openai__ResponsesForm": {
-        "additionalProperties": true,
-        "properties": {
-          "input": {
-            "anyOf": [
-              {
-                "items": {},
-                "type": "array"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Input"
-          },
-          "instructions": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instructions"
-          },
-          "max_output_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Output Tokens"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata"
-          },
-          "model": {
-            "title": "Model",
-            "type": "string"
-          },
-          "previous_response_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Previous Response Id"
-          },
-          "reasoning": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reasoning"
-          },
-          "store": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Store"
-          },
-          "stream": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stream"
-          },
-          "temperature": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Temperature"
-          },
-          "text": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Text"
-          },
-          "tool_choice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tool Choice"
-          },
-          "tools": {
-            "anyOf": [
-              {
-                "items": {},
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tools"
-          },
-          "top_p": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Top P"
-          },
-          "truncation": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Truncation"
-          }
-        },
-        "required": [
-          "model"
-        ],
-        "title": "ResponsesForm",
-        "type": "object"
-      },
-      "open_webui__routers__retrieval__OllamaConfigForm": {
-        "properties": {
-          "key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Key"
-          },
-          "url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Url"
-          }
-        },
-        "title": "OllamaConfigForm",
-        "type": "object"
-      },
-      "open_webui__routers__retrieval__OpenAIConfigForm": {
-        "properties": {
-          "key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Key"
-          },
-          "url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Url"
-          }
-        },
-        "title": "OpenAIConfigForm",
-        "type": "object"
       }
     },
     "securitySchemes": {
@@ -21720,7 +20983,7 @@
     },
     "/api/embeddings": {
       "post": {
-        "description": "OpenAI-compatible embeddings endpoint.\n\nThis handler:\n  - Performs user/model checks and dispatches to the correct backend.\n  - Supports OpenAI, Ollama, arena models, pipelines, and any compatible provider.\n\nArgs:\n    request (Request): Request context.\n    form_data (dict): OpenAI-like payload (e.g., {\"model\": \"...\", \"input\": [...]})\n    user (UserModel): Authenticated user.\n\nReturns:\n    dict: OpenAI-compatible embeddings response.",
+        "description": "OpenAI-compatible embeddings endpoint.\n\nThis handler:\n  - Performs user/model checks and dispatches to the correct backend.\n  - Supports Ollama embeddings.\n\nArgs:\n    request (Request): Request context.\n    form_data (dict): OpenAI-like payload (e.g., {\"model\": \"...\", \"input\": [...]})\n    user (UserModel): Authenticated user.\n\nReturns:\n    dict: OpenAI-compatible embeddings response.",
         "operationId": "embeddings_api_embeddings_post",
         "requestBody": {
           "content": {
@@ -21931,89 +21194,6 @@
           }
         ],
         "summary": "Update Event Webhook"
-      }
-    },
-    "/api/message": {
-      "post": {
-        "description": "Anthropic Messages API compatible endpoint.\n\nAccepts the Anthropic Messages API format, converts internally to OpenAI\nChat Completions format, routes through the existing chat completion\npipeline, then converts the response back to Anthropic Messages format.\n\nSupports both streaming and non-streaming requests.\nAll models configured in Open WebUI are accessible via this endpoint.\n\nAuthentication: Supports both standard Authorization header and\nAnthropic's x-api-key header (via middleware translation).",
-        "operationId": "generate_messages_api_message_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MessagesBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Generate Messages"
-      }
-    },
-    "/api/message/count_tokens": {
-      "post": {
-        "operationId": "count_message_tokens_api_message_count_tokens_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MessagesBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Count Message Tokens"
       }
     },
     "/api/models": {
@@ -33258,7 +32438,7 @@
     },
     "/api/v1/embeddings": {
       "post": {
-        "description": "OpenAI-compatible embeddings endpoint.\n\nThis handler:\n  - Performs user/model checks and dispatches to the correct backend.\n  - Supports OpenAI, Ollama, arena models, pipelines, and any compatible provider.\n\nArgs:\n    request (Request): Request context.\n    form_data (dict): OpenAI-like payload (e.g., {\"model\": \"...\", \"input\": [...]})\n    user (UserModel): Authenticated user.\n\nReturns:\n    dict: OpenAI-compatible embeddings response.",
+        "description": "OpenAI-compatible embeddings endpoint.\n\nThis handler:\n  - Performs user/model checks and dispatches to the correct backend.\n  - Supports Ollama embeddings.\n\nArgs:\n    request (Request): Request context.\n    form_data (dict): OpenAI-like payload (e.g., {\"model\": \"...\", \"input\": [...]})\n    user (UserModel): Authenticated user.\n\nReturns:\n    dict: OpenAI-compatible embeddings response.",
         "operationId": "embeddings_api_v1_embeddings_post",
         "requestBody": {
           "content": {
@@ -40548,89 +39728,6 @@
         ]
       }
     },
-    "/api/v1/messages": {
-      "post": {
-        "description": "Anthropic Messages API compatible endpoint.\n\nAccepts the Anthropic Messages API format, converts internally to OpenAI\nChat Completions format, routes through the existing chat completion\npipeline, then converts the response back to Anthropic Messages format.\n\nSupports both streaming and non-streaming requests.\nAll models configured in Open WebUI are accessible via this endpoint.\n\nAuthentication: Supports both standard Authorization header and\nAnthropic's x-api-key header (via middleware translation).",
-        "operationId": "generate_messages_api_v1_messages_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MessagesBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Generate Messages"
-      }
-    },
-    "/api/v1/messages/count_tokens": {
-      "post": {
-        "operationId": "count_message_tokens_api_v1_messages_count_tokens_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MessagesBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Count Message Tokens"
-      }
-    },
     "/api/v1/models": {
       "get": {
         "operationId": "get_models_api_v1_models_get",
@@ -42478,409 +41575,6 @@
         ]
       }
     },
-    "/api/v1/pipelines/": {
-      "get": {
-        "operationId": "get_pipelines_api_v1_pipelines__get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "urlIdx",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Urlidx"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Pipelines",
-        "tags": [
-          "pipelines"
-        ]
-      }
-    },
-    "/api/v1/pipelines/add": {
-      "post": {
-        "operationId": "add_pipeline_api_v1_pipelines_add_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddPipelineForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Add Pipeline",
-        "tags": [
-          "pipelines"
-        ]
-      }
-    },
-    "/api/v1/pipelines/delete": {
-      "delete": {
-        "operationId": "delete_pipeline_api_v1_pipelines_delete_delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeletePipelineForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Delete Pipeline",
-        "tags": [
-          "pipelines"
-        ]
-      }
-    },
-    "/api/v1/pipelines/list": {
-      "get": {
-        "operationId": "get_pipelines_list_api_v1_pipelines_list_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Pipelines List",
-        "tags": [
-          "pipelines"
-        ]
-      }
-    },
-    "/api/v1/pipelines/upload": {
-      "post": {
-        "operationId": "upload_pipeline_api_v1_pipelines_upload_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_pipeline_api_v1_pipelines_upload_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Upload Pipeline",
-        "tags": [
-          "pipelines"
-        ]
-      }
-    },
-    "/api/v1/pipelines/{pipeline_id}/valves": {
-      "get": {
-        "operationId": "get_pipeline_valves_api_v1_pipelines__pipeline_id__valves_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_id",
-            "required": true,
-            "schema": {
-              "title": "Pipeline Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "urlIdx",
-            "required": true,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Urlidx"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Pipeline Valves",
-        "tags": [
-          "pipelines"
-        ]
-      }
-    },
-    "/api/v1/pipelines/{pipeline_id}/valves/spec": {
-      "get": {
-        "operationId": "get_pipeline_valves_spec_api_v1_pipelines__pipeline_id__valves_spec_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_id",
-            "required": true,
-            "schema": {
-              "title": "Pipeline Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "urlIdx",
-            "required": true,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Urlidx"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Pipeline Valves Spec",
-        "tags": [
-          "pipelines"
-        ]
-      }
-    },
-    "/api/v1/pipelines/{pipeline_id}/valves/update": {
-      "post": {
-        "operationId": "update_pipeline_valves_api_v1_pipelines__pipeline_id__valves_update_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_id",
-            "required": true,
-            "schema": {
-              "title": "Pipeline Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "urlIdx",
-            "required": true,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Urlidx"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Update Pipeline Valves",
-        "tags": [
-          "pipelines"
-        ]
-      }
-    },
     "/api/v1/prompts/": {
       "get": {
         "operationId": "get_prompts_api_v1_prompts__get",
@@ -43901,77 +42595,8 @@
         ]
       }
     },
-    "/api/v1/retrieval/embedding": {
-      "get": {
-        "operationId": "get_embedding_config_api_v1_retrieval_embedding_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Embedding Config",
-        "tags": [
-          "retrieval"
-        ]
-      }
-    },
-    "/api/v1/retrieval/embedding/update": {
-      "post": {
-        "operationId": "update_embedding_config_api_v1_retrieval_embedding_update_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EmbeddingModelUpdateForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Update Embedding Config",
-        "tags": [
-          "retrieval"
-        ]
-      }
-    },
     "/api/v1/retrieval/process/file": {
       "post": {
-        "description": "Process a file and save its content to the vector database.\nNote: granular session management is used to prevent connection pool exhaustion.\nThe session is committed before external API calls, and updates use a fresh session.",
         "operationId": "process_file_api_v1_retrieval_process_file_post",
         "requestBody": {
           "content": {
@@ -44016,7 +42641,6 @@
     },
     "/api/v1/retrieval/process/files/batch": {
       "post": {
-        "description": "Process a batch of files and save them to the vector database.\n\nNOTE: We intentionally do NOT use Depends(get_async_session) here.\nThe save_docs_to_vector_db() call makes external embedding API calls which\ncan take 5-60+ seconds for batch operations. Database operations after\nembedding (Files.update_file_by_id) manage their own short-lived sessions.",
         "operationId": "process_files_batch_api_v1_retrieval_process_files_batch_post",
         "parameters": [
           {
@@ -44066,50 +42690,6 @@
           }
         ],
         "summary": "Process Files Batch",
-        "tags": [
-          "retrieval"
-        ]
-      }
-    },
-    "/api/v1/retrieval/process/text": {
-      "post": {
-        "operationId": "process_text_api_v1_retrieval_process_text_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProcessTextForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Process Text",
         "tags": [
           "retrieval"
         ]
@@ -44354,94 +42934,6 @@
           }
         ],
         "summary": "Process Web",
-        "tags": [
-          "retrieval"
-        ]
-      }
-    },
-    "/api/v1/retrieval/query/collection": {
-      "post": {
-        "operationId": "query_collection_handler_api_v1_retrieval_query_collection_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryCollectionsForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Query Collection Handler",
-        "tags": [
-          "retrieval"
-        ]
-      }
-    },
-    "/api/v1/retrieval/query/doc": {
-      "post": {
-        "operationId": "query_doc_handler_api_v1_retrieval_query_doc_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryDocForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Query Doc Handler",
         "tags": [
           "retrieval"
         ]
@@ -50362,7 +48854,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__ollama__OllamaConfigForm"
+                "$ref": "#/components/schemas/OllamaConfigForm"
               }
             }
           },
@@ -51299,7 +49791,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__ollama__ResponsesForm"
+                "$ref": "#/components/schemas/ResponsesForm"
               }
             }
           },
@@ -51362,7 +49854,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__ollama__ResponsesForm"
+                "$ref": "#/components/schemas/ResponsesForm"
               }
             }
           },
@@ -51407,7 +49899,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__ollama__ConnectionVerificationForm"
+                "$ref": "#/components/schemas/ConnectionVerificationForm"
               }
             }
           },
@@ -51441,874 +49933,6 @@
         "summary": "Verify Connection",
         "tags": [
           "ollama"
-        ]
-      }
-    },
-    "/openai/audio/speech": {
-      "post": {
-        "operationId": "speech_openai_audio_speech_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Speech",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/chat/completions": {
-      "post": {
-        "operationId": "generate_chat_completion_openai_chat_completions_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChatCompletionBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Generate Chat Completion",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/config": {
-      "get": {
-        "operationId": "get_config_openai_config_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Config",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/config/update": {
-      "post": {
-        "operationId": "update_config_openai_config_update_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__openai__OpenAIConfigForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Update Config",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/models": {
-      "get": {
-        "operationId": "get_models_openai_models_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "url_idx",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Url Idx"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Models",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/models/{url_idx}": {
-      "delete": {
-        "operationId": "delete_provider_model_openai_models__url_idx__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "url_idx",
-            "required": true,
-            "schema": {
-              "title": "Url Idx",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "model",
-            "required": true,
-            "schema": {
-              "title": "Model",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Delete Provider Model",
-        "tags": [
-          "openai"
-        ]
-      },
-      "get": {
-        "operationId": "get_models_openai_models__url_idx__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "url_idx",
-            "required": true,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Url Idx"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Models",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/models/{url_idx}/catalog": {
-      "get": {
-        "operationId": "get_provider_model_catalog_openai_models__url_idx__catalog_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "url_idx",
-            "required": true,
-            "schema": {
-              "title": "Url Idx",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Provider Model Catalog",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/models/{url_idx}/download": {
-      "post": {
-        "operationId": "download_provider_model_openai_models__url_idx__download_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "url_idx",
-            "required": true,
-            "schema": {
-              "title": "Url Idx",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProviderModelOperationForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Download Provider Model",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/models/{url_idx}/download/status/{job_id}": {
-      "get": {
-        "operationId": "get_provider_model_download_status_openai_models__url_idx__download_status__job_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "url_idx",
-            "required": true,
-            "schema": {
-              "title": "Url Idx",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get Provider Model Download Status",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/models/{url_idx}/load": {
-      "post": {
-        "operationId": "load_provider_model_openai_models__url_idx__load_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "url_idx",
-            "required": true,
-            "schema": {
-              "title": "Url Idx",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProviderModelOperationForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Load Provider Model",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/models/{url_idx}/sse": {
-      "get": {
-        "operationId": "stream_provider_model_events_openai_models__url_idx__sse_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "url_idx",
-            "required": true,
-            "schema": {
-              "title": "Url Idx",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Stream Provider Model Events",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/models/{url_idx}/unload": {
-      "post": {
-        "operationId": "unload_provider_model_openai_models__url_idx__unload_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "url_idx",
-            "required": true,
-            "schema": {
-              "title": "Url Idx",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProviderModelOperationForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Unload Provider Model",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/responses": {
-      "post": {
-        "description": "Forward requests to the OpenAI Responses API endpoint.\nRoutes to the correct upstream backend based on the model field.",
-        "operationId": "responses_openai_responses_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__openai__ResponsesForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Responses",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/verify": {
-      "post": {
-        "operationId": "verify_connection_openai_verify_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/open_webui__routers__openai__ConnectionVerificationForm"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Verify Connection",
-        "tags": [
-          "openai"
-        ]
-      }
-    },
-    "/openai/{path}": {
-      "delete": {
-        "description": "Deprecated: proxy all requests to OpenAI API.\nDisabled by default. Set ENABLE_OPENAI_API_PASSTHROUGH=True to enable.",
-        "operationId": "proxy_openai__path__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "openai"
-        ]
-      },
-      "get": {
-        "description": "Deprecated: proxy all requests to OpenAI API.\nDisabled by default. Set ENABLE_OPENAI_API_PASSTHROUGH=True to enable.",
-        "operationId": "proxy_openai__path__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "openai"
-        ]
-      },
-      "post": {
-        "description": "Deprecated: proxy all requests to OpenAI API.\nDisabled by default. Set ENABLE_OPENAI_API_PASSTHROUGH=True to enable.",
-        "operationId": "proxy_openai__path__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "openai"
-        ]
-      },
-      "put": {
-        "description": "Deprecated: proxy all requests to OpenAI API.\nDisabled by default. Set ENABLE_OPENAI_API_PASSTHROUGH=True to enable.",
-        "operationId": "proxy_openai__path__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "title": "Path",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Proxy",
-        "tags": [
-          "openai"
         ]
       }
     },

@@ -7,12 +7,10 @@ import mimetypes
 import os
 import re
 import shutil
-import uuid
 from types import SimpleNamespace
 from typing import List, Optional, Union
 from urllib.parse import unquote, urlparse
 
-import tiktoken
 from fastapi import (
     APIRouter,
     Depends,
@@ -24,61 +22,30 @@ from fastapi import (
 )
 from fastapi.concurrency import run_in_threadpool
 from langchain_core.documents import Document
-from langchain_text_splitters import (
-    MarkdownHeaderTextSplitter,
-    RecursiveCharacterTextSplitter,
-    TokenTextSplitter,
-)
-from open_webui import config as soev_config
 from open_webui.config import (
     DEFAULT_LOCALE,
-    ENV,
-    RAG_EMBEDDING_CONTENT_PREFIX,
-    RAG_EMBEDDING_MODEL_AUTO_UPDATE,
-    RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
-    RAG_EMBEDDING_QUERY_PREFIX,
-    RAG_RERANKING_MODEL_AUTO_UPDATE,
-    RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
     UPLOAD_DIR,
 )
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import (
     AIOHTTP_CLIENT_ALLOW_REDIRECTS,
     AIOHTTP_CLIENT_SESSION_SSL,
-    DEVICE_TYPE,
-    DOCKER,
-    RAG_EMBEDDING_TIMEOUT,
-    SENTENCE_TRANSFORMERS_BACKEND,
-    SENTENCE_TRANSFORMERS_CROSS_ENCODER_BACKEND,
-    SENTENCE_TRANSFORMERS_CROSS_ENCODER_MODEL_KWARGS,
-    SENTENCE_TRANSFORMERS_CROSS_ENCODER_SIGMOID_ACTIVATION_FUNCTION,
-    SENTENCE_TRANSFORMERS_MODEL_KWARGS,
 )
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_db, get_async_session
 from open_webui.models.config import Config
-from open_webui.models.files import FileModel, Files, FileUpdateForm
+from open_webui.models.files import FileModel, Files
 from open_webui.models.knowledge import Knowledges
 
 # Document loaders
 from open_webui.retrieval.loaders.youtube import YoutubeTranscriptError
 from open_webui.retrieval.utils import (
-    build_loader_from_config,
     filter_accessible_collections,
     get_content_from_url,
-    get_embedding_function,
     get_loader_config,
-    get_model_path,
-    get_reranking_function,
     is_youtube_url,
-    query_collection,
-    query_collection_with_hybrid_search,
-    query_doc,
-    query_doc_with_hybrid_search,
 )
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
-from open_webui.retrieval.vector.utils import filter_metadata
 from open_webui.retrieval.web.azure import search_azure
 from open_webui.retrieval.web.bing import search_bing
 from open_webui.retrieval.web.bocha import search_bocha
@@ -115,16 +82,14 @@ from open_webui.retrieval.web.yacy import search_yacy
 from open_webui.retrieval.web.yandex import search_yandex
 from open_webui.retrieval.web.ydc import search_youcom
 from open_webui.soev import identity, ingest
-from open_webui.soev.availability import SoevNotConfigured, configured
+from open_webui.soev.availability import SoevNotConfigured, configured, ensure_configured
 from open_webui.soev.client import SoevApiError
-from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.content_types import content_type_for  # [Gradient]
 from open_webui.utils.loop_bridge import run_on_main_loop
 from open_webui.utils.misc import (
     calculate_sha256_string,
-    sanitize_text_for_db,
 )
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -173,7 +138,6 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'DOCUMENT_INTELLIGENCE_ENDPOINT': 'rag.document_intelligence_endpoint',
     'DOCUMENT_INTELLIGENCE_KEY': 'rag.document_intelligence_key',
     'DOCUMENT_INTELLIGENCE_MODEL': 'rag.document_intelligence_model',
-    'ENABLE_ASYNC_EMBEDDING': 'rag.enable_async_embedding',
     'ENABLE_CONFLUENCE_INTEGRATION': 'confluence.enable',
     'ENABLE_GOOGLE_DRIVE_INTEGRATION': 'google_drive.enable',
     'ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER': 'rag.enable_markdown_header_text_splitter',
@@ -221,24 +185,7 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'PERPLEXITY_SEARCH_CONTEXT_USAGE': 'web.search.perplexity_search_context_usage',
     'PLAYWRIGHT_TIMEOUT': 'web.loader.playwright_timeout',
     'PLAYWRIGHT_WS_URL': 'web.loader.playwright_ws_url',
-    'RAG_AZURE_OPENAI_API_KEY': 'rag.azure_openai.api_key',
-    'RAG_AZURE_OPENAI_API_VERSION': 'rag.azure_openai.api_version',
-    'RAG_AZURE_OPENAI_BASE_URL': 'rag.azure_openai.base_url',
-    'RAG_EMBEDDING_BATCH_SIZE': 'rag.embedding_batch_size',
-    'RAG_EMBEDDING_CONCURRENT_REQUESTS': 'rag.embedding_concurrent_requests',
-    'RAG_EMBEDDING_ENGINE': 'rag.embedding_engine',
-    'RAG_EMBEDDING_MODEL': 'rag.embedding_model',
-    'RAG_EXTERNAL_RERANKER_API_KEY': 'rag.external_reranker_api_key',
-    'RAG_EXTERNAL_RERANKER_TIMEOUT': 'rag.external_reranker_timeout',
-    'RAG_EXTERNAL_RERANKER_URL': 'rag.external_reranker_url',
     'RAG_FULL_CONTEXT': 'rag.full_context',
-    'RAG_OLLAMA_API_KEY': 'rag.ollama.api_key',
-    'RAG_OLLAMA_BASE_URL': 'rag.ollama.base_url',
-    'RAG_OPENAI_API_BASE_URL': 'rag.openai.api_base_url',
-    'RAG_OPENAI_API_KEY': 'rag.openai.api_key',
-    'RAG_RERANKING_BATCH_SIZE': 'rag.reranking_batch_size',
-    'RAG_RERANKING_ENGINE': 'rag.reranking_engine',
-    'RAG_RERANKING_MODEL': 'rag.reranking_model',
     'RAG_TEMPLATE': 'rag.template',
     'RELEVANCE_THRESHOLD': 'rag.relevance_threshold',
     'SEARCHAPI_API_KEY': 'web.search.searchapi_api_key',
@@ -318,107 +265,6 @@ async def get_rag_config_state() -> SimpleNamespace:
 ##########################################
 
 
-def get_ef(
-    engine: str,
-    embedding_model: str,
-    auto_update: bool = RAG_EMBEDDING_MODEL_AUTO_UPDATE,
-):
-    ef = None
-    if embedding_model and engine == '':
-        from sentence_transformers import SentenceTransformer
-
-        try:
-            ef = SentenceTransformer(
-                get_model_path(embedding_model, auto_update),
-                device=DEVICE_TYPE,
-                trust_remote_code=RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
-                backend=SENTENCE_TRANSFORMERS_BACKEND,
-                model_kwargs=SENTENCE_TRANSFORMERS_MODEL_KWARGS,
-            )
-        except Exception as e:
-            log.error(f'Error loading SentenceTransformer: {e}')
-
-    return ef
-
-
-def get_rf(
-    engine: str = '',
-    reranking_model: Optional[str] = None,
-    external_reranker_url: str = '',
-    external_reranker_api_key: str = '',
-    external_reranker_timeout: str = '',
-    auto_update: bool = RAG_RERANKING_MODEL_AUTO_UPDATE,
-):
-    rf = None
-    # Convert timeout string to int or None (system default)
-    timeout_value = int(external_reranker_timeout) if external_reranker_timeout else None
-    if reranking_model:
-        if any(model in reranking_model for model in ['jinaai/jina-colbert-v2']):
-            try:
-                from open_webui.retrieval.models.colbert import ColBERT
-
-                rf = ColBERT(
-                    get_model_path(reranking_model, auto_update),
-                    env='docker' if DOCKER else None,
-                )
-
-            except Exception as e:
-                log.error(f'ColBERT: {e}')
-                raise Exception(ERROR_MESSAGES.DEFAULT(e))
-        else:
-            if engine == 'external':
-                try:
-                    from open_webui.retrieval.models.external import ExternalReranker
-
-                    rf = ExternalReranker(
-                        url=external_reranker_url,
-                        api_key=external_reranker_api_key,
-                        model=reranking_model,
-                        timeout=timeout_value,
-                    )
-                except Exception as e:
-                    log.error(f'ExternalReranking: {e}')
-                    raise Exception(ERROR_MESSAGES.DEFAULT(e))
-            else:
-                import sentence_transformers
-                import torch
-
-                try:
-                    rf = sentence_transformers.CrossEncoder(
-                        get_model_path(reranking_model, auto_update),
-                        device=DEVICE_TYPE,
-                        trust_remote_code=RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
-                        backend=SENTENCE_TRANSFORMERS_CROSS_ENCODER_BACKEND,
-                        model_kwargs=SENTENCE_TRANSFORMERS_CROSS_ENCODER_MODEL_KWARGS,
-                        activation_fn=(
-                            torch.nn.Sigmoid()
-                            if SENTENCE_TRANSFORMERS_CROSS_ENCODER_SIGMOID_ACTIVATION_FUNCTION
-                            else None
-                        ),
-                    )
-                except Exception as e:
-                    log.error(f'CrossEncoder: {e}')
-                    raise Exception(ERROR_MESSAGES.DEFAULT('CrossEncoder error'))
-
-                # Safely adjust pad_token_id if missing as some models do not have this in config
-                try:
-                    model_cfg = getattr(rf, 'model', None)
-                    if model_cfg and hasattr(model_cfg, 'config'):
-                        cfg = model_cfg.config
-                        if getattr(cfg, 'pad_token_id', None) is None:
-                            # Fallback to eos_token_id when available
-                            eos = getattr(cfg, 'eos_token_id', None)
-                            if eos is not None:
-                                cfg.pad_token_id = eos
-                                log.debug(f'Missing pad_token_id detected; set to eos_token_id={eos}')
-                            else:
-                                log.warning('Neither pad_token_id nor eos_token_id present in model config')
-                except Exception as e2:
-                    log.warning(f'Failed to adjust pad_token_id on CrossEncoder: {e2}')
-
-    return rf
-
-
 ##########################################
 #
 # API routes
@@ -449,173 +295,6 @@ class ProcessUrlResponse(BaseModel):
 
 class SearchForm(BaseModel):
     queries: List[str]
-
-
-@router.get('/embedding')
-async def get_embedding_config(request: Request, user=Depends(get_admin_user)):
-    config = await get_rag_config_state()
-    return {
-        'status': True,
-        'RAG_EMBEDDING_ENGINE': config.RAG_EMBEDDING_ENGINE,
-        'RAG_EMBEDDING_MODEL': config.RAG_EMBEDDING_MODEL,
-        'RAG_EMBEDDING_BATCH_SIZE': config.RAG_EMBEDDING_BATCH_SIZE,
-        'ENABLE_ASYNC_EMBEDDING': config.ENABLE_ASYNC_EMBEDDING,
-        'RAG_EMBEDDING_CONCURRENT_REQUESTS': config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
-        'openai_config': {
-            'url': config.RAG_OPENAI_API_BASE_URL,
-            'key': config.RAG_OPENAI_API_KEY,
-        },
-        'ollama_config': {
-            'url': config.RAG_OLLAMA_BASE_URL,
-            'key': config.RAG_OLLAMA_API_KEY,
-        },
-        'azure_openai_config': {
-            'url': config.RAG_AZURE_OPENAI_BASE_URL,
-            'key': config.RAG_AZURE_OPENAI_API_KEY,
-            'version': config.RAG_AZURE_OPENAI_API_VERSION,
-        },
-    }
-
-
-class OpenAIConfigForm(BaseModel):
-    url: str | None = None
-    key: str | None = None
-
-
-class OllamaConfigForm(BaseModel):
-    url: str | None = None
-    key: str | None = None
-
-
-class AzureOpenAIConfigForm(BaseModel):
-    url: str | None = None
-    key: str | None = None
-    version: str | None = None
-
-
-class EmbeddingModelUpdateForm(BaseModel):
-    openai_config: Optional[OpenAIConfigForm] = None
-    ollama_config: Optional[OllamaConfigForm] = None
-    azure_openai_config: Optional[AzureOpenAIConfigForm] = None
-    RAG_EMBEDDING_ENGINE: str
-    RAG_EMBEDDING_MODEL: str
-    RAG_EMBEDDING_BATCH_SIZE: Optional[int] = 1
-    ENABLE_ASYNC_EMBEDDING: Optional[bool] = True
-    RAG_EMBEDDING_CONCURRENT_REQUESTS: Optional[int] = 0
-
-
-def unload_embedding_model(request: Request, config):
-    if config.RAG_EMBEDDING_ENGINE == '':
-        # unloads current internal embedding model and clears VRAM cache
-        request.app.state.ef = None
-        request.app.state.EMBEDDING_FUNCTION = None
-        import gc
-
-        gc.collect()
-        if DEVICE_TYPE == 'cuda':
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-
-@router.post('/embedding/update')
-async def update_embedding_config(request: Request, form_data: EmbeddingModelUpdateForm, user=Depends(get_admin_user)):
-    config = await get_rag_config_state()
-    _original_config = dict(vars(config))
-    log.info(f'Updating embedding model: {config.RAG_EMBEDDING_MODEL} to {form_data.RAG_EMBEDDING_MODEL}')
-    unload_embedding_model(request, config)
-    try:
-        config.RAG_EMBEDDING_ENGINE = form_data.RAG_EMBEDDING_ENGINE
-        config.RAG_EMBEDDING_MODEL = form_data.RAG_EMBEDDING_MODEL.strip()
-        config.RAG_EMBEDDING_BATCH_SIZE = form_data.RAG_EMBEDDING_BATCH_SIZE
-        config.ENABLE_ASYNC_EMBEDDING = form_data.ENABLE_ASYNC_EMBEDDING
-        config.RAG_EMBEDDING_CONCURRENT_REQUESTS = form_data.RAG_EMBEDDING_CONCURRENT_REQUESTS
-
-        if config.RAG_EMBEDDING_ENGINE == 'openai' and form_data.openai_config is not None:
-            config.RAG_OPENAI_API_BASE_URL = form_data.openai_config.url or ''
-            config.RAG_OPENAI_API_KEY = form_data.openai_config.key or ''
-
-        if config.RAG_EMBEDDING_ENGINE == 'ollama' and form_data.ollama_config is not None:
-            config.RAG_OLLAMA_BASE_URL = form_data.ollama_config.url or ''
-            config.RAG_OLLAMA_API_KEY = form_data.ollama_config.key or ''
-
-        if config.RAG_EMBEDDING_ENGINE == 'azure_openai' and form_data.azure_openai_config is not None:
-            config.RAG_AZURE_OPENAI_BASE_URL = form_data.azure_openai_config.url or ''
-            config.RAG_AZURE_OPENAI_API_KEY = form_data.azure_openai_config.key or ''
-            config.RAG_AZURE_OPENAI_API_VERSION = form_data.azure_openai_config.version or ''
-
-        # Build before saving: an engine get_embedding_function refuses must not be
-        # persisted for every later request (PLANE-001).
-        ef = get_ef(
-            config.RAG_EMBEDDING_ENGINE,
-            config.RAG_EMBEDDING_MODEL,
-        )
-
-        embedding_function = get_embedding_function(
-            config.RAG_EMBEDDING_ENGINE,
-            config.RAG_EMBEDDING_MODEL,
-            ef,
-            (
-                config.RAG_OPENAI_API_BASE_URL
-                if config.RAG_EMBEDDING_ENGINE == 'openai'
-                else (
-                    config.RAG_OLLAMA_BASE_URL
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_BASE_URL
-                )
-            ),
-            (
-                config.RAG_OPENAI_API_KEY
-                if config.RAG_EMBEDDING_ENGINE == 'openai'
-                else (
-                    config.RAG_OLLAMA_API_KEY
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_API_KEY
-                )
-            ),
-            config.RAG_EMBEDDING_BATCH_SIZE,
-            azure_api_version=(
-                config.RAG_AZURE_OPENAI_API_VERSION if config.RAG_EMBEDDING_ENGINE == 'azure_openai' else None
-            ),
-            enable_async=config.ENABLE_ASYNC_EMBEDDING,
-            concurrent_requests=config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
-        )
-
-        await Config.upsert({RAG_CONFIG_KEYS[k]: v for k, v in vars(config).items() if _original_config.get(k) != v})
-        request.app.state.ef = ef
-        request.app.state.EMBEDDING_FUNCTION = embedding_function
-
-        return {
-            'status': True,
-            'RAG_EMBEDDING_ENGINE': config.RAG_EMBEDDING_ENGINE,
-            'RAG_EMBEDDING_MODEL': config.RAG_EMBEDDING_MODEL,
-            'RAG_EMBEDDING_BATCH_SIZE': config.RAG_EMBEDDING_BATCH_SIZE,
-            'ENABLE_ASYNC_EMBEDDING': config.ENABLE_ASYNC_EMBEDDING,
-            'RAG_EMBEDDING_CONCURRENT_REQUESTS': config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
-            'openai_config': {
-                'url': config.RAG_OPENAI_API_BASE_URL,
-                'key': config.RAG_OPENAI_API_KEY,
-            },
-            'ollama_config': {
-                'url': config.RAG_OLLAMA_BASE_URL,
-                'key': config.RAG_OLLAMA_API_KEY,
-            },
-            'azure_openai_config': {
-                'url': config.RAG_AZURE_OPENAI_BASE_URL,
-                'key': config.RAG_AZURE_OPENAI_API_KEY,
-                'version': config.RAG_AZURE_OPENAI_API_VERSION,
-            },
-        }
-    except ValueError as e:
-        log.warning(f'Refused embedding configuration: {e}')
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT(e))
-    except Exception as e:
-        log.exception(f'Problem updating embedding model: {e}')
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DEFAULT(e),
-        )
 
 
 @router.get('/config')
@@ -673,13 +352,6 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         'MINERU_API_TIMEOUT': config.MINERU_API_TIMEOUT,
         'MINERU_PARAMS': config.MINERU_PARAMS,
         'MINERU_FILE_EXTENSIONS': config.MINERU_FILE_EXTENSIONS,
-        # Reranking settings
-        'RAG_RERANKING_MODEL': config.RAG_RERANKING_MODEL,
-        'RAG_RERANKING_ENGINE': config.RAG_RERANKING_ENGINE,
-        'RAG_RERANKING_BATCH_SIZE': config.RAG_RERANKING_BATCH_SIZE,
-        'RAG_EXTERNAL_RERANKER_URL': config.RAG_EXTERNAL_RERANKER_URL,
-        'RAG_EXTERNAL_RERANKER_API_KEY': config.RAG_EXTERNAL_RERANKER_API_KEY,
-        'RAG_EXTERNAL_RERANKER_TIMEOUT': config.RAG_EXTERNAL_RERANKER_TIMEOUT,
         # Chunking settings
         'TEXT_SPLITTER': config.TEXT_SPLITTER,
         'RAG_TOKENIZER_MODEL': config.RAG_TOKENIZER_MODEL,
@@ -910,14 +582,6 @@ class ConfigForm(BaseModel):
     MINERU_API_TIMEOUT: Optional[str] = None
     MINERU_PARAMS: Optional[dict] = None
 
-    # Reranking settings
-    RAG_RERANKING_MODEL: Optional[str] = None
-    RAG_RERANKING_ENGINE: Optional[str] = None
-    RAG_RERANKING_BATCH_SIZE: Optional[int] = None
-    RAG_EXTERNAL_RERANKER_URL: Optional[str] = None
-    RAG_EXTERNAL_RERANKER_API_KEY: Optional[str] = None
-    RAG_EXTERNAL_RERANKER_TIMEOUT: Optional[str] = None
-
     # Chunking settings
     TEXT_SPLITTER: Optional[str] = None
     ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER: Optional[bool] = None
@@ -1126,79 +790,6 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
     )
     config.MINERU_PARAMS = form_data.MINERU_PARAMS if form_data.MINERU_PARAMS is not None else config.MINERU_PARAMS
 
-    # Reranking settings
-    if config.RAG_RERANKING_ENGINE == '':
-        # Unloading the internal reranker and clear VRAM memory
-        request.app.state.rf = None
-        request.app.state.RERANKING_FUNCTION = None
-        import gc
-
-        gc.collect()
-        if DEVICE_TYPE == 'cuda':
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-    config.RAG_RERANKING_ENGINE = (
-        form_data.RAG_RERANKING_ENGINE if form_data.RAG_RERANKING_ENGINE is not None else config.RAG_RERANKING_ENGINE
-    )
-
-    config.RAG_EXTERNAL_RERANKER_URL = (
-        form_data.RAG_EXTERNAL_RERANKER_URL
-        if form_data.RAG_EXTERNAL_RERANKER_URL is not None
-        else config.RAG_EXTERNAL_RERANKER_URL
-    )
-
-    config.RAG_EXTERNAL_RERANKER_API_KEY = (
-        form_data.RAG_EXTERNAL_RERANKER_API_KEY
-        if form_data.RAG_EXTERNAL_RERANKER_API_KEY is not None
-        else config.RAG_EXTERNAL_RERANKER_API_KEY
-    )
-
-    config.RAG_EXTERNAL_RERANKER_TIMEOUT = (
-        form_data.RAG_EXTERNAL_RERANKER_TIMEOUT
-        if form_data.RAG_EXTERNAL_RERANKER_TIMEOUT is not None
-        else config.RAG_EXTERNAL_RERANKER_TIMEOUT
-    )
-
-    config.RAG_RERANKING_BATCH_SIZE = (
-        form_data.RAG_RERANKING_BATCH_SIZE
-        if form_data.RAG_RERANKING_BATCH_SIZE is not None
-        else config.RAG_RERANKING_BATCH_SIZE
-    )
-
-    log.info('Updating reranking model: %s to %s', config.RAG_RERANKING_MODEL, form_data.RAG_RERANKING_MODEL)
-    try:
-        config.RAG_RERANKING_MODEL = (
-            form_data.RAG_RERANKING_MODEL if form_data.RAG_RERANKING_MODEL is not None else config.RAG_RERANKING_MODEL
-        )
-
-        try:
-            if config.ENABLE_RAG_HYBRID_SEARCH and not config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-                request.app.state.rf = get_rf(
-                    config.RAG_RERANKING_ENGINE,
-                    config.RAG_RERANKING_MODEL,
-                    config.RAG_EXTERNAL_RERANKER_URL,
-                    config.RAG_EXTERNAL_RERANKER_API_KEY,
-                    config.RAG_EXTERNAL_RERANKER_TIMEOUT,
-                )
-
-                request.app.state.RERANKING_FUNCTION = get_reranking_function(
-                    config.RAG_RERANKING_ENGINE,
-                    config.RAG_RERANKING_MODEL,
-                    request.app.state.rf,
-                    reranking_batch_size=config.RAG_RERANKING_BATCH_SIZE,
-                )
-        except Exception as e:
-            log.error(f'Error loading reranking model: {e}')
-            config.ENABLE_RAG_HYBRID_SEARCH = False
-    except Exception as e:
-        log.exception(f'Problem updating reranking model: {e}')
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DEFAULT(e),
-        )
-
     # Chunking settings
     config.TEXT_SPLITTER = form_data.TEXT_SPLITTER if form_data.TEXT_SPLITTER is not None else config.TEXT_SPLITTER
     config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER = (
@@ -1393,12 +984,6 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         'MINERU_PARAMS': config.MINERU_PARAMS,
         'MINERU_FILE_EXTENSIONS': config.MINERU_FILE_EXTENSIONS,
         # Reranking settings
-        'RAG_RERANKING_MODEL': config.RAG_RERANKING_MODEL,
-        'RAG_RERANKING_ENGINE': config.RAG_RERANKING_ENGINE,
-        'RAG_RERANKING_BATCH_SIZE': config.RAG_RERANKING_BATCH_SIZE,
-        'RAG_EXTERNAL_RERANKER_URL': config.RAG_EXTERNAL_RERANKER_URL,
-        'RAG_EXTERNAL_RERANKER_API_KEY': config.RAG_EXTERNAL_RERANKER_API_KEY,
-        'RAG_EXTERNAL_RERANKER_TIMEOUT': config.RAG_EXTERNAL_RERANKER_TIMEOUT,
         # Chunking settings
         'TEXT_SPLITTER': config.TEXT_SPLITTER,
         'RAG_TOKENIZER_MODEL': config.RAG_TOKENIZER_MODEL,
@@ -1502,381 +1087,6 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
 ####################################
 
 
-def save_embeddings_to_vector_db(
-    collection_name: str,
-    chunks: List[dict],
-    file_metadata: Optional[dict] = None,
-    overwrite: bool = False,
-    add: bool = False,
-) -> bool:
-    """
-    Save pre-computed embeddings directly to vector database.
-    Bypasses parsing, chunking, and embedding generation.
-
-    Args:
-        collection_name: Name of the collection to store in
-        chunks: List of chunks with structure:
-            {
-                "text": str,
-                "embedding": List[float],
-                "metadata": dict (optional)
-            }
-        file_metadata: Optional file-level metadata to merge with chunk metadata
-        overwrite: If True, delete existing collection before inserting
-        add: If True, add to existing collection (default: False)
-
-    Returns:
-        bool: True if successful
-    """
-    try:
-        if not chunks:
-            raise ValueError('No chunks provided')
-
-        # Check if collection exists
-        if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
-            log.info(f'collection {collection_name} already exists')
-
-            if overwrite:
-                VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
-                log.info(f'deleting existing collection {collection_name}')
-            elif add is False:
-                log.info(f'collection {collection_name} already exists, overwrite is False and add is False')
-                return True
-
-        # Prepare items for insertion
-        items = []
-        for chunk in chunks:
-            # Validate chunk structure
-            if 'text' not in chunk or 'embedding' not in chunk:
-                raise ValueError("Chunk must contain 'text' and 'embedding' fields")
-
-            # Merge metadata
-            metadata = chunk.get('metadata', {})
-            if file_metadata:
-                metadata = {**metadata, **file_metadata}
-
-            items.append(
-                {
-                    'id': chunk.get('id', str(uuid.uuid4())),
-                    'text': chunk['text'],
-                    'vector': chunk['embedding'],
-                    'metadata': metadata,
-                }
-            )
-
-        log.info(f'adding {len(items)} items to collection {collection_name}')
-        VECTOR_DB_CLIENT.insert(
-            collection_name=collection_name,
-            items=items,
-        )
-
-        log.info(f'added {len(items)} items to collection {collection_name}')
-        return True
-
-    except Exception as e:
-        log.exception(e)
-        raise e
-
-
-def can_merge_chunks(a: Document, b: Document) -> bool:
-    if a.metadata.get('source') != b.metadata.get('source'):
-        return False
-
-    a_file_id = a.metadata.get('file_id')
-    b_file_id = b.metadata.get('file_id')
-
-    if a_file_id is not None and b_file_id is not None:
-        return a_file_id == b_file_id
-
-    return True
-
-
-def merge_docs_to_target_size(
-    request: Request,
-    chunks: list[Document],
-    config=None,
-) -> list[Document]:
-    """
-    Best-effort normalization of chunk sizes.
-
-    Attempts to grow small chunks up to a desired minimum size,
-    without exceeding the maximum size or crossing source/file
-    boundaries.
-    """
-    if config is None:
-        config = run_on_main_loop(get_rag_config_state())
-    min_chunk_size_target = config.CHUNK_MIN_SIZE_TARGET
-    max_chunk_size = config.CHUNK_SIZE
-
-    if min_chunk_size_target <= 0:
-        return chunks
-
-    measure_chunk_size = len
-    if config.TEXT_SPLITTER == 'token':
-        encoding = tiktoken.get_encoding(str(config.TIKTOKEN_ENCODING_NAME))
-        measure_chunk_size = lambda text: len(encoding.encode(text))
-
-    processed_chunks: list[Document] = []
-
-    current_chunk: Document | None = None
-    current_content: str = ''
-
-    for next_chunk in chunks:
-        if current_chunk is None:
-            current_chunk = next_chunk
-            current_content = next_chunk.page_content
-            continue  # First chunk initialization
-
-        proposed_content = f'{current_content}\n\n{next_chunk.page_content}'
-
-        can_merge = (
-            can_merge_chunks(current_chunk, next_chunk)
-            and measure_chunk_size(current_content) < min_chunk_size_target
-            and measure_chunk_size(proposed_content) <= max_chunk_size
-        )
-
-        if can_merge:
-            current_content = proposed_content
-        else:
-            processed_chunks.append(
-                Document(
-                    page_content=current_content,
-                    metadata={**current_chunk.metadata},
-                )
-            )
-            current_chunk = next_chunk
-            current_content = next_chunk.page_content
-
-    if current_chunk is not None:
-        processed_chunks.append(
-            Document(
-                page_content=current_content,
-                metadata={**current_chunk.metadata},
-            )
-        )
-
-    return processed_chunks
-
-
-def save_docs_to_vector_db(
-    request: Request,
-    docs,
-    collection_name,
-    metadata: Optional[dict] = None,
-    overwrite: bool = False,
-    split: bool = True,
-    add: bool = False,
-    user=None,
-    config=None,
-) -> bool:
-    if config is None:
-        config = run_on_main_loop(get_rag_config_state())
-
-    def _get_docs_info(docs: list[Document]) -> str:
-        docs_info = set()
-
-        # Trying to select relevant metadata identifying the document.
-        for doc in docs:
-            metadata = getattr(doc, 'metadata', {})
-            doc_name = metadata.get('name', '')
-            if not doc_name:
-                doc_name = metadata.get('title', '')
-            if not doc_name:
-                doc_name = metadata.get('source', '')
-            if doc_name:
-                docs_info.add(doc_name)
-
-        return ', '.join(docs_info)
-
-    log.debug(f'save_docs_to_vector_db: {len(docs)} docs to {collection_name}')
-
-    # Check if entries with the same hash (metadata.hash) already exist
-    if metadata and 'hash' in metadata:
-        result = VECTOR_DB_CLIENT.query(
-            collection_name=collection_name,
-            filter={'hash': metadata['hash']},
-        )
-
-        if result is not None and result.ids and len(result.ids) > 0:
-            existing_doc_ids = result.ids[0]
-            if existing_doc_ids:
-                existing_file_id = None
-                if result.metadatas and result.metadatas[0]:
-                    existing_file_id = result.metadatas[0][0].get('file_id')
-
-                if existing_file_id == metadata.get('file_id'):
-                    # Same file re-added/reindexed - allow it
-                    pass
-                else:
-                    # Different file with same content hash - remove old entries
-                    # and re-add with the new file's metadata (supports re-uploads
-                    # of the same document under a different file ID).
-                    log.info(
-                        f'Replacing existing document with hash {metadata["hash"]} '
-                        f'(old file_id={existing_file_id}, new file_id={metadata.get("file_id")})'
-                    )
-                    VECTOR_DB_CLIENT.delete(
-                        collection_name=collection_name,
-                        filter={'hash': metadata['hash']},
-                    )
-
-    if split:
-        if config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER:
-            log.info('Using markdown header text splitter')
-            # Define headers to split on - covering most common markdown header levels
-            markdown_splitter = MarkdownHeaderTextSplitter(
-                headers_to_split_on=[
-                    ('#', 'Header 1'),
-                    ('##', 'Header 2'),
-                    ('###', 'Header 3'),
-                    ('####', 'Header 4'),
-                    ('#####', 'Header 5'),
-                    ('######', 'Header 6'),
-                ],
-                strip_headers=False,  # Keep headers in content for context
-            )
-
-            split_docs = []
-            for doc in docs:
-                split_docs.extend(
-                    [
-                        Document(
-                            page_content=split_chunk.page_content,
-                            metadata={**doc.metadata},
-                        )
-                        for split_chunk in markdown_splitter.split_text(doc.page_content)
-                    ]
-                )
-
-            docs = split_docs
-            if config.CHUNK_MIN_SIZE_TARGET > 0:
-                docs = merge_docs_to_target_size(request, docs, config=config)
-
-        if config.TEXT_SPLITTER in ['', 'character']:
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=config.CHUNK_SIZE,
-                chunk_overlap=config.CHUNK_OVERLAP,
-                add_start_index=True,
-            )
-            docs = text_splitter.split_documents(docs)
-        elif config.TEXT_SPLITTER == 'token':
-            log.info('Using token text splitter: %s', config.TIKTOKEN_ENCODING_NAME)
-
-            tiktoken.get_encoding(str(config.TIKTOKEN_ENCODING_NAME))
-            text_splitter = TokenTextSplitter(
-                encoding_name=str(config.TIKTOKEN_ENCODING_NAME),
-                chunk_size=config.CHUNK_SIZE,
-                chunk_overlap=config.CHUNK_OVERLAP,
-                add_start_index=True,
-                disallowed_special=TIKTOKEN_DISALLOWED_SPECIAL,
-            )
-            docs = text_splitter.split_documents(docs)
-        else:
-            raise ValueError(ERROR_MESSAGES.DEFAULT('Invalid text splitter'))
-
-    if len(docs) == 0:
-        log.warning(f'No text content could be extracted for collection {collection_name}')
-        return True
-
-    texts = [sanitize_text_for_db(doc.page_content) for doc in docs]
-    # `chunk_index` is the list position in the final (post-split) doc list, which
-    # is the authoritative document order: markdown sections extend in order, the
-    # character/token splitter preserves order within a section, pages come in
-    # order. `start_index` cannot stand in for it — the markdown header splitter
-    # resets it per section. Consumers reconstruct full documents by sorting on it.
-    metadatas = [
-        {
-            **doc.metadata,
-            **(metadata if metadata else {}),
-            'chunk_index': chunk_index,
-            'embedding_config': {
-                'engine': config.RAG_EMBEDDING_ENGINE,
-                'model': config.RAG_EMBEDDING_MODEL,
-            },
-        }
-        for chunk_index, doc in enumerate(docs)
-    ]
-
-    try:
-        if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
-            log.info('collection %s already exists', collection_name)
-
-            if overwrite:
-                VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
-                log.info('deleting existing collection %s', collection_name)
-            elif add is False:
-                log.info('collection %s already exists, overwrite is False and add is False', collection_name)
-                return True
-
-        log.info('generating embeddings for %s', collection_name)
-        embedding_function = get_embedding_function(
-            config.RAG_EMBEDDING_ENGINE,
-            config.RAG_EMBEDDING_MODEL,
-            request.app.state.ef,
-            (
-                config.RAG_OPENAI_API_BASE_URL
-                if config.RAG_EMBEDDING_ENGINE == 'openai'
-                else (
-                    config.RAG_OLLAMA_BASE_URL
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_BASE_URL
-                )
-            ),
-            (
-                config.RAG_OPENAI_API_KEY
-                if config.RAG_EMBEDDING_ENGINE == 'openai'
-                else (
-                    config.RAG_OLLAMA_API_KEY
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_API_KEY
-                )
-            ),
-            config.RAG_EMBEDDING_BATCH_SIZE,
-            azure_api_version=(
-                config.RAG_AZURE_OPENAI_API_VERSION if config.RAG_EMBEDDING_ENGINE == 'azure_openai' else None
-            ),
-            enable_async=config.ENABLE_ASYNC_EMBEDDING,
-            concurrent_requests=config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
-        )
-
-        # Run async embedding in sync context using the main event loop
-        # This allows the main loop to stay responsive to health checks during long operations
-        embedding_timeout = RAG_EMBEDDING_TIMEOUT
-
-        future = asyncio.run_coroutine_threadsafe(
-            embedding_function(
-                list(map(lambda x: x.replace('\n', ' '), texts)),
-                prefix=RAG_EMBEDDING_CONTENT_PREFIX,
-                user=user,
-            ),
-            request.app.state.main_loop,
-        )
-        embeddings = future.result(timeout=embedding_timeout)
-        log.info('embeddings generated %s for %s items', len(embeddings), len(texts))
-
-        items = [
-            {
-                'id': str(uuid.uuid4()),
-                'text': text,
-                'vector': embeddings[idx],
-                'metadata': metadatas[idx],
-            }
-            for idx, text in enumerate(texts)
-        ]
-
-        log.info('adding to collection %s', collection_name)
-        VECTOR_DB_CLIENT.insert(
-            collection_name=collection_name,
-            items=items,
-        )
-
-        log.info('added %s items to collection %s', len(items), collection_name)
-        return True
-    except Exception as e:
-        log.exception(e)
-        raise e
-
-
 class ProcessFileForm(BaseModel):
     file_id: str
     content: Optional[str] = None
@@ -1890,12 +1100,7 @@ async def process_file(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """
-    Process a file and save its content to the vector database.
-    Note: granular session management is used to prevent connection pool exhaustion.
-    The session is committed before external API calls, and updates use a fresh session.
-    """
-    config = await get_rag_config_state()
+    ensure_configured()
     if can_bypass_access_control(user):
         file = await Files.get_file_by_id(form_data.file_id, db=db)
     else:
@@ -1911,230 +1116,24 @@ async def process_file(
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
 
-            if soev_config.SOEV_API_URL:
-                try:
-                    collection_key = form_data.collection_name or await ingest.ensure_attachments_collection(
-                        user.id, identity.build_client()
-                    )
-                    job_id = await ingest.submit(
-                        file, collection_key=collection_key, user_id=user.id, text=form_data.content
-                    )
-                except SoevNotConfigured:
-                    raise
-                except SoevApiError as e:
-                    raise ValueError(f'{e.code}: {e.detail}') from e
-                return {
-                    'status': True,
-                    'collection_name': form_data.collection_name,
-                    'filename': file.filename,
-                    'content': '',
-                    'job_id': job_id,
-                }
-
-            if form_data.content:
-                # Update the content in the file
-                # Usage: /files/{file_id}/data/content/update, /files/ (audio file upload pipeline)
-
-                try:
-                    # /files/{file_id}/data/content/update
-                    await ASYNC_VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection_name)
-                except Exception:
-                    # Audio file upload pipeline
-                    pass
-
-                docs = [
-                    Document(
-                        page_content=form_data.content.replace('<br/>', '\n'),
-                        metadata={
-                            **file.meta,
-                            'name': file.filename,
-                            'created_by': file.user_id,
-                            'file_id': file.id,
-                            'source': file.filename,
-                        },
-                    )
-                ]
-
-                text_content = form_data.content
-            elif form_data.collection_name:
-                # Check if the file has already been processed and save the content.
-                # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update,
-                # and /files/ uploads with knowledge_id (workspace KB upload).
-                #
-                # Previously this branch first queried a per-file `file-{id}`
-                # cache collection. KB-bound uploads no longer create that
-                # collection (dev's e64b083b9), so we fall straight through to
-                # the existing content / disk-load path.
-                existing_content = file.data.get('content', '')
-                if existing_content:
-                    docs = [
-                        Document(
-                            page_content=existing_content,
-                            metadata={
-                                **file.meta,
-                                'name': file.filename,
-                                'created_by': file.user_id,
-                                'file_id': file.id,
-                                'source': file.filename,
-                            },
-                        )
-                    ]
-                else:
-                    # File hasn't been processed yet (e.g. background processing
-                    # hasn't completed). Load and extract content directly.
-                    file_path = file.path
-                    if file_path:
-                        file_path = await asyncio.to_thread(Storage.get_file, file_path)
-                        loader = build_loader_from_config(request, await get_loader_config())
-                        loader.user = user
-                        docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
-                        docs = [
-                            Document(
-                                page_content=doc.page_content,
-                                metadata={
-                                    **filter_metadata(doc.metadata),
-                                    'name': file.filename,
-                                    'created_by': file.user_id,
-                                    'file_id': file.id,
-                                    'source': file.filename,
-                                },
-                            )
-                            for doc in docs
-                        ]
-                    else:
-                        raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
-
-                text_content = ' '.join([doc.page_content for doc in docs]) if docs else file.data.get('content', '')
-            else:
-                # Process the file and save the content
-                # Usage: /files/
-                file_path = file.path
-                if file_path:
-                    file_path = await asyncio.to_thread(Storage.get_file, file_path)
-                    loader = build_loader_from_config(request, await get_loader_config())
-                    loader.user = user
-
-                    docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
-
-                    docs = [
-                        Document(
-                            page_content=doc.page_content,
-                            metadata={
-                                **filter_metadata(doc.metadata),
-                                'name': file.filename,
-                                'created_by': file.user_id,
-                                'file_id': file.id,
-                                'source': file.filename,
-                            },
-                        )
-                        for doc in docs
-                    ]
-                else:
-                    docs = [
-                        Document(
-                            page_content=file.data.get('content', ''),
-                            metadata={
-                                **file.meta,
-                                'name': file.filename,
-                                'created_by': file.user_id,
-                                'file_id': file.id,
-                                'source': file.filename,
-                            },
-                        )
-                    ]
-                text_content = ' '.join([doc.page_content for doc in docs])
-
-            log.debug(f'text_content length: {len(text_content)}')
-            await Files.update_file_data_by_id(
-                file.id,
-                {'content': text_content},
-                db=db,
-            )
-            hash = calculate_sha256_string(text_content)
-
-            if config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-                await Files.set_status(file.id, 'completed', db=db)
-                await Files.update_file_hash_by_id(file.id, hash, db=db)
-                return {
-                    'status': True,
-                    'collection_name': None,
-                    'filename': file.filename,
-                    'content': text_content,
-                }
-            else:
-                try:
-                    # Commit any pending changes before the slow embedding step.
-                    # Note: file is already a Pydantic model (not ORM), so no expunge needed.
-                    await db.commit()
-
-                    # External embedding API takes time (5-60s+).
-                    # Subsequent updates use fresh async sessions.
-                    if not text_content.strip():
-                        # File has no extractable text (e.g. image-only PDF).
-                        # Still add it to the KB for bookkeeping, but skip embedding.
-                        log.warning(
-                            'No text content extracted from file, skipping embedding but adding to knowledge base'
-                        )
-                        async with get_async_db() as session:
-                            await Files.update_file_metadata_by_id(
-                                file.id,
-                                {'collection_name': collection_name},
-                                db=session,
-                            )
-                            await Files.set_status(file.id, 'completed', db=session)
-                            await Files.update_file_hash_by_id(file.id, hash, db=session)
-
-                        return {
-                            'status': True,
-                            'collection_name': collection_name,
-                            'filename': file.filename,
-                            'content': text_content,
-                            'warning': 'No text content could be extracted from this file. '
-                            'It has been added but will not be searchable.',
-                        }
-
-                    # save_docs_to_vector_db is sync and blocks on embedding +
-                    # vector-DB I/O. Offload so the event loop stays responsive.
-                    result = await run_in_threadpool(
-                        save_docs_to_vector_db,
-                        request,
-                        docs=docs,
-                        collection_name=collection_name,
-                        config=config,
-                        metadata={
-                            'file_id': file.id,
-                            'name': file.filename,
-                            'hash': hash,
-                        },
-                        add=(True if form_data.collection_name else False),
-                        user=user,
-                    )
-                    log.info(f'added {len(docs)} items to collection {collection_name}')
-
-                    if result:
-                        # Fresh session for the final update.
-                        async with get_async_db() as session:
-                            await Files.update_file_metadata_by_id(
-                                file.id,
-                                {
-                                    'collection_name': collection_name,
-                                },
-                                db=session,
-                            )
-
-                            await Files.set_status(file.id, 'completed', db=session)
-                            await Files.update_file_hash_by_id(file.id, hash, db=session)
-
-                            return {
-                                'status': True,
-                                'collection_name': collection_name,
-                                'filename': file.filename,
-                                'content': text_content,
-                            }
-                    else:
-                        raise Exception('Error saving document to vector database')
-                except Exception as e:
-                    raise e
+            try:
+                collection_key = form_data.collection_name or await ingest.ensure_attachments_collection(
+                    user.id, identity.build_client()
+                )
+                job_id = await ingest.submit(
+                    file, collection_key=collection_key, user_id=user.id, text=form_data.content
+                )
+            except SoevNotConfigured:
+                raise
+            except SoevApiError as e:
+                raise ValueError(f'{e.code}: {e.detail}') from e
+            return {
+                'status': True,
+                'collection_name': form_data.collection_name,
+                'filename': file.filename,
+                'content': '',
+                'job_id': job_id,
+            }
 
         except ingest.IngestBusy as e:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='file is being processed') from e
@@ -2174,47 +1173,6 @@ async def process_file(
 
     else:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-
-class ProcessTextForm(BaseModel):
-    name: str
-    content: str
-    collection_name: Optional[str] = None
-
-
-@router.post('/process/text')
-async def process_text(
-    request: Request,
-    form_data: ProcessTextForm,
-    user=Depends(get_verified_user),
-):
-    collection_name = form_data.collection_name
-    if collection_name is None:
-        collection_name = calculate_sha256_string(form_data.content)
-    else:
-        await _validate_collection_access([collection_name], user, access_type='write')
-
-    docs = [
-        Document(
-            page_content=form_data.content,
-            metadata={'name': form_data.name, 'created_by': user.id},
-        )
-    ]
-    text_content = form_data.content
-    log.debug(f'text_content length: {len(text_content)}')
-
-    result = await run_in_threadpool(save_docs_to_vector_db, request, docs, collection_name, user=user)
-    if result:
-        return {
-            'status': True,
-            'collection_name': collection_name,
-            'content': text_content,
-        }
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ERROR_MESSAGES.DEFAULT(),
-        )
 
 
 async def _fetch_url(url: str, max_size_mb: int | str | None) -> dict:
@@ -2441,18 +1399,7 @@ async def process_web(
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
 
-            if not config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
-                await run_in_threadpool(
-                    save_docs_to_vector_db,
-                    request,
-                    docs,
-                    collection_name,
-                    overwrite=overwrite,
-                    add=(not overwrite),
-                    user=user,
-                )
-            else:
-                collection_name = None
+            collection_name = None
 
             return {
                 'status': True,
@@ -2970,50 +1917,20 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
             dict(item) for item in result_items if item.link in url_set
         ]  # only keep the search results that have been loaded
 
-        if config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
-            return {
-                'status': True,
-                'collection_name': None,
-                'filenames': urls,
-                'items': result_items,
-                'docs': [
-                    {
-                        'content': doc.page_content,
-                        'metadata': doc.metadata,
-                    }
-                    for doc in docs
-                ],
-                'loaded_count': len(docs),
-            }
-        else:
-            # Create a single collection for all documents
-            # Bind the ephemeral collection to its owner so filter_accessible_collections can scope it per-user.
-            collection_name = f'web-search-{user.id}-{calculate_sha256_string("-".join(form_data.queries))}'[:63]
-
-            try:
-                await run_in_threadpool(
-                    save_docs_to_vector_db,
-                    request,
-                    docs,
-                    collection_name,
-                    overwrite=True,
-                    user=user,
-                )
-            except Exception as e:
-                # Surface the failure instead of returning an unusable collection
-                log.exception(f'Error saving web search results to vector DB: {e}')
-                raise HTTPException(
-                    status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail='Failed to embed and store the retrieved web pages. Check the embedding configuration in Admin Settings > Documents.',
-                )
-
-            return {
-                'status': True,
-                'collection_names': [collection_name],
-                'items': result_items,
-                'filenames': urls,
-                'loaded_count': len(docs),
-            }
+        return {
+            'status': True,
+            'collection_name': None,
+            'filenames': urls,
+            'items': result_items,
+            'docs': [
+                {
+                    'content': doc.page_content,
+                    'metadata': doc.metadata,
+                }
+                for doc in docs
+            ],
+            'loaded_count': len(docs),
+        }
     except Exception as e:
         log.exception(e)
         raise HTTPException(
@@ -3036,135 +1953,6 @@ async def _validate_collection_access(collection_names: list[str], user, access_
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-
-class QueryDocForm(BaseModel):
-    collection_name: str
-    query: str
-    k: Optional[int] = None
-    k_reranker: Optional[int] = None
-    r: Optional[float] = None
-    hybrid: Optional[bool] = None
-
-
-@router.post('/query/doc')
-async def query_doc_handler(
-    request: Request,
-    form_data: QueryDocForm,
-    user=Depends(get_verified_user),
-):
-    config = await get_rag_config_state()
-    await _validate_collection_access([form_data.collection_name], user)
-
-    try:
-        if config.ENABLE_RAG_HYBRID_SEARCH and (form_data.hybrid is None or form_data.hybrid):
-            collection_results = {}
-            collection_results[form_data.collection_name] = await ASYNC_VECTOR_DB_CLIENT.get(
-                collection_name=form_data.collection_name
-            )
-            return await query_doc_with_hybrid_search(
-                collection_name=form_data.collection_name,
-                collection_result=collection_results[form_data.collection_name],
-                query=form_data.query,
-                embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
-                    query, prefix=prefix, user=user
-                ),
-                k=form_data.k if form_data.k else config.TOP_K,
-                reranking_function=(
-                    (lambda query, documents: request.app.state.RERANKING_FUNCTION(query, documents, user=user))
-                    if request.app.state.RERANKING_FUNCTION
-                    else None
-                ),
-                k_reranker=form_data.k_reranker or config.TOP_K_RERANKER,
-                r=(form_data.r if form_data.r else config.RELEVANCE_THRESHOLD),
-                hybrid_bm25_weight=(
-                    form_data.hybrid_bm25_weight if form_data.hybrid_bm25_weight else config.HYBRID_BM25_WEIGHT
-                ),
-                user=user,
-            )
-        else:
-            query_embedding = await request.app.state.EMBEDDING_FUNCTION(
-                form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
-            )
-            # query_doc wraps a blocking VECTOR_DB_CLIENT.search call; offload
-            # so the request's event loop stays responsive.
-            return await asyncio.to_thread(
-                query_doc,
-                collection_name=form_data.collection_name,
-                query_embedding=query_embedding,
-                k=form_data.k if form_data.k else config.TOP_K,
-                user=user,
-            )
-    except Exception as e:
-        log.exception(e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
-        )
-
-
-class QueryCollectionsForm(BaseModel):
-    collection_names: list[str]
-    query: str
-    k: Optional[int] = None
-    k_reranker: Optional[int] = None
-    r: Optional[float] = None
-    hybrid: Optional[bool] = None
-    hybrid_bm25_weight: Optional[float] = None
-    enable_enriched_texts: Optional[bool] = None
-
-
-@router.post('/query/collection')
-async def query_collection_handler(
-    request: Request,
-    form_data: QueryCollectionsForm,
-    user=Depends(get_verified_user),
-):
-    config = await get_rag_config_state()
-    await _validate_collection_access(form_data.collection_names, user)
-
-    try:
-        if config.ENABLE_RAG_HYBRID_SEARCH and (form_data.hybrid is None or form_data.hybrid):
-            return await query_collection_with_hybrid_search(
-                collection_names=form_data.collection_names,
-                queries=[form_data.query],
-                embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
-                    query, prefix=prefix, user=user
-                ),
-                k=form_data.k if form_data.k else config.TOP_K,
-                reranking_function=(
-                    (lambda query, documents: request.app.state.RERANKING_FUNCTION(query, documents, user=user))
-                    if request.app.state.RERANKING_FUNCTION
-                    else None
-                ),
-                k_reranker=form_data.k_reranker or config.TOP_K_RERANKER,
-                r=(form_data.r if form_data.r else config.RELEVANCE_THRESHOLD),
-                hybrid_bm25_weight=(
-                    form_data.hybrid_bm25_weight if form_data.hybrid_bm25_weight else config.HYBRID_BM25_WEIGHT
-                ),
-                enable_enriched_texts=(
-                    form_data.enable_enriched_texts
-                    if form_data.enable_enriched_texts is not None
-                    else config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
-                ),
-            )
-        else:
-            return await query_collection(
-                request,
-                collection_names=form_data.collection_names,
-                queries=[form_data.query],
-                embedding_function=lambda query, prefix: request.app.state.EMBEDDING_FUNCTION(
-                    query, prefix=prefix, user=user
-                ),
-                k=form_data.k if form_data.k else config.TOP_K,
-            )
-
-    except Exception as e:
-        log.exception(e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
         )
 
 
@@ -3275,13 +2063,6 @@ async def reset_upload_dir(request: Request, user=Depends(get_admin_user)) -> bo
     return True
 
 
-if ENV == 'dev':
-
-    @router.get('/ef/{text}')
-    async def get_embeddings(request: Request, text: Optional[str] = 'Hello World!', user=Depends(get_admin_user)):
-        return {'result': await request.app.state.EMBEDDING_FUNCTION(text, prefix=RAG_EMBEDDING_QUERY_PREFIX)}
-
-
 class BatchProcessFilesForm(BaseModel):
     files: List[FileModel]
     collection_name: str
@@ -3305,114 +2086,29 @@ async def process_files_batch(
     user=Depends(get_verified_user),
     db=None,
 ) -> BatchProcessFilesResponse:
-    """
-    Process a batch of files and save them to the vector database.
-
-    NOTE: We intentionally do NOT use Depends(get_async_session) here.
-    The save_docs_to_vector_db() call makes external embedding API calls which
-    can take 5-60+ seconds for batch operations. Database operations after
-    embedding (Files.update_file_by_id) manage their own short-lived sessions.
-    """
-
-    config = await get_rag_config_state()
+    ensure_configured()
     collection_name = form_data.collection_name
-
     if collection_name:
         await _validate_collection_access([collection_name], user, access_type='write')
-
-    file_results: List[BatchProcessFilesResult] = []
-    file_errors: List[BatchProcessFilesResult] = []
-    file_updates: List[FileUpdateForm] = []
-
-    # Prepare all documents first
-    all_docs: List[Document] = []
-
+    results = []
+    errors = []
     for file in form_data.files:
-        try:
-            # Ownership check: verify the requesting user owns the file or is an admin
-            db_file = await Files.get_file_by_id(file.id, db=db)
-            if not db_file:
-                file_errors.append(
-                    BatchProcessFilesResult(
-                        file_id=file.id,
-                        status='failed',
-                        error='File not found',
-                    )
-                )
-                continue
-            if db_file.user_id != user.id and not can_bypass_access_control(user):
-                file_errors.append(
-                    BatchProcessFilesResult(
-                        file_id=file.id,
-                        status='failed',
-                        error='Permission denied: not file owner',
-                    )
-                )
-                continue
-
-            if soev_config.SOEV_API_URL:
-                try:
-                    await ingest.submit(db_file, collection_key=collection_name, user_id=user.id)
-                except SoevNotConfigured:
-                    raise
-                except (SoevApiError, ingest.IngestBusy) as e:
-                    error = f'{e.code}: {e.detail}' if isinstance(e, SoevApiError) else 'file is being processed'
-                    file_errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error=error))
-                else:
-                    file_results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))
-                continue
-
-            text_content = file.data.get('content', '')
-            docs: List[Document] = [
-                Document(
-                    page_content=text_content.replace('<br/>', '\n'),
-                    metadata={
-                        **file.meta,
-                        'name': file.filename,
-                        'created_by': file.user_id,
-                        'file_id': file.id,
-                        'source': file.filename,
-                    },
-                )
-            ]
-
-            all_docs.extend(docs)
-
-            file_updates.append(
-                FileUpdateForm(
-                    hash=calculate_sha256_string(text_content),
-                    data={'content': text_content},
-                )
+        db_file = await Files.get_file_by_id(file.id, db=db)
+        if not db_file:
+            errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error='File not found'))
+            continue
+        if db_file.user_id != user.id and not can_bypass_access_control(user):
+            errors.append(
+                BatchProcessFilesResult(file_id=file.id, status='failed', error='Permission denied: not file owner')
             )
-            file_results.append(BatchProcessFilesResult(file_id=file.id, status='prepared'))
-
+            continue
+        try:
+            await ingest.submit(db_file, collection_key=collection_name, user_id=user.id)
         except SoevNotConfigured:
             raise
-        except Exception as e:
-            log.error(f'process_files_batch: Error processing file {file.id}: {str(e)}')
-            file_errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error=str(e)))
-
-    # Save all documents in one batch
-    if all_docs:
-        try:
-            await run_in_threadpool(
-                save_docs_to_vector_db,
-                request,
-                all_docs,
-                collection_name,
-                add=True,
-                user=user,
-            )
-
-            # Update all files with collection name
-            for file_update, file_result in zip(file_updates, file_results):
-                await Files.update_file_by_id(id=file_result.file_id, form_data=file_update, db=db)
-                file_result.status = 'completed'
-
-        except Exception as e:
-            log.error(f'process_files_batch: Error saving documents to vector DB: {str(e)}')
-            for file_result in file_results:
-                file_result.status = 'failed'
-                file_errors.append(BatchProcessFilesResult(file_id=file_result.file_id, status='failed', error=str(e)))
-
-    return BatchProcessFilesResponse(results=file_results, errors=file_errors)
+        except (SoevApiError, ingest.IngestBusy) as e:
+            error = f'{e.code}: {e.detail}' if isinstance(e, SoevApiError) else 'file is being processed'
+            errors.append(BatchProcessFilesResult(file_id=file.id, status='failed', error=error))
+        else:
+            results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))
+    return BatchProcessFilesResponse(results=results, errors=errors)

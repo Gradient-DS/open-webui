@@ -28,10 +28,8 @@ MAIN_PATHS = [
     '/api/chat/actions/{action_id}',
     '/api/embeddings',
     '/api/v1/embeddings',
-    '/api/message',
-    '/api/v1/messages',
 ]
-PATHS = TASK_PATHS + OLLAMA_PATHS + ['/openai/chat/completions'] + MAIN_PATHS
+PATHS = TASK_PATHS + OLLAMA_PATHS + MAIN_PATHS
 MODEL = 'vendor-model'
 TEXT = 'Explain the northern lights.'
 REPLY = {
@@ -112,7 +110,7 @@ def application():
 
 @pytest.fixture
 def harness(application, monkeypatch):
-    from open_webui.routers import ollama, openai, tasks
+    from open_webui.routers import ollama, tasks
     from open_webui.utils.auth import get_verified_user
 
     # Mount the actual registered endpoints without app lifespan or unrelated middleware.
@@ -124,7 +122,6 @@ def harness(application, monkeypatch):
     user = SimpleNamespace(id='control-user', name='Control', email='control@example.test', role='admin')
     app.dependency_overrides[get_verified_user] = lambda: user
     app.state.MODELS = {MODEL: {'id': MODEL, 'owned_by': 'openai'}}
-    app.state.OPENAI_MODELS = {MODEL: {'id': MODEL, 'urlIdx': 0}}
 
     async def config(key, default=None):
         if key.endswith('.enable'):
@@ -137,13 +134,10 @@ def harness(application, monkeypatch):
 
     monkeypatch.setattr(application.Config, 'get', config)
     monkeypatch.setattr(application.Models, 'get_model_by_id', AsyncMock(return_value=None))
-    for module in (application, ollama, openai):
+    for module in (application, ollama):
         monkeypatch.setattr(module, 'check_model_access', AsyncMock())
     monkeypatch.setattr(application, 'AGENT_API_ENABLED', False)
     monkeypatch.setattr(ollama, 'get_ollama_url', AsyncMock(return_value=('http://provider.invalid', 0)))
-    monkeypatch.setattr(openai, 'get_openai_connection', AsyncMock(return_value=('http://provider.invalid/v1', '', {})))
-    monkeypatch.setattr(openai, 'get_headers_and_cookies', AsyncMock(return_value=({}, {})))
-    monkeypatch.setattr(openai, 'cleanup_response', AsyncMock())
     seen = []
 
     async def capture(request, form_data, user):
@@ -171,10 +165,8 @@ def harness(application, monkeypatch):
         seen.append(json.loads(kwargs['data']))
         return SimpleNamespace(status=200, headers={}, json=AsyncMock(return_value=copy.deepcopy(REPLY)))
 
-    monkeypatch.setattr(tasks, 'process_pipeline_inlet_filter', pipeline)
     monkeypatch.setattr(tasks, 'generate_chat_completion', capture)
     monkeypatch.setattr(ollama, 'send_request', send_request)
-    monkeypatch.setattr(openai, 'get_session', AsyncMock(return_value=SimpleNamespace(request=provider_request)))
     monkeypatch.setattr(application, 'generate_embeddings', capture)
     monkeypatch.setattr(application, 'chat_completed_handler', capture)
     monkeypatch.setattr(application, 'chat_action_handler', action)

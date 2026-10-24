@@ -1,4 +1,4 @@
-"""v2 mode takes models, the default and task completions from soev-api; stock mode is unchanged."""
+"""v2 mode takes models, the default and task completions from soev-api; Ollama remains available outside v2."""
 
 import json
 from types import SimpleNamespace
@@ -46,7 +46,7 @@ GEMMA = {
     'replaced_by': 'glm-5-3',
     'default': False,
 }
-CONNECTION_MODEL = {'id': 'zai-org/GLM-5.3', 'name': 'zai-org/GLM-5.3', 'owned_by': 'openai', 'urlIdx': 0}
+CONNECTION_MODEL = {'id': 'zai-org/GLM-5.3', 'name': 'zai-org/GLM-5.3', 'owned_by': 'ollama'}
 
 
 @pytest.fixture
@@ -65,11 +65,9 @@ def stock(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def connections(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     fetch = AsyncMock(return_value=[CONNECTION_MODEL])
-    monkeypatch.setattr(models_utils, 'fetch_openai_models', fetch)
+    monkeypatch.setattr(models_utils, 'fetch_ollama_models', fetch)
     monkeypatch.setattr(models_utils, 'get_function_models', AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        models_utils.Config, 'get_many', AsyncMock(return_value={'openai.enable': True, 'ollama.enable': False})
-    )
+    monkeypatch.setattr(models_utils.Config, 'get_many', AsyncMock(return_value={'ollama.enable': True}))
     return fetch
 
 
@@ -168,7 +166,7 @@ async def test_unreadable_catalog_is_empty_and_not_cached(v2: FakeSoevApi) -> No
 
 
 @pytest.mark.asyncio
-async def test_stock_base_models_still_come_from_connections(stock, connections: AsyncMock) -> None:
+async def test_stock_base_models_can_still_come_from_ollama(stock, connections: AsyncMock) -> None:
     assert await models_utils.get_all_base_models(app_request()) == [CONNECTION_MODEL]
 
 
@@ -384,13 +382,3 @@ async def test_v2_task_refusal_is_an_http_error(v2: FakeSoevApi) -> None:
             task_request(model), json.loads(json.dumps(TASK_FORM)), SimpleNamespace(id='alice', role='admin')
         )
     assert getattr(raised.value, 'status_code', None) == 403
-
-
-@pytest.mark.asyncio
-async def test_stock_task_keeps_the_connection_route(stock, monkeypatch: pytest.MonkeyPatch) -> None:
-    openai = AsyncMock(return_value={'choices': []})
-    monkeypatch.setattr(chat_utils, 'generate_openai_chat_completion', openai)
-    request = task_request(CONNECTION_MODEL)
-    form = {**json.loads(json.dumps(TASK_FORM)), 'model': CONNECTION_MODEL['id']}
-    await chat_utils.generate_chat_completion(request, form, SimpleNamespace(id='alice', role='admin'))
-    openai.assert_awaited_once()

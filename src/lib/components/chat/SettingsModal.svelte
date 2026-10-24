@@ -28,7 +28,6 @@
 	import ArchivedChats from './Settings/ArchivedChats.svelte';
 	import Personalization from './Settings/Personalization.svelte';
 	import Search from '../icons/Search.svelte';
-	import Connections from './Settings/Connections.svelte';
 	import Integrations from './Settings/Integrations.svelte';
 	import DatabaseSettings from '../icons/DatabaseSettings.svelte';
 	import SettingsAlt from '../icons/SettingsAlt.svelte';
@@ -46,7 +45,6 @@
 	import UsageIcon from '../icons/UsageIcon.svelte';
 	import AdminTabIcon from '$lib/components/admin/Settings/AdminTabIcon.svelte';
 	import AdminGeneral from '$lib/components/admin/Settings/General.svelte';
-	import AdminConnections from '$lib/components/admin/Settings/Connections.svelte';
 	import AdminModels from '$lib/components/admin/Settings/Models.svelte';
 	import AdminSystemPrompt from '$lib/components/admin/Settings/SystemPrompt.svelte';
 	import AdminEvaluations from '$lib/components/admin/Settings/Evaluations.svelte';
@@ -58,7 +56,6 @@
 	import AdminInterface from '$lib/components/admin/Settings/Interface.svelte';
 	import AdminAudio from '$lib/components/admin/Settings/Audio.svelte';
 	import AdminImages from '$lib/components/admin/Settings/Images.svelte';
-	import AdminPipelines from '$lib/components/admin/Settings/Pipelines.svelte';
 	import AdminDatabase from '$lib/components/admin/Settings/Database.svelte';
 
 	// [Gradient] Fork admin tab migrated from the route host.
@@ -178,7 +175,6 @@
 		'admin:acceptance': 'System',
 		'admin:security': 'System',
 		'admin:email': 'System',
-		'admin:connections': 'AI',
 		'admin:models': 'AI',
 		'admin:system-prompt': 'AI',
 		'admin:external-agents': 'AI',
@@ -191,7 +187,6 @@
 		'admin:documents': 'Tools',
 		'admin:web': 'Tools',
 		'admin:code-execution': 'Tools',
-		'admin:pipelines': 'Tools',
 		'admin:db': 'Data'
 	};
 	const settingGroupTitle = (tabId: string) =>
@@ -400,19 +395,6 @@
 				'shortcut',
 				'shortcuts',
 				'show shortcuts'
-			]
-		},
-		{
-			id: 'connections',
-			title: 'Connections',
-			keywords: [
-				'addconnection',
-				'add connection',
-				'manageconnections',
-				'manage connections',
-				'manage direct connections',
-				'managedirectconnections',
-				'settings'
 			]
 		},
 		{
@@ -737,19 +719,6 @@
 			keywords: ['email', 'invite', 'smtp', 'notifications', 'mail']
 		},
 		{
-			id: 'admin:connections',
-			title: 'Connections',
-			keywords: [
-				'connections',
-				'ollama',
-				'openai',
-				'api',
-				'base url',
-				'direct connections',
-				'proxy'
-			]
-		},
-		{
 			id: 'admin:models',
 			title: 'Models',
 			keywords: [
@@ -820,11 +789,6 @@
 			keywords: ['code execution', 'python', 'sandbox', 'compiler', 'jupyter', 'interpreter']
 		},
 		{
-			id: 'admin:pipelines',
-			title: 'Pipelines',
-			keywords: ['pipelines', 'workflows', 'filters', 'valves', 'middleware']
-		},
-		{
 			id: 'admin:db',
 			title: 'Database',
 			keywords: ['database', 'export', 'import', 'backup', 'chats', 'users']
@@ -840,10 +804,6 @@
 
 	const getAvailableSettings = () => {
 		const personalSettings = allSettings.filter((tab) => {
-			if (tab.id === 'connections') {
-				return $config?.features?.enable_direct_connections;
-			}
-
 			if (tab.id === 'tools') {
 				return (
 					(isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) &&
@@ -925,10 +885,7 @@
 	};
 
 	const getModels = async () => {
-		return await _getModels(
-			localStorage.token,
-			$config?.features?.enable_direct_connections ? ($settings?.directConnections ?? null) : null
-		);
+		return await _getModels(localStorage.token, null);
 	};
 
 	const adminConfigSaveHandler = async () => {
@@ -1098,22 +1055,7 @@
 							<Keyboard className="size-3.5" strokeWidth="2" />
 							<span>{$i18n.t('Keyboard')}</span>
 						</button>
-					{:else if tabId === 'connections'}
-						{#if $user?.role === 'admin' || ($user?.role === 'user' && $config?.features?.enable_direct_connections)}
-							<button
-								role="tab"
-								aria-controls="tab-connections"
-								aria-selected={selectedTab === 'connections'}
-								class={tabButtonClass(selectedTab === 'connections')}
-								on:click={() => {
-									selectedTab = 'connections';
-								}}
-							>
-								<Link className="size-3.5" strokeWidth="2" />
-								<span>{$i18n.t('Connections')}</span>
-							</button>
-						{/if}
-					{:else if tabId === 'tools'}
+					{:else if tabId === 'connections'}{:else if tabId === 'tools'}
 						<!-- [Gradient] Both integration types follow their tenant gates. -->
 						{#if (isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) && ($user?.role === 'admin' || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers))}
 							<button
@@ -1287,13 +1229,6 @@
 				<Notifications {saveSettings} />
 			{:else if selectedTab === 'shortcuts'}
 				<Shortcuts {saveSettings} />
-			{:else if selectedTab === 'connections'}
-				<Connections
-					saveSettings={async (updated: Record<string, unknown>) => {
-						await saveSettings(updated);
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
 			{:else if selectedTab === 'tools'}
 				<Integrations
 					saveSettings={async (updated: Record<string, unknown>) => {
@@ -1364,12 +1299,6 @@
 				/>
 			{:else if selectedTab === 'admin:general'}
 				<AdminGeneral saveHandler={adminConfigSaveHandler} />
-			{:else if selectedTab === 'admin:connections'}
-				<AdminConnections
-					on:save={() => {
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
 			{:else if selectedTab === 'admin:models'}
 				<AdminModels bind:tabState />
 			{:else if selectedTab === 'admin:system-prompt'}
@@ -1410,12 +1339,6 @@
 				/>
 			{:else if selectedTab === 'admin:db'}
 				<AdminDatabase
-					saveHandler={() => {
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
-			{:else if selectedTab === 'admin:pipelines'}
-				<AdminPipelines
 					saveHandler={() => {
 						toast.success($i18n.t('Settings saved successfully!'));
 					}}

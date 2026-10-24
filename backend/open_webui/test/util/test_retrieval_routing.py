@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from fastapi import HTTPException
-from langchain_core.documents import Document
+from open_webui import config as soev_config
 from open_webui.models.files import FileModel
 from open_webui.routers import retrieval as retrieval_router
 from open_webui.routers.retrieval import BatchProcessFilesForm, ProcessFileForm
@@ -36,7 +36,7 @@ def _setup(monkeypatch, *, api_url='https://soev.invalid', bypass=False):
         monkeypatch.setattr(retrieval_router.Files, method, AsyncMock())
     monkeypatch.setattr(retrieval_router, '_validate_collection_access', AsyncMock())
     monkeypatch.setattr(retrieval_router, 'publish_event', AsyncMock())
-    monkeypatch.setattr(retrieval_router.soev_config, 'SOEV_API_URL', api_url)
+    monkeypatch.setattr(soev_config, 'SOEV_API_URL', api_url)
     submit = AsyncMock(return_value='job-1')
     ensure = AsyncMock(return_value='owui-attachments-user-1')
     client = MagicMock()
@@ -44,13 +44,6 @@ def _setup(monkeypatch, *, api_url='https://soev.invalid', bypass=False):
     monkeypatch.setattr(retrieval_router.ingest, 'ensure_attachments_collection', ensure)
     monkeypatch.setattr(retrieval_router.identity, 'build_client', MagicMock(return_value=client))
 
-    loader = MagicMock()
-    loader.aload = AsyncMock(return_value=[Document(page_content='hello world', metadata={})])
-    monkeypatch.setattr(retrieval_router, 'build_loader_from_config', MagicMock(return_value=loader))
-    monkeypatch.setattr(retrieval_router, 'get_loader_config', AsyncMock(return_value={}))
-    monkeypatch.setattr(retrieval_router.Storage, 'get_file', lambda path: '/tmp/x')  # nosec B108
-    save = MagicMock(return_value=True)
-    monkeypatch.setattr(retrieval_router, 'save_docs_to_vector_db', save)
     session = MagicMock()
 
     @asynccontextmanager
@@ -74,8 +67,6 @@ def _setup(monkeypatch, *, api_url='https://soev.invalid', bypass=False):
         submit=submit,
         ensure=ensure,
         client=client,
-        loader=loader,
-        save=save,
         vector=vector_client,
     )
 
@@ -87,14 +78,6 @@ async def _invoke(env, *, collection_name=None, content=None):
         user=env.user,
         db=env.db,
     )
-
-
-def _assert_native_untouched(env):
-    retrieval_router.build_loader_from_config.assert_not_called()
-    env.loader.aload.assert_not_awaited()
-    env.save.assert_not_called()
-    assert not env.vector.mock_calls
-    retrieval_router.Files.update_file_data_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -111,7 +94,6 @@ async def test_a_kb_file_submits_into_the_knowledge_base(monkeypatch):
     retrieval_router._validate_collection_access.assert_awaited_once_with(['kb-1'], env.user, access_type='write')
     env.submit.assert_awaited_once_with(env.file, collection_key='kb-1', user_id=env.user.id, text=None)
     env.ensure.assert_not_awaited()
-    _assert_native_untouched(env)
 
 
 @pytest.mark.asyncio
@@ -124,7 +106,6 @@ async def test_a_chat_file_submits_into_the_users_attachments_collection(monkeyp
     env.submit.assert_awaited_once_with(
         env.file, collection_key='owui-attachments-user-1', user_id=env.user.id, text=None
     )
-    _assert_native_untouched(env)
 
 
 @pytest.mark.asyncio
@@ -140,36 +121,6 @@ async def test_inline_content_uses_the_inline_arm(monkeypatch, content, collecti
         user_id=env.user.id,
         text=content,
     )
-    _assert_native_untouched(env)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('bypass', [False, True])
-async def test_without_soev_api_the_upstream_body_runs(monkeypatch, bypass):
-    env = _setup(monkeypatch, api_url='', bypass=bypass)
-    result = await _invoke(env)
-    assert result['status'] is True
-    assert result['content'] == 'hello world'
-    env.submit.assert_not_awaited()
-    env.ensure.assert_not_awaited()
-    env.loader.aload.assert_awaited_once()
-    retrieval_router.Files.update_file_data_by_id.assert_awaited_once_with(
-        env.file.id, {'content': 'hello world'}, db=env.db
-    )
-    if bypass:
-        assert result['collection_name'] is None
-        env.save.assert_not_called()
-    else:
-        env.save.assert_called_once()
-    env.save.reset_mock()
-    result = await retrieval_router.process_files_batch(
-        env.request, BatchProcessFilesForm(files=[env.file], collection_name='kb-1'), user=env.user, db=env.db
-    )
-    assert [(item.file_id, item.status) for item in result.results] == [('file-1', 'completed')]
-    assert not result.errors
-    env.save.assert_called_once()
-    retrieval_router.Files.update_file_by_id.assert_awaited_once()
-    env.submit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -191,7 +142,6 @@ async def test_a_refused_submit_marks_the_file_failed_with_the_code(monkeypatch)
         subject_type='file',
         data={'collection_name': 'kb-1', 'filename': env.file.filename, 'message': f'{env.file.filename}: {detail}'},
     )
-    _assert_native_untouched(env)
 
 
 @pytest.mark.asyncio
@@ -205,7 +155,6 @@ async def test_a_busy_file_is_409(monkeypatch):
     retrieval_router.Files.set_status.assert_not_awaited()
     retrieval_router.Files.update_file_hash_by_id.assert_not_awaited()
     retrieval_router.publish_event.assert_not_awaited()
-    _assert_native_untouched(env)
 
 
 @pytest.mark.asyncio
@@ -241,4 +190,3 @@ async def test_process_files_batch_submits_each_file_as_processing(monkeypatch, 
         assert not result.errors
     env.ensure.assert_not_awaited()
     retrieval_router.Files.update_file_by_id.assert_not_awaited()
-    _assert_native_untouched(env)

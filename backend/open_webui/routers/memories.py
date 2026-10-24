@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -13,6 +15,7 @@ from open_webui.models.config import Config
 from open_webui.models.memories import Memories, MemoryModel
 from open_webui.models.users import Users
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
+from open_webui.soev import model_catalog, primitives
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.memory import (
@@ -125,11 +128,18 @@ def _memory_metadata(memory: MemoryModel) -> dict:
     }
 
 
+async def memory_embedding(request: Request, text: str, *, prefix: str, user) -> list[float]:
+    if model_catalog.is_v2():
+        return await primitives.embed_memory(text, user)
+    return await request.app.state.EMBEDDING_FUNCTION(text, prefix=prefix, user=user)
+
+
 async def reindex_memory_vectors_for_user(
     request: Request,
     user_id: str,
     memories: list[MemoryModel] | None = None,
     user=None,
+    embedding_function: Callable[..., Awaitable[list[float]]] | None = None,
 ) -> int:
     collection_name = f'user-memory-{user_id}'
     try:
@@ -142,9 +152,10 @@ async def reindex_memory_vectors_for_user(
     if not memories:
         return 0
 
+    embed = embedding_function or partial(memory_embedding, request)
     vectors = await asyncio.gather(
         *[
-            request.app.state.EMBEDDING_FUNCTION(
+            embed(
                 memory_vector_text(memory.content, memory.path),
                 prefix=RAG_EMBEDDING_CONTENT_PREFIX,
                 user=user,
@@ -204,8 +215,8 @@ async def add_memory(
         meta={'created_by': 'manual'},
     )
 
-    vector = await request.app.state.EMBEDDING_FUNCTION(
-        memory_vector_text(memory.content, memory.path), prefix=RAG_EMBEDDING_CONTENT_PREFIX, user=user
+    vector = await memory_embedding(
+        request, memory_vector_text(memory.content, memory.path), prefix=RAG_EMBEDDING_CONTENT_PREFIX, user=user
     )
 
     await upsert_memory_vectors_or_reindex(
@@ -265,7 +276,8 @@ async def update_memories(
         if isinstance(memory, MemoryModel):
             result = {**result, 'memory': memory.model_dump()}
             if result.get('status') in {'created', 'updated'}:
-                vector = await request.app.state.EMBEDDING_FUNCTION(
+                vector = await memory_embedding(
+                    request,
                     memory_vector_text(memory.content, memory.path),
                     prefix=RAG_EMBEDDING_CONTENT_PREFIX,
                     user=user,
@@ -344,7 +356,7 @@ async def query_memory(
     if not memories:
         raise HTTPException(status_code=404, detail='No memories found for user')
 
-    vector = await request.app.state.EMBEDDING_FUNCTION(form_data.content, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user)
+    vector = await memory_embedding(request, form_data.content, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user)
 
     results = await ASYNC_VECTOR_DB_CLIENT.search(
         collection_name=f'user-memory-{user.id}',
@@ -465,7 +477,7 @@ async def reindex_memories_from_vector_db(
             request,
             memory_user.id,
             memories=memories_by_user_id.get(memory_user.id, []),
-            user=memory_user,
+            user=user if model_catalog.is_v2() else memory_user,
         )
 
     await publish_event(
@@ -574,8 +586,8 @@ async def update_memory_by_id(
         raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
 
     if form_data.content is not None or form_data.path is not None:
-        vector = await request.app.state.EMBEDDING_FUNCTION(
-            memory_vector_text(memory.content, memory.path), prefix=RAG_EMBEDDING_CONTENT_PREFIX, user=user
+        vector = await memory_embedding(
+            request, memory_vector_text(memory.content, memory.path), prefix=RAG_EMBEDDING_CONTENT_PREFIX, user=user
         )
 
         await upsert_memory_vectors_or_reindex(

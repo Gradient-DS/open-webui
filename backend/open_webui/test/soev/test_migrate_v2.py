@@ -961,33 +961,6 @@ async def test_memories_are_reembedded_once_per_row_and_reruns_embed_nothing(env
     assert len(env.embedded) == 2
 
 
-@pytest.mark.asyncio
-async def test_the_embedding_function_is_built_from_the_rag_config_rows(monkeypatch, fake_vector_modules):
-    """The Job builds what main.py puts on app.state, from the same persistent keys."""
-    memories = importlib.import_module('open_webui.soev.migrate_memories')
-    rag = {
-        'rag.embedding_engine': 'openai',
-        'rag.embedding_model': 'bge-m3',
-        'rag.openai.api_base_url': 'https://litellm.invalid/v1',
-        'rag.openai.api_key': 'sk-embed',
-        'rag.embedding_batch_size': 8,
-    }
-    monkeypatch.setattr(
-        importlib.import_module('open_webui.models.config').Config, 'get_many', AsyncMock(return_value=rag)
-    )
-    built = {}
-    monkeypatch.setattr(
-        importlib.import_module('open_webui.retrieval.utils'),
-        'get_embedding_function',
-        lambda *args, **kwargs: built.update(args=args, kwargs=kwargs) or 'function',
-    )
-    monkeypatch.setattr(importlib.import_module('open_webui.routers.retrieval'), 'get_ef', lambda engine, model: None)
-    assert await memories.build_embedding_function() == 'function'
-    assert built['args'] == ('openai', 'bge-m3')
-    assert (built['kwargs']['url'], built['kwargs']['key']) == ('https://litellm.invalid/v1', 'sk-embed')
-    assert built['kwargs']['embedding_batch_size'] == 8
-
-
 async def finish_jobs(env, monkeypatch, status='SUCCEEDED'):
     for job_id in list(env.api.jobs):
         if env.api.jobs[job_id]['status'] not in {'SUCCEEDED', 'COMPLETED_WITH_ERRORS'}:

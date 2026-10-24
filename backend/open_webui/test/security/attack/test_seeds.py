@@ -842,42 +842,18 @@ def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
     asyncio.run(exercise())
 
 
-def test_model_seed_registers_the_upstream_selector_on_each_pass(monkeypatch):
-    monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'waive')
-    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.values['openai_index'] = '0'
-    ctx.request = Mock(
-        side_effect=[
-            {'data': [{'id': 'stub-model'}]},
-            {'id': 'stub-model', 'access_grants': [PUBLIC_MODEL_READ]},
-        ]
-        * 2
-    )
-    for _ in range(2):
-        assert seeds.seed_model(ctx, {'key': 'model'}) == 'stub-model'
-        assert ctx.values['upstream_model'] == 'stub-model'
-    for discovery, registration in zip(ctx.request.call_args_list[::2], ctx.request.call_args_list[1::2]):
-        assert discovery.args == ('GET', '/openai/models/0')
-        assert registration.args == ('POST', '/api/v1/models/model/access/update')
-        assert registration.kwargs['actor'] is ctx.admin
-        assert registration.kwargs['json'] == {'id': 'stub-model', 'access_grants': [PUBLIC_MODEL_READ]}
-
-
 def test_drive_model_seed_registers_the_soev_catalog_default(monkeypatch):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.values['openai_index'] = '0'
     ctx.request = Mock(
         side_effect=[
-            {'data': [{'id': 'stub-model'}]},
             {'default_models': 'ci/chat'},
             {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ], 'is_active': True},
         ]
     )
     assert seeds.seed_model(ctx, {'key': 'model'}) == 'ci/chat'
-    assert ctx.values['upstream_model'] == 'stub-model'
-    discovery, config, registration = ctx.request.call_args_list
-    assert discovery.args == ('GET', '/openai/models/0')
+    assert ctx.values['upstream_model'] == 'ci/chat'
+    config, registration = ctx.request.call_args_list
     assert config.args == ('GET', '/api/config')
     assert config.kwargs == {'actor': ctx.admin}
     assert registration.kwargs['json'] == {'id': 'ci/chat', 'access_grants': [PUBLIC_MODEL_READ]}
@@ -887,8 +863,7 @@ def test_drive_model_seed_registers_the_soev_catalog_default(monkeypatch):
 def test_drive_model_seed_needs_exactly_one_catalog_default(monkeypatch, default):
     monkeypatch.setenv('RUNTIME_SOEV_BACKED', 'drive')
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
-    ctx.values['openai_index'] = '0'
-    ctx.request = Mock(side_effect=[{'data': [{'id': 'stub-model'}]}, {'default_models': default}])
+    ctx.request = Mock(return_value={'default_models': default})
     with pytest.raises(RuntimeError, match='expected one soev catalog default model'):
         seeds.seed_model(ctx, {'key': 'model'})
 
@@ -936,7 +911,6 @@ def test_connection_proxy_fields_use_the_upstream_model():
     # These routes resolve the model against a connection's own list, not the registry.
     direct = {
         'POST /api/models/unload',
-        'POST /openai/chat/completions',
         'POST /ollama/api/chat/{url_idx}',
         'POST /ollama/v1/chat/completions/{url_idx}',
         'POST /ollama/v1/messages/{url_idx}',

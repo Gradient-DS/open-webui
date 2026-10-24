@@ -198,9 +198,6 @@ Shared services URLs
 {{- printf "http://%s.%s.svc:%d" .Values.sharedServices.gateway.host .Values.sharedServices.namespace (int .Values.sharedServices.gateway.port) }}
 {{- end }}
 
-{{- define "open-webui-tenant.sharedServices.rerankerUrl" -}}
-{{- printf "http://%s.%s.svc:%d" .Values.sharedServices.reranker.host .Values.sharedServices.namespace (int .Values.sharedServices.reranker.port) }}
-{{- end }}
 
 {{- define "open-webui-tenant.sharedServices.searxngUrl" -}}
 {{- printf "http://%s.%s.svc:%d" .Values.sharedServices.searxng.host .Values.sharedServices.namespace (int .Values.sharedServices.searxng.port) }}
@@ -224,21 +221,13 @@ v2-migrate Job so it runs with exactly the app's credentials.
       key: postgres-password
 - name: DATABASE_URL
   value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-tenant.postgres.host" . }}:{{ include "open-webui-tenant.postgres.port" . }}/{{ .Values.postgres.database }}"
-- name: OPENAI_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: openai-api-key
+{{- if or .Values.secrets.imagesOpenaiApiKey .Values.externalSecrets.onepassword.fields.imagesOpenaiApiKey }}
 - name: IMAGES_OPENAI_API_KEY
   valueFrom:
     secretKeyRef:
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: openai-api-key
-- name: RAG_OPENAI_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: rag-openai-api-key
+      key: images-openai-api-key
+{{- end }}
 # Google OAuth (only if configured)
 {{- if or .Values.secrets.googleClientSecret .Values.externalSecrets.onepassword.fields.googleClientSecret }}
 - name: GOOGLE_CLIENT_SECRET
@@ -301,13 +290,6 @@ v2-migrate Job so it runs with exactly the app's credentials.
     secretKeyRef:
       name: {{ include "open-webui-tenant.fullname" . }}-secrets
       key: external-document-loader-api-key
-{{- end }}
-{{- if or .Values.secrets.ragExternalRerankerApiKey .Values.externalSecrets.onepassword.fields.ragExternalRerankerApiKey }}
-- name: RAG_EXTERNAL_RERANKER_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "open-webui-tenant.fullname" . }}-secrets
-      key: rag-external-reranker-api-key
 {{- end }}
 {{- if .Values.soevApi.url }}
 - name: SOEV_API_KEY

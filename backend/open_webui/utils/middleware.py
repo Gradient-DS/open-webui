@@ -1,9 +1,7 @@
 import ast
 import asyncio
-import base64
 import copy
 import html
-import inspect
 import json
 import logging
 import mimetypes
@@ -13,15 +11,12 @@ import re
 import sys
 import textwrap
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 from uuid import uuid4
 
-from aiocache import cached
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 from open_webui.config import (
-    CACHE_DIR,
     CODE_INTERPRETER_BLOCKED_MODULES,
     CODE_INTERPRETER_PYODIDE_PROMPT,
     DEFAULT_CODE_INTERPRETER_PROMPT,
@@ -30,14 +25,12 @@ from open_webui.config import (
 )
 from open_webui.constants import TASKS
 from open_webui.env import (
-    BYPASS_MODEL_ACCESS_CONTROL,
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
     CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
     ENABLE_API_OUTLET_FILTERS,
     ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION,
     ENABLE_PLUGINS,
     ENABLE_QUERIES_CACHE,
-    ENABLE_REALTIME_CHAT_SAVE,
     ENABLE_RESPONSES_API_STATEFUL,
     GLOBAL_LOG_LEVEL,
     RAG_SYSTEM_CONTEXT,
@@ -47,10 +40,8 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
 from open_webui.models.folders import Folders
-from open_webui.models.models import Models
 from open_webui.models.notes import Notes
-from open_webui.models.oauth_sessions import OAuthSessions
-from open_webui.models.users import UserModel, Users
+from open_webui.models.users import UserModel
 from open_webui.soev.availability import SoevNotConfigured
 from open_webui.retrieval.utils import get_sources_from_items
 from open_webui.routers.images import (
@@ -58,11 +49,6 @@ from open_webui.routers.images import (
     EditImageForm,
     image_edits,
     image_generations,
-)
-from open_webui.routers.pipelines import (
-    get_sorted_filters,
-    process_pipeline_inlet_filter,
-    process_pipeline_outlet_filter,
 )
 from open_webui.routers.retrieval import (
     SearchForm,
@@ -108,7 +94,6 @@ from open_webui.utils.misc import (
     add_or_update_system_message,
     add_or_update_user_message,
     convert_output_to_messages,
-    extract_urls,
     get_content_from_message,
     get_last_assistant_message,
     get_last_user_message,
@@ -120,13 +105,11 @@ from open_webui.utils.misc import (
     get_system_message,
     is_string_allowed,
     merge_system_messages,
-    prepend_to_first_user_message_content,
     replace_system_message_content,
     set_last_user_message_content,
     strip_empty_content_blocks,
 )
 from open_webui.utils.payload import apply_params_to_form_data, apply_system_prompt_to_body, resolve_system_prompt
-from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.response import merge_usage, normalize_usage
 from open_webui.utils.sanitize import sanitize_code
 from open_webui.utils.task import (
@@ -134,6 +117,7 @@ from open_webui.utils.task import (
     rag_template,
     tools_function_calling_generation_template,
 )
+from open_webui.utils.webhook import post_webhook
 from open_webui.utils.tools import (
     build_tool_server_headers,
     get_attached_knowledge,
@@ -142,7 +126,6 @@ from open_webui.utils.tools import (
     get_tools,
     get_updated_tool_function,
 )
-from open_webui.utils.webhook import post_webhook
 
 # [Gradient] Fork-only imports (upstream equivalents already imported above).
 from open_webui.utils.agent_routing import agent_owns_tool_execution
@@ -154,7 +137,7 @@ from open_webui.config import (
     FEATURE_SKILL_FILES,
 )
 from open_webui.env import AGENT_API_ENABLED  # Agent API bypass flag
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from open_webui.utils.access_control import can_bypass_access_control
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -2744,13 +2727,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # [Gradient] An agent owns its conversation history, so Open WebUI never compacts a chat routed to one: the
     # summary would land in the chat's system prompt, which the agent receives as the user's instructions.
     if is_saved_chat_id(chat_id) and user_message_id and not route_to_agent:
-        if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-            compaction_models = {
-                **dict(request.app.state.MODELS.items()),
-                request.state.model['id']: request.state.model,
-            }
-        else:
-            compaction_models = request.app.state.MODELS
+        compaction_models = request.app.state.MODELS
 
         system_message = get_system_message(form_data.get('messages', []))
         system_prompt = get_content_from_message(system_message) if system_message else ''
@@ -2815,12 +2792,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     }
     # Initialize events to store additional event to be sent to the client
     # Initialize contexts and citation
-    if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
-        models = {
-            request.state.model['id']: request.state.model,
-        }
-    else:
-        models = request.app.state.MODELS
+    models = request.app.state.MODELS
 
     task_model_id = get_task_model_id(
         form_data['model'],
@@ -2928,12 +2900,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     variables = form_data.pop('variables', None)
     payload_tools = form_data.get('tools', None)  # snapshot before filters
-
-    # Process the form_data through the pipeline
-    try:
-        form_data = await process_pipeline_inlet_filter(request, form_data, user, models)
-    except Exception as e:
-        raise e
 
     filter_functions = []
     filter_context = get_filter_context(request) if ENABLE_PLUGINS else None
@@ -4310,12 +4276,7 @@ async def outlet_filter_handler(ctx):
         filter_functions = (
             await get_filter_functions(request, model, metadata.get('filter_ids', [])) if ENABLE_PLUGINS else []
         )
-        model_id = model.get('id') if isinstance(model, dict) else model
-        models = request.app.state.MODELS
-        has_pipeline_outlet_filters = bool(
-            (isinstance(model, dict) and 'pipeline' in model) or get_sorted_filters(model_id, models)
-        )
-        if not filter_functions and not has_pipeline_outlet_filters:
+        if not filter_functions:
             return
 
         messages_map = None
@@ -4353,7 +4314,7 @@ async def outlet_filter_handler(ctx):
                 return
 
         outlet_data = {
-            'model': model_id,
+            'model': model.get('id') if isinstance(model, dict) else model,
             'messages': [
                 {
                     'id': m.get('id'),
@@ -4373,12 +4334,6 @@ async def outlet_filter_handler(ctx):
             'session_id': metadata.get('session_id'),
             'id': message_id,
         }
-
-        # Pipeline outlet filters
-        try:
-            outlet_data = await process_pipeline_outlet_filter(request, outlet_data, user, models)
-        except Exception as e:
-            log.debug('Pipeline outlet filter error: %s', e)
 
         # Function outlet filters
         extra_params = {
@@ -5260,7 +5215,7 @@ async def streaming_chat_response_handler(response, ctx):
                                 )
 
                             if data:
-                                if 'event' in data and not getattr(request.state, 'direct', False):
+                                if 'event' in data:
                                     await event_emitter(data.get('event', {}))
 
                                 if 'selected_model_id' in data:
@@ -6752,15 +6707,6 @@ async def streaming_chat_response_handler(response, ctx):
             assistant_message = {}
             filter_context = FilterContext()
             has_api_outlet_filters = ENABLE_API_OUTLET_FILTERS and bool(filter_functions)
-            if ENABLE_API_OUTLET_FILTERS and not has_api_outlet_filters:
-                try:
-                    model_id = model.get('id') if isinstance(model, dict) else model
-                    has_api_outlet_filters = bool(
-                        (isinstance(model, dict) and 'pipeline' in model)
-                        or get_sorted_filters(model_id, request.app.state.MODELS)
-                    )
-                except Exception:
-                    has_api_outlet_filters = True
 
             for event in events:
                 event, _ = await process_filter_functions(

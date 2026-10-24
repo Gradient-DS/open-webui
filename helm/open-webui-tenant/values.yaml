@@ -26,9 +26,6 @@ sharedServices:
   gateway:
     host: gradient-gateway
     port: 8000
-  reranker:
-    host: reranker
-    port: 8000
 
 # -----------------------------------------------------------------------------
 # Observability Configuration
@@ -153,7 +150,7 @@ openWebui:
     # on-start "true" wiped the config table on every rollout, which deletes
     # admin-only resources like integration providers — they have no env-var
     # equivalent to fall back on. Trade-off: env-var changes for admin-visible
-    # settings (openaiApiBaseUrl, embedding model, etc.) become DB-shadowed
+    # settings become DB-shadowed
     # after first boot. To roll such a change via Helm, set
     # resetConfigOnStart: "true" for one reconcile cycle, then flip back —
     # see tenants/CLAUDE.md "Open WebUI persistent_config pitfall".
@@ -187,7 +184,6 @@ openWebui:
 
     # LLM Providers
     enableOllamaApi: "false"
-    openaiApiBaseUrl: "https://router.huggingface.co/v1"
     # Forward user identity headers to upstream LLM API (required for LiteLLM per-user tracking)
     enableForwardUserInfoHeaders: "false"
     forwardUserInfoHeaderUserId: "X-OpenWebUI-User-Id"  # Header name for user UUID forwarding
@@ -215,10 +211,7 @@ openWebui:
     databasePort: "5432"
     databaseName: "openwebui"
 
-    # RAG Embeddings
-    ragEmbeddingEngine: "openai"
-    ragEmbeddingModel: "text-embedding-3-small"
-    ragEmbeddingBatchSize: "100"
+    # Upload and retrieval limits
     ragTopK: "15"
     ragTopKReranker: "10"
     ragRelevanceThreshold: "0.0"
@@ -245,9 +238,7 @@ openWebui:
 
     # Content Extraction & Reranking (via shared services)
     contentExtractionEngine: "external"
-    ragRerankingEngine: "external"
     # externalDocumentLoaderApiKey is set via secrets
-    # ragExternalRerankerApiKey is set via secrets
     # URLs are templated to use shared service names by default; set
     # externalDocumentLoaderUrl explicitly to bypass the helper (e.g. when
     # a tenant uses one shared-services namespace for LiteLLM/reranker and
@@ -731,7 +722,7 @@ webuiUrl: ""  # Public URL used for callbacks, e.g. https://client.soev.ai.
 # postgres.user/database; a mismatch fails rendering instead of overriding values.
 # CNPG must declare the vector extension; its owner role cannot create it.
 pgvector:
-  maxVectorLength: 1024  # bge-m3 dimensions; match ragEmbeddingModel.
+  maxVectorLength: 1024  # bge-m3 dimensions; match the platform memory embedding dimensions.
   createExtension: false
 
 # Appended to the open-webui container env. Supports value and valueFrom.
@@ -856,8 +847,8 @@ redis:
 # -----------------------------------------------------------------------------
 # Runs in the tenant namespace. Receives jobs from open-webui (same ns,
 # NetworkPolicy-gated, no bearer), downloads cloud bytes, calls
-# shared-services gradient-doc-processor for parse+chunk, embeds via LiteLLM
-# using the tenant's existing openaiApiKey, and pushes embedded chunks back
+# shared-services gradient-doc-processor for parse+chunk.
+# Legacy ingestion worker; no model-provider credentials are supplied. It pushes results back
 # to /api/v1/integrations/ingest with LOADER_INGEST_API_KEY + acting headers.
 #
 # Image source: soev-solutions/api/gateway/loader_worker (built via build-services CI).
@@ -882,10 +873,6 @@ loaderWorker:
         namespace: shared-services
         podLabels: {app.kubernetes.io/name: gradient-gateway, app.kubernetes.io/component: doc-processor}
         ports: [8001]
-      - name: litellm
-        namespace: shared-services
-        podLabels: {app.kubernetes.io/name: litellm, app.kubernetes.io/component: litellm}
-        ports: [4000]
 
   resources:
     requests:
@@ -906,7 +893,6 @@ loaderWorker:
     port: 8002
     logLevel: "INFO"
     docProcessorUrl: "http://gradient-doc-processor.shared-services.svc:8001"
-    litellmBaseUrl: "http://litellm-proxy.shared-services.svc:4000/v1"
     maxConcurrentJobsPerReplica: 4
     perJobItemConcurrency: 5
     # Max concurrent OWUI file-status polls per job in warren mode; decoupled from
@@ -1005,10 +991,9 @@ ingress:
 # -----------------------------------------------------------------------------
 # These values should be overridden in a separate values file or via --set
 secrets:
+  imagesOpenaiApiKey: ""
   # Open WebUI secrets
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
-  openaiApiKey: ""
-  ragOpenaiApiKey: ""
   # Required when soevApi.url is set and externalSecrets.enabled is false.
   soevApiKey: ""
   soevApiSigningKey: ""  # Literal multi-line Ed25519 PEM; use a YAML | block.
@@ -1035,7 +1020,6 @@ secrets:
 
   # External Services API Keys (optional)
   externalDocumentLoaderApiKey: ""
-  ragExternalRerankerApiKey: ""
 
   # Loader-worker → tenant /ingest callback bearer (loader-worker presents this
   # outbound; open-webui validates inbound). Same value, both pods.
@@ -1094,6 +1078,7 @@ externalSecrets:
     # soevApiKey and soevApiSigningKey are always fetched when soevApi.url is set.
     # Toggle optional fields (set to true if the 1P item contains these)
     fields:
+      imagesOpenaiApiKey: false
       s3AccessKeyId: false
       emailGraphClientSecret: false
       feedbackReportSlackWebhookUrl: false
@@ -1103,7 +1088,6 @@ externalSecrets:
       confluenceOauthClientSecret: false
       confluenceBasicAuthApiToken: false
       externalDocumentLoaderApiKey: false
-      ragExternalRerankerApiKey: false
       loaderIngestApiKey: false
       pipelineApiKey: false
       loaderWorkerDbPassword: false
