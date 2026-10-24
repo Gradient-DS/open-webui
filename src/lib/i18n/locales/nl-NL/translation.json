@@ -4183,6 +4183,8 @@
   "{{count}} selected_one": "{{count}} geselecteerd",
   "{{count}} selected_other": "{{count}} geselecteerd",
   "{{count}} sources": "{{count}} bronnen",
+  "{{count}} steps_one": "{{count}} stap",
+  "{{count}} steps_other": "{{count}} stappen",
   "{{count}} suspended": "{{count}} opgeschort",
   "{{count}} suspended_one": "{{count}} opgeschort",
   "{{count}} suspended_other": "{{count}} opgeschort",

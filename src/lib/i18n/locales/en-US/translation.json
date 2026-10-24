@@ -4183,6 +4183,8 @@
   "{{count}} selected_one": "",
   "{{count}} selected_other": "",
   "{{count}} sources": "",
+  "{{count}} steps_one": "{{count}} step",
+  "{{count}} steps_other": "{{count}} steps",
   "{{count}} suspended": "",
   "{{count}} suspended_one": "{{count}} suspended",
   "{{count}} suspended_other": "{{count}} suspended",
