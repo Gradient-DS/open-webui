@@ -72,10 +72,7 @@ def workspace(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('admin', [False, True])
-async def test_download_relays_bytes_and_headers_as_chat_owner(workspace, admin):
-    if admin:
-        workspace.user.id, workspace.user.role = 'admin', 'admin'
+async def test_download_relays_bytes_and_headers_as_chat_owner(workspace):
     async with workspace.client as client:
         response = await client.get('/api/v1/chats/chat/workspace/element/file?thread_id=request-thread')
     assert response.status_code == 200
@@ -106,10 +103,17 @@ async def test_page_part_is_one_based_and_relays_image_headers(workspace):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('case', ['foreign', 'unknown-chat', 'unknown-element', 'not-workspace', 'no-thread'])
-async def test_unavailable_attachment_is_404_without_upstream_request(workspace, case):
+@pytest.mark.parametrize(
+    'case', ['foreign', 'admin', 'shared', 'unknown-chat', 'unknown-element', 'not-workspace', 'no-thread']
+)
+async def test_unavailable_attachment_is_404_without_upstream_request(workspace, monkeypatch, case):
     if case == 'foreign':
         workspace.user.id = 'bob'
+    elif case == 'admin':
+        workspace.user.id, workspace.user.role = 'admin', 'admin'
+    elif case == 'shared':
+        workspace.user.id = 'bob'
+        monkeypatch.setattr(chat_models.AccessGrants, 'has_access', AsyncMock(return_value=True))
     elif case == 'unknown-chat':
         workspace.lookup.return_value = None
     elif case == 'unknown-element':

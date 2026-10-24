@@ -99,10 +99,12 @@ async def get_workspace_content(
         attachment = agent_threads.temporary_workspace(chat_id, element_id, user.id)
         as_user = f'owui:user:{user.id}'
     else:
-        chat = await Chats.get_chat_by_id_for_user(chat_id, user)
-        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        # [Gradient] Owner only, admins too: the download asserts the owner to the agent, so admin chat access or a
+        # share must not reach the owner's workspace files.
+        chat = await Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+        if chat is None:
             raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND, headers=_WORKSPACE_HEADERS)
-        as_user = f'owui:user:{chat.user_id}'
+        as_user = f'owui:user:{user.id}'
         files = await ChatMessages.get_files_by_chat_id(chat_id)
         attachment = next(
             (
