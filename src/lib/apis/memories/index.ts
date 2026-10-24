@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const getMemories = async (token: string) => {
@@ -8,6 +9,7 @@ export const getMemories = async (token: string) => {
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
+			'Accept-Language': i18next.resolvedLanguage ?? i18next.language ?? 'en-US',
 			authorization: `Bearer ${token}`
 		}
 	})
@@ -16,7 +18,7 @@ export const getMemories = async (token: string) => {
 			return res.json();
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = err.detail?.detail ?? err.detail;
 			console.error(err);
 			return null;
 		});
@@ -36,6 +38,7 @@ export const addNewMemory = async (token: string, content: string, type = 'user'
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
+			'Accept-Language': i18next.resolvedLanguage ?? i18next.language ?? 'en-US',
 			authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify({
@@ -49,7 +52,7 @@ export const addNewMemory = async (token: string, content: string, type = 'user'
 			return res.json();
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = err.detail?.detail ?? err.detail;
 			console.error(err);
 			return null;
 		});
@@ -76,6 +79,7 @@ export const updateMemoryById = async (
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
+			'Accept-Language': i18next.resolvedLanguage ?? i18next.language ?? 'en-US',
 			authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify(body)
@@ -85,7 +89,7 @@ export const updateMemoryById = async (
 			return res.json();
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = err.detail?.detail ?? err.detail;
 			console.error(err);
 			return null;
 		});
@@ -105,6 +109,7 @@ export const queryMemory = async (token: string, content: string) => {
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
+			'Accept-Language': i18next.resolvedLanguage ?? i18next.language ?? 'en-US',
 			authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify({
@@ -116,7 +121,7 @@ export const queryMemory = async (token: string, content: string) => {
 			return res.json();
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = err.detail?.detail ?? err.detail;
 			console.error(err);
 			return null;
 		});
@@ -136,6 +141,7 @@ export const reindexMemoryVectors = async (token: string) => {
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
+			'Accept-Language': i18next.resolvedLanguage ?? i18next.language ?? 'en-US',
 			authorization: `Bearer ${token}`
 		}
 	})
@@ -144,7 +150,7 @@ export const reindexMemoryVectors = async (token: string) => {
 			return res.json();
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = err.detail?.detail ?? err.detail;
 			console.error(err);
 			return null;
 		});
@@ -164,6 +170,7 @@ export const deleteMemoryById = async (token: string, id: string) => {
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
+			'Accept-Language': i18next.resolvedLanguage ?? i18next.language ?? 'en-US',
 			authorization: `Bearer ${token}`
 		}
 	})
@@ -175,7 +182,7 @@ export const deleteMemoryById = async (token: string, id: string) => {
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = err.detail?.detail ?? err.detail;
 
 			console.error(err);
 			return null;
@@ -196,6 +203,7 @@ export const deleteMemoriesByUserId = async (token: string) => {
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
+			'Accept-Language': i18next.resolvedLanguage ?? i18next.language ?? 'en-US',
 			authorization: `Bearer ${token}`
 		}
 	})
@@ -207,7 +215,7 @@ export const deleteMemoriesByUserId = async (token: string) => {
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = err.detail?.detail ?? err.detail;
 
 			console.error(err);
 			return null;

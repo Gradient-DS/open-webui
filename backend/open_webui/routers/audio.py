@@ -25,6 +25,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
 from open_webui.config import (
     CACHE_DIR,
@@ -49,6 +50,7 @@ from open_webui.env import (
 )
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
+from open_webui.soev import model_catalog, primitives
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.features import is_feature_enabled
@@ -276,29 +278,34 @@ class STTConfigForm(BaseModel):
 
 class AudioConfigUpdateForm(BaseModel):
     tts: TTSConfigForm
-    stt: STTConfigForm
+    stt: STTConfigForm | None = None
 
 
 @router.get('/config')
 async def get_audio_config(request: Request, user=Depends(get_admin_user)):
     return {
         'tts': await get_config_values(TTS_CONFIG_KEYS),
-        'stt': await get_config_values(STT_CONFIG_KEYS),
+        'stt': {'ENGINE': 'soev'} if model_catalog.is_v2() else await get_config_values(STT_CONFIG_KEYS),
     }
 
 
 @router.post('/config/update')
 async def update_audio_config(request: Request, form_data: AudioConfigUpdateForm, user=Depends(get_admin_user)):
+    stt = None if model_catalog.is_v2() else form_data.stt
+    if not model_catalog.is_v2() and stt is None:
+        raise RequestValidationError(
+            [{'type': 'missing', 'loc': ('body', 'stt'), 'msg': 'Field required', 'input': None}]
+        )
     await Config.upsert(
         {
             **config_updates(form_data.tts.model_dump(), TTS_CONFIG_KEYS),
-            **config_updates(form_data.stt.model_dump(), STT_CONFIG_KEYS),
+            **(config_updates(stt.model_dump(), STT_CONFIG_KEYS) if stt else {}),
         }
     )
 
-    if form_data.stt.ENGINE == '':
+    if stt and stt.ENGINE == '':
         request.app.state.faster_whisper_model = await asyncio.to_thread(
-            set_faster_whisper_model, form_data.stt.WHISPER_MODEL, WHISPER_MODEL_AUTO_UPDATE
+            set_faster_whisper_model, stt.WHISPER_MODEL, WHISPER_MODEL_AUTO_UPDATE
         )
     else:
         request.app.state.faster_whisper_model = None
@@ -1237,6 +1244,16 @@ async def transcription(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+    if model_catalog.is_v2():
+        result = await primitives.transcribe(file, language, user)
+        await publish_event(
+            request,
+            EVENTS.AUDIO_TRANSCRIPTION_REQUESTED,
+            actor=user,
+            subject_id=str(uuid.uuid4()),
+            data={'content_type': file.content_type, 'language': language},
+        )
+        return result
     log.info('file.content_type: %s', file.content_type)
     stt_supported_content_types = await Config.get('audio.stt.supported_content_types', [])
 

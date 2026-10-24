@@ -187,19 +187,21 @@
 	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
 		<UserSettingSection title={$i18n.t('STT Settings')} first>
 			{#if $config.audio.stt.engine !== 'web'}
-				<UserSettingRow
-					label={$i18n.t('Speech-to-Text Engine')}
-					description={$i18n.t('Choose the engine used to transcribe voice input.')}
-				>
-					<SettingsSelect
-						bind:value={STTEngine}
-						ariaLabel={$i18n.t('Speech-to-Text Engine')}
-						placeholder={$i18n.t('Select an engine')}
+				{#if $config.audio.stt.engine !== 'soev'}
+					<UserSettingRow
+						label={$i18n.t('Speech-to-Text Engine')}
+						description={$i18n.t('Choose the engine used to transcribe voice input.')}
 					>
-						<option value="">{$i18n.t('Default')}</option>
-						<option value="web">{$i18n.t('Web API')}</option>
-					</SettingsSelect>
-				</UserSettingRow>
+						<SettingsSelect
+							bind:value={STTEngine}
+							ariaLabel={$i18n.t('Speech-to-Text Engine')}
+							placeholder={$i18n.t('Select an engine')}
+						>
+							<option value="">{$i18n.t('Default')}</option>
+							<option value="web">{$i18n.t('Web API')}</option>
+						</SettingsSelect>
+					</UserSettingRow>
+				{/if}
 
 				<UserSettingRow
 					label={$i18n.t('Language')}
