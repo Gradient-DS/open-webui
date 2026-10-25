@@ -126,7 +126,11 @@
 	import Cube from '../icons/Cube.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
 	import Database from '../icons/Database.svelte';
-	import { DATA_SOURCE_PIN_PREFIX, toggleDataSource } from '$lib/utils/dataSources';
+	import {
+		DATA_SOURCE_PIN_PREFIX,
+		requestedDataSources,
+		toggleDataSource
+	} from '$lib/utils/dataSources';
 	import { dataSources, loadDataSources } from '$lib/utils/dataSourcesStore';
 	import Mic from '../icons/Mic.svelte';
 
@@ -927,7 +931,16 @@
 	$: dataSeparationSide = strictDataSeparation
 		? getActiveSide({
 				messages: dataSeparationMessages,
-				files,
+				// [Gradient] A switched-on data source is a knowledge base to the agent: internal.
+				files: [
+					...files,
+					...($config?.features?.enable_data_sources
+						? requestedDataSources(selectedDataSourceIds, $dataSources).map((id) => ({
+								type: 'collection',
+								id
+							}))
+						: [])
+				],
 				webSearchEnabled: webSearchEnabled && showWebSearchButton
 			})
 		: null;
