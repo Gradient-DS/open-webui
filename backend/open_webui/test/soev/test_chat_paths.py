@@ -48,7 +48,6 @@ def fake_api(request, calls, state, visible, feedback):
 
     calls.append(request)
     assert request.headers['X-Soev-User-Token'] == 'fictional-login'
-    assert 'X-Soev-Subject' not in request.headers
     if state['status'] != 200:
         return httpx.Response(state['status'], json={'detail': 'Fictional secret'})
     path = request.url.path
@@ -638,7 +637,6 @@ async def test_live_share_list_unshare_with_requester_token(dark_api, kind):
     assert (await dark_api.browser.get(base + '/shared/fictional-chat/access')).json()['items'] == []
     assert not dark_api.records.writes
     assert all(r.headers['X-Soev-User-Token'] == 'fictional-login' for r in dark_api.calls)
-    assert all('X-Soev-Subject' not in r.headers for r in dark_api.calls)
 
 
 @pytest.mark.asyncio

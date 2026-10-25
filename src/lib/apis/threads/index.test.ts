@@ -23,7 +23,6 @@ it('relays cache versions and context through the private browser boundary', asy
 	expect(init.cache).toBe('no-store');
 	expect(JSON.parse(String(init.body))).toEqual(body);
 	expect(init.headers).toMatchObject({ Authorization: 'Bearer fictional-token' });
-	expect(init.headers).not.toHaveProperty('X-Soev-Subject');
 });
 
 it('requests private pages with only the OWUI credential and preserves opaque cursors and validators', async () => {

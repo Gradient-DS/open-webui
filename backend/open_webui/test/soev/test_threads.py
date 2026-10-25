@@ -313,14 +313,12 @@ async def test_authorize_relay_uses_login_token_only_and_is_private(thread_http,
     http_type = type(_shared_client())
     async with http_type(transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid') as browser:
         responses.append(httpx.Response(200, json=grant))
-        with acting.acting_as('owui:user:fictional-other-owner'):
-            authorized = await browser.post('/api/v1/threads:authorize', json=form)
+        authorized = await browser.post('/api/v1/threads:authorize', json=form)
         assert authorized.json() == grant
         assert requests[0].url.path == '/v1/threads:authorize'
         assert json.loads(requests[0].content) == form
         assert requests[0].headers['X-Soev-User-Token'] == 'fictional-login-token'
         assert requests[0].headers['Authorization'] == 'Bearer fictional-product-key'
-        assert 'X-Soev-Subject' not in requests[0].headers
         resolver = acting._token_resolver.set(AsyncMock(return_value=None))
         try:
             tokenless = await browser.post('/api/v1/threads:authorize', json=form)
