@@ -413,8 +413,6 @@ openWebui:
     modelProfiles: []
     enableFolders: "true"
     userPermissionsFeaturesFolders: "true"
-    enableChannels: "false"
-    userPermissionsFeaturesChannels: "false"
     enableCommunitySharing: "false"
     enableCitationRelevance: "true"
     # Client-side text-match highlighting of cited passages in the citation
@@ -455,8 +453,9 @@ openWebui:
     enableAdminExport: "false"
     enableDataExport: "true"
     dataExportRetentionHours: "24"
+    # Legacy feedback access only; never grants access to chats.
     enableAdminChatAccess: "false"
-    enableAdminAnalytics: "true"  # Aggregate usage only; message content and chat titles also need enableAdminChatAccess
+    enableAdminAnalytics: "true"  # Aggregate usage only
     enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
     bypassAdminAccessControl: "false"  # Admin must follow access control
     # Tools and Functions run admin-written Python in the pod, which holds the

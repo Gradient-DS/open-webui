@@ -2,7 +2,7 @@
 Automation utilities and unified scheduler.
 
 RRULE helpers, scheduler worker loop, and execution logic.
-Follows the utils/<feature>.py pattern (cf. utils/channels.py, utils/task.py).
+Follows the utils/<feature>.py pattern (cf. utils/task.py).
 
 The scheduler_worker_loop handles all time-based background work:
   - Automation execution (claim_due → execute)
@@ -35,7 +35,6 @@ from open_webui.models.automations import AutomationModel, AutomationRuns, Autom
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.config import Config
 from open_webui.models.folders import Folders
-from open_webui.models.messages import MessageForm
 from open_webui.models.users import Users
 from open_webui.utils.auth import create_token
 from open_webui.utils.misc import parse_duration
@@ -384,113 +383,10 @@ async def _set_terminal_cwd(app, server_id: str, user, cwd: str, chat_id: str) -
         log.warning(f'Failed to set terminal CWD: {e}')
 
 
-async def _execute_channel_automation(
-    app,
-    automation: AutomationModel,
-    user,
-    prompt: str,
-    model_id: str,
-    token: str,
-) -> None:
-    target = automation.data.get('target') or {}
-    channel_id = target.get('channel_id')
-    if not channel_id or not await Config.get('channels.enable'):
-        raise ValueError('Channel not found')
-
-    model = getattr(app.state, 'MODELS', {}).get(model_id, {})
-    request = _build_request(app, token=token)
-
-    from open_webui.routers.channels import new_message_handler
-
-    async with get_async_db() as db:
-        user_message, channel = await new_message_handler(
-            request,
-            channel_id,
-            MessageForm(
-                content=prompt,
-                data={},
-                meta={'automation_id': automation.id},
-            ),
-            user,
-            db,
-        )
-        response_parent_id = (
-            user_message.parent_id
-            if user_message.parent_id
-            else (user_message.id if await Config.get('channels.model_response_mode', 'thread') == 'thread' else None)
-        )
-        assistant_message, channel = await new_message_handler(
-            request,
-            channel.id,
-            MessageForm(
-                parent_id=response_parent_id,
-                content='',
-                data={},
-                meta={
-                    'automation_id': automation.id,
-                    'model_id': model_id,
-                    'model_name': model.get('name', model_id),
-                },
-            ),
-            user,
-            db,
-        )
-
-    tool_ids, features, filter_ids, _ = await _resolve_model_defaults(app, model_id)
-
-    form_data = {
-        'model': model_id,
-        'messages': [
-            {
-                'role': 'system',
-                'content': f'You are {model.get("name", model_id)}, participating in a channel conversation. Be concise and conversational.',
-            },
-            {'role': 'user', 'content': f'{user.name if user else "User"}: {prompt}'},
-        ],
-        'stream': True,
-        'chat_id': f'channel:{channel.id}',
-        'id': assistant_message.id,
-        'session_id': f'channel:{channel.id}',
-        'automation_id': automation.id,
-        'background_tasks': {},
-    }
-    if tool_ids:
-        form_data['tool_ids'] = tool_ids
-    if features:
-        form_data['features'] = features
-    if filter_ids:
-        form_data['filter_ids'] = filter_ids
-
-    await app.state.CHAT_COMPLETION_HANDLER(request, form_data, user=user)
-
-    from open_webui.socket.main import sio
-
-    await sio.emit(
-        'automation:result',
-        {
-            'automation_id': automation.id,
-            'name': automation.name,
-            'chat_id': f'channel:{channel.id}',
-            'message_id': assistant_message.id,
-            'status': 'success',
-        },
-        room=f'user:{automation.user_id}',
-    )
-
-    await _record_run(automation.id, 'success', chat_id=f'channel:{channel.id}')
-    await publish_event(
-        app,
-        EVENTS.AUTOMATION_RUN_COMPLETED,
-        actor=user,
-        subject_id=automation.id,
-        data={'name': automation.name, 'channel_id': channel.id, 'message_id': assistant_message.id},
-    )
-
-
 async def execute_automation(app, automation: AutomationModel) -> None:
     """Execute an automation through the full chat completion pipeline.
 
-    Creates a real chat or channel message, then calls chat_completion exactly like the frontend:
+    Creates a real chat message, then calls chat_completion exactly like the frontend:
     session_id + chat_id + message_id → async task → pipeline handles everything
     (filters, model params, knowledge/RAG, tools, DB saves, webhooks).
     """
@@ -536,9 +432,8 @@ async def execute_automation(app, automation: AutomationModel) -> None:
         )
 
         target = automation.data.get('target') or {}
-        if target.get('type') == 'channel':
-            await _execute_channel_automation(app, automation, user, prompt, model_id, token)
-            return
+        if target.get('type', 'chat') != 'chat':
+            raise ValueError('Unsupported automation destination')
 
         folder_id = automation.folder_id
         if folder_id and not await Folders.get_folder_by_id_and_user_id(folder_id, automation.user_id):

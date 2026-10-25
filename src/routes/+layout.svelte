@@ -28,8 +28,6 @@
 		appInfo,
 		toolServers,
 		playingNotificationSound,
-		channels,
-		channelId,
 		terminalServers,
 		showControls,
 		showFileNavPath,
@@ -73,7 +71,6 @@
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
 	import { getUserSettings } from '$lib/apis/users';
 	import dayjs from 'dayjs';
-	import { getChannels } from '$lib/apis/channels';
 
 	const unregisterServiceWorkers = async () => {
 		if ('serviceWorker' in navigator) {
@@ -679,111 +676,6 @@
 		}
 	};
 
-	const channelEventHandler = async (event) => {
-		console.log('channelEventHandler', event);
-		if (event.data?.type === 'typing') {
-			return;
-		}
-
-		// handle channel created event
-		if (event.data?.type === 'channel:created') {
-			const res = await getChannels(localStorage.token).catch(async (error) => {
-				return null;
-			});
-
-			if (res) {
-				await channels.set(
-					res.sort(
-						(a, b) =>
-							['', null, 'group', 'dm'].indexOf(a.type) - ['', null, 'group', 'dm'].indexOf(b.type)
-					)
-				);
-			}
-
-			return;
-		}
-
-		// check url path
-		const channel = $page.url.pathname.includes(`/channels/${event.channel_id}`);
-
-		let isInBackground = document.visibilityState !== 'visible';
-		if (window.electronAPI) {
-			const res = await window.electronAPI.send({
-				type: 'window:isFocused'
-			});
-			if (res) {
-				isInBackground = !res.isFocused;
-			}
-		}
-
-		if ((!channel || isInBackground) && event?.user?.id !== $user?.id) {
-			await tick();
-			const type = event?.data?.type ?? null;
-			const data = event?.data?.data ?? null;
-
-			if ($channels) {
-				if ($channels.find((ch) => ch.id === event.channel_id) && $channelId !== event.channel_id) {
-					channels.set(
-						$channels.map((ch) => {
-							if (ch.id === event.channel_id) {
-								if (type === 'message') {
-									return {
-										...ch,
-										unread_count: (ch.unread_count ?? 0) + 1,
-										last_message_at: event.created_at
-									};
-								}
-							}
-							return ch;
-						})
-					);
-				} else {
-					const res = await getChannels(localStorage.token).catch(async (error) => {
-						return null;
-					});
-
-					if (res) {
-						await channels.set(
-							res.sort(
-								(a, b) =>
-									['', null, 'group', 'dm'].indexOf(a.type) -
-									['', null, 'group', 'dm'].indexOf(b.type)
-							)
-						);
-					}
-				}
-			}
-
-			if (type === 'message') {
-				const title = `${data?.user?.name}${event?.channel?.type !== 'dm' ? ` (#${event?.channel?.name})` : ''}`;
-
-				if ($isLastActiveTab) {
-					if ($settings?.notificationEnabled ?? false) {
-						// LICENSE covers this Open WebUI notification identifier.
-						// Do not alter, remove, obscure, or replace it except as LICENSE permits:
-						// https://docs.openwebui.com/license.
-						new Notification(`${title} / Open WebUI`, {
-							body: data?.content,
-							icon: `${WEBUI_API_BASE_URL}/users/${data?.user?.id}/profile/image`
-						});
-					}
-				}
-
-				toast.custom(NotificationToast, {
-					componentProps: {
-						onClick: () => {
-							goto(`/channels/${event.channel_id}`);
-						},
-						content: data?.content,
-						title: `${title}`
-					},
-					duration: 15000,
-					unstyled: true
-				});
-			}
-		}
-	};
-
 	const TOKEN_EXPIRY_BUFFER = 60; // seconds
 	const resolveFetchUrl = (input) => {
 		if (input instanceof Request) {
@@ -1096,10 +988,8 @@
 		user.subscribe(async (value) => {
 			if (value) {
 				$socket?.off('events', chatEventHandler);
-				$socket?.off('events:channel', channelEventHandler);
 
 				$socket?.on('events', chatEventHandler);
-				$socket?.on('events:channel', channelEventHandler);
 
 				// Set up the token expiry check
 				if (tokenTimer) {
@@ -1108,7 +998,6 @@
 				tokenTimer = setInterval(checkTokenExpiry, 15000);
 			} else {
 				$socket?.off('events', chatEventHandler);
-				$socket?.off('events:channel', channelEventHandler);
 			}
 		});
 

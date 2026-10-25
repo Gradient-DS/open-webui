@@ -5,9 +5,8 @@
 	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
-	import { WEBUI_NAME, user, config, channels, folders } from '$lib/stores';
+	import { WEBUI_NAME, user, config, folders } from '$lib/stores';
 	import { getFolders } from '$lib/apis/folders';
-	import { getChannels } from '$lib/apis/channels';
 
 	import {
 		createAutomation,
@@ -68,7 +67,6 @@
 	let importFiles: FileList | null = null;
 	let automationsImportInputElement: HTMLInputElement;
 	let foldersLoaded = false;
-	let channelsLoaded = false;
 
 	const syncHeader = () => {
 		automationsLayout?.setHeader({
@@ -153,13 +151,6 @@
 		foldersLoaded = true;
 	};
 
-	const ensureChannels = async () => {
-		if (channelsLoaded || ($channels ?? []).length > 0) return;
-		const res = await getChannels(localStorage.token).catch(() => null);
-		if (res) channels.set(res);
-		channelsLoaded = true;
-	};
-
 	const toggleHandler = async (automation: AutomationResponse) => {
 		const res = await toggleAutomationById(localStorage.token, automation.id).catch((err) => {
 			toast.error(`${err}`);
@@ -228,12 +219,6 @@
 	};
 
 	const formatDestination = (automation: AutomationResponse): string => {
-		if (automation.data.target?.type === 'channel') {
-			const channel = ($channels ?? []).find(
-				(channel) => channel.id === automation.data.target?.channel_id
-			);
-			return channel?.name ? `#${channel.name}` : $i18n.t('Channel');
-		}
 		return automation.folder_id ? $i18n.t('Folder') : $i18n.t('New chat');
 	};
 
@@ -365,7 +350,6 @@
 
 		loaded = true;
 		syncHeader();
-		ensureChannels();
 
 		return () => {
 			clearTimeout(searchDebounceTimer);

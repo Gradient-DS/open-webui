@@ -3,9 +3,7 @@
 
 	const i18n = getContext('i18n');
 
-	import { user as _user, config, channels, socket } from '$lib/stores';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { getChannels, getDMChannelByUserId } from '$lib/apis/channels';
 
 	import ChatBubbles from '$lib/components/icons/ChatBubbles.svelte';
 	import ChatBubble from '$lib/components/icons/ChatBubble.svelte';
@@ -15,21 +13,6 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	export let user = null;
-
-	const directMessageHandler = async () => {
-		if (!user) {
-			return;
-		}
-
-		const res = await getDMChannelByUserId(localStorage.token, user.id).catch((error) => {
-			console.error('Error fetching DM channel:', error);
-			return null;
-		});
-
-		if (res) {
-			goto(`/channels/${res.id}`);
-		}
-	};
 </script>
 
 {#if user}
@@ -111,28 +94,6 @@
 						{group.name}
 					</div>
 				{/each}
-			</div>
-		{/if}
-
-		{#if $_user?.id !== user.id && $config?.features?.enable_channels}
-			<hr class="border-gray-100/50 dark:border-gray-800/50 my-2.5" />
-
-			<div class=" flex flex-col w-full px-2.5 items-center">
-				<button
-					class="w-full text-left px-3 py-1.5 rounded-xl border border-gray-100/50 dark:border-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-850 transition flex items-center gap-2 text-sm"
-					type="button"
-					on:click={() => {
-						directMessageHandler();
-					}}
-				>
-					<div>
-						<ChatBubbleOval className="size-4" />
-					</div>
-
-					<div class="font-normal">
-						{$i18n.t('Message')}
-					</div>
-				</button>
 			</div>
 		{/if}
 	</div>

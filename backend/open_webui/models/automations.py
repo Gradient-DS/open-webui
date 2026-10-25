@@ -66,8 +66,7 @@ class AutomationTerminalConfig(BaseModel):
 
 
 class AutomationTarget(BaseModel):
-    type: Literal['chat', 'channel'] = 'chat'
-    channel_id: Optional[str] = None
+    type: Literal['chat'] = 'chat'
 
 
 class AutomationData(BaseModel):

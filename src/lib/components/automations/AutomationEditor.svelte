@@ -7,9 +7,8 @@
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 	import type i18nType from '$lib/i18n';
 
-	import { WEBUI_NAME, channels, folders } from '$lib/stores';
+	import { WEBUI_NAME, folders } from '$lib/stores';
 	import { getFolders } from '$lib/apis/folders';
-	import { getChannels } from '$lib/apis/channels';
 
 	import {
 		getAutomationById,
@@ -45,20 +44,12 @@
 	let hasMoreRuns = true;
 	let runsPage = 0;
 	let foldersLoaded = false;
-	let channelsLoaded = false;
 
 	const ensureFolders = async () => {
 		if (foldersLoaded || ($folders ?? []).length > 0) return;
 		const res = await getFolders(localStorage.token).catch(() => null);
 		if (res) folders.set(res);
 		foldersLoaded = true;
-	};
-
-	const ensureChannels = async () => {
-		if (channelsLoaded || ($channels ?? []).length > 0) return;
-		const res = await getChannels(localStorage.token).catch(() => null);
-		if (res) channels.set(res);
-		channelsLoaded = true;
 	};
 
 	const getFolderName = (folderId: string | null): string =>
@@ -68,10 +59,6 @@
 
 	const getDestinationName = (): string => {
 		const target = automation.data.target;
-		if (target?.type === 'channel') {
-			const channel = ($channels ?? []).find((channel) => channel.id === target.channel_id);
-			return channel?.name ? `#${channel.name}` : $i18n.t('Channel');
-		}
 		return automation.folder_id
 			? `${$i18n.t('Folder')}: ${getFolderName(automation.folder_id)}`
 			: $i18n.t('New chat');
@@ -239,7 +226,6 @@
 		is_active = automation.is_active;
 
 		await ensureFolders();
-		await ensureChannels();
 		await loadRuns();
 	});
 
@@ -379,19 +365,11 @@
 							{#if run.chat_id}
 								<button
 									class="group flex items-center gap-1 text-[0.6875rem] text-gray-400"
-									on:click={() => {
-										if (run.chat_id?.startsWith('channel:')) {
-											goto(`/channels/${run.chat_id.replace('channel:', '')}`);
-										} else {
-											goto(`/c/${run.chat_id}`);
-										}
-									}}
+									on:click={() => goto(`/c/${run.chat_id}`)}
 									type="button"
 								>
 									<span class="group-hover:underline">
-										{run.chat_id?.startsWith('channel:')
-											? $i18n.t('View channel')
-											: $i18n.t('View chat')}
+										{$i18n.t('View chat')}
 									</span>
 									<ArrowRight className="size-2.5" strokeWidth="2" />
 								</button>

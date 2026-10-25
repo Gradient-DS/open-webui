@@ -202,7 +202,7 @@
 							<input
 								class={inputClass}
 								type="text"
-								placeholder={`e.g.) /api/v1/messages, /api/v1/channels`}
+								placeholder={`e.g.) /api/v1/chats, /api/v1/notes`}
 								bind:value={adminConfig.API_KEYS_ALLOWED_ENDPOINTS}
 							/>
 							<a

@@ -1,7 +1,6 @@
 import logging
 
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
 from open_webui.models.folders import FolderModel
@@ -29,7 +28,6 @@ async def has_access_to_file(
     Check if a user has the specified access to a file through any of:
     - Knowledge bases (ownership or access grants)
     - Shared workspace models that attach the file directly
-    - Channels the user is a member of
     - Shared chats
 
     NOTE: This does NOT check direct file ownership — callers should check
@@ -86,11 +84,6 @@ async def has_access_to_file(
             )
         ):
             return True
-
-    # Check if the file is associated with any channels the user has access to
-    channels = await Channels.get_channels_by_file_id_and_user_id(file_id, user.id, db=db)
-    if access_type == 'read' and channels:
-        return True
 
     # Check if the file is associated with any chats the user has access to. Only a chat of the file's owner
     # counts: a chat's link to someone else's file was checked once at attach, so honouring it here would let

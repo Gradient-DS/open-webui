@@ -26,7 +26,6 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_db_context, get_async_session
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.channels import Channels
 from open_webui.models.config import Config
 from open_webui.models.files import (
     FileForm,
@@ -594,11 +593,6 @@ async def upload_file_handler(
             ),
             db=db,
         )
-
-        if 'channel_id' in file_metadata:
-            channel = await Channels.get_channel_by_id_and_user_id(file_metadata['channel_id'], user.id, db=db)
-            if channel:
-                await Channels.add_file_to_channel_by_id(channel.id, file_item.id, user.id, db=db)
 
         if process:
             if background_tasks and process_in_background:

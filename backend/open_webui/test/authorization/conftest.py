@@ -23,7 +23,6 @@ MODULES = (
     'models',
     'prompts',
     'tools',
-    'channels',
     'knowledge',
     'groups',
     'users',
@@ -117,7 +116,6 @@ def template(application, tmp_path_factory):
         db.add_all(
             [
                 Config(key='user.permissions', value=permissions),
-                Config(key='channels.enable', value=True),
                 Config(key='folders.enable', value=True),
             ]
         )

@@ -26,13 +26,13 @@ def test_object_route_rejects_unverified_identity(seeded, principal):
     assert response.status_code in (401, 403), response.text
 
 
-@pytest.mark.parametrize('kind', ('chat', 'file', 'note', 'folder', 'model', 'prompt', 'tool', 'channel', 'knowledge'))
+@pytest.mark.parametrize('kind', ('chat', 'file', 'note', 'folder', 'model', 'prompt', 'tool', 'knowledge'))
 def test_admin_keeps_owned_resource_access_without_bypass(seeded, monkeypatch, kind):
     from open_webui import config
     from .test_matrix import request_for
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', False)
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
 
     async def prepare():
         model = await seed_resource(seeded, kind)
@@ -52,23 +52,23 @@ def test_permissions_merge_groups_without_mutating_defaults(seeded):
         from open_webui.models.groups import Group, GroupMember
         from open_webui.utils.access_control import get_permissions, has_permission
 
-        defaults = {'features': {'notes': False, 'channels': True}}
+        defaults = {'features': {'notes': False, 'skills': True}}
         original = deepcopy(defaults)
         async with seeded.sessions() as db:
             await db.execute(
                 update(Group)
                 .where(Group.id == 'readers')
-                .values(permissions={'features': {'notes': True, 'channels': False}})
+                .values(permissions={'features': {'notes': True, 'skills': False}})
             )
             await db.execute(
                 update(Group).where(Group.id == 'writers').values(permissions={'features': {'notes': False}})
             )
             db.add(GroupMember(id='second', group_id='writers', user_id='reader'))
             await db.commit()
-            assert await get_permissions('reader', defaults, db=db) == {'features': {'notes': True, 'channels': True}}
+            assert await get_permissions('reader', defaults, db=db) == {'features': {'notes': True, 'skills': True}}
             assert defaults == original
             assert await has_permission('reader', 'features.notes', deepcopy(defaults), db=db)
-            assert await has_permission('outsider', 'features.channels', deepcopy(defaults), db=db)
+            assert await has_permission('outsider', 'features.skills', deepcopy(defaults), db=db)
             assert not await has_permission('outsider', 'features.notes', deepcopy(defaults), db=db)
             assert not await has_permission('reader', 'unknown.permission', deepcopy(defaults), db=db)
 
@@ -123,7 +123,7 @@ def test_filter_grants_by_seeded_sharing_permissions(
     seeded.run(check)
 
 
-@pytest.mark.parametrize('kind', ('note', 'folder', 'model', 'prompt', 'tool', 'channel', 'knowledge'))
+@pytest.mark.parametrize('kind', ('note', 'folder', 'model', 'prompt', 'tool', 'knowledge'))
 def test_database_grants_are_scoped_and_revocable(seeded, kind):
     async def check():
         from open_webui.models.access_grants import AccessGrants
@@ -408,8 +408,8 @@ def test_shared_chat_read_matrix(seeded, monkeypatch, bypass, principal):
     from open_webui import config
 
     # admin owner reader writer outsider other_group wildcard reader
-    expected = ('AAAADDA' if bypass else 'DAAADDA')[PRINCIPALS.index(principal)] == 'A'
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', bypass)
+    expected = 'DAAADDA'[PRINCIPALS.index(principal)] == 'A'
+    monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', bypass)
 
     async def prepare():
         from open_webui.models.access_grants import AccessGrants

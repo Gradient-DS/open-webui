@@ -4,7 +4,6 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from open_webui.config import (
-    ENABLE_ADMIN_CHAT_ACCESS,
     ENABLE_ADMIN_EXPORT,
 )
 from open_webui.constants import ERROR_MESSAGES

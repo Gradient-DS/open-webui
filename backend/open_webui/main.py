@@ -49,9 +49,8 @@ from open_webui.config import (
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
     DEFAULT_LOCALE,
-    ENABLE_ADMIN_ANALYTICS,
     # Admin
-    ENABLE_ADMIN_CHAT_ACCESS,
+    ENABLE_ADMIN_ANALYTICS,
     ENABLE_ADMIN_EXPORT,
     # [Gradient] GDPR data export
     ENABLE_DATA_EXPORT,
@@ -189,12 +188,9 @@ from open_webui.events import (
     get_event_catalog as get_event_catalog_items,
 )
 from open_webui.internal.db import engine, get_async_session
-from open_webui.models.access_grants import AccessGrants
-from open_webui.models.channels import Channels
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.config import Config
 from open_webui.models.functions import Functions
-from open_webui.models.messages import Messages
 from open_webui.models.models import Models, normalize_model_tags
 from open_webui.models.users import Users
 from open_webui.routers import (
@@ -205,7 +201,6 @@ from open_webui.routers import (
     auths,
     automations,
     calendar,
-    channels,
     chats,
     configs,
     cloud_sync,
@@ -338,7 +333,7 @@ from open_webui.utils.tool_approval import (
 from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
 from open_webui.services.email.auth import is_mail_configured  # [Gradient]
-from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
+from open_webui.utils.access_control import can_bypass_access_control
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')
@@ -995,7 +990,6 @@ app.include_router(archives.router, prefix='/api/v1/archives', tags=['archives']
 app.include_router(export.router, prefix='/api/v1/export', tags=['export'])
 
 
-app.include_router(channels.router, prefix='/api/v1/channels', tags=['channels'])
 app.include_router(chats.router, prefix='/api/v1/chats', tags=['chats'])
 app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
@@ -1374,7 +1368,7 @@ async def chat_completion(
         automation_id = form_data.pop('automation_id', None)
         tool_approval_mode = (
             'full'
-            if automation_id or chat_id.startswith('channel:')
+            if automation_id
             else (
                 form_data.get('params', {}).get('tool_approval_mode')
                 if await Config.get('chat.tool_permissions.enable', False)
@@ -1444,49 +1438,6 @@ async def chat_completion(
 
         if metadata.get('chat_id') and user:
             chat_id = metadata['chat_id']
-
-            # Gate channel: branch — caller needs write access on the channel, and the
-            # supplied message_id must belong to that channel and be the caller's own.
-            if chat_id.startswith('channel:'):
-                channel_id = chat_id.removeprefix('channel:')
-                channel = await Channels.get_channel_by_id(channel_id)
-                if not channel:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=ERROR_MESSAGES.NOT_FOUND,
-                    )
-                if not can_bypass_access_control(user):
-                    if channel.type in ['group', 'dm']:
-                        if not await Channels.is_user_channel_member(channel.id, user.id):
-                            raise HTTPException(
-                                status_code=status.HTTP_403_FORBIDDEN,
-                                detail=ERROR_MESSAGES.DEFAULT(),
-                            )
-                    else:
-                        if not await AccessGrants.has_access(
-                            user_id=user.id,
-                            resource_type='channel',
-                            resource_id=channel.id,
-                            permission='write',
-                        ):
-                            raise HTTPException(
-                                status_code=status.HTTP_403_FORBIDDEN,
-                                detail=ERROR_MESSAGES.DEFAULT(),
-                            )
-                for entry in message_ids:
-                    target_message_id = entry.get('message_id')
-                    if not target_message_id:
-                        continue
-                    target_message = await Messages.get_message_by_id(target_message_id)
-                    if target_message and (
-                        target_message.channel_id != channel.id
-                        # Write access is not authorship — block cross-member edits.
-                        or (not can_bypass_access_control(user) and target_message.user_id != user.id)
-                    ):
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail=ERROR_MESSAGES.DEFAULT(),
-                        )
 
             if is_saved_chat_id(chat_id):
                 if is_new_chat:
@@ -1632,7 +1583,7 @@ async def chat_completion(
                         asyncio.create_task(run_initial_title_generation())
                 else:
                     # Existing chat — verify ownership
-                    if not await Chats.is_chat_owner(chat_id, user.id) and not can_access_admin_chats(user):
+                    if not await Chats.is_chat_owner(chat_id, user.id):
                         raise HTTPException(
                             status_code=status.HTTP_404_NOT_FOUND,
                             detail=ERROR_MESSAGES.DEFAULT(),
@@ -2118,14 +2069,7 @@ async def verify_chat_ownership(chat_id: str | None, user) -> None:
     if not chat_id or is_temporary_chat_id(chat_id):
         return
 
-    # Channel messages need the membership and write-access gate that only /api/chat/completions has.
-    if chat_id.startswith('channel:'):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Channel chats are not supported on this endpoint',
-        )
-
-    if not can_access_admin_chats(user) and not await Chats.is_chat_owner(chat_id, user.id):
+    if not await Chats.is_chat_owner(chat_id, user.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.DEFAULT(),
@@ -2191,11 +2135,11 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     socket_id = get_temporary_chat_session_id(chat_id)
     if socket_id:
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and not can_access_admin_chats(user):
+        if owner_id != user.id:
             return {'task_ids': []}
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and not can_access_admin_chats(user)):
+        if chat is None or (chat.user_id != user.id):
             return {'task_ids': []}
 
     task_ids = await list_task_ids_by_item_id(request.app.state.redis, chat_id)
@@ -2210,11 +2154,11 @@ async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     chat = None
     if socket_id:
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and not can_access_admin_chats(user):
+        if owner_id != user.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and not can_access_admin_chats(user)):
+        if chat is None or (chat.user_id != user.id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     result = await stop_item_tasks(request.app.state.redis, chat_id)
 
@@ -2353,7 +2297,6 @@ async def get_app_config(request: Request):
         'ui.enable_password_change_form',
         'folders.enable',
         'folders.max_file_count',
-        'channels.enable',
         'calendar.enable',
         'automations.enable',
         'notes.enable',
@@ -2485,7 +2428,6 @@ async def get_app_config(request: Request):
                     'enable_folders': config.get('folders.enable'),
                     'folder_max_file_count': config.get('folders.max_file_count'),
                     'knowledge_max_file_count': KNOWLEDGE_MAX_FILE_COUNT,  # [Gradient]
-                    'enable_channels': config.get('channels.enable'),
                     'enable_calendar': config.get('calendar.enable'),
                     'enable_automations': config.get('automations.enable'),
                     'enable_notes': config.get('notes.enable'),
@@ -2520,7 +2462,6 @@ async def get_app_config(request: Request):
                     'enable_user_status': config.get('users.enable_status'),
                     'enable_admin_export': ENABLE_ADMIN_EXPORT,
                     'enable_data_export': ENABLE_DATA_EXPORT,  # [Gradient] GDPR self-service export
-                    'enable_admin_chat_access': ENABLE_ADMIN_CHAT_ACCESS,
                     'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
                     # [Gradient] Feature Flags (SaaS Tier Control)
                     'feature_chat_controls': FEATURE_CHAT_CONTROLS,

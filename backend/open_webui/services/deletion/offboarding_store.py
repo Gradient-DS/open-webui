@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.internal.db import Base
 from open_webui.models.access_grants import AccessGrant
 from open_webui.models.auths import Auth
-from open_webui.models.channels import Channel, ChannelFile, ChannelMember, ChannelWebhook
 from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.chats import Chat, ChatFile
 from open_webui.models.feedbacks import Feedback
@@ -24,7 +23,6 @@ from open_webui.models.functions import Function
 from open_webui.models.groups import Group, GroupMember
 from open_webui.models.knowledge import Knowledge, KnowledgeDirectory, KnowledgeFile
 from open_webui.models.memories import Memory
-from open_webui.models.messages import Message, MessageReaction
 from open_webui.models.models import Model
 from open_webui.models.notes import Note, PinnedNote
 from open_webui.models.oauth_sessions import OAuthSession
@@ -46,11 +44,6 @@ RESOURCE_TABLES = (Knowledge, Model, Prompt, Tool, Note, File)
 DELETE_USER_TABLES = (
     ChatFile,
     ChatMessage,
-    MessageReaction,
-    Message,
-    ChannelMember,
-    ChannelWebhook,
-    Channel,
     Tag,
     Folder,
     PinnedNote,
@@ -230,7 +223,6 @@ async def finalize_local(
     if archive is not None:
         db.add(archive)
     await _dispose_resources(user_id, options=options, db=db)
-    await _delete_channel_dependents(user_id, db=db)
     for table in DELETE_USER_TABLES:
         await db.execute(delete(table).where(table.user_id == user_id))
     await db.execute(
@@ -300,7 +292,7 @@ async def delete_resource_dependents(table: type[Base], ids: list[str], *, db: A
     if table is Prompt:
         await db.execute(delete(PromptHistory).where(PromptHistory.prompt_id.in_(ids)))
     if table is File:
-        for junction in (ChatFile, ChannelFile, KnowledgeFile):
+        for junction in (ChatFile, KnowledgeFile):
             await db.execute(delete(junction).where(junction.file_id.in_(ids)))
 
 
@@ -318,11 +310,3 @@ async def _archive_grants(kind: str, ids: list[str], *, db: AsyncSession) -> Non
                 created_at=int(time.time()),
             )
         )
-
-
-async def _delete_channel_dependents(user_id: str, *, db: AsyncSession) -> None:
-    channels = select(Channel.id).where(Channel.user_id == user_id)
-    message_ids = select(Message.id).where(Message.channel_id.in_(channels))
-    await db.execute(delete(MessageReaction).where(MessageReaction.message_id.in_(message_ids)))
-    for table in (ChannelFile, ChannelMember, ChannelWebhook, Message):
-        await db.execute(delete(table).where(table.channel_id.in_(channels)))

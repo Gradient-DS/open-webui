@@ -20,7 +20,6 @@ from open_webui.models.user_archives import (
     UpdateArchiveForm,
 )
 from open_webui.services.archival import ArchiveService
-from open_webui.utils.access_control import can_access_admin_chats
 from open_webui.utils.auth import get_admin_user
 
 from pydantic import BaseModel
@@ -31,8 +30,8 @@ router = APIRouter()
 
 
 def require_content_access(user, owner_id: str) -> None:
-    """Another user's archived chats are readable only with admin chat access."""
-    if owner_id != user.id and not can_access_admin_chats(user):
+    """Archived content is readable only by its owner."""
+    if owner_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 
 

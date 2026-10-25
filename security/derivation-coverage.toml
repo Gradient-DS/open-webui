@@ -16,14 +16,6 @@ id = "POST /api/v1/auths/admin/config/ldap"
 reason = "LdapConfigForm already declares only enable_ldap (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
-id = "POST /api/v1/channels/{id}/members/active"
-reason = "UpdateActiveMemberForm already declares only is_active (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
-
-[[waived]]
-id = "POST /api/v1/channels/{id}/messages/{message_id}/pin"
-reason = "PinMessageForm already declares only is_pinned (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
-
-[[waived]]
 id = "POST /api/v1/configs/2fa"
 reason = "TwoFAConfigForm already declares two booleans and grace-period days (integer). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 

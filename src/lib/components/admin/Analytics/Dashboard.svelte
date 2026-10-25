@@ -275,12 +275,7 @@
 </div>
 
 <!-- Model Details Modal -->
-<AnalyticsModelModal
-	bind:show={showModelModal}
-	model={selectedModel}
-	startDate={getDateRange(selectedPeriod).start}
-	endDate={getDateRange(selectedPeriod).end}
-/>
+<AnalyticsModelModal bind:show={showModelModal} model={selectedModel} />
 
 <!-- Summary stats -->
 {#if !loading}

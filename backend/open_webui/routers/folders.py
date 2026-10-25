@@ -39,7 +39,7 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.tasks import has_active_tasks
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.utils.access_control import can_access_admin_chats, can_bypass_access_control
+from open_webui.utils.access_control import can_bypass_access_control
 
 log = logging.getLogger(__name__)
 
@@ -638,8 +638,7 @@ async def get_shared_folder_chats(
         )
 
     is_owner = user.id == folder.user_id
-    is_admin = can_access_admin_chats(user)
-    has_write = is_owner or is_admin or await _has_folder_access(user.id, folder, 'write', db)
+    has_write = is_owner or await _has_folder_access(user.id, folder, 'write', db)
     has_read = has_write or await _has_folder_access(user.id, folder, 'read', db)
 
     if not has_read:
@@ -700,17 +699,14 @@ async def mark_folder_chats_read_by_id(
         )
 
     is_owner = user.id == folder.user_id
-    is_admin = can_access_admin_chats(user)
-    if not (is_owner or is_admin or await _has_folder_access(user.id, folder, 'read', db)):
+    if not (is_owner or await _has_folder_access(user.id, folder, 'read', db)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
     folder_ids = (
-        await Folders.get_folder_ids_by_id_and_user_id_in_subtree(id, folder.user_id, db=db)
-        if is_owner or is_admin
-        else [id]
+        await Folders.get_folder_ids_by_id_and_user_id_in_subtree(id, folder.user_id, db=db) if is_owner else [id]
     )
     updated_count = await Chats.mark_chats_read_by_folder_ids(user.id, folder_ids, db=db)
 
@@ -759,9 +755,7 @@ async def delete_folder_by_id(
         chat_delete_permission = await has_permission(
             user.id, 'chat.delete', await Config.get('user.permissions'), db=db
         )
-        if (folder_owner_id != user.id and not can_access_admin_chats(user)) or (
-            user.role != 'admin' and not chat_delete_permission
-        ):
+        if (folder_owner_id != user.id) or (user.role != 'admin' and not chat_delete_permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
