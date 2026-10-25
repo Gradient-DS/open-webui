@@ -1,3 +1,5 @@
+from open_webui.soev.group_policy import refuse_group_write
+
 """
 Experimental SCIM 2.0 Implementation for Open WebUI
 Provides System for Cross-domain Identity Management endpoints for users and groups
@@ -7,26 +9,17 @@ NOTE: This is an experimental implementation and may not fully comply with SCIM 
 
 import hmac
 import logging
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
-from open_webui.config import OAUTH_PROVIDERS
-from open_webui.constants import ERROR_MESSAGES
-from open_webui.events import EVENTS, publish_event
 from open_webui.env import SCIM_AUTH_PROVIDER
+from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.groups import GroupModel, Groups
 from open_webui.models.users import UserModel, Users
-from open_webui.utils.auth import (
-    decode_token,
-    get_admin_user,
-    get_current_user,
-    get_verified_user,
-)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -914,67 +907,7 @@ async def create_group(
     _: bool = Depends(get_scim_auth),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Create SCIM Group"""
-    # Extract member IDs
-    member_ids = []
-    if group_data.members:
-        for member in group_data.members:
-            member_ids.append(member.value)
-
-    # Create group
-    from open_webui.models.groups import GroupForm
-
-    form = GroupForm(
-        name=group_data.displayName,
-        description='',
-    )
-
-    # Need to get the creating user's ID - we'll use the first admin
-    admin_user = await Users.get_super_admin_user(db=db)
-    if not admin_user:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='No admin user found',
-        )
-
-    new_group = await Groups.insert_new_group(admin_user.id, form, db=db)
-    if not new_group:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Failed to create group',
-        )
-
-    # Add members if provided
-    if member_ids:
-        from open_webui.models.groups import GroupUpdateForm
-
-        update_form = GroupUpdateForm(
-            name=new_group.name,
-            description=new_group.description,
-        )
-
-        await Groups.update_group_by_id(new_group.id, update_form, db=db)
-        await Groups.set_group_user_ids_by_id(new_group.id, member_ids, db=db)
-
-        new_group = await Groups.get_group_by_id(new_group.id, db=db)
-
-    await publish_event(
-        request,
-        EVENTS.GROUP_CREATED,
-        subject_id=new_group.id,
-        source='scim',
-        data={'name': new_group.name, 'member_ids': member_ids, 'member_count': len(member_ids)},
-    )
-    if member_ids:
-        await publish_event(
-            request,
-            EVENTS.GROUP_MEMBER_ADDED,
-            subject_id=new_group.id,
-            source='scim',
-            data={'member_ids': member_ids, 'count': len(member_ids)},
-        )
-
-    return await group_to_scim(new_group, request, db=db)
+    refuse_group_write()
 
 
 @router.put('/Groups/{group_id}', response_model=SCIMGroup)
@@ -985,66 +918,7 @@ async def update_group(
     _: bool = Depends(get_scim_auth),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Update SCIM Group (full update)"""
-    group = await Groups.get_group_by_id(group_id, db=db)
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f'Group {group_id} not found',
-        )
-
-    # Build update form
-    from open_webui.models.groups import GroupUpdateForm
-
-    update_form = GroupUpdateForm(
-        name=group_data.displayName if group_data.displayName else group.name,
-        description=group.description,
-    )
-
-    # Handle members if provided
-    added_member_ids = []
-    removed_member_ids = []
-    if group_data.members is not None:
-        old_member_ids = set(await Groups.get_group_user_ids_by_id(group_id, db) or [])
-        member_ids = [member.value for member in group_data.members]
-        await Groups.set_group_user_ids_by_id(group_id, member_ids, db=db)
-        new_member_ids = set(member_ids)
-        added_member_ids = sorted(new_member_ids - old_member_ids)
-        removed_member_ids = sorted(old_member_ids - new_member_ids)
-
-    # Update group
-    updated_group = await Groups.update_group_by_id(group_id, update_form, db=db)
-    if not updated_group:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Failed to update group',
-        )
-
-    await publish_event(
-        request,
-        EVENTS.GROUP_UPDATED,
-        subject_id=group_id,
-        source='scim',
-        data={'updated_fields': ['name', 'members'] if group_data.members is not None else ['name']},
-    )
-    if added_member_ids:
-        await publish_event(
-            request,
-            EVENTS.GROUP_MEMBER_ADDED,
-            subject_id=group_id,
-            source='scim',
-            data={'member_ids': added_member_ids, 'count': len(added_member_ids)},
-        )
-    if removed_member_ids:
-        await publish_event(
-            request,
-            EVENTS.GROUP_MEMBER_REMOVED,
-            subject_id=group_id,
-            source='scim',
-            data={'member_ids': removed_member_ids, 'count': len(removed_member_ids)},
-        )
-
-    return await group_to_scim(updated_group, request, db=db)
+    refuse_group_write()
 
 
 @router.patch('/Groups/{group_id}', response_model=SCIMGroup)
@@ -1055,88 +929,7 @@ async def patch_group(
     _: bool = Depends(get_scim_auth),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Update SCIM Group (partial update)"""
-    group = await Groups.get_group_by_id(group_id, db=db)
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f'Group {group_id} not found',
-        )
-
-    from open_webui.models.groups import GroupUpdateForm
-
-    update_form = GroupUpdateForm(
-        name=group.name,
-        description=group.description,
-    )
-    added_member_ids = []
-    removed_member_ids = []
-
-    for operation in patch_data.Operations:
-        op = operation.op.lower()
-        path = operation.path
-        value = operation.value
-
-        if op == 'replace':
-            if path == 'displayName':
-                update_form.name = value
-            elif path == 'members':
-                # Replace all members
-                old_member_ids = set(await Groups.get_group_user_ids_by_id(group_id, db) or [])
-                new_member_ids = [member['value'] for member in value]
-                await Groups.set_group_user_ids_by_id(group_id, new_member_ids, db=db)
-                new_member_ids_set = set(new_member_ids)
-                added_member_ids.extend(sorted(new_member_ids_set - old_member_ids))
-                removed_member_ids.extend(sorted(old_member_ids - new_member_ids_set))
-
-        elif op == 'add':
-            if path == 'members':
-                # Add members
-                if isinstance(value, list):
-                    for member in value:
-                        if isinstance(member, dict) and 'value' in member:
-                            await Groups.add_users_to_group(group_id, [member['value']], db=db)
-                            added_member_ids.append(member['value'])
-        elif op == 'remove':
-            if path and path.startswith('members[value eq'):
-                # Remove specific member
-                member_id = path.split('"')[1]
-                await Groups.remove_users_from_group(group_id, [member_id], db=db)
-                removed_member_ids.append(member_id)
-
-    # Update group
-    updated_group = await Groups.update_group_by_id(group_id, update_form, db=db)
-    if not updated_group:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Failed to update group',
-        )
-
-    await publish_event(
-        request,
-        EVENTS.GROUP_UPDATED,
-        subject_id=group_id,
-        source='scim',
-        data={'operation_count': len(patch_data.Operations)},
-    )
-    if added_member_ids:
-        await publish_event(
-            request,
-            EVENTS.GROUP_MEMBER_ADDED,
-            subject_id=group_id,
-            source='scim',
-            data={'member_ids': sorted(set(added_member_ids)), 'count': len(set(added_member_ids))},
-        )
-    if removed_member_ids:
-        await publish_event(
-            request,
-            EVENTS.GROUP_MEMBER_REMOVED,
-            subject_id=group_id,
-            source='scim',
-            data={'member_ids': sorted(set(removed_member_ids)), 'count': len(set(removed_member_ids))},
-        )
-
-    return await group_to_scim(updated_group, request, db=db)
+    refuse_group_write()
 
 
 @router.delete('/Groups/{group_id}', status_code=status.HTTP_204_NO_CONTENT)
@@ -1146,27 +939,4 @@ async def delete_group(
     _: bool = Depends(get_scim_auth),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Delete SCIM Group"""
-    group = await Groups.get_group_by_id(group_id, db=db)
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f'Group {group_id} not found',
-        )
-
-    success = await Groups.delete_group_by_id(group_id, db=db)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Failed to delete group',
-        )
-
-    await publish_event(
-        request,
-        EVENTS.GROUP_DELETED,
-        subject_id=group_id,
-        source='scim',
-        data={'name': group.name},
-    )
-
-    return None
+    refuse_group_write()

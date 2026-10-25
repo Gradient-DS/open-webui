@@ -2,7 +2,6 @@
 
 import base64
 import copy
-import hashlib
 import importlib
 import json
 import os
@@ -32,7 +31,7 @@ async def env(identity_config, fake_api, monkeypatch):
     groups = importlib.import_module('open_webui.models.groups')
     files = importlib.import_module('open_webui.models.files')
     database = importlib.import_module('open_webui.internal.db')
-    raw, grants, group_table = knowledge.KnowledgeTable(), access.AccessGrantsTable(), groups.GroupTable()
+    raw, grants = knowledge.KnowledgeTable(), access.AccessGrantsTable()
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     users = importlib.import_module('open_webui.models.users')
@@ -82,9 +81,12 @@ async def env(identity_config, fake_api, monkeypatch):
         oauth = await db.get(users.User, 'oauth')
         oauth.oauth = {'entra': {'sub': 'provider-sub'}}
         await db.commit()
-        group = await group_table.insert_new_group('alice', groups.GroupForm(name='Staff', description=''), db=db)
-        await group_table.set_group_user_ids_by_id(group.id, ['bob', 'alice'], db=db)
-        empty = await group_table.insert_new_group('alice', groups.GroupForm(name='Empty', description=''), db=db)
+        group = groups.Group(id='staff', user_id='alice', name='Staff', description='', created_at=1, updated_at=1)
+        empty = groups.Group(id='empty', user_id='alice', name='Empty', description='', created_at=1, updated_at=1)
+        db.add_all([group, empty])
+        await db.flush()
+        db.add_all([groups.GroupMember(id=f'member-{uid}', group_id='staff', user_id=uid) for uid in ['bob', 'alice']])
+        await db.commit()
         kbs = []
         with monkeypatch.context() as seed_patch:
             seed_patch.setattr(knowledge, 'AccessGrants', grants)
@@ -179,9 +181,9 @@ async def test_every_knowledge_base_becomes_a_collection_keyed_by_its_id(env):
     row = env.api.collections[env.kbs[0].id]
     assert row['created_by'] == 'owui:user:alice'
     assert row['principals'] == sorted(
-        ['owui:service:webui', 'owui:user:alice', 'owui:user:bob', f'owui:group:{env.group.id}']
+        ['owui:service:webui', 'owui:user:alice', 'owui:user:bob', f'platform:group:{env.group.id}']
     )
-    assert row['writers'] == sorted(['owui:user:alice', 'owui:user:bob', f'owui:group:{env.group.id}'])
+    assert row['writers'] == sorted(['owui:user:alice', 'owui:user:bob', f'platform:group:{env.group.id}'])
     assert env.api.collections[env.kbs[1].id]['visibility'] == 'restricted'
     assert 'platform:pseudo:owui' in env.api.collections[env.kbs[1].id]['principals']
     assert 'platform:pseudo:owui' in env.api.collections[env.kbs[1].id]['writers']
@@ -229,23 +231,10 @@ async def test_only_eligible_users_get_a_link_of_the_right_assurance(env):
 
 
 @pytest.mark.asyncio
-async def test_groups_are_pushed_before_collections_name_them(env):
-    """Links precede complete sorted group replacements, including empty groups, then collections."""
+async def test_migration_never_writes_platform_groups(env):
     assert await run(env) == 0
-    requests = env.api.requests
-    links = [i for i, r in enumerate(requests) if r.url.path == '/v1/identity/links']
-    groups = [i for i, r in enumerate(requests) if r.method == 'PUT']
-    creates = [i for i, r in enumerate(requests) if r.method == 'POST' and r.url.path == '/v1/collections']
-    assert max(links) < min(groups) <= max(groups) < min(creates)
-    assert env.api.groups == {
-        f'owui:group:{env.group.id}': ['owui:user:alice', 'owui:user:bob'],
-        f'owui:group:{env.empty.id}': [],
-    }
-    for i in groups:
-        request = requests[i]
-        members = json.loads(request.content)['members']
-        digest = hashlib.sha256(json.dumps(members, separators=(',', ':')).encode()).hexdigest()
-        assert request.headers['Idempotency-Key'].endswith(':' + digest)
+    assert not any('/directory/groups' in r.url.path for r in env.api.requests)
+    assert env.api.groups == {}
 
 
 @pytest.mark.asyncio
@@ -318,7 +307,8 @@ async def test_dry_run_sends_nothing(env, capsys):
     assert await run(env, dry_run=True) == 0
     output = capsys.readouterr().out
     assert not env.api.requests and not env.identity._linked_refs
-    assert '/v1/identity/links' in output and '/v1/directory/groups/' in output
+    assert '/v1/identity/links' in output
+    assert '/v1/directory/groups/' not in output
     assert '/v1/collections' in output and '/folders' in output
     assert 'reports/2026' not in output and env.kbs[0].name not in output and '<redacted>' in output
     assert 'OWUI files' in output and 'document_count' in output and 'not read' in output
@@ -372,6 +362,7 @@ async def test_module_dry_run_preserves_sql_tables(env, tmp_path, catalog_url):
         'DATABASE_ENABLE_SQLITE_WAL': 'false',
         'VECTOR_DB': 'weaviate',
         'SOEV_API_URL': catalog_url,
+        'SOEV_ARCHIVE_READERS_GROUP_REF': 'platform:group:archive-readers',
         'SOEV_API_KEY': 'soev_test_cred-dry-run_secret',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
         'SOEV_V2_MIGRATION_ID': 'v2-test',

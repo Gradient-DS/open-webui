@@ -116,7 +116,7 @@ async def test_modes_move_or_delete_resources_then_unlink(offboard_store, mode):
         assert body['owner'] == ('owui:user:lark' if mode == 'transfer' else expected_owner)
         if mode == 'archive':
             archive = (await store.db.execute(select(Archive))).scalar_one()
-            assert body['readers'] == ['owui:group:admins-archive']
+            assert body['readers'] == ['platform:group:archive-readers']
             assert body['expires_at'].startswith(
                 __import__('datetime')
                 .datetime.fromtimestamp(archive.expires_at, __import__('datetime').UTC)
@@ -233,15 +233,13 @@ async def test_shared_deletion_requires_exact_inventory(offboard_store):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('step', ['inventory', 'cloud', 'groups', 'resources', 'unlink', 'local'])
+@pytest.mark.parametrize('step', ['inventory', 'cloud', 'resources', 'unlink', 'local'])
 async def test_failure_never_partially_deletes_local_data(offboard_store, monkeypatch, step):
     store = offboard_store
-    from open_webui.models.groups import Groups
 
     targets = {
         'inventory': (store.module, 'inventory'),
         'cloud': (store.module, 'revoke_cloud'),
-        'groups': (Groups, 'remove_user_from_all_groups'),
         'resources': (store.module, 'apply_collections'),
         'unlink': (store.identity, 'unlink'),
         'local': (store.module, 'finalize_local'),
@@ -270,7 +268,7 @@ async def test_archive_never_delete_omits_expiry(offboard_store):
 
 
 @pytest.mark.asyncio
-async def test_archive_assistant_is_readable_only_by_current_admins(offboard_store):
+async def test_archive_assistant_follows_platform_readers_not_local_admins(offboard_store, monkeypatch):
     from open_webui.models.access_grants import AccessGrantsTable
     from open_webui.models.users import Users
 
@@ -279,12 +277,39 @@ async def test_archive_assistant_is_readable_only_by_current_admins(offboard_sto
     await store.module.offboard_user(
         'fern', actor_id='rook', options=store.module.OffboardingOptions(mode='archive'), db=store.db
     )
+    from open_webui.soev import group_mirror
+
+    client = SimpleNamespace(
+        get=AsyncMock(
+            return_value={
+                'data': [
+                    {
+                        'id': 'archive-readers',
+                        'ref': 'platform:group:archive-readers',
+                        'name': 'Archive readers',
+                        'members': ['lark-person'],
+                    }
+                ],
+                'next_cursor': None,
+            }
+        )
+    )
+    from open_webui.models.users import User
+
+    user = await store.db.get(User, 'lark')
+    user.person_id = 'platform:user:lark-person'
+    await store.db.commit()
+    monkeypatch.setattr(group_mirror, 'build_service_client', lambda: client)
+    await group_mirror.reconcile(db=store.db)
     grants = AccessGrantsTable()
-    assert await grants.has_access('rook', 'model', 'assistant', 'read', db=store.db)
-    assert not await grants.has_access('rook', 'model', 'assistant', 'write', db=store.db)
-    assert not await grants.has_access('lark', 'model', 'assistant', 'read', db=store.db)
-    await Users.update_user_role_by_id('rook', 'user', db=store.db)
     assert not await grants.has_access('rook', 'model', 'assistant', 'read', db=store.db)
+    assert await grants.has_access('lark', 'model', 'assistant', 'read', db=store.db)
+    assert not await grants.has_access('lark', 'model', 'assistant', 'write', db=store.db)
+    await Users.update_user_role_by_id('lark', 'admin', db=store.db)
+    assert await grants.has_access('lark', 'model', 'assistant', 'read', db=store.db)
+    client.get.return_value['data'][0]['members'] = []
+    await group_mirror.reconcile(db=store.db)
+    assert not await grants.has_access('lark', 'model', 'assistant', 'read', db=store.db)
 
 
 @pytest.mark.asyncio
@@ -372,15 +397,10 @@ async def test_transfer_refuses_invalid_target_before_remote_changes(offboard_st
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    'path', ['/v1/connections/', '/v1/directory/groups/', '/v1/collections/native', '/v1/identity/links/']
-)
+@pytest.mark.parametrize('path', ['/v1/connections/', '/v1/collections/native', '/v1/identity/links/'])
 async def test_actual_http_failure_keeps_local_source_rows(offboard_store, monkeypatch, path):
-    from open_webui.models.groups import GroupForm, GroupTable
 
     store = offboard_store
-    group = await GroupTable().insert_new_group('lark', GroupForm(name='team', description=''), db=store.db)
-    await GroupTable().set_group_user_ids_by_id(group.id, ['fern', 'lark'], db=store.db)
     await store.identity.build_client().send(
         'POST',
         '/v1/connections',
@@ -755,9 +775,8 @@ async def test_demotion_revocation_failures_preserve_local_role_and_link(offboar
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('step', ['inventory', 'groups', 'resources', 'unlink', 'local'])
+@pytest.mark.parametrize('step', ['inventory', 'resources', 'unlink', 'local'])
 async def test_pending_offboarding_keeps_fail_closed_boundaries(offboard_store, monkeypatch, step):
-    from open_webui.models.groups import Groups
     from open_webui.models.users import Users
 
     store = offboard_store
@@ -767,8 +786,6 @@ async def test_pending_offboarding_keeps_fail_closed_boundaries(offboard_store, 
     )
     store.api.requests.clear()
     failure = store.identity.SoevApiError(503, 'service_unavailable', 'Unavailable')
-    if step == 'groups':
-        monkeypatch.setattr(Groups, 'remove_user_from_all_groups', AsyncMock(side_effect=failure))
     if step == 'local':
         finalize = store.module.finalize_local
 

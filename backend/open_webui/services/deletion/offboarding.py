@@ -11,15 +11,14 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui.internal.db import get_async_db_context
-from open_webui.models.groups import Groups
 from open_webui.models.user_archives import UserArchive
 from open_webui.models.users import Users
 from open_webui.services.deletion import offboarding_store as store
-from open_webui.soev import group_sync, identity, ingest
+from open_webui.soev import identity, ingest
+from open_webui.soev.archive import ARCHIVE_OWNER, archive_group_ref
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
 from open_webui.soev.cloud_sync import revoke_cloud
-from open_webui.soev.group_sync import ARCHIVE_OWNER
 
 
 class OffboardingOptions(BaseModel):
@@ -92,9 +91,8 @@ async def offboard_user(
 ) -> int:
     """Complete remote steps before atomically removing or reassigning local rows."""
     async with get_async_db_context(db) as session:
-        async with group_sync.membership_lock(session):
-            async with identity.link_lock(f'owui:user:{user_id}'):
-                return await _offboard(user_id, actor_id=actor_id, options=options, db=session, language=language)
+        async with identity.link_lock(f'owui:user:{user_id}'):
+            return await _offboard(user_id, actor_id=actor_id, options=options, db=session, language=language)
 
 
 async def _offboard(
@@ -110,9 +108,6 @@ async def _offboard(
     archive = await store.prepare_archive(user, actor_id=actor_id, options=options, owned=owned, db=db)
     if configured() and as_user is not None:
         await revoke_cloud(user_id, client=identity.build_client())
-    if not await Groups.remove_user_from_all_groups(user_id, db=db):
-        raise SoevApiError(503, 'group_sync_unavailable', 'Group membership update failed')
-    await store.narrow_owned_groups(user_id, db=db)
     await apply_collections(owned, options=options, archive=archive, as_user=as_user)
     await delete_external_user_data(user_id, options=options, db=db)
     if configured():
@@ -168,7 +163,7 @@ async def apply_collections(
             continue
         body = {'owner': f'owui:user:{options.transfer_to}'}
         if options.mode == 'archive':
-            body = {'owner': ARCHIVE_OWNER, 'readers': [f'owui:group:{group_sync.ADMIN_ARCHIVE_GROUP}']}
+            body = {'owner': ARCHIVE_OWNER, 'readers': [archive_group_ref()]}
             if archive.expires_at is not None:
                 body['expires_at'] = (
                     dt.datetime.fromtimestamp(archive.expires_at, dt.UTC).isoformat().replace('+00:00', 'Z')

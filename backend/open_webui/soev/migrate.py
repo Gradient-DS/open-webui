@@ -3,7 +3,7 @@
 This operator CLI runs before the platform-target cutover only.
 
 python -m open_webui.soev.migrate --apply | --restore | --dry-run. The directory copy
-(identities, groups, collections, folders, cloud schedules) only reads OWUI tables.
+(identities, collections, folders, cloud schedules) only reads OWUI tables.
 --models with --apply or --dry-run rewrites stored model ids alone, under its own id.
 --uploads with --apply or --dry-run ingests chat uploads and assistant files (step 5).
 """
@@ -16,8 +16,8 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
-from urllib.parse import quote
 from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Sequence
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from open_webui.models.access_grants import AccessGrantModel
@@ -83,8 +83,7 @@ async def _send(client, method, path, body, *, key, dry_run, as_user=None):
     return await client.send(method, path, body, idempotency_key=key, as_user=as_user)
 
 
-async def _push_directory(users, groups, client, *, dry_run, db):
-    from open_webui.models.users import Users
+async def _push_directory(users, client, *, dry_run, db):
     from open_webui.soev import identity
 
     print(f'4 directory: skipped pending users {sum(user.role == "pending" for user in users)}')
@@ -107,18 +106,6 @@ async def _push_directory(users, groups, client, *, dry_run, db):
             )
         else:
             await identity.ensure_link(ref, client)
-    for group in sorted(groups, key=lambda group: group.id):
-        members = sorted({identity.external_ref(user) for user in await Users.get_users_by_group_id(group.id, db=db)})
-        # Match SoevGroupTable's replacement key so migration and runtime pushes agree.
-        digest = hashlib.sha256(json.dumps(members, separators=(',', ':')).encode()).hexdigest()
-        await _send(
-            client,
-            'PUT',
-            f'/v1/directory/groups/{quote(f"owui:group:{group.id}", safe="")}/members',
-            {'members': members},
-            key=f'group:{group.id}:{digest}',
-            dry_run=dry_run,
-        )
 
 
 def _collection_grants(
@@ -341,14 +328,13 @@ class Directory:
 
 
 async def copy_directory(*, dry_run=False, db=None) -> Directory:
-    """Step 4: links, groups, collections, cloud schedules and folders; OWUI tables are only read."""
+    """Step 4: links, collections, cloud schedules and folders; OWUI tables are only read."""
     from open_webui.models.access_grants import AccessGrantsTable
-    from open_webui.models.groups import GroupTable
     from open_webui.models.knowledge import KnowledgeTable
     from open_webui.models.users import Users
     from open_webui.soev import identity
 
-    table, grants, groups = KnowledgeTable(), AccessGrantsTable(), GroupTable()
+    table, grants = KnowledgeTable(), AccessGrantsTable()
     users = (await Users.get_users(db=db))['users']
     rows = await _knowledge_rows(table, db)
     keys = [kb.id for kb in rows]
@@ -359,7 +345,7 @@ async def copy_directory(*, dry_run=False, db=None) -> Directory:
     file_counts = {key: counts.get(key, 0) for key in keys}
     paths = await _folder_paths(table, keys, db)
     client = identity.build_client()
-    await _push_directory(users, await groups.get_all_groups(db=db), client, dry_run=dry_run, db=db)
+    await _push_directory(users, client, dry_run=dry_run, db=db)
     conflicts = await _create_collections(rows, users, grants, client, dry_run=dry_run, db=db)
     user_ids = {user.id for user in users}
     cloud_owners = {

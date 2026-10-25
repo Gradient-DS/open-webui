@@ -729,20 +729,17 @@ class UsersTable:
             return UserModel.model_validate(user)
 
     async def update_user_by_id(self, id: str, updated: dict, db: AsyncSession | None = None) -> UserModel | None:
-        from open_webui.soev import group_sync, identity
+        from open_webui.soev import identity
 
-        async with group_sync.membership_lock(db):
-            async with get_async_db_context(db) as session:
-                user = await session.get(User, id)
-                if user is None:
-                    return None
-                async with identity.role_change(
-                    UserModel.model_validate(user), updated.get('role', user.role), db=session
-                ):
-                    for key, value in updated.items():
-                        setattr(user, key, value)
-                    await session.commit()
-                return UserModel.model_validate(user)
+        async with get_async_db_context(db) as session:
+            user = await session.get(User, id)
+            if user is None:
+                return None
+            async with identity.role_change(UserModel.model_validate(user), updated.get('role', user.role), db=session):
+                for key, value in updated.items():
+                    setattr(user, key, value)
+                await session.commit()
+            return UserModel.model_validate(user)
 
     # settings update helper
     async def update_user_settings_by_id(

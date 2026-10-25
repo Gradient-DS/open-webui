@@ -391,8 +391,8 @@ async def test_insert_sends_readers_writers_and_the_subject(env):
     result = await env.store.insert_new_knowledge('carol', form)
     assert result.user_id == 'carol'
     row = env.api.collections[result.id]
-    assert row['principals'] == ['owui:group:staff', SERVICE, 'owui:user:carol']
-    assert row['writers'] == ['owui:group:staff', 'owui:user:carol']
+    assert row['principals'] == [SERVICE, 'owui:user:carol', 'platform:group:staff']
+    assert row['writers'] == ['owui:user:carol', 'platform:group:staff']
     relevant = [request for request in env.api.requests if request.method == 'POST']
     assert relevant[-2].url.path == '/v1/identity/links'
     assert relevant[-1].url.path == '/v1/collections'

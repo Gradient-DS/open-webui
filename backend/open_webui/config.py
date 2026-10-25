@@ -2682,6 +2682,12 @@ SOEV_API_KEY = os.environ.get('SOEV_API_KEY', '')
 SOEV_API_SIGNING_KEY = os.environ.get('SOEV_API_SIGNING_KEY', '')
 SOEV_API_AUDIENCE = os.environ.get('SOEV_API_AUDIENCE', '')
 SOEV_API_SERVICE_PRINCIPAL = os.environ.get('SOEV_API_SERVICE_PRINCIPAL', '')
+SOEV_ARCHIVE_READERS_GROUP_REF = os.environ.get('SOEV_ARCHIVE_READERS_GROUP_REF', '')
+if SOEV_API_URL and (
+    not SOEV_ARCHIVE_READERS_GROUP_REF.startswith('platform:group:')
+    or not SOEV_ARCHIVE_READERS_GROUP_REF.removeprefix('platform:group:')
+):
+    raise ValueError('SOEV_ARCHIVE_READERS_GROUP_REF must be a seeded platform group ref')
 SOEV_GROUP_RECONCILE_MINUTES = int(os.environ.get('SOEV_GROUP_RECONCILE_MINUTES', '15'))
 if SOEV_GROUP_RECONCILE_MINUTES <= 0:
     raise ValueError('SOEV_GROUP_RECONCILE_MINUTES must be positive')

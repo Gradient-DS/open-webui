@@ -1609,7 +1609,7 @@ async def test_assistant_file_is_submitted_as_the_model_owner_and_shared_with_th
     assert {key for key, file_id in submitted_uploads(env) if file_id == 'quiet'} == {'owui-assistant-field-guide'}
     collection = env.api.collections['owui-assistant-field-guide']
     assert collection['created_by'] == 'owui:user:alice'
-    assert 'owui:group:readers' in collection['principals']
+    assert 'platform:group:readers' in collection['principals']
     assert collection['writers'] == ['owui:user:alice']
 
 

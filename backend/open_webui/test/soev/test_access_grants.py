@@ -48,13 +48,13 @@ async def env(identity_config, fake_api, monkeypatch):
             'name': 'Research',
             'description': 'Notes',
             'visibility': 'restricted',
-            'principals': [SERVICE, 'owui:group:readers', 'owui:group:writers'],
-            'writers': ['owui:group:writers'],
+            'principals': [SERVICE, 'platform:group:readers', 'platform:group:writers'],
+            'writers': ['platform:group:writers'],
         },
         as_user='owui:user:owner',
         idempotency_key='seed:collection',
     )
-    api.groups.update({'owui:group:readers': ['owui:user:reader'], 'owui:group:writers': ['owui:user:writer']})
+    api.groups.update({'platform:group:readers': ['owui:user:reader'], 'platform:group:writers': ['owui:user:writer']})
     api.requests.clear()
     return SimpleNamespace(api=api, table=table, store=store, models=models, module=module)
 
@@ -139,12 +139,12 @@ async def test_group_scoped_access_matches_collection_principals(env, permission
     """Group previews match explicit principals without inheriting the request user's audience."""
     base = env.api.collections['kb']
     for key, readers, writers in (
-        ('read-only', ['owui:group:readers'], []),
-        ('write-only', [], ['owui:group:writers']),
-        ('unrelated', ['owui:group:other'], ['owui:group:other']),
-        ('unrequested', ['owui:group:readers'], ['owui:group:writers']),
+        ('read-only', ['platform:group:readers'], []),
+        ('write-only', [], ['platform:group:writers']),
+        ('unrelated', ['platform:group:other'], ['platform:group:other']),
+        ('unrequested', ['platform:group:readers'], ['platform:group:writers']),
         ('public', [], []),
-        ('deleted', ['owui:group:readers'], ['owui:group:writers']),
+        ('deleted', ['platform:group:readers'], ['platform:group:writers']),
     ):
         env.api.collections[key] = {
             **base,
@@ -224,12 +224,12 @@ async def test_setting_grants_commissions_one_atomic_access_job(env):
     assert json.loads(writes[0].content) == {
         'visibility': 'restricted',
         'principals': sorted(
-            [SERVICE, 'owui:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']
+            [SERVICE, 'platform:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']
         ),
-        'writers': sorted(['owui:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']),
+        'writers': sorted(['platform:group:editors', 'owui:user:editor', 'owui:user:owner', 'platform:pseudo:owui']),
     }
     assert all(subject(request) == 'owui:user:owner' for request in writes)
-    assert env.api.collections['kb']['writers'] == ['owui:group:writers', 'owui:user:owner']
+    assert env.api.collections['kb']['writers'] == ['owui:user:owner', 'platform:group:writers']
     assert len(env.api.jobs) == 1
     env.api.advance(next(iter(env.api.jobs)), 'SUCCEEDED')
     projected = await env.table.get_grants_by_resource('knowledge', 'kb')
@@ -248,7 +248,7 @@ async def test_revoke_all_access_returns_to_owner_only(env):
     """Revocation keeps the owner as writer and restores restricted readers through the access job."""
     removed = await env.table.revoke_all_access('knowledge', 'kb')
     assert removed == 3
-    assert env.api.collections['kb']['writers'] == ['owui:group:writers', 'owui:user:owner']
+    assert env.api.collections['kb']['writers'] == ['owui:user:owner', 'platform:group:writers']
     job_id = next(iter(env.api.jobs))
     assert env.api.job_effects[job_id] == {
         'visibility': 'restricted',

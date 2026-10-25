@@ -12,7 +12,6 @@ FEATURES = (
     capabilities.LIVE_MAIL,
     capabilities.CLOUD_SYNC,
     capabilities.MEETINGS,
-    capabilities.GROUPS_PUSH,
     capabilities.IMAGES,
 )
 

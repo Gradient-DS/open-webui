@@ -53,6 +53,7 @@ def identity_config(monkeypatch, tmp_path):
         'SERVICE_PRINCIPAL': 'owui:service:webui',
     }.items():
         monkeypatch.setattr(identity.config, f'SOEV_API_{name}', value)
+    monkeypatch.setattr(identity.config, 'SOEV_ARCHIVE_READERS_GROUP_REF', 'platform:group:archive-readers')
     monkeypatch.setattr(identity, '_linked_refs', set())
     monkeypatch.setattr(identity, '_pending_links', {})
     return identity, key
@@ -117,14 +118,11 @@ def eligible_identity(identity_config, monkeypatch):
 async def role_store(identity_config, monkeypatch, platform_capabilities):
     from types import SimpleNamespace
 
+    from open_webui.internal import db as database
     from open_webui.internal.db import Base
     from open_webui.models.users import User, Users
-    from open_webui.soev import group_sync, identity
+    from open_webui.soev import identity
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-    monkeypatch.setattr(group_sync, '_pending', {})
-
-    from open_webui.internal import db as database
 
     monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
@@ -133,4 +131,77 @@ async def role_store(identity_config, monkeypatch, platform_capabilities):
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         await Users.insert_new_user('fern', 'Fern', 'fern@example.invalid', db=db)
         yield SimpleNamespace(db=db, users=Users, identity=identity)
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def group_db(identity_config, monkeypatch):
+    from open_webui.internal import db as database
+    from open_webui.models.access_grants import AccessGrant
+    from open_webui.models.groups import Group, GroupMember
+    from open_webui.models.users import User
+    from sqlalchemy import event
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    monkeypatch.setattr(database, 'DATABASE_ENABLE_SESSION_SHARING', True)
+    engine = create_async_engine('sqlite+aiosqlite:///:memory:')
+
+    @event.listens_for(engine.sync_engine, 'connect')
+    def enable_foreign_keys(connection, _):
+        connection.execute('PRAGMA foreign_keys=ON')
+
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            lambda db: database.Base.metadata.create_all(
+                db, tables=[Group.__table__, GroupMember.__table__, User.__table__, AccessGrant.__table__]
+            )
+        )
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        db.add_all(
+            [
+                Group(
+                    id='old',
+                    user_id='fern',
+                    name='Old',
+                    description='',
+                    created_at=1,
+                    updated_at=1,
+                    permissions={'workspace': {'knowledge': True}},
+                    data={'config': {'share': 'members'}},
+                ),
+                User(
+                    id='fern',
+                    name='Fern',
+                    email='fern@example.invalid',
+                    role='admin',
+                    person_id='platform:user:fern-person',
+                    last_active_at=1,
+                    created_at=1,
+                    updated_at=1,
+                ),
+                User(
+                    id='lark',
+                    name='Lark',
+                    email='lark@example.invalid',
+                    role='user',
+                    person_id='platform:user:lark-person',
+                    last_active_at=1,
+                    created_at=1,
+                    updated_at=1,
+                ),
+                User(
+                    id='unlinked',
+                    name='Reed',
+                    email='reed@example.invalid',
+                    role='admin',
+                    last_active_at=1,
+                    created_at=1,
+                    updated_at=1,
+                ),
+            ]
+        )
+        await db.flush()
+        db.add(GroupMember(id='membership', group_id='old', user_id='fern', created_at=1, updated_at=1))
+        await db.commit()
+        yield db
     await engine.dispose()

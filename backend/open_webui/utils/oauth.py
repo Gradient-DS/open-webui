@@ -44,8 +44,8 @@ from open_webui.config import (
     OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID,
     OAUTH_ADMIN_ROLES,
     OAUTH_ALLOWED_DOMAINS,
-    OAUTH_ALLOWED_TENANTS,
     OAUTH_ALLOWED_ROLES,
+    OAUTH_ALLOWED_TENANTS,
     OAUTH_AUDIENCE,
     OAUTH_AUTHORIZE_PARAMS,
     OAUTH_BLOCKED_GROUPS,
@@ -53,7 +53,6 @@ from open_webui.config import (
     OAUTH_EMAIL_CLAIM,
     OAUTH_GROUP_DEFAULT_SHARE,
     OAUTH_GROUPS_CLAIM,
-    OAUTH_GROUPS_SEPARATOR,
     OAUTH_INVITE_REQUIRED,
     OAUTH_PICTURE_CLAIM,
     OAUTH_PROVIDERS,
@@ -81,16 +80,16 @@ from open_webui.env import (
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.auths import Auths
 from open_webui.models.config import Config
-from open_webui.models.groups import GroupForm, GroupModel, Groups, GroupUpdateForm
 from open_webui.models.invites import Invites
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import Users
 from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
 from open_webui.soev import identity, silent_connect
+from open_webui.soev.group_policy import refuse_group_write
 from open_webui.utils.auth import (
     create_token,
-    get_password_hash,
     get_optional_verified_user_from_request,
+    get_password_hash,
     get_verified_user_by_id,
     revoke_user_tokens,
 )
@@ -653,7 +652,7 @@ async def get_oauth_client_info_with_dynamic_client_registration(
                     log.error(
                         f'Dynamic client registration failed at {registration_url}: {oauth_client_registration_response.status} - {error_text}'
                     )
-                except Exception as e:
+                except Exception:
                     pass
 
                 log.error(f'Error parsing client registration response: {e}')
@@ -1669,163 +1668,7 @@ class OAuthManager:
         return user
 
     async def update_user_groups(self, request, user, user_data, default_permissions, db=None):
-        auth_config = await get_oauth_runtime_config()
-        log.debug('Running OAUTH Group management')
-        oauth_claim = auth_config.OAUTH_GROUPS_CLAIM
-
-        try:
-            blocked_groups = JSONCodec.loads(auth_config.OAUTH_BLOCKED_GROUPS)
-        except Exception as e:
-            log.exception(f'Error loading OAUTH_BLOCKED_GROUPS: {e}')
-            blocked_groups = []
-
-        user_oauth_groups = []
-        # Nested claim search for groups claim
-        if oauth_claim:
-            claim_data = user_data
-            nested_claims = oauth_claim.split('.')
-            for nested_claim in nested_claims:
-                claim_data = claim_data.get(nested_claim, {})
-
-            if isinstance(claim_data, list):
-                user_oauth_groups = claim_data
-            elif isinstance(claim_data, str):
-                # Split by the configured separator if present
-                if OAUTH_GROUPS_SEPARATOR in claim_data:
-                    user_oauth_groups = claim_data.split(OAUTH_GROUPS_SEPARATOR)
-                else:
-                    user_oauth_groups = [claim_data]
-            else:
-                user_oauth_groups = []
-
-        user_current_groups: list[GroupModel] = await Groups.get_groups_by_member_id(user.id, db=db)
-        all_available_groups: list[GroupModel] = await Groups.get_all_groups(db=db)
-
-        # Create groups if they don't exist and creation is enabled
-        if auth_config.ENABLE_OAUTH_GROUP_CREATION:
-            log.debug('Checking for missing groups to create...')
-            all_group_names = {g.name for g in all_available_groups}
-            groups_created = False
-            # Determine creator ID: Prefer admin, fallback to current user if no admin exists
-            admin_user = await Users.get_super_admin_user()
-            creator_id = admin_user.id if admin_user else user.id
-            log.debug('Using creator ID %s for potential group creation.', creator_id)
-
-            for group_name in user_oauth_groups:
-                if group_name not in all_group_names:
-                    log.info("Group '%s' not found via OAuth claim. Creating group...", group_name)
-                    try:
-                        new_group_form = GroupForm(
-                            name=group_name,
-                            description=f"Group '{group_name}' created automatically via OAuth.",
-                            permissions=default_permissions,  # Use default permissions from function args
-                            data={'config': {'share': auth_config.OAUTH_GROUP_DEFAULT_SHARE}},
-                        )
-                        # Use determined creator ID (admin or fallback to current user)
-                        created_group = await Groups.insert_new_group(creator_id, new_group_form, db=db)
-                        if created_group:
-                            log.info(
-                                "Successfully created group '%s' with ID %s using creator ID %s",
-                                group_name,
-                                created_group.id,
-                                creator_id,
-                            )
-                            groups_created = True
-                            # Add to local set to prevent duplicate creation attempts in this run
-                            all_group_names.add(group_name)
-                            await publish_event(
-                                request,
-                                EVENTS.GROUP_CREATED,
-                                subject_id=created_group.id,
-                                source='oauth',
-                                data={'name': created_group.name},
-                            )
-                        else:
-                            log.error(f"Failed to create group '{group_name}' via OAuth.")
-                    except Exception as e:
-                        log.error(f"Error creating group '{group_name}' via OAuth: {e}")
-
-            # Refresh the list of all available groups if any were created
-            if groups_created:
-                all_available_groups = await Groups.get_all_groups(db=db)
-                log.debug('Refreshed list of all available groups after creation.')
-
-        log.debug('Oauth Groups claim: %s', oauth_claim)
-        log.debug('User oauth groups: %s', user_oauth_groups)
-        log.debug("User's current groups: %s", [g.name for g in user_current_groups])
-        log.debug('All groups available in OpenWebUI: %s', [g.name for g in all_available_groups])
-
-        # Remove groups that user is no longer a part of
-        for group_model in user_current_groups:
-            if (
-                user_oauth_groups
-                and group_model.name not in user_oauth_groups
-                and not is_in_blocked_groups(group_model.name, blocked_groups)
-            ):
-                # Remove group from user
-                log.debug('Removing user from group %s as it is no longer in their oauth groups', group_model.name)
-                if await Groups.remove_users_from_group(group_model.id, [user.id], db=db):
-                    await publish_event(
-                        request,
-                        EVENTS.GROUP_MEMBER_REMOVED,
-                        actor=user,
-                        subject_id=group_model.id,
-                        source='oauth',
-                        data={'user_ids': [user.id]},
-                    )
-
-                # In case a group is created, but perms are never assigned to the group by hitting "save"
-                group_permissions = group_model.permissions
-                if not group_permissions:
-                    group_permissions = default_permissions
-
-                await Groups.update_group_by_id(
-                    id=group_model.id,
-                    form_data=GroupUpdateForm(
-                        name=group_model.name,
-                        description=group_model.description,
-                        permissions=group_permissions,
-                    ),
-                    overwrite=False,
-                    db=db,
-                )
-
-        # Add user to new groups
-        for group_model in all_available_groups:
-            if (
-                user_oauth_groups
-                and group_model.name in user_oauth_groups
-                and not any(gm.name == group_model.name for gm in user_current_groups)
-                and not is_in_blocked_groups(group_model.name, blocked_groups)
-            ):
-                # Add user to group
-                log.debug('Adding user to group %s as it was found in their oauth groups', group_model.name)
-
-                if await Groups.add_users_to_group(group_model.id, [user.id], db=db):
-                    await publish_event(
-                        request,
-                        EVENTS.GROUP_MEMBER_ADDED,
-                        actor=user,
-                        subject_id=group_model.id,
-                        source='oauth',
-                        data={'user_ids': [user.id]},
-                    )
-
-                # In case a group is created, but perms are never assigned to the group by hitting "save"
-                group_permissions = group_model.permissions
-                if not group_permissions:
-                    group_permissions = default_permissions
-
-                await Groups.update_group_by_id(
-                    id=group_model.id,
-                    form_data=GroupUpdateForm(
-                        name=group_model.name,
-                        description=group_model.description,
-                        permissions=group_permissions,
-                    ),
-                    overwrite=False,
-                    db=db,
-                )
+        refuse_group_write()
 
     async def _process_picture_url(self, picture_url: str, access_token: str = None) -> str:
         """Process a picture URL and return a base64 encoded data URL.

@@ -29,6 +29,7 @@ def test_object_route_rejects_unverified_identity(seeded, principal):
 @pytest.mark.parametrize('kind', ('chat', 'file', 'note', 'folder', 'model', 'prompt', 'tool', 'knowledge'))
 def test_admin_keeps_owned_resource_access_without_bypass(seeded, monkeypatch, kind):
     from open_webui import config
+
     from .test_matrix import request_for
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', False)
@@ -127,7 +128,6 @@ def test_filter_grants_by_seeded_sharing_permissions(
 def test_database_grants_are_scoped_and_revocable(seeded, kind):
     async def check():
         from open_webui.models.access_grants import AccessGrants
-        from open_webui.models.groups import Groups
         from open_webui.utils.access_control import has_access
 
         await seed_resource(seeded, kind)
@@ -147,7 +147,13 @@ def test_database_grants_are_scoped_and_revocable(seeded, kind):
         assert not await AccessGrants.has_access('reader', 'unrelated_type', 'target', 'read')
         assert not await AccessGrants.has_access('other_group', kind, 'target', 'read')
         assert await AccessGrants.get_accessible_resource_ids('reader', kind, ['target', 'missing']) == {'target'}
-        await Groups.set_group_user_ids_by_id('readers', [])
+        from open_webui.internal.db import get_async_db_context
+        from open_webui.models.groups import GroupMember
+        from sqlalchemy import delete
+
+        async with get_async_db_context() as db:
+            await db.execute(delete(GroupMember).where(GroupMember.group_id == 'readers'))
+            await db.commit()
         assert not await AccessGrants.has_access('reader', kind, 'target', 'read')
         await AccessGrants.set_access_grants(
             kind, 'target', [{'principal_type': 'user', 'principal_id': 'outsider', 'permission': 'write'}]
@@ -386,7 +392,7 @@ def test_deleting_a_file_detaches_it_from_the_models_holding_it(seeded, monkeypa
 def test_folder_file_entries_require_valid_readable_targets(seeded):
     async def check():
         from open_webui.models.users import Users
-        from open_webui.utils.access_control.files import get_accessible_folder_files, can_read_all_folder_files
+        from open_webui.utils.access_control.files import can_read_all_folder_files, get_accessible_folder_files
 
         await seed_resource(seeded, 'note')
         user = await Users.get_user_by_id('reader')
@@ -404,8 +410,8 @@ def test_folder_file_entries_require_valid_readable_targets(seeded):
 @pytest.mark.parametrize('bypass', (False, True))
 @pytest.mark.parametrize('principal', PRINCIPALS)
 def test_shared_chat_read_matrix(seeded, monkeypatch, bypass, principal):
-    from open_webui.routers import chats
     from open_webui import config
+    from open_webui.routers import chats
 
     # admin owner reader writer outsider other_group wildcard reader
     expected = 'DAAADDA'[PRINCIPALS.index(principal)] == 'A'
@@ -439,8 +445,8 @@ def test_shared_chat_read_matrix(seeded, monkeypatch, bypass, principal):
     [(False, False, False), (True, False, True), (False, True, True), (True, True, True)],
 )
 def test_model_listing_bypass_flags(seeded, monkeypatch, admin_bypass, model_bypass, allowed):
-    from open_webui.utils import models
     from open_webui import config
+    from open_webui.utils import models
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', admin_bypass)
     monkeypatch.setattr(models, 'BYPASS_MODEL_ACCESS_CONTROL', model_bypass)

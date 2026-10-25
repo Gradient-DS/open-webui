@@ -86,7 +86,7 @@ async def test_a_saved_assistant_gets_a_collection_its_users_read_and_its_files_
     await assistant_files.sync('helper')
     collection = saved.api.collections[KEY]
     assert collection['created_by'] == 'owui:user:bob'
-    assert {'owui:group:juristen', 'owui:user:carol', 'owui:user:bob'} <= set(collection['principals'])
+    assert {'platform:group:juristen', 'owui:user:carol', 'owui:user:bob'} <= set(collection['principals'])
     assert collection['writers'] == ['owui:user:bob', 'owui:user:carol']
     assert ingest.is_assistant_collection(KEY) and not ingest.is_attachments_collection(KEY)
     assert saved.submitted == [('f1', KEY, 'bob'), ('f2', KEY, 'bob')]
