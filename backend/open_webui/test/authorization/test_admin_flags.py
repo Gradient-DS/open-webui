@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from open_webui import config
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -13,7 +14,6 @@ from .test_matrix import seed_resource
 
 @pytest.fixture(params=[False, True])
 def bypass(request, seeded, monkeypatch):
-    from open_webui import config
 
     for flag in ('BYPASS_ADMIN_ACCESS_CONTROL', 'ENABLE_ADMIN_CHAT_ACCESS', 'ENABLE_ADMIN_EXPORT'):
         monkeypatch.setattr(config, flag, request.param)
@@ -55,54 +55,11 @@ def test_knowledge_files(seeded, bypass, suffix):
     assert response.status_code == 200 if bypass else response.status_code in (400, 403), response.text
 
 
-@pytest.mark.parametrize(
-    'method,suffix,body',
-    [
-        ('GET', '/messages', None),
-        ('GET', '/messages/pinned', None),
-        ('GET', '/messages/message', None),
-        ('GET', '/messages/message/data', None),
-        ('GET', '/messages/message/thread', None),
-        ('POST', '/messages/message/update', {'content': 'changed'}),
-        ('POST', '/messages/message/pin', {'is_pinned': True}),
-        ('DELETE', '/messages/message/delete', None),
-        ('GET', '/webhooks', None),
-    ],
-)
-def test_channel_messages_without_membership(seeded, bypass, method, suffix, body):
-    from open_webui.models.messages import Message
-
-    seeded.run(seed_resource, seeded, 'channel')
-    with Session(seeded.engine) as db:
-        db.add(
-            Message(
-                id='message',
-                user_id='owner',
-                channel_id='target',
-                content='private',
-                data={},
-                created_at=1,
-                updated_at=1,
-            )
-        )
-        db.commit()
-    response = seeded.client.request(
-        method, '/api/v1/channels/target' + suffix, json=body, headers=seeded.headers('admin')
-    )
-    assert response.status_code == (200 if bypass else 403), response.text
-    if not bypass:
-        with Session(seeded.engine) as db:
-            assert db.get(Message, 'message').content == 'private'
-
-
-@pytest.mark.parametrize('chat_access', [False, True])
 @pytest.mark.parametrize('delete_contents', [False, True])
-def test_folder_chat_cascade_requires_both_flags(seeded, monkeypatch, bypass, chat_access, delete_contents):
-    from open_webui import config
+def test_folder_chat_cascade_requires_ownership(seeded, monkeypatch, bypass, delete_contents):
     from open_webui.models.chats import Chat
     from open_webui.models.folders import Folder
 
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', chat_access)
     seeded.run(seed_resource, seeded, 'folder')
     seeded.run(seed_resource, seeded, 'chat')
     with Session(seeded.engine) as db:
@@ -111,7 +68,7 @@ def test_folder_chat_cascade_requires_both_flags(seeded, monkeypatch, bypass, ch
     response = seeded.client.delete(
         f'/api/v1/folders/target?delete_contents={str(delete_contents).lower()}', headers=seeded.headers('admin')
     )
-    allowed = bypass and chat_access
+    allowed = False
     assert response.status_code == (200 if allowed else 403), response.text
     with Session(seeded.engine) as db:
         chat = db.get(Chat, 'target')
@@ -163,22 +120,7 @@ def test_feedback_content(seeded, bypass, monkeypatch, method, path, body):
             assert db.get(Feedback, 'feedback').snapshot['chat']['title'] == 'private'
 
 
-@pytest.mark.parametrize('path', ['/chats/list/user/owner', '/chats/all/db', '/utils/db/download', '/utils/db/export'])
-def test_admin_listing_and_exports(seeded, bypass, monkeypatch, path):
-    from open_webui import config
-    from open_webui.internal import db as database
-
-    seeded.run(seed_resource, seeded, 'chat')
-    if path.startswith('/chats/list'):
-        monkeypatch.setattr(config, 'ENABLE_ADMIN_EXPORT', not bypass)
-    else:
-        monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', not bypass)
-    monkeypatch.setattr(database, 'engine', seeded.engine)
-    response = seeded.client.get('/api/v1' + path, headers=seeded.headers('admin'))
-    assert response.status_code == (200 if bypass else 401), response.text
-
-
-@pytest.mark.parametrize('kind', ['note', 'model', 'prompt', 'tool', 'skill', 'knowledge', 'channel'])
+@pytest.mark.parametrize('kind', ['note', 'model', 'prompt', 'tool', 'skill', 'knowledge'])
 def test_admin_reader_has_no_write_access(seeded, bypass, kind):
     from open_webui.models.access_grants import AccessGrants
 
@@ -199,8 +141,7 @@ def test_admin_reader_has_no_write_access(seeded, bypass, kind):
 
 
 @pytest.mark.parametrize('internal', [False, True])
-def test_internal_chats_require_chat_flag(seeded, bypass, monkeypatch, internal):
-    from open_webui import config
+def test_internal_chats_require_ownership(seeded, bypass, monkeypatch, internal):
     from open_webui.models.chats import Chat
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', not bypass)
@@ -210,7 +151,7 @@ def test_internal_chats_require_chat_flag(seeded, bypass, monkeypatch, internal)
             db.execute(update(Chat).where(Chat.id == 'target').values(meta={'internal': True, 'type': 'note'}))
             db.commit()
     response = seeded.client.get('/api/v1/chats/target', headers=seeded.headers('admin'))
-    assert response.status_code == (200 if bypass else 401), response.text
+    assert response.status_code == 401, response.text
 
 
 @pytest.mark.parametrize(
@@ -299,7 +240,6 @@ def test_runtime_content_helpers(seeded, bypass, kind):
 @pytest.mark.parametrize('export_enabled', [False, True])
 @pytest.mark.parametrize('kind', ['model', 'tool', 'skill'])
 def test_workspace_bulk_exports_need_export_flag(seeded, bypass, monkeypatch, export_enabled, kind):
-    from open_webui import config
 
     monkeypatch.setattr(config, 'ENABLE_ADMIN_EXPORT', export_enabled)
     seeded.run(seed_resource, seeded, kind)
@@ -314,8 +254,7 @@ def test_workspace_bulk_exports_need_export_flag(seeded, bypass, monkeypatch, ex
     assert bool(response.json()) is (bypass and export_enabled)
 
 
-def test_shared_folder_chats_use_chat_flag(seeded, bypass, monkeypatch):
-    from open_webui import config
+def test_shared_folder_chats_require_folder_access(seeded, bypass, monkeypatch):
     from open_webui.models.chats import Chat
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', not bypass)
@@ -325,12 +264,12 @@ def test_shared_folder_chats_use_chat_flag(seeded, bypass, monkeypatch):
         db.execute(update(Chat).where(Chat.id == 'target').values(folder_id='target'))
         db.commit()
     response = seeded.client.get('/api/v1/folders/target/shared/chats', headers=seeded.headers('admin'))
-    assert response.status_code == (200 if bypass else 403), response.text
+    assert response.status_code == 403, response.text
 
 
 def test_chat_runtime_ownership(seeded, bypass, monkeypatch):
     from fastapi import HTTPException
-    from open_webui import config, main
+    from open_webui import main
     from open_webui.models.users import Users
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', not bypass)
@@ -338,12 +277,9 @@ def test_chat_runtime_ownership(seeded, bypass, monkeypatch):
 
     async def check():
         user = await Users.get_user_by_id('admin')
-        if bypass:
+        with pytest.raises(HTTPException) as denied:
             await main.verify_chat_ownership('target', user)
-        else:
-            with pytest.raises(HTTPException) as denied:
-                await main.verify_chat_ownership('target', user)
-            assert denied.value.status_code == 404
+        assert denied.value.status_code == 404
 
     seeded.run(check)
 
@@ -388,17 +324,14 @@ def seed_chat_message(seeded, deleted=False):
         '/analytics/models/model/chats',
     ],
 )
-def test_analytics_content_needs_chat_flag(seeded, bypass, monkeypatch, path):
-    from open_webui import config
+def test_analytics_content_requires_ownership(seeded, bypass, monkeypatch, path):
 
     # Only the chat flag decides; the other admin flags must not open it.
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
     monkeypatch.setattr(config, 'ENABLE_ADMIN_EXPORT', True)
     seed_chat_message(seeded)
     response = seeded.client.get('/api/v1' + path, headers=seeded.headers('admin'))
-    assert response.status_code == (200 if bypass else 403), response.text
-    if bypass:
-        assert 'private' in response.text or 'original' in response.text
+    assert response.status_code == 404, response.text
 
 
 @pytest.mark.parametrize('path', ['/analytics/summary', '/analytics/models', '/analytics/users', '/analytics/tokens'])
@@ -407,17 +340,6 @@ def test_analytics_aggregates_stay_open(seeded, bypass, path):
     response = seeded.client.get('/api/v1' + path, headers=seeded.headers('admin'))
     assert response.status_code == 200, response.text
     assert 'private' not in response.text and 'original' not in response.text
-
-
-@pytest.mark.parametrize('query', ['chat_id=target', 'user_id=owner', 'model_id=model'])
-def test_analytics_messages_skip_deleted_chats(seeded, monkeypatch, query):
-    from open_webui import config
-
-    monkeypatch.setattr(config, 'ENABLE_ADMIN_CHAT_ACCESS', True)
-    seed_chat_message(seeded, deleted=True)
-    response = seeded.client.get(f'/api/v1/analytics/messages?{query}', headers=seeded.headers('admin'))
-    assert response.status_code == 200, response.text
-    assert response.json() == []
 
 
 def seed_archive(seeded, owner):
@@ -442,8 +364,7 @@ def seed_archive(seeded, owner):
 
 @pytest.mark.parametrize('owner', ['owner', 'admin'])
 @pytest.mark.parametrize('suffix', ['', '/export'])
-def test_archive_content_needs_chat_flag(seeded, bypass, monkeypatch, owner, suffix):
-    from open_webui import config
+def test_archive_content_requires_ownership(seeded, bypass, monkeypatch, owner, suffix):
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
     seed_archive(seeded, owner)
@@ -451,13 +372,12 @@ def test_archive_content_needs_chat_flag(seeded, bypass, monkeypatch, owner, suf
         '/api/v1/archives/admin/config', json={'enable_user_archival': True}, headers=seeded.headers('admin')
     )
     response = seeded.client.get('/api/v1/archives/archive' + suffix, headers=seeded.headers('admin'))
-    allowed = bypass or owner == 'admin'
+    allowed = owner == 'admin'
     assert response.status_code == (200 if allowed else 403), response.text
     assert ('private' in response.text) is allowed
 
 
-def test_archive_of_living_user_needs_chat_flag(seeded, bypass, monkeypatch):
-    from open_webui import config
+def test_archive_of_living_user_requires_ownership(seeded, bypass, monkeypatch):
     from open_webui.models.user_archives import UserArchive
 
     monkeypatch.setattr(config, 'BYPASS_ADMIN_ACCESS_CONTROL', True)
@@ -468,9 +388,9 @@ def test_archive_of_living_user_needs_chat_flag(seeded, bypass, monkeypatch):
     )
     assert enabled.status_code == 200, enabled.text
     response = seeded.client.post('/api/v1/archives/user/owner', json={'reason': 'x'}, headers=seeded.headers('admin'))
-    assert response.status_code == (200 if bypass else 403), response.text
+    assert response.status_code == 403, response.text
     with Session(seeded.engine) as db:
-        assert (db.query(UserArchive).count() == 1) is bypass
+        assert db.query(UserArchive).count() == 0
 
 
 def test_oauth_sessions_never_return_tokens(seeded, bypass):

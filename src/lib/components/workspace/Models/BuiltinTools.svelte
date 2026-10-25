@@ -13,7 +13,6 @@
 	const toolConfigGuards: Record<string, string> = {
 		memory: 'enable_memories',
 		notes: 'enable_notes',
-		channels: 'enable_channels',
 		knowledge: 'feature_knowledge',
 		web_search: 'enable_web_search',
 		image_generation: 'enable_image_generation',
@@ -48,10 +47,6 @@
 		files: {
 			label: $i18n.t('Files'),
 			description: $i18n.t('List, search, and read files attached to the current chat')
-		},
-		channels: {
-			label: $i18n.t('Channels'),
-			description: $i18n.t('Search channels and channel messages')
 		},
 		notifications: {
 			label: $i18n.t('Notifications'),

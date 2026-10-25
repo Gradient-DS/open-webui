@@ -3,15 +3,13 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from open_webui.constants import ERROR_MESSAGES
+from fastapi import APIRouter, Depends, Query
 from open_webui.internal.db import get_async_session
-from open_webui.models.chat_messages import ChatMessageModel, ChatMessages
+from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chats
 from open_webui.models.feedbacks import Feedbacks
 from open_webui.models.groups import Groups
 from open_webui.models.users import Users
-from open_webui.utils.access_control import can_access_admin_chats
 from open_webui.utils.auth import get_admin_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,13 +18,6 @@ log = logging.getLogger(__name__)
 
 
 router = APIRouter()
-
-
-def get_admin_chat_reader(user=Depends(get_admin_user)):
-    """Admin who may read other users' chats; aggregate endpoints only need get_admin_user."""
-    if not can_access_admin_chats(user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-    return user
 
 
 ####################
@@ -129,33 +120,6 @@ async def get_user_analytics(
         )
 
     return UserAnalyticsResponse(users=users)
-
-
-@router.get('/messages', response_model=list[ChatMessageModel])
-async def get_messages(
-    model_id: Optional[str] = Query(None, description='Filter by model ID'),
-    user_id: Optional[str] = Query(None, description='Filter by user ID'),
-    chat_id: Optional[str] = Query(None, description='Filter by chat ID'),
-    start_date: Optional[int] = Query(None, description='Start timestamp (epoch)'),
-    end_date: Optional[int] = Query(None, description='End timestamp (epoch)'),
-    skip: int = Query(0),
-    limit: int = Query(50, le=100),
-    user=Depends(get_admin_chat_reader),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Query messages of live chats; every given filter applies."""
-    if not (chat_id or model_id or user_id):
-        return []
-    return await ChatMessages.get_live_messages(
-        chat_id=chat_id,
-        model_id=model_id,
-        user_id=user_id,
-        start_date=start_date,
-        end_date=end_date,
-        skip=skip,
-        limit=limit,
-        db=db,
-    )
 
 
 class SummaryResponse(BaseModel):
@@ -263,64 +227,6 @@ async def get_token_usage(
         total_input_tokens=total_input,
         total_output_tokens=total_output,
         total_tokens=total_input + total_output,
-    )
-
-
-####################
-# Model Chats Browser
-####################
-
-
-class ModelChatEntry(BaseModel):
-    chat_id: str
-    user_id: Optional[str] = None
-    user_name: Optional[str] = None
-    first_message: Optional[str] = None
-    updated_at: int
-
-
-class ModelChatsResponse(BaseModel):
-    chats: list[ModelChatEntry]
-    total: int
-
-
-MODEL_CHAT_ORDER_FIELDS = {'title', 'updated_at', 'user_name'}
-
-
-@router.get('/models/{model_id:path}/chats', response_model=ModelChatsResponse)
-async def get_model_chats(
-    model_id: str,
-    start_date: Optional[int] = Query(None),
-    end_date: Optional[int] = Query(None),
-    skip: int = Query(0),
-    limit: int = Query(50, le=100),
-    order_by: str = Query('updated_at'),
-    direction: str = Query('desc'),
-    user=Depends(get_admin_chat_reader),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Get chats that used a specific model, with preview and feedback info."""
-    filter = {}
-    if start_date:
-        filter['start_date'] = start_date
-    if end_date:
-        filter['end_date'] = end_date
-    if order_by in MODEL_CHAT_ORDER_FIELDS:
-        filter['order_by'] = order_by
-    if direction in {'asc', 'desc'}:
-        filter['direction'] = direction
-
-    result = await Chats.get_chats_by_model_id(
-        model_id=model_id,
-        filter=filter,
-        skip=skip,
-        limit=limit,
-        db=db,
-    )
-
-    return ModelChatsResponse(
-        chats=[ModelChatEntry.model_validate(chat) for chat in result['items']],
-        total=result['total'] or 0,
     )
 
 

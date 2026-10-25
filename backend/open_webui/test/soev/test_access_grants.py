@@ -262,7 +262,7 @@ async def test_revoke_all_access_returns_to_owner_only(env):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('resource_type', ['model', 'prompt', 'tool', 'note', 'channel', 'file'])
+@pytest.mark.parametrize('resource_type', ['model', 'prompt', 'tool', 'note', 'file'])
 async def test_every_other_resource_type_is_untouched(identity_config, resource_type, monkeypatch):
     """Every non-knowledge override executes the original SQL against an isolated access-grant table."""
     models = importlib.import_module('open_webui.models.access_grants')

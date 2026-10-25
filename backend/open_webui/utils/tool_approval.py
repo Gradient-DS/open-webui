@@ -8,7 +8,6 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.json_codec import JSONCodec
-from open_webui.utils.access_control import can_access_admin_chats
 
 
 class ResolveToolCallForm(BaseModel):
@@ -26,7 +25,7 @@ async def resolve_tool_call_output(
     db: AsyncSession | None = None,
 ) -> dict:
     chat = await Chats.get_chat_by_id(chat_id, db=db)
-    if not chat or (chat.user_id != user.id and not can_access_admin_chats(user)):
+    if not chat or (chat.user_id != user.id):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,

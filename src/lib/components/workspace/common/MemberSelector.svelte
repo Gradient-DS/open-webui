@@ -10,7 +10,7 @@
 
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
-	import ProfilePreview from '$lib/components/channel/Messages/Message/ProfilePreview.svelte';
+	import ProfilePreview from '$lib/components/common/ProfilePreview.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';

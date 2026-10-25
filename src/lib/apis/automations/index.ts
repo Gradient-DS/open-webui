@@ -6,8 +6,7 @@ export type AutomationTerminalConfig = {
 };
 
 export type AutomationTarget = {
-	type: 'chat' | 'channel';
-	channel_id?: string | null;
+	type: 'chat';
 };
 
 export type AutomationData = {

@@ -30,20 +30,17 @@ from open_webui.env import (
     WEBSOCKET_SERVER_PING_TIMEOUT,
 )
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
 from open_webui.models.folders import Folders
 from open_webui.models.groups import Groups
 from open_webui.models.notes import Notes, NoteUpdateForm
-from open_webui.models.users import Users, UserNameResponse
+from open_webui.models.users import Users
 from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
 from open_webui.tasks import create_task, stop_item_tasks
-from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_verified_user_by_token
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.json_codec import SOCKETIO_JSON
 from open_webui.utils.lazy_resource import lazy  # [Gradient] Bind Redis clients on the running loop.
-from open_webui.utils.misc import get_output_text
 from open_webui.utils.redis import (
     build_sentinel_url,
     get_redis_connection,
@@ -496,13 +493,6 @@ async def user_join(sid, data):
     await sio.save_session(sid, {'user': socket_user})
     await sio.enter_room(sid, f'user:{user.id}')
 
-    # Join all the channels only if user has channels permission
-    if user.role == 'admin' or await has_permission(user.id, 'features.channels'):
-        channels = await Channels.get_channels_by_user_id(user.id)
-        log.debug('channels=%r', channels)
-        for channel in channels:
-            await sio.enter_room(sid, f'channel:{channel.id}')
-
     return {'id': user.id, 'name': user.name}
 
 
@@ -512,28 +502,6 @@ async def heartbeat(sid, data):
     if user:
         SESSION_POOL[sid] = {**user, 'last_seen_at': int(time.time())}
         await Users.update_last_active_by_id(user['id'])
-
-
-@sio.on('join-channels')
-async def join_channel(sid, data):
-    auth = data['auth'] if 'auth' in data else None
-    if not auth or 'token' not in auth:
-        return
-
-    environ = sio.get_environ(sid) or {}
-    scope = environ.get('asgi.scope') or {}
-    fastapi_app = scope.get('app')
-    redis = getattr(getattr(fastapi_app, 'state', None), 'redis', None) or REDIS
-    user = await get_verified_user_by_token(auth['token'], redis)
-    if not user:
-        return
-
-    # Join all the channels only if user has channels permission
-    if user.role == 'admin' or await has_permission(user.id, 'features.channels'):
-        channels = await Channels.get_channels_by_user_id(user.id)
-        log.debug('channels=%r', channels)
-        for channel in channels:
-            await sio.enter_room(sid, f'channel:{channel.id}')
 
 
 @sio.on('join-note')
@@ -647,35 +615,6 @@ async def close_note_rooms(note_id: str) -> None:
     await sio.close_room(f'note:{note_id}')
     await sio.close_room(f'doc_note:{note_id}')
     await YDOC_MANAGER.clear_document(f'note:{note_id}')
-
-
-@sio.on('events:channel')
-async def channel_events(sid, data):
-    room = f'channel:{data["channel_id"]}'
-    if sid not in (get_room_sid_map(sio.manager, '/', room) or {}):
-        return
-
-    event_data = data['data']
-    event_type = event_data['type']
-
-    user = await get_socket_session_user(sid)
-
-    if not user:
-        return
-
-    if event_type == 'typing':
-        await sio.emit(
-            'events:channel',
-            {
-                'channel_id': data['channel_id'],
-                'message_id': data.get('message_id', None),
-                'data': event_data,
-                'user': UserNameResponse(**user).model_dump(),
-            },
-            room=room,
-        )
-    elif event_type == 'last_read_at':
-        await Channels.update_member_last_read_at(data['channel_id'], user['id'])
 
 
 async def get_folder_unread_counts(user_id: str) -> dict[str, int]:
@@ -1039,121 +978,7 @@ async def _release_temporary_agent_threads(session_ids: list[str]) -> None:
         log.exception('Failed to delete the agent threads of closed temporary chats')
 
 
-async def _make_channel_emitter(request_info):
-    """Event emitter that routes pipeline output to a channel message.
-
-    Translates chat:completion events into channel message:update socket
-    emissions, throttled to avoid flooding with per-token updates.
-    """
-    channel_id = request_info['chat_id'].removeprefix('channel:')
-    message_id = request_info['message_id']
-
-    state = {'last_emit_at': 0.0, 'output': []}
-    THROTTLE_INTERVAL = 0.15  # ~6 updates/sec
-
-    async def _emit_channel_update(
-        content: str,
-        done: bool = False,
-        output: list | None = None,
-        data: dict | None = None,
-    ):
-        from open_webui.models.messages import MessageForm, Messages
-
-        msg = await Messages.get_message_by_id(message_id)
-        if not msg or msg.channel_id != channel_id:
-            return
-
-        update_data = data or ({'output': output} if output else None)
-        update_form = MessageForm(content=content, data=update_data)
-        if done:
-            # Merge done flag into existing meta (preserve model_id etc.)
-            existing_meta = msg.meta or {}
-            update_form = MessageForm(
-                content=content,
-                data=update_data,
-                meta={**existing_meta, 'done': True},
-            )
-
-        await Messages.update_message_by_id(message_id, update_form)
-        message = await Messages.get_message_by_id(message_id)
-        if message:
-            await sio.emit(
-                'events:channel',
-                {
-                    'channel_id': channel_id,
-                    'message_id': message_id,
-                    'data': {
-                        'type': 'message:update',
-                        'data': message.model_dump(),
-                    },
-                },
-                to=f'channel:{channel_id}',
-            )
-
-    async def __channel_emitter__(event_data):
-        event_type = event_data.get('type')
-
-        if event_type == 'chat:completion':
-            data = event_data.get('data', {})
-            output = data.get('output')
-            content = data.get('content') or get_output_text(output)
-            done = data.get('done', False)
-
-            if not content and not output and not done:
-                return
-
-            now = time.time()
-            if done or (now - state['last_emit_at']) >= THROTTLE_INTERVAL:
-                state['last_emit_at'] = now
-                await _emit_channel_update(content, done, output if isinstance(output, list) else None)
-
-        elif event_type == 'response:completion':
-            from open_webui.utils.middleware import handle_responses_streaming_event
-
-            data = event_data.get('data', {})
-            state['output'], _ = handle_responses_streaming_event(data, state['output'])
-            content = get_output_text(state['output'])
-
-            now = time.time()
-            if content and (now - state['last_emit_at']) >= THROTTLE_INTERVAL:
-                state['last_emit_at'] = now
-                await _emit_channel_update(content, False, state['output'])
-
-        elif event_type in ('files', 'chat:message:files'):
-            from open_webui.models.messages import Messages
-
-            files = event_data.get('data', {}).get('files', [])
-            if not files:
-                return
-
-            msg = await Messages.get_message_by_id(message_id)
-            if not msg or msg.channel_id != channel_id:
-                return
-
-            existing_files = (msg.data or {}).get('files')
-            for file in files:
-                if isinstance(file, dict) and file.get('id'):
-                    file['url'] = file['id']
-                    await Channels.add_file_to_channel_by_id(channel_id, file['id'], msg.user_id)
-                    await Channels.set_file_message_id_in_channel_by_id(channel_id, file['id'], message_id)
-
-            if isinstance(existing_files, list):
-                files.extend(existing_files)
-
-            await _emit_channel_update(msg.content, data={'files': files})
-
-        elif event_type == 'chat:message:error':
-            error = event_data.get('data', {}).get('error', {})
-            error_content = error.get('content', 'An error occurred') if isinstance(error, dict) else str(error)
-            await _emit_channel_update(f'Error: {error_content}', done=True)
-
-    return __channel_emitter__
-
-
 async def get_event_emitter(request_info, update_db=True):
-    # Channel mode: route pipeline output to channel message updates
-    if (request_info.get('chat_id') or '').startswith('channel:'):
-        return await _make_channel_emitter(request_info)
 
     async def __event_emitter__(event_data):
         user_id = request_info['user_id']

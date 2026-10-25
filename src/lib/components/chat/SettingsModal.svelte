@@ -697,7 +697,6 @@
 				'version',
 				'update',
 				'community',
-				'channels',
 				'authentication',
 				'ldap',
 				'oauth'

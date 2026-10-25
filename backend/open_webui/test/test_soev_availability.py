@@ -137,7 +137,6 @@ def access(monkeypatch):
     monkeypatch.setattr(files.Knowledges, 'get_knowledge_by_id', AsyncMock(return_value=kb))
     monkeypatch.setattr(files.Knowledges, 'check_access_by_user_id', AsyncMock(return_value=True))
     monkeypatch.setattr(files.Groups, 'get_groups_by_member_id', AsyncMock(return_value=[]))
-    monkeypatch.setattr(files.Channels, 'get_channels_by_file_id_and_user_id', AsyncMock(return_value=[]))
     monkeypatch.setattr(files.Chats, 'get_shared_chat_ids_by_file_id', AsyncMock(return_value=[]))
     monkeypatch.setattr(files.Models, 'get_model_owners_attaching_file', AsyncMock(return_value={}))
     monkeypatch.setattr(files.AccessGrants, 'get_accessible_resource_ids', AsyncMock(return_value=set()))
@@ -157,12 +156,10 @@ async def test_file_access_no_kb_grants_when_unconfigured(soev_state, access, pe
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('grant', ['channel', 'shared_chat', 'model'])
+@pytest.mark.parametrize('grant', ['shared_chat', 'model'])
 async def test_local_grants_still_work_without_soev(access, monkeypatch, grant):
     monkeypatch.setattr(config, 'SOEV_API_URL', '')
-    if grant == 'channel':
-        access.Channels.get_channels_by_file_id_and_user_id.return_value = ['channel']
-    elif grant == 'shared_chat':
+    if grant == 'shared_chat':
         access.Chats.get_shared_chat_ids_by_file_id.return_value = ['chat']
         access.AccessGrants.get_accessible_resource_ids.return_value = {'chat'}
     else:

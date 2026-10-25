@@ -272,8 +272,6 @@ data:
   {{- end }}
   ENABLE_FOLDERS: {{ .Values.openWebui.config.enableFolders | quote }}
   USER_PERMISSIONS_FEATURES_FOLDERS: {{ .Values.openWebui.config.userPermissionsFeaturesFolders | quote }}
-  ENABLE_CHANNELS: {{ .Values.openWebui.config.enableChannels | quote }}
-  USER_PERMISSIONS_FEATURES_CHANNELS: {{ .Values.openWebui.config.userPermissionsFeaturesChannels | quote }}
   ENABLE_COMMUNITY_SHARING: {{ .Values.openWebui.config.enableCommunitySharing | quote }}
   ENABLE_CITATION_RELEVANCE: {{ .Values.openWebui.config.enableCitationRelevance | quote }}
   ENABLE_CITATION_TEXT_HIGHLIGHT: {{ .Values.openWebui.config.enableCitationTextHighlight | quote }}
@@ -310,6 +308,7 @@ data:
   ENABLE_ADMIN_EXPORT: {{ .Values.openWebui.config.enableAdminExport | quote }}
   ENABLE_DATA_EXPORT: {{ .Values.openWebui.config.enableDataExport | quote }}
   DATA_EXPORT_RETENTION_HOURS: {{ .Values.openWebui.config.dataExportRetentionHours | quote }}
+  # Legacy feedback access only.
   ENABLE_ADMIN_CHAT_ACCESS: {{ .Values.openWebui.config.enableAdminChatAccess | quote }}
   ENABLE_ADMIN_ANALYTICS: {{ .Values.openWebui.config.enableAdminAnalytics | quote }}
   ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS: {{ .Values.openWebui.config.enableAdminWorkspaceContentAccess | quote }}

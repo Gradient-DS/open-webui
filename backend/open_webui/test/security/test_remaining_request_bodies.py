@@ -81,7 +81,7 @@ def test_access_grants_keep_nested_extras_and_missing_keys(module_name, mount, m
     elif module_name == 'notes':
         resource = SimpleNamespace(id='resource-1', user_id='control-user', is_pinned=False)
     table_name, getter = {
-        'chats': ('Chats', 'get_chat_by_id'),
+        'chats': ('Chats', 'get_chat_by_id_and_user_id'),
         'folders': ('Folders', 'get_folder_by_id'),
         'knowledge': ('Knowledges', 'get_knowledge_by_id'),
         'notes': ('Notes', 'get_note_by_id'),

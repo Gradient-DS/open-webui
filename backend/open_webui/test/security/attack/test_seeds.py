@@ -544,7 +544,6 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
     entries = {p['key']: p for p in seeds.SURFACE['parameter']}
     for chain in [
         ('folder', 'chat', 'chat_message', 'share'),
-        ('channel', 'channel_message', 'channel_webhook', 'webhook_token'),
         ('knowledge', 'directory'),
         ('calendar', 'event'),
         ('prompt', 'prompt_history'),
@@ -554,7 +553,6 @@ def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
     order = {p['key']: i for i, p in enumerate(seeds.dependency_order(seeds.SURFACE))}
     for key, gate in [
         ('folder', 'folders.enable'),
-        ('channel', 'channels.enable'),
         ('calendar', 'calendar.enable'),
         ('automation', 'automations.enable'),
         ('memory', 'memories.enable'),
@@ -947,9 +945,6 @@ LIVE_READS = [
     '/api/v1/chats/{id}',
     '/api/v1/chats/share/{share_id}',
     '/api/v1/chats/shared/{id}/access',
-    '/api/v1/channels/{id}',
-    '/api/v1/channels/{id}/messages/{message_id}',
-    '/api/v1/channels/{id}/webhooks',
     '/api/v1/knowledge/{id}',
     '/api/v1/knowledge/external/connections/{id}',
     '/api/v1/files/{id}',

@@ -91,7 +91,6 @@
 		width: '',
 		height: ''
 	};
-	let imageCompressionInChannels = true;
 
 	// chat export
 	let stylizedPdfExport = true;
@@ -388,7 +387,6 @@
 
 		imageCompression = currentSettings?.imageCompression ?? false;
 		imageCompressionSize = currentSettings?.imageCompressionSize ?? { width: '', height: '' };
-		imageCompressionInChannels = currentSettings?.imageCompressionInChannels ?? true;
 
 		defaultModelId = currentSettings?.models?.at(0) ?? '';
 		if ($config?.default_models) {
@@ -1895,29 +1893,4 @@
 			{$i18n.t('Compress uploaded images before sending or storage.')}
 		</p>
 	</div>
-
-	{#if imageCompression}
-		<div>
-			<div class={settingRowClass}>
-				<div id="image-compression-in-channels-label" class={settingLabelClass}>
-					{$i18n.t('Compress Images in Channels')}
-				</div>
-
-				<div class={settingControlClass}>
-					<Switch
-						ariaLabelledbyId="image-compression-in-channels-label"
-						tooltip={true}
-						bind:state={imageCompressionInChannels}
-						inherited={isDefaultSetting('imageCompressionInChannels')}
-						on:change={() => {
-							saveSettings({ imageCompressionInChannels });
-						}}
-					/>
-				</div>
-			</div>
-			<p class={settingDescriptionClass}>
-				{$i18n.t('Apply image compression to channel uploads too.')}
-			</p>
-		</div>
-	{/if}
 </div>

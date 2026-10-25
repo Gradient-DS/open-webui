@@ -226,64 +226,6 @@ class EventDefinitions(BaseModel):
         description='A message-level event was received.',
         message='Message event received',
     )
-    MESSAGE_REACTION_ADDED: EventDefinition = EventDefinition(
-        name='message.reaction_added',
-        description='A reaction was added to a message.',
-        message='Message reaction added',
-    )
-    MESSAGE_REACTION_REMOVED: EventDefinition = EventDefinition(
-        name='message.reaction_removed',
-        description='A reaction was removed from a message.',
-        message='Message reaction removed',
-    )
-    MESSAGE_PINNED: EventDefinition = EventDefinition(
-        name='message.pinned', description='A message was pinned.', message='Message pinned'
-    )
-    MESSAGE_UNPINNED: EventDefinition = EventDefinition(
-        name='message.unpinned', description='A message was unpinned.', message='Message unpinned'
-    )
-    CHANNEL_CREATED: EventDefinition = EventDefinition(
-        name='channel.created', description='A channel was created.', message='Channel created'
-    )
-    CHANNEL_UPDATED: EventDefinition = EventDefinition(
-        name='channel.updated', description='A channel was updated.', message='Channel updated'
-    )
-    CHANNEL_DELETED: EventDefinition = EventDefinition(
-        name='channel.deleted', description='A channel was deleted.', message='Channel deleted'
-    )
-    CHANNEL_MEMBER_ADDED: EventDefinition = EventDefinition(
-        name='channel.member_added', description='A member was added to a channel.', message='Channel member added'
-    )
-    CHANNEL_MEMBER_REMOVED: EventDefinition = EventDefinition(
-        name='channel.member_removed',
-        description='A member was removed from a channel.',
-        message='Channel member removed',
-    )
-    CHANNEL_MEMBER_ACTIVE_UPDATED: EventDefinition = EventDefinition(
-        name='channel.member_active_updated',
-        description='A channel member active state was updated.',
-        message='Channel member active updated',
-    )
-    CHANNEL_MESSAGE: EventDefinition = EventDefinition(
-        name='channel.message',
-        description='A channel message was posted.',
-        message='Channel message',
-    )
-    CHANNEL_WEBHOOK_CREATED: EventDefinition = EventDefinition(
-        name='channel.webhook.created',
-        description='A channel incoming webhook was created.',
-        message='Channel Webhook created',
-    )
-    CHANNEL_WEBHOOK_UPDATED: EventDefinition = EventDefinition(
-        name='channel.webhook.updated',
-        description='A channel incoming webhook was updated.',
-        message='Channel Webhook updated',
-    )
-    CHANNEL_WEBHOOK_DELETED: EventDefinition = EventDefinition(
-        name='channel.webhook.deleted',
-        description='A channel incoming webhook was deleted.',
-        message='Channel Webhook deleted',
-    )
     FILE_UPLOADED: EventDefinition = EventDefinition(
         name='file.uploaded', description='A file was uploaded.', message='File uploaded'
     )
@@ -669,7 +611,6 @@ EVENT_CATALOG_SET = set(EVENT_CATALOG)
 NOTIFICATION_EVENTS = (
     EVENTS.CHAT_FINISHED.name,
     EVENTS.CHAT_FAILED.name,
-    EVENTS.CHANNEL_MESSAGE.name,
     EVENTS.CALENDAR_ALERT.name,
     EVENTS.RETRIEVAL_CONTENT_PROCESS_FAILED.name,
 )

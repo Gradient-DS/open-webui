@@ -125,16 +125,14 @@ def test_share_snapshot_of_a_legacy_row_drops_embedded_paths(seeded):
     assert_no_storage_path(stored(seeded, SharedChat, response.json()['share_id'], 'chat'))
 
 
-def test_folder_channel_and_assistant_data_drop_embedded_paths():
+def test_folder_and_assistant_data_drop_embedded_paths():
     from open_webui.models.folders import FolderForm, FolderUpdateForm
-    from open_webui.models.messages import MessageForm
     from open_webui.models.models import ModelMeta
 
     files = {'files': [{'type': 'file', 'id': 'f1', 'file': file_record()}]}
     for model in (
         FolderForm(name='Map', data=files),
         FolderUpdateForm(data=files),
-        MessageForm(content='hoi', data=files),
         ModelMeta(knowledge=files['files']),
     ):
         dumped = model.model_dump_json()

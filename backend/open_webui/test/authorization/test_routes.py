@@ -19,7 +19,6 @@ PUBLIC_ROUTES = {
     'POST /api/v1/auths/signout': 'Clears session cookies, including expired sessions.',
     'POST /api/v1/auths/oauth/{provider}/token/exchange': 'Authenticates an external OAuth token to establish a session.',
     'POST /api/v1/auths/2fa/verify': 'Consumes a partial-login token and second factor before a full session exists.',
-    'POST /api/v1/channels/webhooks/{webhook_id}/{token}': 'Webhook capability token is validated inside the handler.',
     'GET /api/v1/chats/share/{share_id}': 'Anyone-read shares are anonymous; other shares check identity.',
     'WEBSOCKET /api/v1/terminals/{server_id}/api/terminals/{session_id}': 'Public upgrade; first message authenticates before connecting upstream.',
     'GET /api/v1/invites/{token}/validate': 'Validates an invitation capability before account creation.',
