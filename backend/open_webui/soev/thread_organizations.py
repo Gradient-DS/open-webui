@@ -21,6 +21,7 @@ chat = sa.table(
     sa.column('updated_at', sa.BigInteger),
 )
 branches = sa.table('chat_thread', sa.column('chat_id', sa.String), sa.column('thread_id', sa.String))
+legacy_shares = sa.table('shared_chat', sa.column('id'), sa.column('chat_id'), sa.column('user_id'))
 FIELDS = ('id', 'thread_id', 'folder_id', 'pinned', 'archived', 'last_read_at')
 
 
@@ -62,6 +63,29 @@ class ThreadOrganizations:
             )
             for row in rows
         ]
+
+    async def legacy_share(self, share_id: str) -> tuple[str, str, str | None] | None:
+        # Select identity/mapping only. The retired snapshot is never loaded.
+        async with self.session() as db:
+            row = (
+                await db.execute(
+                    sa.select(legacy_shares.c.user_id, chat.c.id, chat.c.thread_id)
+                    .join(chat, chat.c.id == legacy_shares.c.chat_id)
+                    .where(legacy_shares.c.id == share_id)
+                )
+            ).first()
+        return tuple(row) if row is not None else None
+
+    async def folder_records(self, folder_id: str) -> dict[str, str]:
+        async with self.session() as db:
+            rows = (
+                await db.execute(
+                    sa.select(chat.c.thread_id, chat.c.user_id).where(
+                        chat.c.folder_id == folder_id, chat.c.thread_id.is_not(None)
+                    )
+                )
+            ).all()
+        return dict(rows)
 
     async def put(self, user_id: str, record: Organization) -> None:
         values = {name: getattr(record, name) for name in FIELDS if name != 'id'}

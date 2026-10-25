@@ -13,15 +13,11 @@ Set `AGENT_API_ENABLED=true` and configure:
 | --- | --- | --- |
 | `SOEV_API_URL` | `soevApi.url` | Platform base URL |
 | `SOEV_API_KEY` | `secrets.soevApiKey` | Platform caller credential |
-| `SOEV_API_SIGNING_KEY` | `secrets.soevApiSigningKey` | Legacy background assertions only: unencrypted Ed25519 private PEM, preserving newlines |
-| `SOEV_API_AUDIENCE` | `soevApi.audience` | Legacy background assertion audience |
 | `SOEV_API_SERVICE_PRINCIPAL` | `soevApi.servicePrincipal` | Declared Open WebUI service principal |
 
 The chart's routing switch is `openWebui.config.agentApiEnabled: "true"`.
-With External Secrets enabled and a platform URL set, provide `soevApiKey` and
-`soevApiSigningKey` in the configured 1Password item instead of inline secrets.
-Startup validates the product credential when the platform URL is set. Only legacy
-background work loads the signing key, when it first signs. Missing platform
+With External Secrets enabled and a platform URL set, provide `soevApiKey` in the configured 1Password item instead of inline secrets.
+Startup validates the product credential when the platform URL is set. Missing platform
 configuration refuses agent requests; it does not select another transport.
 
 `AGENT_API_AGENTS` (chart `agentApiAgents`) lists the agents an admin can
@@ -78,36 +74,18 @@ service inventory and grant projections, collection ownership
 operations, and credential-scoped job reads/commits. Those calls send neither
 person header. ThreadClient already requires the requester's token.
 
-### Remaining legacy subject assertions
+### Remaining legacy subject callers
 
-Only `identity.build_background_client()` constructs `BackgroundSoevClient`.
-It refuses a user request context or an explicit login token before minting.
-`identity.mint_assertion` also refuses request context, including legacy link
-assertions in JSON bodies. The remaining subject-header callers are listed
-exhaustively below; paths are under `backend/open_webui/soev/`.
+None. OWUI has no subject signer, subject-header client, identity-link publishing
+or impersonation context. User calls require the requesting person's login token;
+service calls explicitly select `SoevClient.as_service()`.
 
-| Caller | Subject-header operations | Why no login token exists |
-| --- | --- | --- |
-| `migrate.copy_directory → _create_collection` | Create a collection when its migration supplies an owner | Offline migration command |
-| `migrate.copy_directory → _create_cloud_sync` | Create the owner's provider connection | Offline migration command |
-| `migrate.copy_directory → _subscribe` | Create the owner's content schedules | Offline migration command |
-| `migrate.copy_directory → _cloud_coverage` | Page the owner's schedules | Offline reconciliation |
-| `migrate.copy_directory → _reconcile_collections` | Page each cloud owner's collections | Offline reconciliation; cloud content is not a service-reader inventory |
-| `migrate_ingest.reingest → ingest.submit` | Create and commit file jobs using `directory.client` from `migrate.copy_directory` | Offline re-ingest as the recorded KB owner |
-| `migrate_uploads.ingest_uploads → _ensure → ingest.ensure_attachments_collection` | Read/create/tag the owner's attachment collection | Offline chat/folder upload migration |
-| `migrate_uploads.ingest_uploads → _ensure → assistant_files.ensure_collection` | Read/create/regrant the assistant owner's collection | Offline assistant upload migration |
-| `migrate_uploads.ingest_uploads → _submit → ingest.submit` | Create and commit upload jobs | Offline upload migration |
-| `jobs._tick → poll_once → _reference_ready` | Read a completed reference document as its File owner to fill missing MIME metadata | Durable job polling runs without a user session; existing D-2g-4 deferral |
-
-`identity.ensure_link` remains only for `migrate._push_directory`,
-`migrate_uploads._ensure`, and `jobs._reference_ready`. These send a signed
-assertion in a link request's body using product authority, without a subject
-header. User requests no longer publish links or proven Entra assertions; approval
-link retries are removed. Ordinary request clients do not need a signing key.
-
-The coordinated platform cut removes these background assertions and legacy link
-operations. This OWUI change leaves their tokenless offline/background behavior
-explicit until their replacement lands.
+The durable job poller uses product authority. A completed reference that lacks
+MIME metadata stays processing until the owner's next authenticated request, when
+the document is read using that request's login token. References with supplied
+MIME metadata can finish in the poller. Failed lookups retain the durable job for
+a later owner request. Offline cutover work belongs to the platform migrator; see
+[cutover-handoff.md](cutover-handoff.md).
 
 ## Optional platform capabilities
 
@@ -175,8 +153,7 @@ fallback for images or audio.
 
 `test/soev/test_no_gateway_keys.py` scans backend source, frontend source and
 configuration, the chart and `.env.example` for explicitly listed gateway/key
-patterns. Its exceptions preserve the historical config-row Alembic migration
-and offline v1 snapshot/restore command. Tests may contain fictional legacy
+patterns. Its exceptions preserve the historical config-row Alembic migration. Tests may contain fictional legacy
 configuration; upstream locale dictionaries may retain unused labels, not
 settings. Existing raw config, user settings, custom-function rows and migration
 snapshots are not erased by this source cleanup. The sealed legacy CI fixture
@@ -193,36 +170,10 @@ After deployment, verify the model catalog, a new turn, a follow-up and a
 regenerated turn. Confirm citations, tool statuses and task-generated titles.
 The discovery filter and agent-service welcome-message UI have been removed.
 
-## Migrating a v1 tenant to v2
+## Cutover
 
-`python -m open_webui.soev.migrate` moves an existing tenant (own Weaviate, a direct LiteLLM connection, local KBs) to v2 (soev-api KBs in pgvector, models from the soev-api catalog, the agent through soev-api). The chart runs it as a Job when `soevApi.migrate.enabled` (see `helm/open-webui-tenant/README.md`). It needs the v2 image with O4: the switch retires the OpenAI connection, so models must come from soev-api's catalog.
-
-Inputs (environment):
-
-- `SOEV_V2_MIGRATION_ID`: names the run. The snapshot, the once-only steps and the sign-out are recorded per id.
-- `SOEV_V2_CONFIG`: JSON with exactly `agent_api.selected_agent`, `document_writer.enable`, `live_documents.enable`, `live_mail.enable`, `notes.enable`, `web.search.enable`, `webui.url` and `user.permissions.features` (merged into `user.permissions`).
-- `SOEV_V2_MODEL_MAP`: JSON of LiteLLM model name to catalog id, e.g. `{"zai-org/GLM-5.3": "glm-5-3"}`. soev-api serves no `/v1/models` with the registry `model_string` yet, so the pairs come from the catalog by hand. An id the map leaves out becomes the catalog default (step 3), so map every model whose chats should keep their own model.
-- `SOEV_V2_INGEST_CONCURRENCY` (default 4) and `SOEV_V2_WAIT_SECONDS` (default 0; the chart sets 600).
-
-`--apply` runs these steps in order; each is safe to rerun after a partial failure:
-
-1. **Snapshot.** The config rows the next steps change are kept as stored text, once per migration id. The migration's state (snapshot, model id records, step markers) lives outside Alembic, in schema `owui_v2_migration` on PostgreSQL (`owui_v2_migration_*` tables on SQLite).
-2. **Config switch** (once per id). The OpenAI and Ollama connections, `ui.default_models` and the task models are retired; the `SOEV_V2_CONFIG` values are written.
-3. **Model ids** (once per id). LiteLLM names become catalog ids in message model ids, chat JSON, assistant base models, base-model override rows and their grants, user pinned models, automations, `ui.default_pinned_models` and `ui.model_order_list`. Each user's default model selection (`settings.ui.models`) is cleared instead, so every user starts on the platform default; `--apply --models` maps it like the rest, since users chose it after the migration. Every other stored id that is neither a catalog id nor an assistant becomes the tenant's default model: the catalog entry marked `default`, which `/api/config` serves as `default_models` (see **Default** above). The run reads it from soev-api's `GET /v1/models` before writing anything, and stops with exit 2 when the catalog marks no default or the map rewrites the default. An unmapped base-model override row is not renamed: its grants move to the default and the row is deactivated, so its name and params never land on the default model. Then every catalog model without a system prompt gets the one of the most recently created base-model row that has one (assistants never count): a model with a row gets it in `params.system`, one without gets a row named after its catalog label. A model whose renamed row brought its own prompt keeps it, and when no base-model row has a prompt nothing is copied. `--apply --models` copies none. Every change, mapped, defaulted or cleared, is recorded with its path, so `--restore` puts it back (a cleared selection only while the user has not chosen a new one). The log prints the default, per site the count of mapped and of defaulted references, per old id how many references went to the default, and which row's system prompt went to which catalog models. `--restore` removes a copied prompt, and a row created for it, only while it still holds that prompt.
-4. **Directory and KB copy.** Identity links, groups, collections with grants, folders and cloud schedules.
-5. **Re-ingest.** Each file of a local KB without a soev document is submitted through `ingest.submit`. Cloud KBs re-sync from their schedules. The job outcome is written to the file row (processing, then completed or failed), which v1 shares: after a rollback, v1 shows the v2 outcome on re-ingested files, e.g. failed for a file v2 could not ingest, while its own v1 vectors are intact.
-   **Chat uploads.** Every upload a stored chat attaches (chat-level and message `files`, type `file`, not an image, not picked from a KB; deleted chats excluded) that is not a KB file is submitted through `ingest.submit` as its owner into their attachments collection, the path a fresh v2 chat upload takes, and its `collection_name` is set to that collection. Files already there, in flight or terminally failed are skipped; an original gone from storage is listed and skipped. Images need nothing: the agent turn reads their bytes from storage. `--apply --uploads` (chart `mode: uploads`) runs only this step, for tenants migrated before it existed.
-6. **Memories.** Users whose vectors do not match their memory rows are re-embedded with the app's embedding function.
-7. **Reconcile.** Exit 0 when every file is ingested or terminally failed (listed); 75 while ingest jobs still run; 1 on a missing or conflicting collection, missing memory vectors or an unreachable soev-api; 2 on invalid input.
-8. **Sign-out** (once per id, after exit 0). Every user's tokens are revoked through the Redis `revoked_at` marker so users sign in again through the configured OIDC provider. `WEBUI_SECRET_KEY` is not rotated. The sign-out is best-effort: if Redis loses its state, a user may keep an OWUI session, but platform operations still require a valid owned OIDC login token. Being signed out is a convenience, not a security control.
-
-`--dry-run` prints the plan without writes (it does not create the state tables either); its one HTTP request is the read of the model catalog for step 3's default. It needs the same `SOEV_V2_*` inputs as `--apply`, and fails like `--apply` when the catalog marks no default. The CLI requires one of `--apply`, `--restore` or `--dry-run`; it no longer runs the directory copy alone. The plan shows the snapshot state, every switched key, the model mapping with counts, the default model with the ids and counts that would go to it, per-KB files to check, memory rows and the sign-out.
-
-`--restore` puts the snapshotted config rows back byte for byte (and removes keys that had no row), and puts back every recorded model id that still holds the value written; references changed since are listed and left. Messages added after the cutover stay. soev-api data and the `owui_v2_migration` state are not touched; the state stays for audit until the cleanup PR drops it. A later `--apply` with the same id switches again from the kept snapshot but does not sign users out again.
-
-Rollback: redeploy the previous full image set and values, and restore the database backup taken before the cutover. v2 migrates the schema past the v1 Alembic head (it drops `agent_config`), so a v1 image does not start on a v2 database.
-
-Not migrated: Confluence KBs (Confluence is out of scope), web-search result collections (transient), Weaviate vectors (re-embedded from the originals), and model ids in feedback records. Person and proven source-identity bindings come from the platform login; OWUI does not mint proven links at sign-in.
+The legacy v1-to-v2 migration CLI and chart Job are removed. Offline migration
+runs in the platform cutover tooling; see [cutover-handoff.md](cutover-handoff.md).
 
 ## Retired inference surfaces and credential boundaries
 
@@ -242,9 +193,8 @@ management and OpenAI-compatible model unloading are gone; Ollama management
 remains. Remote pipeline inlet/outlet calls are removed from chat and task
 processing; local custom-function filters are disabled under v2. Single-file and batch ingestion use soev-api; web extraction returns
 text without creating local embedding collections. Memory embeddings and dictation
-use the soev-api primitives. Memory re-embedding during migration uses the same
-platform primitive; connection snapshots and their byte-for-byte restore remain
-in `soev/migrate_config.py` and the historical Alembic migration. This removes
+use the soev-api primitives. Cutover copies existing memory vectors after verifying the embedding model.
+The historical Alembic config migration remains. This removes
 runtime use and settings surfaces; it does not erase old values from migration
 snapshots or existing raw config/user-settings rows. A later user-settings save
 drops the retired direct-connection payload.

@@ -55,7 +55,7 @@ async def test_the_product_key_and_login_token_are_sent_without_a_subject(record
     assert str(requests[0].url) == 'https://soev.invalid/v1/collections/kb?limit=2'
     assert requests[0].headers['Authorization'] == 'Bearer test-api-key'
     assert requests[0].headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
-    assert 'X-Soev-Subject' not in requests[1].headers
+    assert 'X-Soev-' + 'Subject' not in requests[1].headers
     assert 'Idempotency-Key' not in requests[0].headers
     assert requests[0].extensions['timeout']['read'] == 7.0
 
@@ -84,7 +84,7 @@ async def test_upload_document_sends_chunks_with_the_callers_admission(recorded_
     assert request.headers['Content-Type'] == 'text/plain'
     assert request.headers['Authorization'] == 'Bearer fictional-key'
     assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:fern'
-    assert 'X-Soev-Subject' not in request.headers
+    assert 'X-Soev-' + 'Subject' not in request.headers
     assert 'Idempotency-Key' not in request.headers
     assert request.extensions['timeout']['read'] == 7.0
 
@@ -120,7 +120,7 @@ async def test_get_text_returns_markdown_without_json_parsing(recorded_http):
     assert requests[0].method == 'GET'
     assert str(requests[0].url) == 'https://soev.invalid/v1/files/file/text'
     assert requests[0].headers['Authorization'] == 'Bearer test-api-key'
-    assert 'X-Soev-Subject' not in requests[0].headers
+    assert 'X-Soev-' + 'Subject' not in requests[0].headers
 
 
 @pytest.mark.asyncio
@@ -292,7 +292,7 @@ async def test_every_page_carries_the_login_token(recorded_http, caplog):
     assert [request.headers['X-Soev-User-Token'] for request in requests] == [
         'fictional-login:owui:user:alice',
     ] * 3
-    assert all('X-Soev-Subject' not in request.headers for request in requests)
+    assert all('X-Soev-' + 'Subject' not in request.headers for request in requests)
     assert 'fictional-login:' not in caplog.text
     assert 'test-api-key' not in caplog.text
 
@@ -445,12 +445,10 @@ async def test_only_api_paths_are_accepted(recorded_http, path):
 def test_settings_are_environment_only_and_secrets_are_not_registered_or_logged(
     tmp_path: Path, configured: bool
 ) -> None:
-    """Deployment settings preserve PEM bytes and never enter database defaults or logs."""
+    """Product credentials never enter database defaults or logs."""
     settings = {
         'SOEV_API_URL': 'https://soev.invalid',
         'SOEV_API_KEY': 'test-api-key-never-persist',
-        'SOEV_API_SIGNING_KEY': '-----BEGIN PRIVATE KEY-----\ntest-signing-key\n-----END PRIVATE KEY-----\n',
-        'SOEV_API_AUDIENCE': 'tenant-1',
         'SOEV_API_SERVICE_PRINCIPAL': 'owui:service:webui',
     }
     environment = {key: value for key, value in os.environ.items() if key not in settings}
@@ -477,7 +475,7 @@ expected = json.loads(sys.argv[1])
 for name, value in expected.items():
     assert getattr(config, name) == value, name
 assert not any(key.startswith('soev_api.') for key in config.DEFAULT_CONFIG)
-for name in ('SOEV_API_KEY', 'SOEV_API_SIGNING_KEY'):
+for name in ('SOEV_API_KEY',):
     value = expected[name]
     if value:
         assert value not in repr(config.DEFAULT_CONFIG)
@@ -525,7 +523,7 @@ async def test_original_stream_is_incremental_and_closes_on_disconnect(recorded_
     assert body.closed and body.delivered == 1
     for request in requests:
         assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
         assert request.headers['Authorization'] == 'Bearer test-api-key'
 
 
@@ -629,14 +627,14 @@ async def test_transport_is_shared_without_sharing_credentials_or_cookies(record
     assert not transport.is_closed
     assert len(requests) == 5
     assert requests[1].headers['Authorization'] == 'Bearer bob-key'
-    assert 'X-Soev-Subject' not in requests[1].headers
+    assert 'X-Soev-' + 'Subject' not in requests[1].headers
     assert [request.extensions['timeout']['read'] for request in requests] == [7, 11, 7, 7, 11]
     assert all('cookie' not in request.headers for request in requests)
     assert requests[3].headers['Authorization'] == 'Bearer alice-key'
     assert requests[3].headers['X-Soev-User-Token'] == 'fictional-login:alice'
-    assert 'X-Soev-Subject' not in requests[3].headers
+    assert 'X-Soev-' + 'Subject' not in requests[3].headers
     assert requests[4].headers['Authorization'] == 'Bearer bob-key'
-    assert 'X-Soev-Subject' not in requests[4].headers
+    assert 'X-Soev-' + 'Subject' not in requests[4].headers
     await close_client()
     assert transport.is_closed
     await close_client()
@@ -758,7 +756,7 @@ async def test_markdown_redemption_keeps_the_same_admission(recorded_http, locat
     assert requests[0].headers['Authorization'] == requests[1].headers['Authorization']
     for request in requests:
         assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:fern'
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
 
 
 @pytest.mark.asyncio

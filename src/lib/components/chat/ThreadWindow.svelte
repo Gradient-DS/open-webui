@@ -6,6 +6,7 @@
 	import { threadAPI, type MessageView, type ThreadAPI } from '$lib/apis/threads';
 	import ThreadState from '$lib/components/common/ThreadState.svelte';
 	import { ThreadWindow, type VersionTarget, type WindowSnapshot } from '$lib/utils/threads';
+	import { browserThreadCache, watchThreadVisibility } from '$lib/utils/threadCache';
 	import Message from './Messages/Message.svelte';
 
 	let {
@@ -24,6 +25,7 @@
 	const i18n = getContext<Readable<I18n>>('i18n');
 	let snapshot = $state<WindowSnapshot | null>(null);
 	let controller: ThreadWindow | null = null;
+	let retry = () => {};
 	let container = $state<HTMLDivElement>();
 	const family = $derived(snapshot?.family);
 	let boundContext = $state('');
@@ -56,12 +58,32 @@
 			snapshot = null;
 			return;
 		}
-		const next = new ThreadWindow(transport, (value) => {
-			snapshot = value;
-		});
+		let cache = browserThreadCache(transport, context);
+		let next = new ThreadWindow(
+			transport,
+			(value) => {
+				snapshot = value;
+			},
+			cache
+		);
 		controller = next;
+		const reopen = () => {
+			cache.dispose();
+			next.clear();
+			cache = browserThreadCache(transport, context);
+			next = new ThreadWindow(transport, (value) => (snapshot = value), cache);
+			controller = next;
+			void openThread(next, activeThread, activeParent);
+		};
+		retry = reopen;
+		const unwatch = watchThreadVisibility(
+			(state) => next.clear(state),
+			() => next.resume(reopen)
+		);
 		void openThread(next, id, ancestor);
 		return () => {
+			unwatch();
+			cache.dispose();
 			next.clear();
 			controller = null;
 		};
@@ -132,10 +154,7 @@
 		}}
 	>
 		{#if snapshot.state}
-			<ThreadState
-				state={snapshot.state}
-				retry={() => controller && openThread(controller, activeThread, activeParent)}
-			/>
+			<ThreadState state={snapshot.state} retry={() => retry()} />
 		{:else if snapshot.page}
 			{#if snapshot.page.next_cursor}
 				<button disabled={snapshot.loading} onclick={older}>{$i18n.t('Load older messages')}</button

@@ -7,6 +7,7 @@ import {
 	type ThreadState,
 	type SidebarItem
 } from '$lib/apis/threads';
+import type { CacheProof, ThreadCache } from './threadCache';
 
 export type HistoryMessage = {
 	id: string;
@@ -128,15 +129,80 @@ export class ThreadWindow {
 	private epoch = 0;
 	private forks: IndexItem[] = [];
 	private pending: Promise<void> | null = null;
+	private proof?: CacheProof;
+	private expiry?: ReturnType<typeof setTimeout>;
+	private renewal?: ReturnType<typeof setTimeout>;
+	private approving: Promise<void> | null = null;
 	snapshot: WindowSnapshot = { page: null, history: emptyHistory(), loading: false, state: null };
 	constructor(
 		private api: ThreadAPI,
-		private changed: (value: WindowSnapshot) => void = () => {}
+		private changed: (value: WindowSnapshot) => void = () => {},
+		private cache?: ThreadCache
 	) {}
 	private publish() {
+		if (this.cache && this.snapshot.page && !this.proof?.valid()) {
+			this.fail(new ThreadError('reconnect'));
+			return;
+		}
 		this.changed({ ...this.snapshot });
 	}
+	private arm(proof: CacheProof) {
+		clearTimeout(this.expiry);
+		clearTimeout(this.renewal);
+		this.proof = proof;
+		const remaining = proof.deadline - Date.now();
+		this.expiry = setTimeout(
+			() => {
+				this.epoch++;
+				this.fail(new ThreadError('reconnect'));
+			},
+			Math.min(2 ** 31 - 1, Math.max(0, remaining))
+		);
+		this.renewal = setTimeout(
+			() => void this.reapprove(),
+			Math.min(2 ** 31 - 1, Math.max(0, remaining - Math.min(1000, remaining / 4)))
+		);
+	}
+	private reapprove(): Promise<void> {
+		if (this.approving) return this.approving;
+		const epoch = this.epoch;
+		const pending = (async () => {
+			try {
+				let page = this.snapshot.page;
+				while (this.cache && page) {
+					const proof = await this.cache.approve(page);
+					if (epoch !== this.epoch) return;
+					if (page === this.snapshot.page) {
+						this.arm(proof);
+						return;
+					}
+					page = this.snapshot.page;
+				}
+			} catch (error) {
+				if (epoch === this.epoch) {
+					this.epoch++;
+					this.fail(error);
+				}
+			}
+		})();
+		this.approving = pending;
+		void pending.finally(() => {
+			if (this.approving === pending) this.approving = null;
+		});
+		return pending;
+	}
+	resume(reopen: () => void) {
+		if (!this.snapshot.page || (this.cache && !this.proof?.valid())) {
+			this.clear();
+			reopen();
+		} else if (this.cache) {
+			void this.reapprove();
+		}
+	}
 	private fail(error: unknown) {
+		clearTimeout(this.expiry);
+		clearTimeout(this.renewal);
+		this.proof = undefined;
 		this.snapshot = {
 			page: null,
 			history: emptyHistory(),
@@ -146,11 +212,15 @@ export class ThreadWindow {
 		this.forks = [];
 		this.publish();
 	}
-	clear() {
+	clear(state: ThreadState | null = null) {
+		clearTimeout(this.expiry);
+		clearTimeout(this.renewal);
+		this.approving = null;
+		this.proof = undefined;
 		this.epoch++;
 		this.pending = null;
 		this.forks = [];
-		this.snapshot = { page: null, history: emptyHistory(), loading: false, state: null };
+		this.snapshot = { page: null, history: emptyHistory(), loading: false, state };
 		this.publish();
 	}
 	private async readForks(threadId: string, epoch: number): Promise<IndexItem[]> {
@@ -173,7 +243,8 @@ export class ThreadWindow {
 		this.snapshot.loading = true;
 		this.publish();
 		try {
-			const result = await this.api.projection(threadId);
+			const cached = this.cache ? await this.cache.read(threadId) : null;
+			const result = cached ?? (await this.api.projection(threadId));
 			if (epoch !== this.epoch) return;
 			if (!result.page || result.page.thread_id !== threadId) throw new ThreadError('reconnect');
 			const forks = await this.readForks(threadId, epoch);
@@ -197,6 +268,10 @@ export class ThreadWindow {
 				}
 			}
 			if (epoch !== this.epoch) return;
+			if (cached) {
+				if (!cached.valid()) throw new ThreadError('reconnect');
+				this.arm(cached);
+			}
 			this.forks = forks;
 			this.snapshot = {
 				page: result.page,
@@ -219,11 +294,18 @@ export class ThreadWindow {
 		this.publish();
 		const pending = (async () => {
 			try {
-				const result = await this.api.projection(page.thread_id, page.next_cursor!);
+				const result = await (this.cache
+					? this.cache.read(page.thread_id, page.next_cursor!)
+					: this.api.projection(page.thread_id, page.next_cursor!));
 				if (epoch !== this.epoch) return;
 				if (!result.page || result.page.next_cursor === page.next_cursor)
 					throw new ThreadError('reconnect');
 				const merged = mergeProjection(this.snapshot.page!, result.page);
+				if (this.cache) {
+					const proof = await this.cache.approve(merged);
+					if (epoch !== this.epoch) return;
+					this.arm(proof);
+				}
 				this.snapshot = {
 					...this.snapshot,
 					page: merged,
@@ -258,6 +340,24 @@ export class ThreadWindow {
 				history: buildThreadHistory(next, this.forks)
 			};
 			this.publish();
+			if (this.cache && message.finished && this.snapshot.page === next) {
+				// Stream delivery has live authority; caching gets its own version proof.
+				const epoch = this.epoch;
+				void this.cache
+					.save(next)
+					.then((proof) => {
+						if (epoch !== this.epoch) return;
+						if (this.snapshot.page === next && proof.valid()) this.arm(proof);
+					})
+					.catch((error) => {
+						if (
+							epoch === this.epoch &&
+							error instanceof ThreadError &&
+							error.state === 'unavailable'
+						)
+							this.fail(error);
+					});
+			}
 		} catch (error) {
 			this.fail(error);
 		}
@@ -286,11 +386,12 @@ export class ThreadSidebar {
 	snapshot: SidebarSnapshot = { items: [], cursor: null, loading: false, state: null };
 	constructor(
 		private api: ThreadAPI,
-		private changed: (value: SidebarSnapshot) => void = () => {}
+		private changed: (value: SidebarSnapshot) => void = () => {},
+		private authenticationFailed: () => void = () => {}
 	) {}
-	clear() {
+	clear(state: ThreadState | null = null) {
 		this.epoch++;
-		this.snapshot = { items: [], cursor: null, loading: false, state: null };
+		this.snapshot = { items: [], cursor: null, loading: false, state };
 		this.changed(this.snapshot);
 	}
 	async search(query = '') {
@@ -298,10 +399,14 @@ export class ThreadSidebar {
 		this.query = query;
 		await this.load('');
 	}
+	async refresh() {
+		this.epoch++;
+		await this.load('', true);
+	}
 	async more() {
 		if (this.snapshot.cursor && !this.snapshot.loading) await this.load(this.snapshot.cursor);
 	}
-	private async load(cursor: string) {
+	private async load(cursor: string, replace = false) {
 		const epoch = this.epoch;
 		this.snapshot = { ...this.snapshot, loading: true };
 		this.changed(this.snapshot);
@@ -310,7 +415,9 @@ export class ThreadSidebar {
 			if (epoch !== this.epoch) return;
 			if (page.next_cursor !== null && page.next_cursor === cursor)
 				throw new ThreadError('reconnect');
-			const items = new Map(this.snapshot.items.map((item) => [item.thread_id, item]));
+			const items = new Map(
+				replace ? [] : this.snapshot.items.map((item) => [item.thread_id, item] as const)
+			);
 			for (const item of page.items) items.set(item.thread_id, item);
 			this.snapshot = {
 				items: [...items.values()],
@@ -326,6 +433,7 @@ export class ThreadSidebar {
 				loading: false,
 				state: error instanceof ThreadError ? error.state : 'reconnect'
 			};
+			if (this.snapshot.state === 'sign_in') this.authenticationFailed();
 		}
 		this.changed(this.snapshot);
 	}

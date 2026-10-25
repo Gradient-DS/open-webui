@@ -52,6 +52,10 @@ def create_thread_router(
 
     router = APIRouter(route_class=PrivateRoute)
 
+    @router.post(':authorize')
+    async def authorize(form: threads.AuthorizeThreads, user=Depends(require_enabled)):
+        return await threads.build_client().authorize(form)
+
     @router.get('')
     async def index(
         q: str = Query('', max_length=500),

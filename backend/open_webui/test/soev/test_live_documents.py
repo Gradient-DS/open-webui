@@ -345,9 +345,16 @@ async def test_completed_reference_recovers_missing_mime(env, monkeypatch):  # n
     event = {**attachment(), 'content_type': None}
     row = await live_documents.register_attachment('alice', event)
     client = SimpleNamespace(get=AsyncMock(side_effect=[{'status': 'SUCCEEDED'}, {'content_type': 'application/pdf'}]))
-    monkeypatch.setattr(env.jobs.identity, 'ensure_link', AsyncMock())
     client.as_service = lambda: client
-    assert await env.jobs.poll_once(client, now=row.meta['soev_job']['submitted_at']) == 1
+    from open_webui.soev import acting
+
+    requester = acting._requester_ref.set('owui:user:alice')
+    resolver = acting._token_resolver.set(AsyncMock(return_value='fictional-login-token'))
+    try:
+        assert await env.jobs.poll_once(client, now=row.meta['soev_job']['submitted_at']) == 1
+    finally:
+        acting._token_resolver.reset(resolver)
+        acting._requester_ref.reset(requester)
     updated = await env.files.Files.get_file_by_id(row.id)
     assert updated.meta['content_type'] == 'application/pdf'
     assert updated.meta['status'] == 'completed'

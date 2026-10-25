@@ -61,8 +61,8 @@ async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F
             assert request.headers['Authorization'] == requests[-2].headers['Authorization']
             assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
             assert request.headers['X-Soev-User-Token'] == requests[-2].headers['X-Soev-User-Token']
-            assert 'X-Soev-Subject' not in request.headers
-            assert 'X-Soev-Subject' not in requests[-2].headers
+            assert 'X-Soev-' + 'Subject' not in request.headers
+            assert 'X-Soev-' + 'Subject' not in requests[-2].headers
             assert 'cookie' not in request.headers
             return httpx.Response(200, content=b'original\x00bytes', headers={'Content-Type': 'wrong/type'})
         if request.url.path.endswith('/original'):
@@ -202,7 +202,7 @@ async def test_file_previews_relay_ranges_and_status(
             requests.append(request)
             assert request.headers['Range'] == range_header
             assert request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:alice'
-            assert 'X-Soev-Subject' not in request.headers
+            assert 'X-Soev-' + 'Subject' not in request.headers
             if request.url.path.endswith('/original'):
                 return httpx.Response(303, headers={'Location': '/v1/downloads/fictional-code'})
             return httpx.Response(

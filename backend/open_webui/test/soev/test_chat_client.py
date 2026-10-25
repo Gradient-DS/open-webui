@@ -23,7 +23,6 @@ async def test_reconnected_tail_close_reads_terminality_without_a_status_frame(
     chat_http: FakeSoevApi, close_after: int
 ) -> None:
     client = identity.build_client()
-    await identity.ensure_link('owui:user:alice', client)
     chat_http.chat.close_after = close_after
     chat_http.chat.tail_closes = True
 
@@ -42,7 +41,6 @@ async def test_reconnected_tail_close_reads_terminality_without_a_status_frame(
 @pytest.mark.asyncio
 async def test_reconnected_tail_checks_root_outputs_without_reading_every_frame(chat_http: FakeSoevApi) -> None:
     client = identity.build_client()
-    await identity.ensure_link('owui:user:alice', client)
     chat_http.chat.close_after = 2
     chat_http.chat.turns = [
         [
@@ -64,7 +62,6 @@ async def test_reconnected_tail_waits_for_lease_release_after_last_output(
     chat_http: FakeSoevApi, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client = identity.build_client()
-    await identity.ensure_link('owui:user:alice', client)
     chat_http.chat.close_after = 2
     original = chat_http.chat._view
     reads = []
@@ -92,7 +89,6 @@ async def test_reconnected_tail_waits_for_lease_release_after_last_output(
 @pytest.mark.asyncio
 async def test_stream_reconnects_without_reposting_input(chat_http: FakeSoevApi) -> None:
     client = identity.build_client()
-    await identity.ensure_link('owui:user:alice', client)
     chat_http.chat.close_after = 2
     stream = client.chat_stream(
         '/v1/chat/threads', {'agent': 'test', 'input': {'text': 'hello'}}, as_user='owui:user:alice'
@@ -122,14 +118,12 @@ async def test_stream_reconnects_without_reposting_input(chat_http: FakeSoevApi)
 @pytest.mark.asyncio
 async def test_fork_delivers_thread_id_and_preserves_owner(chat_http: FakeSoevApi) -> None:
     client = identity.build_client()
-    await identity.ensure_link('owui:user:alice', client)
     await _collect(
         client.chat_stream('/v1/chat/threads', {'agent': 'test', 'input': {'text': 'hello'}}, as_user='owui:user:alice')
     )
     branch = await client.chat_post('/v1/chat/threads/thr-1/fork', {'at': 1}, as_user='owui:user:alice')
     assert branch['thread_id'] == 'thr-2'
     assert branch['status']['position'] == 1
-    await identity.ensure_link('owui:user:bob', client)
     with pytest.raises(SoevApiError) as caught:
         await client.get('/v1/chat/threads/thr-2', as_user='owui:user:bob')
     assert caught.value.code == 'not_found'
@@ -157,7 +151,6 @@ async def test_stream_keeps_relay_error_codes(
 @pytest.mark.asyncio
 async def test_terminal_error_is_not_retried(chat_http: FakeSoevApi) -> None:
     client = identity.build_client()
-    await identity.ensure_link('owui:user:alice', client)
     chat_http.chat.turns = [[('error', {'code': 'service_unavailable', 'detail': 'failed'})]]
     frames = await _collect(
         client.chat_stream('/v1/chat/threads', {'agent': 'test', 'input': {'text': 'hello'}}, as_user='owui:user:alice')

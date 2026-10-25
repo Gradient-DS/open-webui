@@ -1,9 +1,7 @@
 """Exercise the reusable fake through HTTP against the recorded B5 wire contract."""
 
 import base64
-import datetime as dt
 import hashlib
-import importlib
 from uuid import uuid4
 
 import httpx
@@ -31,11 +29,6 @@ def ingest(client, *documents, **kwargs):
     return send(client, 'POST', '/v1/jobs', {'collection_key': 'kb', 'documents': list(documents)}, **kwargs)
 
 
-def assertion(ref):
-    identity = importlib.import_module('open_webui.soev.identity')
-    return identity.mint_assertion(ref, now=dt.datetime.now(dt.UTC))
-
-
 @pytest.fixture
 def api(fake_api):
     """Use a real HTTP client over MockTransport with inspectable fake state."""
@@ -50,15 +43,13 @@ def send(
 ):
     headers = {'Authorization': f'Bearer {credential}'}
     if user:
-        headers['X-Soev-Subject'] = assertion(user)
+        headers['X-Soev-User-Token'] = f'fictional-login:{user}'
     if method != 'GET':
         headers['Idempotency-Key'] = operation or str(uuid4())
     return client.request(method, path, json=body, headers=headers)
 
 
 def seed(client, key='kb', user='owui:user:alice'):
-    response = send(client, 'POST', '/v1/identity/links', {'platform_user_id': 'person', 'assertion': assertion(user)})
-    assert response.status_code == 204
     body = {
         'key': key,
         'name': key,
@@ -185,7 +176,7 @@ def test_folder_and_document_routes_preserve_paths_and_replays(api):
 
 
 def test_identity_groups_and_credential_scoped_jobs(api):
-    """Membership replacement affects closure, assertions are single-use, and subjects never widen job visibility."""
+    """Membership replacement affects closure, and login tokens never widen credential-scoped job visibility."""
     fake, client = api
     seed(client)
     seed(client, 'other', 'owui:user:bob')
@@ -213,51 +204,26 @@ def test_identity_groups_and_credential_scoped_jobs(api):
         == 404
     )
     assert send(client, 'GET', '/v1/jobs', credential='other-key').json()['data'] == []
-    token = assertion('owui:user:alice')
-    headers = {'Authorization': 'Bearer soev_test_cred-runtime_test-secret', 'X-Soev-Subject': token}
-    assert client.get('/v1/collections/kb', headers=headers).status_code == 200
-    assert client.get('/v1/collections/kb', headers=headers).status_code == 401
     send(client, 'PUT', '/v1/directory/groups/owui%3Agroup%3Astaff/members', {'members': []})
     assert send(client, 'GET', '/v1/collections/kb', user='owui:user:bob').status_code == 404
 
 
-def test_identity_link_and_group_routes_replay_freely(api):
-    """Links and group replacements require valid keys without caching bodies or bypassing assertion checks."""
+def test_group_replacements_replay_freely(api):
+    """Directory replacements accept a repeated operation key but require a valid key."""
     fake, client = api
-    link_path = '/v1/identity/links'
-    group_path = '/v1/directory/groups/owui%3Agroup%3Astaff/members'
-    operation = 'directory:repeated'
-    for _ in range(2):
-        response = send(
-            client,
-            'POST',
-            link_path,
-            {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
-            operation=operation,
-        )
-        assert response.status_code == 204
-    assert fake.links == {'owui:user:alice': 'person'}
+    path = '/v1/directory/groups/owui%3Agroup%3Astaff/members'
     for members in (['owui:user:alice'], [], ['owui:user:alice']):
-        response = send(client, 'PUT', group_path, {'members': members}, operation=operation)
+        response = send(client, 'PUT', path, {'members': members}, operation='directory:repeated')
         assert response.status_code == 204
         assert fake.groups['owui:group:staff'] == members
     assert not fake.replays
-    body = {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')}
-    assert send(client, 'POST', link_path, body, operation=operation).status_code == 204
-    replayed_assertion = send(client, 'POST', link_path, body, operation=operation)
-    assert replayed_assertion.status_code == 401
-    assert replayed_assertion.json()['code'] == 'assertion_replayed'
-    for method, path, body in (
-        ('POST', link_path, {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')}),
-        ('PUT', group_path, {'members': []}),
-    ):
-        for invalid in (None, 'short', 'x' * 256):
-            headers = {'Authorization': 'Bearer soev_test_cred-runtime_test-secret'}
-            if invalid is not None:
-                headers['Idempotency-Key'] = invalid
-            response = client.request(method, path, json=body, headers=headers)
-            assert response.status_code == 400
-            assert response.json()['code'] == 'invalid_idempotency_key'
+    for invalid in (None, 'short', 'x' * 256):
+        headers = {'Authorization': 'Bearer soev_test_cred-runtime_test-secret'}
+        if invalid is not None:
+            headers['Idempotency-Key'] = invalid
+        response = client.put(path, json={'members': []}, headers=headers)
+        assert response.status_code == 400
+        assert response.json()['code'] == 'invalid_idempotency_key'
 
 
 def test_pages_and_document_acl_follow_the_wire_contract(api):
@@ -276,69 +242,6 @@ def test_pages_and_document_acl_follow_the_wire_contract(api):
         '/v1/collections', json={}, headers={'Authorization': 'Bearer soev_test_cred-runtime_test-secret'}
     )
     assert missing_key.status_code == 400
-
-
-def test_an_assertion_signed_with_the_derived_kid_is_accepted_by_the_fake(api):
-    """The registered public key verifies assertions minted with the derived kid."""
-    fake, client = api
-    response = send(
-        client,
-        'POST',
-        '/v1/identity/links',
-        {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
-    )
-    assert response.status_code == 204
-    assert fake.links == {'owui:user:alice': 'person'}
-
-
-def test_an_assertion_with_an_unregistered_kid_is_refused_by_the_fake(api):
-    """A valid signature cannot authenticate an unregistered kid."""
-    fake, client = api
-    fake.signing_keys.clear()
-    response = send(
-        client,
-        'POST',
-        '/v1/identity/links',
-        {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
-    )
-    assert response.status_code == 401
-    assert response.json()['code'] == 'credential_invalid'
-    assert not fake.links
-
-
-def test_an_assertion_with_a_forged_signature_is_refused_by_the_fake(api):
-    """A registered kid cannot authenticate a forged signature."""
-    fake, client = api
-    header, payload, _ = assertion('owui:user:alice').split('.')
-    forged = base64.urlsafe_b64encode(bytes(64)).decode().rstrip('=')
-    response = send(
-        client,
-        'POST',
-        '/v1/identity/links',
-        {'platform_user_id': 'person', 'assertion': f'{header}.{payload}.{forged}'},
-    )
-    assert response.status_code == 401
-    assert response.json()['code'] == 'credential_invalid'
-    assert not fake.links
-
-
-@pytest.mark.parametrize(
-    ('setting', 'value'),
-    [('SOEV_API_KEY', 'soev_test_cred-wrong_test-secret'), ('SOEV_API_AUDIENCE', 'wrong-value')],
-)
-def test_an_assertion_with_wrong_claims_is_refused_by_the_fake(api, identity_config, monkeypatch, setting, value):
-    """A valid signature still requires the credential issuer and configured audience."""
-    _, client = api
-    identity, _ = identity_config
-    monkeypatch.setattr(identity.config, setting, value)
-    response = send(
-        client,
-        'POST',
-        '/v1/identity/links',
-        {'platform_user_id': 'person', 'assertion': assertion('owui:user:alice')},
-    )
-    assert response.status_code == 401
-    assert response.json()['code'] == 'credential_invalid'
 
 
 def test_a_file_document_opens_an_awaiting_upload_job_with_an_authenticated_put(api):

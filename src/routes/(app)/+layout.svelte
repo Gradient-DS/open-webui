@@ -8,6 +8,7 @@
 	import { toast } from 'svelte-sonner';
 	import { onMount, tick, getContext } from 'svelte';
 	import { openDB, deleteDB } from 'idb';
+	import { clearThreadDrafts } from '$lib/utils/threadCache';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
@@ -106,6 +107,11 @@
 	};
 
 	const checkLocalDBChats = async () => {
+		if ($config?.features?.enable_v2_threads) {
+			clearThreadDrafts();
+			await deleteDB('Chats');
+			return;
+		}
 		try {
 			// Check if IndexedDB exists
 			DB = await openDB('Chats', 1);

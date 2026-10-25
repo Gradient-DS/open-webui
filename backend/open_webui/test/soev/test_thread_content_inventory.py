@@ -98,8 +98,6 @@ def test_v2_has_no_unguarded_local_content_writer():
         'utils/subagents.py': {'process_pending_internal_messages', 'delegate'},
         'utils/timers.py': {'claim_due_timers', 'cancel_timers_for_chat', 'execute_due_timer', '_set_timer_state'},
         'services/deletion/offboarding_store.py': {'_delete_threads', 'finalize_local', 'delete_resource_dependents'},
-        'soev/migrate_uploads.py': {'_referenced'},
-        'soev/migrate_models.py': {'rewrite', 'restore'},
         'soev/agent_threads.py': {'_user_messages', 'deletion_chat_ids'},
         'soev/retention.py': {'poll_deletions'},
     }
@@ -154,7 +152,7 @@ def test_v2_has_no_unguarded_local_content_writer():
 
 
 def test_organization_repository_has_only_organizational_columns():
-    from open_webui.soev.thread_organizations import branches, chat
+    from open_webui.soev.thread_organizations import branches, chat, legacy_shares
 
     assert set(chat.c.keys()) == {
         'id',
@@ -168,6 +166,7 @@ def test_organization_repository_has_only_organizational_columns():
         'updated_at',
     }
     assert set(branches.c.keys()) == {'chat_id', 'thread_id'}
+    assert set(legacy_shares.c.keys()) == {'id', 'chat_id', 'user_id'}
 
 
 def test_no_unreviewed_raw_sql_content_access():
@@ -187,7 +186,7 @@ def test_no_unreviewed_raw_sql_content_access():
                     and isinstance(node.args[0], ast.Constant)
                     and node.args[0].value in {'chat', 'chat_message', 'chat_file', 'shared_chat', 'feedback'}
                 ):
-                    actual.append(str(relative))
+                    actual.append((str(relative), node.args[0].value))
             if isinstance(node, ast.Call) and ast.unparse(node.func).split('.')[-1] in {
                 'text',
                 'execute',
@@ -199,5 +198,8 @@ def test_no_unreviewed_raw_sql_content_access():
                     for argument in node.args
                     for value in ast.walk(argument)
                 ):
-                    actual.append(str(relative))
-    assert actual == ['soev/thread_organizations.py']
+                    actual.append((str(relative), 'raw SQL'))
+    assert sorted(actual) == [
+        ('soev/thread_organizations.py', 'chat'),
+        ('soev/thread_organizations.py', 'shared_chat'),
+    ]

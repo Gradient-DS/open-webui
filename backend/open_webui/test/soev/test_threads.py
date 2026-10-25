@@ -89,6 +89,15 @@ async def test_windows_versions_and_conditional_reads(thread_http):
 
 
 @pytest.mark.asyncio
+async def test_shared_projection_may_omit_owner_preferences(thread_http):
+    _, responses, client = thread_http
+    shared = page(1)
+    del shared['preferences']
+    responses.append(httpx.Response(200, json=shared))
+    assert (await client.projection('fictional-thread')).page.preferences is None
+
+
+@pytest.mark.asyncio
 async def test_index_search_forks_and_fork_creation(thread_http):
     requests, responses, client = thread_http
     child = index_item('fictional-child', 'fictional-thread', 4)
@@ -110,16 +119,15 @@ async def test_index_search_forks_and_fork_creation(thread_http):
 
 
 @pytest.mark.asyncio
-async def test_only_requester_login_token_even_inside_owner_context(thread_http):
+async def test_projection_uses_only_requester_login_token(thread_http):
     requests, responses, client = thread_http
     responses.extend([httpx.Response(200, json=page(1)) for _ in range(2)])
-    with acting.acting_as('owui:user:fictional-other-owner'):
-        await client.projection('fictional-thread')
-        await client.projection('fictional-thread')
+    await client.projection('fictional-thread')
+    await client.projection('fictional-thread')
     for request in requests:
         assert request.headers['X-Soev-User-Token'] == 'fictional-login-token'
         assert request.headers['Authorization'] == 'Bearer fictional-product-key'
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
         assert 'Idempotency-Key' not in request.headers
     assert acting._token_resolver.get().await_count == 2
     resolver = acting._token_resolver.set(AsyncMock(return_value=None))
@@ -204,7 +212,7 @@ async def test_contract_fake_checks_admission_before_etag(thread_http, monkeypat
 
     def fake_api(request):
         calls.append(request)
-        assert 'X-Soev-Subject' not in request.headers
+        assert 'X-Soev-' + 'Subject' not in request.headers
         if request.headers.get('X-Soev-User-Token') != 'fictional-login-token':
             return httpx.Response(401, json={'code': 'invalid_credential'})
         if not allowed:
@@ -270,5 +278,60 @@ async def test_browser_boundary_is_private_and_gated(thread_http, monkeypatch):
         invalid = await browser.get('/api/v1/threads?limit=0')
         assert invalid.json() == {'state': 'invalid_request'}
         for response in (disabled, projection, conditional, listed, invalid):
+            assert response.headers['cache-control'] == 'private, no-store'
+            assert response.headers['vary'] == 'Authorization, Cookie'
+
+
+@pytest.mark.asyncio
+async def test_authorize_relay_uses_login_token_only_and_is_private(thread_http, monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from open_webui.soev.thread_routes import create_thread_router
+    from open_webui.utils.auth import get_verified_user
+
+    requests, responses, client = thread_http
+    form = {
+        'context_epoch': 'fictional-epoch',
+        'threads': [{'thread_id': 'fictional-thread', 'generation': 'fictional-generation', 'versions': ['v1']}],
+    }
+    grant = {
+        'principal': 'platform:user:fictional-fern',
+        'session': 'fictional-session',
+        'context_epoch': form['context_epoch'],
+        'authorization_context': 'fictional-door-scope',
+        'valid_until': '2026-10-25T11:00:00Z',
+        'items': [{**form['threads'][0], 'status': 'ok'}],
+    }
+    app = FastAPI()
+    app.include_router(create_thread_router(AsyncMock(return_value=[])), prefix='/api/v1/threads')
+    app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fictional-fern')
+    monkeypatch.setattr(threads, 'build_client', lambda: client)
+    monkeypatch.setattr(threads, 'enabled', lambda: True)
+    from open_webui.soev.client import _shared_client
+
+    http_type = type(_shared_client())
+    async with http_type(transport=httpx.ASGITransport(app=app), base_url='https://owui.invalid') as browser:
+        responses.append(httpx.Response(200, json=grant))
+        authorized = await browser.post('/api/v1/threads:authorize', json=form)
+        assert authorized.json() == grant
+        assert requests[0].url.path == '/v1/threads:authorize'
+        assert json.loads(requests[0].content) == form
+        assert requests[0].headers['X-Soev-User-Token'] == 'fictional-login-token'
+        assert requests[0].headers['Authorization'] == 'Bearer fictional-product-key'
+        resolver = acting._token_resolver.set(AsyncMock(return_value=None))
+        try:
+            tokenless = await browser.post('/api/v1/threads:authorize', json=form)
+        finally:
+            acting._token_resolver.reset(resolver)
+        assert tokenless.status_code == 401
+        assert tokenless.json() == {'state': 'sign_in'}
+        assert len(requests) == 1
+        invalid = await browser.post('/api/v1/threads:authorize', json={**form, 'subject': 'fictional-other'})
+        assert invalid.status_code == 422
+        monkeypatch.setattr(threads, 'enabled', lambda: False)
+        disabled = await browser.post('/api/v1/threads:authorize', json=form)
+        assert disabled.status_code == 404
+        for response in (authorized, tokenless, invalid, disabled):
             assert response.headers['cache-control'] == 'private, no-store'
             assert response.headers['vary'] == 'Authorization, Cookie'

@@ -1,4 +1,4 @@
-"""Role transitions preserve the product link before and after local commits."""
+"""Role transitions require no product links and refuse console-only suspension."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -13,29 +13,14 @@ async def empty_cloud_pages(path, *, as_user):
 
 
 @pytest.mark.asyncio
-async def test_pending_user_cannot_link_even_if_cached(identity_config, monkeypatch):
-    identity, _ = identity_config
-    monkeypatch.setattr(identity, 'user_of', AsyncMock(return_value=SimpleNamespace(role='pending')))
-    identity._linked_refs.add('owui:user:fern')
-    client = SimpleNamespace(send=AsyncMock(), pages=empty_cloud_pages)
-    with pytest.raises(identity.SoevApiError) as error:
-        await identity.ensure_link('owui:user:fern', client)
-    assert error.value.status == 403
-    client.send.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize('method', ['role', 'update'])
 async def test_approval_never_mints_a_legacy_link(role_store, monkeypatch, method):
     store = role_store
-    signer = AsyncMock(side_effect=AssertionError('Approval must not mint a subject'))
-    monkeypatch.setattr(store.identity, 'mint_assertion', signer)
     if method == 'role':
         await store.users.update_user_role_by_id('fern', 'user', db=store.db)
     else:
         await store.users.update_user_by_id('fern', {'role': 'user'}, db=store.db)
     assert (await store.users.get_user_by_id('fern', db=store.db)).role == 'user'
-    signer.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -92,23 +77,6 @@ async def test_invalid_role_refuses_before_remote_or_local_write(
 
 
 @pytest.mark.asyncio
-async def test_unlink_contract_and_cache_invalidation(identity_config, identity_http):
-    identity, _ = identity_config
-    requests, responses = identity_http
-    responses.extend([httpx.Response(204), httpx.Response(204)])
-    identity._linked_refs.add('owui:user:fern')
-    for _ in range(2):
-        await identity.unlink('owui:user:fern', identity.build_client())
-    assert 'owui:user:fern' not in identity._linked_refs
-    for request in requests:
-        assert request.method == 'DELETE'
-        assert request.url.path == '/v1/identity/links/' + identity.platform_user_id('owui:user:fern')
-        assert request.url.params['source'] == 'owui'
-        assert request.headers['Idempotency-Key']
-        assert 'X-Soev-Subject' not in request.headers
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize('role', ['user', 'admin'])
 async def test_approval_never_links_and_suspension_never_unlinks(role_store, monkeypatch, role):
     store = role_store
@@ -126,7 +94,6 @@ async def test_approval_never_links_and_suspension_never_unlinks(role_store, mon
     assert caught.value.constraint == 'suspension:console'
     client.send.assert_not_awaited()
     assert (await store.users.get_user_by_id('fern', db=store.db)).role == role
-    assert 'owui:user:fern' not in store.identity._linked_refs
 
 
 @pytest.mark.asyncio
@@ -140,21 +107,8 @@ async def test_group_reconcile_does_not_publish_unlink_or_retry_identities(
     client.as_service = lambda: client
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
     monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
-    store.identity._linked_refs.add('owui:user:gone')
     await store.users.insert_new_user('lark', 'Lark', 'lark@example.invalid', role='user', db=store.db)
     table = SimpleNamespace(get_all_groups=AsyncMock(return_value=[]))
     await group_sync.reconcile(table, db=store.db)
     assert all('/v1/identity/' not in call.args[1] for call in client.send.await_args_list)
-    assert 'owui:user:gone' in store.identity._linked_refs
     await group_sync.retry_pending(table, now=float('inf'), db=store.db)
-
-
-@pytest.mark.asyncio
-async def test_relink_after_unlink_uses_a_new_operation(identity_config, identity_http):
-    identity, _ = identity_config
-    requests, responses = identity_http
-    responses.extend([httpx.Response(204)] * 3)
-    await identity.ensure_link('owui:user:fern', identity.build_client())
-    await identity.unlink('owui:user:fern', identity.build_client())
-    await identity.ensure_link('owui:user:fern', identity.build_client())
-    assert requests[0].headers['Idempotency-Key'] != requests[2].headers['Idempotency-Key']

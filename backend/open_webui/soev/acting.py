@@ -1,8 +1,7 @@
 """Carry the authenticated OWUI user's external ref and OIDC access token through the request."""
 
-from contextlib import contextmanager
-from contextvars import ContextVar
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from functools import wraps
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
@@ -10,15 +9,10 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from open_webui.soev.request_cache import request_cache
 
-_acting_ref: ContextVar[str | None] = ContextVar('soev_acting_ref', default=None)
 _requester_ref: ContextVar[str | None] = ContextVar('soev_requester_ref', default=None)
 _token_resolver: ContextVar[Callable[[], Awaitable[str | None]] | None] = ContextVar(
     'soev_token_resolver', default=None
 )
-
-
-def acting_ref() -> str | None:
-    return _acting_ref.get()
 
 
 def requester_ref() -> str | None:
@@ -39,17 +33,6 @@ async def user_token(as_user: str | None) -> str | None:
     return await resolver()
 
 
-@contextmanager
-def acting_as(ref: str):
-    """[Gradient] Assert `ref` instead of the requesting user inside the block: an owner's own change that OWUI
-    makes for them, such as the grants a folder share adds to their knowledge bases."""
-    token = _acting_ref.set(ref)
-    try:
-        yield
-    finally:
-        _acting_ref.reset(token)
-
-
 def install(app: FastAPI) -> None:
     from open_webui.models.oauth_sessions import OAuthSessions
     from open_webui.soev import identity
@@ -68,7 +51,6 @@ def install(app: FastAPI) -> None:
         auth_token: HTTPAuthorizationCredentials = Depends(bearer_security),
     ):
         ref = identity.external_ref(user)
-        token = _acting_ref.set(ref)
         requester = _requester_ref.set(ref)
         resolver = _token_resolver.set(_oidc_token_resolver(request, user, auth_token))
         try:
@@ -82,14 +64,14 @@ def install(app: FastAPI) -> None:
                             await remember_person(user, access_token)
                         except PersonMismatchError:
                             raise HTTPException(status_code=401, detail='Identity could not be verified') from None
-                from open_webui.soev import pending_sync
+                from open_webui.soev import jobs, pending_sync
 
+                await jobs.complete_references(user.id)
                 await pending_sync.on_request(user.id, background_tasks)
                 yield user
         finally:
             _token_resolver.reset(resolver)
             _requester_ref.reset(requester)
-            _acting_ref.reset(token)
 
     def _oidc_token_resolver(request: Request, user, auth_token):
         """Fetch (and refresh) the user's `oidc` session token on first use, once per request."""

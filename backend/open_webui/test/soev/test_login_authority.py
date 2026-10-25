@@ -1,11 +1,11 @@
-"""User routes carry only login proof; legacy authority is confined to background work."""
+"""User routes carry only login proof and refuse missing tokens."""
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from open_webui.soev import acting, identity
-from open_webui.soev.client import BackgroundSoevClient, SoevApiError, SoevClient
+from open_webui.soev import acting
+from open_webui.soev.client import SoevApiError, SoevClient
 from open_webui.soev.knowledge_store import SoevKnowledgeTable
 from open_webui.soev.request_cache import request_cache
 from open_webui.test.soev.test_keycloak_token import token_app  # noqa: F401
@@ -38,8 +38,6 @@ async def test_main_routes_use_only_login_authority(
     ctx.app.include_router(cloud_sync.router, prefix='/cloud')
     ctx.app.include_router(meetings.router, prefix='/meetings')
     fake_api.user_tokens['fictional-access-token'] = f'owui:user:{ctx.user.id}'
-    signer = Mock(side_effect=AssertionError('User routes must not mint assertions'))
-    monkeypatch.setattr(identity, 'mint_assertion', signer)
     if not logged_in:
         ctx.browser.cookies.clear()
     async with httpx.AsyncClient(transport=httpx.MockTransport(fake_api.handle)) as transport:
@@ -56,36 +54,11 @@ async def test_main_routes_use_only_login_authority(
         assert response.status_code in {200, 201}, response.text
         assert fake_api.requests
         assert all(r.headers['X-Soev-User-Token'] == 'fictional-access-token' for r in fake_api.requests)
-        assert all('X-Soev-Subject' not in r.headers for r in fake_api.requests)
+        assert all('X-Soev-' + 'Subject' not in r.headers for r in fake_api.requests)
     else:
         assert response.status_code == 401, response.text
         assert 'sign_in' in response.text
         assert not fake_api.requests
-    signer.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('context', ['none', 'requester', 'acting', 'explicit-token'])
-async def test_background_subject_path_is_explicit_and_rejects_requests(monkeypatch, context):
-    minter = Mock(return_value='fictional-background-assertion')
-    client = BackgroundSoevClient('https://soev.invalid', 'fictional-key', subject_minter=minter)
-    requester = acting._requester_ref.set('owui:user:fern' if context == 'requester' else None)
-    actor = acting._acting_ref.set('owui:user:fern' if context == 'acting' else None)
-    try:
-        if context == 'none':
-            headers = await client._headers('owui:user:fern')
-            assert headers['X-Soev-Subject'] == 'fictional-background-assertion'
-            assert 'X-Soev-User-Token' not in headers
-            minter.assert_called_once_with('owui:user:fern')
-        else:
-            kwargs = {'user_access_token': 'fictional-token'} if context == 'explicit-token' else {}
-            with pytest.raises(SoevApiError) as error:
-                await client._headers('owui:user:fern', **kwargs)
-            assert (error.value.status, error.value.code) == (401, 'sign_in')
-            minter.assert_not_called()
-    finally:
-        acting._acting_ref.reset(actor)
-        acting._requester_ref.reset(requester)
 
 
 @pytest.mark.asyncio

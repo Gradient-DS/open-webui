@@ -10,7 +10,9 @@
 		reconnect: $i18n.t('Reconnect to view this chat'),
 		unavailable: $i18n.t('This chat is unavailable'),
 		sign_in: $i18n.t('Sign in again to view this chat'),
-		invalid_request: $i18n.t('Reload this chat to continue')
+		invalid_request: $i18n.t('Reload this chat to continue'),
+		share_refused: $i18n.t("This chat uses sources you don't have access to"),
+		legacy_share: $i18n.t('This chat is no longer available to others')
 	});
 </script>
 

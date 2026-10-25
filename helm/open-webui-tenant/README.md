@@ -18,19 +18,15 @@ is rendered as `"false"`.
 | Value | Environment variable | Default when unset |
 | --- | --- | --- |
 | `soevApi.url` | `SOEV_API_URL` | Empty |
-| `soevApi.audience` | `SOEV_API_AUDIENCE` | Empty |
 | `soevApi.servicePrincipal` | `SOEV_API_SERVICE_PRINCIPAL` | Empty |
 | `liveDocuments.enabled` | `ENABLE_LIVE_DOCUMENTS` | `false` |
 | `liveMail.enabled` | `ENABLE_LIVE_MAIL` | `false` |
 | `webuiUrl` | `WEBUI_URL` | Empty |
 
 With `externalSecrets.enabled: true` and a nonempty `soevApi.url`, the
-ExternalSecret fetches `soevApiKey` and `soevApiSigningKey` from the configured
-1Password item. The application receives them as `SOEV_API_KEY` and
-`SOEV_API_SIGNING_KEY` through `secretKeyRef`. Store the signing key as the
-literal multiline Ed25519 PEM; no template or newline substitution is applied.
-When External Secrets is disabled, use `secrets.soevApiKey` and
-`secrets.soevApiSigningKey` (a YAML `|` block preserves PEM newlines).
+ExternalSecret fetches `soevApiKey` from the configured 1Password item and
+injects `SOEV_API_KEY` through `secretKeyRef`. Inline deployments use
+`secrets.soevApiKey`. User authority comes from each person's login token.
 
 `extraEnv` is appended to the main Open WebUI container's environment. Each
 entry supports either `{name, value}` or `{name, valueFrom}`; quote scalar
@@ -123,62 +119,10 @@ retry under the pod's restart policy and use `openWebui.resources`; there is no
 separate hook deadline or resource configuration. For multiple replicas, also
 enable Redis and disable the default RWO data PVC, as in the v2 example.
 
-## v1 to v2 migration Job
+## Cutover
 
-`soevApi.migrate.enabled` renders a plain `batch/v1` Job (not a Helm hook)
-named `<release>-v2-migrate-<hash>`. The hash covers the whole `soevApi.migrate`
-block (config, model map, migration id, mode, tuning and the pinned
-`soevApi.migrate.image.tag`) and the rendered pod template, so any change to
-the immutable template starts a new Job instead of failing the upgrade with
-`field is immutable`. That includes the shared env: a new
-`externalSecrets.onepassword.fields` entry, `extraEnv` or resources. The
-template never takes the app image tag, so an app image bump leaves the
-finished Job alone. Every step is
-idempotent, and the once-only steps (config switch, model ids, sign-out) are
-skipped on later runs with the same `soevApi.migrate.id`.
-
-The Job runs `python -m open_webui.soev.migrate --<mode>` with the app's
-ConfigMap, secrets, `extraEnv` and data volume, plus `ENABLE_DB_MIGRATIONS=true`
-so the app schema is current. The migration keeps its own state outside
-Alembic (schema `owui_v2_migration`). `soevApi.migrate.config` becomes `SOEV_V2_CONFIG`, `modelMap` becomes
-`SOEV_V2_MODEL_MAP` and `systemPrompt` becomes `SOEV_V2_SYSTEM_PROMPT`. Exit 1 (soev-api unreachable, collection mismatch) and 75
-(ingest still running) are retried with Kubernetes' capped exponential backoff
-up to `backoffLimit`; exit 2 (invalid input) fails the Job at once. The
-finished Job is kept by default: with `ttlSecondsAfterFinished` set, the next
-Helm upgrade recreates it and the migration runs again. Redis must be enabled
-for the final sign-out. With an RWO data PVC the Job pod must land on the
-app's node; v2 tenants run without one.
-
-Rollback to v1: redeploy the previous image set and values and restore the
-database backup taken before the cutover; see `docs/agent-api-deployment.md`.
-
-`mode: models` runs `--apply --models`: it rewrites only the stored model ids by
-`modelMap` (old catalog id to new) under its own `id`, with no config switch,
-directory copy, re-ingest, memories or sign-out, and needs no `config`. It
-snapshots just the two model-id config rows, so `mode: restore` with the same
-`id` undoes it. Unlike `apply`, which clears each user's default model
-selection so everyone starts on the platform default, it maps that selection.
-
-In both `apply` and `models`, a stored model id that `modelMap` leaves out and
-that is no catalog id becomes the catalog's default model, read from soev-api
-before anything is written; with no default in the catalog the Job exits 2.
-
-`mode: plan` runs `--dry-run` once (no retries): it prints what `apply` would do
-and writes nothing. Its step 3 lists every distinct base-model system prompt in
-full, with the base models that carry it and when they were last updated.
-`apply` moves those prompts to the one global system prompt (Admin > Settings >
-System prompt) and clears them on the models: with one distinct prompt it is
-kept; with several, `soevApi.migrate.systemPrompt` names the v1 base model id
-whose prompt to keep, or `none`. Several and no choice exits 2 before any
-write. `restore` puts the global prompt and every cleared prompt back, except
-where an admin has changed them since.
-
-`mode: uploads` runs `--apply --uploads`: it ingests only the uploads stored
-chats attach (not KB files or images) into their owners' attachments
-collections in soev-api, for a tenant whose `apply` ran before that step was
-part of it. It needs no `config` or `modelMap`, is safe to rerun (ingested
-files are skipped), exits 75 while its ingest jobs run and lists files whose
-original is gone. There is nothing to restore: v1 never reads soev-api.
+The legacy OWUI v1-to-v2 migration Job and CLI have been removed. The platform
+cutover Job owns migration; see [the handoff](../../docs/cutover-handoff.md).
 
 ## Render checks
 

@@ -11,6 +11,7 @@
 	import { getChatByShareId, cloneSharedChatById } from '$lib/apis/chats';
 
 	import Messages from '$lib/components/chat/Messages.svelte';
+	import SharedThread from '$lib/components/chat/SharedThread.svelte';
 
 	import { getUserInfoById, getUserSettings } from '$lib/apis/users';
 	import { getModels } from '$lib/apis';
@@ -47,7 +48,7 @@
 		$sessionUser &&
 		($sessionUser.role === 'admin' || ($sessionUser.permissions?.chat?.import ?? true));
 
-	$: if ($page.params.id) {
+	$: if ($page.params.id && $config && !$config?.features?.enable_v2_threads) {
 		(async () => {
 			if (await loadSharedChat()) {
 				await tick();
@@ -175,15 +176,19 @@
 	<!-- LICENSE covers this Open WebUI browser-title identifier.
 	Do not alter, remove, obscure, or replace it except as LICENSE permits:
 	https://docs.openwebui.com/license. -->
-	<title>
-		{title
-			? `${title.length > 30 ? `${title.slice(0, 30)}...` : title} / ${$WEBUI_NAME}`
-			: `${$WEBUI_NAME}`}
-	</title>
+	{#if !$config?.features?.enable_v2_threads}
+		<title>
+			{title
+				? `${title.length > 30 ? `${title.slice(0, 30)}...` : title} / ${$WEBUI_NAME}`
+				: `${$WEBUI_NAME}`}
+		</title>
+	{/if}
 	<meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
-{#if loaded}
+{#if $config?.features?.enable_v2_threads}
+	<SharedThread shareId={$page.params.id ?? ''} />
+{:else if loaded}
 	<div
 		class="h-screen max-h-[100dvh] w-full flex flex-col text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-900"
 	>

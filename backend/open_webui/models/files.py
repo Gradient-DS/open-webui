@@ -505,9 +505,14 @@ class FilesTable:
                 log.warning(f'Error fetching pending files for knowledge {knowledge_id}: {e}')
                 return []
 
-    async def get_files_with_soev_jobs(self, db: AsyncSession | None = None) -> list[FileModel]:
+    async def get_files_with_soev_jobs(
+        self, db: AsyncSession | None = None, *, user_id: str | None = None
+    ) -> list[FileModel]:
         async with get_async_db_context(db) as db:
-            result = await db.execute(select(File).filter(File.meta['soev_job'].as_string().is_not(None)))
+            query = select(File).filter(File.meta['soev_job'].as_string().is_not(None))
+            if user_id is not None:
+                query = query.filter_by(user_id=user_id)
+            result = await db.execute(query)
             return [
                 FileModel.model_validate(file)
                 for file in result.scalars().all()

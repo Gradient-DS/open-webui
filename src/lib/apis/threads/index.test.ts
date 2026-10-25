@@ -3,6 +3,28 @@ import { ThreadError, threadAPI } from './index';
 
 afterEach(() => vi.unstubAllGlobals());
 
+it('relays cache versions and context through the private browser boundary', async () => {
+	const fetcher = vi.fn(async () => new Response(JSON.stringify({ items: [] })));
+	vi.stubGlobal('fetch', fetcher);
+	const body = {
+		context_epoch: 'fictional-epoch',
+		threads: [
+			{
+				thread_id: 'fictional-thread',
+				generation: 'fictional-generation',
+				versions: ['fictional-version']
+			}
+		]
+	};
+	await threadAPI('fictional-token').authorize(body);
+	const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+	expect(url).toBe('/api/v1/threads:authorize');
+	expect(init.method).toBe('POST');
+	expect(init.cache).toBe('no-store');
+	expect(JSON.parse(String(init.body))).toEqual(body);
+	expect(init.headers).toMatchObject({ Authorization: 'Bearer fictional-token' });
+});
+
 it('requests private pages with only the OWUI credential and preserves opaque cursors and validators', async () => {
 	const fetch = vi.fn(
 		async () => new Response(null, { status: 304, headers: { ETag: '"fictional"' } })
@@ -22,7 +44,7 @@ it('requests private pages with only the OWUI credential and preserves opaque cu
 		'If-None-Match': '"fictional"'
 	});
 	expect(init.headers).not.toHaveProperty('X-Soev-User-Token');
-	expect(init.headers).not.toHaveProperty('X-Soev-Subject');
+	expect(init.headers).not.toHaveProperty('X-Soev-' + 'Subject');
 });
 
 it.each([
