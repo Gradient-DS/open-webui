@@ -229,17 +229,21 @@ class SoevClient:
         response = await self._request('POST', '/v1/completions/task', body=body, as_user=as_user)
         return self._json_object(response)
 
-    async def embed(self, texts: list[str], *, as_user: str) -> dict:
-        if not as_user:
-            raise ValueError('Embedding requires an acting user')
-        response = await self._request('POST', '/v1/embeddings', body={'input': texts}, as_user=as_user)
+    async def embed(self, texts: list[str], *, user_access_token: str) -> dict:
+        """Embed as the person whose login token this is, without a subject assertion."""
+        if self.is_service or not user_access_token:
+            raise ValueError('Embedding requires the user token')
+        response = await self._request(
+            'POST', '/v1/embeddings', body={'input': texts}, user_access_token=user_access_token
+        )
         return self._json_object(response)
 
     async def transcribe(
-        self, audio: bytes, *, filename: str, content_type: str, language: str | None, as_user: str
+        self, audio: bytes, *, filename: str, content_type: str, language: str | None, user_access_token: str
     ) -> dict:
-        if not as_user:
-            raise ValueError('Transcription requires an acting user')
+        """Transcribe as the person whose login token this is, without a subject assertion."""
+        if self.is_service or not user_access_token:
+            raise ValueError('Transcription requires the user token')
         data = {'response_format': 'json'}
         if language:
             data['language'] = language
@@ -248,7 +252,7 @@ class SoevClient:
             '/v1/audio/transcriptions',
             files={'file': (filename, audio, content_type)},
             data=data,
-            as_user=as_user,
+            user_access_token=user_access_token,
         )
         return self._json_object(response)
 
