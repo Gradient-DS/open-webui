@@ -1,5 +1,6 @@
 """The dark handlers exercised through the HTTP client and a fictional 7a API."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -28,6 +29,12 @@ class FictionalOrganizations:
     async def list(self, user_id):
         return list(self.records)
 
+    async def legacy_share(self, share_id):
+        return getattr(self, 'legacy', {}).get(share_id)
+
+    async def folder_records(self, folder_id):
+        return getattr(self, 'folders', {}).get(folder_id, {})
+
     async def put(self, user_id, record):
         self.records = [r for r in self.records if r.id != record.id] + [record]
         self.writes.append(record)
@@ -46,8 +53,8 @@ def fake_api(request, calls, state, visible, feedback):
     path = request.url.path
     if path in {'/v1/threads/usage', '/v1/feedback', '/v1/feedback/summary'}:
         return fake_metrics(path, state, feedback)
-    if not state['allowed']:
-        return httpx.Response(404, json={'code': 'not_found'})
+    if path.endswith('/shares') or not state['allowed'] or state.get('reader'):
+        return fake_reader(request, state) if state.get('reader') else fake_shares(request, state)
     if path.startswith('/v1/chat/threads'):
         return fake_runtime(request)
     if path == '/v1/threads':
@@ -79,6 +86,42 @@ def fake_api(request, calls, state, visible, feedback):
             headers={'ETag': 'fictional-etag'},
         )
     return httpx.Response(501)
+
+
+def fake_reader(request, state):
+    import json
+
+    shares = state.get('shares', [])
+    if request.url.path.endswith('/shares'):
+        return httpx.Response(404, json={'code': 'not_found'})
+    if (
+        not shares
+        or not state.get('label', True)
+        or not state.get('same_tenant', True)
+        or 'fictional-missing' in request.url.path
+    ):
+        return httpx.Response(404, json={'code': 'not_found'})
+    at = max(share['at'] for share in shares)
+    if request.url.path.endswith('/fork'):
+        assert json.loads(request.content)['at'] <= at
+        state['clone'] = {'owner': 'fictional-reader', 'label': 'fictional-source-label'}
+        return httpx.Response(200, json={'thread_id': 'fictional-reader-fork'})
+    return httpx.Response(200, json={**page(*range(1, at + 1)), 'version': 'fictional-projection-version'})
+
+
+def fake_shares(request, state):
+    import json
+
+    shares = state.setdefault('shares', [])
+    if not state['allowed'] or not state.get('owner', True) or state.get('fallback', False):
+        return httpx.Response(404, json={'code': 'not_found'})
+    if request.method == 'GET':
+        return httpx.Response(200, json={'items': shares, 'next_cursor': None})
+    body = json.loads(request.content)
+    shares[:] = [s for s in shares if s['audience'] != body['audience']]
+    if request.method == 'POST':
+        shares.append(body)
+    return httpx.Response(204)
 
 
 def fake_runtime(request):
@@ -150,6 +193,13 @@ async def dark_api(monkeypatch):
     api.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fictional-fern', role='user')
     legacy = AsyncMock(return_value=[])
     monkeypatch.setattr(chats.Chats, 'get_chat_title_id_list_by_user_id', legacy)
+    monkeypatch.setattr(chats, 'can_share_chats', AsyncMock(return_value=True))
+    monkeypatch.setattr(chats, 'require_chat_import_permission', AsyncMock())
+    monkeypatch.setattr(
+        chats.Folders,
+        'get_folder_by_id',
+        AsyncMock(return_value=SimpleNamespace(id='fictional-folder', user_id='fictional-fern')),
+    )
     monkeypatch.setattr(chats, 'add_active_state_to_chat_list', AsyncMock(side_effect=lambda request, result: result))
     monkeypatch.setattr(threads, 'enabled', lambda: True)
 
@@ -163,7 +213,9 @@ async def dark_api(monkeypatch):
         client = threads.ThreadClient('https://soev.invalid', 'fictional-key')
         monkeypatch.setattr(threads, 'build_client', lambda: client)
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=api), base_url='https://owui.invalid'
+            transport=httpx.ASGITransport(app=api),
+            base_url='https://owui.invalid',
+            headers={'Authorization': 'Bearer fictional-session', 'Content-Type': 'application/json'},
         ) as browser:
             yield SimpleNamespace(
                 browser=browser,
@@ -565,3 +617,315 @@ async def test_standalone_thread_fork_gets_its_own_organization(dark_api):
     assert response.status_code == 200, response.text
     assert response.json() == {'thread_id': 'fictional-child'}
     assert dark_api.records.writes[-1].id == 'fictional-child'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['person', 'group', 'folder'])
+async def test_live_share_list_unshare_with_requester_token(dark_api, kind):
+    form = {'audience': {'kind': kind, 'id': 'fictional-audience'}, 'at': 2}
+    base = '/api/v1/chats'
+    shared = await dark_api.browser.post(
+        base + '/fictional-chat/share', json=form, headers={'Content-Type': 'application/json; charset=utf-8'}
+    )
+    assert shared.status_code == 200 and shared.json() == {'share_id': 'fictional-thread'}
+    listed = await dark_api.browser.get(base + '/shared/fictional-chat/access')
+    assert listed.json() == {'items': [form], 'next_cursor': None}
+    own = await dark_api.browser.get(base + '/shared')
+    assert own.json()[0]['share_id'] == 'fictional-thread'
+    removed = await dark_api.browser.delete(base + '/fictional-chat/share')
+    assert removed.status_code == 200
+    assert (await dark_api.browser.get(base + '/shared/fictional-chat/access')).json()['items'] == []
+    assert not dark_api.records.writes
+    assert all(r.headers['X-Soev-User-Token'] == 'fictional-login' for r in dark_api.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'method,path',
+    [
+        ('POST', '/fictional-chat/share'),
+        ('DELETE', '/fictional-chat/share'),
+        ('DELETE', '/share/all'),
+        ('POST', '/fictional-thread/clone/shared'),
+        ('POST', '/fictional-chat/clone'),
+    ],
+)
+@pytest.mark.parametrize(
+    'media_type,authorization,status',
+    [
+        ('text/plain', None, 415),
+        ('text/plain', 'Bearer fictional-session', 415),
+        ('application/x-www-form-urlencoded', 'Bearer fictional-session', 415),
+        (None, 'Bearer fictional-session', 415),
+        ('application/json', None, 401),
+        ('application/json', 'Basic fictional-session', 401),
+        ('application/json', 'Bearer ', 401),
+    ],
+)
+async def test_share_mutations_refuse_csrf_before_platform_access(
+    dark_api, method, path, media_type, authorization, status
+):
+    dark_api.browser.headers.pop('Authorization')
+    dark_api.browser.headers.pop('Content-Type')
+    dark_api.browser.cookies.set('token', 'fictional-cookie-session')
+    headers = {'Origin': 'https://hostile.owui.invalid'}
+    if media_type is not None:
+        headers['Content-Type'] = media_type
+    if authorization is not None:
+        headers['Authorization'] = authorization
+    response = await dark_api.browser.request(
+        method,
+        '/api/v1/chats' + path,
+        headers=headers,
+        content=json.dumps({'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}),
+    )
+    assert response.status_code == status
+    assert response.json() == {'state': 'sign_in' if status == 401 else 'invalid_request'}
+    assert response.headers['Cache-Control'] == 'private, no-store'
+    assert response.headers['Vary'] == 'Authorization, Cookie'
+    assert not dark_api.calls and not dark_api.records.writes
+
+
+@pytest.mark.asyncio
+async def test_share_mutation_validates_explicit_bearer_without_cookie_fallback(dark_api):
+    dark_api.app.dependency_overrides.pop(get_verified_user)
+    dark_api.browser.cookies.set('token', 'fictional-cookie-session')
+    response = await dark_api.browser.post(
+        '/api/v1/chats/fictional-chat/share',
+        headers={'Authorization': 'Bearer fictional-invalid-session'},
+        json={'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2},
+    )
+    assert response.status_code == 401 and response.json() == {'state': 'sign_in'}
+    assert not dark_api.calls and not dark_api.records.writes
+
+
+@pytest.mark.asyncio
+async def test_live_share_reader_refusal_missing_and_clone(dark_api):
+    base = '/api/v1/chats'
+    read = await dark_api.browser.get(base + '/share/fictional-thread')
+    assert read.status_code == 200 and read.json()['messages']
+    dark_api.state['allowed'] = False
+    denied = await dark_api.browser.get(base + '/share/fictional-thread')
+    missing = await dark_api.browser.get(base + '/share/fictional-missing')
+    assert (denied.status_code, denied.content) == (missing.status_code, missing.content)
+    assert denied.json() == {'state': 'share_refused'}
+    dark_api.state['allowed'] = True
+    clone = await dark_api.browser.post(base + '/fictional-thread/clone/shared')
+    assert clone.json()['thread_id'] == 'fictional-child'
+    assert dark_api.records.writes[-1].id == 'fictional-child'
+    assert '/v1/threads/fictional-thread/fork' == dark_api.calls[-1].url.path
+
+
+@pytest.mark.asyncio
+async def test_anonymous_and_tokenless_shares_do_not_call_platform(dark_api):
+    from fastapi import HTTPException
+
+    def anonymous():
+        raise HTTPException(401)
+
+    dark_api.app.dependency_overrides[get_verified_user] = anonymous
+    response = await dark_api.browser.get('/api/v1/chats/share/fictional-thread')
+    assert response.status_code == 401 and response.json() == {'state': 'sign_in'}
+    dark_api.app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fictional-fern')
+    resolver = acting._token_resolver.set(AsyncMock(return_value=None))
+    try:
+        response = await dark_api.browser.get('/api/v1/chats/share/fictional-thread')
+        assert response.status_code == 401 and response.json() == {'state': 'sign_in'}
+        assert not dark_api.calls
+    finally:
+        acting._token_resolver.reset(resolver)
+
+
+@pytest.mark.asyncio
+async def test_retired_share_owner_only_and_fallback_share_refused(dark_api):
+    dark_api.records.legacy = {'fictional-retired': ('fictional-owner', 'fictional-chat', 'fictional-thread')}
+    response = await dark_api.browser.get('/api/v1/chats/share/fictional-retired')
+    assert response.status_code == 404 and response.json() == {'state': 'legacy_share'}
+    assert not dark_api.calls
+    dark_api.records.legacy['fictional-retired'] = ('fictional-fern', 'fictional-chat', 'fictional-thread')
+    assert (await dark_api.browser.get('/api/v1/chats/share/fictional-retired')).json()['messages']
+    dark_api.records.legacy['fictional-unmapped'] = ('fictional-fern', 'fictional-chat', None)
+    calls = len(dark_api.calls)
+    unmapped = await dark_api.browser.get('/api/v1/chats/share/fictional-unmapped')
+    assert unmapped.status_code == 404 and unmapped.json() == {'state': 'legacy_share'}
+    assert len(dark_api.calls) == calls
+    dark_api.state['fallback'] = True
+    response = await dark_api.browser.post(
+        '/api/v1/chats/fictional-chat/share',
+        json={
+            'audience': {'kind': 'person', 'id': 'fictional-reader'},
+            'at': 2,
+        },
+    )
+    assert response.status_code == 404 and response.json() == {'state': 'share_refused'}
+
+
+@pytest.mark.asyncio
+async def test_shared_folder_joins_only_authorized_threads_before_counting_and_sorting(dark_api):
+    service = ChatPaths(dark_api.client, dark_api.records)
+    dark_api.records.records = []  # The reader owns no row for either chat.
+    dark_api.records.folders = {'fictional-folder': {'fictional-thread': 'fictional-owner'}}
+    before = await service.listing('fictional-fern', folder_id='fictional-folder')
+    counts = await service.folder_counts('fictional-fern', {'fictional-folder': None})
+    dark_api.records.folders['fictional-folder']['fictional-hidden'] = 'fictional-owner'
+    assert await service.listing('fictional-fern', folder_id='fictional-folder') == before
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == counts
+    assert len(before) == 1 and before[0]['readonly'] is True
+    assert counts == {'fictional-folder': 0}
+
+
+@pytest.mark.asyncio
+async def test_share_ceiling_live_grant_label_and_tenant_then_reader_owned_fork(dark_api):
+    form = {'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}
+    assert (await dark_api.browser.post('/api/v1/chats/fictional-chat/share', json=form)).status_code == 200
+    dark_api.state['reader'] = True
+    dark_api.records.records = []
+    dark_api.app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(id='fictional-reader', role='user')
+    read = await dark_api.browser.get('/api/v1/chats/share/fictional-thread')
+    assert [message['position'] for message in read.json()['messages']] == [1, 2]
+    cloned = await dark_api.browser.post('/api/v1/chats/fictional-thread/clone/shared')
+    assert cloned.json()['id'] == 'fictional-reader-fork'
+    assert dark_api.state['clone'] == {'owner': 'fictional-reader', 'label': 'fictional-source-label'}
+    for key in ['label', 'same_tenant']:
+        dark_api.state[key] = False
+        denied = await dark_api.browser.get('/api/v1/chats/share/fictional-thread')
+        missing = await dark_api.browser.get('/api/v1/chats/share/fictional-missing')
+        assert (denied.status_code, denied.content) == (missing.status_code, missing.content)
+        assert denied.json() == {'state': 'share_refused'}
+        dark_api.state[key] = True
+    dark_api.state['shares'] = []
+    assert (await dark_api.browser.get('/api/v1/chats/share/fictional-thread')).json() == {'state': 'share_refused'}
+
+
+@pytest.mark.asyncio
+async def test_share_permission_fallback_and_non_owner_cannot_manage_grants(dark_api, monkeypatch):
+    from open_webui.routers import chats
+
+    form = {'audience': {'kind': 'person', 'id': 'fictional-person'}, 'at': 2}
+    dark_api.state['owner'] = False
+    assert (await dark_api.browser.post('/api/v1/chats/fictional-chat/share', json=form)).status_code == 404
+    assert not dark_api.state.get('shares')
+    dark_api.state['owner'] = True
+    monkeypatch.setattr(chats, 'can_share_chats', AsyncMock(return_value=False))
+    dark_api.calls.clear()
+    assert (await dark_api.browser.post('/api/v1/chats/fictional-chat/share', json=form)).status_code == 404
+    assert not dark_api.calls
+
+
+@pytest.mark.asyncio
+async def test_unshare_all_covers_previously_shared_inactive_branches(dark_api):
+    dark_api.records.records[0].branch_thread_ids = ['fictional-thread', 'fictional-older']
+    dark_api.visible.append(index_item('fictional-older'))
+    dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}]
+    result = await dark_api.browser.delete('/api/v1/chats/share/all')
+    assert result.status_code == 200 and result.json() is True
+    assert '/v1/threads/fictional-older/shares' in [r.url.path for r in dark_api.calls]
+
+
+@pytest.mark.asyncio
+async def test_share_link_keeps_the_shared_position_for_its_owner_too(dark_api):
+    form = {'audience': {'kind': 'person', 'id': 'fictional-person'}, 'at': 1}
+    await dark_api.browser.post('/api/v1/chats/fictional-chat/share', json=form)
+    shared = await dark_api.browser.get('/api/v1/chats/share/fictional-thread')
+    assert [m['position'] for m in shared.json()['messages']] == [1]
+    own = await dark_api.browser.get('/api/v1/chats/fictional-chat')
+    assert [m['position'] for m in own.json()['messages']] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_folder_membership_is_not_disclosed_without_folder_access(dark_api, monkeypatch):
+    from open_webui.models.folders import Folders
+
+    monkeypatch.setattr(Folders, 'get_folder_by_id', AsyncMock(return_value=None))
+    result = await dark_api.browser.get('/api/v1/chats/folder/fictional-folder/list')
+    assert result.status_code == 404 and result.json() == {'state': 'unavailable'}
+    assert not dark_api.calls
+
+
+@pytest.mark.asyncio
+async def test_flag_off_preserves_legacy_public_snapshot(dark_api, monkeypatch):
+    from open_webui.routers import chats
+
+    monkeypatch.setattr(threads, 'enabled', lambda: False)
+    dark_api.app.dependency_overrides[chats.get_optional_verified_user] = lambda: None
+    monkeypatch.setattr(
+        chats.SharedChats, 'get_by_id', AsyncMock(return_value=SimpleNamespace(user_id='fictional-owner'))
+    )
+    monkeypatch.setattr(chats, 'is_open_shared_chat', AsyncMock(return_value=True))
+    legacy = {
+        'id': 'fictional-retired',
+        'user_id': 'fictional-owner',
+        'title': 'Fictional snapshot',
+        'chat': {'messages': [{'content': 'Fictional historical text'}]},
+        'updated_at': 1,
+        'created_at': 1,
+        'archived': False,
+    }
+    monkeypatch.setattr(chats.Chats, 'get_chat_by_share_id', AsyncMock(return_value=SimpleNamespace(**legacy)))
+    result = await dark_api.browser.get('/api/v1/chats/share/fictional-retired')
+    assert result.status_code == 200 and result.json()['chat'] == legacy['chat']
+    assert not dark_api.calls
+
+
+@pytest.mark.asyncio
+async def test_readonly_folder_rows_do_not_stay_unread_after_reading(dark_api):
+    service = ChatPaths(dark_api.client, dark_api.records)
+    dark_api.records.folders = {
+        'fictional-folder': {
+            'fictional-thread': 'fictional-fern',
+            'fictional-shared': 'fictional-owner',
+        }
+    }
+    dark_api.visible.append(index_item('fictional-shared'))
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 1}
+    await service.organize('fictional-fern', 'fictional-chat', {'last_read_at': 2_000_000_000})
+    assert await service.folder_counts('fictional-fern', {'fictional-folder': None}) == {'fictional-folder': 0}
+    rows = await service.listing('fictional-fern', folder_id='fictional-folder')
+    assert len(rows) == 2
+    assert next(row for row in rows if row['readonly'])['last_read_at'] is None
+
+
+@pytest.mark.asyncio
+async def test_unavailable_owned_share_does_not_block_listing_or_unshare_all(dark_api, monkeypatch):
+    dark_api.records.records[0].branch_thread_ids = ['fictional-unavailable']
+    dark_api.visible.insert(0, index_item('fictional-unavailable'))
+    dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}]
+    original = dark_api.client.shares
+
+    async def shares(thread_id, **kwargs):
+        if thread_id == 'fictional-unavailable':
+            raise ThreadError(404, 'unavailable')
+        return await original(thread_id, **kwargs)
+
+    monkeypatch.setattr(dark_api.client, 'shares', shares)
+    listed = await dark_api.browser.get('/api/v1/chats/shared')
+    assert listed.status_code == 200
+    assert [item['thread_id'] for item in listed.json()] == ['fictional-thread']
+    deleted = await dark_api.browser.delete('/api/v1/chats/share/all')
+    assert deleted.status_code == 200 and deleted.json() is True
+    assert not dark_api.state['shares']
+
+
+@pytest.mark.asyncio
+async def test_share_listing_still_refuses_transient_platform_failures(dark_api, monkeypatch):
+    monkeypatch.setattr(dark_api.client, 'shares', AsyncMock(side_effect=ThreadError(503, 'reconnect')))
+    response = await dark_api.browser.get('/api/v1/chats/shared')
+    assert response.status_code == 503 and response.json() == {'state': 'reconnect'}
+
+
+@pytest.mark.asyncio
+async def test_unshare_all_tolerates_a_thread_disappearing_after_listing(dark_api, monkeypatch):
+    dark_api.state['shares'] = [{'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2}]
+    monkeypatch.setattr(dark_api.client, 'unshare', AsyncMock(side_effect=ThreadError(404, 'unavailable')))
+    response = await dark_api.browser.delete('/api/v1/chats/share/all')
+    assert response.status_code == 200 and response.json() is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_access_update_cannot_create_a_live_share(dark_api):
+    response = await dark_api.browser.post(
+        '/api/v1/chats/shared/fictional-chat/access/update',
+        json={'audience': {'kind': 'person', 'id': 'fictional-reader'}, 'at': 2},
+    )
+    assert response.status_code == 409 and response.json() == {'state': 'unavailable'}
+    assert not dark_api.calls and not dark_api.state.get('shares')

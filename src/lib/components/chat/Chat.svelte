@@ -906,7 +906,7 @@
 	// features or the user's last choice: a remounted composer writes its defaults into the
 	// draft, so restoring states from it turned the user's choices back off.
 	const restoreChatInput = async (storageChatInput: string | null) => {
-		if (!storageChatInput || $temporaryChatEnabled) {
+		if ($config?.features?.enable_v2_threads || !storageChatInput || $temporaryChatEnabled) {
 			return false;
 		}
 
@@ -4656,10 +4656,13 @@
 		if (saveDraftTimeout) {
 			clearTimeout(saveDraftTimeout);
 		}
+		if ($config?.features?.enable_v2_threads) return;
 
 		if (draft.prompt !== null && draft.prompt.length < MAX_DRAFT_LENGTH) {
 			const key = `chat-input${chatId ? `-${chatId}` : ''}`;
-			const write = () => sessionStorage.setItem(key, JSON.stringify(draft));
+			const write = () => {
+				sessionStorage.setItem(key, JSON.stringify(draft));
+			};
 			if (debounce) {
 				saveDraftTimeout = setTimeout(write, 500);
 			} else {

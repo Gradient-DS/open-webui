@@ -35,7 +35,13 @@ export type Organization = {
 
 export type SidebarItem = IndexItem & { organization: Organization | null };
 export type Page<T> = { items: T[]; next_cursor: string | null };
-export type ThreadState = 'reconnect' | 'unavailable' | 'sign_in' | 'invalid_request';
+export type ThreadState =
+	| 'reconnect'
+	| 'unavailable'
+	| 'sign_in'
+	| 'invalid_request'
+	| 'share_refused'
+	| 'legacy_share';
 
 export class ThreadError extends Error {
 	constructor(public state: ThreadState) {
@@ -47,7 +53,9 @@ export const stateText: Record<ThreadState, string> = {
 	reconnect: 'Reconnect to view this chat',
 	unavailable: 'This chat is unavailable',
 	sign_in: 'Sign in again to view this chat',
-	invalid_request: 'Reload this chat to continue'
+	invalid_request: 'Reload this chat to continue',
+	share_refused: "This chat uses sources you don't have access to",
+	legacy_share: 'This chat is no longer available to others'
 };
 
 export type ProjectionResult = {
@@ -56,7 +64,19 @@ export type ProjectionResult = {
 	notModified: boolean;
 };
 
+export type CachedThread = { thread_id: string; generation: string; versions: string[] };
+export type AuthorizeThreads = { threads: CachedThread[]; context_epoch: string };
+export type CacheAuthorization = {
+	principal: string;
+	session: string | null;
+	context_epoch: string;
+	authorization_context: string;
+	valid_until: string;
+	items: (CachedThread & { status: 'ok' | 'gone' })[];
+};
+
 export interface ThreadAPI {
+	authorize(body: AuthorizeThreads): Promise<CacheAuthorization>;
 	projection(threadId: string, before?: string, etag?: string): Promise<ProjectionResult>;
 	forks(threadId: string, cursor?: string): Promise<Page<IndexItem>>;
 	fork(threadId: string, at: number): Promise<{ thread_id: string }>;
@@ -95,6 +115,9 @@ export const threadAPI = (token: string, window = 20): ThreadAPI => {
 		return response;
 	};
 	return {
+		async authorize(body) {
+			return (await request(':authorize', { method: 'POST', body: JSON.stringify(body) })).json();
+		},
 		async projection(threadId, before = '', etag) {
 			const query = new URLSearchParams({ window: String(window), before });
 			const response = await request(`/${encodeURIComponent(threadId)}?${query}`, {

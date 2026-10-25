@@ -5,6 +5,7 @@
 	import { config } from '$lib/stores';
 	import { threadAPI, type SidebarItem, type ThreadAPI } from '$lib/apis/threads';
 	import ThreadState from '$lib/components/common/ThreadState.svelte';
+	import { threadCacheOrigin, watchThreadVisibility } from '$lib/utils/threadCache';
 	import {
 		filterSidebar,
 		ThreadSidebar,
@@ -47,12 +48,23 @@
 			snapshot = null;
 			return;
 		}
-		const next = new ThreadSidebar(transport, (value) => {
-			snapshot = value;
-		});
+		const origin = threadCacheOrigin();
+		const next = new ThreadSidebar(
+			transport,
+			(value) => {
+				snapshot = value;
+			},
+			() => void origin.clear()
+		);
 		controller = next;
+		const current = origin.stamp();
+		const unwatch = watchThreadVisibility(
+			(state) => next.clear(state),
+			() => void (current() ? next.refresh() : next.search(search))
+		);
 		void next.search(search);
 		return () => {
+			unwatch();
 			next.clear();
 			controller = null;
 		};

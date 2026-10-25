@@ -33,6 +33,7 @@
 	} from '$lib/apis/chats';
 	import {
 		chatId,
+		config,
 		chatTitle as _chatTitle,
 		mobile,
 		showSidebar,
@@ -150,6 +151,8 @@
 					: ' hover:bg-gray-100 dark:hover:bg-gray-900 group-hover:bg-gray-100 dark:group-hover:bg-gray-900'
 	}  whitespace-nowrap text-ellipsis transition`;
 
+	$: chatUrl = $config?.features?.enable_v2_threads && readonly ? `/s/${id}` : `/c/${id}`;
+
 	const selectChatHandler = (event?: MouseEvent) => {
 		openPreview = false;
 		dispatch('select');
@@ -164,7 +167,7 @@
 
 		if ($mobile) {
 			event?.preventDefault();
-			void goto(`/c/${id}`);
+			void goto(chatUrl);
 			showSidebar.set(false);
 		}
 	};
@@ -639,7 +642,7 @@
 		<a
 			id="sidebar-chat-item"
 			class={chatItemClass}
-			href="/c/{id}"
+			href={chatUrl}
 			aria-current={id === $chatId ? 'page' : undefined}
 			on:click={selectChatHandler}
 			draggable="false"
@@ -650,13 +653,16 @@
 		<LinkPreview.Root
 			openDelay={300}
 			closeDelay={0}
-			disabled={confirmEdit || dragged || !($settings?.chatHoverPreview ?? true)}
+			disabled={($config?.features?.enable_v2_threads && readonly) ||
+				confirmEdit ||
+				dragged ||
+				!($settings?.chatHoverPreview ?? true)}
 			bind:open={openPreview}
 		>
 			<LinkPreview.Trigger
 				id="sidebar-chat-item"
 				class={chatItemClass}
-				href="/c/{id}"
+				href={chatUrl}
 				aria-current={id === $chatId ? 'page' : undefined}
 				onclick={selectChatHandler}
 				ondblclick={renameChatFromDoubleClick}
