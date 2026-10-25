@@ -78,10 +78,9 @@ depends_on = ["namespace"]
 key = "model"
 name = "model_id"
 prefix = "/api/v1/analytics/models/{model_id}"
-description = "Select the soev-api catalog default through /api/config and register a publicly readable model override for the security pass. The same catalog id is supplied as upstream_model for compatibility with request fixtures."
+description = "Select the soev-api catalog default through /api/config and register a publicly readable model override for the security pass. Direct Ollama routes use the separate upstream_model from ollama_index."
 seeded_by = "seed_model"
 depends_on = []
-provides = ["upstream_model"]
 fresh = false
 actor = "admin"
 
@@ -152,8 +151,11 @@ same_as = "folder"
 key = "archive_user"
 name = "user_id"
 prefix = "/api/v1/archives/user/{user_id}"
-description = "Same Users.id created by auths.add; this scope is explicit so unrelated user-like parameters cannot silently inherit it."
-same_as = "user"
+description = "A living user's snapshot is an owner-only read of their chats. Use the authenticated admin's own id; the disposable user target is reserved for account operations."
+seeded_by = "seed_archive_user"
+depends_on = []
+actor = "admin"
+fresh = false
 
 [[parameter]]
 key = "task_chat"
@@ -434,12 +436,12 @@ actor = "admin"
 key = "archive"
 name = "archive_id"
 prefix = "/api/v1/archives/{archive_id}"
-description = "routers/archives.py:create_user_archive returns CreateArchiveResponse.archive_id after ArchiveService succeeds. Archival does not delete its target user."
-via = "POST /api/v1/archives/user/{user}"
+description = "routers/archives.py:create_user_archive returns CreateArchiveResponse.archive_id after the admin snapshots their own data. Archival does not delete its target user."
+via = "POST /api/v1/archives/user/{archive_user}"
 body = { "reason" = "Attack archive {token}" }
 extract = "archive_id"
 actor = "admin"
-depends_on = ["namespace", "user"]
+depends_on = ["namespace", "archive_user"]
 
 [[parameter]]
 key = "invite"
@@ -465,9 +467,10 @@ actor = "admin"
 key = "ollama_index"
 name = "url_idx"
 prefix = "/ollama"
-description = "routers/ollama.py indexes the configured URL list; GET config and a real model-list probe establish index 0. It is a stable selector, not a resource row."
-seeded_by = "connection_index"
+description = "GET config and a real model-list probe establish index 0. The aggregate tags endpoint populates OLLAMA_MODELS for unload and provides a model on that connection for direct provider routes, independently of the soev catalog."
+seeded_by = "seed_ollama_connection"
 depends_on = []
+provides = ["upstream_model"]
 actor = "admin"
 config_via = "/ollama/config"
 urls_field = "OLLAMA_BASE_URLS"
@@ -875,12 +878,12 @@ setup = [
 [[field]]
 route = "POST /api/embeddings"
 description = "The generic embedding dispatcher accepts Ollama models only; catalog models are refused rather than forwarded to a direct provider connection."
-json = { "model" = "{model}" }
+json = { "model" = "{model}", "input" = "Attack embedding control {token}" }
 
 [[field]]
 route = "POST /api/v1/embeddings"
-description = "The same handler as POST /api/embeddings: 404 for a model outside the registry (PLANE-004); the seeded model embeds."
-json = { "model" = "{model}" }
+description = "The same handler as POST /api/embeddings: catalog models are refused because only Ollama models can use this direct dispatcher."
+json = { "model" = "{model}", "input" = "Attack embedding control {token}" }
 
 [[field]]
 route = "POST /ollama/api/chat/{url_idx}"
@@ -1137,9 +1140,9 @@ reason = "The model download refuses a file URL outside the allowed hosts, and t
 
 [[control]]
 route = "GET /api/v1/users/{user_id}/oauth/sessions"
-status = 400
-detail = "could not find"
-reason = "OAuth sessions come from an identity provider's code exchange, which the sealed stack has none of."
+status = 403
+detail = "You do not have permission to access this resource"
+reason = "The target is a different user's account. Admins cannot read another user's OAuth session metadata, whether or not OIDC login has created sessions."
 
 [[control]]
 route = "POST /api/v1/calendars/events/{event_id}/rsvp"

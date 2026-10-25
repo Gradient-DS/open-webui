@@ -77,6 +77,21 @@ reason = "Never attempted: every owner pass skips it because `target_id` is decl
 id = "POST /api/v1/notifications/targets/{target_id}/test"
 reason = "Never attempted: every owner pass skips it because `target_id` is declared unseedable (attack-surface.toml, key notification_target). With user webhooks on (CI-005), POST /api/v1/notifications/targets answers 400 'The URL you provided is invalid' for an in-network URL: utils/notifications.py:_normalize_target runs retrieval/web/utils.py:validate_url on every target, which refuses private Docker addresses, and external hosts do not resolve on the internal network. Does not close: the route is unseedable because the guard works."
 
+# --- Catalog-only v2 registry ----------------------------------------------------
+# These waivers affect the coverage gate only: the passes still attempt both
+# routes, and a hit makes the stale-waiver gate fail. The public Ollama registry
+# must continue driving them without waivers.
+
+[[waived]]
+id = "POST /api/embeddings"
+runtime_soev_backed = "drive"
+reason = "The private v2 sweep left this route unentered: utils/models.py:get_all_base_models loads only soev-api catalog models, while utils/embeddings.py:generate_embeddings only dispatches owned_by=ollama. HTTP controls against the actual handler confirm a valid catalog model and input return 404 without provider I/O. A direct Ollama connection cannot add a model to the v2 registry. Closes when the dispatcher supports catalog embeddings."
+
+[[waived]]
+id = "POST /api/v1/embeddings"
+runtime_soev_backed = "drive"
+reason = "Same handler as /api/embeddings: the private v2 sweep left this alias unentered. A valid catalog model and input return 404 without provider I/O in the actual-handler HTTP control; the v2 registry never includes Ollama models. Applies only in private drive mode. Closes when the dispatcher supports catalog embeddings."
+
 # --- Singletons -----------------------------------------------------------------
 
 [[waived]]

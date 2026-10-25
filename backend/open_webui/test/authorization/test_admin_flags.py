@@ -396,8 +396,24 @@ def test_archive_of_living_user_requires_ownership(seeded, bypass, monkeypatch):
 def test_oauth_sessions_never_return_tokens(seeded, bypass):
     from open_webui.models.oauth_sessions import OAuthSessions
 
-    seeded.run(OAuthSessions.create_session, 'owner', 'microsoft', {'access_token': 'secret-access', 'id_token': 'x'})
-    response = seeded.client.get('/api/v1/users/owner/oauth/sessions', headers=seeded.headers('admin'))
+    seeded.run(OAuthSessions.create_session, 'admin', 'microsoft', {'access_token': 'secret-access', 'id_token': 'x'})
+    response = seeded.client.get('/api/v1/users/admin/oauth/sessions', headers=seeded.headers('admin'))
     assert response.status_code == 200, response.text
     assert 'secret-access' not in response.text and 'token' not in response.json()[0]
     assert set(response.json()[0]) == {'id', 'user_id', 'provider', 'expires_at', 'created_at'}
+
+
+@pytest.mark.parametrize(('principal', 'status'), [('admin', 403), ('reader', 401)])
+def test_oauth_sessions_refuse_other_users_before_lookup(seeded, bypass, monkeypatch, principal, status):
+    from open_webui.models.oauth_sessions import OAuthSessions
+
+    seeded.run(OAuthSessions.create_session, 'owner', 'oidc', {'access_token': 'fictional-owner-token'})
+    lookup = AsyncMock(wraps=OAuthSessions.get_sessions_by_user_id)
+    monkeypatch.setattr(OAuthSessions, 'get_sessions_by_user_id', lookup)
+    responses = [
+        seeded.client.get(f'/api/v1/users/{target}/oauth/sessions', headers=seeded.headers(principal))
+        for target in ('owner', 'missing')
+    ]
+    assert [response.status_code for response in responses] == [status, status]
+    assert responses[0].json() == responses[1].json()
+    lookup.assert_not_awaited()
