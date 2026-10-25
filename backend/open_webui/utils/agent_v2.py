@@ -33,6 +33,7 @@ from open_webui.models.notes import Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import get_event_emitter
 from open_webui.soev import acting, agent_threads, assistant_files, identity, ingest, live_documents
+from open_webui.soev.policy_jobs import v2_enabled
 from open_webui.soev.client import ChatEvent, SoevApiError, SoevClient
 from open_webui.soev.meetings import MEETING_TEXT_PREFIX, MeetingUnavailable, meeting_document
 from open_webui.storage.provider import Storage
@@ -1817,6 +1818,8 @@ class AgentTurn:
 
     async def events(self, body: dict) -> AsyncIterator[ChatEvent]:
         path = self.path('inputs') if self.thread_id else _ROOT
+        if path == _ROOT and v2_enabled() and is_temporary_chat_id(self.metadata.get('chat_id', '')):
+            body = {**body, 'temporary': True}
         try:
             stream = self.client.chat_stream(
                 path, body, as_user=self.as_user, thread_id=self.thread_id, after=self.position

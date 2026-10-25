@@ -18,8 +18,8 @@ from open_webui.services.deletion import offboarding_store as store
 from open_webui.soev import group_sync, identity, ingest
 from open_webui.soev.availability import configured
 from open_webui.soev.client import SoevApiError
-from open_webui.soev.cloud_sync import revoke_cloud
 from open_webui.soev.group_sync import ARCHIVE_OWNER
+from open_webui.soev.policy_jobs import refuse_offboarding
 
 
 class OffboardingOptions(BaseModel):
@@ -55,6 +55,7 @@ class Inventory:
 
 async def inventory(user_id: str, *, db: AsyncSession) -> Inventory:
     """List owned resources with the platform's principals and writers."""
+    refuse_offboarding()
     user = await Users.get_user_by_id(user_id, db=db)
     if user is None:
         raise SoevApiError(404, 'not_found', 'User not found')
@@ -89,6 +90,7 @@ async def offboard_user(
     language: str = 'en',
 ) -> int:
     """Complete remote steps before atomically removing or reassigning local rows."""
+    refuse_offboarding()
     async with get_async_db_context(db) as session:
         async with group_sync.membership_lock(session):
             async with identity.link_lock(f'owui:user:{user_id}'):
@@ -98,6 +100,7 @@ async def offboard_user(
 async def _offboard(
     user_id: str, *, actor_id: str, options: OffboardingOptions, db: AsyncSession, language: str
 ) -> int:
+    refuse_offboarding()
     user = await Users.get_user_by_id(user_id, db=db)
     if user is None:
         raise SoevApiError(404, 'not_found', 'User not found')
@@ -106,8 +109,6 @@ async def _offboard(
     owned = await inventory(user_id, db=db)
     _confirm_deletion(owned, options, language)
     archive = await store.prepare_archive(user, actor_id=actor_id, options=options, owned=owned, db=db)
-    if configured() and as_user is not None:
-        await revoke_cloud(user_id, client=identity.build_client())
     if not await Groups.remove_user_from_all_groups(user_id, db=db):
         raise SoevApiError(503, 'group_sync_unavailable', 'Group membership update failed')
     await store.narrow_owned_groups(user_id, db=db)

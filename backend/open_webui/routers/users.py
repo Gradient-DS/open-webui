@@ -961,6 +961,9 @@ async def update_user_by_id(
     user = await Users.get_user_by_id(user_id, db=db)
 
     if user:
+        from open_webui.soev.identity import check_role_change
+
+        check_role_change(user, form_data.role or user.role)
         if form_data.email is not None and form_data.email.lower() != user.email:
             email_user = await Users.get_user_by_email(form_data.email.lower(), db=db)
             if email_user:

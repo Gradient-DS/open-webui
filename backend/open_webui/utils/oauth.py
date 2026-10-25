@@ -86,6 +86,7 @@ from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import Users
 from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
 from open_webui.soev import silent_connect
+from open_webui.soev.client import SoevApiError
 from open_webui.utils.auth import (
     create_token,
     get_password_hash,
@@ -2258,6 +2259,8 @@ class OAuthManager:
                     db=db,
                 )
 
+        except SoevApiError:
+            raise
         except Exception as e:
             log.error(f'Error during OAuth process: {e}')
             error_message = (

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import logging
 from typing import Union
+from uuid import uuid4
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -41,7 +42,7 @@ from open_webui.utils.tools import (
     set_terminal_servers,
     set_tool_servers,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter()
 
@@ -1183,17 +1184,57 @@ class DataRetentionConfigForm(BaseModel):
     ENABLE_RETENTION_WARNING_EMAIL: bool
 
 
+class PlatformRetentionConfigForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    temporary_idle_hours: int | None = Field(ge=1, le=720, strict=True)
+    thread_idle_days: int | None = Field(ge=1, le=3650, strict=True)
+
+
+async def _retention_admin(user_id: str) -> str:
+    from open_webui.soev.acting import requester_ref, user_token
+    from open_webui.soev.client import SoevApiError
+
+    ref = f'owui:user:{user_id}'
+    if requester_ref() != ref or not await user_token(ref):
+        raise SoevApiError(401, 'unauthenticated', 'A user token is required')
+    return ref
+
+
 @router.get('/data-retention')
 async def get_data_retention_config(request: Request, user=Depends(get_admin_user)):
+    from open_webui.soev import identity
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        ref = await _retention_admin(user.id)
+        return {'platform_policy': await identity.build_client().get_retention_policy(as_user=ref)}
     return await get_config_values(DATA_RETENTION_CONFIG_KEYS)
 
 
 @router.post('/data-retention')
 async def set_data_retention_config(
     request: Request,
-    form_data: DataRetentionConfigForm,
+    form_data: DataRetentionConfigForm | PlatformRetentionConfigForm,
     user=Depends(get_admin_user),
 ):
+    from open_webui.soev import identity
+    from open_webui.soev.client import SoevApiError
+    from open_webui.soev.policy_jobs import v2_enabled
+
+    if v2_enabled():
+        ref = await _retention_admin(user.id)
+        if not isinstance(form_data, PlatformRetentionConfigForm):
+            raise SoevApiError(422, 'invalid_field', 'Invalid retention policy', constraint='retention:rules')
+        policy = await identity.build_client().send(
+            'PUT',
+            '/v1/retention-policy',
+            form_data.model_dump(),
+            as_user=ref,
+            idempotency_key=request.headers.get('Idempotency-Key') or str(uuid4()),
+        )
+        return {'platform_policy': policy}
+    if not isinstance(form_data, DataRetentionConfigForm):
+        raise SoevApiError(422, 'invalid_field', 'Invalid retention settings', constraint='retention:rules')
     await Config.upsert(config_updates(form_data.model_dump(), DATA_RETENTION_CONFIG_KEYS))
     return await get_config_values(DATA_RETENTION_CONFIG_KEYS)
 

@@ -298,7 +298,11 @@ class SoevClient:
         """Delete a thread once; the chat contract has no mutation replay key."""
         if not as_user:
             raise ValueError('Chat requires an acting user')
-        await self._request('DELETE', path, as_user=as_user)
+        from open_webui.soev.policy_jobs import v2_enabled
+
+        response = await self._request('DELETE', path, as_user=as_user)
+        if v2_enabled() and response.status_code != 204:
+            raise SoevApiError(502, 'upstream_error', 'Thread deletion did not complete')
 
     async def chat_stream(
         self,
@@ -361,6 +365,7 @@ class SoevClient:
                         return
 
     async def get(self, path: str, *, as_user: str | None = None, params: dict | None = None) -> dict:
+        await self._require_thread_request(path, as_user)
         headers = await self._headers(as_user)
         key = (
             self._base_url,
@@ -376,6 +381,12 @@ class SoevClient:
         )
         return self._json_object(response)
 
+    async def get_retention_policy(self, *, as_user: str) -> dict | None:
+        response = await self._request('GET', '/v1/retention-policy', as_user=as_user)
+        if response.json() is None:
+            return None
+        return self._json_object(response)
+
     async def get_text(self, path: str, *, as_user: str | None = None) -> str:
         """Read API text with the same authority and error handling as JSON reads."""
         response = await self._request('GET', path, as_user=as_user)
@@ -387,6 +398,7 @@ class SoevClient:
             raise ValueError('An API path must start with a single slash')
         if not as_user:
             raise ValueError('Acting as a user requires an acting user')
+        await self._require_thread_request(path, as_user)
         headers = await self._headers(as_user)
         try:
             async with AsyncExitStack() as stack:
@@ -448,6 +460,14 @@ class SoevClient:
             return None
         return self._json_object(response)
 
+    async def _require_thread_request(self, path: str, as_user: str | None) -> None:
+        from open_webui.soev.policy_jobs import require_thread_owner, v2_enabled
+
+        if v2_enabled() and path.startswith('/v1/chat/threads/'):
+            if self.is_service or not as_user:
+                raise SoevApiError(403, 'policy_forbids', 'Owner request required', constraint='thread:owner_request')
+            await require_thread_owner(as_user.removeprefix('owui:user:'))
+
     async def _request(
         self,
         method: str,
@@ -465,6 +485,8 @@ class SoevClient:
     ) -> httpx.Response:
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('An API path must start with a single slash')
+        if method in {'GET', 'DELETE'}:
+            await self._require_thread_request(path, as_user)
         headers = (
             admission_headers
             if admission_headers is not None

@@ -58,10 +58,18 @@ and attempts to act as another user do not fall back to an assertion. Chat tasks
 started by a user request inherit its token context. Presigned storage requests
 use only their presigned credentials.
 
+Admin suspension to `pending` is refused with `403 policy_forbids` /
+`suspension:console` whenever soev is configured, before remote calls or local
+writes. v2 offboarding keeps the same console-only boundary. OWUI never revokes
+the target person's schedules or connections on an admin's behalf.
+Archive DELETE and retention PATCH require the admin's own login token and use
+a requester client. Scheduled archive expiry remains tokenless and makes no
+platform calls; the platform owns remote expiry.
+
 `SoevClient` resolves the requesting user's token even when a caller omits an
 explicit user reference. `as_service()` / `build_service_client()` explicitly
 select product authority for catalog/capability discovery, directory/group pushes,
-service inventory and grant projections, archived resources, collection ownership
+service inventory and grant projections, collection ownership
 operations, and credential-scoped job reads/commits. Those calls send neither
 person header. ThreadClient already requires the requester's token.
 

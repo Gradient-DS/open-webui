@@ -16,6 +16,7 @@ from open_webui.internal.db import get_async_db
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chat, ChatForm, Chats
 from open_webui.models.users import UserModel, Users
+from open_webui.soev.policy_jobs import refuse_automations, v2_enabled
 from open_webui.soev.thread_content import refuse_local_content
 from open_webui.tasks import has_active_tasks
 from open_webui.utils.json_codec import JSONCodec
@@ -77,6 +78,7 @@ async def create_timer(
     parent_chat_id: str,
     parent_message_id: str | None,
 ) -> str:
+    refuse_automations()
     prompt = prompt.strip()
     if not prompt:
         return 'Error: prompt must not be empty.'
@@ -170,6 +172,8 @@ async def create_timer(
 
 async def claim_due_timers(now_ns: int, limit: int = 10) -> list[tuple[str, str]]:
     """Claim due timers by moving them from pending to running."""
+    if v2_enabled():
+        return []
     refuse_local_content()
     async with get_async_db() as db:
         stmt = (
@@ -204,6 +208,8 @@ async def cancel_timers_for_chat(
     parent_chat_id: str, event: Literal['chat.read', 'chat.user_message'], user_id: str
 ) -> None:
     """Owner-scoped: without the user filter, reading a chat cancels every user's timers on it."""
+    if v2_enabled():
+        return
     refuse_local_content()
     async with get_async_db() as db:
         result = await db.execute(
@@ -230,6 +236,8 @@ async def cancel_timers_for_chat(
 
 
 async def execute_due_timer(app, timer_id: str, claim_id: str | None = None) -> None:
+    if v2_enabled():
+        return
     refuse_local_content()
     lock = _timer_locks.setdefault(timer_id, asyncio.Lock())
     async with lock:

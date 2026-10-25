@@ -165,19 +165,22 @@ async def _unlink(user_ref: str, client: SoevClient) -> None:
     _linked_refs.discard(user_ref)
 
 
+def check_role_change(user: UserModel, role: str) -> None:
+    if config.SOEV_API_URL and role == 'pending' and user.role in {'user', 'admin'}:
+        raise SoevApiError(403, 'policy_forbids', 'Console suspension required', constraint='suspension:console')
+
+
 @asynccontextmanager
 async def role_change(user: UserModel, role: str, *, db: AsyncSession | None = None) -> AsyncIterator[None]:
-    """Revoke cloud custody before unlinking a demotion."""
+    """Refuse suspension before changing platform membership or the local role."""
+    check_role_change(user, role)
     if not config.SOEV_API_URL or user.role == role:
         yield
         return
     from open_webui.soev import group_sync
-    from open_webui.soev.cloud_sync import revoke_cloud
 
     ref = external_ref(user)
     async with link_lock(ref):
-        if role == 'pending' and user.role in {'user', 'admin'}:
-            await revoke_cloud(user.id, client=build_client())
         if user.role == 'admin' and role != 'admin':
             await group_sync.narrow_admin(user.id, db=db)
         if role not in {'user', 'admin'}:

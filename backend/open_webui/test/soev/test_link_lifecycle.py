@@ -40,18 +40,20 @@ async def test_approval_never_mints_a_legacy_link(role_store, monkeypatch, metho
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('method', ['role', 'update'])
-async def test_demotion_failure_refuses_local_role_write(role_store, monkeypatch, method):
+async def test_suspension_refuses_before_remote_or_local_role_write(role_store, monkeypatch, method):
     store = role_store
     await store.db.execute(__import__('sqlalchemy').text("UPDATE user SET role='user'"))
     await store.db.commit()
     client = SimpleNamespace(send=AsyncMock(side_effect=httpx.ConnectError('offline')), pages=empty_cloud_pages)
     client.as_service = lambda: client
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
-    with pytest.raises(httpx.ConnectError):
+    with pytest.raises(store.identity.SoevApiError) as caught:
         if method == 'role':
             await store.users.update_user_role_by_id('fern', 'pending', db=store.db)
         else:
             await store.users.update_user_by_id('fern', {'role': 'pending'}, db=store.db)
+    assert caught.value.constraint == 'suspension:console'
+    client.send.assert_not_awaited()
     assert (await store.users.get_user_by_id('fern', db=store.db)).role == 'user'
 
 
@@ -74,7 +76,7 @@ async def test_unlink_contract_and_cache_invalidation(identity_config, identity_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('role', ['user', 'admin'])
-async def test_approval_links_and_demotion_unlinks(role_store, monkeypatch, role):
+async def test_approval_never_links_and_suspension_never_unlinks(role_store, monkeypatch, role):
     store = role_store
     client = SimpleNamespace(send=AsyncMock(), pages=empty_cloud_pages)
     client.as_service = lambda: client
@@ -84,9 +86,12 @@ async def test_approval_links_and_demotion_unlinks(role_store, monkeypatch, role
     monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
     await store.users.update_user_role_by_id('fern', role, db=store.db)
     assert all('/v1/identity/' not in c.args[1] for c in client.send.await_args_list)
-    await store.users.update_user_role_by_id('fern', 'pending', db=store.db)
-    assert any(c.args[0] == 'DELETE' for c in client.send.await_args_list)
-    assert (await store.users.get_user_by_id('fern', db=store.db)).role == 'pending'
+    client.send.reset_mock()
+    with pytest.raises(store.identity.SoevApiError) as caught:
+        await store.users.update_user_role_by_id('fern', 'pending', db=store.db)
+    assert caught.value.constraint == 'suspension:console'
+    client.send.assert_not_awaited()
+    assert (await store.users.get_user_by_id('fern', db=store.db)).role == role
     assert 'owui:user:fern' not in store.identity._linked_refs
 
 

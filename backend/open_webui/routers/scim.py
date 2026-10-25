@@ -754,6 +754,7 @@ async def patch_user(
 
     update_data = {}
 
+    external_ids = []
     for operation in patch_data.Operations:
         op = operation.op.lower()
         path = operation.path
@@ -773,8 +774,7 @@ async def patch_user(
             elif path == 'name.formatted':
                 update_data['name'] = value
             elif path == 'externalId':
-                provider = get_scim_provider()
-                await Users.update_user_scim_by_id(user_id, provider, value, db=db)
+                external_ids.append(value)
 
     # Update user
     if update_data:
@@ -786,6 +786,10 @@ async def patch_user(
             )
     else:
         updated_user = user
+
+    for external_id in external_ids:
+        provider = get_scim_provider()
+        await Users.update_user_scim_by_id(user_id, provider, external_id, db=db)
 
     role_changed = updated_user.role != user.role
     user_updated_fields = [field for field in update_data.keys() if field != 'role']
