@@ -5,6 +5,8 @@
 		composerFromFeatures,
 		type ComposerPreferences
 	} from '$lib/utils/composerPreferences';
+	import { requestedDataSources } from '$lib/utils/dataSources';
+	import { dataSources } from '$lib/utils/dataSourcesStore';
 	import type { LiveToolState } from '$lib/utils/toolState';
 	import {
 		grantedLiveState,
@@ -392,6 +394,7 @@
 	let selectedToolIds: string[] = [];
 	let selectedSkillIds: string[] = [];
 	let selectedFilterIds: string[] = [];
+	let selectedDataSourceIds: string[] = [];
 	let pendingOAuthTools = [];
 
 	let imageGenerationEnabled = false;
@@ -457,7 +460,8 @@
 		documentWriterEnabled,
 		selectedToolIds,
 		selectedSkillIds,
-		selectedFilterIds
+		selectedFilterIds,
+		selectedDataSourceIds
 	});
 	let composerSession = 0;
 	const restoreComposerPreferences = (value: ComposerPreferences) => {
@@ -471,7 +475,8 @@
 			documentWriterEnabled,
 			selectedToolIds,
 			selectedSkillIds,
-			selectedFilterIds
+			selectedFilterIds,
+			selectedDataSourceIds
 		} = value);
 		composerInitialized = true;
 	};
@@ -1093,7 +1098,8 @@
 		documentWriterEnabled,
 		selectedToolIds,
 		selectedSkillIds,
-		selectedFilterIds
+		selectedFilterIds,
+		selectedDataSourceIds
 	});
 	$: if (composerInitialized && !loading && !settingDefaults) {
 		const current = JSON.stringify(composerSnapshot);
@@ -3978,6 +3984,10 @@
 				live_mail: $config?.features?.enable_live_mail
 					? grantedLiveState(liveMailState, liveGranted($liveGrants, 'mail'))
 					: 'off',
+				// [Gradient] Switched-on data sources, merged into the agent's knowledge server-side.
+				data_sources: $config?.features?.enable_data_sources
+					? requestedDataSources(selectedDataSourceIds, $dataSources)
+					: [],
 				web_search: webSearchActive
 			};
 
@@ -5121,6 +5131,7 @@
 										bind:selectedToolIds
 										bind:selectedSkillIds
 										bind:selectedFilterIds
+										bind:selectedDataSourceIds
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										bind:documentWriterEnabled
@@ -5217,6 +5228,7 @@
 										bind:selectedToolIds
 										bind:selectedSkillIds
 										bind:selectedFilterIds
+										bind:selectedDataSourceIds
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										{pendingOAuthTools}
@@ -5280,6 +5292,7 @@
 									bind:selectedToolIds
 									bind:selectedSkillIds
 									bind:selectedFilterIds
+									bind:selectedDataSourceIds
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:documentWriterEnabled

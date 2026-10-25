@@ -1,3 +1,4 @@
+import { dataSourceIds } from './dataSources';
 import { liveDocumentState } from './toolState';
 
 const featureKeys = {
@@ -9,7 +10,8 @@ const featureKeys = {
 	documentWriterEnabled: 'document_writer',
 	selectedToolIds: 'tool_ids',
 	selectedSkillIds: 'skill_ids',
-	selectedFilterIds: 'filter_ids'
+	selectedFilterIds: 'filter_ids',
+	selectedDataSourceIds: 'data_sources'
 } as const;
 
 export type ComposerPreferences = {
@@ -22,6 +24,7 @@ export type ComposerPreferences = {
 	selectedToolIds: string[];
 	selectedSkillIds: string[];
 	selectedFilterIds: string[];
+	selectedDataSourceIds: string[];
 };
 
 export function composerPreferences(
@@ -38,7 +41,8 @@ export function composerPreferences(
 		documentWriterEnabled: values.documentWriterEnabled ?? false,
 		selectedToolIds: [...(values.selectedToolIds ?? [])],
 		selectedSkillIds: [...(values.selectedSkillIds ?? [])],
-		selectedFilterIds: [...(values.selectedFilterIds ?? [])]
+		selectedFilterIds: [...(values.selectedFilterIds ?? [])],
+		selectedDataSourceIds: dataSourceIds(values.selectedDataSourceIds)
 	};
 }
 

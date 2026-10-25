@@ -53,6 +53,14 @@
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import OneDriveSearch from '$lib/components/icons/OneDriveSearch.svelte';
 	import MailSearch from '$lib/components/icons/MailSearch.svelte';
+	import Database from '$lib/components/icons/Database.svelte';
+	import {
+		DATA_SOURCE_PIN_PREFIX,
+		requestedDataSources,
+		toggleDataSource
+	} from '$lib/utils/dataSources';
+	import { dataSources, loadDataSources } from '$lib/utils/dataSourcesStore';
+	import PinButton from './InputMenu/PinButton.svelte';
 	import Chats from './InputMenu/Chats.svelte';
 	import Files from './InputMenu/Files.svelte';
 	import Notes from './InputMenu/Notes.svelte';
@@ -99,7 +107,7 @@
 	export let uploadOneDriveHandler: () => void;
 	// [Gradient] Assistant-builder restrictions and strict data-separation state. Item keys
 	// match the pin ids (see MessageInput/inputItems.ts): 'upload_files', 'capture', 'attach_webpage', 'attach_notes',
-	// 'google_drive', 'onedrive', 'knowledge', 'reference_chats', 'tools', 'skills',
+	// 'google_drive', 'onedrive', 'knowledge', 'reference_chats', 'data_sources', 'tools', 'skills',
 	// 'filters', 'web_search', 'image_generation', 'code_interpreter', 'document_writer'.
 	// Null shows every globally enabled item.
 	export let restrictTo: string[] | null = null;
@@ -117,6 +125,8 @@
 	export let selectedToolIds: string[] = [];
 	export let selectedSkillIds: string[] = [];
 	export let selectedFilterIds: string[] = [];
+	// [Gradient] Data sources switched on in this chat (`utils/dataSources.ts`).
+	export let selectedDataSourceIds: string[] = [];
 	export let toggleFilters: ToggleFilter[] = [];
 	export let showWebSearchButton = false;
 	export let webSearchEnabled = false;
@@ -194,6 +204,9 @@
 	$: if (show && $config?.features?.enable_onedrive_business) {
 		void prepareBusinessDocumentPicker().catch(() => {});
 	}
+	$: if (show && $config?.features?.enable_data_sources) {
+		void loadDataSources(localStorage.token);
+	}
 	let tab = '';
 	// Opened straight into a submenu from a pinned composer button: no back row.
 	let directTab = false;
@@ -262,6 +275,11 @@
 		oneDriveBusiness;
 	$: showKnowledge = itemAllowed('knowledge') && isFeatureEnabled('knowledge');
 	$: showReferenceChats = itemAllowed('reference_chats') && isFeatureEnabled('reference_chats');
+	$: showDataSources =
+		itemAllowed('data_sources') &&
+		!!$config?.features?.enable_data_sources &&
+		($dataSources ?? []).length > 0;
+	$: dataSourcesOn = requestedDataSources(selectedDataSourceIds, $dataSources).length;
 
 	$: showTools =
 		itemAllowed('tools') && isFeatureEnabled('tools') && Object.keys(tools ?? {}).length > 0;
@@ -291,7 +309,7 @@
 		showMeetings ||
 		showGoogleDrive ||
 		showOneDrive;
-	$: anyKnowledge = showKnowledge || showReferenceChats;
+	$: anyKnowledge = showKnowledge || showReferenceChats || showDataSources;
 	$: anyTools =
 		showLiveMail ||
 		showLiveDocuments ||
@@ -812,6 +830,29 @@
 						</MenuItem>
 					{/if}
 
+					{#if showDataSources}
+						<MenuItem
+							label={$i18n.t('Data sources')}
+							pinId="data_sources"
+							submenu
+							tooltip={internalBlocked ? dataSeparationMessage : ''}
+							disabled={internalBlocked}
+							onClick={() => {
+								if (internalBlocked) return;
+								tab = 'data_sources';
+							}}
+						>
+							<Database slot="icon" className="size-3.5" />
+							<svelte:fragment slot="actions">
+								{#if dataSourcesOn > 0}
+									<span class="shrink-0 text-xs text-gray-500"
+										>{$i18n.t('{{COUNT}} on', { COUNT: dataSourcesOn })}</span
+									>
+								{/if}
+							</svelte:fragment>
+						</MenuItem>
+					{/if}
+
 					<!-- ═══ Tools ═══ -->
 					{#if anyTools || toolsLoading}
 						{#if anyContext || anyKnowledge}
@@ -1155,6 +1196,8 @@
 										{$i18n.t('Files')}
 									{:else if tab === 'chats'}
 										{$i18n.t('Reference chats')}
+									{:else if tab === 'data_sources'}
+										{$i18n.t('Data sources')}
 									{:else if tab === 'tool_permissions'}
 										{$i18n.t('Tool Permissions')}
 									{:else if tab === 'tools'}
@@ -1179,6 +1222,53 @@
 						<Files {onSelect} />
 					{:else if tab === 'chats'}
 						<Chats {onSelect} />
+					{:else if tab === 'data_sources'}
+						<!-- [Gradient] Each data source is off or on (the model decides whether to search it). -->
+						<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
+							{#if $dataSources === null}
+								<div class="py-4">
+									<Spinner />
+								</div>
+							{:else}
+								<div class="flex flex-col gap-0.5">
+									{#each $dataSources as source (source.id)}
+										{@const on = selectedDataSourceIds.includes(source.id)}
+										<button
+											type="button"
+											class="flex w-full gap-2 items-center px-2 py-1 text-[0.8125rem] font-normal text-left cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/60"
+											class:opacity-50={internalBlocked}
+											aria-disabled={internalBlocked}
+											aria-pressed={on}
+											aria-label={stateAriaLabel(
+												source.name,
+												on,
+												on
+													? $i18n.t('The model decides whether to search this data source')
+													: $i18n.t(TOOL_OFF_DESCRIPTION)
+											)}
+											on:click={() => {
+												if (internalBlocked) return;
+												selectedDataSourceIds = toggleDataSource(selectedDataSourceIds, source.id);
+											}}
+										>
+											<div class="shrink-0 flex items-center justify-center size-3.5">
+												<Database className="size-3.5" />
+											</div>
+											<div class="flex-1 min-w-0">
+												<div class="truncate">{source.name}</div>
+												{#if source.description}
+													<div class="text-xs text-gray-500 line-clamp-1">{source.description}</div>
+												{/if}
+											</div>
+											<div class="shrink-0" inert>
+												<Switch state={on} />
+											</div>
+											<PinButton itemId={`${DATA_SOURCE_PIN_PREFIX}${source.id}`} />
+										</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
 					{:else if tab === 'tool_permissions'}
 						<div class="space-y-1">
 							{#each toolApprovalModes as mode}

@@ -20,6 +20,26 @@ describe('input items', () => {
 		]);
 	});
 
+	it('lists each data source after the data sources menu, in the knowledge section', () => {
+		const order = inputItemOrder(['a'], ['ds:x', 'ds:y']);
+		expect(order.slice(order.indexOf('reference_chats') + 1, order.indexOf('live_mail'))).toEqual([
+			'data_sources',
+			'data_source:ds:x',
+			'data_source:ds:y'
+		]);
+	});
+
+	it('shows a data source that is on or pinned, never one no longer listed', () => {
+		const order = inputItemOrder([], ['ds:x', 'ds:y']);
+		expect(
+			barItemIds({
+				order,
+				pinned: ['data_source:ds:y', 'data_source:ds:gone'],
+				states: { 'data_source:ds:x': 'on' }
+			})
+		).toEqual(['data_source:ds:x', 'data_source:ds:y']);
+	});
+
 	it('maps tool states and booleans to off / on', () => {
 		expect(itemState('auto')).toBe('on');
 		expect(itemState('off')).toBe('off');

@@ -125,6 +125,9 @@
 	import Wrench from '../icons/Wrench.svelte';
 	import Cube from '../icons/Cube.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
+	import Database from '../icons/Database.svelte';
+	import { DATA_SOURCE_PIN_PREFIX, toggleDataSource } from '$lib/utils/dataSources';
+	import { dataSources, loadDataSources } from '$lib/utils/dataSourcesStore';
 	import Mic from '../icons/Mic.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
@@ -247,6 +250,8 @@
 	export let selectedToolIds: string[] = [];
 	export let selectedSkillIds: string[] = [];
 	export let selectedFilterIds: string[] = [];
+	// [Gradient] Data sources switched on in this chat (`utils/dataSources.ts`).
+	export let selectedDataSourceIds: string[] = [];
 
 	export let imageGenerationEnabled = false;
 	export let liveDocumentsState: LiveToolState = 'off';
@@ -307,6 +312,7 @@
 		selectedToolIds,
 		selectedSkillIds,
 		selectedFilterIds,
+		selectedDataSourceIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
 		liveDocumentsState,
@@ -945,6 +951,7 @@
 								'attach_meetings',
 								'knowledge',
 								'reference_chats',
+								'data_sources',
 								'google_drive',
 								'onedrive'
 							]
@@ -956,11 +963,21 @@
 	// [Gradient] "+" menu items shown as buttons in the composer bar: every pinned item and
 	// every item that is on, in menu order (inputItems.ts). The "Attach Files"
 	// submenu shares the upload_files restriction key with the menu.
-	$: inputBarAllowed = (id: string) =>
-		(inputMenuRestrictTo === null ||
-			inputMenuRestrictTo.includes(id === 'attach_files' ? 'upload_files' : id) ||
-			(id.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
-		!dataSeparationBlockedItems.has(id);
+	$: inputBarAllowed = (id: string) => {
+		// [Gradient] Each data source shares the data_sources key, its restriction and gates.
+		const key = id.startsWith(DATA_SOURCE_PIN_PREFIX) ? 'data_sources' : id;
+		return (
+			(inputMenuRestrictTo === null ||
+				inputMenuRestrictTo.includes(key === 'attach_files' ? 'upload_files' : key) ||
+				(key.startsWith('filter:') && inputMenuRestrictTo.includes('filters'))) &&
+			!dataSeparationBlockedItems.has(key) &&
+			(key !== 'data_sources' || dataSourcesShown)
+		);
+	};
+	$: dataSourcesShown = !!$config?.features?.enable_data_sources && ($dataSources ?? []).length > 0;
+	$: if ($config?.features?.enable_data_sources && $dataSources === null) {
+		void loadDataSources(localStorage.token);
+	}
 	// [Gradient] A live family is on only with a grant; without one its pinned button connects.
 	$: liveMailGranted = liveGranted($liveGrants, 'mail') === true;
 	$: liveDocumentsGranted = liveGranted($liveGrants, 'live_documents') === true;
@@ -977,6 +994,12 @@
 		skills: itemState((selectedSkillIds ?? []).length),
 		...Object.fromEntries(
 			(selectedFilterIds ?? []).map((id: string) => [`filter:${id}`, itemState(true)])
+		),
+		...Object.fromEntries(
+			(selectedDataSourceIds ?? []).map((id: string) => [
+				`${DATA_SOURCE_PIN_PREFIX}${id}`,
+				itemState(true)
+			])
 		)
 	};
 	// Items used in this chat keep their button until the next chat, which shows only the
@@ -991,7 +1014,10 @@
 		usedInputItems = usedItemIds(usedInputItems, inputItemStates);
 	}
 	$: inputBarItems = barItemIds({
-		order: inputItemOrder(toggleFilters.map((filter: { id: string }) => filter.id)),
+		order: inputItemOrder(
+			toggleFilters.map((filter: { id: string }) => filter.id),
+			($dataSources ?? []).map((source) => source.id)
+		),
 		pinned: normalizePins($settings?.pinnedInputItems),
 		states: inputItemStates,
 		used: usedInputItems,
@@ -2551,6 +2577,7 @@
 											bind:selectedToolIds
 											bind:selectedSkillIds
 											bind:selectedFilterIds
+											bind:selectedDataSourceIds
 											bind:webSearchEnabled
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
@@ -2732,6 +2759,48 @@
 															<ClockRotateRight className="size-4" />
 														</button>
 													</Tooltip>
+												{:else if itemId === 'data_sources'}
+													<Tooltip content={$i18n.t('Data sources')} placement="top">
+														<button
+															class={pinnedButtonClass}
+															type="button"
+															aria-label={$i18n.t('Data sources')}
+															on:click={() => inputMenuRef?.openTab('data_sources')}
+														>
+															<Database className="size-4" />
+														</button>
+													</Tooltip>
+												{:else if itemId.startsWith(DATA_SOURCE_PIN_PREFIX)}
+													{@const pinnedSource = ($dataSources ?? []).find(
+														(source) => `${DATA_SOURCE_PIN_PREFIX}${source.id}` === itemId
+													)}
+													{#if pinnedSource}
+														{@const sourceOn = selectedDataSourceIds.includes(pinnedSource.id)}
+														{@const sourceTooltip = pinnedStateTooltip(
+															pinnedSource.name,
+															sourceOn,
+															sourceOn
+																? $i18n.t('The model decides whether to search this data source')
+																: $i18n.t(TOOL_OFF_DESCRIPTION)
+														)}
+														<Tooltip content={sourceTooltip} placement="top">
+															<button
+																type="button"
+																aria-label={sourceTooltip}
+																aria-pressed={sourceOn}
+																on:click|preventDefault={() => {
+																	selectedDataSourceIds = toggleDataSource(
+																		selectedDataSourceIds,
+																		pinnedSource.id
+																	);
+																}}
+																class={pinnedToggleClass(sourceOn)}
+															>
+																<Database className="size-4" />
+																<span class="max-w-28 truncate">{pinnedSource.name}</span>
+															</button>
+														</Tooltip>
+													{/if}
 												{:else if itemId === 'web_search' && showWebSearchButton}
 													<Tooltip
 														content={imageGenerationEnabled

@@ -9,7 +9,10 @@ export type InputItemState = 'off' | 'on';
 
 export type InputItem = { id: string; section: InputItemSection; pinnable: true };
 
-/** Menu order. `filter:*` stands for the toggleable filters, in their own order. */
+/**
+ * Menu order. `filter:*` stands for the toggleable filters and `data_source:*` for the data
+ * sources (each pinnable on its own), in their own order.
+ */
 export const INPUT_ITEMS: readonly InputItem[] = [
 	{ id: 'upload_files', section: 'context', pinnable: true },
 	{ id: 'capture', section: 'context', pinnable: true },
@@ -21,6 +24,8 @@ export const INPUT_ITEMS: readonly InputItem[] = [
 	{ id: 'onedrive', section: 'context', pinnable: true },
 	{ id: 'knowledge', section: 'knowledge', pinnable: true },
 	{ id: 'reference_chats', section: 'knowledge', pinnable: true },
+	{ id: 'data_sources', section: 'knowledge', pinnable: true },
+	{ id: 'data_source:*', section: 'knowledge', pinnable: true },
 	{ id: 'live_mail', section: 'tools', pinnable: true },
 	{ id: 'live_documents', section: 'tools', pinnable: true },
 	{ id: 'web_search', section: 'tools', pinnable: true },
@@ -32,10 +37,17 @@ export const INPUT_ITEMS: readonly InputItem[] = [
 	{ id: 'skills', section: 'tools', pinnable: true }
 ];
 
-/** All item ids in menu order, with the filter placeholder expanded. */
-export const inputItemOrder = (filterIds: readonly string[] = []): string[] =>
+/** All item ids in menu order, with the filter and data source placeholders expanded. */
+export const inputItemOrder = (
+	filterIds: readonly string[] = [],
+	dataSourceIds: readonly string[] = []
+): string[] =>
 	INPUT_ITEMS.flatMap((item) =>
-		item.id === 'filter:*' ? filterIds.map((id) => `filter:${id}`) : [item.id]
+		item.id === 'filter:*'
+			? filterIds.map((id) => `filter:${id}`)
+			: item.id === 'data_source:*'
+				? dataSourceIds.map((id) => `data_source:${id}`)
+				: [item.id]
 	);
 
 /** Live tool states ('off' | 'auto'), booleans and counts as one item state. */

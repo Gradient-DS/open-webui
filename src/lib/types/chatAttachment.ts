@@ -24,6 +24,7 @@ export interface ChatDraft {
 	selectedToolIds: string[];
 	selectedSkillIds: string[];
 	selectedFilterIds: string[];
+	selectedDataSourceIds: string[];
 	imageGenerationEnabled: boolean;
 	liveDocumentsState: import('$lib/utils/toolState').LiveToolState;
 	liveMailState: import('$lib/utils/toolState').LiveToolState;
