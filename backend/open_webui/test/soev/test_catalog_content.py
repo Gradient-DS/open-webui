@@ -8,10 +8,15 @@ from fastapi import HTTPException
 from httpx import AsyncClient
 from open_webui.test.soev.test_knowledge_store import env, seed  # noqa: F401
 
+# A scripted SVG must never render inline under the OWUI origin.
+CONTENT_TYPES = {'text': 'text/plain', 'svg': 'image/svg+xml'}
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('named', [False, True])
-@pytest.mark.parametrize('case', ['pdf', 'attachment', 'text', 'missing', 'unreadable', 'document_hidden', 'revoked'])
+@pytest.mark.parametrize(
+    'case', ['pdf', 'attachment', 'text', 'svg', 'missing', 'unreadable', 'document_hidden', 'revoked']
+)
 async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F811
     from open_webui.models import knowledge
     from open_webui.routers import files
@@ -24,7 +29,7 @@ async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F
             'private' if case == 'unreadable' else 'kb',
             'cloud',
             filename='Café.pdf',
-            content_type='text/plain' if case == 'text' else 'application/pdf',
+            content_type=CONTENT_TYPES.get(case, 'application/pdf'),
             principals=['owui:user:bob' if case in {'unreadable', 'document_hidden'} else 'owui:user:alice'],
         )
     requests = []
@@ -70,7 +75,8 @@ async def test_catalog_content_routes(env, monkeypatch, named, case):  # noqa: F
     else:
         response = await result
         assert b''.join([chunk async for chunk in response.body_iterator]) == b'original\x00bytes'
-        assert response.headers['content-type'].split(';')[0] == ('text/plain' if case == 'text' else 'application/pdf')
+        assert response.headers['content-type'].split(';')[0] == CONTENT_TYPES.get(case, 'application/pdf')
+        assert response.headers['x-content-type-options'] == 'nosniff'
         disposition = 'inline' if not named and case == 'pdf' else 'attachment'
         assert response.headers['content-disposition'] == f"{disposition}; filename*=UTF-8''Caf%C3%A9.pdf"
         assert 'location' not in response.headers
