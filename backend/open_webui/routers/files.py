@@ -946,15 +946,17 @@ async def update_file_data_content_by_id(
 @router.api_route('/{id}/content', methods=['GET', 'HEAD'], name='get_file_content_by_id')
 async def get_file_content_by_id_inline(
     id: str,
+    request: Request = None,
     user=Depends(get_verified_user),
     attachment: bool = Query(False),
     db: AsyncSession = Depends(get_async_session),
 ):
+    range_header = getattr(request, 'headers', {}).get('range')
     file = await Files.get_file_by_id(id, db=db)
 
     # [Gradient] Cloud catalog documents have no local file row.
     if file is None:
-        content = await stream_catalog_content(id, user, attachment=attachment)
+        content = await stream_catalog_content(id, user, attachment=attachment, range_header=range_header)
         if content is not None:
             return content
 
@@ -966,7 +968,7 @@ async def get_file_content_by_id_inline(
 
     if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
         if (file.meta or {}).get('source'):
-            return await stream_original(file, user, attachment=attachment)
+            return await stream_original(file, user, attachment=attachment, range_header=range_header)
         try:
             file_path = await asyncio.to_thread(Storage.get_file, file.path)
             file_path = Path(file_path)
@@ -1067,14 +1069,18 @@ async def get_html_file_content_by_id(
 async def get_file_content_by_id(
     id: str,
     file_name: str,  # [Gradient] Bound from the path; kept for catalog downloads.
+    request: Request = None,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    range_header = getattr(request, 'headers', {}).get('range')
     file = await Files.get_file_by_id(id, db=db)
 
     # [Gradient] Cloud catalog documents have no local file row.
     if file is None:
-        content = await stream_catalog_content(id, user, attachment=True, file_name=file_name)
+        content = await stream_catalog_content(
+            id, user, attachment=True, file_name=file_name, range_header=range_header
+        )
         if content is not None:
             return content
 
@@ -1086,7 +1092,7 @@ async def get_file_content_by_id(
 
     if file.user_id == user.id or can_bypass_access_control(user) or await has_access_to_file(id, 'read', user, db=db):
         if (file.meta or {}).get('source'):
-            return await stream_original(file, user, attachment=True)
+            return await stream_original(file, user, attachment=True, range_header=range_header)
         file_path = file.path
 
         # Handle Unicode filenames

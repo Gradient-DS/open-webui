@@ -16,6 +16,17 @@ from open_webui.soev import acting
 from open_webui.soev.client import SoevApiError, SoevClient
 
 
+async def _send_file(api, ref, operation):
+    if operation == 'bytes':
+        await api.post_bytes('/v1/images', b'fictional-image', as_user=ref)
+    else:
+
+        async def chunks():
+            yield b'fictional-upload'
+
+        await api.upload_document('job', 'source', chunks(), size=16, content_type='text/plain', as_user=ref)
+
+
 async def platform_error(request, error):
     return JSONResponse(status_code=error.status, content={'code': error.code})
 
@@ -85,8 +96,8 @@ async def token_app(identity_config, monkeypatch):
         if request.url.path == '/v1/completions/task':
             return httpx.Response(200, text='data: {"text":"hello"}\n\n')
         if request.url.path == '/v1/original':
-            return httpx.Response(303, headers={'Location': 'https://storage.invalid/original'})
-        if request.url.host == 'storage.invalid':
+            return httpx.Response(303, headers={'Location': '/v1/downloads/fictional-code'})
+        if request.url.path == '/v1/downloads/fictional-code':
             return httpx.Response(200, content=b'fictional-original')
         if request.url.path == '/v1/failure':
             return httpx.Response(503, text='unavailable')
@@ -107,8 +118,8 @@ async def token_app(identity_config, monkeypatch):
         @app.get('/call/{operation}')
         async def call(operation: str, resolved=Depends(auth.get_verified_user)):
             ref = identity.external_ref(resolved)
-            if operation == 'bytes':
-                await api.post_bytes('/v1/images', b'fictional-image', as_user=ref)
+            if operation in {'bytes', 'upload'}:
+                await _send_file(api, ref, operation)
             elif operation == 'task':
                 return StreamingResponse(api.stream_task({}, as_user=ref))
             elif operation == 'chat':
@@ -118,8 +129,6 @@ async def token_app(identity_config, monkeypatch):
                 ]
             elif operation == 'original':
                 return StreamingResponse(api.stream('/v1/original', as_user=ref))
-            elif operation == 'presigned-upload':
-                await api.put_bytes('https://storage.invalid/upload', headers={}, body=b'fictional-upload')
             elif operation in {'failure', 'transport'}:
                 with pytest.raises(SoevApiError):
                     await api.get(f'/v1/{operation}', as_user=ref)
@@ -150,7 +159,7 @@ async def token_app(identity_config, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('operation', ['json', 'bytes', 'task', 'chat', 'original', 'product'])
+@pytest.mark.parametrize('operation', ['json', 'bytes', 'task', 'chat', 'original', 'upload', 'product'])
 async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operation):
     ctx = token_app
     assert acting._token_resolver.get() is None
@@ -172,8 +181,9 @@ async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operati
         assert request.headers['Accept'] == 'text/event-stream'
     if operation == 'original':
         assert response.content == b'fictional-original'
-        assert 'X-Soev-User-Token' not in ctx.requests[1].headers
-        assert 'Authorization' not in ctx.requests[1].headers
+        assert ctx.requests[1].headers['X-Soev-User-Token'] == 'fictional-access-token'
+        assert ctx.requests[1].headers['Authorization'] == 'Bearer fictional-product-key'
+        assert 'X-Soev-' + 'Subject' not in ctx.requests[1].headers
     assert 'fictional-access-token' not in caplog.text
     assert 'fictional-refresh-token' not in caplog.text
     ctx.refresh.assert_not_awaited()
@@ -257,14 +267,6 @@ async def test_missing_or_failed_refresh_does_not_forward_old_credentials(token_
     response = await ctx.browser.get('/call/json')
     assert response.status_code == 401 and response.json()['code'] == 'sign_in'
     assert ctx.requests == []
-
-
-@pytest.mark.asyncio
-async def test_presigned_upload_has_no_user_token(token_app):
-    ctx = token_app
-    assert (await ctx.browser.get('/call/presigned-upload')).status_code == 200
-    for header in ('Authorization', 'X-Soev-' + 'Subject', 'X-Soev-User-Token'):
-        assert header not in ctx.requests[0].headers
 
 
 @pytest.mark.asyncio

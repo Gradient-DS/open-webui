@@ -51,8 +51,13 @@ credential in `Authorization`. It never sends `X-Soev-Subject` with a login toke
 A user operation without that person's token fails with `401` / `sign_in`:
 password users, other OAuth providers, OWUI API keys, missing or expired sessions,
 and attempts to act as another user do not fall back to an assertion. Chat tasks
-started by a user request inherit its token context. Presigned storage requests
-use only their presigned credentials.
+started by a user request inherit its token context. Document downloads follow
+one redirect to `/v1/downloads/{code}` on the configured soev-api origin with the
+same product credential and login token, without `X-Soev-Subject`. Preview requests
+preserve Range and partial responses. File uploads stream through authenticated
+`PUT /v1/jobs/{job_id}/uploads/{source_id}` with bounded reads; browsers receive no
+object-store URL. Only raster images (PNG, JPEG, GIF, WebP) and PDF may render inline;
+SVG and other types download as attachments, and responses carry `nosniff`.
 
 Admin suspension to `pending` is refused with `403 policy_forbids` /
 `suspension:console` whenever soev is configured, before remote calls or local
