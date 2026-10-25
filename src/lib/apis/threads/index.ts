@@ -64,7 +64,19 @@ export type ProjectionResult = {
 	notModified: boolean;
 };
 
+export type CachedThread = { thread_id: string; generation: string; versions: string[] };
+export type AuthorizeThreads = { threads: CachedThread[]; context_epoch: string };
+export type CacheAuthorization = {
+	principal: string;
+	session: string | null;
+	context_epoch: string;
+	authorization_context: string;
+	valid_until: string;
+	items: (CachedThread & { status: 'ok' | 'gone' })[];
+};
+
 export interface ThreadAPI {
+	authorize(body: AuthorizeThreads): Promise<CacheAuthorization>;
 	projection(threadId: string, before?: string, etag?: string): Promise<ProjectionResult>;
 	forks(threadId: string, cursor?: string): Promise<Page<IndexItem>>;
 	fork(threadId: string, at: number): Promise<{ thread_id: string }>;
@@ -103,6 +115,9 @@ export const threadAPI = (token: string, window = 20): ThreadAPI => {
 		return response;
 	};
 	return {
+		async authorize(body) {
+			return (await request(':authorize', { method: 'POST', body: JSON.stringify(body) })).json();
+		},
 		async projection(threadId, before = '', etag) {
 			const query = new URLSearchParams({ window: String(window), before });
 			const response = await request(`/${encodeURIComponent(threadId)}?${query}`, {

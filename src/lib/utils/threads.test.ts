@@ -62,6 +62,7 @@ const fork = (id = 'fictional-fork', at = 2): IndexItem => ({
 	parent_position: at
 });
 const api = (): ThreadAPI => ({
+	authorize: vi.fn(),
 	projection: vi.fn(async () => ({
 		page: page([3, 4], 'opaque-older'),
 		etag: 'opaque-etag',

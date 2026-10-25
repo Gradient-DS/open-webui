@@ -5,6 +5,7 @@
 	import { config } from '$lib/stores';
 	import { threadAPI, type SidebarItem, type ThreadAPI } from '$lib/apis/threads';
 	import ThreadState from '$lib/components/common/ThreadState.svelte';
+	import { threadCacheOrigin, watchThreadVisibility } from '$lib/utils/threadCache';
 	import {
 		filterSidebar,
 		ThreadSidebar,
@@ -49,10 +50,16 @@
 		}
 		const next = new ThreadSidebar(transport, (value) => {
 			snapshot = value;
+			if (value.state === 'sign_in') void threadCacheOrigin().clear();
 		});
 		controller = next;
+		const unwatch = watchThreadVisibility(
+			(state) => next.clear(state),
+			() => void next.search(search)
+		);
 		void next.search(search);
 		return () => {
+			unwatch();
 			next.clear();
 			controller = null;
 		};

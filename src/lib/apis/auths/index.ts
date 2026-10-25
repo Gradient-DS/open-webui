@@ -1,5 +1,8 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { partStore } from '$lib/components/meetings/parts';
+import { get } from 'svelte/store';
+import { config } from '$lib/stores';
+import { threadCacheOrigin } from '$lib/utils/threadCache';
 
 export const getAdminDetails = async (token: string) => {
 	let error = null;
@@ -381,6 +384,7 @@ export const userSignUp = async (
 };
 
 export const userSignOut = async () => {
+	if (get(config)?.features?.enable_v2_threads) await threadCacheOrigin().clear();
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/signout`, {

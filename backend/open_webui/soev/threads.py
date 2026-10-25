@@ -38,7 +38,7 @@ class ProjectionPage(WireModel):
     thread_id: str
     generation: str
     title: str | None
-    preferences: JsonValue
+    preferences: JsonValue = None
     messages: list[MessageView]
     next_cursor: str | None
 
@@ -58,6 +58,30 @@ class IndexPage(WireModel):
 
 class CreatedThread(WireModel):
     thread_id: str
+
+
+class CachedThread(WireModel):
+    thread_id: str = Field(pattern=r'^[A-Za-z0-9_.-]{1,128}$')
+    generation: str
+    versions: list[str] = Field(max_length=200)
+
+
+class AuthorizeThreads(WireModel):
+    threads: list[CachedThread] = Field(max_length=100)
+    context_epoch: str = Field(min_length=1, max_length=128)
+
+
+class CacheVerdict(CachedThread):
+    status: Literal['ok', 'gone']
+
+
+class CacheAuthorization(WireModel):
+    principal: str
+    session: str | None
+    context_epoch: str
+    authorization_context: str
+    valid_until: str
+    items: list[CacheVerdict]
 
 
 class ShareAudience(WireModel):
@@ -238,6 +262,12 @@ class ThreadClient:
                 params={'q': q, 'limit': _page_size(limit), 'cursor': cursor},
             ),
             IndexPage,
+        )
+
+    async def authorize(self, form: AuthorizeThreads) -> CacheAuthorization:
+        return self._parse(
+            await self._request('POST', '/v1/threads:authorize', body=form.model_dump()),
+            CacheAuthorization,
         )
 
     async def forks(

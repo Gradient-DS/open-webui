@@ -656,6 +656,31 @@
         "title": "ArchiveListResponse",
         "type": "object"
       },
+      "AuthorizeThreads": {
+        "additionalProperties": false,
+        "properties": {
+          "context_epoch": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Context Epoch",
+            "type": "string"
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/CachedThread"
+            },
+            "maxItems": 100,
+            "title": "Threads",
+            "type": "array"
+          }
+        },
+        "required": [
+          "threads",
+          "context_epoch"
+        ],
+        "title": "AuthorizeThreads",
+        "type": "object"
+      },
       "AutomationData": {
         "properties": {
           "model_id": {
@@ -1148,6 +1173,35 @@
           "file"
         ],
         "title": "Body_upload_model_ollama_models_upload_post",
+        "type": "object"
+      },
+      "CachedThread": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "title": "Generation",
+            "type": "string"
+          },
+          "thread_id": {
+            "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "thread_id",
+          "generation",
+          "versions"
+        ],
+        "title": "CachedThread",
         "type": "object"
       },
       "CalendarEventAttendeeModel": {
@@ -38451,6 +38505,47 @@
           }
         ],
         "summary": "Forks"
+      }
+    },
+    "/api/v1/threads:authorize": {
+      "post": {
+        "operationId": "authorize_api_v1_threads_authorize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizeThreads"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Authorize"
       }
     },
     "/api/v1/tools/": {

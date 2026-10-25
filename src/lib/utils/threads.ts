@@ -7,6 +7,7 @@ import {
 	type ThreadState,
 	type SidebarItem
 } from '$lib/apis/threads';
+import type { CacheProof, ThreadCache } from './threadCache';
 
 export type HistoryMessage = {
 	id: string;
@@ -128,15 +129,35 @@ export class ThreadWindow {
 	private epoch = 0;
 	private forks: IndexItem[] = [];
 	private pending: Promise<void> | null = null;
+	private proof?: CacheProof;
+	private expiry?: ReturnType<typeof setTimeout>;
 	snapshot: WindowSnapshot = { page: null, history: emptyHistory(), loading: false, state: null };
 	constructor(
 		private api: ThreadAPI,
-		private changed: (value: WindowSnapshot) => void = () => {}
+		private changed: (value: WindowSnapshot) => void = () => {},
+		private cache?: ThreadCache
 	) {}
 	private publish() {
+		if (this.cache && this.snapshot.page && !this.proof?.valid()) {
+			this.fail(new ThreadError('reconnect'));
+			return;
+		}
 		this.changed({ ...this.snapshot });
 	}
+	private arm(proof: CacheProof) {
+		clearTimeout(this.expiry);
+		this.proof = proof;
+		this.expiry = setTimeout(
+			() => {
+				this.epoch++;
+				this.fail(new ThreadError('reconnect'));
+			},
+			Math.min(2 ** 31 - 1, Math.max(0, proof.deadline - Date.now()))
+		);
+	}
 	private fail(error: unknown) {
+		clearTimeout(this.expiry);
+		this.proof = undefined;
 		this.snapshot = {
 			page: null,
 			history: emptyHistory(),
@@ -146,11 +167,13 @@ export class ThreadWindow {
 		this.forks = [];
 		this.publish();
 	}
-	clear() {
+	clear(state: ThreadState | null = null) {
+		clearTimeout(this.expiry);
+		this.proof = undefined;
 		this.epoch++;
 		this.pending = null;
 		this.forks = [];
-		this.snapshot = { page: null, history: emptyHistory(), loading: false, state: null };
+		this.snapshot = { page: null, history: emptyHistory(), loading: false, state };
 		this.publish();
 	}
 	private async readForks(threadId: string, epoch: number): Promise<IndexItem[]> {
@@ -173,7 +196,7 @@ export class ThreadWindow {
 		this.snapshot.loading = true;
 		this.publish();
 		try {
-			const result = await this.api.projection(threadId);
+			const result = await (this.cache ? this.cache.read(threadId) : this.api.projection(threadId));
 			if (epoch !== this.epoch) return;
 			if (!result.page || result.page.thread_id !== threadId) throw new ThreadError('reconnect');
 			const forks = await this.readForks(threadId, epoch);
@@ -197,6 +220,11 @@ export class ThreadWindow {
 				}
 			}
 			if (epoch !== this.epoch) return;
+			if (this.cache) {
+				const proof = await this.cache.approve(result.page);
+				if (epoch !== this.epoch) return;
+				this.arm(proof);
+			}
 			this.forks = forks;
 			this.snapshot = {
 				page: result.page,
@@ -219,11 +247,18 @@ export class ThreadWindow {
 		this.publish();
 		const pending = (async () => {
 			try {
-				const result = await this.api.projection(page.thread_id, page.next_cursor!);
+				const result = await (this.cache
+					? this.cache.read(page.thread_id, page.next_cursor!)
+					: this.api.projection(page.thread_id, page.next_cursor!));
 				if (epoch !== this.epoch) return;
 				if (!result.page || result.page.next_cursor === page.next_cursor)
 					throw new ThreadError('reconnect');
 				const merged = mergeProjection(this.snapshot.page!, result.page);
+				if (this.cache) {
+					const proof = await this.cache.approve(merged);
+					if (epoch !== this.epoch) return;
+					this.arm(proof);
+				}
 				this.snapshot = {
 					...this.snapshot,
 					page: merged,
@@ -252,6 +287,31 @@ export class ThreadWindow {
 			const messages = page.messages.filter((view) => view.position !== message.position);
 			messages.push(message);
 			const next = { ...page, messages: messages.sort((a, b) => a.position - b.position) };
+			if (this.cache && message.finished) {
+				// Never write a live stream. Reopen from the current projection after completion
+				// if another update arrived while this authorization was pending.
+				const epoch = this.epoch;
+				void this.cache
+					.save(next)
+					.then((proof) => {
+						if (epoch !== this.epoch) return;
+						if (this.snapshot.page !== page) {
+							void this.open(threadId);
+							return;
+						}
+						this.arm(proof);
+						this.snapshot = {
+							...this.snapshot,
+							page: next,
+							history: buildThreadHistory(next, this.forks)
+						};
+						this.publish();
+					})
+					.catch((error) => {
+						if (epoch === this.epoch) this.fail(error);
+					});
+				return;
+			}
 			this.snapshot = {
 				...this.snapshot,
 				page: next,
@@ -288,9 +348,9 @@ export class ThreadSidebar {
 		private api: ThreadAPI,
 		private changed: (value: SidebarSnapshot) => void = () => {}
 	) {}
-	clear() {
+	clear(state: ThreadState | null = null) {
 		this.epoch++;
-		this.snapshot = { items: [], cursor: null, loading: false, state: null };
+		this.snapshot = { items: [], cursor: null, loading: false, state };
 		this.changed(this.snapshot);
 	}
 	async search(query = '') {

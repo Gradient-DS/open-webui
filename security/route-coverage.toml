@@ -414,6 +414,11 @@ id = "POST /api/v1/threads/{thread_id}/fork"
 backed_by = "soev-solutions"
 reason = "soev/thread_routes.py needs platform thread reads and forks. The sealed stack has no soev-api; isolated fake-platform contract tests exercise authorization, projection and forks. ENABLE_V2_THREADS remains off until activation."
 
+[[waived]]
+id = "POST /api/v1/threads:authorize"
+backed_by = "soev-solutions"
+reason = "soev/thread_routes.py relays current cache authorization using only the requester's login token. Isolated fake-platform contract tests cover tokenless refusal and private headers; the sealed stack has no soev-api. ENABLE_V2_THREADS remains off until activation."
+
 # --- v2 custom functions: refused by the router dependency ----------------------
 # Keep every route in the passes. A successful handler entry invalidates its waiver.
 

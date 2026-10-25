@@ -36,6 +36,15 @@
 		desktopEvent
 	} from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
+	import { observeThreadAccount } from '$lib/utils/threadCache';
+
+	$: if (
+		typeof window !== 'undefined' &&
+		$config?.features?.enable_v2_threads &&
+		($user !== undefined || !localStorage.token)
+	) {
+		observeThreadAccount($user?.id ?? null);
+	}
 	import { getFileContentById } from '$lib/apis/files';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
