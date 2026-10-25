@@ -47,9 +47,6 @@ router = APIRouter()
 
 log = logging.getLogger(__name__)
 
-CONNECTIONS_CONFIG_KEYS = {
-    'ENABLE_BASE_MODELS_CACHE': 'models.base_models_cache',
-}
 CODE_EXECUTION_CONFIG_KEYS = {
     'ENABLE_DOCUMENT_WRITER': 'document_writer.enable',
     'ENABLE_CODE_EXECUTION': 'code_execution.enable',
@@ -137,35 +134,6 @@ async def get_config_namespace(namespace: str, user=Depends(get_admin_user)):
 ############################
 # Connections Config
 ############################
-
-
-class ConnectionsConfigForm(BaseModel):
-    ENABLE_DIRECT_CONNECTIONS: bool
-    ENABLE_BASE_MODELS_CACHE: bool
-
-
-@router.get('/connections', response_model=ConnectionsConfigForm)
-async def get_connections_config(request: Request, user=Depends(get_admin_user)):
-    return await get_config_values(CONNECTIONS_CONFIG_KEYS)
-
-
-@router.post('/connections', response_model=ConnectionsConfigForm)
-async def set_connections_config(
-    request: Request,
-    form_data: ConnectionsConfigForm,
-    user=Depends(get_admin_user),
-):
-    await Config.upsert(config_updates(form_data.model_dump(), CONNECTIONS_CONFIG_KEYS))
-    values = await get_config_values(CONNECTIONS_CONFIG_KEYS)
-    await publish_event(
-        request,
-        EVENTS.CONFIG_CONNECTIONS_UPDATED,
-        actor=user,
-        subject_id='connections',
-        subject_type='config',
-        data=values,
-    )
-    return values
 
 
 class OAuthClientRegistrationForm(BaseModel):

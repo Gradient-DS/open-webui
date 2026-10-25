@@ -28,10 +28,6 @@ id = "POST /api/v1/configs/2fa"
 reason = "TwoFAConfigForm already declares two booleans and grace-period days (integer). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
-id = "POST /api/v1/configs/connections"
-reason = "ConnectionsConfigForm already declares two connection/cache booleans. There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
-
-[[waived]]
 id = "POST /api/v1/configs/data-retention"
 reason = "DataRetentionConfigForm already declares retention-day integers and a warning-email boolean. There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 

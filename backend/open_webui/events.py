@@ -65,11 +65,6 @@ class EventDefinitions(BaseModel):
         description='Event webhook configuration was updated.',
         message='Webhook configuration updated',
     )
-    CONFIG_CONNECTIONS_UPDATED: EventDefinition = EventDefinition(
-        name='config.connections.updated',
-        description='Connection configuration was updated.',
-        message='Config Connections updated',
-    )
     CONFIG_TOOL_SERVERS_UPDATED: EventDefinition = EventDefinition(
         name='config.tool_servers.updated',
         description='Tool server configuration was updated.',
