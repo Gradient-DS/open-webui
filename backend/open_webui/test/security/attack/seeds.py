@@ -226,10 +226,10 @@ class SeedContext:
             raise RuntimeError(f'{parameter["key"]}: does not declare that it provides {name}')
         self.values[name] = _extract({'value': value}, 'value', name=name, via=parameter['key'])
 
-    def request(self, method, path, *, actor=None, **kwargs):
+    def request(self, method, path, *, actor=None, password_identity=False, **kwargs):
         if is_destructive(method, path, self.surface):
             raise RuntimeError(f'Destructive route cannot seed fixtures: {method} {path}')
-        if oidc.enabled() and method == 'POST' and path == '/api/v1/auths/add':
+        if oidc.enabled() and not password_identity and method == 'POST' and path == '/api/v1/auths/add':
             with create_oidc_identity(self.admin, **kwargs['json']) as client:
                 return {
                     **client.identity,
@@ -418,6 +418,7 @@ def seed_totp_user(ctx, parameter):
         'POST',
         '/api/v1/auths/add',
         actor=ctx.admin,
+        password_identity=True,
         json={
             'email': f'attack-totp-{ctx.token}@example.com',
             'name': f'Attack TOTP {ctx.token}',
@@ -428,8 +429,6 @@ def seed_totp_user(ctx, parameter):
     user_id = _extract(body, 'id', name=parameter['key'], via='POST /api/v1/auths/add')
     token = _extract(body, 'token', name=parameter['key'], via='POST /api/v1/auths/add')
     with AttackClient(ctx.client.base_url, token=token) as enrolee:
-        if oidc.enabled():
-            enrolee.oauth_session_id = body['oauth_session_id']
         enrolee.verify_identity(user_id=user_id, role='user')
         setup = ctx.request('POST', '/api/v1/auths/2fa/totp/setup', actor=enrolee)
         secret = _extract(setup, 'secret', name=parameter['key'], via='POST /api/v1/auths/2fa/totp/setup')

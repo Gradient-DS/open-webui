@@ -1,7 +1,10 @@
 """Live sealed-stack checks; run only by runtime-security.yml."""
 
+from uuid import uuid4
+
 import pytest
 
+from . import oidc
 from .client import (
     AttackClient,
     AuthenticationError,
@@ -66,7 +69,18 @@ def test_real_2fa_signin_success_status_is_rejected(identities, challenge):
     original = admin.request('GET', config_path)
     assert original.status_code == 200, original.text
     enrolled = False
+    local_user = None
     try:
+        if oidc.enabled():
+            # OWUI rejects TOTP setup for accounts linked to an SSO provider.
+            email = f'attack-2fa-{uuid4().hex}@example.com'
+            local_user = AttackClient(admin.base_url)
+            with admin.request(
+                'POST',
+                '/api/v1/auths/add',
+                json={'email': email, 'password': PASSWORD, 'name': 'Attack 2FA', 'role': 'user'},
+            ) as created:
+                user = local_user.authenticate(created, email, role='user')
         configured = admin.request(
             'POST',
             config_path,
@@ -117,6 +131,8 @@ def test_real_2fa_signin_success_status_is_rejected(identities, challenge):
                 disabled = user.request('POST', '/api/v1/auths/2fa/totp/disable', json={'password': PASSWORD})
                 assert disabled.status_code == 200, disabled.text
         finally:
+            if local_user:
+                local_user.close()
             restored = admin.request('POST', config_path, json=original.json())
             assert restored.status_code == 200, restored.text
 
