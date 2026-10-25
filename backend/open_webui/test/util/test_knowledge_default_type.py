@@ -4,8 +4,7 @@ KnowledgeForm.type is Optional[str] = None; KnowledgeModel.type is a required
 str defaulting to 'local'. insert_new_knowledge builds the model from
 form_data.model_dump(), which emits type=None and overrides that default, so
 every caller that did not set a type raised a pydantic ValidationError and the
-route answered 500. create_external_knowledge constructs its form without a
-type, so it could never succeed at all.
+route answered 500.
 These tests cover the SQL class that soev-api replaced for the product.
 """
 
@@ -35,8 +34,8 @@ def test_a_form_without_a_type_inserts_with_the_model_default():
 def test_an_explicit_type_still_wins():
     knowledge = asyncio.run(
         Knowledges.insert_new_knowledge(
-            'user-under-test', KnowledgeForm(name='explicit type', description='', type='external')
+            'user-under-test', KnowledgeForm(name='explicit type', description='', type='onedrive')
         )
     )
     assert knowledge is not None
-    assert knowledge.type == 'external'
+    assert knowledge.type == 'onedrive'

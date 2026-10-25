@@ -181,7 +181,10 @@ writes; a submitted `model_item` cannot select a provider or bypass catalog acce
 Local knowledge embedding and reranking engines, their configuration endpoints,
 local query/text-processing routes (`/api/v1/retrieval/query/doc`,
 `/query/collection`, `/process/text`), the development `/ef/{text}` probe, and
-the Documents embedding/reranking controls are removed. Provider model
+the Documents embedding/reranking controls are removed. The legacy external-knowledge
+connections and query-only sources (direct Qdrant, Milvus and pgvector retrieval),
+their test and CRUD routes, and their admin/workspace controls are removed too;
+they depended on the same local embedding function. Knowledge is served by the platform. Provider model
 management and OpenAI-compatible model unloading are gone; Ollama management
 remains. Remote pipeline inlet/outlet calls are removed from chat and task
 processing; local custom-function filters are disabled under v2. Single-file and batch ingestion use soev-api; web extraction returns

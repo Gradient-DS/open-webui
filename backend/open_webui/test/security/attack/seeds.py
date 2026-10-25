@@ -286,7 +286,7 @@ def connection_index(ctx, parameter):
     return '0'
 
 
-def seed_archive_user(ctx, parameter):
+def seed_admin_user(ctx, parameter):
     return ctx.admin.identity['id']
 
 
@@ -576,40 +576,12 @@ def seed_cloud_authorize_connection(ctx, parameter):
     return _extract(created, 'connection_id', name=parameter['key'], via='POST cloud connection')
 
 
-def seed_external_source(ctx, parameter):
-    # A connection of its own: delete_external_knowledge_connection answers 400 while
-    # a KB still uses one, so on {connection} this KB would refuse the owner's DELETE.
-    connection = ctx.request(
-        'POST',
-        '/api/v1/knowledge/external/connections',
-        actor=ctx.admin,
-        json={
-            'name': f'attack-source-{ctx.token}',
-            'provider': 'qdrant',
-            'endpoint': 'http://stub:8000',
-            'auth_config': {},
-        },
-    )
-    connection_id = _extract(connection, 'id', name=parameter['key'], via='POST external/connections')
-    body = ctx.request(
-        'POST',
-        '/api/v1/knowledge/external/knowledge/create',
-        actor=ctx.admin,
-        json={
-            'name': f'attack-external-{ctx.token}',
-            'connection_id': connection_id,
-            'source': {'name': f'attack-{ctx.token}', 'config': {'content_field': 'text'}},
-        },
-    )
-    return _extract(body, 'id', name=parameter['key'], via='POST external/knowledge/create')
-
-
 _SEEDERS = {
     function.__name__: function
     for function in (
         prepare_configuration,
         connection_index,
-        seed_archive_user,
+        seed_admin_user,
         seed_ollama_connection,
         upstream_path,
         seed_terminal,
@@ -622,7 +594,6 @@ _SEEDERS = {
         seed_cloud_authorize_connection,
         seed_cloud_family,
         seed_knowledge_file,
-        seed_external_source,
     )
 }
 

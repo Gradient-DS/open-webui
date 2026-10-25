@@ -9,8 +9,6 @@ export type KnowledgeListItem = {
 	suspension_info?: { days_remaining: number };
 	meta?: {
 		document?: unknown;
-		source?: string;
-		external?: { provider?: string; source?: { name?: string }; auth_mode?: string };
 		[key: string]: unknown;
 	};
 	user?: {

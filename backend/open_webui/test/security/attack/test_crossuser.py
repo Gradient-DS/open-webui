@@ -15,7 +15,7 @@ offline = test_shapes.offline
 def test_inventory_resolves_every_committed_operation_including_named_methods_and_duplicate_functions():
     inventory = source_operations()
     assert set(plane.operations()) <= inventory.keys()
-    assert len(admin_gated_operations()) == 172
+    assert len(admin_gated_operations()) == 161
     assert 'GET /api/v1/functions/' in inventory
     assert 'GET /api/v1/files/{id}/content' in inventory
     assert 'POST /api/v1/files/onedrive/attach' in inventory
@@ -28,6 +28,26 @@ def test_inventory_resolves_every_committed_operation_including_named_methods_an
     unseedable = {r for r in expected if not crossuser._is_seedable(r, seeds.SURFACE)}
     assert unseedable, 'expected at least one unseedable operation to be excluded'
     assert set(routes) == expected - unseedable
+
+
+def test_oauth_sessions_keep_a_cross_user_refusal_and_require_a_positive_owner():
+    route = 'GET /api/v1/users/{user_id}/oauth/sessions'
+    routes, admins = crossuser.targets()
+    assert route in routes and route in admins and route in seeds.ordinary_targets()
+    assert crossuser._owner_key(route.split(' ', 1)[1], seeds.SURFACE) == 'admin'
+    assert route not in crossuser.expected_refusals() and route not in crossuser._shared()
+    result = crossuser.Authorization(plane.Seeding())
+    crossuser._check(
+        result,
+        route,
+        plane.Outcome(403, True, '{"detail": "You do not have permission to access this resource"}'),
+        plane.Outcome(200, True, '[{"user_id": "fictional-admin", "provider": "oidc"}]'),
+        (),
+        admin_only=True,
+        control=True,
+    )
+    assert result.controls[route] == 200
+    assert not result.violations
 
 
 def test_offboarding_inventory_is_an_admin_read_of_another_users_resources():

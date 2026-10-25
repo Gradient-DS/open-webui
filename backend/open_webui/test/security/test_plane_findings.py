@@ -169,27 +169,6 @@ def test_verifying_an_unreachable_ollama_connection_is_refused():
     assert 400 <= response.status_code < 500, (response.status_code, response.text)
 
 
-def test_an_external_retrieval_test_that_cannot_reach_its_store_is_refused(monkeypatch):
-    # knowledge/external/connections/{id}/retrieve-test: the Qdrant client raised
-    # AssertionError on a store it could not use, and the connection test
-    # answered 500. A failed connection test is the answer, not a fault.
-    import asyncio
-
-    from fastapi import HTTPException
-    from open_webui.routers import knowledge
-
-    async def unreachable(*args, **kwargs):
-        raise AssertionError('Search returned None')
-
-    monkeypatch.setattr(knowledge, 'retrieve_external_knowledge_for_connection', unreachable)
-    source = knowledge.ExternalKnowledgeSourceForm(name='test', config={'content_field': 'payload.text'})
-    connection = {'id': 'c1', 'name': 'Attack', 'provider': 'qdrant'}
-    user = SimpleNamespace(id='control-user', role='admin')
-    with pytest.raises(HTTPException) as refused:
-        asyncio.run(knowledge._get_external_source_test_result(None, connection, source, 'probe', 1, user))
-    assert refused.value.status_code == 400
-
-
 @pytest.mark.parametrize(
     'data',
     [{'content': 'a string'}, {'content': {'md': 5}}, {'content': ['x']}, ['not', 'a', 'dict'], {'content': None}],
