@@ -5,16 +5,25 @@ import math
 from fastapi import UploadFile
 
 from open_webui.soev import identity
+from open_webui.soev.acting import user_token
 from open_webui.soev.client import SoevApiError
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 INFERENCE_TIMEOUT = 120.0
 
 
+async def _login_token(user) -> str:
+    """The requesting user's own platform login token; nothing else may act for them."""
+    token = await user_token(f'owui:user:{user.id}')
+    if not token:
+        raise SoevApiError(403, 'scope_insufficient', 'Platform login required', 'identity:platform_login')
+    return token
+
+
 async def embed_memory(text: str, user) -> list[float]:
+    token = await _login_token(user)
     client = identity.build_client(timeout=INFERENCE_TIMEOUT)
-    ref = await identity.acting_ref(user, client)
-    result = await client.embed([text], as_user=ref)
+    result = await client.embed([text], user_access_token=token)
     try:
         [item] = result['data']
         vector = item['embedding']
@@ -36,14 +45,14 @@ async def transcribe(file: UploadFile, language: str | None, user) -> dict:
     audio = await file.read(MAX_AUDIO_BYTES + 1)
     if len(audio) > MAX_AUDIO_BYTES:
         raise SoevApiError(413, 'upload_size_exceeded', 'Audio upload too large')
+    token = await _login_token(user)
     client = identity.build_client(timeout=INFERENCE_TIMEOUT)
-    ref = await identity.acting_ref(user, client)
     result = await client.transcribe(
         audio,
         filename='dictation',
         content_type=file.content_type or 'application/octet-stream',
         language=language,
-        as_user=ref,
+        user_access_token=token,
     )
     if not isinstance(result.get('text'), str):
         raise SoevApiError(502, 'upstream_error', 'Invalid transcription response')

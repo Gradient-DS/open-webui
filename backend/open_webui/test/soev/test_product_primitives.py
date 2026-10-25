@@ -31,6 +31,7 @@ async def platform(identity_config, eligible_identity, monkeypatch):
         state.calls.append(request)
         assert request.url.hostname == 'soev.invalid'
         assert request.headers['authorization'] == 'Bearer soev_test_cred-runtime_test-secret'
+        assert 'x-soev-subject' not in request.headers
         if request.headers.get('x-soev-user-token') != 'fictional-fern-token':
             return JSONResponse(
                 status_code=401,
@@ -299,12 +300,17 @@ async def test_another_users_context_never_supplies_a_token(platform, memory_sta
     monkeypatch.setattr(acting, '_requester_ref', acting.ContextVar('other-requester', default='owui:user:moss'))
     with pytest.raises(SoevApiError) as error:
         await memories.query_memory(memory_state.request, memories.QueryMemoryForm(content='Tea?'), platform.user)
-    assert (error.value.status, error.value.code) == (401, 'user_token_required')
+    assert (error.value.status, error.value.code, error.value.constraint) == (
+        403,
+        'scope_insufficient',
+        'identity:platform_login',
+    )
     async with platform.http(
         transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
     ) as client:
         response = await client.post('/transcriptions', files={'file': ('fiction.wav', b'fiction', 'audio/wav')})
-    assert response.status_code == 401
+    assert response.status_code == 403
+    assert platform.calls == []
     memory_state.legacy.assert_not_awaited()
     audio.transcribe.assert_not_awaited()
 
@@ -331,3 +337,12 @@ async def test_offline_reindex_keeps_its_explicit_embedding_function(platform, m
     supplied.assert_awaited_once()
     assert memory_state.vectors.upsert.call_args.kwargs['items'][0]['vector'] == [0.4, 0.5]
     assert not platform.calls
+
+
+@pytest.mark.asyncio
+async def test_a_login_without_a_platform_token_is_refused_before_any_call(platform, memory_state, monkeypatch):
+    monkeypatch.setattr(acting, '_token_resolver', acting.ContextVar('no-token', default=AsyncMock(return_value=None)))
+    with pytest.raises(SoevApiError) as error:
+        await primitives.embed_memory('Fictional note.', platform.user)
+    assert (error.value.status, error.value.constraint) == (403, 'identity:platform_login')
+    assert platform.calls == []
