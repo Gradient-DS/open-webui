@@ -88,6 +88,22 @@ def test_model_discovery_exposes_a_usable_model(stub):
     assert models[0]['id'] == tags[0]['model'] == 'stub-model'
 
 
+def test_speech_returns_audio_and_captures_the_openai_body(stub):
+    payload = {
+        'model': 'stub-model',
+        'input': 'Fictional speech.',
+        'voice': 'fictional-voice',
+        'response_format': 'mp3',
+    }
+    get_json(stub, '/_recorded/reset')
+    content_type, body = request(stub, '/v1/audio/speech', payload)
+    assert content_type == 'audio/mpeg'
+    assert body.startswith(b'ID3') and len(body) > 10
+    record = get_json(stub, '/_recorded')['requests'][-1]
+    assert record['path'] == '/v1/audio/speech'
+    assert record['body'] == payload
+
+
 @pytest.mark.parametrize('path,field', [('/api/chat', 'message'), ('/api/generate', 'response')])
 @pytest.mark.parametrize('stream', [True, False])
 def test_ollama_uses_its_own_protocol(stub, path, field, stream):
@@ -175,9 +191,10 @@ def test_unmodelled_upstreams_have_the_planned_catch_all(stub, path):
 
 
 @pytest.mark.parametrize('raw', [b'[]', b'not-json'])
-def test_malformed_model_body_is_an_explicit_refusal(stub, raw):
+@pytest.mark.parametrize('path', ['/v1/chat/completions', '/v1/audio/speech'])
+def test_malformed_model_body_is_an_explicit_refusal(stub, raw, path):
     with pytest.raises(HTTPError) as error:
-        request(stub, '/v1/chat/completions', raw=raw)
+        request(stub, path, raw=raw)
     assert error.value.code == 400
     assert json.loads(error.value.read())['error'] == 'expected a JSON object'
 

@@ -972,6 +972,11 @@ description = "Multipart: routers/files.py:upload_file takes an UploadFile, whic
 files = [{ field = "file", filename = "attack-{token}.txt", content = "Attack upload {token}", content_type = "text/plain" }]
 
 [[field]]
+route = "POST /api/v1/audio/speech"
+description = "routers/audio.py:SpeechForm accepts nonempty input, an optional voice and response_format; no caller-selected model or provider. The private stack resolves the platform speech role to the stub. Without a platform login the public stack refuses identity:platform_login before upstream I/O."
+json = { input = "Fictional speech probe {token}.", response_format = "mp3" }
+
+[[field]]
 route = "POST /api/v1/audio/transcriptions"
 description = "Multipart: an audio part. routers/audio.py:transcription refuses a content type outside audio.stt.supported_content_types, which defaults to audio/* and video/webm. CI runs speech-to-text on the stub (CI-005)."
 files = [{ field = "file", filename = "attack-{token}.wav", content = "RIFF attack {token}", content_type = "audio/wav" }]
@@ -1091,6 +1096,13 @@ reason = "A proxied completion is the upstream's answer, not an owner's resource
 route = "POST /ollama/v1/messages/{url_idx}"
 allow = ["same-object", "write"]
 reason = "A proxied completion is the upstream's answer, not an owner's resource: any user the model's access grant allows (the CI model is public-read) gets the same one, and the call writes nothing the owner owns."
+
+[[control]]
+runtime_soev_backed = "waive"
+route = "POST /api/v1/audio/speech"
+status = 403
+detail = "identity:platform_login"
+reason = "Observed through routers/audio.py:speech and soev/primitives.py:_login_token: a verified local user without a platform login receives 403 scope_insufficient, constraint identity:platform_login, before any upstream request. The public sealed stack has no soev-api login; private drive mode must succeed with the requesting person's token and configured speech role."
 
 [[control]]
 route = "POST /api/v1/invites/{token}/accept"
