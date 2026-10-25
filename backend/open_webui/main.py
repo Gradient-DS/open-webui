@@ -1012,7 +1012,6 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
-app.include_router(knowledge.connections_router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])

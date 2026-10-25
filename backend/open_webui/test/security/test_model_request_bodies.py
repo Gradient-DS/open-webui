@@ -209,6 +209,23 @@ def test_vendor_payload_reaches_handler_unchanged(path, harness):
         assert response.json() == REPLY
 
 
+@pytest.mark.parametrize('path', ['/api/embeddings', '/api/v1/embeddings'])
+def test_generic_embeddings_refuse_catalog_models_without_provider_io(path, harness, application, monkeypatch):
+    from open_webui.soev.model_catalog import OWNER
+    from open_webui.utils import embeddings
+
+    client, seen = harness
+    client.app.state.MODELS = {MODEL: {'id': MODEL, 'owned_by': OWNER}}
+    monkeypatch.setattr(application, 'generate_embeddings', embeddings.generate_embeddings)
+    provider = AsyncMock(side_effect=AssertionError('Catalog models cannot use the direct Ollama backend'))
+    monkeypatch.setattr(embeddings, 'ollama_embed', provider)
+    response = client.post(path, json={'model': MODEL, 'input': 'Fictional embedding control.'})
+    assert response.status_code == 404, response.text
+    assert 'Model' in response.json()['detail']
+    provider.assert_not_awaited()
+    assert not seen
+
+
 @pytest.mark.parametrize('path', PATHS)
 @pytest.mark.parametrize('body', [[], 'text', 42, True, None])
 def test_non_object_body_is_rejected_before_handler(path, body, harness):

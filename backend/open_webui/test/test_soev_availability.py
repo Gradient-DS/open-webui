@@ -63,11 +63,9 @@ async def test_unconfigured_soev_refuses_callers_by_auth_first(monkeypatch):
         return SimpleNamespace(id=role, role=role)
 
     monkeypatch.setattr(config, 'SOEV_API_URL', '')
-    monkeypatch.setattr(knowledge, '_get_external_connections', AsyncMock(return_value=[]))
     app = FastAPI(exception_handlers={SoevNotConfigured: main_app.exception_handlers[SoevNotConfigured]})
     app.dependency_overrides[get_current_user] = current_user
     for prefix, router in [
-        ('/knowledge', knowledge.connections_router),
         ('/knowledge', knowledge.router),
         ('/live', live_documents.router),
         ('/cloud', cloud_sync.router),
@@ -86,8 +84,6 @@ async def test_unconfigured_soev_refuses_callers_by_auth_first(monkeypatch):
             ('user', 'GET', '/knowledge/kb/export', 401),
             ('user', 'POST', '/knowledge/metadata/reindex', 401),
             ('admin', 'GET', '/knowledge/kb/export', 503),
-            ('user', 'GET', '/knowledge/external/connections', 401),
-            ('admin', 'GET', '/knowledge/external/connections', 200),
         ]:
             headers = {} if role is None else {'x-role': role}
             response = await client.request(method, path, headers=headers)
@@ -114,16 +110,11 @@ def test_every_soev_gated_route_resolves_availability_last():
         assert route.dependant.dependencies[-1].call is require_soev, route.path
 
 
-def test_only_soev_backed_knowledge_routes_are_gated():
+def test_all_knowledge_routes_are_soev_gated():
     from open_webui.routers import knowledge
 
     for route in knowledge.router.routes:
         assert any(dependency.call is require_soev for dependency in route.dependant.dependencies), route.path
-    assert not any(
-        dependency.call is require_soev
-        for route in knowledge.connections_router.routes
-        for dependency in route.dependant.dependencies
-    )
 
 
 @pytest.fixture

@@ -45,6 +45,7 @@ def waivers() -> dict[str, str]:
         entry['id']: entry['reason']
         for entry in parsed.get('waived', [])
         if not (entry.get('backed_by') == 'soev-solutions' and seeds.runtime_soev_backed() == 'drive')
+        and entry.get('runtime_soev_backed', seeds.runtime_soev_backed()) == seeds.runtime_soev_backed()
     }
 
 

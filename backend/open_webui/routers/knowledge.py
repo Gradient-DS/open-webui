@@ -4,7 +4,6 @@ import asyncio
 import io
 import logging
 import time
-import uuid
 import zipfile
 from typing import List, Optional
 from urllib.parse import quote
@@ -35,7 +34,6 @@ from open_webui.models.knowledge import (
 )
 from open_webui.models.files import FileUpdateForm
 from open_webui.models.models import ModelForm, Models
-from open_webui.retrieval.external import retrieve_external_knowledge, retrieve_external_knowledge_for_connection
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import (
     BatchProcessFilesForm,
@@ -61,8 +59,6 @@ from open_webui.utils.access_control import can_bypass_access_control
 log = logging.getLogger(__name__)
 
 router = APIRouter(route_class=SoevRoute, dependencies=[Depends(require_soev)])
-# External connections are stored in OWUI's own config; only the routes that read knowledge bases need soev-api.
-connections_router = APIRouter()
 
 ############################
 # getKnowledgeBases
@@ -148,17 +144,6 @@ class KnowledgeAccessResponse(KnowledgeUserResponse):
 class KnowledgeAccessListResponse(BaseModel):
     items: list[KnowledgeAccessResponse]
     total: int
-
-
-def is_external_knowledge(knowledge) -> bool:
-    return (knowledge.meta or {}).get('source') == 'external'
-
-
-def external_knowledge_error():
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail='External knowledge bases are read-only.',
-    )
 
 
 async def derive_relative_path_from_directory(
@@ -249,7 +234,6 @@ async def search_knowledge_bases(
     query: Optional[str] = None,
     view_option: Optional[str] = None,
     type: Optional[str] = None,
-    source: Optional[str] = None,
     page: Optional[int] = 1,
     order_by: Optional[str] = None,
     direction: Optional[str] = None,
@@ -267,8 +251,6 @@ async def search_knowledge_bases(
         filter['view_option'] = view_option
     if type:
         filter['type'] = type
-    if source in {'local', 'external'}:
-        filter['source'] = source
     if order_by in KNOWLEDGE_SORTABLE_FIELDS:
         filter['order_by'] = order_by
     if direction in {'asc', 'desc'}:
@@ -535,623 +517,6 @@ async def reindex_knowledge_base_metadata_embeddings(
 
     log.info('Embedding reindex complete: %s/%s', success_count, len(knowledge_bases))
     return {'total': len(knowledge_bases), 'success': success_count}
-
-
-############################
-# External Knowledge Sources
-############################
-
-
-class ExternalKnowledgeSourceForm(BaseModel):
-    type: str = 'collection'
-    name: str
-    config: Optional[dict] = None
-
-
-class ExternalKnowledgeCreateForm(BaseModel):
-    name: str
-    description: str = ''
-    connection_id: str
-    source: ExternalKnowledgeSourceForm
-    access_grants: Optional[list[dict]] = None
-
-
-class ExternalKnowledgeSourceCreateForm(BaseModel):
-    name: str
-    description: str = ''
-    connection: ExternalKnowledgeConnectionForm
-    source: ExternalKnowledgeSourceForm
-    access_grants: Optional[list[dict]] = None
-    test_query: str
-    test_count: int = 5
-
-
-class ExternalKnowledgeSourceUpdateForm(ExternalKnowledgeSourceCreateForm):
-    pass
-
-
-class ExternalKnowledgeSourceTestForm(BaseModel):
-    connection_id: Optional[str] = None
-    connection: ExternalKnowledgeConnectionForm
-    source: ExternalKnowledgeSourceForm
-    query: str
-    count: int = 5
-
-
-class ExternalKnowledgeRetrieveTestForm(BaseModel):
-    query: str
-    source: Optional[ExternalKnowledgeSourceForm] = None
-    count: int = 5
-
-
-class ExternalKnowledgeConnectionForm(BaseModel):
-    name: str
-    provider: str
-    endpoint: str
-    auth_config: Optional[dict] = None
-    config: Optional[dict] = None
-    capabilities: Optional[dict] = None
-    enabled: bool = True
-
-
-class ExternalKnowledgeConnectionListResponse(BaseModel):
-    items: list[dict]
-    total: int
-
-
-EXTERNAL_KNOWLEDGE_CONNECTIONS_CONFIG_KEY = 'external_knowledge.connections'
-EXTERNAL_KNOWLEDGE_PROVIDERS = {'qdrant', 'milvus', 'pgvector'}
-
-
-def _get_external_connection_provider_and_config(form_data: ExternalKnowledgeConnectionForm) -> tuple[str, dict]:
-    provider = form_data.provider.lower().strip()
-    if provider not in EXTERNAL_KNOWLEDGE_PROVIDERS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Unsupported external knowledge provider.',
-        )
-
-    if not form_data.name.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Knowledge source name is required.')
-
-    if not form_data.endpoint.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Knowledge source endpoint is required.')
-
-    config = form_data.config or {}
-    allowed_config_keys = {'timeout'}
-    if provider == 'milvus':
-        allowed_config_keys.add('db_name')
-
-    return provider, {key: value for key, value in config.items() if key in allowed_config_keys}
-
-
-def _get_external_auth_config(provider: str, incoming: Optional[dict], existing: Optional[dict] = None) -> dict:
-    if provider == 'pgvector':
-        return {}
-    return existing if incoming is None else incoming or {}
-
-
-def _get_normalized_external_source(source: ExternalKnowledgeSourceForm, provider: str) -> ExternalKnowledgeSourceForm:
-    source.type = (source.type or 'collection').strip()
-    source.name = source.name.strip()
-
-    if source.type != 'collection':
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Only collection sources are supported.')
-    if not source.name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Collection name is required.')
-
-    config = source.config or {}
-    allowed_keys = {'content_field', 'metadata_field', 'document_id_field'}
-    if provider in {'qdrant', 'milvus'}:
-        allowed_keys.add('vector_field')
-    if provider == 'pgvector':
-        allowed_keys.update({'table_name', 'collection_field', 'vector_field'})
-
-    normalized_config = {
-        key: value.strip() if isinstance(value, str) else value
-        for key, value in config.items()
-        if key in allowed_keys and value is not None and (not isinstance(value, str) or value.strip())
-    }
-
-    if not normalized_config.get('content_field'):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Content field is required.')
-    if provider in {'milvus', 'pgvector'} and not normalized_config.get('vector_field'):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Vector field is required.')
-
-    source.config = normalized_config
-    return source
-
-
-def _get_sanitized_external_connection(connection: dict) -> dict:
-    sanitized = {**connection}
-    sanitized.pop('auth_config', None)
-    sanitized['auth_configured'] = bool(connection.get('auth_config'))
-    return sanitized
-
-
-async def _get_external_connections() -> list[dict]:
-    return await Config.get(EXTERNAL_KNOWLEDGE_CONNECTIONS_CONFIG_KEY, []) or []
-
-
-async def _set_external_connections(connections: list[dict]) -> None:
-    await Config.upsert({EXTERNAL_KNOWLEDGE_CONNECTIONS_CONFIG_KEY: connections})
-
-
-def _get_external_connection_from_form(
-    form_data: ExternalKnowledgeConnectionForm, user_id: str, id: Optional[str] = None
-) -> dict:
-    provider, config = _get_external_connection_provider_and_config(form_data)
-    now = int(time.time())
-    return {
-        'id': id or str(uuid.uuid4()),
-        'name': form_data.name.strip(),
-        'provider': provider,
-        'endpoint': form_data.endpoint.strip(),
-        'auth_config': _get_external_auth_config(provider, form_data.auth_config),
-        'config': config,
-        'capabilities': form_data.capabilities or {'retrieve': True},
-        'health': None,
-        'enabled': form_data.enabled,
-        'created_by': user_id,
-        'created_at': now,
-        'updated_at': now,
-    }
-
-
-def _get_external_connection_update_from_form(
-    form_data: ExternalKnowledgeConnectionForm,
-    existing: dict,
-) -> dict:
-    provider, config = _get_external_connection_provider_and_config(form_data)
-    return {
-        **existing,
-        'name': form_data.name.strip(),
-        'provider': provider,
-        'endpoint': form_data.endpoint.strip(),
-        'auth_config': _get_external_auth_config(provider, form_data.auth_config, existing.get('auth_config')) or {},
-        'config': config,
-        'capabilities': form_data.capabilities or {'retrieve': True},
-        'enabled': form_data.enabled,
-        'updated_at': int(time.time()),
-    }
-
-
-async def _get_external_connection_by_id(id: str) -> Optional[dict]:
-    connections = await _get_external_connections()
-    return next((connection for connection in connections if connection.get('id') == id), None)
-
-
-async def _get_knowledge_base_count_for_external_connection(
-    connection_id: str, db: Optional[AsyncSession] = None
-) -> int:
-    count = 0
-    for knowledge in await Knowledges.get_knowledge_bases(db=db):
-        if (knowledge.meta or {}).get('external', {}).get('connection_id') == connection_id:
-            count += 1
-    return count
-
-
-@connections_router.get('/external/connections', response_model=ExternalKnowledgeConnectionListResponse)
-async def get_external_knowledge_connections(user=Depends(get_admin_user)):
-    connections = [_get_sanitized_external_connection(connection) for connection in await _get_external_connections()]
-    return ExternalKnowledgeConnectionListResponse(items=connections, total=len(connections))
-
-
-@connections_router.post('/external/connections', response_model=dict)
-async def create_external_knowledge_connection(
-    request: Request,
-    form_data: ExternalKnowledgeConnectionForm,
-    user=Depends(get_admin_user),
-):
-    connections = await _get_external_connections()
-    connection = _get_external_connection_from_form(form_data, user.id)
-    connections.append(connection)
-    await _set_external_connections(connections)
-    sanitized = _get_sanitized_external_connection(connection)
-    await publish_event(
-        request,
-        EVENTS.KNOWLEDGE_EXTERNAL_CONNECTION_CREATED,
-        actor=user,
-        subject_id=connection.get('id'),
-        data={'name': sanitized.get('name'), 'provider': sanitized.get('provider')},
-    )
-    return sanitized
-
-
-@connections_router.get('/external/connections/{id}', response_model=dict)
-async def get_external_knowledge_connection(
-    id: str,
-    user=Depends(get_admin_user),
-):
-    connection = await _get_external_connection_by_id(id)
-    if not connection:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    return _get_sanitized_external_connection(connection)
-
-
-@connections_router.patch('/external/connections/{id}', response_model=dict)
-async def update_external_knowledge_connection(
-    request: Request,
-    id: str,
-    form_data: ExternalKnowledgeConnectionForm,
-    user=Depends(get_admin_user),
-):
-    connections = await _get_external_connections()
-    idx = next((idx for idx, connection in enumerate(connections) if connection.get('id') == id), None)
-    if idx is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-    connection = _get_external_connection_update_from_form(form_data, connections[idx])
-    connections[idx] = connection
-    await _set_external_connections(connections)
-    sanitized = _get_sanitized_external_connection(connection)
-    await publish_event(
-        request,
-        EVENTS.KNOWLEDGE_EXTERNAL_CONNECTION_UPDATED,
-        actor=user,
-        subject_id=id,
-        data={'name': sanitized.get('name'), 'provider': sanitized.get('provider')},
-    )
-    return sanitized
-
-
-@router.delete('/external/connections/{id}', response_model=bool)
-async def delete_external_knowledge_connection(
-    request: Request,
-    id: str,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    connection = await _get_external_connection_by_id(id)
-    if not connection:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-    if await _get_knowledge_base_count_for_external_connection(id, db=db) > 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='External connection is still used by knowledge bases.',
-        )
-
-    connections = [connection for connection in await _get_external_connections() if connection.get('id') != id]
-    await _set_external_connections(connections)
-    await publish_event(
-        request,
-        EVENTS.KNOWLEDGE_EXTERNAL_CONNECTION_DELETED,
-        actor=user,
-        subject_id=id,
-        data={'name': connection.get('name'), 'provider': connection.get('provider')},
-    )
-    return True
-
-
-@connections_router.post('/external/connections/{id}/test', response_model=dict)
-async def test_external_knowledge_connection(
-    id: str,
-    user=Depends(get_admin_user),
-):
-    connection = await _get_external_connection_by_id(id)
-    if not connection:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-    health = {
-        'ok': bool(connection.get('enabled') and connection.get('endpoint')),
-        'provider': connection.get('provider'),
-        'checked_at': int(time.time()),
-    }
-    connections = await _get_external_connections()
-    for item in connections:
-        if item.get('id') == id:
-            item['health'] = health
-            item['updated_at'] = int(time.time())
-            break
-    await _set_external_connections(connections)
-    return health
-
-
-async def _get_external_source_test_result(
-    request: Request,
-    connection: dict,
-    source: ExternalKnowledgeSourceForm,
-    query: str,
-    count: int,
-    user,
-) -> dict:
-    if not query.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Test query is required.')
-
-    source = _get_normalized_external_source(source, connection.get('provider'))
-    test_knowledge = KnowledgeResponse(
-        id='external-test',
-        user_id=user.id,
-        name=connection.get('name'),
-        description='',
-        meta={
-            'source': 'external',
-            'read_only': True,
-            'external': {
-                'connection_id': connection.get('id'),
-                'source': source.model_dump(),
-                'provider': connection.get('provider'),
-                'auth_mode': 'service_account',
-                'capabilities': {'retrieve': True},
-            },
-        },
-        access_grants=[],
-        created_at=int(time.time()),
-        updated_at=int(time.time()),
-    )
-    try:
-        result = await retrieve_external_knowledge_for_connection(
-            request,
-            test_knowledge,
-            connection,
-            [query.strip()],
-            count,
-            user=user,
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        # A connection test that cannot use its store has failed: that is the answer, not a fault.
-        log.warning('External retrieval test failed for connection %s', connection.get('id'), exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'External retrieval test failed: {e}')
-    return {
-        'documents': result.get('documents', [[]])[0],
-        'metadatas': result.get('metadatas', [[]])[0],
-        'distances': result.get('distances', [[]])[0],
-    }
-
-
-@connections_router.post('/external/source/test', response_model=dict)
-async def test_external_knowledge_source(
-    request: Request,
-    form_data: ExternalKnowledgeSourceTestForm,
-    user=Depends(get_admin_user),
-):
-    if form_data.connection_id:
-        existing_connection = await _get_external_connection_by_id(form_data.connection_id)
-        if not existing_connection:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='External connection not found.')
-        connection = _get_external_connection_update_from_form(form_data.connection, existing_connection)
-    else:
-        connection = _get_external_connection_from_form(form_data.connection, user.id, id='external-test')
-
-    return await _get_external_source_test_result(
-        request,
-        connection,
-        form_data.source,
-        form_data.query,
-        form_data.count,
-        user,
-    )
-
-
-@connections_router.post('/external/connections/{id}/retrieve-test', response_model=dict)
-async def test_external_knowledge_retrieval(
-    request: Request,
-    id: str,
-    form_data: ExternalKnowledgeRetrieveTestForm,
-    user=Depends(get_admin_user),
-):
-    connection = await _get_external_connection_by_id(id)
-    if not connection:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-    source = form_data.source or ExternalKnowledgeSourceForm(name='test', config={'content_field': 'payload.text'})
-    return await _get_external_source_test_result(request, connection, source, form_data.query, form_data.count, user)
-
-
-@router.post('/external/knowledge/create', response_model=KnowledgeResponse | None)
-async def create_external_knowledge(
-    request: Request,
-    form_data: ExternalKnowledgeCreateForm,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    connection = await _get_external_connection_by_id(form_data.connection_id)
-    if not connection:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    if not form_data.name.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Knowledge name is required.')
-    source = _get_normalized_external_source(form_data.source, connection.get('provider'))
-
-    form_data.access_grants = await filter_allowed_access_grants(
-        await Config.get('user.permissions'),
-        user.id,
-        user.role,
-        form_data.access_grants,
-        'sharing.public_knowledge',
-    )
-
-    knowledge = await Knowledges.insert_new_knowledge(
-        user.id,
-        KnowledgeForm(
-            name=form_data.name.strip(),
-            description=form_data.description,
-            # [Gradient] KnowledgeModel.type is non-optional, and insert_new_knowledge
-            # builds the model outside its try block — an implicit None raises a
-            # ValidationError that escapes as a 500 instead of a handled failure.
-            type='local',
-            access_grants=form_data.access_grants,
-        ),
-        db=db,
-    )
-    if not knowledge:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.FILE_EXISTS)
-
-    meta = {
-        'source': 'external',
-        'read_only': True,
-        'external': {
-            'connection_id': form_data.connection_id,
-            'source': source.model_dump(),
-            'provider': connection.get('provider'),
-            'auth_mode': 'service_account',
-            'capabilities': {'retrieve': True},
-        },
-    }
-    knowledge = await Knowledges.update_knowledge_meta_by_id(knowledge.id, meta, db=db)
-    await embed_knowledge_base_metadata(request, knowledge.id, knowledge.name, knowledge.description)
-    return knowledge
-
-
-@router.post('/external/source/create', response_model=KnowledgeResponse | None)
-async def create_external_knowledge_source(
-    request: Request,
-    form_data: ExternalKnowledgeSourceCreateForm,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    if not form_data.name.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Knowledge name is required.')
-
-    connection = _get_external_connection_from_form(form_data.connection, user.id)
-    source = _get_normalized_external_source(form_data.source, connection.get('provider'))
-    test_result = await _get_external_source_test_result(
-        request,
-        connection,
-        source,
-        form_data.test_query,
-        form_data.test_count,
-        user,
-    )
-    if not test_result.get('documents'):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Test query returned no results.')
-
-    form_data.access_grants = await filter_allowed_access_grants(
-        await Config.get('user.permissions'),
-        user.id,
-        user.role,
-        form_data.access_grants,
-        'sharing.public_knowledge',
-    )
-
-    connections = await _get_external_connections()
-    connections.append(connection)
-    await _set_external_connections(connections)
-
-    knowledge = await Knowledges.insert_new_knowledge(
-        user.id,
-        KnowledgeForm(
-            name=form_data.name.strip(),
-            description=form_data.description,
-            # [Gradient] KnowledgeModel.type is non-optional, and insert_new_knowledge
-            # builds the model outside its try block — an implicit None raises a
-            # ValidationError that escapes as a 500 instead of a handled failure.
-            type='local',
-            access_grants=form_data.access_grants,
-        ),
-        db=db,
-    )
-    if not knowledge:
-        connections = [item for item in await _get_external_connections() if item.get('id') != connection.get('id')]
-        await _set_external_connections(connections)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.FILE_EXISTS)
-
-    meta = {
-        'source': 'external',
-        'read_only': True,
-        'external': {
-            'connection_id': connection.get('id'),
-            'source': source.model_dump(),
-            'provider': connection.get('provider'),
-            'auth_mode': 'service_account',
-            'capabilities': {'retrieve': True},
-        },
-    }
-    knowledge = await Knowledges.update_knowledge_meta_by_id(knowledge.id, meta, db=db)
-    await embed_knowledge_base_metadata(request, knowledge.id, knowledge.name, knowledge.description)
-    return knowledge
-
-
-@router.patch('/external/source/{id}', response_model=KnowledgeResponse | None)
-async def update_external_knowledge_source(
-    request: Request,
-    id: str,
-    form_data: ExternalKnowledgeSourceUpdateForm,
-    user=Depends(get_admin_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
-    if not knowledge or not is_external_knowledge(knowledge):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    if not (
-        can_bypass_access_control(user)
-        or knowledge.user_id == user.id
-        or await AccessGrants.has_access(user.id, 'knowledge', id, 'write', db=db)
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
-    # [Gradient] External metadata does not exempt a subscribed KB from the share guard.
-    _assert_synced_grants_unchanged(knowledge, form_data.access_grants)
-    if not form_data.name.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Knowledge name is required.')
-
-    connection_id = (knowledge.meta or {}).get('external', {}).get('connection_id')
-    connections = await _get_external_connections()
-    idx = next((idx for idx, connection in enumerate(connections) if connection.get('id') == connection_id), None)
-    if idx is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='External connection not found.')
-
-    existing_connection = connections[idx]
-    connection = _get_external_connection_update_from_form(form_data.connection, existing_connection)
-    source = _get_normalized_external_source(form_data.source, connection.get('provider'))
-    test_result = await _get_external_source_test_result(
-        request,
-        connection,
-        source,
-        form_data.test_query,
-        form_data.test_count,
-        user,
-    )
-    if not test_result.get('documents'):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Test query returned no results.')
-
-    # [Gradient] Keep equal synced grants unchanged.
-    if not is_synced_kb(knowledge):
-        form_data.access_grants = await filter_allowed_access_grants(
-            await Config.get('user.permissions'),
-            user.id,
-            user.role,
-            form_data.access_grants,
-            'sharing.public_knowledge',
-        )
-
-    connections[idx] = connection
-    await _set_external_connections(connections)
-
-    updated = await Knowledges.update_knowledge_by_id(
-        id=id,
-        form_data=KnowledgeForm(
-            name=form_data.name.strip(),
-            description=form_data.description,
-            access_grants=form_data.access_grants,
-        ),
-        db=db,
-    )
-    if not updated:
-        connections[idx] = existing_connection
-        await _set_external_connections(connections)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT())
-
-    meta = {
-        'source': 'external',
-        'read_only': True,
-        'external': {
-            'connection_id': connection.get('id'),
-            'source': source.model_dump(),
-            'provider': connection.get('provider'),
-            'auth_mode': 'service_account',
-            'capabilities': {'retrieve': True},
-        },
-    }
-    updated = await Knowledges.update_knowledge_meta_by_id(id, meta, db=db)
-    if not updated:
-        connections[idx] = existing_connection
-        await _set_external_connections(connections)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT())
-
-    await embed_knowledge_base_metadata(request, id, updated.name, updated.description)
-    return updated
 
 
 ############################
@@ -1507,9 +872,6 @@ async def add_file_to_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if is_external_knowledge(knowledge):
-        external_knowledge_error()
-
     if (
         knowledge.user_id != user.id
         and not await AccessGrants.has_access(
@@ -1627,9 +989,6 @@ async def update_file_from_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if is_external_knowledge(knowledge):
-        external_knowledge_error()
-
     if (
         knowledge.user_id != user.id
         and not await AccessGrants.has_access(
@@ -1720,11 +1079,7 @@ async def remove_file_from_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if is_external_knowledge(knowledge):
-        external_knowledge_error()
-
-    # For external-source KBs, never delete the underlying file
-    # (other users may reference it via their own KBs)
+    # Cloud files may be referenced by other knowledge bases.
     if knowledge.type != 'local':
         delete_file = False
 
@@ -1974,26 +1329,6 @@ async def delete_knowledge_by_id(
     # and dropping the vector collection - is intentionally NOT adopted here because
     # those steps would break the restore flow. The hard-delete cleanup worker is
     # responsible for cascading those cleanups once the retention window expires.
-    #
-    # Re-homed from upstream's hard-delete cascade: an external-knowledge KB owns a
-    # config-stored external connection that is not tied to the KB row, so the
-    # retention worker (which only prunes DB + vector state) would never reap it and
-    # it would leak in config forever. Drop it here at soft-delete time. External
-    # KBs are upstream read-only and have no fork restore UX, so losing the
-    # connection on delete is acceptable; the KB row itself still soft-deletes.
-    if is_external_knowledge(knowledge):
-        connection_id = (knowledge.meta or {}).get('external', {}).get('connection_id')
-        # Connections are admin-owned and shared across knowledge bases
-        if (
-            connection_id
-            and user.role == 'admin'
-            and await _get_knowledge_base_count_for_external_connection(connection_id, db=db) <= 1
-        ):
-            connections = [
-                connection for connection in await _get_external_connections() if connection.get('id') != connection_id
-            ]
-            await _set_external_connections(connections)
-
     log.info(f'Soft-deleting knowledge base: {id} (name: {knowledge.name})')
 
     # Remove knowledge base embedding
@@ -2031,9 +1366,6 @@ async def reset_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if is_external_knowledge(knowledge):
-        external_knowledge_error()
-
     _assert_not_synced_kb(knowledge)  # [Gradient]
 
     if (
@@ -2099,9 +1431,6 @@ async def add_files_to_knowledge_batch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if is_external_knowledge(knowledge):
-        external_knowledge_error()
-
     if (
         knowledge.user_id != user.id
         and not await AccessGrants.has_access(
@@ -2234,9 +1563,6 @@ async def export_knowledge_by_id(id: str, user=Depends(get_admin_user), db: Asyn
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if is_external_knowledge(knowledge):
-        external_knowledge_error()
-
     if not (
         can_bypass_access_control(user)
         or knowledge.user_id == user.id
@@ -2299,8 +1625,6 @@ async def _verify_knowledge_write_access(id: str, user, db: AsyncSession):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if is_external_knowledge(knowledge):
-        external_knowledge_error()
     if (
         knowledge.user_id != user.id
         and not await AccessGrants.has_access(

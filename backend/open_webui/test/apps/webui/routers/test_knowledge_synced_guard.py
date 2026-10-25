@@ -44,9 +44,6 @@ def api(monkeypatch):
     monkeypatch.setattr(knowledge, 'embed_knowledge_base_metadata', AsyncMock())
     monkeypatch.setattr(knowledge, 'publish_event', AsyncMock())
     monkeypatch.setattr(knowledge.Config, 'get', AsyncMock(return_value={}))
-    monkeypatch.setattr(knowledge, '_get_external_connections', AsyncMock(return_value=[{'id': 'external'}]))
-    monkeypatch.setattr(knowledge, '_set_external_connections', AsyncMock())
-    monkeypatch.setattr(knowledge, '_get_external_source_test_result', AsyncMock(return_value={'documents': [{}]}))
     monkeypatch.setitem(FEATURE_FLAGS, 'knowledge', True)
     app = FastAPI()
     app.include_router(knowledge.router, prefix='/knowledge')
@@ -66,27 +63,17 @@ def set_grants(api, grants):
 
 def update(api, route, grants):
     body = {'name': 'Research', 'description': 'Notes', 'access_grants': grants}
-    if route == 'external':
-        api.kb.meta = {'source': 'external', 'external': {'connection_id': 'external'}}
-        body.update(
-            connection={'name': 'Remote', 'provider': 'qdrant', 'endpoint': 'https://external.invalid'},
-            source={'name': 'documents', 'config': {'content_field': 'text'}},
-            test_query='test',
-        )
-        return api.browser.patch('/knowledge/external/source/kb', json=body)
     if route == 'access/update':
         body = {'access_grants': grants}
     return api.browser.post('/knowledge/kb/' + route, json=body)
 
 
 @pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
-@pytest.mark.parametrize('route', ['update', 'access/update', 'external'])
+@pytest.mark.parametrize('route', ['update', 'access/update'])
 @pytest.mark.parametrize('change', ['add', 'remove', 'permission'])
 def test_access_grants_change_on_a_synced_kb_is_403(api, provider, route, change):
     """All existing-KB grant routes reject widening, removal and permission changes."""
     api.kb.type = provider
-    if route == 'external':
-        api.user.role = 'admin'
     set_grants(api, GRANTS if change != 'add' else [])
     requested = [] if change == 'remove' else [GRANTS[0], {**GRANTS[1], 'permission': 'read'}]
     result = update(api, route, requested)
@@ -98,13 +85,11 @@ def test_access_grants_change_on_a_synced_kb_is_403(api, provider, route, change
 
 
 @pytest.mark.parametrize('provider', ['onedrive', 'google_drive', 'confluence'])
-@pytest.mark.parametrize('route', ['update', 'access/update', 'external'])
+@pytest.mark.parametrize('route', ['update', 'access/update'])
 @pytest.mark.parametrize('grants', [[], GRANTS])
 def test_same_grants_is_allowed(api, provider, route, grants):
     """Unchanged grants pass through without filtering, irrespective of order and row metadata."""
     api.kb.type = provider
-    if route == 'external':
-        api.user.role = 'admin'
     set_grants(api, grants)
     requested = list(reversed(grants))
     result = update(api, route, requested)
@@ -162,12 +147,10 @@ def test_cloud_metadata_does_not_mark_a_local_kb_as_synced(api):
     assert not is_synced_kb(api.kb)
 
 
-@pytest.mark.parametrize('action', ['update', 'access/update', 'external', 'reset'])
+@pytest.mark.parametrize('action', ['update', 'access/update', 'reset'])
 def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, monkeypatch, action):
     """Stored source kind enforces every guard without subscriptions or viewer-owned schedules."""
     api.user.id = 'co-writer'
-    if action == 'external':
-        api.user.role = 'admin'
     row = {
         'key': 'kb',
         'name': 'Research',
@@ -187,14 +170,6 @@ def test_a_co_writer_who_did_not_register_the_source_still_hits_the_guard(api, m
     schedules = AsyncMock(return_value=[])
     monkeypatch.setattr(store, '_pages', schedules)
     monkeypatch.setattr(knowledge.Knowledges, 'get_knowledge_by_id', store.get_knowledge_by_id)
-    if action == 'external':
-
-        async def external_knowledge(*args, **kwargs):
-            projected = await store.get_knowledge_by_id(*args, **kwargs)
-            projected.meta = api.kb.meta
-            return projected
-
-        monkeypatch.setattr(knowledge.Knowledges, 'get_knowledge_by_id', external_knowledge)
     monkeypatch.setattr(knowledge.AccessGrants, 'has_access', AsyncMock(return_value=True))
     if action == 'reset':
         result = api.browser.post('/knowledge/kb/reset')

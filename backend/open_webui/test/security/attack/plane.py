@@ -2,7 +2,7 @@
 
 RUN-TAG: owui-phase7a-plane-core
 
-The committed document has 547 operations, 203 writable routes and 2230
+The committed document has 536 operations, 196 writable routes and 2193
 derived string fields. At 63 payloads, all-fields alone costs about 13,000
 requests; unconditional leave-one-out costs another ~140,000 before
 single-field retries.

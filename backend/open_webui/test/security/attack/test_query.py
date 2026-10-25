@@ -25,9 +25,12 @@ def query_spec():
 
 def test_committed_query_surface():
     targets = query.query_targets()
-    assert (len(targets), sum(map(len, targets.values()))) == (45, 94)
+    assert (len(targets), sum(map(len, targets.values()))) == (48, 97)
     assert targets['GET /api/v1/models/model/sharing'] == ['id']
     assert targets['DELETE /api/v1/users/{user_id}'] == ['archive_reason', 'mode', 'transfer_to']
+    assert targets['GET /api/v1/threads'] == ['cursor', 'q']
+    assert targets['GET /api/v1/threads/{thread_id}'] == ['before']
+    assert targets['GET /api/v1/threads/{thread_id}/forks'] == ['cursor']
 
 
 def test_offboarding_query_contract_includes_resource_confirmation_array():
