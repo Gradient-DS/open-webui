@@ -54,10 +54,8 @@ from open_webui.tools.builtin import (
     delete_automation,
     delete_calendar_event,
     delete_memory,
-    edit_image,
     execute_code,
     fetch_url,
-    generate_image,
     get_current_timestamp,
     grep_chat_files,
     grep_knowledge_files,
@@ -542,8 +540,6 @@ async def get_builtin_tools(
     user = extra_params.get('__user__', {})
     config = await Config.get_many(
         'web.search.enable',
-        'image_generation.enable',
-        'images.edit.enable',
         'code_interpreter.enable',
         'notes.enable',
         'automations.enable',
@@ -679,25 +675,6 @@ async def get_builtin_tools(
         and await has_user_permission('web_search')
     ):
         builtin_functions.extend([search_web, fetch_url])
-
-    # Add image generation/edit tools if builtin category enabled,
-    # globally enabled, and allowed by model capability.
-    if (
-        is_builtin_tool_enabled('image_generation')
-        and config.get('image_generation.enable')
-        and get_model_capability('image_generation')
-        and features.get('image_generation')
-        and await has_user_permission('image_generation')
-    ):
-        builtin_functions.append(generate_image)
-    if (
-        is_builtin_tool_enabled('image_generation')
-        and config.get('images.edit.enable')
-        and get_model_capability('image_generation')
-        and features.get('image_generation')
-        and await has_user_permission('image_generation')
-    ):
-        builtin_functions.append(edit_image)
 
     # Add code interpreter tool if builtin category enabled,
     # globally enabled, and allowed by model capability.

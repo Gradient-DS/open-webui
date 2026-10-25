@@ -8,7 +8,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from open_webui import env
 from open_webui.models.memories import MemoryModel
 from open_webui.retrieval.vector.main import SearchResult
@@ -51,6 +51,9 @@ async def platform(identity_config, eligible_identity, monkeypatch):
             assert set(body) == {'input'}
             assert len(body['input']) == 1
             return state.embedding or {'data': [{'index': 0, 'embedding': [0.1, 0.2]}]}
+        if path == 'audio/speech':
+            state.speech = await request.json()
+            return Response(b'fictional-streamed-audio', media_type='audio/mpeg')
         assert path == 'audio/transcriptions'
         async with request.form() as form:
             assert set(form) in ({'file', 'response_format'}, {'file', 'response_format', 'language'})
@@ -167,10 +170,8 @@ async def test_stock_memory_embedding_is_preserved(platform, memory_state, monke
 def dictation_app(platform, monkeypatch, tmp_path):
     from open_webui.main import soev_api_error_handler
 
-    monkeypatch.setattr(audio, 'CACHE_DIR', tmp_path)
     monkeypatch.setattr(audio, 'is_feature_enabled', lambda feature: True)
     monkeypatch.setattr(audio, 'publish_event', AsyncMock())
-    monkeypatch.setattr(audio, 'transcribe', AsyncMock(side_effect=AssertionError('Direct STT must not run')))
     monkeypatch.setattr(audio.Config, 'get', AsyncMock(side_effect=AssertionError('STT settings must not be read')))
     app = FastAPI()
     app.include_router(audio.router)
@@ -196,7 +197,6 @@ async def test_dictation_multipart_uses_platform_without_disk(platform, dictatio
     assert platform.upload == b'fictional-audio' and platform.language == language
     assert [request.url.path for request in platform.calls] == ['/v1/audio/transcriptions']
     assert list(tmp_path.iterdir()) == []
-    audio.transcribe.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -221,7 +221,6 @@ async def test_dictation_refusal_uses_safe_error_mapping(platform, dictation_app
     assert response.status_code == status
     assert response.json()['detail'] == {'code': code, 'constraint': None, 'detail': detail}
     assert 'private upstream information' not in response.text
-    audio.transcribe.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -242,28 +241,6 @@ async def test_voice_gate_still_binds_v2_admin(platform, dictation_app, monkeypa
         response = await client.post('/transcriptions', files={'file': ('fiction.wav', b'fiction', 'audio/wav')})
     assert response.status_code == 403
     assert not platform.calls
-
-
-@pytest.mark.asyncio
-async def test_dictation_settings_are_platform_owned(platform, monkeypatch):
-    read = AsyncMock(return_value={})
-    write = AsyncMock()
-    whisper = AsyncMock(side_effect=AssertionError('Local Whisper must not load'))
-    monkeypatch.setattr(audio, 'get_config_values', read)
-    monkeypatch.setattr(audio.Config, 'upsert', write)
-    monkeypatch.setattr(audio, 'set_faster_whisper_model', whisper)
-    monkeypatch.setattr(audio, 'publish_event', AsyncMock())
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
-    config = await audio.get_audio_config(request, platform.user)
-    assert config['stt'] == {'ENGINE': 'soev'}
-    assert all(call.args[0] == audio.TTS_CONFIG_KEYS for call in read.call_args_list)
-    tts = audio.TTSConfigForm.model_construct(ENGINE='openai', MODEL='fictional-voice')
-    stt = audio.STTConfigForm.model_construct(ENGINE='', WHISPER_MODEL='ignored', OPENAI_API_KEY='ignored-key')
-    result = await audio.update_audio_config(request, audio.AudioConfigUpdateForm(tts=tts, stt=stt), platform.user)
-    assert result['stt'] == {'ENGINE': 'soev'}
-    assert not any(key.startswith('audio.stt.') for key in write.call_args.args[0])
-    whisper.assert_not_called()
-    assert request.app.state.faster_whisper_model is None
 
 
 @pytest.mark.asyncio
@@ -292,7 +269,6 @@ async def test_transport_failure_is_mapped_without_fallback(platform, dictation_
             response = await client.post('/transcriptions', files={'file': ('fiction.wav', b'fiction', 'audio/wav')})
     assert response.status_code == 502
     assert response.json()['detail']['detail'] == 'The platform could not complete this request.'
-    audio.transcribe.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -312,7 +288,6 @@ async def test_another_users_context_never_supplies_a_token(platform, memory_sta
     assert response.status_code == 403
     assert platform.calls == []
     memory_state.legacy.assert_not_awaited()
-    audio.transcribe.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -346,3 +321,145 @@ async def test_a_login_without_a_platform_token_is_refused_before_any_call(platf
         await primitives.embed_memory('Fictional note.', platform.user)
     assert (error.value.status, error.value.constraint) == (403, 'identity:platform_login')
     assert platform.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'body',
+    [
+        {'input': 'Fictional speech.', 'response_format': 'mp3'},
+        {'input': 'Fictional speech.', 'voice': 'fictional-voice', 'response_format': 'wav'},
+    ],
+)
+async def test_speech_streams_through_platform_token_only(platform, dictation_app, body, tmp_path):
+    async with platform.http(
+        transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
+    ) as client:
+        response = await client.post('/speech', json=body)
+    assert response.status_code == 200, response.text
+    assert response.content == b'fictional-streamed-audio'
+    assert response.headers['content-type'] == 'audio/mpeg'
+    assert response.headers['cache-control'] == 'no-store'
+    assert platform.speech == body
+    assert [call.url.path for call in platform.calls] == ['/v1/audio/speech']
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,code', [(429, 'budget_spent'), (503, 'service_unavailable'), (422, 'invalid_field')])
+@pytest.mark.parametrize(
+    'language,detail',
+    [
+        ('en-US', 'The platform could not complete this request.'),
+        ('nl-NL', 'Het platform kon dit verzoek niet uitvoeren.'),
+    ],
+)
+async def test_speech_refusal_precedes_stream_headers(platform, dictation_app, status, code, language, detail):
+    platform.failure = status, code
+    async with platform.http(
+        transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
+    ) as client:
+        response = await client.post(
+            '/speech', json={'input': 'Fictional speech.'}, headers={'Accept-Language': language}
+        )
+    assert response.status_code == status
+    assert response.json()['detail']['detail'] == detail
+    assert 'private upstream information' not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('requester,token', [('owui:user:fern', None), ('owui:user:moss', 'fictional-moss-token')])
+async def test_speech_requires_requesting_persons_platform_login(
+    platform, dictation_app, monkeypatch, requester, token
+):
+    monkeypatch.setattr(acting, '_requester_ref', acting.ContextVar('speech-requester', default=requester))
+    monkeypatch.setattr(
+        acting, '_token_resolver', acting.ContextVar('speech-token', default=AsyncMock(return_value=token))
+    )
+    async with platform.http(
+        transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
+    ) as client:
+        response = await client.post('/speech', json={'input': 'Fictional speech.'})
+    assert response.status_code == 403
+    assert response.json()['detail']['constraint'] == 'identity:platform_login'
+    assert not platform.calls
+
+
+@pytest.mark.asyncio
+async def test_speech_permission_and_feature_gates(platform, dictation_app, monkeypatch):
+    async with platform.http(
+        transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
+    ) as client:
+        monkeypatch.setattr(audio, 'is_feature_enabled', lambda feature: False)
+        assert (await client.post('/speech', json={'input': 'Fictional speech.'})).status_code == 403
+        monkeypatch.setattr(audio, 'is_feature_enabled', lambda feature: True)
+        platform.user.role = 'user'
+        monkeypatch.setattr(audio.Config, 'get', AsyncMock(return_value={}))
+        monkeypatch.setattr(audio, 'has_permission', AsyncMock(return_value=False))
+        assert (await client.post('/speech', json={'input': 'Fictional speech.'})).status_code == 403
+    assert not platform.calls
+
+
+@pytest.mark.asyncio
+async def test_speech_transport_failure_is_safe(platform, dictation_app, monkeypatch):
+    async def unavailable(request):
+        raise httpx.ConnectError('fictional private server', request=request)
+
+    async with platform.http(transport=httpx.MockTransport(unavailable)) as outbound:
+        monkeypatch.setattr('open_webui.soev.client._shared_client', lambda: outbound)
+        async with platform.http(
+            transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
+        ) as client:
+            response = await client.post('/speech', json={'input': 'Fictional speech.'})
+    assert response.status_code == 502
+    assert response.json()['detail']['detail'] == 'The platform could not complete this request.'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'body',
+    [
+        {'input': 'Fictional', 'model': 'caller-chosen'},
+        {'input': 'Fictional', 'response_format': 'invalid'},
+        {'input': ''},
+    ],
+)
+async def test_speech_rejects_provider_overrides_and_invalid_input(platform, dictation_app, body):
+    async with platform.http(
+        transport=httpx.ASGITransport(app=dictation_app), base_url='http://owui.invalid'
+    ) as client:
+        assert (await client.post('/speech', json=body)).status_code == 422
+    assert not platform.calls
+
+
+@pytest.mark.asyncio
+async def test_speech_does_not_buffer_and_closes_upstream_on_disconnect(platform, monkeypatch):
+    class AudioStream(httpx.AsyncByteStream):
+        def __init__(self):
+            self.yielded = 0
+            self.closed = False
+
+        async def __aiter__(self):
+            for chunk in (b'fictional first', b'fictional second'):
+                self.yielded += 1
+                yield chunk
+
+        async def aclose(self):
+            self.closed = True
+
+    audio_stream = AudioStream()
+
+    async def upstream(request):
+        assert request.url.path == '/v1/audio/speech'
+        assert 'x-soev-subject' not in request.headers
+        assert request.headers['x-soev-user-token'] == 'fictional-fern-token'
+        return httpx.Response(200, stream=audio_stream, headers={'Content-Type': 'audio/mpeg'})
+
+    async with platform.http(transport=httpx.MockTransport(upstream)) as outbound:
+        monkeypatch.setattr('open_webui.soev.client._shared_client', lambda: outbound)
+        response = await primitives.speech({'input': 'Fictional speech.'}, platform.user)
+        assert audio_stream.yielded == 0
+        assert await anext(response.body_iterator) == b'fictional first'
+        assert audio_stream.yielded == 1
+        await response.body_iterator.aclose()
+        assert audio_stream.closed

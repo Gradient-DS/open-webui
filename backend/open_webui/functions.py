@@ -21,7 +21,7 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, ENABLE_PLUGINS, GLOBAL_LOG_LEVEL
 from open_webui.models.functions import Functions
 from open_webui.models.models import Models
-from open_webui.soev import system_prompt
+from open_webui.soev import model_catalog, system_prompt
 from open_webui.models.users import UserModel
 from open_webui.socket.main import (
     get_event_call,
@@ -69,7 +69,7 @@ async def get_function_module_by_id(request: Request, pipe_id: str):
 
 
 async def get_function_models(request):
-    if not ENABLE_PLUGINS:
+    if not ENABLE_PLUGINS or model_catalog.is_v2():
         return []
 
     pipes = await Functions.get_functions_by_type('pipe', active_only=True)
@@ -151,6 +151,7 @@ async def get_function_models(request):
 
 
 async def generate_function_chat_completion(request, form_data, user, models: dict | None = None):
+    model_catalog.require_custom_functions()
     if models is None:
         models = {}
 

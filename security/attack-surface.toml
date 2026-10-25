@@ -819,11 +819,6 @@ description = "utils/tool_approval.py:resolve_tool_call_output answers 404 'Tool
 json = { "call_id" = "call_{token}", "action" = "reject" }
 
 [[field]]
-route = "POST /api/v1/images/edit"
-description = "routers/images.py:image_edits resolves a non-URL image as a file id through get_file_content_by_id, which answers 404 for an unknown id."
-json = { "image" = "{file}" }
-
-[[field]]
 backed_by = "soev-solutions"
 route = "POST /api/v1/knowledge/{id}/file/move"
 description = "routers/knowledge.py:move_file_in_knowledge answers 404 unless the file is in this KB (Knowledges.has_file), and no path parameter seeds a KB membership. Setup processes the seeded file first -- file/add refuses a file with no extracted content, and the file fixture uploads with process=false to avoid an ingestion race -- then adds it to the KB."

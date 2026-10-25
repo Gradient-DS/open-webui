@@ -27,9 +27,6 @@ DICT_CONFIG_KEY_ALIASES = {
     'rag.mineru_params': ('MINERU_PARAMS',),
     'rag.docling_params': ('DOCLING_PARAMS',),
     'web.search.linkup_search_params': ('LINKUP_SEARCH_PARAMS',),
-    'image_generation.automatic1111.api_params': ('AUTOMATIC1111_PARAMS',),
-    'image_generation.openai.params': ('IMAGES_OPENAI_API_PARAMS',),
-    'audio.tts.openai.params': ('AUDIO_TTS_OPENAI_PARAMS',),
     'models.default_metadata': ('DEFAULT_MODEL_METADATA',),
     'models.default_params': ('DEFAULT_MODEL_PARAMS',),
     'task.model.params': ('TASK_MODEL_PARAMS',),
@@ -64,10 +61,7 @@ API_CONFIG_FIELDS = (
 # of being pinned to the value seed_defaults wrote at first boot.
 # Security-critical upload guards are deployment-authoritative: gitops env
 # always wins; admin-UI writes do not persist for these keys.
-# [Gradient] Speech-to-text has no admin tab in this fork: the chart env (parakeet via
-# litellm) is its only source, and a tenant booted before dictation was configured would
-# otherwise stay pinned to the empty engine (local Whisper, not in the image).
-_ENV_AUTHORITATIVE_KEY_PREFIXES = ('sync_daemon.', 'rag.file.', 'audio.stt.')
+_ENV_AUTHORITATIVE_KEY_PREFIXES = ('sync_daemon.', 'rag.file.')
 
 
 def _split_api_config_fragment(fragment: str) -> tuple[str, list[str]] | None:

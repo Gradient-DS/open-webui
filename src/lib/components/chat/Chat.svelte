@@ -1180,7 +1180,9 @@
 				tools.set(await getTools(localStorage.token));
 			}
 			if (!$functions) {
-				functions.set(await getFunctions(localStorage.token));
+				functions.set(
+					$config?.features?.enable_functions ? await getFunctions(localStorage.token) : []
+				);
 			}
 			if (!$skills) {
 				skills.set(await getSkills(localStorage.token));

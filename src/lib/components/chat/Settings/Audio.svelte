@@ -4,7 +4,6 @@
 
 	import { user, settings, config } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { getVoices as _getVoices } from '$lib/apis/audio';
 
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -67,14 +66,7 @@
 					}
 				}, 100);
 			} else {
-				const res = await _getVoices(localStorage.token).catch((e) => {
-					toast.error(`${e}`);
-				});
-
-				if (res) {
-					console.log(res);
-					voices = res.voices;
-				}
+				voices = [];
 			}
 		}
 	};

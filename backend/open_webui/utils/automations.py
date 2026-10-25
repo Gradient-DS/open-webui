@@ -36,6 +36,7 @@ from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.users import Users
+from open_webui.soev import model_catalog
 from open_webui.utils.auth import create_token
 from open_webui.utils.misc import parse_duration
 from open_webui.utils.task import prompt_template
@@ -323,7 +324,7 @@ async def _resolve_model_defaults(app, model_id: str) -> tuple[list[str], dict, 
     # and does not work in headless backend execution.
     feature_checks = {
         'web_search': await Config.get('web.search.enable'),
-        'image_generation': await Config.get('image_generation.enable'),
+        'image_generation': model_catalog.is_v2(),
     }
 
     for feature_id in default_feature_ids:

@@ -464,11 +464,6 @@ openWebui:
     showAdminDetails: "false"
     enableEvaluationArenaModels: "false"
     enableApiKeys: "false"
-    enableImageGeneration: "false"
-    imageGenerationEngine: "openai"
-    imageGenerationModel: ""
-    imagesOpenaiApiBaseUrl: ""
-    imageSize: "1024x1024"
     # Google Drive Integration
     enableGoogleDriveIntegration: "false"
     googleDriveClientId: ""   # Google OAuth Client ID (for Picker + sync)
@@ -990,7 +985,6 @@ ingress:
 # -----------------------------------------------------------------------------
 # These values should be overridden in a separate values file or via --set
 secrets:
-  imagesOpenaiApiKey: ""
   # Open WebUI secrets
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
   # Required when soevApi.url is set and externalSecrets.enabled is false.
@@ -1077,7 +1071,6 @@ externalSecrets:
     # soevApiKey and soevApiSigningKey are always fetched when soevApi.url is set.
     # Toggle optional fields (set to true if the 1P item contains these)
     fields:
-      imagesOpenaiApiKey: false
       s3AccessKeyId: false
       emailGraphClientSecret: false
       feedbackReportSlackWebhookUrl: false

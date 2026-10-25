@@ -54,8 +54,6 @@
 	import AdminWebSearch from '$lib/components/admin/Settings/WebSearch.svelte';
 	import AdminCodeExecution from '$lib/components/admin/Settings/CodeExecution.svelte';
 	import AdminInterface from '$lib/components/admin/Settings/Interface.svelte';
-	import AdminAudio from '$lib/components/admin/Settings/Audio.svelte';
-	import AdminImages from '$lib/components/admin/Settings/Images.svelte';
 	import AdminDatabase from '$lib/components/admin/Settings/Database.svelte';
 
 	// [Gradient] Fork admin tab migrated from the route host.
@@ -179,8 +177,6 @@
 		'admin:system-prompt': 'AI',
 		'admin:external-agents': 'AI',
 		'admin:interface': 'Experience',
-		'admin:audio': 'Experience',
-		'admin:images': 'Experience',
 		'admin:evaluations': 'Quality',
 		'admin:analytics': 'Quality',
 		'admin:integrations': 'Tools',
@@ -748,16 +744,6 @@
 			keywords: ['interface', 'ui', 'appearance', 'banners', 'tasks', 'prompt suggestions', 'tags']
 		},
 		{
-			id: 'admin:audio',
-			title: 'Audio',
-			keywords: ['audio', 'voice', 'speech', 'tts', 'stt', 'whisper', 'deepgram', 'azure']
-		},
-		{
-			id: 'admin:images',
-			title: 'Images',
-			keywords: ['images', 'generation', 'dalle', 'stable diffusion', 'comfyui', 'automatic1111']
-		},
-		{
 			id: 'admin:evaluations',
 			title: 'Evaluations',
 			keywords: ['evaluations', 'feedback', 'rating', 'arena', 'leaderboard', 'preference']
@@ -1320,18 +1306,6 @@
 				<AdminCodeExecution saveHandler={adminConfigSaveHandler} />
 			{:else if selectedTab === 'admin:interface'}
 				<AdminInterface
-					on:save={() => {
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
-			{:else if selectedTab === 'admin:audio'}
-				<AdminAudio
-					saveHandler={() => {
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
-			{:else if selectedTab === 'admin:images'}
-				<AdminImages
 					on:save={() => {
 						toast.success($i18n.t('Settings saved successfully!'));
 					}}

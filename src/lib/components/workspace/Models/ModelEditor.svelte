@@ -12,7 +12,6 @@
 	import { getFunctions } from '$lib/apis/functions';
 	import { getModelsDefaults } from '$lib/apis/configs';
 	import { getBaseModelTags, getModelTags } from '$lib/apis/models';
-	import { getVoices } from '$lib/apis/audio';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
 	// [Gradient] Assistants retain only a hidden legacy LLM default.
@@ -211,11 +210,6 @@
 		suggestionTags = res.map((tag) => ({ name: tag }));
 	};
 
-	const loadVoices = async () => {
-		const res = await getVoices(localStorage.token).catch(() => null);
-		voices = res?.voices ?? [];
-	};
-
 	const toModelKnowledgeReference = (item: any) => {
 		if (!item || typeof item !== 'object') {
 			return item;
@@ -406,13 +400,12 @@
 		await tools.set((await getTools(localStorage.token).catch(() => null)) ?? []);
 		skillsList = (await getSkills(localStorage.token).catch(() => null)) ?? [];
 		if (!$functions) {
-			await functions.set(await getFunctions(localStorage.token));
+			await functions.set(
+				$config?.features?.enable_functions ? await getFunctions(localStorage.token) : []
+			);
 		}
 		if (suggestionTags.length === 0) {
 			await loadSuggestionTags();
-		}
-		if (voices.length === 0) {
-			await loadVoices();
 		}
 
 		// Fetch admin-configured default model metadata so the editor
