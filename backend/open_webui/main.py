@@ -213,7 +213,6 @@ from open_webui.routers import (
     folders,
     functions,
     groups,
-    images,
     integrations,
     invites,
     knowledge,
@@ -893,25 +892,6 @@ async def initialize_runtime_config(app: FastAPI):
 
 ########################################
 #
-# IMAGES
-#
-########################################
-
-
-########################################
-#
-# AUDIO
-#
-########################################
-
-
-app.state.faster_whisper_model = None
-app.state.speech_synthesiser = None
-app.state.speech_speaker_embeddings_dataset = None
-
-
-########################################
-#
 # TASKS
 #
 ########################################
@@ -976,7 +956,6 @@ app.include_router(ollama.router, prefix='/ollama', tags=['ollama'])
 
 
 app.include_router(tasks.router, prefix='/api/v1/tasks', tags=['tasks'])
-app.include_router(images.router, prefix='/api/v1/images', tags=['images'])
 
 app.include_router(audio.router, prefix='/api/v1/audio', tags=['audio'])
 app.include_router(retrieval.router, prefix='/api/v1/retrieval', tags=['retrieval'])
@@ -2307,7 +2286,6 @@ async def get_app_config(request: Request):
         'web.search.confirmation.content',
         'code_execution.enable',
         'code_interpreter.enable',
-        'image_generation.enable',
         'task.autocomplete.enable',
         'ui.enable_community_sharing',
         'ui.enable_message_rating',
@@ -2324,10 +2302,6 @@ async def get_app_config(request: Request):
         'ui.prompt_suggestions',
         'code_execution.engine',
         'code_interpreter.engine',
-        'audio.tts.engine',
-        'audio.tts.voice',
-        'audio.tts.split_on',
-        'audio.stt.engine',
         'rag.file.max_size',
         'rag.file.max_count',
         'file.image_compression_width',
@@ -2425,6 +2399,7 @@ async def get_app_config(request: Request):
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
                     # [Gradient] v2 mode keeps the picker to the soev-api catalog.
                     'enable_plugins': ENABLE_PLUGINS,
+                    'enable_functions': ENABLE_PLUGINS and not model_catalog.is_v2(),
                     'enable_folders': config.get('folders.enable'),
                     'folder_max_file_count': config.get('folders.max_file_count'),
                     'knowledge_max_file_count': KNOWLEDGE_MAX_FILE_COUNT,  # [Gradient]
@@ -2440,7 +2415,7 @@ async def get_app_config(request: Request):
                     'enable_code_execution': config.get('code_execution.enable'),
                     'enable_code_interpreter': config.get('code_interpreter.enable'),
                     'enable_document_writer': config.get('document_writer.enable'),  # [Gradient]
-                    'enable_image_generation': config.get('image_generation.enable'),
+                    'enable_image_generation': model_catalog.is_v2() and await capabilities.has(capabilities.IMAGES),
                     'enable_autocomplete_generation': config.get('task.autocomplete.enable'),
                     'enable_community_sharing': config.get('ui.enable_community_sharing'),
                     'enable_citation_relevance': config.get('ui.enable_citation_relevance'),  # [Gradient]
@@ -2569,12 +2544,12 @@ async def get_app_config(request: Request):
                 },
                 'audio': {
                     'tts': {
-                        'engine': config.get('audio.tts.engine'),
-                        'voice': config.get('audio.tts.voice'),
-                        'split_on': config.get('audio.tts.split_on'),
+                        'engine': 'soev',
+                        'voice': '',
+                        'split_on': 'punctuation',
                     },
                     'stt': {
-                        'engine': 'soev' if model_catalog.is_v2() else config.get('audio.stt.engine'),
+                        'engine': 'soev',
                     },
                 },
                 'file': {

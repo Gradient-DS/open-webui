@@ -1044,7 +1044,9 @@ class SocketSessionEventSink:
 async def dispatch_event_functions(
     app: Any, event: Event, request: Any | None = None, extra_function_ids: list[str] | None = None
 ) -> None:
-    if not ENABLE_PLUGINS:
+    from open_webui.soev.model_catalog import is_v2
+
+    if not ENABLE_PLUGINS or is_v2():
         return
 
     from open_webui.models.functions import Functions

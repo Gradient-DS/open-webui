@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give 543 operations. Audit bodies across all
-# OpenAPI methods (547 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give 533 operations. Audit bodies across all
+# OpenAPI methods (537 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (543, 547), (
-        f'Expected 543 five-method operations / 547 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (533, 537), (
+        f'Expected 533 five-method operations / 537 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -44,9 +44,9 @@ def test_derived_counts(surface):
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        203,
-        2230,
-    ), f'Expected 203 routes / 2230 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        200,
+        2167,
+    ), f'Expected 200 routes / 2167 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     assert query_counts == (
         45,
         94,
@@ -55,11 +55,11 @@ def test_derived_counts(surface):
 
 def test_derivation_cannot_silently_collapse(surface):
     _, fields, queries = surface
-    # Preserve the previous guard margin after retiring another 11 routes and 30 fields.
+    # Preserve the previous guard margin after retiring another 14 routes and 93 fields.
     routes, strings = sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values()))
-    assert routes >= 225 - 17 - 11 and strings >= 2400 - 403 - 30, (
+    assert routes >= 225 - 17 - 14 and strings >= 2400 - 403 - 93, (
         f'Derivation collapsed: {routes} routes / {strings} writable string fields; '
-        'Original floor 225 / 2400, less the retired 28 routes / 433 fields. '
+        'Original floor 225 / 2400, less the retired 31 routes / 496 fields. '
     )
     routes, strings = sum(bool(names) for names in queries.values()), sum(map(len, queries.values()))
     assert routes >= 40 and strings >= 90, (

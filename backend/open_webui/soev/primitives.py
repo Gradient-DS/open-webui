@@ -1,8 +1,10 @@
 """Product inference uses the platform's roles and the requesting person's token."""
 
 import math
+from collections.abc import AsyncIterator
 
 from fastapi import UploadFile
+from fastapi.responses import StreamingResponse
 
 from open_webui.soev import identity
 from open_webui.soev.acting import user_token
@@ -10,6 +12,26 @@ from open_webui.soev.client import SoevApiError
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 INFERENCE_TIMEOUT = 120.0
+
+
+async def speech(body: dict, user) -> StreamingResponse:
+    token = await _login_token(user)
+    client = identity.build_client(timeout=INFERENCE_TIMEOUT)
+    stream = client.speech(body, user_access_token=token)
+    response = await stream.__aenter__()
+
+    async def audio() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in response.aiter_bytes():
+                yield chunk
+        finally:
+            await stream.__aexit__(None, None, None)
+
+    return StreamingResponse(
+        audio(),
+        media_type=response.headers.get('content-type', 'application/octet-stream'),
+        headers={'Cache-Control': 'no-store'},
+    )
 
 
 async def _login_token(user) -> str:

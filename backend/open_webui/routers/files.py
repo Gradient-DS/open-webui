@@ -37,7 +37,6 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.users import Users
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.routers.audio import transcribe
 from open_webui.routers.live_documents import router as live_documents_router
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.services.files.events import emit_file_status
@@ -190,33 +189,12 @@ async def process_uploaded_file(
                 if not knowledge_file:
                     raise Exception(f'Failed to link file {file_item.id} to knowledge {knowledge_id}')
 
-            stt_supported = await Config.get('audio.stt.supported_content_types', [])
             content_extraction_engine = await Config.get('rag.content_extraction_engine')
             content_extraction_supported_media_mime_types = await Config.get(
                 'rag.content_extraction.supported_media_mime_types'
             )
 
-            if content_type and strict_match_mime_type(stt_supported, content_type):
-                # Audio / STT-supported files → transcribe then index
-                file_path_processed = await asyncio.to_thread(Storage.get_file, file_path)
-                result = await transcribe(
-                    request,
-                    file_path_processed,
-                    file_metadata,
-                    user,
-                )
-                await process_file(
-                    request,
-                    ProcessFileForm(
-                        file_id=file_item.id,
-                        content=result.get('text', ''),
-                        collection_name=collection_name,
-                    ),
-                    user=user,
-                    db=db_session,
-                )
-
-            elif (
+            if (
                 content_type
                 and content_type.startswith(('image/', 'video/'))
                 and not _media_supported_for_extraction(
@@ -483,8 +461,8 @@ async def upload_file_handler(
                     detail=ERROR_MESSAGES.DEFAULT(f'File type {file_extension} is not allowed'),
                 )
 
-        # Reject image/video uploads up front when neither the configured
-        # extraction engine nor STT can process them. Otherwise the upload
+        # Reject image/video uploads up front when the configured
+        # extraction engine cannot process them. Otherwise the upload
         # succeeds, _process_handler raises in a background task, and the
         # only signal to the frontend is a single Socket.IO 'file:status'
         # emit — which is exactly the path that drops on a stuck loop and
@@ -492,11 +470,9 @@ async def upload_file_handler(
         # [Gradient]
         if process and content_type.startswith(('image/', 'video/')):
             engine = await Config.get('rag.content_extraction_engine')
-            stt = await Config.get('audio.stt.supported_content_types', []) or []
             image_engines = {'external', 'datalab_marker', 'mistral_ocr'}
             handles_image = engine in image_engines
-            handles_stt = strict_match_mime_type(stt, content_type)  # [Gradient]
-            if not handles_image and not handles_stt:
+            if not handles_image:
                 raise HTTPException(
                     status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                     # [Gradient]

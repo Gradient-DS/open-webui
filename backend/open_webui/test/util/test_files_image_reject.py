@@ -23,19 +23,17 @@ from open_webui.routers import files as files_router
 from open_webui.routers.files import upload_file_handler
 
 
-def _patch_config(monkeypatch, *, engine: str, stt: list | None = None, allowed: list | None = None) -> None:
+def _patch_config(monkeypatch, *, engine: str, allowed: list | None = None) -> None:
     """Route the handler's per-key Config reads to test values.
 
     upload_file_handler reads ``rag.content_extraction_engine``
-    (CONTENT_EXTRACTION_ENGINE), ``audio.stt.supported_content_types``
-    (STT_SUPPORTED_CONTENT_TYPES) and ``rag.file.allowed_extensions``
+    (CONTENT_EXTRACTION_ENGINE) and ``rag.file.allowed_extensions``
     (ALLOWED_FILE_EXTENSIONS) via ``await Config.get(...)``; patching
     ``Config.get`` keeps the tests hermetic — no config DB involved.
     ``rag.file.max_size`` intentionally resolves to None (no size cap).
     """
     values = {
         'rag.content_extraction_engine': engine,
-        'audio.stt.supported_content_types': stt or [],
         'rag.file.allowed_extensions': allowed,
     }
 
@@ -102,9 +100,9 @@ async def test_image_upload_passes_415_check_for_image_capable_engines(engine, m
 
 
 @pytest.mark.asyncio
-async def test_audio_upload_passes_415_check_when_stt_handles_it(monkeypatch):
-    """STT-supported content types skip the 415 (transcribe path takes over)."""
-    _patch_config(monkeypatch, engine='tika', stt=['audio/mpeg'])
+async def test_audio_upload_passes_415_check_for_ordinary_ingestion(monkeypatch):
+    """Audio goes through ordinary ingestion without local transcription."""
+    _patch_config(monkeypatch, engine='tika')
     request = _request()
     file = _upload_file('clip.mp3', 'audio/mpeg')
 
