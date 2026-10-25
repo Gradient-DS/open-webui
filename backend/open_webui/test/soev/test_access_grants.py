@@ -1,6 +1,5 @@
 """Access decisions and grant mutations through recorded soev-api requests."""
 
-import base64
 import importlib
 import json
 import os
@@ -60,8 +59,7 @@ async def env(identity_config, fake_api, monkeypatch):
 
 
 def subject(request):
-    encoded = request.headers['X-Soev-Subject'].split('.')[1]
-    return json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))['sub']
+    return request.headers['X-Soev-User-Token'].removeprefix('fictional-login:')
 
 
 @pytest.mark.asyncio
@@ -93,7 +91,7 @@ async def test_read_and_write_are_soev_apis_decision(env, user, read, write):
     assert await env.table.has_access(user, 'knowledge', 'kb', 'write', {'writers'}) is write
     assert not await env.table.has_access(user, 'knowledge', 'missing')
     assert subject(env.api.requests[-1]) == f'owui:user:{user}'
-    assert env.api.requests[0].url.path == '/v1/identity/links'
+    assert env.api.requests[0].url.path == '/v1/collections/kb'
 
 
 @pytest.mark.asyncio

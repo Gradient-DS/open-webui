@@ -10,11 +10,14 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
-
 from open_webui.soev import acting
 from open_webui.soev.client import SoevApiError, SoevClient
+
+
+async def platform_error(request, error):
+    return JSONResponse(status_code=error.status, content={'code': error.code})
 
 
 @pytest_asyncio.fixture
@@ -67,6 +70,8 @@ async def token_app(identity_config, monkeypatch):
     app = FastAPI()
     app.state.oauth_manager = manager
     acting.install(app)
+
+    app.add_exception_handler(SoevApiError, platform_error)
     requests = []
 
     def handle(request):
@@ -91,7 +96,7 @@ async def token_app(identity_config, monkeypatch):
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as api_http:
         monkeypatch.setattr('open_webui.soev.client._shared_client', lambda: api_http)
-        api = SoevClient('https://soev.invalid', 'fictional-product-key', subject_minter=lambda _: 'fictional-subject')
+        api = SoevClient('https://soev.invalid', 'fictional-product-key')
 
         @app.middleware('http')
         async def api_key_header(request, call_next):
@@ -120,7 +125,7 @@ async def token_app(identity_config, monkeypatch):
                     await api.get(f'/v1/{operation}', as_user=ref)
                 raise HTTPException(503)
             elif operation == 'product':
-                await api.get('/v1/capabilities')
+                await api.as_service().get('/v1/capabilities')
             else:
                 await api.send('POST', '/v1/collections', {}, as_user=ref, idempotency_key='fictional-operation')
             return {}
@@ -160,7 +165,7 @@ async def test_oidc_token_reaches_every_api_transport(token_app, caplog, operati
     assert request.headers['X-Soev-User-Token'] == 'fictional-access-token'
     assert request.headers['Authorization'] == 'Bearer fictional-product-key'
     if operation != 'product':
-        assert request.headers['X-Soev-Subject'] == 'fictional-subject'
+        assert 'X-Soev-Subject' not in request.headers
     if operation == 'bytes':
         assert request.content == b'fictional-image'
     if operation in {'chat', 'task'}:
@@ -189,8 +194,9 @@ async def test_non_oidc_or_unowned_sessions_have_no_token(token_app, provider):
         ctx.session.user_id = 'rowan'
     else:
         ctx.session.provider = provider
-    assert (await ctx.browser.get('/call/json')).status_code == 200
-    assert 'X-Soev-User-Token' not in ctx.requests[0].headers
+    response = await ctx.browser.get('/call/json')
+    assert response.status_code == 401 and response.json()['code'] == 'sign_in'
+    assert ctx.requests == []
     ctx.refresh.assert_not_awaited()
     if provider == 'password':
         ctx.lookup.assert_not_awaited()
@@ -207,8 +213,9 @@ async def test_api_keys_ignore_an_oidc_session_cookie(token_app, credential):
         ctx.browser.cookies.set('token', 'sk-fictional')
     else:
         ctx.browser.headers['x-api-key'] = 'sk-fictional'
-    assert (await ctx.browser.get('/call/json')).status_code == 200
-    assert 'X-Soev-User-Token' not in ctx.requests[0].headers
+    response = await ctx.browser.get('/call/json')
+    assert response.status_code == 401 and response.json()['code'] == 'sign_in'
+    assert ctx.requests == []
     ctx.lookup.assert_not_awaited()
 
 
@@ -247,8 +254,9 @@ async def test_missing_or_failed_refresh_does_not_forward_old_credentials(token_
         ctx.refresh.return_value = None
     else:
         ctx.session.token = {}
-    assert (await ctx.browser.get('/call/json')).status_code == 200
-    assert 'X-Soev-User-Token' not in ctx.requests[0].headers
+    response = await ctx.browser.get('/call/json')
+    assert response.status_code == 401 and response.json()['code'] == 'sign_in'
+    assert ctx.requests == []
 
 
 @pytest.mark.asyncio
@@ -326,13 +334,13 @@ async def test_concurrent_requests_do_not_share_tokens(token_app):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=ctx.app), base_url='https://owui.invalid'
         ) as other:
-            assert (await other.get('/held', headers=dict(ctx.browser.headers))).status_code == 200
+            assert (await other.get('/held', headers=dict(ctx.browser.headers))).status_code == 401
         assert (await pending).status_code == 200
     finally:
         release.set()
         await pending
     headers = {request.url.params['session']: request.headers for request in ctx.requests}
-    assert 'X-Soev-User-Token' not in headers['false']
+    assert 'false' not in headers
     assert headers['true']['X-Soev-User-Token'] == 'fictional-access-token'
 
 

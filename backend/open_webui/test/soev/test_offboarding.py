@@ -167,7 +167,8 @@ async def test_inventory_links_an_approved_user_before_listing_as_them(offboard_
     owned = await store.module.inventory('fern', db=store.db)
     assert {row['key'] for row in owned.collections} == {'native', 'cloud'}
     paths = [(r.method, r.url.path) for r in store.api.requests]
-    assert paths.index(('POST', '/v1/identity/links')) < paths.index(('GET', '/v1/collections'))
+    assert ('GET', '/v1/collections') in paths
+    assert ('POST', '/v1/identity/links') not in paths
 
 
 @pytest.mark.asyncio
@@ -307,7 +308,6 @@ async def test_final_transaction_rolls_back_already_staged_deletions(offboard_st
 
 @pytest.mark.asyncio
 async def test_cloud_revocations_act_as_departing_user(offboard_store):
-    from open_webui.test.soev.test_identity import claims
 
     store = offboard_store
     client = store.identity.build_client()
@@ -335,7 +335,7 @@ async def test_cloud_revocations_act_as_departing_user(offboard_store):
         if r.method == 'DELETE' and r.url.path.startswith(('/v1/schedules/', '/v1/connections/'))
     ]
     assert len(mutations) == 2
-    assert all(claims(r.headers['X-Soev-Subject'])['sub'] == 'owui:user:fern' for r in mutations)
+    assert all(r.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:fern' for r in mutations)
     assert store.api.schedules[schedule['id']]['subscribers'] == []
     assert connection['id'] not in store.api.connections
 
@@ -687,7 +687,6 @@ async def seed_cloud_custody(store):
 @pytest.mark.parametrize('method', ['role', 'update'])
 async def test_demotion_revokes_cloud_before_unlink_and_role_commit(offboard_store, monkeypatch, role, method):
     from open_webui.models.users import Users
-    from open_webui.test.soev.test_identity import claims
 
     store = offboard_store
     await Users.update_user_role_by_id('fern', role, db=store.db)
@@ -713,7 +712,7 @@ async def test_demotion_revokes_cloud_before_unlink_and_role_commit(offboard_sto
         f'/v1/connections/{connection_id}',
         '/v1/identity/links/' + store.identity.platform_user_id('owui:user:fern'),
     ]
-    assert all(claims(request.headers['X-Soev-Subject'])['sub'] == 'owui:user:fern' for request in deletes[:2])
+    assert all(request.headers['X-Soev-User-Token'] == 'fictional-login:owui:user:fern' for request in deletes[:2])
     assert 'X-Soev-Subject' not in deletes[-1].headers
     assert connection_id not in store.api.connections
     assert store.api.schedules[schedule_id]['subscribers'] == []
@@ -800,3 +799,23 @@ async def test_pending_offboarding_keeps_fail_closed_boundaries(offboard_store, 
     assert not any(request.url.path.startswith(('/v1/schedules', '/v1/connections')) for request in store.api.requests)
     for cls, rid in zip(store.classes[:8], ['fern', 'assistant', 'prompt', 'tool', 'note', 'chat', 'memory', 'native']):
         assert await store.db.get(cls, rid) is not None
+
+
+@pytest.mark.asyncio
+async def test_offboarding_another_person_refuses_before_local_or_remote_writes(offboard_store):
+    from open_webui.soev import acting
+
+    store = offboard_store
+    requester = acting._requester_ref.set('owui:user:operator')
+    resolver = acting._token_resolver.set(AsyncMock(return_value='fictional-login:owui:user:operator'))
+    try:
+        with pytest.raises(store.identity.SoevApiError) as error:
+            await store.module.offboard_user(
+                'fern', actor_id='operator', options=store.module.OffboardingOptions(), db=store.db
+            )
+        assert (error.value.status, error.value.code) == (401, 'sign_in')
+        assert store.api.requests == []
+        assert await store.db.get(store.classes[0], 'fern') is not None
+    finally:
+        acting._token_resolver.reset(resolver)
+        acting._requester_ref.reset(requester)

@@ -15,7 +15,7 @@ _MESSAGES = {
         'User archival is not enabled.',
         'Het archiveren van gebruikers is niet ingeschakeld.',
     ),
-    ('scope_insufficient', 'identity:platform_login'): (
+    ('sign_in', 'identity:platform_login'): (
         'Sign in with your organisation account to use this feature.',
         'Log in met je organisatieaccount om deze functie te gebruiken.',
     ),

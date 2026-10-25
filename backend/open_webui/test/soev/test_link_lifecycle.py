@@ -26,19 +26,16 @@ async def test_pending_user_cannot_link_even_if_cached(identity_config, monkeypa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('method', ['role', 'update'])
-async def test_approval_commits_then_retries_link(role_store, monkeypatch, method):
+async def test_approval_never_mints_a_legacy_link(role_store, monkeypatch, method):
     store = role_store
-    client = SimpleNamespace(send=AsyncMock(side_effect=[httpx.ConnectError('offline'), None]))
-    monkeypatch.setattr(store.identity, 'build_client', lambda: client)
+    signer = AsyncMock(side_effect=AssertionError('Approval must not mint a subject'))
+    monkeypatch.setattr(store.identity, 'mint_assertion', signer)
     if method == 'role':
         await store.users.update_user_role_by_id('fern', 'user', db=store.db)
     else:
         await store.users.update_user_by_id('fern', {'role': 'user'}, db=store.db)
     assert (await store.users.get_user_by_id('fern', db=store.db)).role == 'user'
-    assert 'owui:user:fern' in store.identity.pending_links()
-    await store.identity.retry_links(now=float('inf'), db=store.db)
-    assert 'owui:user:fern' not in store.identity.pending_links()
-    assert client.send.await_count == 2
+    signer.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -48,6 +45,7 @@ async def test_demotion_failure_refuses_local_role_write(role_store, monkeypatch
     await store.db.execute(__import__('sqlalchemy').text("UPDATE user SET role='user'"))
     await store.db.commit()
     client = SimpleNamespace(send=AsyncMock(side_effect=httpx.ConnectError('offline')), pages=empty_cloud_pages)
+    client.as_service = lambda: client
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
     with pytest.raises(httpx.ConnectError):
         if method == 'role':
@@ -79,12 +77,13 @@ async def test_unlink_contract_and_cache_invalidation(identity_config, identity_
 async def test_approval_links_and_demotion_unlinks(role_store, monkeypatch, role):
     store = role_store
     client = SimpleNamespace(send=AsyncMock(), pages=empty_cloud_pages)
+    client.as_service = lambda: client
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
     from open_webui.soev import group_sync
 
     monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
     await store.users.update_user_role_by_id('fern', role, db=store.db)
-    assert client.send.await_args_list[0].args[:2] == ('POST', '/v1/identity/links')
+    assert all('/v1/identity/' not in c.args[1] for c in client.send.await_args_list)
     await store.users.update_user_role_by_id('fern', 'pending', db=store.db)
     assert any(c.args[0] == 'DELETE' for c in client.send.await_args_list)
     assert (await store.users.get_user_by_id('fern', db=store.db)).role == 'pending'
@@ -99,10 +98,9 @@ async def test_group_reconcile_does_not_publish_unlink_or_retry_identities(
 
     store = role_store
     client = SimpleNamespace(send=AsyncMock(), get=AsyncMock(return_value={'groups': [], 'next_cursor': None}))
+    client.as_service = lambda: client
     monkeypatch.setattr(store.identity, 'build_client', lambda: client)
     monkeypatch.setattr(group_sync, 'build_service_client', lambda: client)
-    retry = AsyncMock()
-    monkeypatch.setattr(store.identity, 'retry_links', retry)
     store.identity._linked_refs.add('owui:user:gone')
     await store.users.insert_new_user('lark', 'Lark', 'lark@example.invalid', role='user', db=store.db)
     table = SimpleNamespace(get_all_groups=AsyncMock(return_value=[]))
@@ -110,7 +108,6 @@ async def test_group_reconcile_does_not_publish_unlink_or_retry_identities(
     assert all('/v1/identity/' not in call.args[1] for call in client.send.await_args_list)
     assert 'owui:user:gone' in store.identity._linked_refs
     await group_sync.retry_pending(table, now=float('inf'), db=store.db)
-    retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio

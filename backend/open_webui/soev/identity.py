@@ -1,21 +1,17 @@
-"""Self-vouched OWUI identities and per-request Ed25519 subject assertions."""
+"""Local user references and legacy identity operations for tokenless background work."""
 
 import asyncio
 import base64
 import datetime as dt
 import hashlib
 import json
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from functools import lru_cache
-from time import monotonic
 from uuid import UUID, uuid4, uuid5
 from weakref import WeakValueDictionary
 
-import httpx
-import jwt
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -24,14 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui import config
 from open_webui.models.users import UserModel, Users
 from open_webui.soev.availability import ensure_configured
-from open_webui.soev.client import SoevApiError, SoevClient
-
-log = logging.getLogger(__name__)
+from open_webui.soev.client import BackgroundSoevClient, SoevApiError, SoevClient
 
 # This namespace is permanent: changing it would give existing people different platform ids.
 OWUI_PLATFORM_NAMESPACE = UUID('ec855a67-541f-4b17-a7e2-0f8fbd09c47e')
 _linked_refs: set[str] = set()
-_pending_links: dict[str, tuple[float, int]] = {}
 _link_owner: ContextVar[tuple[asyncio.Task, str] | None] = ContextVar('soev_link_owner', default=None)
 _link_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
@@ -91,10 +84,13 @@ def jwk_thumbprint(private_key: Ed25519PrivateKey) -> str:
 def validate_config() -> None:
     if config.SOEV_API_URL:
         credential_id_from_key(config.SOEV_API_KEY)
-        jwk_thumbprint(signing_key())
 
 
 def mint_assertion(user_ref: str, *, now: dt.datetime) -> str:
+    from open_webui.soev.acting import acting_ref, requester_ref
+
+    if requester_ref() is not None or acting_ref() is not None:
+        raise SoevApiError(401, 'sign_in', 'User requests cannot mint legacy assertions')
     if now.utcoffset() is None:
         raise ValueError('Assertion time must include a timezone')
     issued_at = int(now.timestamp())
@@ -141,7 +137,7 @@ async def ensure_link(user_ref: str, client: SoevClient, *, db: AsyncSession | N
 async def _ensure_link(user_ref: str, client: SoevClient) -> None:
     if user_ref in _linked_refs:
         return
-    await client.send(
+    await client.as_service().send(
         'POST',
         '/v1/identity/links',
         {
@@ -151,7 +147,6 @@ async def _ensure_link(user_ref: str, client: SoevClient) -> None:
         idempotency_key=f'link:{uuid4()}',
     )
     _linked_refs.add(user_ref)
-    _pending_links.pop(user_ref, None)
 
 
 async def unlink(user_ref: str, client: SoevClient) -> None:
@@ -161,46 +156,18 @@ async def unlink(user_ref: str, client: SoevClient) -> None:
 
 
 async def _unlink(user_ref: str, client: SoevClient) -> None:
-    await client.send(
+    await client.as_service().send(
         'DELETE',
         f'/v1/identity/links/{platform_user_id(user_ref)}?source=owui',
         None,
         idempotency_key=f'unlink:{uuid4()}',
     )
     _linked_refs.discard(user_ref)
-    _pending_links.pop(user_ref, None)
-
-
-def pending_links() -> set[str]:
-    """Return approvals waiting for a successful platform link."""
-    return set(_pending_links)
-
-
-async def publish_link(user_ref: str, client: SoevClient, *, db: AsyncSession | None = None) -> None:
-    """Retry widening failures with bounded exponential backoff."""
-    try:
-        await ensure_link(user_ref, client, db=db)
-    except (SoevApiError, httpx.TransportError):
-        attempts = _pending_links.get(user_ref, (0, 0))[1] + 1
-        _pending_links[user_ref] = (monotonic() + min(10 * 2 ** min(attempts - 1, 5), 300), attempts)
-        log.warning('soev-api link push failed', extra={'user_ref': user_ref})
-
-
-async def retry_links(*, now: float, db: AsyncSession | None = None) -> None:
-    """Retry against the current role, dropping stale approvals."""
-    for ref, (due, _) in list(_pending_links.items()):
-        if due > now:
-            continue
-        user = await user_of(ref, db=db)
-        if user is None or user.role not in {'user', 'admin'}:
-            await unlink(ref, build_client())
-        else:
-            await publish_link(ref, build_client(), db=db)
 
 
 @asynccontextmanager
 async def role_change(user: UserModel, role: str, *, db: AsyncSession | None = None) -> AsyncIterator[None]:
-    """Revoke cloud custody before unlinking a demotion; retry committed approvals."""
+    """Revoke cloud custody before unlinking a demotion."""
     if not config.SOEV_API_URL or user.role == role:
         yield
         return
@@ -216,49 +183,24 @@ async def role_change(user: UserModel, role: str, *, db: AsyncSession | None = N
         if role not in {'user', 'admin'}:
             await _unlink(ref, build_client())
         yield
-    if role in {'user', 'admin'}:
-        await publish_link(ref, build_client(), db=db)
     if role == 'admin':
         from open_webui.models.groups import Groups
 
         await group_sync.publish(Groups, [group_sync.ADMIN_ARCHIVE_GROUP], db=db)
 
 
-async def acting_ref(user: UserModel, client: SoevClient) -> str:
-    ref = external_ref(user)
-    await ensure_link(ref, client)
-    return ref
-
-
-async def link_proven(user: UserModel, *, source: str, id_token: str | None, client: SoevClient) -> None:
-    try:
-        if source != 'entra':
-            raise SoevApiError(400, 'unsupported_source', 'Unsupported proven identity source')
-        # Read only the candidate principal; soev-api verifies the token and its binding to this assertion.
-        try:
-            oid = jwt.decode(id_token, options={'verify_signature': False}).get('oid')
-        except jwt.PyJWTError:
-            oid = None
-        if not isinstance(oid, str) or not oid or ':' in oid:
-            raise SoevApiError(400, 'invalid_id_token', 'The Entra id token must carry an oid')
-        await client.send(
-            'POST',
-            '/v1/identity/links',
-            {
-                'platform_user_id': platform_user_id(external_ref(user)),
-                'assertion': mint_assertion(f'{source}:user:{oid}', now=dt.datetime.now(dt.UTC)),
-                'id_token': id_token,
-            },
-            idempotency_key=f'link-proven:{uuid4()}',
-        )
-    except Exception as error:
-        code = error.code if isinstance(error, SoevApiError) else 'link_failed'
-        log.warning('Proven identity link failed', extra={'user_id': user.id, 'code': code})
-
-
 def build_client(*, timeout: float = 30.0) -> SoevClient:
     ensure_configured()
     return SoevClient(
+        config.SOEV_API_URL,
+        config.SOEV_API_KEY,
+        timeout=timeout,
+    )
+
+
+def build_background_client(*, timeout: float = 30.0) -> BackgroundSoevClient:
+    ensure_configured()
+    return BackgroundSoevClient(
         config.SOEV_API_URL,
         config.SOEV_API_KEY,
         subject_minter=lambda ref: mint_assertion(ref, now=dt.datetime.now(dt.UTC)),

@@ -62,13 +62,11 @@ async def inventory(user_id: str, *, db: AsyncSession) -> Inventory:
     as_user = ref if user.role in {'user', 'admin'} else None
     collections = []
     if configured():
-        if as_user is not None:
-            # An approved user whose link push is still queued lists as themselves too.
-            await identity.ensure_link(as_user, identity.build_client(), db=db)
+        client = identity.build_client()
+        if as_user is None:
+            client = client.as_service()
         collections = [
-            row
-            async for row in identity.build_client().pages('/v1/collections', as_user=as_user)
-            if row['created_by'] == ref
+            row async for row in client.pages('/v1/collections', as_user=as_user) if row['created_by'] == ref
         ]
     shared = [
         {'id': row['key'], 'kind': 'knowledge'}
@@ -158,6 +156,8 @@ async def apply_collections(
     if not configured():
         return
     client = identity.build_client()
+    if as_user is None:
+        client = client.as_service()
     rows = owned.collections if archive is None else archive.data['offboarding']['collections']
     for row in rows:
         path = f'/v1/collections/{quote(row["key"], safe="")}'
@@ -173,7 +173,7 @@ async def apply_collections(
                 body['expires_at'] = (
                     dt.datetime.fromtimestamp(archive.expires_at, dt.UTC).isoformat().replace('+00:00', 'Z')
                 )
-        await client.send(
+        await client.as_service().send(
             'POST',
             path + '/owner',
             body,

@@ -140,7 +140,7 @@ async def meeting_document(user, meeting_id: str, client: SoevClient | None = No
     path = thread_path(meeting_id)
     client = client or identity.build_client()
     try:
-        thread = await client.get(path, as_user=await identity.acting_ref(user, client))
+        thread = await client.get(path, as_user=identity.external_ref(user))
     except SoevApiError as error:
         raise MeetingUnavailable(error.detail) from None
     state = latest_state(thread.get('events') or [])

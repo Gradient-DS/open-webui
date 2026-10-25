@@ -56,7 +56,6 @@ async def ensure_collection(model: ModelModel, client: SoevClient) -> str:
     per call: a collection deleted with its assistant's last file is created again later under the same key."""
     key = ingest.assistant_collection_key(model.id)
     owner = f'owui:user:{model.user_id}'
-    await identity.ensure_link(owner, client)
     body = access(model, owner)
     try:
         await client.get(_path(key), as_user=owner)
@@ -144,8 +143,6 @@ async def sync(model_id: str, *, client: SoevClient | None = None) -> bool:
 async def existing(model_id: str, *, client: SoevClient | None = None) -> dict | None:
     """The assistant's collection read as the requester, or None when there is none."""
     client = client if client is not None else identity.build_client()
-    if acting.requester_ref() is not None:
-        await identity.ensure_link(acting.requester_ref(), client)
     try:
         return await client.get(_path(ingest.assistant_collection_key(model_id)), as_user=acting.requester_ref())
     except SoevApiError as error:

@@ -31,7 +31,6 @@ from mcp.shared.auth import (
 from mcp.shared.auth import (
     OAuthMetadata,
 )
-from open_webui import config as soev_config
 from open_webui.config import (
     DEFAULT_USER_ROLE,
     ENABLE_OAUTH,
@@ -86,7 +85,7 @@ from open_webui.models.invites import Invites
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import Users
 from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
-from open_webui.soev import identity, silent_connect
+from open_webui.soev import silent_connect
 from open_webui.utils.auth import (
     create_token,
     get_password_hash,
@@ -2245,11 +2244,6 @@ class OAuthManager:
                         source='oauth',
                         data={'role': user.role, 'provider': provider},
                     )
-
-            if provider == 'microsoft' and soev_config.SOEV_API_URL:
-                await identity.link_proven(
-                    user, source='entra', id_token=token.get('id_token'), client=identity.build_client()
-                )
 
             jwt_token = create_token(
                 data={'id': user.id},

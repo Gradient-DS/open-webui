@@ -818,7 +818,6 @@ async def _images(metadata: dict[str, Any], user: str) -> list[dict]:
         ):
             images.append(cached)
             continue
-        await identity.ensure_link(user, client)
         try:
             uploaded = await client.post_bytes('/v1/chat/images', body, as_user=user, params={'name': name})
         except SoevApiError as error:
@@ -2017,7 +2016,6 @@ class AgentTurn:
         try:
             self.emitter = await get_event_emitter(self.metadata)
             await self.notify()
-            await identity.ensure_link(self.as_user, self.client)
             self.tool_statuses = await _tool_statuses(self.client)
             self.knowledge_names = {entry['key']: entry['name'] for entry in body['input'].get('knowledge') or []}
             await self.prepare()

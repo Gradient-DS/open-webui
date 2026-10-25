@@ -358,7 +358,7 @@ async def copy_directory(*, dry_run=False, db=None) -> Directory:
         counts.update(await table.get_file_counts_by_knowledge_ids(owner_keys, db=db, user_id=owner_id))
     file_counts = {key: counts.get(key, 0) for key in keys}
     paths = await _folder_paths(table, keys, db)
-    client = identity.build_client()
+    client = identity.build_background_client()
     await _push_directory(users, await groups.get_all_groups(db=db), client, dry_run=dry_run, db=db)
     conflicts = await _create_collections(rows, users, grants, client, dry_run=dry_run, db=db)
     user_ids = {user.id for user in users}
@@ -476,7 +476,7 @@ async def _model_catalog(options: Options) -> tuple[str, dict[str, str]]:
     from open_webui.soev import identity
     from open_webui.soev.migrate_models import catalog_default
 
-    return catalog_default(await identity.build_client().get('/v1/models'), options.model_map)
+    return catalog_default(await identity.build_client().as_service().get('/v1/models'), options.model_map)
 
 
 async def _rewrite_models(

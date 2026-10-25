@@ -36,7 +36,7 @@ async def cloud_sync(request: Request, user=Depends(get_verified_user)):
     try:
         client = identity.build_client()
         with request_cache():
-            yield CloudSync(client, await identity.acting_ref(user, client))
+            yield CloudSync(client, identity.external_ref(user))
     except SoevApiError as error:
         detail = {'code': error.code, 'detail': error.detail}
         if error.constraint is not None:
@@ -61,7 +61,7 @@ async def get_policy(user: object = Depends(get_verified_user)) -> SyncPolicy:
             default_cadence_minutes=None,
         )
     try:
-        policy = await identity.build_client().get('/v1/sync-policy')
+        policy = await identity.build_client().as_service().get('/v1/sync-policy')
     except SoevApiError as error:
         detail = {'code': error.code, 'detail': error.detail}
         if error.constraint is not None:

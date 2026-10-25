@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
-
 from open_webui.soev import acting, capabilities, model_catalog
 from open_webui.soev.client import SoevApiError, SoevClient
 
@@ -21,7 +20,7 @@ async def test_service_calls_ignore_request_context(identity_config, monkeypatch
 
     resolver = AsyncMock(return_value='fictional-user-token')
     minter = Mock(return_value='fictional-subject')
-    client = SoevClient('https://soev.invalid', 'fictional-product-key', subject_minter=minter)
+    client = SoevClient('https://soev.invalid', 'fictional-product-key')
     requester = acting._requester_ref.set('owui:user:fern')
     token = acting._token_resolver.set(resolver)
     try:

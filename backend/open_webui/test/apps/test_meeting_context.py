@@ -41,10 +41,6 @@ class FakeClient:
 
 @pytest.fixture(autouse=True)
 def acting(monkeypatch, platform_capabilities):
-    async def acting_ref(user, client):
-        return f'owui:user:{user.id}'
-
-    monkeypatch.setattr(meetings.identity, 'acting_ref', acting_ref)
     monkeypatch.setattr(meetings, 'is_feature_enabled', lambda feature: True)
     monkeypatch.setattr('open_webui.config.SOEV_API_URL', 'https://soev.invalid')
 
